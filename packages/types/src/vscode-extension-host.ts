@@ -18,7 +18,7 @@ import { OllamaModelsMessageType } from "./providers/ollama.js"
 import { OpenAiModelsMessageType } from "./providers/openai.js"
 import { VsCodeLmModelsMessageType } from "./providers/vscode-llm.js"
 import type { OpenAiCodexRateLimitInfo } from "./providers/openai-codex-rate-limits.js"
-import type { SkillMetadata } from "./skills.js"
+import type { SkillDiagnostic, SkillMetadata } from "./skills.js"
 import type { RuleMetadata } from "./rules.js"
 import type { TelemetrySetting } from "./telemetry.js"
 import type { WorktreeIncludeStatus } from "./worktree.js"
@@ -186,6 +186,7 @@ export interface ExtensionMessage {
 	list?: string[] // For dismissedUpsells
 	tools?: SerializedCustomToolDefinition[] // For customToolsResult
 	skills?: SkillMetadata[] // For skills response
+	skillDiagnostics?: SkillDiagnostic[] // For malformed skills omitted from the skills response
 	rules?: RuleMetadata[] // For rules response
 	modes?: { slug: string; name: string }[] // For modes response
 	rooHistoryImportProgress?: {

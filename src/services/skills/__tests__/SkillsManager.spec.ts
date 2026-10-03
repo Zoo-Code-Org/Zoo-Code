@@ -1,4 +1,5 @@
 import * as path from "path"
+import matter from "gray-matter"
 
 // Use vi.hoisted to ensure mocks are available during hoisting
 const {
@@ -66,6 +67,20 @@ vi.mock("fs/promises", () => ({
 vi.mock("os", () => ({
 	homedir: mockHomedir,
 }))
+
+// Keep the real gray-matter parser by default, but let individual tests script
+// the failure shape (e.g. a non-Error throw) to exercise recordDiagnostic's
+// defensive fallbacks (see issue #859). vi.importActual resolves the CJS module
+// to a namespace that exposes the parser as `default`, which the module's
+// declared `export =` type does not carry, so the namespace is bridged through
+// `unknown` once; the double assertion then bridges the mock back to the
+// module's declared type.
+vi.mock("gray-matter", async () => {
+	const actual = await vi.importActual("gray-matter")
+	const realParse = (actual as { default: typeof matter }).default
+	const parse = Object.assign(vi.fn(realParse), actual) as unknown as typeof matter
+	return { default: parse }
+})
 
 // Mock vscode
 vi.mock("vscode", () => ({
@@ -389,6 +404,162 @@ description: Name doesn't match directory
 
 			const skills = skillsManager.getAllSkills()
 			expect(skills).toHaveLength(0)
+		})
+
+		it("should skip skills with invalid YAML frontmatter and log the real cause (issue #859)", async () => {
+			const badSkillDir = p(globalSkillsDir, "test-skill")
+			const badSkillMd = p(badSkillDir, "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => {
+				return dir === globalSkillsDir
+			})
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => {
+				return dir === globalSkillsDir ? ["test-skill"] : []
+			})
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === badSkillDir) {
+					return { isDirectory: () => true }
+				}
+				throw new Error("Not found")
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === badSkillMd)
+			mockReadFile.mockImplementation(async (file: string) => {
+				if (file === badSkillMd) {
+					return `---
+name: test-skill
+description: Use when implementing features. Triggers on: "TDD", "test-driven development"
+---
+
+# Test Skill
+
+Instructions here.`
+				}
+				throw new Error("File not found")
+			})
+
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			try {
+				await skillsManager.discoverSkills()
+
+				// The skill is skipped...
+				expect(skillsManager.getAllSkills()).toHaveLength(0)
+
+				// ...and the real cause (a YAML syntax error) is reported instead
+				// of the misleading "missing required 'name' field" message.
+				const logged = consoleErrorSpy.mock.calls.map((call) => call.join(" "))
+				expect(logged.some((line) => line.includes("YAMLException"))).toBe(true)
+				expect(logged.some((line) => line.includes("missing required 'name' field"))).toBe(false)
+				// The unescaped-double-quotes hint points at the exact problem.
+				expect(logged.some((line) => line.includes("unescaped double quotes"))).toBe(true)
+
+				// The structured diagnostic captures the parse failure location.
+				const diagnostics = skillsManager.getSkillDiagnostics()
+				expect(diagnostics).toHaveLength(1)
+				expect(diagnostics[0].path).toBe(badSkillMd)
+				expect(diagnostics[0].source).toBe("global")
+				expect(typeof diagnostics[0].message).toBe("string")
+				expect(diagnostics[0].line).toBe(3)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
+
+		it("should log a distinct YAML error for other malformed frontmatter (no quote hint)", async () => {
+			const badSkillDir = p(globalSkillsDir, "broken-skill")
+			const badSkillMd = p(badSkillDir, "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => {
+				return dir === globalSkillsDir
+			})
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => {
+				return dir === globalSkillsDir ? ["broken-skill"] : []
+			})
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === badSkillDir) {
+					return { isDirectory: () => true }
+				}
+				throw new Error("Not found")
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === badSkillMd)
+			mockReadFile.mockImplementation(async (file: string) => {
+				if (file === badSkillMd) {
+					return `---
+name broken-skill
+description: Missing colon makes this invalid YAML
+---
+
+# Broken skill`
+				}
+				throw new Error("File not found")
+			})
+
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			try {
+				await skillsManager.discoverSkills()
+
+				expect(skillsManager.getAllSkills()).toHaveLength(0)
+
+				const logged = consoleErrorSpy.mock.calls.map((call) => call.join(" "))
+				expect(logged.some((line) => line.includes("YAMLException"))).toBe(true)
+				expect(skillsManager.getSkillDiagnostics()).toHaveLength(1)
+				// The unescaped-quotes hint only applies when the description line
+				// actually contains double quotes.
+				expect(logged.some((line) => line.includes("unescaped double quotes"))).toBe(false)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
+
+		it("should skip skills with unterminated frontmatter and a dangling quote (no line hint)", async () => {
+			const badSkillDir = p(globalSkillsDir, "unclosed-skill")
+			const badSkillMd = p(badSkillDir, "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => {
+				return dir === globalSkillsDir
+			})
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => {
+				return dir === globalSkillsDir ? ["unclosed-skill"] : []
+			})
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === badSkillDir) {
+					return { isDirectory: () => true }
+				}
+				throw new Error("Not found")
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === badSkillMd)
+			mockReadFile.mockImplementation(async (file: string) => {
+				if (file === badSkillMd) {
+					// Unterminated frontmatter: the opening --- is never closed, and the
+					// dangling double quote makes gray-matter throw. The raw-line lookup
+					// cannot find a closing delimiter, so no quote hint is possible.
+					return `---
+name: unclosed-skill
+description: "unclosed quote
+rest of the file`
+				}
+				throw new Error("File not found")
+			})
+
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			try {
+				await skillsManager.discoverSkills()
+
+				expect(skillsManager.getAllSkills()).toHaveLength(0)
+
+				const logged = consoleErrorSpy.mock.calls.map((call) => call.join(" "))
+				expect(logged.some((line) => line.includes("YAMLException"))).toBe(true)
+				expect(skillsManager.getSkillDiagnostics()).toHaveLength(1)
+				// Without a closing frontmatter delimiter there is no line to hint at.
+				expect(logged.some((line) => line.includes("unescaped double quotes"))).toBe(false)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
 		})
 
 		it("should skip skills with invalid name formats (spec compliance)", async () => {
@@ -1233,6 +1404,47 @@ Instructions`)
 			expect(writeCall[1]).toContain("- code")
 		})
 
+		it("round-trips the issue description and mode slugs through YAML frontmatter", async () => {
+			mockDirectoryExists.mockResolvedValue(false)
+			mockRealpath.mockImplementation(async (p: string) => p)
+			mockReaddir.mockResolvedValue([])
+			mockFileExists.mockResolvedValue(false)
+			mockMkdir.mockResolvedValue(undefined)
+			mockWriteFile.mockResolvedValue(undefined)
+			const description = 'Triggers on: "TDD", "test-driven development"'
+
+			await skillsManager.createSkill("tdd-skill", "global", description, ["code", "debug"])
+
+			const generatedContent = mockWriteFile.mock.calls[0][1] as string
+			const parsed = matter(generatedContent)
+			expect(parsed.data).toEqual({
+				name: "tdd-skill",
+				description,
+				modeSlugs: ["code", "debug"],
+			})
+			expect(parsed.content).toBe("\n# Tdd Skill\n\n## Instructions\n\nAdd your skill instructions here.\n")
+		})
+
+		it.each([
+			["colon-space", "Use when: tests fail"],
+			["quotes", "Use \"red-green-refactor\" and 'small steps'"],
+			["hash", "Use tests # not comments"],
+			["leading punctuation", "- Start from a failing test"],
+			["multiline", "First line\nSecond line: with # and quotes"],
+		])("preserves YAML-sensitive %s descriptions", async (_caseName, description) => {
+			mockDirectoryExists.mockResolvedValue(false)
+			mockRealpath.mockImplementation(async (p: string) => p)
+			mockReaddir.mockResolvedValue([])
+			mockFileExists.mockResolvedValue(false)
+			mockMkdir.mockResolvedValue(undefined)
+			mockWriteFile.mockResolvedValue(undefined)
+
+			await skillsManager.createSkill("yaml-sensitive", "global", description)
+
+			const generatedContent = mockWriteFile.mock.calls[0][1] as string
+			expect(matter(generatedContent).data.description).toBe(description)
+		})
+
 		it("should create a project skill", async () => {
 			mockDirectoryExists.mockResolvedValue(false)
 			mockRealpath.mockImplementation(async (p: string) => p)
@@ -1244,6 +1456,120 @@ Instructions`)
 			const createdPath = await skillsManager.createSkill("project-skill", "project", "A project skill")
 
 			expect(createdPath).toBe(p(PROJECT_DIR, ".roo", "skills", "project-skill", "SKILL.md"))
+		})
+
+		it("should escape double quotes in the description so the created skill loads (issue #859)", async () => {
+			mockDirectoryExists.mockResolvedValue(false)
+			mockRealpath.mockImplementation(async (p: string) => p)
+			mockReaddir.mockResolvedValue([])
+			mockFileExists.mockResolvedValue(false)
+			mockMkdir.mockResolvedValue(undefined)
+			mockWriteFile.mockResolvedValue(undefined)
+
+			const description = 'Use when implementing features. Triggers on: "TDD", "test-driven development"'
+			const createdPath = await skillsManager.createSkill("test-skill", "global", description)
+
+			// The written frontmatter must be valid YAML that round-trips the
+			// description, with the raw value quoted instead of unescaped.
+			const writtenContent = String(mockWriteFile.mock.calls[0][1])
+			const parsed = matter(writtenContent)
+			expect(parsed.data.name).toBe("test-skill")
+			expect(parsed.data.description).toBe(description)
+			expect(writtenContent).toContain(`description: '${description}'`)
+
+			// Re-discovery loads the created skill instead of silently skipping it.
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["test-skill"] : []))
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === p(globalSkillsDir, "test-skill")) {
+					return { isDirectory: () => true }
+				}
+				throw new Error("Not found")
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === createdPath)
+			mockReadFile.mockImplementation(async (file: string) =>
+				file === createdPath ? writtenContent : Promise.reject(new Error("File not found")),
+			)
+
+			await skillsManager.discoverSkills()
+
+			const skills = skillsManager.getAllSkills()
+			expect(skills).toHaveLength(1)
+			expect(skills[0].name).toBe("test-skill")
+			expect(skills[0].description).toBe(description)
+		})
+
+		it("should quote descriptions that would otherwise parse as YAML non-strings", async () => {
+			mockDirectoryExists.mockResolvedValue(false)
+			mockRealpath.mockImplementation(async (p: string) => p)
+			mockReaddir.mockResolvedValue([])
+			mockFileExists.mockResolvedValue(false)
+			mockMkdir.mockResolvedValue(undefined)
+			mockWriteFile.mockResolvedValue(undefined)
+
+			await skillsManager.createSkill("flag-skill", "global", "yes")
+
+			const writtenContent = String(mockWriteFile.mock.calls[0][1])
+			const parsed = matter(writtenContent)
+			// Without quoting, js-yaml resolves "yes" to a boolean and the skill
+			// is rejected with a misleading "missing required 'description' field".
+			expect(typeof parsed.data.description).toBe("string")
+			expect(parsed.data.description).toBe("yes")
+		})
+
+		it("should rewrite modeSlugs via gray-matter serialization without reflowing the description", async () => {
+			const skillDir = p(globalSkillsDir, "modes-skill")
+			const skillMd = p(skillDir, "SKILL.md")
+			const description = 'Use when implementing features. Triggers on: "TDD", "test-driven development"'
+			const originalContent = `---
+name: modes-skill
+description: '${description}'
+---
+
+# Modes Skill
+
+## Instructions
+
+Body here.`
+
+			// Initial discovery so the skill is registered.
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["modes-skill"] : []))
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === skillDir) {
+					return { isDirectory: () => true }
+				}
+				throw new Error("Not found")
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === skillMd)
+			mockReadFile.mockResolvedValue(originalContent)
+			mockWriteFile.mockResolvedValue(undefined)
+
+			await skillsManager.discoverSkills()
+			expect(skillsManager.getAllSkills()).toHaveLength(1)
+
+			// Apply a mode restriction; the file is rewritten with the new slugs.
+			await skillsManager.updateSkillModes("modes-skill", "global", ["code"])
+
+			expect(mockWriteFile).toHaveBeenCalledTimes(1)
+			const rewritten = String(mockWriteFile.mock.calls[0][1])
+			const parsed = matter(rewritten)
+			// The description survives the round-trip exactly and stays quoted.
+			expect(parsed.data.description).toBe(description)
+			expect(rewritten).toContain(`description: '${description}'`)
+			// The new modeSlugs were written and the body is preserved.
+			expect(parsed.data.modeSlugs).toEqual(["code"])
+			expect(rewritten).toContain("Body here.")
+			// lineWidth: -1 keeps the value on a single line (no folded block scalar).
+			expect(rewritten).not.toContain("> ")
+
+			// Clearing the restriction removes modeSlugs from the frontmatter.
+			await skillsManager.updateSkillModes("modes-skill", "global", [])
+
+			const rewritten2 = String(mockWriteFile.mock.calls[1][1])
+			const parsed2 = matter(rewritten2)
+			expect(parsed2.data.modeSlugs).toBeUndefined()
+			expect(parsed2.data.description).toBe(description)
 		})
 
 		it("should throw error for invalid skill name", async () => {
@@ -1296,6 +1622,197 @@ Instructions`)
 			await expect(skillsManager.createSkill("existing-skill", "global", "Description")).rejects.toThrow(
 				"already exists",
 			)
+		})
+	})
+
+	describe("skill diagnostics", () => {
+		it("reports malformed YAML with location while retaining valid skills", async () => {
+			const validSkillDir = p(globalSkillsDir, "valid-skill")
+			const malformedSkillDir = p(globalSkillsDir, "malformed-skill")
+			const validSkillPath = p(validSkillDir, "SKILL.md")
+			const malformedSkillPath = p(malformedSkillDir, "SKILL.md")
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) =>
+				dir === globalSkillsDir ? ["valid-skill", "malformed-skill"] : [],
+			)
+			mockStat.mockResolvedValue({ isDirectory: () => true })
+			mockFileExists.mockImplementation(async (file: string) =>
+				[validSkillPath, malformedSkillPath].includes(file),
+			)
+			mockReadFile.mockImplementation(async (file: string) => {
+				if (file === validSkillPath) {
+					return "---\nname: valid-skill\ndescription: Still visible\n---\nValid instructions"
+				}
+				return '---\nname: malformed-skill\ndescription: Triggers on: "TDD"\n---\nBroken instructions'
+			})
+
+			await skillsManager.discoverSkills()
+
+			expect(skillsManager.getSkillsMetadata()).toEqual([
+				expect.objectContaining({ name: "valid-skill", description: "Still visible" }),
+			])
+			expect(skillsManager.getSkillDiagnostics()).toEqual([
+				expect.objectContaining({
+					path: malformedSkillPath,
+					source: "global",
+					message: expect.any(String),
+					line: 3,
+					column: expect.any(Number),
+				}),
+			])
+		})
+
+		it("serializes overlapping scans so an older scan cannot append stale diagnostics", async () => {
+			const skillDir = p(globalSkillsDir, "flaky-skill")
+			const skillPath = p(skillDir, "SKILL.md")
+			const staleContent = `---
+name: flaky-skill
+description: "Broken "quote" frontmatter
+---
+
+Body.`
+			const goodContent = `---
+name: flaky-skill
+description: Healthy after repair
+---
+
+Body.`
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["flaky-skill"] : []))
+			mockStat.mockResolvedValue({ isDirectory: () => true })
+			mockFileExists.mockImplementation(async (file: string) => file === skillPath)
+
+			// The first scan's read is delayed (as when a watcher fires while the
+			// file is still being written) and observes malformed content. A second
+			// scan started before that read resolves must run afterwards, and its
+			// result must win.
+			let resolveFirstRead!: (content: string) => void
+			const firstRead = new Promise<string>((resolve) => {
+				resolveFirstRead = resolve
+			})
+			let reads = 0
+			mockReadFile.mockImplementation(async () => {
+				reads += 1
+				return reads === 1 ? firstRead : goodContent
+			})
+
+			const first = skillsManager.discoverSkills()
+			const second = skillsManager.discoverSkills()
+			resolveFirstRead(staleContent)
+			await Promise.all([first, second])
+
+			expect(skillsManager.getSkillsMetadata()).toEqual([
+				expect.objectContaining({ name: "flaky-skill", description: "Healthy after repair" }),
+			])
+			expect(skillsManager.getSkillDiagnostics()).toEqual([])
+		})
+
+		it("does not hint at unescaped quotes when the parse error is on another line", async () => {
+			const skillDir = p(globalSkillsDir, "hint-skill")
+			const skillPath = p(skillDir, "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["hint-skill"] : []))
+			mockStat.mockResolvedValue({ isDirectory: () => true })
+			mockFileExists.mockImplementation(async (file: string) => file === skillPath)
+			// The description is a valid single-quoted value that itself contains
+			// double quotes; the YAML error is on the unclosed name line instead,
+			// so the unescaped-quotes hint must not fire.
+			mockReadFile.mockResolvedValue(`---
+name: "unclosed
+description: 'Triggers on "TDD" - valid quotes'
+---
+
+Body.`)
+
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			try {
+				await skillsManager.discoverSkills()
+
+				const logged = consoleErrorSpy.mock.calls.map((call) => call.join(" "))
+				expect(logged.some((line) => line.includes("unescaped double quotes"))).toBe(false)
+				expect(skillsManager.getSkillDiagnostics()).toEqual([
+					expect.objectContaining({ path: skillPath, source: "global", line: 4 }),
+				])
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
+
+		it("keeps reporting the same malformed skill on a re-scan (gray-matter cache must not swallow the error)", async () => {
+			const skillDir = p(globalSkillsDir, "cached-bad-skill")
+			const skillPath = p(skillDir, "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["cached-bad-skill"] : []))
+			mockStat.mockResolvedValue({ isDirectory: () => true })
+			mockFileExists.mockImplementation(async (file: string) => file === skillPath)
+			mockReadFile.mockResolvedValue(`---
+name: cached-bad-skill
+description: "Broken "quote" description
+---
+
+Body.`)
+
+			await skillsManager.discoverSkills()
+			expect(skillsManager.getSkillsMetadata()).toEqual([])
+			expect(skillsManager.getSkillDiagnostics()).toHaveLength(1)
+
+			// A re-scan of the identical (unchanged) content must keep reporting the
+			// parse failure. gray-matter keeps a global content-keyed cache that it
+			// populates before parsing, so without bypassing it the first throw is
+			// cached with an empty data object and every later parse of the same
+			// content silently returns that object instead of re-throwing - which
+			// would resurface the misleading "missing required 'name' field" symptom
+			// from issue #859.
+			await skillsManager.discoverSkills()
+			expect(skillsManager.getSkillsMetadata()).toEqual([])
+			expect(skillsManager.getSkillDiagnostics()).toHaveLength(1)
+			expect(skillsManager.getSkillDiagnostics()[0]).toEqual(
+				expect.objectContaining({ path: skillPath, source: "global" }),
+			)
+		})
+
+		it("records a diagnostic from a non-Error parse failure without location details", async () => {
+			const skillDir = p(globalSkillsDir, "raw-error-skill")
+			const skillPath = p(skillDir, "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["raw-error-skill"] : []))
+			mockStat.mockResolvedValue({ isDirectory: () => true })
+			mockFileExists.mockImplementation(async (file: string) => file === skillPath)
+			mockReadFile.mockResolvedValue(`---
+name: raw-error-skill
+description: Healthy
+---
+
+Body.`)
+			// Script a parse failure that is a plain string (no YAML reason, no
+			// mark, not an Error) so every defensive fallback in recordDiagnostic
+			// is exercised.
+			vi.mocked(matter).mockImplementationOnce(() => {
+				throw "gray-matter exploded"
+			})
+
+			await skillsManager.discoverSkills()
+
+			expect(skillsManager.getSkillsMetadata()).toEqual([])
+			expect(skillsManager.getSkillDiagnostics()).toEqual([
+				{
+					path: skillPath,
+					source: "global",
+					message: "gray-matter exploded",
+					line: undefined,
+					column: undefined,
+				},
+			])
 		})
 	})
 
