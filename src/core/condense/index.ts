@@ -275,8 +275,10 @@ export async function summarizeConversation(options: SummarizeConversationOption
 
 	const response: SummarizeResponse = { messages, cost: 0, summary: "" }
 
-	// Get messages to summarize (all messages since the last summary, if any)
-	const messagesToSummarize = getMessagesSinceLastSummary(messages)
+	// Summarize the effective history (what normal requests send): excludes messages already hidden
+	// by sliding-window truncation or a previous condense, and starts at the last summary if any.
+	// The stored history in `messages` is left intact and tagged below.
+	const messagesToSummarize = getEffectiveApiHistory(messages)
 
 	if (messagesToSummarize.length <= 1) {
 		const error =
