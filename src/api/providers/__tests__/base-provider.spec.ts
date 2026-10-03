@@ -4,6 +4,7 @@ import type { ModelInfo } from "@roo-code/types"
 
 import { BaseProvider } from "../base-provider"
 import type { ApiStream } from "../../transform/stream"
+import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
 
 // Create a concrete implementation for testing
 class TestProvider extends BaseProvider {
@@ -288,10 +289,44 @@ describe("BaseProvider", () => {
 
 			expect(result?.[0].function.description).toBe("bad\uFFFDend")
 			expect(result?.[0].function.parameters.properties.path.description).toBe("bad\uFFFDend")
-			// The serialized body must not contain a lone surrogate anywhere.
-			expect(JSON.stringify(result)).not.toMatch(
-				/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/,
-			)
+			// Inspect the raw values: JSON.stringify escapes lone surrogates as \udXXX text,
+			// so a regex over the serialized body can never fail. See expectNoLoneSurrogates.
+			expectNoLoneSurrogates(result)
+		})
+
+		it("should sanitize lone UTF-16 surrogates in nested MCP tool parameters (#461)", () => {
+			const lone = "bad\uD800end"
+			const sanitized = "bad\uFFFDend"
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "mcp__srv__tool",
+						description: "Run an MCP tool",
+						parameters: {
+							type: "object",
+							properties: {
+								path: { type: "string" },
+								nested: {
+									type: "object",
+									properties: {
+										list: { type: "string", description: lone },
+									},
+								},
+							},
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+
+			// MCP tools keep their original schema (no strict-mode conversion) ...
+			expect(result?.[0].function.strict).toBe(false)
+			expect(result?.[0].function.parameters.additionalProperties).toBeUndefined()
+			// ... but strings nested in the parameters are still sanitized.
+			expect(result?.[0].function.parameters.properties.nested.properties.list.description).toBe(sanitized)
+			expectNoLoneSurrogates(result)
 		})
 
 		it("should sanitize lone UTF-16 surrogates in tool names (#461)", () => {

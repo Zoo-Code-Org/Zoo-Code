@@ -1,6 +1,7 @@
 // Mocks must come first, before imports
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
 
 const mockCreate = vi.fn()
 vi.mock("openai", () => {
@@ -826,9 +827,6 @@ describe("DeepSeekHandler", () => {
 })
 
 describe("DeepSeekHandler lone surrogate sanitization (#461)", () => {
-	// Matches any unpaired UTF-16 code unit; the serialized request body must never contain one.
-	const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
-
 	beforeEach(() => {
 		mockCreate.mockClear()
 	})
@@ -874,8 +872,10 @@ describe("DeepSeekHandler lone surrogate sanitization (#461)", () => {
 		expect(mockCreate).toHaveBeenCalledOnce()
 		const request = mockCreate.mock.calls[0][0]
 
-		// The whole body (messages + tools) must serialize without a lone surrogate.
-		expect(JSON.stringify(request)).not.toMatch(LONE_SURROGATE)
+		// The whole body (messages + tools) must be free of lone surrogates. Inspect the raw
+		// values: JSON.stringify escapes lone surrogates as \udXXX text, so a regex over the
+		// serialized body can never fail. See expectNoLoneSurrogates.
+		expectNoLoneSurrogates(request)
 
 		// The tool call and its result stay paired after injective id sanitization.
 		const assistantMessage = request.messages.find(

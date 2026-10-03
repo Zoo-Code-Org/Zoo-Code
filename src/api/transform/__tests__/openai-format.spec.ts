@@ -10,6 +10,7 @@ import {
 	ReasoningDetail,
 } from "../openai-format"
 import { normalizeMistralToolCallId } from "../mistral-format"
+import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
 
 describe("convertToOpenAiMessages", () => {
 	it("should convert simple text messages", () => {
@@ -1668,9 +1669,12 @@ describe("convertToOpenAiMessages lone surrogate sanitization (#461)", () => {
 	it("composes id sanitization with normalizeToolCallId", () => {
 		const result = convertToOpenAiMessages(
 			[{ role: "user", content: [{ type: "tool_result", tool_use_id: "call-\uD800", content: "ok" }] }],
-			{ normalizeToolCallId: (id) => id.toUpperCase() },
+			// Lowercase makes the composition order observable: the caller normalizer runs
+			// first, then sanitization. Swapping the order would also lowercase the encoded
+			// hex suffix (producing call-\uFFFdd800), so this assertion would fail.
+			{ normalizeToolCallId: (id) => id.toLowerCase() },
 		)
-		expect((result[0] as OpenAI.Chat.ChatCompletionToolMessageParam).tool_call_id).toBe("CALL-\uFFFD" + "D800")
+		expect((result[0] as OpenAI.Chat.ChatCompletionToolMessageParam).tool_call_id).toBe("call-\uFFFD" + "D800")
 	})
 
 	it("sanitizes reasoning_content pass-through", () => {
@@ -1680,13 +1684,39 @@ describe("convertToOpenAiMessages lone surrogate sanitization (#461)", () => {
 		expect(result[0]).toMatchObject({ content: sanitized, reasoning_content: sanitized })
 	})
 
+	it("sanitizes reasoning_content on the array-content assistant path", () => {
+		const result = convertToOpenAiMessages([
+			Object.assign(
+				{ role: "assistant" as const, content: [{ type: "text" as const, text: lone }] },
+				{ reasoning_content: lone },
+			),
+		])
+		expect(result[0]).toEqual({ role: "assistant", content: sanitized, reasoning_content: sanitized })
+	})
+
+	it("sanitizes text merged into the last tool message after tool_result blocks", () => {
+		const result = convertToOpenAiMessages(
+			[
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "tool-1", content: lone },
+						{ type: "text", text: lone },
+					],
+				},
+			],
+			{ mergeToolResultText: true },
+		)
+		expect(result).toEqual([{ role: "tool", tool_call_id: "tool-1", content: `${sanitized}\n\n${sanitized}` }])
+	})
+
 	it("leaves valid surrogate pairs untouched", () => {
 		const pair = "emoji \uD83D\uDE00 done"
 		const result = convertToOpenAiMessages([{ role: "user", content: pair }])
 		expect(result[0]).toEqual({ role: "user", content: pair })
 	})
 
-	it("produces a JSON body free of lone surrogates", () => {
+	it("produces a request body free of lone surrogates", () => {
 		const result = convertToOpenAiMessages([
 			{ role: "user", content: lone },
 			{
@@ -1695,7 +1725,8 @@ describe("convertToOpenAiMessages lone surrogate sanitization (#461)", () => {
 			},
 			{ role: "user", content: [{ type: "tool_result", tool_use_id: "call-\uD800", content: lone }] },
 		])
-		const body = JSON.stringify(result)
-		expect(body).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/)
+		// Inspect the raw values: JSON.stringify escapes lone surrogates as \udXXX text,
+		// so a regex over the serialized body can never fail. See expectNoLoneSurrogates.
+		expectNoLoneSurrogates(result)
 	})
 })

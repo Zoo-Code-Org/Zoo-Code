@@ -13,6 +13,7 @@ import {
 import { Package } from "../../../shared/package"
 import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
 import axios from "axios"
 
 vitest.mock("../utils/timeout-config", () => ({
@@ -1879,9 +1880,6 @@ describe("getOpenAiModels", () => {
 })
 
 describe("OpenAiHandler lone surrogate sanitization (#461)", () => {
-	// Matches any unpaired UTF-16 code unit; the serialized request body must never contain one.
-	const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
-
 	beforeEach(() => {
 		mockCreate.mockClear()
 	})
@@ -1927,8 +1925,10 @@ describe("OpenAiHandler lone surrogate sanitization (#461)", () => {
 		expect(mockCreate).toHaveBeenCalledOnce()
 		const request = mockCreate.mock.calls[0][0]
 
-		// The whole body (system prompt, messages, tools) must serialize without a lone surrogate.
-		expect(JSON.stringify(request)).not.toMatch(LONE_SURROGATE)
+		// The whole body (system prompt, messages, tools) must be free of lone surrogates.
+		// Inspect the raw values: JSON.stringify escapes lone surrogates as \udXXX text, so
+		// a regex over the serialized body can never fail. See expectNoLoneSurrogates.
+		expectNoLoneSurrogates(request)
 
 		expect(request.messages[0]).toEqual({ role: "system", content: "system \uFFFD prompt" })
 
@@ -1944,5 +1944,97 @@ describe("OpenAiHandler lone surrogate sanitization (#461)", () => {
 		expect(toolMessage.content).toBe(sanitized)
 		expect(JSON.parse(toolCalls[0].function.arguments)).toEqual({ path: sanitized })
 		expect(request.tools[0].function.description).toBe(sanitized)
+	})
+
+	it("sanitizes the system prompt inside the cache_control block when streaming with prompt caching", async () => {
+		const handler = new OpenAiHandler(
+			makeApiHandlerOptions({
+				openAiApiKey: "test-api-key",
+				openAiModelId: "gpt-4",
+				openAiBaseUrl: "https://api.openai.com/v1",
+				openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, supportsPromptCache: true },
+			}),
+		)
+
+		await collectStream(
+			handler.createMessage("system \uD800 prompt", [{ role: "user", content: "hi" }], { taskId: "task-1" }),
+		)
+
+		expect(mockCreate).toHaveBeenCalledOnce()
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.messages[0]).toEqual({
+			role: "system",
+			content: [{ type: "text", text: "system \uFFFD prompt", cache_control: { type: "ephemeral" } }],
+		})
+		expect(request.stream).toBe(true)
+		expectNoLoneSurrogates(request)
+	})
+
+	it("sanitizes the system prompt string for non-streaming requests", async () => {
+		const handler = new OpenAiHandler(
+			makeApiHandlerOptions({
+				openAiApiKey: "test-api-key",
+				openAiModelId: "gpt-4",
+				openAiBaseUrl: "https://api.openai.com/v1",
+				openAiStreamingEnabled: false,
+			}),
+		)
+
+		await collectStream(
+			handler.createMessage("system \uD800 prompt", [{ role: "user", content: "hi" }], { taskId: "task-1" }),
+		)
+
+		expect(mockCreate).toHaveBeenCalledOnce()
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.messages[0]).toEqual({ role: "system", content: "system \uFFFD prompt" })
+		expect(request.stream).toBeUndefined()
+		expectNoLoneSurrogates(request)
+	})
+
+	it("sanitizes the o3 developer message when streaming", async () => {
+		const handler = new OpenAiHandler(
+			makeApiHandlerOptions({
+				openAiApiKey: "test-api-key",
+				openAiModelId: "o3-mini",
+				openAiBaseUrl: "https://api.openai.com/v1",
+			}),
+		)
+
+		await collectStream(
+			handler.createMessage("system \uD800 prompt", [{ role: "user", content: "hi" }], { taskId: "task-1" }),
+		)
+
+		expect(mockCreate).toHaveBeenCalledOnce()
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.messages[0]).toEqual({
+			role: "developer",
+			content: "Formatting re-enabled\nsystem \uFFFD prompt",
+		})
+		expect(request.stream).toBe(true)
+		expectNoLoneSurrogates(request)
+	})
+
+	it("sanitizes the o3 developer message for non-streaming requests", async () => {
+		const handler = new OpenAiHandler(
+			makeApiHandlerOptions({
+				openAiApiKey: "test-api-key",
+				openAiModelId: "o3-mini",
+				openAiBaseUrl: "https://api.openai.com/v1",
+				openAiStreamingEnabled: false,
+			}),
+		)
+
+		await collectStream(
+			handler.createMessage("system \uD800 prompt", [{ role: "user", content: "hi" }], { taskId: "task-1" }),
+		)
+
+		expect(mockCreate).toHaveBeenCalledOnce()
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.messages[0]).toEqual({
+			role: "developer",
+			content: "Formatting re-enabled\nsystem \uFFFD prompt",
+		})
+		expect(request.stream).toBeUndefined()
+		expectNoLoneSurrogates(request)
 	})
 })

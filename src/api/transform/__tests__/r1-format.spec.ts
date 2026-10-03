@@ -3,6 +3,7 @@
 import { convertToR1Format } from "../r1-format"
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
+import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
 
 describe("convertToR1Format", () => {
 	it("should convert basic text messages", () => {
@@ -647,6 +648,27 @@ describe("convertToR1Format lone surrogate sanitization (#461)", () => {
 		expect(result[0]).toEqual({ role: "user", content: sanitized })
 	})
 
+	it("sanitizes a simple string assistant message", () => {
+		const result = convertToR1Format([{ role: "assistant", content: lone }])
+		expect(result).toEqual([{ role: "assistant", content: sanitized }])
+	})
+
+	it("sanitizes and merges a string assistant message into the previous assistant message", () => {
+		const result = convertToR1Format([
+			{ role: "assistant", content: "a" },
+			{ role: "assistant", content: lone },
+		])
+		expect(result).toEqual([{ role: "assistant", content: `a\n${sanitized}` }])
+	})
+
+	it("sanitizes and merges a string user message into the previous user message", () => {
+		const result = convertToR1Format([
+			{ role: "user", content: "a" },
+			{ role: "user", content: lone },
+		])
+		expect(result).toEqual([{ role: "user", content: `a\n${sanitized}` }])
+	})
+
 	it("sanitizes user text blocks", () => {
 		const result = convertToR1Format([{ role: "user", content: [{ type: "text", text: lone }] }])
 		expect(result[0]).toEqual({ role: "user", content: sanitized })
@@ -748,9 +770,12 @@ describe("convertToR1Format lone surrogate sanitization (#461)", () => {
 	it("composes id sanitization with the normalizeToolCallId option", () => {
 		const result = convertToR1Format(
 			[{ role: "user", content: [{ type: "tool_result", tool_use_id: "call-\uD800", content: "ok" }] }],
-			{ normalizeToolCallId: (id) => id.toUpperCase() },
+			// Lowercase makes the composition order observable: the caller normalizer runs
+			// first, then sanitization. Swapping the order would also lowercase the encoded
+			// hex suffix (producing call-\uFFFdd800), so this assertion would fail.
+			{ normalizeToolCallId: (id) => id.toLowerCase() },
 		)
-		expect((result[0] as OpenAI.Chat.ChatCompletionToolMessageParam).tool_call_id).toBe("CALL-\uFFFD" + "D800")
+		expect((result[0] as OpenAI.Chat.ChatCompletionToolMessageParam).tool_call_id).toBe("call-\uFFFD" + "D800")
 	})
 
 	it("leaves valid surrogate pairs untouched", () => {
@@ -759,7 +784,7 @@ describe("convertToR1Format lone surrogate sanitization (#461)", () => {
 		expect(result[0]).toEqual({ role: "user", content: pair })
 	})
 
-	it("produces a JSON body free of lone surrogates", () => {
+	it("produces a request body free of lone surrogates", () => {
 		const result = convertToR1Format([
 			{ role: "user", content: lone },
 			{
@@ -768,7 +793,8 @@ describe("convertToR1Format lone surrogate sanitization (#461)", () => {
 			},
 			{ role: "user", content: [{ type: "tool_result", tool_use_id: "call-\uD800", content: lone }] },
 		])
-		const body = JSON.stringify(result)
-		expect(body).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/)
+		// Inspect the raw values: JSON.stringify escapes lone surrogates as \udXXX text,
+		// so a regex over the serialized body can never fail. See expectNoLoneSurrogates.
+		expectNoLoneSurrogates(result)
 	})
 })
