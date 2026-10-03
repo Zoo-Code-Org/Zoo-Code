@@ -443,6 +443,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// submission was consumed (hand the ID to the caller for a durable ack) or
 	// overwritten unconsumed (retain for a later ask).
 	private pendingSubmittedQueuedMessageId: string | undefined
+	// The ask currently blocked in Task.ask's response wait, when any. A
+	// background drain consults queuedResponseForAsk against this gate so a
+	// queued conversational message can never answer an approval-gating ask,
+	// exactly matching the claim path's resolution gate.
+	private inFlightAskGate: { type: ClineAsk; text?: string } | undefined
 	// Association between a queued message ID and the user_feedback row its ack
 	// persisted. A redelivery after a partial save failure reconciles the same
 	// row instead of appending a duplicate feedback row.
@@ -1874,29 +1879,37 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			queuedMessageId = this.handleQueuedAskResponse(queuedMessage, queuedAskResolution)
 		}
 
-		// Wait for askResponse to be set
-		await pWaitFor(
-			() => {
-				if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
-					return true
-				}
-
-				// If a queued message arrives while we're blocked on an ask (e.g. a follow-up
-				// suggestion click that was incorrectly queued due to UI state), consume it
-				// immediately so the task doesn't hang. Approval-gating ask types get no
-				// resolution, so the message stays queued for a conversational turn.
-				if (shouldDrainQueuedMessageForAsk && !this.messageQueueService.isEmpty()) {
-					const resolution = queuedResponseForAsk(type, text)
-					const message = resolution ? this.messageQueueService.claimNextMessage() : undefined
-					if (message && resolution) {
-						queuedMessageId = this.handleQueuedAskResponse(message, resolution)
+		// Wait for askResponse to be set. The drain gate is accurate for the
+		// whole wait: a background drain consults it so an approval-gating ask
+		// can never be answered by a queued conversational message (the same
+		// resolution gate the claim path applies).
+		this.inFlightAskGate = { type, text }
+		try {
+			await pWaitFor(
+				() => {
+					if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
+						return true
 					}
-				}
 
-				return false
-			},
-			{ interval: 100 },
-		)
+					// If a queued message arrives while we're blocked on an ask (e.g. a follow-up
+					// suggestion click that was incorrectly queued due to UI state), consume it
+					// immediately so the task doesn't hang. Approval-gating ask types get no
+					// resolution, so the message stays queued for a conversational turn.
+					if (shouldDrainQueuedMessageForAsk && !this.messageQueueService.isEmpty()) {
+						const resolution = queuedResponseForAsk(type, text)
+						const message = resolution ? this.messageQueueService.claimNextMessage() : undefined
+						if (message && resolution) {
+							queuedMessageId = this.handleQueuedAskResponse(message, resolution)
+						}
+					}
+
+					return false
+				},
+				{ interval: 100 },
+			)
+		} finally {
+			this.inFlightAskGate = undefined
+		}
 
 		/* v8 ignore next 3 -- abort-while-waiting path; covered by e2e standalone-resume test */
 		if (this.abort) {
@@ -2114,6 +2127,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// to the write so no cancellation can interleave (single-threaded).
 				if (this.abort || this.abandoned) {
 					console.error("[Task#submitUserMessage] Task aborted, dropping user message submission")
+					return false
+				}
+
+				// Never overwrite a response an ask is blocked waiting on: an
+				// approval-gating ask (queuedResponseForAsk returns undefined)
+				// must not be answered by the queue, and a direct response that
+				// already landed in the slot must not be replaced (an approval
+				// would become a conversational answer). Outside an in-flight
+				// ask the slot only holds stale residue the next ask clears, so
+				// between-turn submissions proceed. Queue drains treat the
+				// returned false as "leave the message queued".
+				const inFlightGate = this.inFlightAskGate
+				if (
+					inFlightGate &&
+					(this.askResponse !== undefined ||
+						queuedResponseForAsk(inFlightGate.type, inFlightGate.text) === undefined)
+				) {
 					return false
 				}
 
@@ -5802,6 +5832,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.messageQueueService.releaseMessage(queued.id)
 			return true
 		}
+		// An approval-gating ask is blocked in its response wait. The claim path
+		// refuses to answer it with a queued conversational message; the drain
+		// must honor the same gate instead of posting messageResponse into the
+		// ask-response slot, so release the claim and leave the message queued
+		// for a conversational turn.
+		const inFlightGate = this.inFlightAskGate
+		if (inFlightGate && queuedResponseForAsk(inFlightGate.type, inFlightGate.text) === undefined) {
+			this.messageQueueService.releaseMessage(queued.id)
+			return true
+		}
 		try {
 			const submitted = await this.submitUserMessage(queued.text, queued.images, undefined, undefined, queued.id)
 			if (!submitted) {
@@ -5811,6 +5851,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// the drain on a task that is already stopping.
 					this.messageQueueService.releaseMessage(queued.id)
 					return false
+				}
+				const gate = this.inFlightAskGate
+				if (
+					gate &&
+					(this.askResponse !== undefined || queuedResponseForAsk(gate.type, gate.text) === undefined)
+				) {
+					// A direct response landed or an approval-gating ask is
+					// waiting: the submission was dropped to keep the slot
+					// intact, so leave the message queued instead of failing
+					// the drain.
+					this.messageQueueService.releaseMessage(queued.id)
+					return true
 				}
 				throw new Error(`[Task] Failed to submit queued message ${queued.id}`)
 			}

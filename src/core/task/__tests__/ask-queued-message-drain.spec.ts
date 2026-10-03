@@ -64,7 +64,7 @@ describe("Task.ask queued message drain", () => {
 	it("acks a drained padded message through the consuming ask", async () => {
 		const task = await createTask({ getState: async () => ({}) })
 
-		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		const askPromise = task.ask("completion_result", "Done", false)
 		await new Promise((resolve) => setTimeout(resolve, 150))
 
 		// editQueuedMessage saves untrimmed text; submitUserMessage trims before
@@ -95,9 +95,10 @@ describe("Task.ask queued message drain", () => {
 	it("acks an intercepted drained message through the consuming ask", async () => {
 		const task = await createTask({ getState: async () => ({}) })
 
-		// Park a tool ask in the real pWaitFor: no auto-approval and nothing
-		// queued at ask start, so it blocks.
-		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		// Park a completion ask in the real pWaitFor: no auto-approval and
+		// nothing queued at ask start, so it blocks. A completion ask has a
+		// queued-ask resolution, so a mid-block drain may intercept it.
+		const askPromise = task.ask("completion_result", "Done", false)
 		// Let the ask reach its pWaitFor before the drain runs.
 		await new Promise((resolve) => setTimeout(resolve, 150))
 
@@ -134,8 +135,9 @@ describe("Task.ask queued message drain", () => {
 		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
 		await new Promise((resolve) => setTimeout(resolve, 150))
 
-		// The drain posts the message into the pending slot, but the user
-		// answers the blocked ask directly before any ask consumed it.
+		// The drain would post the message into the pending slot, but the
+		// approval-gating gate drops the submission instead; the user then
+		// answers the blocked ask directly.
 		task.messageQueueService.addMessage("queued correction")
 		await task.processQueuedMessages()
 		setTimeout(() => task.approveAsk(), 0)
@@ -178,7 +180,7 @@ describe("Task.ask queued message drain", () => {
 		const task = await createTask({ getState: async () => ({}) })
 		const submitSpy = vi.spyOn(task, "submitUserMessage")
 
-		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		const askPromise = task.ask("completion_result", "Done", false)
 		await new Promise((resolve) => setTimeout(resolve, 150))
 
 		task.messageQueueService.addMessage("queued correction")
@@ -207,7 +209,7 @@ describe("Task.ask queued message drain", () => {
 	it("retains an intercepted drained message until its history write succeeds", async () => {
 		const task = await createTask({ getState: async () => ({}) })
 
-		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		const askPromise = task.ask("completion_result", "Done", false)
 		await new Promise((resolve) => setTimeout(resolve, 150))
 
 		task.messageQueueService.addMessage("Keep this correction")
@@ -247,7 +249,7 @@ describe("Task.ask queued message drain", () => {
 	it("re-queues an intercepted drained message when its history write keeps failing", async () => {
 		const task = await createTask({ getState: async () => ({}) })
 
-		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		const askPromise = task.ask("completion_result", "Done", false)
 		await new Promise((resolve) => setTimeout(resolve, 150))
 
 		task.messageQueueService.addMessage("Do not lose me")
@@ -284,9 +286,10 @@ describe("Task.ask queued message drain", () => {
 		const task = await createTask({ getState: async () => ({}) })
 		const submitSpy = vi.spyOn(task, "submitUserMessage")
 
-		// ReadFileTool-style blocked approval ask: the queue is empty at ask
-		// start, so a drain that posts mid-block intercepts the ask.
-		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		// Blocked completion ask: the queue is empty at ask start, so a drain
+		// that posts mid-block intercepts the ask (the approval-gating gate
+		// does not apply to a resolvable ask).
+		const askPromise = task.ask("completion_result", "Done", false)
 		await new Promise((resolve) => setTimeout(resolve, 150))
 
 		task.messageQueueService.addMessage("user correction")
@@ -338,7 +341,7 @@ describe("Task.ask queued message drain", () => {
 	it("keeps exactly one feedback row when a redelivery follows a partial save failure", async () => {
 		const task = await createTask({ getState: async () => ({}) })
 
-		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		const askPromise = task.ask("completion_result", "Done", false)
 		await new Promise((resolve) => setTimeout(resolve, 150))
 
 		task.messageQueueService.addMessage("dedupe me")
@@ -384,7 +387,7 @@ describe("Task.ask queued message drain", () => {
 	it("releases the queued message when the reconciled row update fails", async () => {
 		const task = await createTask({ getState: async () => ({}) })
 
-		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		const askPromise = task.ask("completion_result", "Done", false)
 		await new Promise((resolve) => setTimeout(resolve, 150))
 
 		task.messageQueueService.addMessage("dedupe me")
@@ -669,6 +672,74 @@ describe("Task.ask queued message drain", () => {
 		const followup = await task.ask("followup", "anything else?", false)
 		expect(followup).toMatchObject({ response: "messageResponse", text: "also fix the tests" })
 		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it.each([
+		["command", "npm test"],
+		["use_mcp_server", "{}"],
+		["tool", JSON.stringify({ tool: "readFile" })],
+	] as const)("keeps a drain from answering a blocked %s ask", async (type, text) => {
+		const task = await createTask({ getState: async () => ({}) }) // auto-approval disabled
+		const submitSpy = vi.spyOn(task, "submitUserMessage")
+
+		// Park an approval-gating ask in the real pWaitFor.
+		const askPromise = task.ask(type, text, false)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+
+		// Background-completion style drain while the approval ask is blocked:
+		// the same queuedResponseForAsk gate the claim path applies must keep
+		// the queued conversational message out of the ask-response slot.
+		task.messageQueueService.addMessage("queued note")
+		await expect(task.processQueuedMessages()).resolves.toBe(true)
+		expect(submitSpy).not.toHaveBeenCalled()
+
+		// The ask is still waiting for an explicit user response.
+		let settled = false
+		void askPromise.then(() => {
+			settled = true
+		})
+		await new Promise((resolve) => setTimeout(resolve, 150))
+		expect(settled).toBe(false)
+
+		setTimeout(() => task.approveAsk(), 0)
+		const result = await askPromise
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
+		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["queued note"])
+
+		// The retained message is delivered to a later conversational ask.
+		const followup = await task.ask("followup", "anything else?", false)
+		expect(followup).toMatchObject({ response: "messageResponse", text: "queued note" })
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it("refuses to overwrite a response a blocked ask is waiting on", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+
+		const askPromise = task.ask("followup", "Q?", false)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+
+		// A direct response (e.g. an Approve click) lands first; a drain racing
+		// behind it must not overwrite the slot the blocked ask is polling.
+		task.handleWebviewAskResponse("yesButtonClicked")
+		await expect(task.submitUserMessage("queued note", undefined, undefined, undefined, "queued-1")).resolves.toBe(
+			false,
+		)
+
+		const result = await askPromise
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
+	})
+
+	it("refuses to submit while an approval-gating ask is in flight", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+
+		const askPromise = task.ask("command", "npm test", false)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+
+		await expect(task.submitUserMessage("queued note")).resolves.toBe(false)
+
+		setTimeout(() => task.approveAsk(), 0)
+		const result = await askPromise
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
 	})
 
 	it("claims lifecycle feedback that arrives while an ask is waiting", async () => {
