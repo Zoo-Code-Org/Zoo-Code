@@ -98,55 +98,10 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
  */
 // Latching on a bare `<invoke` would let any prose mentioning the tag stop real-time streaming for
 // the rest of the response, so the marker only counts once the `name="` attribute has arrived.
-const LEAKED_TOOL_CALL_START = /<(?:antml:)?(?:function_calls\s*>|invoke\s+name=")/i
+const LEAKED_TOOL_CALL_START = /<\/?(?:antml:)?function_calls(?:\s|>)|<(?:antml:)?invoke\s+name="/i
 
-/** Upper bound on an incomplete `<invoke ...` tail held back between chunks. */
+/** Bounds generic tag fragments, not prefixes that can still become valid recovery markup. */
 const MAX_PARTIAL_INVOKE_CARRY = 64
-
-// Allow substantial file contents and todo lists (256 Ki characters including markup), while
-// bounding how much never-closing markup can withhold from the user.
-const MAX_SALVAGE_BUFFER_CHARS = 256 * 1024
-
-/**
- * End offset just past the last closed `<invoke>` block in `text`, or 0 when none is closed.
- * Mirrors `extractLeakedToolCalls`' forward scan so both agree on what is decidable.
- */
-function lastCompleteInvokeBlockEnd(text: string): number {
-	const openPattern = /<(?:antml:)?invoke\s+name="([^"]+)"\s*>/gi
-	const closePattern = /<\/(?:antml:)?invoke\s*>/gi
-	let end = 0
-	for (let open = openPattern.exec(text); open !== null; open = openPattern.exec(text)) {
-		closePattern.lastIndex = open.index + open[0].length
-		const close = closePattern.exec(text)
-		// With no closing tag after this open there is none after any later open either.
-		if (!close) {
-			break
-		}
-		end = close.index + close[0].length
-		openPattern.lastIndex = end
-	}
-	return end
-}
-
-/**
- * End of the decided span: the newline after the last closed `<invoke>`, or 0 while that line is
- * still open. The quoting cue that suppresses recovery can trail the block on its own line, so
- * cutting at the tag would hide it and replay narrated markup as a live call.
- */
-function decidedSalvageEnd(text: string): number {
-	const blockEnd = lastCompleteInvokeBlockEnd(text)
-	if (blockEnd === 0) {
-		return 0
-	}
-	const lineEnd = text.indexOf("\n", blockEnd)
-	if (lineEnd === -1) {
-		return 0
-	}
-	// A newline inside a later, still-open block must not drain that block's opener as text.
-	// Search past the newline: the opener itself may span it, as in `<invoke\nname="`.
-	const nextOpen = text.slice(blockEnd).search(/<(?:antml:)?invoke\s+name="/i)
-	return nextOpen === -1 ? lineEnd + 1 : blockEnd + nextOpen
-}
 
 /**
  * Left-to-right scan state behind the quoting heuristics: open code fence, current line start,
@@ -272,12 +227,30 @@ function stripTagsCompletely(text: string): string {
  * be detected intact.
  */
 export function trailingPartialToolMarkerLength(text: string): number {
+	const tailStart = text.lastIndexOf("<")
+	const tail = text.slice(tailStart).toLowerCase()
+	if (
+		tailStart !== -1 &&
+		[
+			"<function_calls",
+			"</function_calls",
+			"<antml:function_calls",
+			"</antml:function_calls",
+			"<invoke",
+			"<antml:invoke",
+		].some((marker) => marker.startsWith(tail))
+	) {
+		return tail.length
+	}
+	// Whitespace in a valid unfinished opener has no length limit in the whole-input parser.
+	if (/<(?:antml:)?invoke\s+(?:n(?:a(?:m(?:e(?:=)?)?)?)?)?$/i.test(text)) {
+		return text.length - tailStart
+	}
 	const partialTag = text.match(/<(?:antml:)?[a-zA-Z_]*$/)
 	if (partialTag) {
 		return partialTag[0].length <= MAX_PARTIAL_INVOKE_CARRY ? partialTag[0].length : 0
 	}
-	// An `<invoke` whose `name="` attribute hasn't arrived yet: hold it back so the marker can
-	// latch on the next chunk, bounded so ordinary prose is never swallowed.
+	// Non-matching invoke fragments remain bounded so ordinary prose can resume streaming.
 	const partialInvoke = text.match(/<(?:antml:)?invoke\b[^<>]*$/i)
 	return partialInvoke && partialInvoke[0].length <= MAX_PARTIAL_INVOKE_CARRY ? partialInvoke[0].length : 0
 }
@@ -718,6 +691,16 @@ export function extractLeakedToolCalls(
 	validTools: ReadonlySet<string> | LeakedToolSchemas,
 	precedingText = "",
 ): { calls: Array<{ name: string; input: Record<string, unknown> }>; leftoverText: string } {
+	const scan = new QuotingScanState()
+	scan.advance(precedingText)
+	return extractLeakedToolCallsWithState(text, validTools, scan)
+}
+
+function extractLeakedToolCallsWithState(
+	text: string,
+	validTools: ReadonlySet<string> | LeakedToolSchemas,
+	scan: QuotingScanState,
+): { calls: Array<{ name: string; input: Record<string, unknown> }>; leftoverText: string } {
 	const schemaFor = (name: string) =>
 		validTools instanceof Map ? (validTools.get(name) as Record<string, unknown> | undefined) : undefined
 	const calls: Array<{ name: string; input: Record<string, unknown> }> = []
@@ -725,10 +708,6 @@ export function extractLeakedToolCalls(
 	let leftover = ""
 	let lastIndex = 0
 
-	// Quote detection needs the text streamed before the buffer, since a fence may have opened
-	// there. Scanned once by state that only ever moves forward, not re-scanned per candidate.
-	const scan = new QuotingScanState()
-	scan.advance(precedingText)
 	let scannedUpTo = 0
 
 	const openPattern = /<(?:antml:)?invoke\s+name="([^"]+)"\s*>/gi
@@ -764,6 +743,7 @@ export function extractLeakedToolCalls(
 		openPattern.lastIndex = blockEnd
 	}
 	leftover += text.slice(lastIndex)
+	scan.advance(text.slice(scannedUpTo))
 
 	// Once a call is recovered its `<function_calls>` wrapper is spent markup, so drop every wrapper
 	// tag (cosmetic; also avoids re-teaching the model this format when the turn replays as history).
@@ -1161,19 +1141,15 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				.map((tool) => [tool.function.name, tool.function.parameters as Record<string, unknown> | undefined]),
 		)
 		const salvageLeakedToolCalls = providedToolSchemas.size > 0
-		let salvageBuffering = false
-		let salvageBuffer = ""
+		let salvageBuffer: string[] | undefined
 		let salvageCarry = ""
-		let salvageEmittedText = ""
+		let salvagePrecedingText: string[] = []
+		const salvageScan = new QuotingScanState()
 		let salvagedToolCallIndex = 0
 
-		// Parses one fully-decided span and returns its ordered chunks: prose first, then recovered
-		// calls. Advancing `salvageEmittedText` by exactly the consumed span is what preserves the
-		// quoting and wrapper context for whatever tail stays buffered.
-		const drainSalvagePrefix = (span: string): ApiStreamChunk[] => {
+		const parseSalvage = (span: string): ApiStreamChunk[] => {
 			const drained: ApiStreamChunk[] = []
-			const { calls, leftoverText } = extractLeakedToolCalls(span, providedToolSchemas, salvageEmittedText)
-			salvageEmittedText += span
+			const { calls, leftoverText } = extractLeakedToolCallsWithState(span, providedToolSchemas, salvageScan)
 			if (leftoverText) {
 				drained.push({ type: "text", text: leftoverText })
 			}
@@ -1192,29 +1168,26 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			return drained
 		}
 
-		// Drains the salvage state into ordered chunks: prose first, then any recovered calls. Must
-		// run before a native tool_call is yielded — text after a tool_use block is rejected by
-		// Anthropic once the turn is serialized back into history.
+		// Only EOF or a native call ends a text segment: even closed invokes cannot settle global
+		// wrapper stripping or text-before-call ordering while more text may arrive. No size cap is safe.
+		// Native boundaries finalize markup, but retain quote/wrapper state outside completed bodies.
 		const flushSalvage = (): ApiStreamChunk[] => {
 			if (!salvageLeakedToolCalls) {
 				return []
 			}
 
-			if (!salvageBuffering) {
-				if (salvageCarry) {
-					const carried = salvageCarry
-					salvageCarry = ""
-					return [{ type: "text", text: carried }]
-				}
-				return []
+			salvageScan.advance(salvagePrecedingText.join(""))
+			salvagePrecedingText = []
+			if (!salvageBuffer) {
+				const carried = salvageCarry
+				salvageCarry = ""
+				salvageScan.advance(carried)
+				return carried ? [{ type: "text", text: carried }] : []
 			}
 
-			// Buffering is only entered with the marker already in the buffer, so `buffered` is
-			// always non-empty here; an emptiness guard would be unreachable code.
-			const buffered = salvageBuffer
-			salvageBuffering = false
-			salvageBuffer = ""
-			return drainSalvagePrefix(buffered)
+			const buffered = salvageBuffer.join("")
+			salvageBuffer = undefined
+			return parseSalvage(buffered)
 		}
 
 		try {
@@ -1248,29 +1221,8 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 						continue
 					}
 
-					// Once we've seen the start of a leaked tool-call block, buffer the rest of the
-					// stream so the full markup can be parsed and replayed as a structured call.
-					if (salvageBuffering) {
-						salvageBuffer += chunk.value
-						if (salvageBuffer.length > MAX_SALVAGE_BUFFER_CHARS) {
-							// Past the cap, drain only the decided prefix: emitting the undecided tail as
-							// text would strand a call whose closing tag is still in flight.
-							const decidedEnd = decidedSalvageEnd(salvageBuffer)
-							if (decidedEnd > 0) {
-								const decided = salvageBuffer.slice(0, decidedEnd)
-								salvageBuffer = salvageBuffer.slice(decidedEnd)
-								yield* drainSalvagePrefix(decided)
-							}
-							// Still over the cap with nothing decidable: markup that never closes must not
-							// withhold the stream, so release it and let a later marker re-arm recovery.
-							if (salvageBuffer.length > MAX_SALVAGE_BUFFER_CHARS) {
-								const overflowed = salvageBuffer
-								salvageBuffering = false
-								salvageBuffer = ""
-								salvageEmittedText += overflowed
-								yield { type: "text", text: overflowed }
-							}
-						}
+					if (salvageBuffer) {
+						salvageBuffer.push(chunk.value)
 						continue
 					}
 
@@ -1281,18 +1233,17 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 					if (markerMatch) {
 						const before = combined.slice(0, markerMatch.index)
 						if (before) {
-							salvageEmittedText += before
+							salvagePrecedingText.push(before)
 							yield { type: "text", text: before }
 						}
-						salvageBuffering = true
-						salvageBuffer = combined.slice(markerMatch.index)
+						salvageBuffer = [combined.slice(markerMatch.index)]
 						salvageCarry = ""
 					} else {
 						const carryLength = trailingPartialToolMarkerLength(combined)
 						const emit = carryLength > 0 ? combined.slice(0, combined.length - carryLength) : combined
 						salvageCarry = carryLength > 0 ? combined.slice(combined.length - carryLength) : ""
 						if (emit) {
-							salvageEmittedText += emit
+							salvagePrecedingText.push(emit)
 							yield { type: "text", text: emit }
 						}
 					}

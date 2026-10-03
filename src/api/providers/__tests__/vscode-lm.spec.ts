@@ -79,6 +79,7 @@ import {
 } from "../vscode-lm"
 import { checkContextWindowExceededError } from "../../../core/context/context-management/context-error-handling"
 import type { ApiHandlerOptions } from "../../../shared/api"
+import type { ApiStreamChunk } from "../../transform/stream"
 import type { Anthropic } from "@anthropic-ai/sdk"
 import { openAiModelInfoSaneDefaults, vscodeLlmDefaultModelId, vscodeLlmModels } from "@roo-code/types"
 
@@ -545,9 +546,8 @@ describe("VsCodeLmHandler", () => {
 				},
 			)
 
-			it("flushes an over-long never-closing invoke as plain text before the stream ends", async () => {
-				// End-of-stream flushing produces identical text, so track production timing to
-				// prove the buffer releases text before the stream ends.
+			it("flushes an over-long never-closing invoke unchanged at the stream boundary", async () => {
+				// A later closing tag can still change recovery; size alone cannot finalize markup.
 				const filler = "x".repeat(256 * 1024)
 				const parts = ['<invoke name="calculator">', filler, filler, filler, filler]
 				let partsProduced = 0
@@ -582,9 +582,8 @@ describe("VsCodeLmHandler", () => {
 					}
 				}
 
-				expect(sawTextBeforeStreamEnd).toBe(true)
-				expect(streamedText).toContain('<invoke name="calculator">')
-				expect(streamedText).toContain(filler)
+				expect(sawTextBeforeStreamEnd).toBe(false)
+				expect(streamedText).toBe(parts.join(""))
 			})
 
 			it("keeps a narrated block quoted when the cap splits the stream after its close tag", async () => {
@@ -607,22 +606,21 @@ describe("VsCodeLmHandler", () => {
 				{ where: "its parameter body", separator: " " },
 				{ where: "its opening tag", separator: "\n" },
 			])("keeps an incomplete invoke buffered when the cap passes a newline in $where", async ({ separator }) => {
-				// The drain boundary was the first newline after the last closed block, even inside a
-				// later open block. The filler trips the cap before that block's closing tag arrives.
+				// Same-line lookahead reaches the later parameter body; parsing a prefix hid its prose.
 				const padding = "p".repeat(20 * 1024)
 				const filler = "x".repeat(240 * 1024)
 				const openBody = `sub\n${filler}`
+				const firstBlock = `<invoke name="calculator"><parameter name="operation">${padding}</parameter></invoke>`
 				const chunks = await collect([
-					`<function${"_calls"}><in${"voke"} name="calculator"><parameter name="operation">${padding}</parameter></in${"voke"}> ` +
+					`<function_calls>${firstBlock} ` +
 						`<in${"voke"}${separator}name="calculator"><parameter name="operation">sub\n`,
 					filler,
 					`</parameter></in${"voke"}></function${"_calls"}>`,
 				])
 
-				// Prose between the blocks is part of the decided span, so it precedes the first call.
+				// Whole-segment prose precedes all recovered calls.
 				expect(chunks.filter((chunk) => chunk.type !== "usage")).toMatchObject([
-					{ type: "text", text: " " },
-					{ type: "tool_call", name: "calculator", arguments: JSON.stringify({ operation: padding }) },
+					{ type: "text", text: `${firstBlock} ` },
 					{ type: "tool_call", name: "calculator", arguments: JSON.stringify({ operation: openBody }) },
 				])
 			})
@@ -643,10 +641,8 @@ describe("VsCodeLmHandler", () => {
 				expect(ids[1]).toMatch(/-1$/)
 			})
 
-			it("recovers a completed call and releases text when the buffer passes the cap", async () => {
-				// The cap used to be bypassed whenever a complete block sat in the buffer, so both the
-				// call and 512 KB of trailing prose were withheld until the stream ended. The block
-				// ends its line: same-line trailing prose reads as narration and suppresses recovery.
+			it("defers a completed call until trailing text is finalized", async () => {
+				// Releasing the call early would put later prose after it, unlike a whole-input parse.
 				const filler = "y".repeat(256 * 1024)
 				const parts = [
 					'<function_calls><invoke name="calculator"><parameter name="operation">add</parameter></invoke></function_calls>\n',
@@ -685,16 +681,14 @@ describe("VsCodeLmHandler", () => {
 					}
 				}
 
-				expect(sawTextBeforeStreamEnd).toBe(true)
+				expect(sawTextBeforeStreamEnd).toBe(false)
 				expect(toolCalls).toMatchObject([
 					{ name: "calculator", arguments: JSON.stringify({ operation: "add" }) },
 				])
 			})
 
 			it("keeps an invoke still in flight buffered when the cap is passed", async () => {
-				// Only the decided prefix may drain; emitting the open block as text would strand the
-				// call whose closing tag arrives in a later chunk. Every complete block in the
-				// over-cap buffer must drain now, so timing is asserted rather than final order.
+				// Completed calls also wait: later text must precede every recovered call in the segment.
 				const bulky = "z".repeat(256 * 1024)
 				const parts = [
 					`<function_calls>\n<invoke name="calculator"><parameter name="operation">${bulky}</parameter></invoke>\n` +
@@ -734,17 +728,596 @@ describe("VsCodeLmHandler", () => {
 					}
 				}
 
-				// Both complete blocks sit in the buffer when the cap is crossed, so both must drain
-				// before the stream ends; the still-open third only resolves at the final chunk.
-				expect(drainedEarly).toMatchObject([
-					{ arguments: JSON.stringify({ operation: bulky }) },
-					{ arguments: JSON.stringify({ operation: "mid" }) },
-				])
+				expect(drainedEarly).toEqual([])
 				expect(toolCalls).toMatchObject([
 					{ name: "calculator", arguments: JSON.stringify({ operation: bulky }) },
 					{ name: "calculator", arguments: JSON.stringify({ operation: "mid" }) },
 					{ name: "calculator", arguments: JSON.stringify({ operation: "sub" }) },
 				])
+			})
+
+			// Chunking must preserve the whole-input parser's text and call order.
+			// Set VSCODE_LM_SPLIT_FUZZ_SCALE to search more seeded cases locally.
+			describe("split invariance", () => {
+				const scale = Math.max(1, Number(process.env.VSCODE_LM_SPLIT_FUZZ_SCALE ?? "1"))
+				const cap = 256 * 1024
+				const INVOKE = `in${"voke"}`
+				const PARAMETER = `param${"eter"}`
+				const WRAPPER = `function${"_calls"}`
+				const markerPattern = new RegExp(`<(?:antml:)?(?:${WRAPPER}\\s*>|${INVOKE}\\s+name=")`, "i")
+
+				type Rng = () => number
+				// mulberry32: tiny, seedable, and stable across runtimes, so a printed seed replays exactly.
+				const createRng = (seed: number): Rng => {
+					let state = seed >>> 0
+					return () => {
+						state = (state + 0x6d2b79f5) >>> 0
+						let mixed = state
+						mixed = Math.imul(mixed ^ (mixed >>> 15), mixed | 1)
+						mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61)
+						return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296
+					}
+				}
+				const pick = <T>(rng: Rng, items: readonly T[]): T => items[Math.floor(rng() * items.length)]
+				const below = (rng: Rng, limit: number) => Math.floor(rng() * limit)
+
+				const tagPrefix = (rng: Rng) => (rng() < 0.25 ? "antml:" : "")
+				// Opener whitespace stays short: a fragment past MAX_PARTIAL_INVOKE_CARRY is deliberately not held.
+				const opener = (rng: Rng, tool: string) =>
+					`<${tagPrefix(rng)}${INVOKE}${pick(rng, [" ", " ", "\n", " \n "])}name="${tool}"${pick(rng, [">", ">", " >", ">\n"])}`
+				const parameter = (rng: Rng) => {
+					const tag = tagPrefix(rng) + PARAMETER
+					const body = pick(rng, [
+						"add",
+						"sub\nmore",
+						"",
+						"a < b",
+						"x\n\ny",
+						"`q`",
+						"\n```\n",
+						"</function_calls>",
+					])
+					return `<${tag} name="operation">${body}</${tag}>`
+				}
+				const block = (rng: Rng) => {
+					const tool = pick(rng, ["calculator", "calculator", "calculator", "unknown_tool"])
+					const params = Array.from({ length: below(rng, 3) }, () => parameter(rng))
+					return `${opener(rng, tool)}${params.join(pick(rng, ["", "\n"]))}</${tagPrefix(rng)}${INVOKE}>`
+				}
+				const pieceKinds: Array<[number, (rng: Rng, looseWrapper: boolean) => string]> = [
+					[
+						22,
+						(rng) =>
+							pick(rng, [
+								"Thinking.",
+								"ok ",
+								"never ",
+								"for example ",
+								"Done! ",
+								"a < b ",
+								"see ",
+								" text",
+							]),
+					],
+					[14, () => "\n"],
+					[6, (rng) => pick(rng, ["`", "`code`", "```\n", "```ts\n", "~~~\n"])],
+					[
+						10,
+						(rng, looseWrapper) =>
+							`<${pick(rng, ["", "", "/"])}${tagPrefix(rng)}${WRAPPER}${looseWrapper && rng() < 0.15 ? " " : ""}>`,
+					],
+					[28, block],
+					[
+						8,
+						(rng) => {
+							const whole = block(rng)
+							return whole.slice(0, 1 + below(rng, whole.length - 1))
+						},
+					],
+					[
+						6,
+						(rng) =>
+							opener(rng, "calculator") +
+							pick(rng, [
+								"",
+								`<${PARAMETER} name="operation">open`,
+								`<${PARAMETER} name="operation">open\nmore`,
+							]),
+					],
+					[6, (rng) => `</${tagPrefix(rng)}${INVOKE}>`],
+				]
+				const pieceWeightTotal = pieceKinds.reduce((sum, [weight]) => sum + weight, 0)
+				const piece = (rng: Rng, looseWrapper: boolean) => {
+					let roll = rng() * pieceWeightTotal
+					for (const [weight, make] of pieceKinds) {
+						roll -= weight
+						if (roll < 0) {
+							return make(rng, looseWrapper)
+						}
+					}
+					return "\n"
+				}
+				const pieces = (rng: Rng, count: number, looseWrapper: boolean) =>
+					Array.from({ length: count }, () => piece(rng, looseWrapper)).join("")
+
+				// Favours the boundaries that broke before: tiny chunks and cuts beside `<`, `>`, `"`, newline.
+				const randomCuts = (rng: Rng, text: string) => {
+					const cuts = new Set<number>()
+					const interesting: number[] = []
+					for (const match of text.matchAll(/[<>"\n]/g)) {
+						interesting.push(match.index, match.index + 1)
+					}
+					for (let count = 1 + below(rng, 6); count > 0; count--) {
+						const roll = rng()
+						if (roll < 0.4 && interesting.length > 0) {
+							cuts.add(pick(rng, interesting))
+						} else if (roll < 0.7) {
+							let position = below(rng, text.length)
+							for (let run = below(rng, 8); run >= 0; run--) {
+								position += 1 + below(rng, 3)
+								cuts.add(position)
+							}
+						} else {
+							cuts.add(below(rng, text.length))
+						}
+					}
+					return [...cuts].filter((cut) => cut > 0 && cut < text.length).sort((left, right) => left - right)
+				}
+				const splitAt = (text: string, cuts: number[]) =>
+					[0, ...cuts].map((start, index) => text.slice(start, index < cuts.length ? cuts[index] : undefined))
+
+				const run = async (parts: Array<string | { name: string; input: object }>) => {
+					let produced = 0
+					let reachedEof = false
+					mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+						stream: (async function* () {
+							for (const part of parts) {
+								produced++
+								yield typeof part === "string"
+									? new vscode.LanguageModelTextPart(part)
+									: new vscode.LanguageModelToolCallPart("native-1", part.name, part.input)
+							}
+							reachedEof = true
+						})(),
+						text: (async function* () {
+							yield ""
+						})(),
+					})
+					const chunks: ApiStreamChunk[] = []
+					const producedAt: number[] = []
+					const eofAt: boolean[] = []
+					for await (const chunk of handler.createMessage("system", [{ role: "user", content: "hi" }], {
+						taskId: "test-task",
+						tools: salvageTools,
+					})) {
+						chunks.push(chunk)
+						producedAt.push(produced)
+						eofAt.push(reachedEof)
+					}
+					return { chunks, producedAt, eofAt }
+				}
+
+				// Ids embed Date.now(), so only the per-response ordinal is compared.
+				const normalize = (chunks: ApiStreamChunk[]) => {
+					const normalized: string[] = []
+					let text = ""
+					const flushText = () => {
+						if (text) {
+							normalized.push(`text ${JSON.stringify(text)}`)
+							text = ""
+						}
+					}
+					for (const chunk of chunks) {
+						if (chunk.type === "text") {
+							text += chunk.text
+						} else if (chunk.type === "tool_call") {
+							flushText()
+							const ordinal = chunk.id.replace(/^vscodelm-salvaged-\d+-/, "")
+							normalized.push(`call#${ordinal} ${chunk.name} ${chunk.arguments}`)
+						}
+					}
+					flushText()
+					return normalized
+				}
+
+				const readable = (value: unknown) =>
+					JSON.stringify(value, null, 1).replace(/F{32,}/g, (run) => `F×${run.length}`)
+
+				// Separating kinds keeps a known reordering from masking a content regression.
+				const contentOf = (normalized: string[]) =>
+					JSON.stringify([
+						normalized.filter((entry) => entry.startsWith("call")),
+						normalized
+							.filter((entry) => entry.startsWith("text"))
+							.map((entry) => JSON.parse(entry.slice(5)) as string)
+							.join(""),
+					])
+
+				// One entry only: keys are cap-sized strings, and caching every shrink candidate exhausts memory.
+				let lastReference: { whole: string; normalized: string[] } | undefined
+				const findProblem = async (parts: string[]) => {
+					const whole = parts.join("")
+					if (lastReference?.whole !== whole) {
+						lastReference = { whole, normalized: oracle(whole) }
+					}
+					const reference = lastReference.normalized
+					const { chunks, producedAt } = await run(parts)
+					const actual = normalize(chunks)
+					if (JSON.stringify(actual) !== JSON.stringify(reference)) {
+						const problem =
+							contentOf(actual) === contentOf(reference)
+								? "order: same calls and joined text, different text/call order"
+								: "content: calls or joined text differ"
+						return { problem, reference, actual }
+					}
+					const usageIndex = chunks.findIndex((chunk) => chunk.type === "usage")
+					if (usageIndex !== chunks.length - 1 || producedAt[usageIndex] !== parts.length) {
+						return { problem: "segment did not flush before final usage", reference, actual }
+					}
+					return undefined
+				}
+
+				// Greedy char deletion keeps the part count, so a printed repro still names its split points.
+				const shrink = async (parts: string[], frozen: ReadonlySet<number>, problem: string) => {
+					let current = parts
+					for (let progress = true; progress; ) {
+						progress = false
+						for (let partIndex = current.length - 1; partIndex >= 0; partIndex--) {
+							if (frozen.has(partIndex)) {
+								continue
+							}
+							for (
+								let charIndex = current[partIndex].length - 1;
+								charIndex >= 0 && shrinkBudget > 0;
+								charIndex--
+							) {
+								shrinkBudget--
+								const candidate = [...current]
+								const part = candidate[partIndex]
+								candidate[partIndex] = part.slice(0, charIndex) + part.slice(charIndex + 1)
+								if (candidate[partIndex] === "" && current.length > 1 && !frozen.size) {
+									candidate.splice(partIndex, 1)
+								}
+								if ((await findProblem(candidate))?.problem === problem) {
+									current = candidate
+									progress = true
+									break
+								}
+							}
+						}
+					}
+					return current
+				}
+
+				// Bounds shrink time when a mutation makes every case fail.
+				let shrinkBudget = 0
+				const failures: string[] = []
+				const failureCounts = new Map<string, number>()
+				const report = async (label: string, seed: number, parts: string[], frozen = new Set<number>()) => {
+					const found = await findProblem(parts)
+					if (!found) {
+						return
+					}
+					const seen = failureCounts.get(found.problem) ?? 0
+					failureCounts.set(found.problem, seen + 1)
+					failingCases.push(`FUZZ-FAIL ${label} seed=${seed}: ${found.problem}`)
+					if (seen >= 2) {
+						return
+					}
+					shrinkBudget = 600
+					const minimal = await shrink(parts, frozen, found.problem)
+					const shrunk = (await findProblem(minimal)) ?? found
+					const cuts = minimal.slice(0, -1).map((_, index) => minimal.slice(0, index + 1).join("").length)
+					failures.push(
+						[
+							`${label} seed=${seed}: ${shrunk.problem}`,
+							`original parts: ${readable(parts)}`,
+							`minimal parts: ${readable(minimal)}`,
+							`split points: ${JSON.stringify(cuts)}`,
+							`one chunk: ${readable(shrunk.reference)}`,
+							`chunked:   ${readable(shrunk.actual)}`,
+						].join("\n"),
+					)
+				}
+
+				const failingCases: string[] = []
+				const summary = () =>
+					[...failureCounts].map(([problem, count]) => `${count}× ${problem}`).join("\n") +
+					"\n\n" +
+					failingCases.join("\n") +
+					"\n\n" +
+					failures.join("\n\n")
+
+				beforeEach(() => {
+					lastReference = undefined
+					failures.length = 0
+					failingCases.length = 0
+					failureCounts.clear()
+					vi.spyOn(console, "warn").mockImplementation(() => {})
+					vi.spyOn(console, "debug").mockImplementation(() => {})
+				})
+
+				const invoke = (body = "add", name = "calculator") =>
+					`<invoke name="${name}"><parameter name="operation">${body}</parameter></invoke>`
+				const schemas = new Map([["calculator", salvageTools[0].function.parameters]])
+				const oracle = (text: string) => {
+					const parsed = extractLeakedToolCalls(text, schemas)
+					return [
+						...(parsed.leftoverText ? [`text ${JSON.stringify(parsed.leftoverText)}`] : []),
+						...parsed.calls.map(
+							(call, index) => `call#${index} ${call.name} ${JSON.stringify(call.input)}`,
+						),
+					]
+				}
+				const expectWholeParse = async (parts: string[]) => {
+					const expected = oracle(parts.join(""))
+					expect(normalize((await run(parts)).chunks)).toEqual(expected)
+				}
+
+				it.each([false, true])(
+					"preserves future-dependent global wrapper stripping: recovery=%s",
+					async (recover) => {
+						const prefix = `<function_calls>\n${invoke("unknown", "unknown_tool")}\n`
+						const suffix = `${recover ? `${invoke()}\n` : ""}</function_calls>`
+						const parts = [prefix, "x\n".repeat(cap), suffix]
+						const { chunks, producedAt } = await run(parts)
+						expect(normalize(chunks)).toEqual(oracle(parts.join("")))
+						expect(producedAt[0]).toBe(parts.length)
+						expect(chunks[0]).toMatchObject({ type: "text" })
+						expect(chunks[0].type === "text" && chunks[0].text[0]).toBe(recover ? "\n" : "<")
+					},
+				)
+
+				it.each(["\n```\n", "\n</function_calls>\n", "\n<function_calls>\n"])(
+					"does not rescan invoke-body context across a cap crossing: %j",
+					async (bodyContext) => {
+						await expectWholeParse([
+							`<function_calls>${invoke("x".repeat(cap) + bodyContext)}\n`,
+							"\n",
+							`${invoke("sub")}\n</function_calls>`,
+						])
+					},
+				)
+
+				it.each(["", " narrated", "\n"])(
+					"retains a closed call crossing the cap before its same-line suffix: %j",
+					async (suffix) => {
+						const text = `<function_calls>${invoke("x".repeat(cap))}`
+						for (const cut of [cap - 1, cap, cap + 1, text.length - 1, text.length]) {
+							await expectWholeParse([text.slice(0, cut), text.slice(cut), suffix + "</function_calls>"])
+						}
+					},
+				)
+
+				it("recovers a suffix in the same part that crosses the former overflow threshold", async () => {
+					await expectWholeParse([
+						"<function_calls>",
+						`${invoke("x".repeat(cap))}\n${invoke("sub")}\n</function_calls>`,
+						"\n",
+					])
+				})
+
+				it("retains carried quote context before a native call", async () => {
+					const before = "`<invoke `"
+					const after = `<function_calls>${invoke()}</function_calls>`
+					const { chunks } = await run([before, { name: "calculator", input: {} }, after])
+					expect(normalize(chunks)).toEqual([
+						`text ${JSON.stringify(before)}`,
+						"call#native-1 calculator {}",
+						'call#0 calculator {"operation":"add"}',
+					])
+				})
+
+				it("flushes recovery before native calls without rescanning parameter fences", async () => {
+					const { chunks, producedAt } = await run([
+						`<function_calls>${invoke("add\n```\n")}\n`,
+						{ name: "calculator", input: { operation: "native" } },
+						`${invoke("sub")}\n</function_calls>`,
+					])
+					expect(normalize(chunks)).toEqual([
+						'text "\\n"',
+						`call#0 calculator ${JSON.stringify({ operation: "add\n```" })}`,
+						'call#native-1 calculator {"operation":"native"}',
+						'text "\\n"',
+						'call#1 calculator {"operation":"sub"}',
+					])
+					expect(producedAt.slice(0, 3)).toEqual([2, 2, 2])
+				})
+
+				it("preserves segment semantics across seeded native/text mixtures", async () => {
+					for (let caseIndex = 0; caseIndex < 100 * scale; caseIndex++) {
+						const seed = 0x160a0001 + caseIndex
+						const rng = createRng(seed)
+						const segments = Array.from(
+							{ length: 3 },
+							() => `<function_calls>\n${pieces(rng, 1 + below(rng, 6), true)}${invoke()}\n`,
+						)
+						const native = { name: "calculator", input: { operation: "native" } }
+						const wholeParts = segments.flatMap((segment, index) =>
+							index === 0 ? [segment] : [native, segment],
+						)
+						const splitParts = segments.flatMap((segment, index) => [
+							...(index === 0 ? [] : [native]),
+							...splitAt(segment, randomCuts(rng, segment)),
+						])
+						const reference = normalize((await run(wholeParts)).chunks)
+						expect(normalize((await run(splitParts)).chunks), `native/text seed=${seed}`).toEqual(reference)
+					}
+				})
+
+				it("streams ordinary text before pulling the next part", async () => {
+					const { chunks, producedAt } = await run(["Hello. ", "Still streaming."])
+					expect(chunks).toMatchObject([
+						{ type: "text", text: "Hello. " },
+						{ type: "text", text: "Still streaming." },
+						{ type: "usage" },
+					])
+					expect(producedAt).toEqual([1, 2, 2])
+				})
+
+				it.each(
+					["</function_calls>", "<function_calls> \n", "<function_calls \n"].flatMap((marker) =>
+						["EOF", "native"].map((boundary) => ({ marker, boundary })),
+					),
+				)("buffers prose after %j until $boundary", async ({ marker, boundary }) => {
+					const prefix = "Prose mentions "
+					const parts = [prefix + marker, "later text", " still held."]
+					const tail = boundary === "native" ? [{ name: "calculator", input: {} }, "After native."] : []
+					const { chunks, producedAt, eofAt } = await run([...parts, ...tail])
+					const whole = await run([parts.join(""), ...tail])
+
+					expect(normalize(chunks)).toEqual(normalize(whole.chunks))
+					expect(chunks.slice(0, 2)).toEqual([
+						{ type: "text", text: prefix },
+						{ type: "text", text: marker + parts.slice(1).join("") },
+					])
+					expect(producedAt.slice(0, 2)).toEqual([1, boundary === "native" ? 4 : 3])
+					expect(eofAt.slice(0, 2)).toEqual([false, boundary === "EOF"])
+					if (boundary === "native") {
+						expect(chunks[2]).toMatchObject({ type: "tool_call", id: "native-1" })
+						expect(producedAt[2]).toBe(4)
+					}
+				})
+
+				it.each(["\n```\n", "\n</function_calls>\n"])(
+					"carries literal unclosed invoke-body context across a native boundary: %j",
+					async (bodyContext) => {
+						const unfinished = '<function_calls><invoke name="calculator"><parameter name="operation">add'
+						const before = unfinished + bodyContext
+						const after = `${invoke("sub")}\n</function_calls>`
+						const native = { name: "calculator", input: {} }
+						const { chunks, producedAt, eofAt } = await run([before, native, after])
+
+						// An unfinished body becomes literal text, unlike a completed body's opaque parameters.
+						expect(normalize(chunks)).toEqual([
+							`text ${JSON.stringify(before)}`,
+							"call#native-1 calculator {}",
+							`text ${JSON.stringify(after)}`,
+						])
+						expect(producedAt.slice(0, 3)).toEqual([2, 2, 3])
+						expect(eofAt.slice(0, 3)).toEqual([false, false, true])
+						expect(normalize((await run([unfinished + "\n", native, after])).chunks)).toEqual([
+							`text ${JSON.stringify(unfinished + "\n")}`,
+							"call#native-1 calculator {}",
+							'text "\\n"',
+							'call#0 calculator {"operation":"sub"}',
+						])
+					},
+				)
+
+				it("does not join unfinished markup or lookahead across a native boundary", async () => {
+					const unfinished = '<function_calls><invoke name="calculator"><parameter name="operation">add'
+					const suffix = "</parameter></invoke>\n</function_calls>"
+					const { chunks, producedAt } = await run([unfinished, { name: "calculator", input: {} }, suffix])
+					expect(normalize(chunks)).toEqual([
+						`text ${JSON.stringify(unfinished)}`,
+						"call#native-1 calculator {}",
+						`text ${JSON.stringify(suffix)}`,
+					])
+					expect(producedAt.slice(0, 2)).toEqual([2, 2])
+					const complete = `<function_calls>${invoke()}</function_calls>`
+					const mixed = await run([complete, { name: "calculator", input: {} }, " narrated"])
+					expect(normalize(mixed.chunks)).toEqual([
+						'call#0 calculator {"operation":"add"}',
+						"call#native-1 calculator {}",
+						'text " narrated"',
+					])
+				})
+
+				it.each([
+					"</function_calls>\n<function_calls>",
+					"<antml:function_calls>",
+					`<function_calls${" ".repeat(80)}>`,
+				])("preserves wrapper syntax at every split: %j", async (wrapper) => {
+					const text = `${wrapper}${invoke()}\n</function_calls>`
+					for (let cut = 1; cut < text.length; cut++) {
+						await expectWholeParse([text.slice(0, cut), text.slice(cut)])
+					}
+				})
+
+				it("holds below the salvage cap for exhaustive and random splits", async () => {
+					const baseSeed = 0x16080001
+					for (let caseIndex = 0; caseIndex < 120 * scale; caseIndex++) {
+						const seed = baseSeed + caseIndex
+						const rng = createRng(seed)
+						const text = pieces(rng, 1 + below(rng, 6), true)
+						if (text.length < 2) {
+							continue
+						}
+						if (text.length <= 48) {
+							await report("exhaustive 1-char", seed, [...text])
+							for (let cut = 1; cut < text.length; cut++) {
+								await report(`exhaustive cut=${cut}`, seed, splitAt(text, [cut]))
+							}
+						} else {
+							for (let attempt = 0; attempt < 10; attempt++) {
+								await report(`random attempt=${attempt}`, seed, splitAt(text, randomCuts(rng, text)))
+							}
+						}
+					}
+					expect(failures, summary()).toEqual([])
+				})
+
+				it("holds when the buffer crosses the cap at a random boundary", async () => {
+					// The former cap remains an adversarial cut point, not a release deadline.
+					const baseSeed = 0x16090001
+					for (let caseIndex = 0; caseIndex < 24 * scale; caseIndex++) {
+						const seed = baseSeed + caseIndex
+						const rng = createRng(seed)
+						// Recovery needs an open wrapper; without one both paths emit plain text and drain bugs hide.
+						const before =
+							(rng() < 0.75 ? `<${tagPrefix(rng)}${WRAPPER}>` : "") + pieces(rng, below(rng, 4), false)
+						// Straddle mode: the cap is crossed after the first newline inside a later, still-open block,
+						// with no newline after the filler, so the drain boundary must stop at that block's opener.
+						const straddleOpener = `<${tagPrefix(rng)}${INVOKE}${pick(rng, [" ", "\n", " \n"])}name="calculator">`
+						const straddleBody = `<${PARAMETER} name="operation">${pick(rng, ["a\nb", "x", "\n"])}</${PARAMETER}>`
+						const straddle =
+							rng() < 0.5 && (straddleOpener + straddleBody).includes("\n")
+								? `${pick(rng, ["", " "])}${straddleOpener}${straddleBody}</${INVOKE}>`
+								: ""
+						const after = straddle + pieces(rng, (straddle ? 0 : 2) + below(rng, 6), false)
+						const beforeParts = before ? splitAt(before, randomCuts(rng, before)) : []
+						const target = straddle
+							? straddle.indexOf("\n") +
+								1 +
+								below(rng, straddle.lastIndexOf("</") - straddle.indexOf("\n"))
+							: undefined
+						let afterParts = splitAt(
+							after,
+							[...new Set([...randomCuts(rng, after), ...(target ? [target] : [])])].sort(
+								(left, right) => left - right,
+							),
+						)
+						if (afterParts.length < 2) {
+							afterParts = splitAt(after, [Math.max(1, after.length >> 1)])
+						}
+						if (afterParts.length < 2) {
+							continue
+						}
+						const fillerBlock = (count: number) =>
+							`<${INVOKE} name="calculator"><${PARAMETER} name="operation">${"F".repeat(count)}` +
+							`</${PARAMETER}></${INVOKE}>${straddle ? "" : "\n"}`
+						const markerStart = (before + fillerBlock(0)).search(markerPattern)
+						const partEnds = afterParts.map((_, index) => afterParts.slice(0, index + 1).join("").length)
+						const crossing =
+							target !== undefined ? partEnds.indexOf(target) : below(rng, afterParts.length - 1)
+						const receivedBeforeCrossing = afterParts.slice(0, crossing).join("").length
+						const offset =
+							target !== undefined
+								? afterParts[crossing].length
+								: 1 + below(rng, afterParts[crossing].length)
+						const fillerCount =
+							cap +
+							1 -
+							(before.length + fillerBlock(0).length - markerStart) -
+							receivedBeforeCrossing -
+							offset
+						const parts = [...beforeParts, fillerBlock(fillerCount), ...afterParts]
+						const mode = straddle ? "straddle" : "crossing"
+						await report(`${mode} part=${crossing}`, seed, parts, new Set([beforeParts.length]))
+					}
+					expect(failures, summary()).toEqual([])
+				})
 			})
 		})
 
