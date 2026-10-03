@@ -92,6 +92,10 @@ export async function getMimoModels(
 	const response = await fetch(url.toString(), {
 		headers,
 		signal: opts?.signal,
+		// The exact-match allowlist is enforced on the request URL only; following
+		// a 3xx would silently re-scope the bearer key to an un-vetted origin.
+		// Reject redirects instead (per fetch spec, "error" aborts on any 3xx).
+		redirect: "error",
 	})
 
 	if (!response.ok) {

@@ -277,6 +277,25 @@ describe("getMimoModels", () => {
 		expect(fetchSpy).not.toHaveBeenCalled()
 	})
 
+	it("pins the fetch to reject redirects so a 3xx cannot re-scope the bearer key", async () => {
+		// The mocked fetch layer cannot exercise undici's real redirect handling,
+		// so this pins the request init: redirect must be "error", which per the
+		// fetch spec aborts the request on any 3xx instead of following it to an
+		// origin the allowlist never vetted.
+		const fetchSpy = vi.fn().mockResolvedValue({
+			ok: true,
+			json: vi.fn().mockResolvedValue({ data: [] }),
+		})
+		globalThis.fetch = fetchSpy as unknown as typeof fetch
+
+		await getMimoModels("https://token-plan-sgp.xiaomimimo.com/v1", "my-secret-key")
+
+		expect(fetchSpy).toHaveBeenCalledWith(
+			"https://token-plan-sgp.xiaomimimo.com/v1/models",
+			expect.objectContaining({ redirect: "error" }),
+		)
+	})
+
 	// Regression guard for the security gate: every legitimate endpoint must keep
 	// working exactly as before the allowlist was introduced.
 	it.each([...ALLOWED_BASE_URLS])("fetches /models normally for allowed endpoint %s", async (allowedUrl) => {
