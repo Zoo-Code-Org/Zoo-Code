@@ -481,9 +481,11 @@ describe("GeminiHandler", () => {
 		})
 
 		it("preserves status and errorDetails when the stream call rejects with a 429", async () => {
+			// Task.ts backoffAndAnnounce consumes errorDetails as an ARRAY of google.rpc
+			// detail objects and parses RetryInfo.retryDelay ("<n>s") on 429s.
 			const rateLimitError = Object.assign(new Error("rate limit exceeded"), {
 				status: 429,
-				errorDetails: { retryAfter: 30 },
+				errorDetails: [{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "30s" }],
 			})
 			mockGenerateContentStream.mockRejectedValue(rateLimitError)
 
@@ -493,7 +495,9 @@ describe("GeminiHandler", () => {
 
 			expect(error).toBeInstanceOf(Error)
 			expect(error.status).toBe(429)
-			expect(error.errorDetails).toEqual({ retryAfter: 30 })
+			expect(error.errorDetails).toEqual([
+				{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "30s" },
+			])
 		})
 	})
 
@@ -528,9 +532,11 @@ describe("GeminiHandler", () => {
 		})
 
 		it("preserves status and errorDetails when the completion call rejects with a 403", async () => {
+			// Same consumer contract as the 429 case: errorDetails is an array of
+			// google.rpc detail objects (ErrorInfo carries the denial reason).
 			const forbiddenError = Object.assign(new Error("permission denied"), {
 				status: 403,
-				errorDetails: { reason: "PERMISSION_DENIED" },
+				errorDetails: [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "PERMISSION_DENIED" }],
 			})
 			mockGenerateContent.mockRejectedValue(forbiddenError)
 
@@ -541,7 +547,9 @@ describe("GeminiHandler", () => {
 
 			expect(error).toBeInstanceOf(Error)
 			expect(error.status).toBe(403)
-			expect(error.errorDetails).toEqual({ reason: "PERMISSION_DENIED" })
+			expect(error.errorDetails).toEqual([
+				{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "PERMISSION_DENIED" },
+			])
 		})
 
 		it("should handle empty response", async () => {
