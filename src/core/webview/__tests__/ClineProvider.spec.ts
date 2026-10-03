@@ -28,6 +28,8 @@ import { defaultModeSlug } from "../../../shared/modes"
 import { experimentDefault } from "../../../shared/experiments"
 import { setTtsEnabled } from "../../../utils/tts"
 import { ContextProxy } from "../../config/ContextProxy"
+import { WorkspaceIndexingSettingsManager } from "../../../services/code-index/workspace-indexing-settings-manager"
+import type { CodeIndexManager } from "../../../services/code-index/manager"
 import { WorkspaceIndexingEnablementManager } from "../../../services/code-index/workspace-indexing-enablement-manager"
 import { Task, TaskOptions } from "../../task/Task"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
@@ -3412,13 +3414,21 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 		expect(provider.postMessageToWebview).not.toHaveBeenCalled()
 	})
 
-	it.each([true, false])("resolves the scope after saving index settings (workspace=%s)", async (hasWorkspace) => {
+	it.each([true, false])("saves index settings through the workspace scope (workspace=%s)", async (hasWorkspace) => {
 		const handleSettingsChange = vi.fn().mockResolvedValue(undefined)
 		const manager = createIndexManager({ handleSettingsChange, isFeatureEnabled: false })
 		const provider = createProvider({
-			getCurrentWorkspaceCodeIndexScope: vi
-				.fn()
-				.mockReturnValue(hasWorkspace ? { codeIndexManager: manager } : undefined),
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue(
+				hasWorkspace
+					? {
+							codeIndexManager: manager,
+							// The concrete manager has private services; this isolated double supplies only handler operations.
+							workspaceIndexingSettingsManager: new WorkspaceIndexingSettingsManager(
+								manager as unknown as CodeIndexManager,
+							),
+						}
+					: undefined,
+			),
 		})
 
 		await webviewMessageHandler(provider, {
@@ -3433,12 +3443,13 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 
 		expect(provider.getCurrentWorkspaceCodeIndexScope).toHaveBeenCalledOnce()
 		expect(provider.postMessageToWebview).toHaveBeenCalledWith(
-			expect.objectContaining({ type: "codeIndexSettingsSaved", success: true }),
+			expect.objectContaining({ type: "codeIndexSettingsSaved", success: hasWorkspace }),
 		)
 		if (hasWorkspace) {
 			expect(handleSettingsChange).toHaveBeenCalledOnce()
 		} else {
 			expect(handleSettingsChange).not.toHaveBeenCalled()
+			expect(provider.contextProxy.setValue).not.toHaveBeenCalled()
 			expect(provider.log).toHaveBeenCalledWith("Cannot save code index settings: No workspace folder open")
 		}
 	})
