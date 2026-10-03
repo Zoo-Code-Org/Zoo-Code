@@ -293,6 +293,461 @@ describe("VsCodeLmHandler", () => {
 			})
 		})
 
+		describe("leaked tool-call recovery during streaming", () => {
+			const salvageTools = [
+				{
+					type: "function" as const,
+					function: {
+						name: "calculator",
+						description: "A simple calculator",
+						parameters: { type: "object", properties: { operation: { type: "string" } } },
+					},
+				},
+			]
+
+			const streamTextParts = (parts: string[]) => {
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						for (const part of parts) {
+							yield new vscode.LanguageModelTextPart(part)
+						}
+						return
+					})(),
+					text: (async function* () {
+						yield parts.join("")
+						return
+					})(),
+				})
+			}
+
+			const streamMixedParts = (parts: Array<string | { name: string; input: object }>) => {
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						for (const part of parts) {
+							yield typeof part === "string"
+								? new vscode.LanguageModelTextPart(part)
+								: new vscode.LanguageModelToolCallPart("native-1", part.name, part.input)
+						}
+						return
+					})(),
+					text: (async function* () {
+						yield ""
+						return
+					})(),
+				})
+			}
+
+			const drain = async () => {
+				const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }], {
+					taskId: "test-task",
+					tools: salvageTools,
+				})
+				const chunks = []
+				for await (const chunk of stream) {
+					chunks.push(chunk)
+				}
+				return chunks
+			}
+
+			const collect = async (parts: string[]) => {
+				streamTextParts(parts)
+				return drain()
+			}
+
+			it("recovers a tool call the model streamed as raw invoke XML", async () => {
+				const chunks = await collect([
+					"Thinking. ",
+					'<function_calls><invoke name="calculator"><parameter name="operation">add</parameter></invoke></function_calls>',
+				])
+
+				expect(chunks.filter((chunk) => chunk.type === "text")).toEqual([{ type: "text", text: "Thinking. " }])
+				expect(chunks.filter((chunk) => chunk.type === "tool_call")).toEqual([
+					{
+						type: "tool_call",
+						id: expect.stringContaining("vscodelm-salvaged-"),
+						name: "calculator",
+						arguments: JSON.stringify({ operation: "add" }),
+					},
+				])
+			})
+
+			it("detects a marker split across stream chunks", async () => {
+				const chunks = await collect([
+					"abc <function_calls><inv",
+					'oke name="calculator"><parameter name="operation">sub</parameter></invoke></function_calls>',
+				])
+
+				expect(chunks.filter((chunk) => chunk.type === "text")).toEqual([{ type: "text", text: "abc " }])
+				expect(chunks.filter((chunk) => chunk.type === "tool_call")).toMatchObject([
+					{ name: "calculator", arguments: JSON.stringify({ operation: "sub" }) },
+				])
+			})
+
+			it("emits a carried tail as plain text when it never becomes a marker", async () => {
+				const chunks = await collect(["hello <par"])
+
+				expect(chunks.filter((chunk) => chunk.type === "text")).toEqual([
+					{ type: "text", text: "hello " },
+					{ type: "text", text: "<par" },
+				])
+				expect(chunks.some((chunk) => chunk.type === "tool_call")).toBe(false)
+			})
+
+			it("emits no text chunk when a chunk is entirely a carried marker fragment", async () => {
+				const chunks = await collect(["<fun", "ky text"])
+
+				expect(chunks.filter((chunk) => chunk.type === "text")).toEqual([{ type: "text", text: "<funky text" }])
+			})
+
+			it("buffers across chunks that arrive after the marker", async () => {
+				const chunks = await collect([
+					'prose <function_calls><invoke name="calculator">',
+					'<parameter name="operation">',
+					"mul</parameter>",
+					"</invoke></function_calls>",
+				])
+
+				expect(chunks.filter((chunk) => chunk.type === "text")).toEqual([{ type: "text", text: "prose " }])
+				expect(chunks.filter((chunk) => chunk.type === "tool_call")).toMatchObject([
+					{ name: "calculator", arguments: JSON.stringify({ operation: "mul" }) },
+				])
+			})
+
+			it("recovers a null-only declared parameter as JSON null through createMessage", async () => {
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						yield new vscode.LanguageModelTextPart(
+							'<function_calls><invoke name="nuller"><parameter name="cursor">null</parameter></invoke></function_calls>',
+						)
+						return
+					})(),
+					text: (async function* () {
+						yield ""
+						return
+					})(),
+				})
+
+				const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }], {
+					taskId: "test-task",
+					tools: [
+						{
+							type: "function" as const,
+							function: {
+								name: "nuller",
+								description: "",
+								parameters: { type: "object", properties: { cursor: { type: "null" } } },
+							},
+						},
+					],
+				})
+				const chunks = []
+				for await (const chunk of stream) {
+					chunks.push(chunk)
+				}
+
+				expect(chunks.filter((chunk) => chunk.type === "tool_call")).toMatchObject([
+					{ name: "nuller", arguments: JSON.stringify({ cursor: null }) },
+				])
+			})
+
+			it("keeps an invoke block for an unknown tool as literal text", async () => {
+				const block = '<invoke name="not_our_tool"><parameter name="a">1</parameter></invoke>'
+				const chunks = await collect([block])
+
+				expect(chunks.filter((chunk) => chunk.type === "text")).toEqual([{ type: "text", text: block }])
+				expect(chunks.some((chunk) => chunk.type === "tool_call")).toBe(false)
+			})
+
+			it("emits prose before the recovered tool call", async () => {
+				const chunks = await collect([
+					"Thinking. ",
+					'<function_calls><invoke name="calculator"><parameter name="operation">add</parameter></invoke></function_calls>',
+				])
+
+				expect(chunks.map((chunk) => chunk.type)).toEqual(["text", "tool_call", "usage"])
+			})
+
+			it("flushes buffered text before a native tool call so no text follows a tool_use", async () => {
+				streamMixedParts([
+					'partial <invoke name="calculator">',
+					{ name: "calculator", input: { operation: "div" } },
+				])
+				const chunks = await drain()
+
+				// The ordering comparison is only meaningful once both kinds of chunk exist: a
+				// silently broken flush emits no text at all, and -1 < firstToolCall would still hold.
+				expect(chunks.filter((chunk) => chunk.type === "text")).toEqual([
+					{ type: "text", text: "partial " },
+					{ type: "text", text: '<invoke name="calculator">' },
+				])
+				const types = chunks.map((chunk) => chunk.type)
+				const lastText = types.lastIndexOf("text")
+				const firstToolCall = types.indexOf("tool_call")
+				expect(lastText).toBeGreaterThanOrEqual(0)
+				expect(firstToolCall).toBeGreaterThanOrEqual(0)
+				expect(firstToolCall).toBeGreaterThan(lastText)
+			})
+
+			it("does not latch buffering on prose that merely mentions the tag", async () => {
+				const chunks = await collect(["never emit <invoke> markup as text. ", "Streaming continues."])
+
+				expect(chunks.filter((chunk) => chunk.type === "text")).toEqual([
+					{ type: "text", text: "never emit <invoke> markup as text. " },
+					{ type: "text", text: "Streaming continues." },
+				])
+				expect(chunks.some((chunk) => chunk.type === "tool_call")).toBe(false)
+			})
+
+			it("does not recover an invoke block quoted inside a fenced code block", async () => {
+				const block = '<invoke name="calculator"><parameter name="operation">add</parameter></invoke>'
+				// Open the wrapper outside the fence so only the quoting guard prevents recovery.
+				const chunks = await collect(["<function_calls>\n```\n" + block + "\n```\n</function_calls>"])
+
+				expect(chunks.some((chunk) => chunk.type === "tool_call")).toBe(false)
+			})
+
+			it.each([
+				{ name: "write_to_file", parameter: "content" },
+				{ name: "update_todo_list", parameter: "todos" },
+			])(
+				"recovers a large $name call split across chunks without leaking markup",
+				async ({ name, parameter }) => {
+					const payload = "x".repeat(5000)
+					streamTextParts([
+						`<function_calls><invoke name="${name}"><parameter name="${parameter}">`,
+						payload,
+						"</parameter></invoke></function_calls>",
+					])
+					const chunks = []
+					for await (const chunk of handler.createMessage("system", [{ role: "user", content: "hi" }], {
+						taskId: "test-task",
+						tools: [
+							{
+								type: "function",
+								function: {
+									name,
+									parameters: { type: "object", properties: { [parameter]: { type: "string" } } },
+								},
+							},
+						],
+					})) {
+						chunks.push(chunk)
+					}
+
+					expect(chunks.filter((chunk) => chunk.type !== "usage")).toEqual([
+						{
+							type: "tool_call",
+							id: expect.stringContaining("vscodelm-salvaged-"),
+							name,
+							arguments: JSON.stringify({ [parameter]: payload }),
+						},
+					])
+				},
+			)
+
+			it("flushes an over-long never-closing invoke as plain text before the stream ends", async () => {
+				// End-of-stream flushing produces identical text, so track production timing to
+				// prove the buffer releases text before the stream ends.
+				const filler = "x".repeat(256 * 1024)
+				const parts = ['<invoke name="calculator">', filler, filler, filler, filler]
+				let partsProduced = 0
+
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						for (const part of parts) {
+							partsProduced++
+							yield new vscode.LanguageModelTextPart(part)
+						}
+						return
+					})(),
+					text: (async function* () {
+						yield ""
+						return
+					})(),
+				})
+
+				const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }], {
+					taskId: "test-task",
+					tools: salvageTools,
+				})
+
+				let sawTextBeforeStreamEnd = false
+				let streamedText = ""
+				for await (const chunk of stream) {
+					if (chunk.type === "text") {
+						streamedText += chunk.text
+						if (partsProduced < parts.length) {
+							sawTextBeforeStreamEnd = true
+						}
+					}
+				}
+
+				expect(sawTextBeforeStreamEnd).toBe(true)
+				expect(streamedText).toContain('<invoke name="calculator">')
+				expect(streamedText).toContain(filler)
+			})
+
+			it("keeps a narrated block quoted when the cap splits the stream after its close tag", async () => {
+				// Cutting the drained span at `</invoke>` hid the trailing cue, so the streaming path
+				// recovered a call the one-shot path refuses.
+				const block = `<function${"_calls"}><in${"voke"} name="calculator"><parameter name="operation">add</parameter></in${"voke"}>`
+				const narration = ` is what you must never emit`
+				const chunks = await collect([block + narration, "x".repeat(270 * 1024)])
+
+				expect(chunks.filter((chunk) => chunk.type === "tool_call")).toEqual([])
+				expect(
+					extractLeakedToolCalls(
+						block + narration,
+						new Map([["calculator", salvageTools[0].function.parameters]]),
+					).calls,
+				).toEqual([])
+			})
+
+			it.each([
+				{ where: "its parameter body", separator: " " },
+				{ where: "its opening tag", separator: "\n" },
+			])("keeps an incomplete invoke buffered when the cap passes a newline in $where", async ({ separator }) => {
+				// The drain boundary was the first newline after the last closed block, even inside a
+				// later open block. The filler trips the cap before that block's closing tag arrives.
+				const padding = "p".repeat(20 * 1024)
+				const filler = "x".repeat(240 * 1024)
+				const openBody = `sub\n${filler}`
+				const chunks = await collect([
+					`<function${"_calls"}><in${"voke"} name="calculator"><parameter name="operation">${padding}</parameter></in${"voke"}> ` +
+						`<in${"voke"}${separator}name="calculator"><parameter name="operation">sub\n`,
+					filler,
+					`</parameter></in${"voke"}></function${"_calls"}>`,
+				])
+
+				// Prose between the blocks is part of the decided span, so it precedes the first call.
+				expect(chunks.filter((chunk) => chunk.type !== "usage")).toMatchObject([
+					{ type: "text", text: " " },
+					{ type: "tool_call", name: "calculator", arguments: JSON.stringify({ operation: padding }) },
+					{ type: "tool_call", name: "calculator", arguments: JSON.stringify({ operation: openBody }) },
+				])
+			})
+
+			it("gives each recovered call in one response a distinct id", async () => {
+				const chunks = await collect([
+					`<function${"_calls"}><in${"voke"} name="calculator"><parameter name="operation">add</parameter></in${"voke"}>\n` +
+						`<in${"voke"} name="calculator"><parameter name="operation">sub</parameter></in${"voke"}></function${"_calls"}>`,
+				])
+
+				const ids = chunks
+					.filter((chunk) => chunk.type === "tool_call")
+					.map((chunk) => (chunk as { id: string }).id)
+
+				expect(ids).toHaveLength(2)
+				expect(new Set(ids).size).toBe(2)
+				expect(ids[0]).toMatch(/-0$/)
+				expect(ids[1]).toMatch(/-1$/)
+			})
+
+			it("recovers a completed call and releases text when the buffer passes the cap", async () => {
+				// The cap used to be bypassed whenever a complete block sat in the buffer, so both the
+				// call and 512 KB of trailing prose were withheld until the stream ended. The block
+				// ends its line: same-line trailing prose reads as narration and suppresses recovery.
+				const filler = "y".repeat(256 * 1024)
+				const parts = [
+					'<function_calls><invoke name="calculator"><parameter name="operation">add</parameter></invoke></function_calls>\n',
+					filler,
+					filler,
+				]
+				let partsProduced = 0
+
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						for (const part of parts) {
+							partsProduced++
+							yield new vscode.LanguageModelTextPart(part)
+						}
+						return
+					})(),
+					text: (async function* () {
+						yield ""
+						return
+					})(),
+				})
+
+				const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }], {
+					taskId: "test-task",
+					tools: salvageTools,
+				})
+
+				let sawTextBeforeStreamEnd = false
+				const toolCalls = []
+				for await (const chunk of stream) {
+					if (chunk.type === "text" && partsProduced < parts.length) {
+						sawTextBeforeStreamEnd = true
+					}
+					if (chunk.type === "tool_call") {
+						toolCalls.push(chunk)
+					}
+				}
+
+				expect(sawTextBeforeStreamEnd).toBe(true)
+				expect(toolCalls).toMatchObject([
+					{ name: "calculator", arguments: JSON.stringify({ operation: "add" }) },
+				])
+			})
+
+			it("keeps an invoke still in flight buffered when the cap is passed", async () => {
+				// Only the decided prefix may drain; emitting the open block as text would strand the
+				// call whose closing tag arrives in a later chunk. Every complete block in the
+				// over-cap buffer must drain now, so timing is asserted rather than final order.
+				const bulky = "z".repeat(256 * 1024)
+				const parts = [
+					`<function_calls>\n<invoke name="calculator"><parameter name="operation">${bulky}</parameter></invoke>\n` +
+						'<invoke name="calculator"><parameter name="operation">mid</parameter></invoke>\n',
+					'<invoke name="calculator"><parameter name="operation">sub</parameter>',
+					"</invoke></function_calls>",
+				]
+				let partsProduced = 0
+
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						for (const part of parts) {
+							partsProduced++
+							yield new vscode.LanguageModelTextPart(part)
+						}
+						return
+					})(),
+					text: (async function* () {
+						yield ""
+						return
+					})(),
+				})
+
+				const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }], {
+					taskId: "test-task",
+					tools: salvageTools,
+				})
+
+				const toolCalls = []
+				const drainedEarly = []
+				for await (const chunk of stream) {
+					if (chunk.type === "tool_call") {
+						toolCalls.push(chunk)
+						if (partsProduced < parts.length) {
+							drainedEarly.push(chunk)
+						}
+					}
+				}
+
+				// Both complete blocks sit in the buffer when the cap is crossed, so both must drain
+				// before the stream ends; the still-open third only resolves at the final chunk.
+				expect(drainedEarly).toMatchObject([
+					{ arguments: JSON.stringify({ operation: bulky }) },
+					{ arguments: JSON.stringify({ operation: "mid" }) },
+				])
+				expect(toolCalls).toMatchObject([
+					{ name: "calculator", arguments: JSON.stringify({ operation: bulky }) },
+					{ name: "calculator", arguments: JSON.stringify({ operation: "mid" }) },
+					{ name: "calculator", arguments: JSON.stringify({ operation: "sub" }) },
+				])
+			})
+		})
+
 		it("returns the original registry name for a tool declared with an encoded name", async () => {
 			const systemPrompt = "You are a helpful assistant"
 			const originalName = `read\uD800file`
