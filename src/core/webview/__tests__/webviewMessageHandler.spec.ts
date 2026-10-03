@@ -2303,7 +2303,7 @@ describe("webviewMessageHandler - chat message queue", () => {
 		expect(updateSpy).toHaveBeenCalledWith(added.id, "edited", ["data:image/png;base64,from-mention"])
 	})
 
-	it("logs instead of leaking when condenseTaskContext rejects", async () => {
+	it("logs and shows a visible error when condenseTaskContext rejects", async () => {
 		const condenseError = new Error("queued submission failed")
 		const providerWithCondense = mockClineProvider as unknown as {
 			condenseTaskContext: ReturnType<typeof vi.fn>
@@ -2317,5 +2317,6 @@ describe("webviewMessageHandler - chat message queue", () => {
 		expect(mockClineProvider.log).toHaveBeenCalledWith(
 			"[condenseTaskContextRequest] Failed: queued submission failed",
 		)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.condense_failed")
 	})
 })

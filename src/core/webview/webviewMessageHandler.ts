@@ -542,7 +542,16 @@ export const webviewMessageHandler = async (
 			// Update the UI to reflect the deletion
 			await provider.postStateToWebview()
 
-			await currentCline.submitUserMessage(editedContent, images)
+			const submitted = await currentCline.submitUserMessage(editedContent, images)
+			if (!submitted) {
+				// The rewind above is destructive: if the task refused the slot
+				// write (an approval ask is in flight or the task is stopping),
+				// the edited message would vanish silently — surface it through
+				// the shared error dialog instead.
+				throw new Error(
+					"Edited message could not be delivered: an approval ask is in flight or the task is stopping.",
+				)
+			}
 		} catch (error) {
 			console.error("Error in edit message:", error)
 			vscode.window.showErrorMessage(
@@ -912,11 +921,12 @@ export const webviewMessageHandler = async (
 				await provider.condenseTaskContext(message.text!)
 			} catch (error) {
 				// condenseContext drains queued messages after summarizing, and a
-				// failed submission rejects: surface it in the log instead of
-				// leaking an unhandled rejection from the message handler.
+				// failed submission rejects: log the details for support and show
+				// the triggering user a visible error like sibling handlers.
 				provider.log(
 					`[condenseTaskContextRequest] Failed: ${error instanceof Error ? error.message : String(error)}`,
 				)
+				await vscode.window.showErrorMessage(t("common:errors.condense_failed"))
 			}
 			break
 		case "deleteTaskWithId":
