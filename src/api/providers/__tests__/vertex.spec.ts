@@ -239,6 +239,19 @@ describe("VertexHandler", () => {
 			expect(modelInfo.reasoning).toBeDefined()
 		})
 
+		it("should strip only a trailing :thinking suffix, preserving mid-ID occurrences", () => {
+			const testHandler = new VertexHandler({
+				apiModelId: "gemini-:thinking-flash:thinking",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			// String.replace eats the FIRST occurrence anywhere, which would turn this
+			// id into "gemini--flash:thinking" and leave a trailing suffix on the wire.
+			const modelInfo = testHandler.getModel()
+			expect(modelInfo.id).toBe("gemini-:thinking-flash")
+		})
+
 		it("should handle custom unlisted gemini models with :thinking suffix", () => {
 			const testHandler = new VertexHandler({
 				apiModelId: "gemini-future-model:thinking",

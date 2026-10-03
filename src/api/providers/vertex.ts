@@ -74,7 +74,8 @@ export class VertexHandler extends GeminiHandler implements SingleCompletionHand
 		// The `:thinking` suffix indicates that the model is a "Hybrid"
 		// reasoning model and that reasoning is required to be enabled.
 		// The actual model ID honored by Gemini's API does not have this
-		// suffix.
-		return { id: id.endsWith(":thinking") ? id.replace(":thinking", "") : id, info, ...params }
+		// suffix. Strip only a TRAILING suffix (endsWith + slice) so a mid-ID
+		// occurrence such as "gemini-:thinking-flash:thinking" survives intact.
+		return { id: id.endsWith(":thinking") ? id.slice(0, -":thinking".length) : id, info, ...params }
 	}
 }
