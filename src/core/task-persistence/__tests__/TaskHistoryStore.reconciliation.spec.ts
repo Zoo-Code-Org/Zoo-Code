@@ -437,6 +437,113 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		expect(repaired?.delegatedToId).toBeUndefined()
 	})
 
+	it("skips repairing a brand-new delegation whose child record has not landed yet (fresh parent record)", async () => {
+		// The delegating window persists the parent BEFORE the child's first
+		// history write (and before the scheduler admits the child run). A
+		// startup pass or periodic tick in that gap must not sever the healthy
+		// link: the freshly written parent record is the grace signal.
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const parent = makeItem({ id: "parent-fresh", status: "delegated", awaitingChildId: "child-starting" })
+		await seedItems(tmpDir, [parent])
+		// Parent file was just written by seedItems → mtime is fresh.
+
+		await store.initialize()
+
+		expect(store.get("parent-fresh")?.status).toBe("delegated")
+		expect(store.get("parent-fresh")?.awaitingChildId).toBe("child-starting")
+		const persistedParent = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", "parent-fresh", "history_item.json"), "utf8"),
+		) as HistoryItem
+		expect(persistedParent.status).toBe("delegated")
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("parent record freshly written"))
+		warnSpy.mockRestore()
+	})
+
+	it("skips while the awaited child id is claimed by this window and repairs after the claim is released", async () => {
+		// The delegating window claims the child id eagerly at creation; the
+		// missing-child repair must honor that claim and only repair once the
+		// claim is gone (session ended without the child ever being written).
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const parent = makeItem({ id: "parent-claimed", status: "delegated", awaitingChildId: "child-claimed" })
+		await seedItems(tmpDir, [parent])
+		await markStaleMtime("parent-claimed")
+
+		store.markLocallyActive("child-claimed")
+		await store.initialize()
+		expect(store.get("parent-claimed")?.status).toBe("delegated")
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("claimed by a live session in this window"))
+
+		// Session gone, claim released, parent record long quiet → orphan repair.
+		store.markLocallyInactive("child-claimed")
+		await store.initialize()
+		expect(store.get("parent-claimed")?.status).toBe("active")
+		expect(store.get("parent-claimed")?.awaitingChildId).toBeUndefined()
+		warnSpy.mockRestore()
+	})
+
+	it("aborts the orphan repair when the child goes live between the liveness stat and the repair write (lock-time re-check)", async () => {
+		// TOCTOU coverage: the orphan decision is taken from an unlocked stat;
+		// a peer window resuming the child in the gap (fresh writes → fresh
+		// mtime) must win. The re-check inside the repair path sees the fresh
+		// second stat, writes nothing, and removes the just-written intent.
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const child = makeItem({
+			id: "child-toctou",
+			status: "active",
+			parentTaskId: "parent-toctou",
+			rootTaskId: "parent-toctou",
+		})
+		const parent = makeItem({
+			id: "parent-toctou",
+			status: "delegated",
+			awaitingChildId: "child-toctou",
+			delegatedToId: "child-toctou",
+			childIds: ["child-toctou"],
+		})
+		await seedItems(tmpDir, [parent, child])
+		await markStaleMtime("child-toctou")
+
+		// First stat (the orphan decision): stale. Second stat (the lock-time
+		// re-check immediately before the repair write): fresh — the peer
+		// resumed the child in the gap.
+		const probe = TaskHistoryStore.prototype as unknown as {
+			getChildFileMtimeMs: (childId: string) => Promise<number | undefined>
+		}
+		const original = probe.getChildFileMtimeMs
+		let calls = 0
+		mtimeSpy = vi
+			.spyOn(probe, "getChildFileMtimeMs")
+			.mockImplementation((childId: string) => {
+				if (childId !== "child-toctou") {
+					return original.call(store, childId)
+				}
+				calls += 1
+				return calls === 1
+					? Promise.resolve(Date.now() - 10 * 60 * 1000)
+					: Promise.resolve(Date.now())
+			})
+
+		await store.initialize()
+
+		// No repair: link preserved in cache and on disk.
+		expect(store.get("child-toctou")?.status).toBe("active")
+		expect(store.get("parent-toctou")?.status).toBe("delegated")
+		expect(store.get("parent-toctou")?.awaitingChildId).toBe("child-toctou")
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Aborting repair for live child child-toctou"))
+		expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("Reconciled orphaned active child"))
+
+		// The durable intent was removed, not left for a stale replay.
+		await expect(fs.access(path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent))).rejects.toThrow()
+
+		// The child record on disk is untouched.
+		const persistedChild = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", "child-toctou", GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		expect(persistedChild.status).toBe("active")
+
+		warnSpy.mockRestore()
+	})
+
 	it("repairs interrupted handoff: delegated parent with completed child → active", async () => {
 		const child = makeItem({
 			id: "child-2",

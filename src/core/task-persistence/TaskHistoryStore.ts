@@ -591,11 +591,13 @@ export class TaskHistoryStore {
 						// behind it. Mark it interrupted before releasing the parent's delegation
 						// link so the normal resume/re-delegate flow can take over. This is an
 						// administrative recovery, not a runtime delegation transition.
-						await this.repairActiveDelegation(item, child)
-						console.warn(
-							`[TaskHistoryStore] Reconciled orphaned active child: child ${child.id} → interrupted, task ${item.id} → active`,
-						)
-						repairsInThisPass++
+						const repaired = await this.repairActiveDelegation(item, child)
+						if (repaired) {
+							console.warn(
+								`[TaskHistoryStore] Reconciled orphaned active child: child ${child.id} → interrupted, task ${item.id} → active`,
+							)
+							repairsInThisPass++
+						}
 					} else if (child.status === "completed") {
 						await this.upsertCore(
 							{
@@ -790,8 +792,11 @@ export class TaskHistoryStore {
 	/**
 	 * Start and complete a guarded active-child repair while already holding the
 	 * store lock. The intent is durable before either task file is touched.
+	 * Returns false when a last-moment liveness re-check (see
+	 * `applyDelegationRepairIntent`) shows the child is alive again — no write
+	 * happened and the durable intent is removed.
 	 */
-	private async repairActiveDelegation(parent: HistoryItem, child: HistoryItem): Promise<void> {
+	private async repairActiveDelegation(parent: HistoryItem, child: HistoryItem): Promise<boolean> {
 		const intent: DelegationRepairIntent = {
 			version: 1,
 			operationId: crypto.randomUUID(),
@@ -813,14 +818,38 @@ export class TaskHistoryStore {
 		}
 
 		await this.writeDelegationRepairIntent(intent)
-		await this.applyDelegationRepairIntent(intent, child, parent)
+		return this.applyDelegationRepairIntent(intent, child, parent)
 	}
 
 	private async applyDelegationRepairIntent(
 		intent: DelegationRepairIntent,
 		child: HistoryItem,
 		parent: HistoryItem,
-	): Promise<void> {
+	): Promise<boolean> {
+		// Lock-time liveness re-check (closes the TOCTOU gap): the repair
+		// decision at the call site was taken from an unlocked stat, and a peer
+		// window can resume the child — fresh writes, fresh mtime — in the gap
+		// before this authoritative overwrite. Re-stat inside the store lock
+		// immediately before the repair write so the resuming peer wins. The
+		// local-ownership claim is re-read for the same reason: this window can
+		// claim the child while the intent journal was being written.
+		if (this.locallyActiveTaskIds.has(child.id)) {
+			await this.removeDelegationRepairIntent()
+			console.warn(
+				`[TaskHistoryStore] Aborting repair for child ${child.id}: claimed by a live session in this window`,
+			)
+			return false
+		}
+		const mtimeMs = await this.getChildFileMtimeMs(child.id)
+		if (isDelegatedChildLive(child, Date.now(), TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS, mtimeMs)) {
+			await this.removeDelegationRepairIntent()
+			console.warn(
+				`[TaskHistoryStore] Aborting repair for live child ${child.id} ` +
+					`(${this.describeLivenessSignal(child, mtimeMs)}) — owned by another window`,
+			)
+			return false
+		}
+
 		const repairedChild = { ...child, status: intent.target.childStatus }
 		const repairedParent = {
 			...parent,
@@ -839,6 +868,7 @@ export class TaskHistoryStore {
 			await this.onWrite(this.getAll())
 		}
 		await this.removeDelegationRepairIntent()
+		return true
 	}
 
 	private matchesDelegationRepairParentPreconditions(intent: DelegationRepairIntent, parent: HistoryItem): boolean {
