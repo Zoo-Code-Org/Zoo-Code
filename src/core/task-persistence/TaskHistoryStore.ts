@@ -505,6 +505,43 @@ export class TaskHistoryStore {
 					const child = byId.get(item.awaitingChildId)
 
 					if (!child) {
+						// A brand-new delegation persists the parent as "delegated"
+						// BEFORE the child's first history write (and before the
+						// scheduler admits the child run). Repairing immediately in
+						// that gap severs a healthy link, so two grace signals apply:
+						//  1. an eager local ownership claim for the awaited child id
+						//     (installed by the delegating window) means a session in
+						//     THIS window is still starting the child — skip;
+						//  2. a freshly written parent record means the delegation
+						//     transition itself just landed (including from a peer
+						//     window this store cannot claim for) — skip while the
+						//     parent's own history file is fresh.
+						// A genuinely orphaned delegation outlives both signals: the
+						// claim is released with the session and the parent file goes
+						// quiet, so the next pass repairs it. An unreadable/absent
+						// parent mtime stays conservative and repairs immediately.
+						if (this.locallyActiveTaskIds.has(item.awaitingChildId)) {
+							console.warn(
+								`[TaskHistoryStore] Skipping repair for delegation ${item.id}: child ${item.awaitingChildId} ` +
+									`claimed by a live session in this window`,
+							)
+							continue
+						}
+						const parentMtimeMs = await this.getChildFileMtimeMs(item.id)
+						if (
+							parentMtimeMs !== undefined &&
+							isLivenessSignalFresh(
+								parentMtimeMs,
+								Date.now(),
+								TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS,
+							)
+						) {
+							console.warn(
+								`[TaskHistoryStore] Skipping repair for delegation ${item.id}: parent record freshly written ` +
+									`(child ${item.awaitingChildId} may still be starting)`,
+							)
+							continue
+						}
 						await this.upsertCore(
 							{
 								...item,
@@ -718,7 +755,10 @@ export class TaskHistoryStore {
 					mtimeMs,
 				)
 				if (isLiveElsewhere) {
-					await this.quarantineDelegationRepairIntent(intent, "child live in another window (recent mtime)")
+					await this.quarantineDelegationRepairIntent(
+						intent,
+						`child live in another window (${this.describeLivenessSignal(child, mtimeMs)})`,
+					)
 					return
 				}
 			}
@@ -927,6 +967,10 @@ export class TaskHistoryStore {
 
 	/**
 	 * Invalidate a single task's cache entry (re-read from disk on next access).
+	 * When the persisted record turns out to be missing or unreadable, the
+	 * cache entry is dropped together with any local ownership claim: a session
+	 * cannot own a record that no longer exists, and a stale claim would
+	 * otherwise disable orphan repair for that id for the window's lifetime.
 	 */
 	async invalidate(taskId: string): Promise<void> {
 		return this.withLock(async () => {
@@ -936,10 +980,12 @@ export class TaskHistoryStore {
 					this.cache.set(taskId, item)
 				} else {
 					this.cache.delete(taskId)
+					this.locallyActiveTaskIds.delete(taskId)
 				}
 				this.taskFileMtimes.delete(taskId)
 			} catch {
 				this.cache.delete(taskId)
+				this.locallyActiveTaskIds.delete(taskId)
 			}
 		})
 	}
@@ -1329,6 +1375,7 @@ export class TaskHistoryStore {
 							missingDiskRecord = true
 							this.cache.delete(taskId)
 							this.taskFileMtimes.delete(taskId)
+							this.locallyActiveTaskIds.delete(taskId)
 							throw new Error(
 								`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} not found in cache`,
 							)
@@ -1337,12 +1384,14 @@ export class TaskHistoryStore {
 						// task-history schema (#1726). Settlement must not
 						// rewrite malformed data and must not clear the action
 						// on a record persisted under a different task ID, so
-						// both cases drop the stale cache entry and fail
-						// closed without touching the disk record.
+						// both cases drop the stale cache entry (and any local
+						// ownership claim — the record no longer exists) and
+						// fail closed without touching the disk record.
 						const parsed = historyItemSchema.safeParse(existing)
 						if (!parsed.success) {
 							this.cache.delete(taskId)
 							this.taskFileMtimes.delete(taskId)
+							this.locallyActiveTaskIds.delete(taskId)
 							throw new Error(
 								`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} has an invalid disk record`,
 							)
@@ -1350,6 +1399,7 @@ export class TaskHistoryStore {
 						if (parsed.data.id !== taskId) {
 							this.cache.delete(taskId)
 							this.taskFileMtimes.delete(taskId)
+							this.locallyActiveTaskIds.delete(taskId)
 							throw new Error(
 								`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} has a disk record with mismatched id ${parsed.data.id}`,
 							)

@@ -424,7 +424,10 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 	it("repairs orphaned delegation: delegated parent whose child does not exist → active", async () => {
 		const parent = makeItem({ id: "parent-1", status: "delegated", awaitingChildId: "missing-child" })
 		await seedItems(tmpDir, [parent])
-
+		// A genuinely orphaned delegation: the parent record stopped being
+		// written long ago, so the brand-new-delegation grace check must NOT
+		// protect it (a freshly written parent record would be skipped instead).
+		await markStaleMtime("parent-1")
 
 		await store.initialize()
 
@@ -1326,8 +1329,9 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 				name.startsWith(`${GlobalFileNames.delegationRepairIntent}.quarantine-`),
 			),
 		).toBe(true)
-		// Kills the StringLiteral mutant on the new quarantine reason.
-		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("child live in another window (recent mtime)"))
+		// Kills the StringLiteral mutant on the new quarantine reason. The reason
+		// names the actual liveness signal (fresh mtime here), not a hardcoded label.
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("child live in another window (mtime"))
 
 		warnSpy.mockRestore()
 	})
@@ -1471,7 +1475,9 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		const parentA = makeItem({ id: "parent-a", status: "delegated", awaitingChildId: "child-a" })
 		const parentB = makeItem({ id: "parent-b", status: "delegated", awaitingChildId: "missing-b" })
 		await seedItems(tmpDir, [childA, parentA, parentB])
-
+		// parentB hits the missing-child repair path; age its record so it reads
+		// as a genuinely orphaned delegation rather than a brand-new one.
+		await markStaleMtime("parent-b")
 
 		await store.initialize()
 
@@ -1489,7 +1495,9 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			awaitingChildId: "missing-child-chain",
 		})
 		await seedItems(tmpDir, [parentA, parentB])
-
+		// B hits the missing-child repair path; age its record so the
+		// brand-new-delegation grace check does not protect a stale orphan.
+		await markStaleMtime("parent-b-chain")
 
 		await store.initialize()
 
@@ -1621,7 +1629,9 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 
 		const parent = makeItem({ id: "parent-log", status: "delegated", awaitingChildId: "nonexistent" })
 		await seedItems(tmpDir, [parent])
-
+		// Aged so the delegation reads as a genuine orphan rather than a
+		// brand-new delegation (fresh parent record → grace skip).
+		await markStaleMtime("parent-log")
 
 		await store.initialize()
 
@@ -1638,7 +1648,9 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 
 		const parent = makeItem({ id: "parent-onwrite", status: "delegated", awaitingChildId: "nonexistent-child" })
 		await seedItems(tmpDir, [parent])
-
+		// The missing-child repair requires a genuinely old delegation: a freshly
+		// written parent record gets the brand-new-delegation grace instead.
+		await markStaleMtime("parent-onwrite")
 
 		await store.initialize()
 
