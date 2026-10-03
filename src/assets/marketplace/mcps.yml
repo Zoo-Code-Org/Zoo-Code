@@ -1549,6 +1549,26 @@ items:
         key: LINEAR_PATH
         placeholder: /path/to/linear-mcp
         optional: true
+  - id: mailtea
+    name: Mailtea
+    description: Send email and newsletters with Mailtea over MCP, plus skills for email and website design. Send
+      transactional email, schedule and publish newsletters, manage contacts, segments, senders and domains, and check
+      delivery. Sign in with OAuth in your browser, no API key needed.
+    author: Mailtea
+    url: https://github.com/mailtea-app/mailtea-agent-plugin
+    tags:
+      - email
+      - newsletter
+      - transactional-email
+      - marketing
+      - communication
+    content:
+      - name: Remote MCP
+        content: |
+          {
+            "type": "streamable-http",
+            "url": "https://api.mailtea.app/mcp"
+          }
   - id: memory
     name: Knowledge Graph Memory
     description: A persistent memory system using a local knowledge graph that enables AI assistants to remember information
