@@ -240,6 +240,165 @@ description: Symlinked command
 		// Note: Nested symlinks (symlink -> symlink -> file) are automatically followed by fs.stat,
 		// so they work transparently. The MAX_DEPTH protection prevents infinite loops.
 
+		it("should pick a deterministic winner for duplicate command names from symlinked directories", async () => {
+			const alphaContent = `# Alpha Command`
+			const betaContent = `# Beta Command`
+
+			mockFs.stat = vi.fn().mockResolvedValue({ isDirectory: () => true })
+
+			// The commands directory contains two directory symlinks whose targets
+			// both define a command with the same name.
+			mockFs.readdir = vi.fn().mockImplementation((dirPath: string) => {
+				const normalizedPath = dirPath.replace(/\\/g, "/")
+				if (normalizedPath.includes("shared-alpha")) {
+					return Promise.resolve([
+						{
+							name: "dup.md",
+							isFile: () => true,
+							isSymbolicLink: () => false,
+							parentPath: "/mock/shared-alpha",
+						},
+					])
+				}
+				if (normalizedPath.includes("shared-beta")) {
+					return Promise.resolve([
+						{
+							name: "dup.md",
+							isFile: () => true,
+							isSymbolicLink: () => false,
+							parentPath: "/mock/shared-beta",
+						},
+					])
+				}
+				if (normalizedPath.includes("/global/")) {
+					return Promise.resolve([])
+				}
+				return Promise.resolve([
+					{
+						name: "alpha-link",
+						isFile: () => false,
+						isSymbolicLink: () => true,
+						parentPath: "/mock/project/.roo/commands",
+					},
+					{
+						name: "beta-link",
+						isFile: () => false,
+						isSymbolicLink: () => true,
+						parentPath: "/mock/project/.roo/commands",
+					},
+				])
+			})
+
+			mockFs.readlink = vi.fn().mockImplementation((linkPath: string) => {
+				const normalizedPath = linkPath.replace(/\\/g, "/")
+				return Promise.resolve(normalizedPath.includes("alpha-link") ? "/mock/shared-alpha" : "/mock/shared-beta")
+			})
+
+			mockFs.lstat = vi.fn().mockResolvedValue({
+				isDirectory: () => true,
+				isFile: () => false,
+				isSymbolicLink: () => false,
+			})
+
+			mockFs.readFile = vi.fn().mockImplementation((filePath: string) => {
+				const normalizedPath = filePath.toString().replace(/\\/g, "/")
+				if (normalizedPath.includes("shared-alpha")) {
+					return Promise.resolve(alphaContent)
+				}
+				if (normalizedPath.includes("shared-beta")) {
+					return Promise.resolve(betaContent)
+				}
+				return Promise.reject(new Error("File not found"))
+			})
+
+			const result = await getCommands("/test/cwd")
+
+			expect(result).toHaveLength(1)
+			// The candidate with the lowest path wins, regardless of the order in
+			// which the symlinked directories were resolved.
+			expect(result[0]).toEqual(
+				expect.objectContaining({
+					name: "dup",
+					content: "# Alpha Command",
+					source: "project",
+					filePath: path.resolve("/mock/shared-alpha", "dup.md"),
+				}),
+			)
+		})
+
+		it("should handle duplicate entries when two symlinks resolve to the same target", async () => {
+			const sharedContent = `# Shared Command`
+
+			mockFs.stat = vi.fn().mockResolvedValue({ isDirectory: () => true })
+
+			// Two directory symlinks pointing at the SAME target directory both
+			// contribute an entry for the same file, so the deterministic sort sees
+			// identical originalPaths (the comparator's equal branch).
+			mockFs.readdir = vi.fn().mockImplementation((dirPath: string) => {
+				const normalizedPath = dirPath.replace(/\\/g, "/")
+				if (normalizedPath.includes("shared-same")) {
+					return Promise.resolve([
+						{
+							name: "dup.md",
+							isFile: () => true,
+							isDirectory: () => false,
+							isSymbolicLink: () => false,
+							parentPath: "/mock/shared-same",
+						},
+					])
+				}
+				if (normalizedPath.includes("/global/")) {
+					return Promise.resolve([])
+				}
+				return Promise.resolve([
+					{
+						name: "alpha-link",
+						isFile: () => false,
+						isDirectory: () => false,
+						isSymbolicLink: () => true,
+						parentPath: "/mock/project/.roo/commands",
+					},
+					{
+						name: "twin-link",
+						isFile: () => false,
+						isDirectory: () => false,
+						isSymbolicLink: () => true,
+						parentPath: "/mock/project/.roo/commands",
+					},
+				])
+			})
+
+			mockFs.readlink = vi.fn().mockResolvedValue("/mock/shared-same")
+
+			mockFs.lstat = vi.fn().mockResolvedValue({
+				isDirectory: () => true,
+				isFile: () => false,
+				isSymbolicLink: () => false,
+			})
+
+			mockFs.readFile = vi.fn().mockImplementation((filePath: string) => {
+				const normalizedPath = filePath.toString().replace(/\\/g, "/")
+				if (normalizedPath.includes("shared-same")) {
+					return Promise.resolve(sharedContent)
+				}
+				return Promise.reject(new Error("File not found"))
+			})
+
+			const result = await getCommands("/test/cwd")
+
+			// Both symlinks contribute the same file; the command appears once with
+			// the shared target's content regardless of resolution order.
+			expect(result).toHaveLength(1)
+			expect(result[0]).toEqual(
+				expect.objectContaining({
+					name: "dup",
+					content: "# Shared Command",
+					source: "project",
+					filePath: path.resolve("/mock/shared-same", "dup.md"),
+				}),
+			)
+		})
+
 		it("should handle cyclic symlinks gracefully (MAX_DEPTH protection)", async () => {
 			// Create a cyclic symlink scenario
 			// Mock lstat to return symlink for all targets (creating infinite loop)

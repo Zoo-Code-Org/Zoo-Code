@@ -290,6 +290,13 @@ async function scanCommandDirectory(
 		// Wait for all files to be resolved
 		await Promise.all(initialPromises)
 
+		// Symlinked directories are resolved concurrently above, so fileInfo order
+		// reflects completion order rather than a stable order. Sort it so duplicate
+		// command names within this source resolve deterministically: iterate from
+		// highest to lowest original path so commands.set (last write wins) keeps
+		// the lowest path.
+		fileInfo.sort((a, b) => (a.originalPath < b.originalPath ? 1 : a.originalPath > b.originalPath ? -1 : 0))
+
 		// Process each collected file
 		for (const { originalPath, resolvedPath } of fileInfo) {
 			// Command name comes from the original path (symlink name if symlinked)
@@ -328,18 +335,15 @@ async function scanCommandDirectory(
 					commandContent = content.trim()
 				}
 
-				// Project commands override global ones
-				if (source === "project" || !commands.has(commandName)) {
-					commands.set(commandName, {
-						name: commandName,
-						content: commandContent,
-						source,
-						filePath: resolvedPath,
-						description,
-						argumentHint,
-						mode,
-					})
-				}
+				commands.set(commandName, {
+					name: commandName,
+					content: commandContent,
+					source,
+					filePath: resolvedPath,
+					description,
+					argumentHint,
+					mode,
+				})
 			} catch (error) {
 				console.warn(`Failed to read command file ${resolvedPath}:`, error)
 			}
