@@ -414,9 +414,10 @@ describe("Task.ask queued message drain", () => {
 		const task = await createTask({ getState: async () => ({}) })
 		const submitSpy = vi.spyOn(task, "submitUserMessage")
 
-		// api_req_failed-style gate: the consumer only inspects the button
-		// response, so the intercepted queued message is discarded, not acked.
-		const askPromise = task.ask("api_req_failed", "The model returned no assistant messages.", false)
+		// Followup-style conversational ask: the consumer only inspects the
+		// button response, so an intercepted queued message can be discarded
+		// instead of acked.
+		const askPromise = task.ask("followup", "Anything to add?", false)
 		await new Promise((resolve) => setTimeout(resolve, 150))
 
 		task.messageQueueService.addMessage("queued note")
@@ -770,6 +771,8 @@ describe("Task.ask queued message drain", () => {
 		["command", "npm test"],
 		["use_mcp_server", "{}"],
 		["tool", JSON.stringify({ tool: "readFile" })],
+		["api_req_failed", "stream failed"],
+		["auto_approval_max_req_reached", "{}"],
 	] as const)("keeps a drain from answering a blocked %s ask", async (type, text) => {
 		const task = await createTask({ getState: async () => ({}) }) // auto-approval disabled
 		const submitSpy = vi.spyOn(task, "submitUserMessage")
@@ -833,6 +836,39 @@ describe("Task.ask queued message drain", () => {
 		const result = await askPromise
 		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
 	})
+
+	it.each([
+		["api_req_failed", "stream failed"],
+		["auto_approval_max_req_reached", JSON.stringify({ count: 3, type: "requests" })],
+	] as const)(
+		"keeps a queued message out of the %s failure gate and delivers it at the next conversational ask",
+		async (type, text) => {
+			const task = await createTask({ getState: async () => ({}) }) // auto-approval disabled
+			task.messageQueueService.addMessage("typed feedback")
+
+			// A failure-gate ask is in flight: any non-yes answer aborts the
+			// task, so the queued message must not be read as its answer.
+			const askPromise = task.ask(type, text, false)
+			await new Promise((resolve) => setTimeout(resolve, 150))
+			let settled = false
+			void askPromise.then(() => {
+				settled = true
+			})
+			await new Promise((resolve) => setTimeout(resolve, 150))
+			expect(settled).toBe(false)
+
+			// The user explicitly retries/approves; the typed text is retained.
+			setTimeout(() => task.approveAsk(), 0)
+			const result = await askPromise
+			expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
+			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["typed feedback"])
+
+			// The retained message is delivered to the next conversational ask.
+			const followup = await task.ask("followup", "anything else?", false)
+			expect(followup).toMatchObject({ response: "messageResponse", text: "typed feedback" })
+			expect(task.messageQueueService.isEmpty()).toBe(true)
+		},
+	)
 
 	it("claims lifecycle feedback that arrives while an ask is waiting", async () => {
 		const task = await createTask()

@@ -184,6 +184,15 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 		return undefined
 	}
 
+	if (type === "api_req_failed" || type === "auto_approval_max_req_reached") {
+		// Failure-gate retry prompts: any non-yes answer aborts the task, so a
+		// queued conversational message must not be converted into an answer —
+		// its text and images would be destroyed with no history row and a
+		// surprise abort. The message stays queued for the next conversational
+		// ask, like the approval-gating asks above.
+		return undefined
+	}
+
 	return { response: "messageResponse", requiresDurableAck: type === "completion_result" }
 }
 
@@ -4087,12 +4096,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							// Truncation repeats on an identical request, so never auto-retry it
 							// (even with auto-approval); let the user decide once.
 							const { response, queuedMessageId } = await this.ask("api_req_failed", rawErrorMessage)
-							// Only the button response is inspected; a consumed queued
-							// message is dropped without inventing a history write (same
-							// as the sibling api_req_failed asks below). The retry gate
-							// stays answerable by a queued message: unlike command_output
-							// asks it does not gate execution, and a typed "no" that
-							// aborts the task destroys the queue either way.
+							// Failure-gate asks refuse queued-message conversion
+							// (queuedResponseForAsk returns undefined), so queuedMessageId
+							// is always undefined here today; the discard stays as a
+							// defensive no-op should that seam ever change.
 							this.discardConsumedQueuedMessage(queuedMessageId)
 
 							if (response !== "yesButtonClicked") {

@@ -559,28 +559,6 @@ describe("Cline", () => {
 			expect(askSpy).toHaveBeenCalledWith("api_req_failed", expect.stringContaining("Output token limit reached"))
 		})
 
-		it("discards a queued message consumed by the truncation retry gate", async () => {
-			const task = await createAutoApprovedTask()
-			// Simulate the ask claim path consuming the queued message as its answer.
-			vi.spyOn(task, "ask").mockImplementation(async () => {
-				const message = task.messageQueueService.claimNextMessage()
-				return {
-					response: "noButtonClicked",
-					text: message?.text,
-					queuedMessageId: message?.id,
-				} satisfies TaskAskResult
-			})
-			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => truncatedStream())
-			task.messageQueueService.addMessage("do not redeliver me")
-
-			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
-
-			// The consumed entry is discarded like the sibling api_req_failed
-			// arms, not left queued for a redelivery that can never be acked:
-			// the declined retry destroys the task queue either way.
-			expect(task.messageQueueService.isEmpty()).toBe(true)
-		})
-
 		it("retries from a fresh attempt count when the user confirms", async () => {
 			const task = await createAutoApprovedTask()
 			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
