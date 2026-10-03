@@ -3,13 +3,20 @@
 import * as vscode from "vscode"
 
 import { TelemetryService } from "@roo-code/telemetry"
-import { getModelId, RooCodeEventName } from "@roo-code/types"
+import { getModelId, ORGANIZATION_ALLOW_ALL, RooCodeEventName } from "@roo-code/types"
 
 import { ContextProxy } from "../../config/ContextProxy"
 import type { Mode } from "../../../shared/modes"
 import { Task, TaskOptions } from "../../task/Task"
 import { ClineProvider } from "../ClineProvider"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
+
+// Partial mock: other provider modules (e.g. `deepseek.ts`) import
+// `OpenAiHandler` from here, so the real exports must remain available.
+vi.mock("../../../api/providers/openai", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../../api/providers/openai")>()),
+	getOpenAiModels: vi.fn(),
+}))
 
 // Mock setup
 vi.mock("fs/promises", () => ({
@@ -130,12 +137,20 @@ vi.mock("../../task/Task", () => ({
 	}),
 }))
 
+// Hoisted so the `@roo-code/cloud` mock factory (which is hoisted above the
+// imports) can expose the same `getAllowList`/`hasInstance` spies the tests configure.
+const { mockGetAllowList, mockHasInstance } = vi.hoisted(() => ({
+	mockGetAllowList: vi.fn(),
+	mockHasInstance: vi.fn(),
+}))
+
 vi.mock("@roo-code/cloud", () => ({
 	CloudService: {
-		hasInstance: vi.fn().mockReturnValue(true),
+		hasInstance: mockHasInstance,
 		get instance() {
 			return {
 				isAuthenticated: vi.fn().mockReturnValue(false),
+				getAllowList: mockGetAllowList,
 			}
 		},
 	},
@@ -153,6 +168,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 	beforeEach(async () => {
 		vi.clearAllMocks()
+		// Default to allow-all; individual tests override with a restrictive list.
+		mockGetAllowList.mockResolvedValue(ORGANIZATION_ALLOW_ALL)
+		// A cloud instance exists by default, which is the fail-closed case.
+		mockHasInstance.mockReturnValue(true)
 
 		if (!TelemetryService.hasInstance()) {
 			TelemetryService.createInstance([])
@@ -257,6 +276,9 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openai/gpt-4",
 			}),
+			// Default to "does not exist yet"; tests that simulate an existing
+			// profile must override this so the prior-profile snapshot is taken.
+			hasConfig: vi.fn().mockResolvedValue(false),
 		}
 
 		// Get the buildApiHandler mock
@@ -416,6 +438,242 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 			// Should not call buildApiHandler when there's no task
 			expect(buildApiHandlerMock).not.toHaveBeenCalled()
+		})
+
+		test("persists and activates an allowed profile under a restrictive allow-list", async () => {
+			mockGetAllowList.mockResolvedValue({
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.openrouter]: { allowAll: false, models: ["openai/gpt-4"] },
+				},
+			})
+
+			const result = await provider.upsertProviderProfile("test-config", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			})
+
+			expect(result).toBe("test-id")
+			expect(provider["providerSettingsManager"].saveConfig).toHaveBeenCalledWith(
+				"test-config",
+				expect.objectContaining({ openRouterModelId: "openai/gpt-4" }),
+			)
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "test-config")
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		test("rejects a disallowed profile: not persisted, not activated, user notified", async () => {
+			mockGetAllowList.mockResolvedValue({
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.openrouter]: { allowAll: false, models: ["openai/gpt-4"] },
+				},
+			})
+			const saveConfig = provider["providerSettingsManager"].saveConfig
+
+			const result = await provider.upsertProviderProfile("blocked-config", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/forbidden",
+			})
+
+			// No id means the write was rejected before any persistence/activation.
+			expect(result).toBeUndefined()
+			expect(saveConfig).not.toHaveBeenCalled()
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("currentApiConfigName", "blocked-config")
+			// The notification lives in `upsertProviderProfile` so direct callers
+			// (OAuth callbacks, sign-out) do not fail silently.
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.violated_organization_allowlist")
+		})
+
+		test("rejects the write when a cloud instance exists but the allow-list is unavailable", async () => {
+			mockGetAllowList.mockRejectedValue(new Error("cloud unavailable"))
+
+			const saveConfig = provider["providerSettingsManager"].saveConfig
+			const result = await provider.upsertProviderProfile("test-config", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			})
+
+			// Fail closed: a transient allow-list failure with a live cloud instance
+			// must not persist a possibly disallowed model.
+			expect(result).toBeUndefined()
+			expect(saveConfig).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.violated_organization_allowlist")
+		})
+
+		test("allows the write when no cloud instance exists (positively no organization policy)", async () => {
+			mockHasInstance.mockReturnValue(false)
+			// Even a failing policy read must not matter: allow-all is legitimate
+			// when no organization policy positively applies.
+			mockGetAllowList.mockRejectedValue(new Error("should not be consulted for the gate"))
+
+			const result = await provider.upsertProviderProfile("test-config", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			})
+
+			expect(result).toBe("test-id")
+			expect(provider["providerSettingsManager"].saveConfig).toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		test("bypassAllowList writes Zoo Gateway credentials even when the allow-list forbids the provider", async () => {
+			// A restrictive allow-list that does not mention zoo-gateway at all. This
+			// is exactly the case that used to strand a refreshed/cleared token, and
+			// it is why the credential write opts out of the model allow-list.
+			mockGetAllowList.mockResolvedValue({
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.openrouter]: { allowAll: false, models: ["openai/gpt-4"] },
+				},
+			})
+
+			const result = await provider.upsertProviderProfile(
+				"Zoo Gateway",
+				{ apiProvider: providerIdentifiers.zooGateway, zooSessionToken: "zoo_ext_token" },
+				false,
+				{ bypassAllowList: true },
+			)
+
+			// The write succeeded even though the allow-list forbids zoo-gateway:
+			// without the bypass this exact profile is rejected (see the next test).
+			expect(result).toBe("test-id")
+			expect(provider["providerSettingsManager"].saveConfig).toHaveBeenCalledWith(
+				"Zoo Gateway",
+				expect.objectContaining({ zooSessionToken: "zoo_ext_token" }),
+			)
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		test("accepts a Zoo Gateway profile whose model is on the allow-list", async () => {
+			// `ProfileValidator.getModelIdFromProfile` maps zoo-gateway to
+			// `zooGatewayModelId`, so a listed model passes without the bypass.
+			mockGetAllowList.mockResolvedValue({
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.zooGateway]: {
+						allowAll: false,
+						models: ["anthropic/claude-sonnet-4"],
+					},
+				},
+			})
+
+			const result = await provider.upsertProviderProfile("Zoo Gateway", {
+				apiProvider: providerIdentifiers.zooGateway,
+				zooSessionToken: "zoo_ext_token",
+				zooGatewayModelId: "anthropic/claude-sonnet-4",
+			})
+
+			expect(result).toBe("test-id")
+			expect(provider["providerSettingsManager"].saveConfig).toHaveBeenCalledWith(
+				"Zoo Gateway",
+				expect.objectContaining({ zooGatewayModelId: "anthropic/claude-sonnet-4" }),
+			)
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		test("rejects a Zoo Gateway profile whose model is not on the allow-list", async () => {
+			mockGetAllowList.mockResolvedValue({
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.zooGateway]: {
+						allowAll: false,
+						models: ["anthropic/claude-sonnet-4"],
+					},
+				},
+			})
+
+			const result = await provider.upsertProviderProfile("Zoo Gateway", {
+				apiProvider: providerIdentifiers.zooGateway,
+				zooSessionToken: "zoo_ext_token",
+				zooGatewayModelId: "anthropic/claude-opus-4",
+			})
+
+			expect(result).toBeUndefined()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.violated_organization_allowlist")
+		})
+
+		test("the Zoo Gateway bypass does not leak to other providers", async () => {
+			mockGetAllowList.mockResolvedValue({
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.openrouter]: { allowAll: false, models: ["openai/gpt-4"] },
+				},
+			})
+
+			// Same restrictive list, but without the internal bypass the write is
+			// still rejected — proving the escape hatch is opt-in per call.
+			const result = await provider.upsertProviderProfile("blocked-config", {
+				apiProvider: providerIdentifiers.zooGateway,
+				zooSessionToken: "zoo_ext_token",
+			})
+
+			expect(result).toBeUndefined()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.violated_organization_allowlist")
+		})
+
+		test("rolls back the profile and active state when an activation write fails after saveConfig", async () => {
+			// Seed the previously active profile name so the rollback restores a known value.
+			await provider.contextProxy.setValue("currentApiConfigName", "test-config")
+			const priorProfile = {
+				name: "new-config",
+				id: "prior-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			}
+			// The profile pre-exists, so existence is confirmed and its prior value is read.
+			provider["providerSettingsManager"].hasConfig = vi.fn().mockResolvedValue(true)
+			provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue(priorProfile)
+			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue(undefined)
+			// Fail an activation write that runs *after* saveConfig succeeded.
+			provider["providerSettingsManager"].setModeConfig = vi
+				.fn()
+				.mockRejectedValue(new Error("mode write failed"))
+			const saveConfig = provider["providerSettingsManager"].saveConfig
+
+			const result = await provider.upsertProviderProfile("new-config", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4-turbo",
+			})
+
+			// The partial write is reported as a failure, never a success.
+			expect(result).toBeUndefined()
+			// The new model was written first, then the prior profile was restored so
+			// the secret cannot carry the new model while the active state is stale.
+			expect(saveConfig).toHaveBeenNthCalledWith(
+				1,
+				"new-config",
+				expect.objectContaining({ openRouterModelId: "openai/gpt-4-turbo" }),
+			)
+			expect(saveConfig).toHaveBeenNthCalledWith(2, "new-config", priorProfile)
+			// The previously active profile name ("test-config") is restored.
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "test-config")
+			// No activation success state leaked to the webview.
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.create_api_config")
+		})
+
+		test("aborts without deleting an existing profile when the prior profile cannot be read", async () => {
+			// The profile exists, but reading it fails (e.g. a transient secrets error).
+			// A swallowed failure must NOT be treated as "absent": rollback must never
+			// delete the still-existing profile and its secrets.
+			provider["providerSettingsManager"].hasConfig = vi.fn().mockResolvedValue(true)
+			provider["providerSettingsManager"].getProfile = vi
+				.fn()
+				.mockRejectedValue(new Error("transient secrets read failure"))
+			const saveConfig = provider["providerSettingsManager"].saveConfig
+			const deleteConfig = vi.fn().mockResolvedValue(undefined)
+			provider["providerSettingsManager"].deleteConfig = deleteConfig
+
+			const result = await provider.upsertProviderProfile("test-config", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4-turbo",
+			})
+
+			// The write aborts *before* saveConfig, so the existing profile is untouched.
+			expect(result).toBeUndefined()
+			expect(saveConfig).not.toHaveBeenCalled()
+			expect(deleteConfig).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.create_api_config")
 		})
 	})
 

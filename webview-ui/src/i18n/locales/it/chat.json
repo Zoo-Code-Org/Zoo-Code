@@ -495,5 +495,9 @@
 		"title": "Provider non più supportato",
 		"message": "Questo provider non è più disponibile. Seleziona un provider supportato per continuare.",
 		"openSettings": "Apri impostazioni"
-	}
+	},
+	"searchModel": "Cerca modelli...",
+	"modelListEmpty": "Nessun modello disponibile per questo provider",
+	"useCustomModel": "Usa modello personalizzato: {{modelId}}",
+	"selectModel": "Seleziona un modello"
 }

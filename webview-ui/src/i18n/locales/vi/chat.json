@@ -496,5 +496,9 @@
 		"title": "Nhà cung cấp không còn được hỗ trợ",
 		"message": "Nhà cung cấp này không còn khả dụng. Hãy chọn một nhà cung cấp được hỗ trợ để tiếp tục.",
 		"openSettings": "Mở cài đặt"
-	}
+	},
+	"searchModel": "Tìm kiếm mô hình...",
+	"modelListEmpty": "Không có mô hình nào khả dụng cho nhà cung cấp này",
+	"useCustomModel": "Sử dụng mô hình tùy chỉnh: {{modelId}}",
+	"selectModel": "Chọn một mô hình"
 }

@@ -495,5 +495,9 @@
 		"title": "Proveïdor ja no compatible",
 		"message": "Aquest proveïdor ja no està disponible. Selecciona un proveïdor compatible per continuar.",
 		"openSettings": "Obrir configuració"
-	}
+	},
+	"searchModel": "Cerca models...",
+	"modelListEmpty": "Aquest proveïdor no té models disponibles",
+	"useCustomModel": "Utilitza el model personalitzat: {{modelId}}",
+	"selectModel": "Selecciona un model"
 }

@@ -495,5 +495,9 @@
 		"title": "Proveedor ya no compatible",
 		"message": "Este proveedor ya no está disponible. Selecciona un proveedor compatible para continuar.",
 		"openSettings": "Abrir configuración"
-	}
+	},
+	"searchModel": "Buscar modelos...",
+	"modelListEmpty": "No hay modelos disponibles para este proveedor",
+	"useCustomModel": "Usar modelo personalizado: {{modelId}}",
+	"selectModel": "Seleccionar un modelo"
 }

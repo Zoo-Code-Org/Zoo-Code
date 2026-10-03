@@ -496,5 +496,9 @@
 		"title": "Sağlayıcı artık desteklenmiyor",
 		"message": "Bu sağlayıcı artık kullanılamıyor. Devam etmek için desteklenen bir sağlayıcı seçin.",
 		"openSettings": "Ayarları aç"
-	}
+	},
+	"searchModel": "Modelleri ara...",
+	"modelListEmpty": "Bu sağlayıcı için kullanılabilir model yok",
+	"useCustomModel": "Özel model kullan: {{modelId}}",
+	"selectModel": "Bir model seçin"
 }

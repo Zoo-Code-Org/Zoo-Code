@@ -483,5 +483,9 @@
 		"title": "Provider no longer supported",
 		"message": "This provider is no longer available. Select a supported provider to continue.",
 		"openSettings": "Open Settings"
-	}
+	},
+	"searchModel": "Search models...",
+	"modelListEmpty": "No models available for this provider",
+	"useCustomModel": "Use custom model: {{modelId}}",
+	"selectModel": "Select a model"
 }

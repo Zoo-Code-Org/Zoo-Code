@@ -1,0 +1,414 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useEvent } from "react-use"
+
+import {
+	type ProviderName,
+	type ProviderSettings,
+	type ModelInfo,
+	type ModelRecord,
+	type ExtensionMessage,
+	type LanguageModelChatSelector,
+	providerIdentifiers,
+	openAiModelInfoSaneDefaults,
+	anthropicDefaultModelId,
+	bedrockDefaultModelId,
+	deepSeekDefaultModelId,
+	moonshotDefaultModelId,
+	geminiDefaultModelId,
+	mistralDefaultModelId,
+	openAiNativeDefaultModelId,
+	qwenCodeDefaultModelId,
+	vertexDefaultModelId,
+	xaiDefaultModelId,
+	sambaNovaDefaultModelId,
+	internationalZAiDefaultModelId,
+	mainlandZAiDefaultModelId,
+	fireworksDefaultModelId,
+	friendliDefaultModelId,
+	minimaxDefaultModelId,
+	mimoDefaultModelId,
+	basetenDefaultModelId,
+	openRouterDefaultModelId,
+	requestyDefaultModelId,
+	unboundDefaultModelId,
+	litellmDefaultModelId,
+	vercelAiGatewayDefaultModelId,
+	zooGatewayDefaultModelId,
+	opencodeGoDefaultModelId,
+	kenariDefaultModelId,
+	nanoGptDefaultModelId,
+	kimiCodeDefaultModelId,
+	poeDefaultModelId,
+	isRetiredProvider,
+} from "@roo-code/types"
+
+import { useRouterModels } from "@/components/ui/hooks/useRouterModels"
+import { getStaticModelsForProvider } from "@/components/settings/utils/providerModelConfig"
+import { MODELS_BY_PROVIDER } from "@/components/settings/constants"
+import { useExtensionState } from "@/context/ExtensionStateContext"
+import { vscode } from "@/utils/vscode"
+
+type ModelIdKey = keyof Pick<
+	ProviderSettings,
+	| "openRouterModelId"
+	| "requestyModelId"
+	| "unboundModelId"
+	| "openAiModelId"
+	| "litellmModelId"
+	| "vercelAiGatewayModelId"
+	| "zooGatewayModelId"
+	| "opencodeGoModelId"
+	| "kenariModelId"
+	| "nanoGptModelId"
+	| "apiModelId"
+	| "ollamaModelId"
+	| "lmStudioModelId"
+	| "vsCodeLmModelSelector"
+>
+
+const STATIC_DEFAULT_MODEL_IDS: Partial<Record<ProviderName, string>> = {
+	[providerIdentifiers.anthropic]: anthropicDefaultModelId,
+	[providerIdentifiers.bedrock]: bedrockDefaultModelId,
+	[providerIdentifiers.deepseek]: deepSeekDefaultModelId,
+	[providerIdentifiers.moonshot]: moonshotDefaultModelId,
+	[providerIdentifiers.gemini]: geminiDefaultModelId,
+	[providerIdentifiers.mistral]: mistralDefaultModelId,
+	[providerIdentifiers.openaiNative]: openAiNativeDefaultModelId,
+	[providerIdentifiers.qwenCode]: qwenCodeDefaultModelId,
+	[providerIdentifiers.vertex]: vertexDefaultModelId,
+	[providerIdentifiers.xai]: xaiDefaultModelId,
+	[providerIdentifiers.sambanova]: sambaNovaDefaultModelId,
+	[providerIdentifiers.zai]: internationalZAiDefaultModelId,
+	[providerIdentifiers.fireworks]: fireworksDefaultModelId,
+	[providerIdentifiers.friendli]: friendliDefaultModelId,
+	[providerIdentifiers.minimax]: minimaxDefaultModelId,
+	[providerIdentifiers.mimo]: mimoDefaultModelId,
+	[providerIdentifiers.baseten]: basetenDefaultModelId,
+}
+
+const ROUTER_DEFAULT_MODEL_IDS: Partial<Record<ProviderName, string>> = {
+	[providerIdentifiers.openrouter]: openRouterDefaultModelId,
+	[providerIdentifiers.requesty]: requestyDefaultModelId,
+	[providerIdentifiers.unbound]: unboundDefaultModelId,
+	[providerIdentifiers.litellm]: litellmDefaultModelId,
+	[providerIdentifiers.vercelAiGateway]: vercelAiGatewayDefaultModelId,
+	[providerIdentifiers.zooGateway]: zooGatewayDefaultModelId,
+	[providerIdentifiers.opencodeGo]: opencodeGoDefaultModelId,
+	[providerIdentifiers.kenari]: kenariDefaultModelId,
+	[providerIdentifiers.nanogpt]: nanoGptDefaultModelId,
+	[providerIdentifiers.kimiCode]: kimiCodeDefaultModelId,
+	[providerIdentifiers.poe]: poeDefaultModelId,
+}
+
+// Providers whose model list is delivered through a dedicated message event
+// (mirrors the settings page provider components).
+const MESSAGE_BASED_PROVIDERS: ProviderName[] = [
+	providerIdentifiers.openai,
+	providerIdentifiers.ollama,
+	providerIdentifiers.lmstudio,
+	providerIdentifiers.vscodeLm,
+]
+
+/**
+ * Message channel for a message-based model list request. Each channel carries
+ * its own in-flight request identity so a reply can only be adopted by the
+ * request that most recently asked for it.
+ */
+type ModelRequestChannel = "openai" | "ollama" | "lmstudio" | "vscodeLm"
+
+export interface ChatModelSelectorData {
+	/** The provider key used to determine model source (undefined for retired providers). */
+	provider: ProviderName | undefined
+	/** Record of available models for the current provider (null until loaded or when N/A). */
+	models: Record<string, ModelInfo> | null
+	/** The configuration field key that stores the selected model for this provider. */
+	modelIdKey: ModelIdKey | undefined
+	/** The default model id for this provider. */
+	defaultModelId: string
+	/** Whether the model list is still loading. */
+	isLoading: boolean
+	/** Transform a selected model id into the stored configuration value (e.g. VSCode LM selector object). */
+	valueTransform?: (modelId: string) => unknown
+	/** Transform the stored configuration value back to a display string (e.g. VSCode LM selector). */
+	displayTransform?: (value: unknown) => string
+}
+
+/**
+ * Resolves the model list, storage key and defaults for the currently active
+ * provider so the chat input bar can render a compact model picker.
+ *
+ * The data sources mirror the settings page (`ApiOptions` and the provider
+ * components) so the chat selector shows the exact same models:
+ * - Router providers (openrouter, requesty, unbound, vercel-ai-gateway,
+ *   zoo-gateway, opencode-go, kenari, nanogpt, kimi-code):
+ *   react-query `useRouterModels` request.
+ * - litellm / poe: backend-broadcast `routerModels` from extension state.
+ * - openai (OpenAI compatible), ollama, lmstudio, vscode-lm: request on mount
+ *   and listen for the corresponding `*Models` message event.
+ * - Static providers: `getStaticModelsForProvider`.
+ */
+export const useChatModelSelector = (): ChatModelSelectorData => {
+	const { apiConfiguration, routerModels: stateRouterModels, currentApiConfigName } = useExtensionState()
+
+	const provider = (apiConfiguration?.apiProvider || providerIdentifiers.openrouter) as ProviderName
+	const activeProvider = isRetiredProvider(provider) ? undefined : provider
+
+	// Router providers are fetched through react-query (mirrors ApiOptions).
+	const routerModels = useRouterModels({
+		provider: activeProvider,
+		enabled: !!activeProvider && ROUTER_DEFAULT_MODEL_IDS[activeProvider] !== undefined,
+	})
+
+	// Message-based providers: request the models on mount and keep the
+	// latest list delivered by the backend.
+	const [openAiModels, setOpenAiModels] = useState<string[]>([])
+	const [ollamaModels, setOllamaModels] = useState<ModelRecord>({})
+	const [lmStudioModels, setLmStudioModels] = useState<ModelRecord>({})
+	const [vsCodeLmModels, setVsCodeLmModels] = useState<LanguageModelChatSelector[]>([])
+
+	// Identity of the in-flight model request per channel. A reply is adopted only by the request
+	// most recently issued for its channel, so a late reply from a previous provider/profile cannot
+	// overwrite the active list. `null` means no request is in flight (nothing may be adopted).
+	const modelRequestIdsRef = useRef<Record<ModelRequestChannel, string | null>>({
+		openai: null,
+		ollama: null,
+		lmstudio: null,
+		vscodeLm: null,
+	})
+
+	// Drop any previously fetched message-based model list when the provider or API profile
+	// changes; the lists are provider/profile scoped and a stale entry would leak across a switch.
+	useEffect(() => {
+		setOpenAiModels([])
+		setOllamaModels({})
+		setLmStudioModels({})
+		setVsCodeLmModels([])
+		modelRequestIdsRef.current = { openai: null, ollama: null, lmstudio: null, vscodeLm: null }
+	}, [activeProvider, currentApiConfigName])
+
+	const onMessage = useCallback((event: MessageEvent) => {
+		const message: ExtensionMessage = event.data
+
+		// Only accept a response belonging to the request most recently issued for its channel.
+		// Replies without an identity come from other callers (e.g. the settings page) and are
+		// accepted; a superseded request id, or one arriving after a provider/profile switch
+		// invalidated the channel, is dropped.
+		const isCurrentRequest = (channel: ModelRequestChannel) =>
+			!message.requestId || message.requestId === modelRequestIdsRef.current[channel]
+
+		switch (message.type) {
+			case "openAiModels":
+				if (isCurrentRequest("openai")) setOpenAiModels(message.openAiModels ?? [])
+				break
+			case "ollamaModels":
+				if (isCurrentRequest("ollama")) setOllamaModels(message.ollamaModels ?? {})
+				break
+			case "lmStudioModels":
+				if (isCurrentRequest("lmstudio")) setLmStudioModels(message.lmStudioModels ?? {})
+				break
+			case "vsCodeLmModels":
+				if (isCurrentRequest("vscodeLm")) setVsCodeLmModels(message.vsCodeLmModels ?? [])
+				break
+		}
+	}, [])
+	useEvent("message", onMessage)
+
+	// Request models on mount when a message-based provider is active (mirrors the settings page).
+	useEffect(() => {
+		if (!activeProvider || !MESSAGE_BASED_PROVIDERS.includes(activeProvider)) {
+			return
+		}
+
+		// Tag each request with an identity token so the matching reply can be identified.
+		const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+		switch (activeProvider) {
+			case providerIdentifiers.openai:
+				if (apiConfiguration?.openAiBaseUrl && apiConfiguration?.openAiApiKey) {
+					modelRequestIdsRef.current.openai = requestId
+					vscode.postMessage({
+						type: "requestOpenAiModels",
+						requestId,
+						values: {
+							baseUrl: apiConfiguration.openAiBaseUrl,
+							apiKey: apiConfiguration.openAiApiKey,
+							customHeaders: {},
+							openAiHeaders: apiConfiguration.openAiHeaders ?? {},
+						},
+					})
+				}
+				break
+			case providerIdentifiers.ollama:
+				modelRequestIdsRef.current.ollama = requestId
+				vscode.postMessage({ type: "requestOllamaModels", requestId })
+				break
+			case providerIdentifiers.lmstudio:
+				modelRequestIdsRef.current.lmstudio = requestId
+				vscode.postMessage({ type: "requestLmStudioModels", requestId })
+				break
+			case providerIdentifiers.vscodeLm:
+				modelRequestIdsRef.current.vscodeLm = requestId
+				vscode.postMessage({ type: "requestVsCodeLmModels", requestId })
+				break
+		}
+
+		// Cancel the in-flight request when the provider/profile changes again or the hook unmounts:
+		// dropping the identity makes any reply still in flight fail the `isCurrentRequest` check
+		// instead of overwriting the newly requested list.
+		return () => {
+			modelRequestIdsRef.current = { openai: null, ollama: null, lmstudio: null, vscodeLm: null }
+		}
+	}, [
+		activeProvider,
+		// Re-request after a provider/profile switch (the reset effect clears the previous list).
+		currentApiConfigName,
+		apiConfiguration?.openAiBaseUrl,
+		apiConfiguration?.openAiApiKey,
+		apiConfiguration?.openAiHeaders,
+	])
+
+	// Map provider -> config field key + model list + default id.
+	return useMemo<ChatModelSelectorData>(() => {
+		if (!activeProvider) {
+			return {
+				provider: undefined,
+				models: null,
+				modelIdKey: undefined,
+				defaultModelId: "",
+				isLoading: false,
+			}
+		}
+
+		const defaultModelId =
+			(activeProvider === providerIdentifiers.zai && apiConfiguration?.zaiApiLine === "china_coding"
+				? mainlandZAiDefaultModelId
+				: (ROUTER_DEFAULT_MODEL_IDS[activeProvider] ?? STATIC_DEFAULT_MODEL_IDS[activeProvider] ?? "")) ?? ""
+
+		let models: Record<string, ModelInfo> | null = null
+		let modelIdKey: ModelIdKey | undefined = undefined
+		let valueTransform: ((modelId: string) => unknown) | undefined
+		let displayTransform: ((value: unknown) => string) | undefined
+		let isLoading = false
+
+		switch (activeProvider) {
+			case providerIdentifiers.openrouter:
+				models = routerModels.data?.openrouter ?? null
+				modelIdKey = "openRouterModelId"
+				break
+			case providerIdentifiers.requesty:
+				models = routerModels.data?.requesty ?? null
+				modelIdKey = "requestyModelId"
+				break
+			case providerIdentifiers.unbound:
+				models = routerModels.data?.unbound ?? null
+				modelIdKey = "unboundModelId"
+				break
+			case providerIdentifiers.litellm:
+				// The settings page reads litellm from the backend broadcast cache (stateRouterModels).
+				models = stateRouterModels?.litellm ?? null
+				modelIdKey = "litellmModelId"
+				break
+			case providerIdentifiers.vercelAiGateway:
+				models = routerModels.data?.[providerIdentifiers.vercelAiGateway] ?? null
+				modelIdKey = "vercelAiGatewayModelId"
+				break
+			case providerIdentifiers.zooGateway:
+				models = routerModels.data?.[providerIdentifiers.zooGateway] ?? null
+				modelIdKey = "zooGatewayModelId"
+				break
+			case providerIdentifiers.opencodeGo:
+				models = routerModels.data?.[providerIdentifiers.opencodeGo] ?? null
+				modelIdKey = "opencodeGoModelId"
+				break
+			case providerIdentifiers.kenari:
+				models = routerModels.data?.[providerIdentifiers.kenari] ?? null
+				modelIdKey = "kenariModelId"
+				break
+			case providerIdentifiers.nanogpt:
+				models = routerModels.data?.[providerIdentifiers.nanogpt] ?? null
+				modelIdKey = "nanoGptModelId"
+				break
+			case providerIdentifiers.kimiCode:
+				// Kimi Code stores its model id in apiModelId (mirrors useSelectedModel).
+				models = routerModels.data?.[providerIdentifiers.kimiCode] ?? null
+				modelIdKey = "apiModelId"
+				break
+			case providerIdentifiers.poe:
+				// Same as litellm: poe uses the backend broadcast cache.
+				models = stateRouterModels?.poe ?? null
+				modelIdKey = "apiModelId"
+				break
+			case providerIdentifiers.openai:
+				// OpenAI Compatible: fetched from the baseUrl via `requestOpenAiModels` → `openAiModels`.
+				models =
+					Object.keys(openAiModels).length > 0
+						? Object.fromEntries(openAiModels.map((item) => [item, openAiModelInfoSaneDefaults]))
+						: null
+				modelIdKey = "openAiModelId"
+				break
+			case providerIdentifiers.ollama:
+				models = Object.keys(ollamaModels).length > 0 ? ollamaModels : null
+				modelIdKey = "ollamaModelId"
+				break
+			case providerIdentifiers.lmstudio:
+				models = Object.keys(lmStudioModels).length > 0 ? lmStudioModels : null
+				modelIdKey = "lmStudioModelId"
+				break
+			case providerIdentifiers.vscodeLm:
+				models = Object.fromEntries(
+					vsCodeLmModels.map((model) => [
+						`${model.vendor}/${model.family}`,
+						{
+							maxTokens: 0,
+							contextWindow: 0,
+							supportsPromptCache: false,
+							description: `${model.vendor} - ${model.family}`,
+						},
+					]),
+				)
+				modelIdKey = "vsCodeLmModelSelector"
+				valueTransform = (modelId) => {
+					const [vendor, family] = modelId.split("/")
+					return { vendor, family }
+				}
+				displayTransform = (value) => {
+					const selector = value as { vendor?: string; family?: string } | undefined
+					return selector?.vendor && selector?.family ? `${selector.vendor}/${selector.family}` : ""
+				}
+				break
+			default:
+				// Static providers (anthropic, bedrock, gemini, …); pass the configuration so Z.ai
+				// resolves models for the same API line (China vs international) as `defaultModelId`.
+				models = MODELS_BY_PROVIDER[activeProvider]
+					? getStaticModelsForProvider(activeProvider, undefined, apiConfiguration)
+					: null
+				modelIdKey = "apiModelId"
+		}
+
+		isLoading =
+			(ROUTER_DEFAULT_MODEL_IDS[activeProvider] !== undefined && routerModels.isLoading) ||
+			(activeProvider === providerIdentifiers.openai &&
+				!!apiConfiguration?.openAiBaseUrl &&
+				!!apiConfiguration?.openAiApiKey &&
+				openAiModels.length === 0)
+
+		return {
+			provider: activeProvider,
+			models,
+			modelIdKey,
+			defaultModelId,
+			isLoading,
+			valueTransform,
+			displayTransform,
+		}
+	}, [
+		activeProvider,
+		apiConfiguration,
+		routerModels,
+		stateRouterModels,
+		openAiModels,
+		ollamaModels,
+		lmStudioModels,
+		vsCodeLmModels,
+	])
+}

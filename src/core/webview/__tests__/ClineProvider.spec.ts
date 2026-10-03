@@ -405,6 +405,9 @@ vi.mock("@roo-code/cloud", () => ({
 				login: vi.fn().mockResolvedValue(undefined),
 				logout: vi.fn().mockResolvedValue(undefined),
 				off: vi.fn(),
+				// A cloud instance is present, so the fail-closed allow-list guard reads
+				// this. Default to allow-all so profile writes behave as before.
+				getAllowList: vi.fn().mockReturnValue({ allowAll: true, providers: {} }),
 			}
 		},
 	},
@@ -5311,6 +5314,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
 					}),
 					false,
+					{ bypassAllowList: true },
 				)
 			})
 
@@ -5355,6 +5359,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
 					}),
 					true,
+					{ bypassAllowList: true },
 				)
 				expect(saveConfig).toHaveBeenCalledWith(
 					"Backup Zoo",

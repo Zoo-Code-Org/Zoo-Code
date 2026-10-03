@@ -341,6 +341,42 @@ describe("ProfileValidator", () => {
 			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
 		})
 
+		it("should extract zooGatewayModelId for zoo-gateway provider", () => {
+			const allowList: OrganizationAllowList = {
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.zooGateway]: {
+						allowAll: false,
+						models: ["anthropic/claude-sonnet-4"],
+					},
+				},
+			}
+			const profile: ProviderSettings = {
+				apiProvider: providerIdentifiers.zooGateway,
+				zooGatewayModelId: "anthropic/claude-sonnet-4",
+			}
+
+			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
+		})
+
+		it("should reject a zoo-gateway profile whose model is not on the allow-list", () => {
+			const allowList: OrganizationAllowList = {
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.zooGateway]: {
+						allowAll: false,
+						models: ["anthropic/claude-sonnet-4"],
+					},
+				},
+			}
+			const profile: ProviderSettings = {
+				apiProvider: providerIdentifiers.zooGateway,
+				zooGatewayModelId: "anthropic/claude-opus-4",
+			}
+
+			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(false)
+		})
+
 		it("should handle providers with undefined models list gracefully", () => {
 			const allowList: OrganizationAllowList = {
 				allowAll: false,

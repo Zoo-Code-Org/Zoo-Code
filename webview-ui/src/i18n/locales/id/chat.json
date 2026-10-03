@@ -501,5 +501,9 @@
 		"title": "Penyedia tidak lagi didukung",
 		"message": "Penyedia ini sudah tidak tersedia. Pilih penyedia yang didukung untuk melanjutkan.",
 		"openSettings": "Buka Pengaturan"
-	}
+	},
+	"searchModel": "Cari model...",
+	"modelListEmpty": "Tidak ada model yang tersedia untuk penyedia ini",
+	"useCustomModel": "Gunakan model kustom: {{modelId}}",
+	"selectModel": "Pilih model"
 }
