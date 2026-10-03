@@ -1221,6 +1221,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
+	 * Apply a webview edit to a queued message. Besides updating the queue
+	 * entry, the task-owned pending submission is updated in place: while the
+	 * ask-response slot still carries that submission (no direct response has
+	 * overwritten it), the edited text/images replace the original copy so the
+	 * consuming ask returns the edited content instead of the stale one.
+	 */
+	public editQueuedMessage(queuedMessageId: string, text: string, images?: string[]): void {
+		this.messageQueueService.updateMessage(queuedMessageId, text, images)
+		if (
+			this.pendingSubmittedQueuedMessageId === queuedMessageId &&
+			this.askResponseQueuedMessageId === queuedMessageId
+		) {
+			this.askResponseText = text
+			this.askResponseImages = images
+		}
+	}
+
+	/**
 	 * Clears the pending action metadata after its durable result is saved.
 	 * Reconciles in-memory state with the task history store to avoid clearing a newer action.
 	 */

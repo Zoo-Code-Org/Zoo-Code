@@ -2319,10 +2319,14 @@ describe("webviewMessageHandler - chat message queue", () => {
 		const queue = new MessageQueueService()
 		const added = queue.addMessage("original")!
 		const updateSpy = vi.spyOn(queue, "updateMessage")
+		const editQueuedMessage = vi.fn((id: string, text: string, images?: string[]) =>
+			queue.updateMessage(id, text, images),
+		)
 		vi.mocked(mockClineProvider.getCurrentTask).mockReturnValue({
 			cwd: "/mock/workspace",
 			rooIgnoreController: undefined,
 			messageQueueService: queue,
+			editQueuedMessage,
 		} as unknown as ReturnType<ClineProvider["getCurrentTask"]>)
 
 		await webviewMessageHandler(mockClineProvider, {
@@ -2334,6 +2338,7 @@ describe("webviewMessageHandler - chat message queue", () => {
 		// message must carry the validated images, proving the edit path no
 		// longer bypasses the size/mention validation applied to queueMessage.
 		expect(resolveImageMentions).toHaveBeenCalled()
+		expect(editQueuedMessage).toHaveBeenCalledWith(added.id, "edited", ["data:image/png;base64,from-mention"])
 		expect(updateSpy).toHaveBeenCalledWith(added.id, "edited", ["data:image/png;base64,from-mention"])
 	})
 

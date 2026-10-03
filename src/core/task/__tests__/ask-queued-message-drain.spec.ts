@@ -381,6 +381,28 @@ describe("Task.ask queued message drain", () => {
 		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["queued note"])
 	})
 
+	it("applies a queue edit to the pending submitted response before the ask consumes it", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+
+		// Park a completion ask, then drain: the submission lands in the
+		// ask-response slot and stays queued until the durable ack.
+		const askPromise = task.ask("completion_result", "Done", false)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+		task.messageQueueService.addMessage("original text")
+		await task.processQueuedMessages()
+		const queuedEntry = task.messageQueueService.messages.at(0)
+		if (!queuedEntry) throw new Error("queued message missing")
+		expect(task["askResponseText"]).toBe("original text")
+
+		// The user edits the queued message before the ask observes the slot:
+		// the task-owned pending submission must carry the edited content.
+		task.editQueuedMessage(queuedEntry.id, "edited text", ["edited.png"])
+
+		const result = await askPromise
+		expect(result).toMatchObject({ response: "messageResponse", text: "edited text", images: ["edited.png"] })
+		expect(result.queuedMessageId).toBe(queuedEntry.id)
+	})
+
 	it("delivers an intercepted message exactly once when a consumer acks through the durable helper", async () => {
 		const task = await createTask({ getState: async () => ({}) })
 		const submitSpy = vi.spyOn(task, "submitUserMessage")

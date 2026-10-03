@@ -3837,9 +3837,10 @@ export const webviewMessageHandler = async (
 			if (message.payload) {
 				const { id, text, images } = message.payload as EditQueuedMessagePayload
 				// Edits can attach images too, so they go through the same
-				// size/mention validation as fresh queued messages.
+				// size/mention validation as fresh queued messages, and through
+				// the task so a pending drain submission is updated in place.
 				const resolved = await resolveIncomingImages({ text, images })
-				provider.getCurrentTask()?.messageQueueService.updateMessage(id, resolved.text, resolved.images)
+				provider.getCurrentTask()?.editQueuedMessage(id, resolved.text, resolved.images)
 			}
 
 			break
