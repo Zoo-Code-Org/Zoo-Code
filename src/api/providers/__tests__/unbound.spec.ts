@@ -246,6 +246,108 @@ describe("getUnboundModels", () => {
 		expect(consoleError).toHaveBeenCalledWith("[getUnboundModels] Unexpected response format:", undefined)
 	})
 
+	it("returns mapped models when the API responds with the real keyed catalog object", async () => {
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+		// Fixture copied from the live unauthenticated payload of
+		// https://api.getunbound.ai/models (2026-10-03, trimmed to two entries).
+		// The top level is a JSON object keyed by model ID; numbers arrive as strings.
+		mockedAxios.get.mockResolvedValue({
+			data: {
+				"anthropic/claude-opus-4-7": {
+					maxTokens: "128000",
+					contextWindow: "1000000",
+					cacheReadPrice: "0.50",
+					supportsImages: true,
+					cacheWritePrice: "6.25",
+					inputTokenPrice: "5.00",
+					outputTokenPrice: "25.00",
+					supportsWebSearch: true,
+					supportsPromptCaching: true,
+					supportsExtendedThinking: true,
+				},
+				"anthropic/claude-haiku-4-5-20251001": {
+					maxTokens: "32000",
+					contextWindow: "200000",
+					supportsImages: true,
+					inputTokenPrice: "1.000000",
+					outputTokenPrice: "5.000000",
+					supportsWebSearch: true,
+					supportsPromptCaching: true,
+					supportsExtendedThinking: true,
+				},
+			},
+		})
+
+		const models = await getUnboundModels("test-key")
+
+		expect(models).toEqual({
+			"anthropic/claude-opus-4-7": {
+				maxTokens: 128000,
+				contextWindow: 1000000,
+				supportsPromptCache: true,
+				supportsImages: true,
+				inputPrice: 5,
+				outputPrice: 25,
+				cacheWritesPrice: 6.25,
+				cacheReadsPrice: 0.5,
+			},
+			"anthropic/claude-haiku-4-5-20251001": {
+				maxTokens: 32000,
+				contextWindow: 200000,
+				supportsPromptCache: true,
+				supportsImages: true,
+				inputPrice: 1,
+				outputPrice: 5,
+				cacheWritesPrice: undefined,
+				cacheReadsPrice: undefined,
+			},
+		})
+		expect(consoleError).not.toHaveBeenCalled()
+	})
+
+	it("falls back to defaults when keyed-catalog numbers are missing or unparseable", async () => {
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+		mockedAxios.get.mockResolvedValue({
+			data: {
+				"anthropic/claude-opus-4-5": {
+					maxTokens: "n/a",
+					contextWindow: "200000",
+					supportsPromptCaching: true,
+					supportsImages: false,
+					inputTokenPrice: "not-a-number",
+					outputTokenPrice: "15.00",
+				},
+				"openai/gpt-5.1": {},
+			},
+		})
+
+		const models = await getUnboundModels("test-key")
+
+		expect(models).toEqual({
+			"anthropic/claude-opus-4-5": {
+				maxTokens: 8192,
+				contextWindow: 200000,
+				supportsPromptCache: true,
+				supportsImages: false,
+				inputPrice: undefined,
+				outputPrice: 15,
+				cacheWritesPrice: undefined,
+				cacheReadsPrice: undefined,
+			},
+			"openai/gpt-5.1": {
+				maxTokens: 8192,
+				contextWindow: 200_000,
+				supportsPromptCache: false,
+				supportsImages: false,
+				inputPrice: undefined,
+				outputPrice: undefined,
+				cacheWritesPrice: undefined,
+				cacheReadsPrice: undefined,
+			},
+		})
+		expect(consoleError).not.toHaveBeenCalled()
+	})
+
 	it("returns mapped models when the API responds with an array", async () => {
 		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
 		mockedAxios.get.mockResolvedValue({
