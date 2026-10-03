@@ -740,6 +740,30 @@ describe("useSelectedModel", () => {
 			expect(result.current.info?.maxTokens).toBe(131_072)
 		})
 
+		it.each([providerIdentifiers.deepseek, providerIdentifiers.moonshot, providerIdentifiers.mimo])(
+			"%s: preserves a router-only configured ID while the router query is unsettled",
+			(provider) => {
+				const routerOnlyModelId = `${provider}-router-only-unsettled`
+				// Loading (no cached data) and a failed fetch with no cache both leave
+				// the query unsettled. The configured ID exists only in the router
+				// catalog, so substituting the static default here would leak into
+				// ApiOptions' apiModelId sync effect and bake the default into saved
+				// settings on Save. Info stays undefined until router data lands.
+				for (const queryState of [{ isLoading: true }, { isError: true }] as const) {
+					mockUseRouterModels.mockReturnValue(createRouterModelsResult(undefined, queryState))
+					mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+					const { result } = renderHook(
+						() => useSelectedModel({ apiProvider: provider, apiModelId: routerOnlyModelId }),
+						{ wrapper: createWrapper() },
+					)
+
+					expect(result.current.id).toBe(routerOnlyModelId)
+					expect(result.current.info).toBeUndefined()
+				}
+			},
+		)
+
 		it.each([
 			[providerIdentifiers.deepseek, deepSeekDefaultModelId, deepSeekModels[deepSeekDefaultModelId]],
 			[providerIdentifiers.moonshot, moonshotDefaultModelId, moonshotModels[moonshotDefaultModelId]],

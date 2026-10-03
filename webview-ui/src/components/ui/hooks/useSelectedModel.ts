@@ -85,6 +85,13 @@ const isStaticCatalogDynamicProvider = (provider: ProviderName): provider is Sta
  * context window rendered a bogus window size of 1 (`contextWindow || 1`).
  * Once router data arrives, getSelectedModel revalidates against the merged
  * catalog and takes over.
+ *
+ * The configured ID is preserved even when it is absent from the static
+ * catalog (a router-only model): while the query is unsettled, substituting
+ * the default here would leak into ApiOptions' apiModelId sync effect and
+ * silently bake the default into saved settings. Info stays undefined for IDs
+ * the static catalog cannot describe; capability UI falls back to its own
+ * defaults until router data lands.
  */
 function getStaticCatalogSelection(
 	provider: StaticCatalogDynamicProvider,
@@ -93,22 +100,15 @@ function getStaticCatalogSelection(
 	const configuredId = apiConfiguration.apiModelId
 	switch (provider) {
 		case providerIdentifiers.deepseek: {
-			const id =
-				configuredId && deepSeekModels[configuredId as keyof typeof deepSeekModels]
-					? configuredId
-					: deepSeekDefaultModelId
+			const id = configuredId ?? deepSeekDefaultModelId
 			return { id, info: deepSeekModels[id as keyof typeof deepSeekModels] }
 		}
 		case providerIdentifiers.moonshot: {
-			const id =
-				configuredId && moonshotModels[configuredId as keyof typeof moonshotModels]
-					? configuredId
-					: moonshotDefaultModelId
+			const id = configuredId ?? moonshotDefaultModelId
 			return { id, info: moonshotModels[id as keyof typeof moonshotModels] }
 		}
 		case providerIdentifiers.mimo: {
-			const id =
-				configuredId && mimoModels[configuredId as keyof typeof mimoModels] ? configuredId : mimoDefaultModelId
+			const id = configuredId ?? mimoDefaultModelId
 			return { id, info: mimoModels[id as keyof typeof mimoModels] }
 		}
 	}
