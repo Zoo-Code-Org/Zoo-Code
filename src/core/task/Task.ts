@@ -290,6 +290,13 @@ interface BackoffApiError extends Error {
 	errorDetails?: { "@type"?: string; retryDelay?: string }[]
 }
 
+export class PendingActionSettlementError extends Error {
+	constructor(message: string, options?: ErrorOptions) {
+		super(message, options)
+		this.name = "PendingActionSettlementError"
+	}
+}
+
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly taskId: string
 	readonly rootTaskId?: string
@@ -697,7 +704,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		this.parentTask = parentTask
 		this.taskNumber = taskNumber
-		this.initialStatus = initialStatus
+		this.initialStatus = initialStatus ?? historyItem?.status
 		this.pendingAction = historyItem?.pendingAction
 
 		// Store the task's mode and API config name when it's created.
@@ -1082,6 +1089,84 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
+	/**
+	 * An interrupted task cannot legally delegate, so a staged create-subtask
+	 * action is a durable rejection marker rather than replayable work. The
+	 * constructor-injected history item can be stale, so the persisted record
+	 * is refreshed first and the refreshed action is the one settled. A failed
+	 * refresh, lookup, or settlement stops replay instead of risking another
+	 * doomed child. A refreshed action kept for replay must also appear in the
+	 * loaded conversation, because a replayed acknowledgment without a matching
+	 * tool use could answer the wrong tool call.
+	 */
+	private async settleInterruptedCreateSubtaskBeforeReplay(): Promise<void> {
+		if (this.initialStatus !== "interrupted") {
+			return
+		}
+
+		const provider = this.providerRef.deref()
+		if (!provider) {
+			throw new PendingActionSettlementError(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Provider unavailable for task ${this.taskId}`,
+			)
+		}
+
+		try {
+			await provider.taskHistoryStore.reconcile({ forceRefresh: true })
+		} catch (error) {
+			throw new PendingActionSettlementError(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Failed to refresh task history for task ${this.taskId}`,
+				{ cause: error },
+			)
+		}
+
+		const refreshedItem = provider.taskHistoryStore.get(this.taskId)
+		if (!refreshedItem) {
+			throw new PendingActionSettlementError(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Task ${this.taskId} not found in refreshed task history`,
+			)
+		}
+		this.pendingAction = refreshedItem.pendingAction
+
+		const action = refreshedItem.pendingAction
+		if (action?.kind === "create_subtask") {
+			let authoritative: HistoryItem
+			try {
+				authoritative = await provider.taskHistoryStore.clearPendingActionIfMatching(
+					this.taskId,
+					action.actionId,
+				)
+			} catch (error) {
+				throw new PendingActionSettlementError(
+					`[Task#settleInterruptedCreateSubtaskBeforeReplay] Failed to settle rejected action for task ${this.taskId}`,
+					{ cause: error },
+				)
+			}
+			this.pendingAction = authoritative.pendingAction
+		}
+
+		const replayAction = this.pendingAction
+		if (replayAction && !this.loadedConversationContainsToolUse(replayAction.actionId)) {
+			throw new PendingActionSettlementError(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Refreshed action ${replayAction.actionId} for task ${this.taskId} is missing from the loaded conversation`,
+			)
+		}
+	}
+
+	/**
+	 * A replayed acknowledgment is safe only when its tool call is part of the
+	 * conversation the task just loaded. A tool result for an unmatched action
+	 * id could otherwise answer a tool call the model never made here.
+	 */
+	private loadedConversationContainsToolUse(actionId: string): boolean {
+		return this.apiConversationHistory.some(
+			(message) =>
+				message.role === "assistant" &&
+				Array.isArray(message.content) &&
+				message.content.some((block) => block.type === "tool_use" && block.id === actionId),
+		)
+	}
+
 	private handleQueuedAskResponse(message: QueuedMessage, resolution: QueuedAskResolution): string | undefined {
 		this.handleWebviewAskResponse(resolution.response, message.text, message.images)
 		if (resolution.requiresDurableAck) {
@@ -1379,8 +1464,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.clineMessages.push(message)
 		const provider = this.providerRef.deref()
 		// Unanswered asks must reach the webview before Message listeners can respond against its state.
-		const requiresImmediateState =
-			message.partial === true || (message.type === "ask" && message.isAnswered !== true)
+		//
+		// Partial `say` messages deliberately do NOT flush. `flushPostStateToWebviewThrottled()`
+		// invoked right after a leading-edge debounce call has no pending trailing invocation to
+		// run, so it only cancels the trailing timer — which makes the *next* call hit the leading
+		// edge and post immediately. Flushing on every partial therefore defeated the debounce
+		// entirely (one full-state post per message, the very behaviour #1078 set out to remove).
+		// They are safe on the throttled path: the trailing/maxWait post carries the message's
+		// current text, so a `messageUpdated` dropped for a not-yet-known `ts` is superseded
+		// rather than lost.
+		//
+		// Partial *asks* still flush, via the clause below — `Task#ask` adds them without
+		// `isAnswered`, so they keep the ordering guarantee that unanswered asks depend on.
+		const requiresImmediateState = message.type === "ask" && message.isAnswered !== true
 		try {
 			await provider?.postStateToWebviewThrottled()
 		} catch (error) {
@@ -2460,6 +2556,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// This is important in case the user deletes messages without resuming
 			// the task first.
 			this.hydrateApiConversationHistory(savedApiConversationHistory)
+			await this.settleInterruptedCreateSubtaskBeforeReplay()
 			if (
 				this.pendingAction &&
 				this.apiConversationHistory.some(
@@ -3327,6 +3424,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.didRejectTool = false
 				this.didAlreadyUseTool = false
 				this.assistantMessageSavedToHistory = false
+				this.didFinishAbortingStream = false
 				this.resetAssistantMessagePersistence()
 				// Reset tool failure flag for each new assistant turn - this ensures that tool failures
 				// only prevent attempt_completion within the same assistant message, not across turns
@@ -3807,8 +3905,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						await abortStream(cancelReason, streamingFailedMessage)
 
 						if (this.abort) {
-							// User cancelled - abort the entire task
-							this.abortReason = cancelReason
+							// ??= keeps the first reason; a cancel can land during abortStream after cancelReason was already computed.
+							this.abortReason ??= "user_cancelled"
 							await this.abortTask()
 						} else if (error instanceof OutputTokenLimitError) {
 							// Truncation repeats on an identical request, so never auto-retry it
@@ -3843,8 +3941,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									console.log(
 										`[Task#${this.taskId}.${this.instanceId}] Task aborted during mid-stream retry backoff`,
 									)
-									// Abort the entire task
-									this.abortReason = "user_cancelled"
+									this.abortReason ??= "user_cancelled"
 									await this.abortTask()
 									break
 								}

@@ -45,11 +45,11 @@ Zoo Code rozwija fundament stworzony przez Roo Code i stale rozszerza go o:
 - **Bardziej niezawodne workflow terminala i edycji** — poprawki przedwczesnego kończenia poleceń terminala, race condition stanu zadań, zarządzania kontekstem, edycji diff i użycia narzędzi właściwych dla providerów.
 - **Większą kontrolę nad workspace** — zarządzanie regułami, ograniczenia MCP dla poszczególnych trybów, kontrolę ścieżek multi-root, opcje reasoning modeli i akcje przeglądu zmian po ukończeniu.
 
-## Nowości w v3.84.0
+## Nowości w v3.86.0
 
-- ✨ **Dodano nowe modele SOTA:** Korzystaj z GPT-6 Sol, GPT-6 Luna i Claude Opus 5.5 u obsługiwanych providerów.
-- 🧭 **Bardziej niezawodne zadania i podzadania:** Zachowaj izolację delegowanych trybów, utrzymuj linki do podzadań po wielokrotnym zatrzymaniu i chroń ustawienia orchestratora, gdy polecenia slash zmieniają tryb.
-- 🛠️ **Bardziej niezawodne działanie terminala, providerów i wyszukiwania kodu:** Usprawnij terminal w Windows i środowiskach innych niż angielskie, popraw odpowiedzi oraz anulowanie u providerów i spraw, aby wyszukiwanie kodu bardziej konsekwentnie korzystało z właściwego workspace.
+- ✨ **Obsługa nowych modeli:** Korzystaj z GPT-6.1 Sol, poprawionego limitu wyjściowego Claude Opus 5.5 i wybierz DeepSeek V4.1 Flash w OpenCode Go.
+- 🧭 **Niezawodne przerywanie i wstrzymywanie zadań:** Zachowaj pierwszy powód przerwania, resetuj stan przerwania strumienia przy każdym żądaniu i zapobiegaj ponownemu uruchamianiu odrzuconych podzadań przez przerwane zadania.
+- 🛠️ **Niezawodne narzędzia, prompty i strumieniowanie interfejsu:** Zachowaj argumenty narzędzi przesyłane strumieniowo w całości, egzekwuj zasady używania narzędzi MCP, zapobiegaj zmyślonym numerom linii i usprawnij aktualizacje czatu.
 
 ## Co Zoo Code może zrobić dla CIEBIE?
 

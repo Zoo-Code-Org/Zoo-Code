@@ -20,8 +20,25 @@ export class LifecycleTransitionError extends Error {
 export function assertValidTransition(from: HistoryItemStatus | undefined, to: HistoryItemStatus): void {
 	const fromStatus: HistoryItemStatus = from ?? "active"
 	if (!VALID_TASK_STATUS_TRANSITIONS[fromStatus].includes(to)) {
-		throw new Error(`Invalid task status transition: ${fromStatus} → ${to}`)
+		throw new LifecycleTransitionError(`Invalid task status transition: ${fromStatus} → ${to}`)
 	}
+}
+
+/**
+ * Settles the pending create_subtask action whose delegation the authoritative
+ * parent record rejected (#1714). Only the exact matching action ID is cleared;
+ * status, lineage, accounting, and unrelated fields are preserved. A replaced
+ * or different-kind pending action is never cleared.
+ */
+export function settleRejectedCreateSubtaskAction(parent: HistoryItem, pendingActionId: string): HistoryItem {
+	const pending = parent.pendingAction
+	if (parent.status === "completed") {
+		return parent
+	}
+	if (pending?.kind !== "create_subtask" || pending.actionId !== pendingActionId) {
+		return parent
+	}
+	return { ...parent, pendingAction: undefined }
 }
 
 export function delegateTaskToChild(
