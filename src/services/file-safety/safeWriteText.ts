@@ -44,10 +44,13 @@ function _tempName(dir: string, prefix: string): string {
 	return path.join(dir, "." + prefix + "_" + Date.now() + "_" + Math.random().toString(36).substring(2) + ".tmp")
 }
 
-/** Create a private staging sub-directory inside *dir* so that multiple
- * concurrent writes never collide on their temp names. */
+/** Create a private per-write staging sub-directory inside *dir*. The name is
+ * unique per write, so concurrent writes never collide on their temp names and
+ * never remove a staging directory another write is still using: with one shared
+ * name, one write's best-effort rmdir could delete the directory another write
+ * had just created but not yet opened, failing its openSync with ENOENT. */
 function _stagingDir(dir: string): string {
-	const sd = path.join(dir, ".file-safety-staging")
+	const sd = path.join(dir, ".file-safety-staging_" + Date.now() + "_" + Math.random().toString(36).substring(2))
 	// mode:0o700 protects a freshly created staging dir; the best-effort chmod
 	// repairs a pre-existing one (mkdirSync with recursive:true never chmods an
 	// existing directory), so staged temp files are never group/world readable.
@@ -151,8 +154,16 @@ export async function safeWriteText(filePath: string, content: string, options?:
 
 	// Create the staging directory only when we generate the temp file there;
 	// callers supplying their own tempPath (e.g. safeWriteJson) must not be left
-	// with an empty .file-safety-staging directory behind.
-	const tempPath = options?.tempPath ?? _tempName(_stagingDir(dirPath), "safeWriteText")
+	// with an empty .file-safety-staging directory behind. Track the directory this
+	// write created so its cleanup removes its own directory, not a shared one.
+	let stagingDir: string | null = null
+	let tempPath: string
+	if (options?.tempPath) {
+		tempPath = options.tempPath
+	} else {
+		stagingDir = _stagingDir(dirPath)
+		tempPath = _tempName(stagingDir, "safeWriteText")
+	}
 
 	let backupPath: string | null = null
 	let releaseBackupOnSuccess = false
@@ -295,11 +306,11 @@ export async function safeWriteText(filePath: string, content: string, options?:
 		// tempPath is now the committed file; no cleanup needed.
 
 		// Best-effort: remove the now-empty staging directory. Self-staged
-		// writes only; ENOTEMPTY means a concurrent write in the same
-		// directory is still using it, and a failure must never un-commit a
-		// published file, so the removal swallows all errors.
-		if (!options?.tempPath) {
-			await fs.rmdir(_stagingDir(dirPath)).catch(() => {})
+		// writes only, and only this write's own directory: a per-write directory
+		// cannot be the one another concurrent write is still using. A failure must
+		// never un-commit a published file, so the removal swallows all errors.
+		if (stagingDir) {
+			await fs.rmdir(stagingDir).catch(() => {})
 		}
 	} catch (originalError: unknown) {
 		// -- Rollback / cleanup on failure ----------------------------------

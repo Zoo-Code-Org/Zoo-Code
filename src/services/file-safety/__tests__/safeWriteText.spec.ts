@@ -179,6 +179,26 @@ describe("safeWriteText", () => {
 			expect(fs.rename).toHaveBeenCalled()
 			expect(fs.rmdir).toHaveBeenCalled()
 		})
+
+		it("gives each self-staged write its own staging directory so a concurrent write cannot remove it", async () => {
+			const targetA = "/tmp/test-dir/target-a.txt"
+			const targetB = "/tmp/test-dir/target-b.txt"
+			vi.mocked(fs.realpath).mockImplementation((p) => Promise.resolve(p as string))
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(targetA, "a", { platform: "linux" })
+			await safeWriteText(targetB, "b", { platform: "linux" })
+
+			// Two self-staged writes in the same directory must not share one staging
+			// directory: the first write's best-effort rmdir would otherwise delete the
+			// directory the second write had created but not yet opened (ENOENT on openSync).
+			const created = vi.mocked(fsSync.mkdirSync).mock.calls.map((c) => String(c[0]))
+			const staging = created.filter((p) => p.includes(".file-safety-staging_"))
+			expect(staging).toHaveLength(2)
+			expect(staging[0]).not.toBe(staging[1])
+			const removed = vi.mocked(fs.rmdir).mock.calls.map((c) => String(c[0]))
+			expect(removed).toEqual([staging[0], staging[1]])
+		})
 	})
 
 	// ── Test 2: fsync ordering ───────────────────────────────────────────────
