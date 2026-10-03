@@ -91,7 +91,7 @@ import { generateSystemPrompt } from "./generateSystemPrompt"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { getCommand } from "../../utils/commands"
 import { getLMStudioModels } from "../../api/providers/fetchers/lmstudio"
-import { ALLOWED_BASE_URLS } from "../../api/providers/fetchers/mimo"
+import { ALLOWED_BASE_URLS, stripTrailingSlashes } from "../../api/providers/fetchers/mimo"
 
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 
@@ -865,7 +865,7 @@ export const webviewMessageHandler = async (
 						// the chat-completion client via persisted state. Trailing slashes
 						// are tolerated for the check and canonicalized away on save.
 						if (typeof value === "string" && value !== "") {
-							const normalized = value.replace(/\/+$/, "")
+							const normalized = stripTrailingSlashes(value)
 							if (!ALLOWED_BASE_URLS.has(normalized)) {
 								console.warn(
 									"[webviewMessageHandler] Rejected mimoBaseUrl outside the allowed Xiaomi MiMo endpoints; the value was not persisted.",
@@ -1315,7 +1315,7 @@ export const webviewMessageHandler = async (
 			// allowlisted literal contains userinfo), and the raw value is never
 			// echoed since an unsaved one may embed credentials.
 			const mimoBaseUrlRejected =
-				unsavedMimoBaseUrl !== undefined && !ALLOWED_BASE_URLS.has(unsavedMimoBaseUrl.replace(/\/+$/, ""))
+				unsavedMimoBaseUrl !== undefined && !ALLOWED_BASE_URLS.has(stripTrailingSlashes(unsavedMimoBaseUrl))
 
 			if (mimoApiKey) {
 				if (mimoBaseUrlRejected) {

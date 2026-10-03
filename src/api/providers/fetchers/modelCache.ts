@@ -1,7 +1,7 @@
 import * as path from "path"
 import fs from "fs/promises"
 import * as fsSync from "fs"
-import { createHash, pbkdf2Sync } from "crypto"
+import { pbkdf2Sync } from "crypto"
 
 import NodeCache from "node-cache"
 import { z } from "zod"
@@ -144,13 +144,6 @@ function isAuthScopedProvider(provider: RouterName): boolean {
 	return AUTH_SCOPED_PROVIDERS.has(provider)
 }
 
-// Memoize derived digests so the deliberately-structureless KDF runs at most once per
-// distinct input per session (getCacheKey / cacheKeyToFilename run on every cache lookup).
-// Keys are digests of the input, never the raw value: deriveApiKeyDiscriminator feeds
-// raw API keys through here, and retaining those as long-lived map keys would keep the
-// secrets alive for the whole session.
-const cacheDigestCache = new Map<string, string>()
-
 // Fixed, non-secret application salt. This is NOT credential storage: it derives short,
 // stable cache-key components from the API key and the compound cache key so that distinct
 // inputs map to distinct cache entries / filenames. PBKDF2 is used (over a plain hash) only
@@ -171,19 +164,16 @@ const CACHE_DIGEST_ITERATIONS = 10_000
  * ~ n^2 / 2^(8*bytes)), while the truncated output is small enough that any preimage search
  * yields an astronomically large set of candidate inputs -- so a value written to an on-disk
  * cache filename cannot be reversed to identify the API key it was derived from.
+ *
+ * No memoization layer: the only callers (getCacheKey / cacheKeyToFilename) run on the
+ * catalog-fetch path, which is user- or scheduler-driven and infrequent, so a 10k-iteration
+ * PBKDF2 per call costs a few ms. A fast-hash memo key over API-key-tainted input is not
+ * worth it -- that pattern retains key-derived state for the session's lifetime and trips
+ * CodeQL's js/insufficient-password-hash. PBKDF2 remains the only derivation whose output
+ * leaves this process (cache keys and on-disk filenames).
  */
 function deriveCacheDigest(value: string, bytes: number): string {
-	// The memo key is a fast, non-reversing digest of the input so the raw API key
-	// is processed but never retained (see cacheDigestCache above). It lives only
-	// in this in-memory map and is never persisted or compared across processes,
-	// so the expensive KDF below remains the only derivation whose output leaves
-	// this process (cache keys and on-disk filenames).
-	const memoKey = createHash("sha256").update(`${bytes}:${value}`).digest("hex") // lgtm[js/insufficient-password-hash]
-	const cached = cacheDigestCache.get(memoKey)
-	if (cached) return cached
-	const digest = pbkdf2Sync(value, CACHE_DIGEST_SALT, CACHE_DIGEST_ITERATIONS, bytes, "sha256").toString("hex")
-	cacheDigestCache.set(memoKey, digest)
-	return digest
+	return pbkdf2Sync(value, CACHE_DIGEST_SALT, CACHE_DIGEST_ITERATIONS, bytes, "sha256").toString("hex")
 }
 
 // 4 bytes (8 hex chars) = 32 bits for the per-API-key discriminator embedded in the cache key.

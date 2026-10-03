@@ -16,7 +16,7 @@ import { NOT_PROVIDED } from "./constants"
 import type { ApiHandlerCreateMessageMetadata } from "../index"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 
-import { ALLOWED_BASE_URLS, MIMO_DEFAULT_BASE_URL } from "./fetchers/mimo"
+import { ALLOWED_BASE_URLS, MIMO_DEFAULT_BASE_URL, stripTrailingSlashes } from "./fetchers/mimo"
 
 /**
  * MiMoHandler extends OpenAiHandler with MiMo-specific adaptations.
@@ -38,7 +38,7 @@ export class MimoHandler extends OpenAiHandler {
 		// back to the default cluster; trailing slashes are normalized for the
 		// check exactly like the model fetcher does.
 		const mimoBaseUrl = options.mimoBaseUrl || MIMO_DEFAULT_BASE_URL
-		if (!ALLOWED_BASE_URLS.has(mimoBaseUrl.replace(/\/+$/, ""))) {
+		if (!ALLOWED_BASE_URLS.has(stripTrailingSlashes(mimoBaseUrl))) {
 			throw new Error(
 				"MIMO/MimoHandler/001: MiMo chat completion rejected: base URL is not an allowed Xiaomi MiMo endpoint.",
 			)

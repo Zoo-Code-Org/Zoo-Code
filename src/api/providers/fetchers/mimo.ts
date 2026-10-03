@@ -42,6 +42,18 @@ function containsUserinfo(rawUrl: string): boolean {
 	return authority.includes("@")
 }
 
+// Trailing-slash normalization as a plain string loop, not a regex: CodeQL's
+// polynomial-redos family flags input-driven regexes, and a loop is exactly
+// equivalent here (every allowlisted literal carries no trailing slash, and the
+// empty string terminates the loop).
+export function stripTrailingSlashes(value: string): string {
+	let result = value
+	while (result.endsWith("/")) {
+		result = result.slice(0, -1)
+	}
+	return result
+}
+
 /**
  * Fetches available models from the Xiaomi MiMo API and merges them with known specs.
  *
@@ -60,7 +72,7 @@ export async function getMimoModels(
 	// MiMo API uses OpenAI-compatible /v1/models endpoint.
 	// The base URL from settings already includes /v1 (e.g. https://token-plan-sgp.xiaomimimo.com/v1),
 	// so we keep it as-is and append /models directly.
-	const base = (baseUrl || MIMO_DEFAULT_BASE_URL).replace(/\/+$/, "")
+	const base = stripTrailingSlashes(baseUrl || MIMO_DEFAULT_BASE_URL)
 
 	// Reject embedded credentials first, then pin the request to the four allowed
 	// endpoints with an exact match. This subsumes the previous https-only guard
