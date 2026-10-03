@@ -218,7 +218,11 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		await this.waitForWebviewLaunch(5_000)
 
 		const { historyItem } = await this.sidebarProvider.getTaskWithId(taskId)
-		await this.sidebarProvider.createTaskWithHistoryItem(historyItem)
+		const preparedHistoryItem = await this.sidebarProvider.prepareHistoryItemForResume(historyItem)
+		if (!preparedHistoryItem) {
+			return
+		}
+		await this.sidebarProvider.createTaskWithHistoryItem(preparedHistoryItem)
 
 		if (this.sidebarProvider.viewLaunched) {
 			await this.sidebarProvider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })

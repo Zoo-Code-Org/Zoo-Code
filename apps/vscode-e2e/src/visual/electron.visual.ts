@@ -122,6 +122,8 @@ async function startScene(
 			mock.addFixture({
 				match: { userMessage: CHAT_PROMPT },
 				response: {
+					// Keep the context meter independent of system prompts and temporary workspace paths.
+					usage: { prompt_tokens: 4096, completion_tokens: 128, total_tokens: 4224 },
 					toolCalls: [
 						{
 							name: "attempt_completion",
@@ -230,6 +232,9 @@ for (const scenario of scenarios) {
 			await contentFrame
 				.getByText(scenario.landmark, { exact: false })
 				.waitFor({ state: "visible", timeout: 60_000 })
+			if (scenario.scene === "chat") {
+				await expect(contentFrame.getByTestId("context-tokens-count")).toHaveText("4.2k")
+			}
 			await contentFrame.evaluate(() => {
 				if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
 			})
