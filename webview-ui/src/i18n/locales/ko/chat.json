@@ -488,6 +488,10 @@
 		"messageTemplate": "{{servers}}를 통해 {{tools}}가 활성화되어 있습니다. 이렇게 많은 수의 도구는 모델을 혼동시키고 오류를 유발할 수 있습니다. {{threshold}} 이하로 유지하도록 노력하세요.",
 		"openMcpSettings": "MCP 설정 열기"
 	},
+	"ignoredDisabledTools": {
+		"title": "비활성화된 도구 무시됨",
+		"messageTemplate": "다음 도구는 비활성화할 수 없으며 계속 사용할 수 있습니다: {{tools}}."
+	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"
 	},

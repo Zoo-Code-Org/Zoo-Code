@@ -489,6 +489,10 @@
 		"messageTemplate": "{{servers}} üzerinden {{tools}} etkinleştirilmiş durumda. Bu kadar fazlası modeli kafası karışabilir ve hatalara neden olabilir. {{threshold}} altında tutmaya çalış.",
 		"openMcpSettings": "MCP Ayarlarını Aç"
 	},
+	"ignoredDisabledTools": {
+		"title": "Devre dışı bırakılan araç yok sayıldı",
+		"messageTemplate": "Aşağıdaki araçlar devre dışı bırakılamaz ve kullanılabilir kalır: {{tools}}."
+	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"
 	},

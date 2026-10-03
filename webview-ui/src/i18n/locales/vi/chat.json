@@ -489,6 +489,10 @@
 		"messageTemplate": "Bạn đã bật {{tools}} qua {{servers}}. Số lượng lớn như vậy có thể khiến mô hình bối rối và dẫn đến lỗi. Cố gắng giữ nó dưới {{threshold}}.",
 		"openMcpSettings": "Mở cài đặt MCP"
 	},
+	"ignoredDisabledTools": {
+		"title": "Đã bỏ qua công cụ bị tắt",
+		"messageTemplate": "Các công cụ sau không thể bị tắt và sẽ vẫn khả dụng: {{tools}}."
+	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"
 	},

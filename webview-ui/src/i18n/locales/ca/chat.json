@@ -488,6 +488,10 @@
 		"messageTemplate": "Tens {{tools}} habilitades via {{servers}}. Un nombre tant alt pot confondre el model i portar a errors. Intenta mantenir-lo per sota de {{threshold}}.",
 		"openMcpSettings": "Obrir configuració de MCP"
 	},
+	"ignoredDisabledTools": {
+		"title": "Eina desactivada ignorada",
+		"messageTemplate": "Les eines següents no es poden desactivar i continuaran disponibles: {{tools}}."
+	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"
 	},

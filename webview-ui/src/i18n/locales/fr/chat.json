@@ -488,6 +488,10 @@
 		"messageTemplate": "Tu as {{tools}} activés via {{servers}}. Un nombre aussi élevé peut confondre le modèle et entraîner des erreurs. Essaie de le maintenir en dessous de {{threshold}}.",
 		"openMcpSettings": "Ouvrir les paramètres MCP"
 	},
+	"ignoredDisabledTools": {
+		"title": "Outil désactivé ignoré",
+		"messageTemplate": "Les outils suivants ne peuvent pas être désactivés et resteront disponibles : {{tools}}."
+	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"
 	},
