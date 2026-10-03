@@ -524,11 +524,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// submission was consumed (hand the ID to the caller for a durable ack) or
 	// overwritten unconsumed (retain for a later ask).
 	private pendingSubmittedQueuedMessageId: string | undefined
-	// The ask currently blocked in Task.ask's response wait, when any. A
-	// background drain consults queuedResponseForAsk against this gate so a
-	// queued conversational message can never answer an approval-gating ask,
-	// exactly matching the claim path's resolution gate.
-	private inFlightAskGate: { type: ClineAsk; text?: string } | undefined
+	// The asks currently inside Task.ask, tracked per ask so an exiting ask
+	// (including a re-entrant one from a Message listener) can never clear
+	// another ask's gate. A background drain consults queuedResponseForAsk
+	// against these gates so a queued conversational message can never answer
+	// an approval-gating ask, exactly matching the claim path's resolution
+	// gate.
+	private inFlightAskGates: Set<{ type: ClineAsk; text?: string }> | undefined
 	/**
 	 * True while a raw queued submission must not be posted into the ask slot:
 	 * an ask is in flight AND either its slot already carries a direct response,
@@ -542,15 +544,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * submissions proceed.
 	 */
 	private inFlightAskBlocksQueuedSubmission(): boolean {
-		const gate = this.inFlightAskGate
-		return (
-			!!gate &&
-			(this.askResponse !== undefined ||
+		for (const gate of this.inFlightAskGates ?? []) {
+			if (
+				this.askResponse !== undefined ||
 				queuedResponseForAsk(gate.type, gate.text) === undefined ||
 				gate.type === "command" ||
 				gate.type === "use_mcp_server" ||
-				gate.type === "tool")
-		)
+				gate.type === "tool"
+			) {
+				return true
+			}
+		}
+		return false
 	}
 	// Association between a queued message ID and the user_feedback row its ack
 	// persisted. A redelivery after a partial save failure reconciles the same
@@ -1966,11 +1971,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// indentation instead of re-indenting it under a wrapping try block,
 		// so whitespace-only changes do not count against the mutation-diff
 		// line budget.
-		this.inFlightAskGate = { type, text }
+		const gate = { type, text }
+		// Lazily initialized: Object.create(Task.prototype)-based harnesses skip
+		// field initializers, and the gate must exist before the try's finally.
+		const gates = (this.inFlightAskGates ??= new Set<{ type: ClineAsk; text?: string }>())
+		gates.add(gate)
 		try {
 			return await this.askImpl(type, text, partial, progressStatus, isProtected, autoApprovalContext)
 		} finally {
-			this.inFlightAskGate = undefined
+			gates.delete(gate)
 		}
 	}
 

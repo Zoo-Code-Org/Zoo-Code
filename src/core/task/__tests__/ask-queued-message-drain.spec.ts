@@ -457,6 +457,30 @@ describe("Task.ask queued message drain", () => {
 		expect(task.messageQueueService.claimNextMessage()?.text).toBe("Reserve me")
 	})
 
+	it("keeps a blocked ask's drain gate when a superseded ask exits", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+
+		// Ask A blocks in its wait.
+		const askA = task.ask("followup", "A?", false).catch((error: unknown) => error)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+
+		// Ask B starts: its prefix supersedes A (lastMessageTs moves) and arms
+		// its own gate before A's superseded-exit finally runs. A's finally
+		// must remove only A's gate.
+		const askB = task.ask("api_req_failed", "B failure gate", false).catch((error: unknown) => error)
+		await new Promise((resolve) => setTimeout(resolve, 200))
+
+		// A has exited; B is still blocked. A's exit must not have cleared B's
+		// gate: a queued submission is still refused.
+		await expect(task.submitUserMessage("queued note")).resolves.toBe(false)
+
+		setTimeout(() => task.approveAsk(), 0)
+		const resultB = await askB
+		expect(resultB).toMatchObject({ response: "yesButtonClicked" })
+		const resultA = await askA
+		expect(String(resultA)).toContain("superseded")
+	})
+
 	it("delivers an intercepted message exactly once when a consumer acks through the durable helper", async () => {
 		const task = await createTask({ getState: async () => ({}) })
 		const submitSpy = vi.spyOn(task, "submitUserMessage")
