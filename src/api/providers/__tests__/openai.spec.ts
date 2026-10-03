@@ -11,7 +11,7 @@ import {
 	type ModelInfo,
 } from "@roo-code/types"
 import { Package } from "../../../shared/package"
-import { makeApiHandlerOptions } from "../../../test-utils/api"
+import { makeApiHandlerOptions, makeCreateMessageMetadata } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import axios from "axios"
 
@@ -274,6 +274,42 @@ describe("OpenAiHandler", () => {
 			const textChunks = chunks.filter((chunk) => chunk.type === "text")
 			expect(textChunks).toHaveLength(1)
 			expect(textChunks[0].text).toBe("Test response")
+		})
+
+		it("should forward the task abortSignal to streaming requests", async () => {
+			const controller = new AbortController()
+
+			await collectStream(
+				handler.createMessage(
+					systemPrompt,
+					messages,
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
+			)
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ stream: true }), {
+				signal: controller.signal,
+			})
+		})
+
+		it("should forward the task abortSignal to non-streaming requests", async () => {
+			const controller = new AbortController()
+			const nonStreamingHandler = new OpenAiHandler({
+				...mockOptions,
+				openAiStreamingEnabled: false,
+			})
+
+			await collectStream(
+				nonStreamingHandler.createMessage(
+					systemPrompt,
+					messages,
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
+			)
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: mockOptions.openAiModelId }), {
+				signal: controller.signal,
+			})
 		})
 
 		it("adds Extra Body fields to streaming requests without allowing reserved field overrides", async () => {
@@ -1148,6 +1184,24 @@ describe("OpenAiHandler", () => {
 			expect(callArgs).not.toHaveProperty("max_completion_tokens")
 		})
 
+		it("should forward the task abortSignal together with the Azure AI Inference path", async () => {
+			const azureHandler = new OpenAiHandler(azureOptions)
+			const controller = new AbortController()
+
+			await collectStream(
+				azureHandler.createMessage(
+					"You are a helpful assistant.",
+					[{ role: "user", content: "Hello!" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
+			)
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ stream: true }), {
+				signal: controller.signal,
+				path: "/models/chat/completions",
+			})
+		})
+
 		it("should handle non-streaming responses with Azure AI Inference Service", async () => {
 			const azureHandler = new OpenAiHandler({
 				...azureOptions,
@@ -1387,6 +1441,48 @@ describe("OpenAiHandler", () => {
 				}),
 				{},
 			)
+		})
+
+		it("should forward the task abortSignal to O3 requests", async () => {
+			const o3Handler = new OpenAiHandler(o3Options)
+			const controller = new AbortController()
+
+			await collectStream(
+				o3Handler.createMessage(
+					"You are a helpful assistant.",
+					[{ role: "user", content: "Hello!" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
+			)
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: "o3-mini", stream: true }), {
+				signal: controller.signal,
+			})
+		})
+
+		it.each([
+			{ name: "standard", baseUrl: undefined },
+			{ name: "Azure AI Inference", baseUrl: "https://test.services.ai.azure.com" },
+		])("should forward the task abortSignal to non-streaming O3 requests ($name)", async ({ baseUrl }) => {
+			const o3Handler = new OpenAiHandler({
+				...o3Options,
+				openAiStreamingEnabled: false,
+				...(baseUrl ? { openAiBaseUrl: baseUrl, azureApiVersion: "2024-05-01-preview" } : {}),
+			})
+			const controller = new AbortController()
+
+			await collectStream(
+				o3Handler.createMessage(
+					"You are a helpful assistant.",
+					[{ role: "user", content: "Hello!" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
+			)
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: "o3-mini" }), {
+				signal: controller.signal,
+				...(baseUrl ? { path: "/models/chat/completions" } : {}),
+			})
 		})
 
 		it.each([true, false])("adds Extra Body fields to O3 requests when streaming is %s", async (streaming) => {
