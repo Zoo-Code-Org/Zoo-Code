@@ -51,7 +51,7 @@ TLA+/PlusCal or Quint with TLC becomes a better fit when the lifecycle needs tem
 | Pending-action settlement                                 | `TaskHistoryStore.clearPendingActionIfMatching` compare-and-clear in the rejected-delegation settlement path (#1714) |
 | `reconcileStartup(parent)`                                | startup/periodic `TaskHistoryStore.reconcileDelegationStateCore` orphan repair                                     |
 | `markLiveElsewhere(child)` / `expireLiveElsewhere(child)` | child history-file mtime recent vs stale past `LIVE_CHILD_MTIME_THRESHOLD_MS` (abstracted; no wall clock in model) |
-| `heartbeat(child)` / `expireHeartbeat(child)`             | persisted `lastActivityAt` liveness heartbeat fresh vs stale past `LIVE_CHILD_MTIME_THRESHOLD_MS` (production: the owning session's throttled heartbeat during a long streaming turn, shared predicate `isDelegatedChildLive`) |
+| `heartbeat(child)` / `expireHeartbeat(child)`             | persisted `lastActivityAt` liveness heartbeat fresh vs stale past `LIVE_CHILD_MTIME_THRESHOLD_MS` (production: the owning session's throttled heartbeat across the child's whole active lifetime — long streaming turns, long tool calls, and ask-idle periods alike — shared predicate `isDelegatedChildLive`) |
 | Atomic event step                                         | `atomicReadAndUpdate`, `atomicUpdatePair`, and per-parent delegation transition lock                               |
 | Event interleaving                                        | Competing completion, cancellation, abandonment, and new delegation calls                                          |
 

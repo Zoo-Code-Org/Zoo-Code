@@ -633,12 +633,14 @@ export class TaskHistoryStore {
 
 	/**
 	 * Persist a liveness heartbeat for a live task session: bump the record's
-	 * `lastActivityAt` so a delegated child streaming a long turn (minutes
-	 * without any other history-file write) is still recognized as alive by
-	 * reconciliation in another window or after an extension-host restart.
+	 * `lastActivityAt` so a delegated child quiet for minutes while running a
+	 * long tool call, streaming a long turn, or awaiting a user ask is still
+	 * recognized as alive by reconciliation in another window or after an
+	 * extension-host restart.
 	 *
-	 * Callers are expected to throttle (see Task's streaming heartbeat);
-	 * each call writes only the `lastActivityAt` delta. Best-effort by design:
+	 * Callers are expected to throttle (see Task's liveness heartbeat, one
+	 * beat per minute over the whole active lifetime); each call writes only
+	 * the `lastActivityAt` delta. Best-effort by design:
 	 * a missing record, a non-active status, or a transient write failure
 	 * never rejects — a heartbeat must never disturb the turn it reports on.
 	 */

@@ -25,9 +25,10 @@ type TaskMap = Record<TaskId, HistoryItem | undefined>
  *   mtime is "recent" (the child is owned by another window that is actively
  *   persisting it), false when it is "stale" or the file is unreadable.
  * - `heartbeatAlive[id]` models the persisted `lastActivityAt` heartbeat: true
- *   when the owning session heartbeated within the threshold (a long streaming
- *   turn that writes nothing else to the history file), false when the
- *   heartbeat is absent or stale.
+ *   when the owning session heartbeated within the threshold (Task's throttled
+ *   heartbeat runs across the child's whole active lifetime — long streaming
+ *   turns, long tool calls, and ask-idle periods that write nothing else to
+ *   the history file), false when the heartbeat is absent or stale.
  *
  * The model never reads wall-clock time. Reconciliation treats the child as
  * live when EITHER signal is true and repairs it to interrupted only when
@@ -652,10 +653,11 @@ function runRepresentativeScenarios(): void {
 	assert.equal(interruptedCompletion.child.status, "completed")
 	assert.equal(interruptedCompletion.parent.status, "active")
 
-	// Heartbeat-only liveness (stale mtime, fresh `lastActivityAt`) — the long
-	// streaming turn: production's shared `isDelegatedChildLive` predicate treats
-	// the child as live, so reconciliation must be an identity transition and the
-	// delegation link survives.
+	// Heartbeat-only liveness (stale mtime, fresh `lastActivityAt`) — the
+	// whole-lifetime heartbeat (long streaming turns, long tool calls, and
+	// ask-idle periods alike): production's shared `isDelegatedChildLive`
+	// predicate treats the child as live, so reconciliation must be an identity
+	// transition and the delegation link survives.
 	{
 		const state: ModelState = {
 			tasks: { parent: delegated, "child-a": childA, "child-b": undefined },

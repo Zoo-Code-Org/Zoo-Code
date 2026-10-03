@@ -785,6 +785,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (startTask) {
 			this._started = true
 			this.startIdleTelemetryCheck()
+			this.startLivenessHeartbeat()
 			if (task || images) {
 				void this.startTask(task, images).catch((error) => {
 					console.error("[Task#constructor] startTask failed:", error)
@@ -2376,6 +2377,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 		this._started = true
 		this.startIdleTelemetryCheck()
+		this.startLivenessHeartbeat()
 
 		const { task, images } = this.metadata
 
@@ -2401,6 +2403,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 		this._started = true
 		this.startIdleTelemetryCheck()
+		this.startLivenessHeartbeat()
 
 		const { task, images } = this.metadata
 
@@ -2949,6 +2952,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// would keep reconciliation from repairing a genuinely orphaned child.
 		this.stopLivenessHeartbeat()
 
+		// Release the local session ownership claim: a disposed task no longer
+		// runs in this window, and a stale `locallyActiveTaskIds` entry would
+		// silently exclude the id from in-window orphan repair for the window's
+		// lifetime. A non-active status write already drops the claim; teardown
+		// paths that write no status are covered here. Best-effort, like the
+		// heartbeat: disposal must never fail on the store.
+		try {
+			this.providerRef.deref()?.taskHistoryStore.markLocallyInactive(this.taskId)
+		} catch (error) {
+			console.warn(`[Task#dispose] Failed to release local ownership for task ${this.taskId}:`, error)
+		}
+
 		// A task being disposed is no longer serving requests: set the same
 		// cancellation state `abortTask()` sets, synchronously before the aborts
 		// below, so the request-construction guard (`abort || abandoned` in
@@ -3457,7 +3472,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				let reasoningMessage = ""
 				const pendingGroundingSources: GroundingSource[] = []
 				this.isStreaming = true
-				this.startLivenessHeartbeat()
 
 				try {
 					const iterator = stream[Symbol.asyncIterator]()
@@ -3960,7 +3974,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					}
 				} finally {
 					this.isStreaming = false
-					this.stopLivenessHeartbeat()
 					// Clean up the abort controller when streaming completes
 					this.currentRequestAbortController = undefined
 				}
@@ -5548,11 +5561,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
-	 * Start the delegated-child liveness heartbeat for the upcoming streaming
-	 * session. No-op for non-child tasks: only an active child awaited by a
+	 * Start the delegated-child liveness heartbeat for the task's whole active
+	 * lifetime. No-op for non-child tasks: only an active child awaited by a
 	 * delegated parent is at risk of reconcile orphan-repair, so standalone
 	 * tasks never pay the write cost. Idempotent — a second call while a
 	 * heartbeat is already running leaves the existing interval in place.
+	 *
+	 * The heartbeat intentionally outlives individual streaming rounds: a
+	 * quiet-but-alive child that is running a long tool call or awaiting a
+	 * user ask writes nothing to its history file for minutes, and both the
+	 * peer-window startup pass and the periodic delegation tick would
+	 * otherwise read stale mtime AND stale/absent `lastActivityAt` and
+	 * misrepair the live link (the #1495 bug class).
 	 */
 	private startLivenessHeartbeat(): void {
 		if (this.livenessHeartbeatInterval !== undefined || !this.parentTaskId) {
@@ -5577,13 +5597,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	/**
 	 * One heartbeat beat: persist `lastActivityAt` for this task so
-	 * reconciliation sees the session as alive. Skipped once streaming has
-	 * ended or the task was cancelled/abandoned — a stale trailing beat must
-	 * not claim life the session no longer has. Failures are logged, never
-	 * thrown: a heartbeat must never disturb the turn it reports on.
+	 * reconciliation sees the session as alive. Skipped once the task was
+	 * cancelled/abandoned — a stale trailing beat must not claim life the
+	 * session no longer has. The store additionally refuses to bump a record
+	 * whose persisted status is not active, so a completed/interrupted child
+	 * is never falsely claimed even before disposal stops this interval.
+	 * Failures are logged, never thrown: a heartbeat must never disturb the
+	 * turn it reports on.
 	 */
 	private async recordLivenessHeartbeat(): Promise<void> {
-		if (!this.isStreaming || this.abort || this.abandoned) {
+		if (this.abort || this.abandoned) {
 			return
 		}
 		const provider = this.providerRef.deref()

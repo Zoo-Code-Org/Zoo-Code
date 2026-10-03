@@ -425,6 +425,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		const parent = makeItem({ id: "parent-1", status: "delegated", awaitingChildId: "missing-child" })
 		await seedItems(tmpDir, [parent])
 
+
 		await store.initialize()
 
 		const repaired = store.get("parent-1")
@@ -1471,6 +1472,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		const parentB = makeItem({ id: "parent-b", status: "delegated", awaitingChildId: "missing-b" })
 		await seedItems(tmpDir, [childA, parentA, parentB])
 
+
 		await store.initialize()
 
 		expect(store.get("parent-a")?.status).toBe("active")
@@ -1487,6 +1489,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			awaitingChildId: "missing-child-chain",
 		})
 		await seedItems(tmpDir, [parentA, parentB])
+
 
 		await store.initialize()
 
@@ -1619,6 +1622,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		const parent = makeItem({ id: "parent-log", status: "delegated", awaitingChildId: "nonexistent" })
 		await seedItems(tmpDir, [parent])
 
+
 		await store.initialize()
 
 		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Reconciled orphaned delegation"))
@@ -1634,6 +1638,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 
 		const parent = makeItem({ id: "parent-onwrite", status: "delegated", awaitingChildId: "nonexistent-child" })
 		await seedItems(tmpDir, [parent])
+
 
 		await store.initialize()
 
@@ -2060,6 +2065,76 @@ describe("TaskHistoryStore periodic delegation reconciliation", () => {
 		// Re-arm must survive the successful tick so the loop keeps running.
 		const internals = s as unknown as { reconcileTimer: ReturnType<typeof setTimeout> | null }
 		expect(internals.reconcileTimer).not.toBeNull()
+
+		warnSpy.mockRestore()
+		errorSpy.mockRestore()
+	})
+
+	it("never repairs a quiet-but-alive child across the periodic tick while its lastActivityAt heartbeat stays fresh", async () => {
+		// Pins the whole-lifetime liveness contract the tick relies on: a child
+		// running a long tool call or awaiting a user ask writes nothing to its
+		// history file for minutes (stale mtime), but its owning session keeps
+		// heartbeating a fresh `lastActivityAt` (Task's liveness heartbeat now
+		// covers the whole active lifetime, not only streaming). The tick must
+		// treat the heartbeat as life exactly like the startup pass.
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		const child = makeItem({
+			id: CHILD_ID,
+			status: "active",
+			parentTaskId: PARENT_ID,
+			rootTaskId: PARENT_ID,
+			// Fresh at startup; the tick runs one RECONCILE_INTERVAL_MS later,
+			// far below the 5-minute liveness threshold, so it stays fresh.
+			lastActivityAt: Date.now() - 60_000,
+		})
+		const parent = makeItem({
+			id: PARENT_ID,
+			status: "delegated",
+			awaitingChildId: CHILD_ID,
+			delegatedToId: CHILD_ID,
+			childIds: [CHILD_ID],
+		})
+		await seedItems(tmpDir, [parent, child])
+
+		const s = (store = new TaskHistoryStore(tmpDir))
+		useTickClock()
+		// The child is owned elsewhere and quiet: mtime is long stale at both
+		// the startup pass and the tick; only the heartbeat says alive.
+		installChildAgeInjector()
+		childAgeMs = 10 * 60 * 1000
+		await s.initialize()
+
+		// Startup pass: stale mtime but fresh heartbeat → skip (same guard).
+		expect(s.get(CHILD_ID)?.status).toBe("active")
+		expect(s.get(PARENT_ID)?.status).toBe("delegated")
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Skipping repair for live child child-tick"))
+
+		// The owning session keeps beating once a minute (Task's liveness
+		// interval across the whole active lifetime), so when the tick lands
+		// exactly one RECONCILE_INTERVAL_MS (= the 5-minute threshold) after
+		// startup, the last beat is 60s old — strictly fresh. A static seed
+		// would sit exactly AT the threshold and read stale.
+		for (let i = 0; i < 5; i++) {
+			await vi.advanceTimersByTimeAsync(60_000)
+			if (i < 4) {
+				await s.recordTaskActivity(CHILD_ID)
+			}
+		}
+
+		const timerState = s as unknown as { reconcileTimer: ReturnType<typeof setTimeout> | null }
+		const timerBeforeTick = timerState.reconcileTimer
+		await flushUntil(() => timerState.reconcileTimer !== timerBeforeTick, {
+			label: "periodic tick completed without repairing the heartbeat-alive child",
+			snapshot: () =>
+				`child=${s.get(CHILD_ID)?.status} parent=${s.get(PARENT_ID)?.status} awaiting=${s.get(PARENT_ID)?.awaitingChildId}`,
+		})
+
+		expect(s.get(CHILD_ID)?.status).toBe("active")
+		expect(s.get(PARENT_ID)?.status).toBe("delegated")
+		expect(s.get(PARENT_ID)?.awaitingChildId).toBe(CHILD_ID)
+		expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("Reconciled orphaned active child"))
+		expect(errorSpy).not.toHaveBeenCalled()
 
 		warnSpy.mockRestore()
 		errorSpy.mockRestore()
