@@ -345,9 +345,9 @@
 		"support": "请在 <githubLink>GitHub</githubLink> 上为 Zoo Code 点星支持我们。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "🔑 随处使用你的 Zoo Gateway API 密钥——可将其用于任何兼容 OpenAI 的客户端或工作流：<modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "🎁 限时通过 Zoo Gateway 免费使用 MiniMax-M3。",
-			"highlight3": "✨ 全新上线：GPT-6 Astra 和 Claude Fable 5.1 模型。"
+			"highlight1": "✨ 支持新模型：使用 GPT-6.1 Sol，享受修正后的 Claude Opus 5.5 输出 Token 上限，并在 OpenCode Go 上选择 DeepSeek V4.1 Flash。",
+			"highlight2": "🧭 更可靠的任务中止与中断：保留首次中止原因，为每次请求重置流中止状态，并阻止中断的任务重新执行已拒绝的子任务。",
+			"highlight3": "🛠️ 更可靠的工具、Prompt 和界面流式更新：完整保留流式传输的工具参数，执行 MCP 工具策略，防止编造行号，让聊天更新更流畅。"
 		},
 		"cloudAgents": {
 			"heading": "云端新功能：",
