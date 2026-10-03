@@ -93,7 +93,7 @@ export const getModelEndpoints = async ({
 	}
 
 	try {
-		modelProviders = await readModelEndpoints(router)
+		modelProviders = await readModelEndpoints(key)
 		// console.log(`[getModelProviders] read ${key} endpoints from file cache`)
 	} catch (error) {
 		console.error(`[getModelProviders] error reading ${key} endpoints from file cache`, error)

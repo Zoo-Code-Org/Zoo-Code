@@ -2,7 +2,11 @@
 
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-import { providerIdentifiers } from "@roo-code/types"
+import * as path from "path"
+
+import sanitize from "sanitize-filename"
+
+import { providerIdentifiers, type ModelRecord } from "@roo-code/types"
 
 import { getModelEndpoints } from "../modelEndpointCache"
 import * as modelCache from "../modelCache"
@@ -11,9 +15,43 @@ import * as openrouter from "../openrouter"
 vi.mock("../modelCache")
 vi.mock("../openrouter")
 
+const { readFileMock, fileExistsMock } = vi.hoisted(() => ({
+	readFileMock: vi.fn(),
+	fileExistsMock: vi.fn(),
+}))
+
+vi.mock("fs/promises", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("fs/promises")>()
+	return {
+		...actual,
+		readFile: readFileMock,
+		default: { ...actual, readFile: readFileMock },
+	}
+})
+
+vi.mock("../../../../utils/fs", () => ({
+	fileExistsAtPath: fileExistsMock,
+}))
+
+vi.mock("../../../../utils/storage", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../../../utils/storage")>()
+	return { ...actual, getCacheDirectoryPath: vi.fn().mockResolvedValue("/mock/cache") }
+})
+
+vi.mock("../../../../utils/safeWriteJson", () => ({
+	safeWriteJson: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock("../../../../core/config/ContextProxy", () => ({
+	ContextProxy: { instance: { globalStorageUri: { fsPath: "/mock/globalStorage" } } },
+}))
+
 describe("modelEndpointCache", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		// Default: no per-model file cache present; individual tests opt in.
+		fileExistsMock.mockResolvedValue(false)
+		readFileMock.mockResolvedValue("")
 	})
 
 	describe("getModelEndpoints", () => {
@@ -167,6 +205,29 @@ describe("modelEndpointCache", () => {
 
 			expect(result1).toEqual({})
 			expect(result2).toEqual({})
+		})
+
+		it("should fall back to the per-model file cache when the API returns no endpoints", async () => {
+			const modelId = "fallback/model"
+			// Same filename the write path persists: `${getCacheKey(router, modelId)}_endpoints.json`.
+			const cacheKey = sanitize(`${providerIdentifiers.openrouter}_${modelId}`)
+			const cachedEndpoints: ModelRecord = {
+				anthropic: { maxTokens: 8192, contextWindow: 200000, supportsPromptCache: true },
+			}
+
+			vi.spyOn(modelCache, "getModels").mockResolvedValue({})
+			vi.spyOn(openrouter, "getOpenRouterModelEndpoints").mockResolvedValue({})
+			fileExistsMock.mockResolvedValue(true)
+			readFileMock.mockResolvedValue(JSON.stringify(cachedEndpoints))
+
+			const result = await getModelEndpoints({
+				router: providerIdentifiers.openrouter,
+				modelId,
+				endpoint: "anthropic",
+			})
+
+			expect(readFileMock).toHaveBeenCalledWith(path.join("/mock/cache", `${cacheKey}_endpoints.json`), "utf8")
+			expect(result).toEqual(cachedEndpoints)
 		})
 	})
 })
