@@ -5,6 +5,8 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import { presentAssistantMessage } from "../presentAssistantMessage"
 import { Task } from "../../task/Task"
 
+type UserContentBlock = Anthropic.TextBlockParam | Anthropic.ImageBlockParam | Anthropic.ToolResultBlockParam
+
 // Mock dependencies
 vi.mock("../../task/Task")
 vi.mock("../../tools/validateToolUse", () => ({
@@ -62,7 +64,8 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 			ask: vi.fn().mockResolvedValue({ response: "yesButtonClicked" }),
 		}
 
-		// Add pushToolResultToUserContent method after mockTask is created so it can reference mockTask
+		// Mirrors Task.pushToolResultToUserContent: duplicate guard plus keeping
+		// tool_result blocks contiguous by moving image blocks after the new result.
 		mockTask.pushToolResultToUserContent = vi.fn().mockImplementation((toolResult: any) => {
 			const existingResult = mockTask.userMessageContent.find(
 				(block: any) => block.type === "tool_result" && block.tool_use_id === toolResult.tool_use_id,
@@ -71,6 +74,15 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 				return false
 			}
 			mockTask.userMessageContent.push(toolResult)
+			const results = mockTask.userMessageContent.filter(
+				(block: UserContentBlock) => block.type === "tool_result",
+			)
+			if (results.length !== mockTask.userMessageContent.length) {
+				const others = mockTask.userMessageContent.filter(
+					(block: UserContentBlock) => block.type !== "tool_result",
+				)
+				mockTask.userMessageContent.splice(0, mockTask.userMessageContent.length, ...results, ...others)
+			}
 			return true
 		})
 	})
@@ -317,6 +329,129 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 			expect(toolResult).toBeDefined()
 			expect(toolResult.is_error).toBe(true)
 			expect(toolResult.content).toContain("was interrupted and not executed")
+		})
+	})
+
+	describe("tool_result contiguity (GitHub #1307)", () => {
+		it("groups images after all tool_results when parallel tools return images", async () => {
+			const toolCallId1 = "tool_call_img_1"
+			const toolCallId2 = "tool_call_img_2"
+
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: toolCallId1,
+					name: "ask_followup_question",
+					params: { question: "Q1?", follow_up: [] },
+					nativeArgs: { question: "Q1?", follow_up: [] },
+				},
+				{
+					type: "tool_use",
+					id: toolCallId2,
+					name: "ask_followup_question",
+					params: { question: "Q2?", follow_up: [] },
+					nativeArgs: { question: "Q2?", follow_up: [] },
+				},
+			]
+
+			// The tool asks the followup question via task.ask("followup", ...);
+			// distinct image data per question so ordering is observable.
+			mockTask.ask = vi.fn().mockImplementation((type: string, message: string) => {
+				if (type !== "followup") {
+					return Promise.resolve({ response: "yesButtonClicked", text: "approved", images: undefined })
+				}
+				const prefix = message.includes("Q1") ? "a" : "b"
+				return Promise.resolve({
+					response: "yesButtonClicked",
+					text: `answer ${prefix}`,
+					images: [`data:image/png;base64,${prefix}-result`],
+				})
+			})
+
+			await presentAssistantMessage(mockTask)
+
+			// Anthropic rejects user messages where image blocks sit between
+			// tool_result blocks, so images from both tools must be grouped
+			// after the last tool_result instead of interleaved.
+			expect(mockTask.userMessageContent.map((block: UserContentBlock) => block.type)).toEqual([
+				"tool_result",
+				"tool_result",
+				"image",
+				"image",
+			])
+			expect(
+				mockTask.userMessageContent
+					.filter(
+						(block: UserContentBlock): block is Anthropic.ToolResultBlockParam =>
+							block.type === "tool_result",
+					)
+					.map((block: Anthropic.ToolResultBlockParam) => block.tool_use_id),
+			).toEqual([toolCallId1, toolCallId2])
+			expect(
+				mockTask.userMessageContent
+					.filter((block: UserContentBlock): block is Anthropic.ImageBlockParam => block.type === "image")
+					.map(
+						(block: Anthropic.ImageBlockParam) =>
+							(block.source as { type: "base64"; media_type: string; data: string }).data,
+					),
+			).toEqual(["a-result", "b-result"])
+		})
+
+		it("relocates an earlier tool's images after a later tool_result with no images", async () => {
+			const toolCallId1 = "tool_call_img_3"
+			const toolCallId2 = "tool_call_img_4"
+
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: toolCallId1,
+					name: "ask_followup_question",
+					params: { question: "Q1?", follow_up: [] },
+					nativeArgs: { question: "Q1?", follow_up: [] },
+				},
+				{
+					type: "tool_use",
+					id: toolCallId2,
+					name: "ask_followup_question",
+					params: { question: "Q2?", follow_up: [] },
+					nativeArgs: { question: "Q2?", follow_up: [] },
+				},
+			]
+
+			mockTask.ask = vi.fn().mockImplementation((type: string, message: string) => {
+				if (type === "followup" && message.includes("Q1")) {
+					return Promise.resolve({
+						response: "yesButtonClicked",
+						text: "answer a",
+						images: ["data:image/png;base64,a-result"],
+					})
+				}
+				return Promise.resolve({ response: "yesButtonClicked", text: "answer b", images: undefined })
+			})
+
+			await presentAssistantMessage(mockTask)
+
+			expect(mockTask.userMessageContent.map((block: UserContentBlock) => block.type)).toEqual([
+				"tool_result",
+				"tool_result",
+				"image",
+			])
+			expect(
+				mockTask.userMessageContent
+					.filter(
+						(block: UserContentBlock): block is Anthropic.ToolResultBlockParam =>
+							block.type === "tool_result",
+					)
+					.map((block: Anthropic.ToolResultBlockParam) => block.tool_use_id),
+			).toEqual([toolCallId1, toolCallId2])
+			expect(
+				mockTask.userMessageContent
+					.filter((block: UserContentBlock): block is Anthropic.ImageBlockParam => block.type === "image")
+					.map(
+						(block: Anthropic.ImageBlockParam) =>
+							(block.source as { type: "base64"; media_type: string; data: string }).data,
+					),
+			).toEqual(["a-result"])
 		})
 	})
 })
