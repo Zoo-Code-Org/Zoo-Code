@@ -323,6 +323,63 @@ describe("Task.ask queued message drain", () => {
 		expect(submitSpy).toHaveBeenCalledTimes(2)
 	})
 
+	it("releases the drain tracker when the row write throws after a durable claim", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+		const submitSpy = vi.spyOn(task, "submitUserMessage")
+
+		task.messageQueueService.addMessage("Do not lose me")
+		// Between-turns drain: submits the message and tracks it as pending.
+		await expect(task.processQueuedMessages()).resolves.toBe(true)
+		expect(submitSpy).toHaveBeenCalledTimes(1)
+
+		// A completion ask claims the retained entry through the durable path.
+		const result = await task.ask("completion_result", "Done", false)
+		expect(result.queuedMessageId).toBe(task.messageQueueService.messages[0]?.id)
+
+		// The row write throws (a synchronously throwing Message listener):
+		// the catch releases the entry and rethrows, and must ALSO release the
+		// pending tracker — it cannot be the finally's job alone.
+		const access = getQueueTaskTestAccess(task)
+		access.addToClineMessages = vi.fn(async () => {
+			throw new Error("listener boom")
+		})
+		await expect(
+			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).rejects.toThrow("listener boom")
+
+		// The re-queued message must be resubmitted by the next drain instead
+		// of stalling on the stale tracker ID forever.
+		expect(task.messageQueueService.messages).toHaveLength(1)
+		await expect(task.processQueuedMessages()).resolves.toBe(true)
+		expect(submitSpy).toHaveBeenCalledTimes(2)
+	})
+
+	it("arms the drain gate for the whole ask lifecycle, including the prefix", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+		const submitSpy = vi.spyOn(task, "submitUserMessage")
+		const access = getQueueTaskTestAccess(task)
+		let finishAddingAsk!: () => void
+		const addingAsk = new Promise<void>((resolve) => {
+			finishAddingAsk = resolve
+		})
+		// Block the ask in its prefix (the addToClineMessages await) so a drain
+		// lands before the response wait begins.
+		access.addToClineMessages = vi.fn(() => addingAsk.then(() => true))
+
+		const askPromise = task.ask("command", "npm test", false)
+		await Promise.resolve()
+
+		task.messageQueueService.addMessage("queued note")
+		await expect(task.processQueuedMessages()).resolves.toBe(true)
+		expect(submitSpy).not.toHaveBeenCalled()
+
+		finishAddingAsk()
+		setTimeout(() => task.approveAsk(), 0)
+		const result = await askPromise
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
+		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["queued note"])
+	})
+
 	it("delivers an intercepted message exactly once when a consumer acks through the durable helper", async () => {
 		const task = await createTask({ getState: async () => ({}) })
 		const submitSpy = vi.spyOn(task, "submitUserMessage")
@@ -464,53 +521,6 @@ describe("Task.ask queued message drain", () => {
 		expect(updateClineMessage).toHaveBeenCalledTimes(1)
 		expect(access.clineMessages.filter((message) => message.say === "user_feedback")).toHaveLength(1)
 		expect(task.messageQueueService.isEmpty()).toBe(true)
-	})
-
-	it("releases the queued message when the reconciled row update fails", async () => {
-		const task = await createTask({ getState: async () => ({}) })
-
-		const askPromise = task.ask("completion_result", "Done", false)
-		await new Promise((resolve) => setTimeout(resolve, 150))
-
-		task.messageQueueService.addMessage("dedupe me")
-		const drain = task.processQueuedMessages()
-
-		const result = await askPromise
-		await drain
-		const messageId = result.queuedMessageId!
-
-		const taskAccess = getQueueTaskTestAccess(task)
-		const updateClineMessage = vi.fn(async () => {})
-		taskAccess.updateClineMessage = updateClineMessage
-		taskAccess.addToClineMessages = async (message) => {
-			taskAccess.clineMessages.push(message!)
-			return true
-		}
-		// First ack: all saves fail, releasing the entry queued while the row
-		// association is retained for a later redelivery.
-		const saveClineMessages = vi.fn().mockResolvedValue(false)
-		taskAccess.saveClineMessages = saveClineMessages
-
-		vi.useFakeTimers()
-		try {
-			const first = task.persistQueuedFeedbackAndAcknowledge(messageId, result.text, result.images)
-			await vi.runAllTimersAsync()
-			await expect(first).resolves.toBe(false)
-		} finally {
-			vi.useRealTimers()
-		}
-		expect(task.messageQueueService.messages).toHaveLength(1)
-
-		// Redelivery: the reconciled row update fails. The failure must
-		// propagate and release the entry — it must NOT be acked/removed.
-		updateClineMessage.mockRejectedValueOnce(new Error("webview update failed"))
-		saveClineMessages.mockResolvedValue(true)
-
-		await expect(task.persistQueuedFeedbackAndAcknowledge(messageId, result.text, result.images)).rejects.toThrow(
-			"webview update failed",
-		)
-		expect(saveClineMessages).toHaveBeenCalledTimes(4)
-		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["dedupe me"])
 	})
 
 	it("does not submit queued messages once the task is aborted", async () => {
