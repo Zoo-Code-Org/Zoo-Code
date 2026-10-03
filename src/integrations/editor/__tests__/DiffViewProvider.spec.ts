@@ -66,9 +66,16 @@ vi.mock("path", () => ({
 vi.mock("vscode", () => ({
 	workspace: {
 		applyEdit: vi.fn(),
-		// VS Code's own codec: the mock echoes the content back as bytes so the
-		// assertions can see exactly what the publish received.
-		encode: vi.fn((content: string) => Promise.resolve(Buffer.from(content))),
+		// VS Code's own codec. The double returns bytes that differ from the plain
+		// UTF-8 encoding of the same text, so an assertion can prove the publish
+		// writes the codec's output rather than re-encoding the string itself.
+		encode: vi.fn((content: string, options: { encoding: string }) =>
+			Promise.resolve(
+				options.encoding === "utf8bom"
+					? Buffer.concat([Buffer.from("\uFEFF"), Buffer.from(content)])
+					: Buffer.from(content),
+			),
+		),
 		onDidOpenTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
 		openTextDocument: vi.fn().mockResolvedValue({
 			isDirty: false,
@@ -1174,7 +1181,10 @@ describe("DiffViewProvider", () => {
 			expect(vi.mocked(vscode.workspace.encode)).toHaveBeenCalledWith("new content", {
 				encoding: "utf8bom",
 			})
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"))
+			expect(safeWriteText).toHaveBeenCalledWith(
+				`${mockCwd}/test.ts`,
+				Buffer.concat([Buffer.from("\uFEFF"), Buffer.from("new content")]),
+			)
 		})
 
 		it("rejects the accepted save when the file changed after the preview (stale version)", async () => {
