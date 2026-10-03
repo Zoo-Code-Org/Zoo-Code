@@ -5,8 +5,9 @@
  * independent. The S4 guarded-write will compare these versions against the
  * token recomputed pre-write to detect stale reads or file replacement.
  *
- * Pure in-memory — zero I/O, no dependencies. No behavior change in this PR:
- * observations are recorded but not consulted.
+ * Pure in-memory — zero I/O, no dependencies. The S4 guarded-write consults
+ * these observations for the version check and for the completeness check that
+ * gates a full-file replacement.
  */
 
 export interface FileObservation {
