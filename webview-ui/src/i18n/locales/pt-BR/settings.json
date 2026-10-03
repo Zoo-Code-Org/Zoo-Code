@@ -534,6 +534,8 @@
 		"apiKey": "Chave de API",
 		"openAiApiKey": "Chave de API OpenAI",
 		"openAiBaseUrl": "URL Base",
+		"openAiStrictToolSchemas": "Schemas de ferramentas estritos (strict: true)",
+		"openAiStrictToolSchemasDescription": "Envia strict: true com os schemas de ferramentas, como exigido pelo OpenAI. Desative apenas se o seu endpoint compatível com OpenAI rejeitar schemas de ferramentas estritos.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nome da implantação do Azure",
 		"azureOpenAiDeploymentNameDescription": "Insira o nome da implantação configurado no Azure AI Studio, não o nome do modelo subjacente.",

@@ -534,6 +534,8 @@
 		"openAiApiKey": "OpenAI API 密钥",
 		"apiKey": "API 密钥",
 		"openAiBaseUrl": "OpenAI 基础 URL",
+		"openAiStrictToolSchemas": "严格工具 schema（strict: true）",
+		"openAiStrictToolSchemasDescription": "向 OpenAI 兼容端点发送 strict: true 工具 schema。仅当您的端点拒收 strict 工具 schema 时才关闭。",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure 部署名称",
 		"azureOpenAiDeploymentNameDescription": "请输入 Azure AI Studio 中的部署名称，而不是底层模型名称。",

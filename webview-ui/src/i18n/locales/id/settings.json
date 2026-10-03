@@ -534,6 +534,8 @@
 		"openAiApiKey": "OpenAI API Key",
 		"apiKey": "API Key",
 		"openAiBaseUrl": "Base URL",
+		"openAiStrictToolSchemas": "Skema tool ketat (strict: true)",
+		"openAiStrictToolSchemasDescription": "Kirim strict: true bersama skema tool, seperti yang dipersyaratkan OpenAI. Nonaktifkan hanya jika endpoint yang kompatibel dengan OpenAI Anda menolak skema tool ketat.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nama deployment Azure",
 		"azureOpenAiDeploymentNameDescription": "Masukkan nama deployment dari Azure AI Studio, bukan nama model dasarnya.",
