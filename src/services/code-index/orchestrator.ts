@@ -5,6 +5,7 @@ import { CodeIndexStateManager, IndexingState } from "./state-manager"
 import { IFileWatcher, IVectorStore, BatchProcessingSummary } from "./interfaces"
 import { DirectoryScanner } from "./processors"
 import { CacheManager } from "./cache-manager"
+import { CodeIndexScanExecutor } from "./code-index-scan-executor"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { t } from "../../i18n"
@@ -16,16 +17,19 @@ export class CodeIndexOrchestrator {
 	private _fileWatcherSubscriptions: vscode.Disposable[] = []
 	private _isProcessing: boolean = false
 	private _abortController: AbortController | null = null
+	private readonly scanExecutor: CodeIndexScanExecutor
 
 	constructor(
 		private readonly configManager: CodeIndexConfigManager,
 		private readonly stateManager: CodeIndexStateManager,
-		private readonly workspacePath: string,
+		workspacePath: string,
 		private readonly cacheManager: CacheManager,
 		private readonly vectorStore: IVectorStore,
-		private readonly scanner: DirectoryScanner,
+		scanner: DirectoryScanner,
 		private readonly fileWatcher: IFileWatcher,
-	) {}
+	) {
+		this.scanExecutor = new CodeIndexScanExecutor(workspacePath, scanner, vectorStore, stateManager)
+	}
 
 	/**
 	 * Starts the file watcher if not already running.
@@ -145,63 +149,11 @@ export class CodeIndexOrchestrator {
 			const hasExistingData = await this.vectorStore.hasIndexedData()
 
 			if (hasExistingData && !collectionCreated) {
-				// Collection exists with data - run incremental scan to catch any new/changed files
-				// This handles files added while workspace was closed or Qdrant was inactive
-				console.log(
-					"[CodeIndexOrchestrator] Collection already has indexed data. Running incremental scan for new/changed files...",
-				)
-				this.stateManager.setSystemState("Indexing", "Checking for new or modified files...")
-
-				// Mark as incomplete at the start of incremental scan
-				await this.vectorStore.markIndexingIncomplete()
-
-				let cumulativeBlocksIndexed = 0
-				let cumulativeBlocksFoundSoFar = 0
-				const batchErrors: Error[] = []
-
-				const handleFileParsed = (fileBlockCount: number) => {
-					cumulativeBlocksFoundSoFar += fileBlockCount
-					this.stateManager.reportBlockIndexingProgress(cumulativeBlocksIndexed, cumulativeBlocksFoundSoFar)
-				}
-
-				const handleBlocksIndexed = (indexedCount: number) => {
-					cumulativeBlocksIndexed += indexedCount
-					this.stateManager.reportBlockIndexingProgress(cumulativeBlocksIndexed, cumulativeBlocksFoundSoFar)
-				}
-
-				// Run incremental scan - scanner will skip unchanged files using cache
-				const result = await this.scanner.scanDirectory(
-					this.workspacePath,
-					(batchError: Error) => {
-						console.error(
-							`[CodeIndexOrchestrator] Error during incremental scan batch: ${batchError.message}`,
-							batchError,
-						)
-						batchErrors.push(batchError)
-					},
-					handleBlocksIndexed,
-					handleFileParsed,
-					signal,
-				)
-
-				if (signal.aborted) {
+				if (!(await this.scanExecutor.runIncrementalScan(signal))) {
 					await this.cacheManager.flush()
 					this.stopWatcher()
 					this.stateManager.setSystemState("Standby", t("embeddings:orchestrator.indexingStopped"))
 					return
-				}
-
-				if (!result) {
-					throw new Error("Incremental scan failed, is scanner initialized?")
-				}
-
-				// If new files were found and indexed, log the results
-				if (cumulativeBlocksFoundSoFar > 0) {
-					console.log(
-						`[CodeIndexOrchestrator] Incremental scan completed: ${cumulativeBlocksIndexed} blocks indexed from new/changed files`,
-					)
-				} else {
-					console.log("[CodeIndexOrchestrator] No new or changed files found")
 				}
 
 				await this._startWatcher()
@@ -211,86 +163,11 @@ export class CodeIndexOrchestrator {
 
 				this.stateManager.setSystemState("Indexed", t("embeddings:orchestrator.fileWatcherStarted"))
 			} else {
-				// No existing data or collection was just created - do a full scan
-				this.stateManager.setSystemState("Indexing", "Services ready. Starting workspace scan...")
-
-				// Mark as incomplete at the start of full scan
-				await this.vectorStore.markIndexingIncomplete()
-
-				let cumulativeBlocksIndexed = 0
-				let cumulativeBlocksFoundSoFar = 0
-				const batchErrors: Error[] = []
-
-				const handleFileParsed = (fileBlockCount: number) => {
-					cumulativeBlocksFoundSoFar += fileBlockCount
-					this.stateManager.reportBlockIndexingProgress(cumulativeBlocksIndexed, cumulativeBlocksFoundSoFar)
-				}
-
-				const handleBlocksIndexed = (indexedCount: number) => {
-					cumulativeBlocksIndexed += indexedCount
-					this.stateManager.reportBlockIndexingProgress(cumulativeBlocksIndexed, cumulativeBlocksFoundSoFar)
-				}
-
-				const result = await this.scanner.scanDirectory(
-					this.workspacePath,
-					(batchError: Error) => {
-						console.error(
-							`[CodeIndexOrchestrator] Error during initial scan batch: ${batchError.message}`,
-							batchError,
-						)
-						batchErrors.push(batchError)
-					},
-					handleBlocksIndexed,
-					handleFileParsed,
-					signal,
-				)
-
-				if (signal.aborted) {
+				if (!(await this.scanExecutor.runFullScan(signal))) {
 					await this.cacheManager.flush()
 					this.stopWatcher()
 					this.stateManager.setSystemState("Standby", t("embeddings:orchestrator.indexingStopped"))
 					return
-				}
-
-				if (!result) {
-					throw new Error("Scan failed, is scanner initialized?")
-				}
-
-				const { stats } = result
-
-				// Check if any blocks were actually indexed successfully
-				// If no blocks were indexed but blocks were found, it means all batches failed
-				if (cumulativeBlocksIndexed === 0 && cumulativeBlocksFoundSoFar > 0) {
-					if (batchErrors.length > 0) {
-						// Use the first batch error as it's likely representative of the main issue
-						const firstError = batchErrors[0]
-						throw new Error(`Indexing failed: ${firstError.message}`)
-					} else {
-						throw new Error(t("embeddings:orchestrator.indexingFailedNoBlocks"))
-					}
-				}
-
-				// Check for partial failures - if a significant portion of blocks failed
-				const failureRate = (cumulativeBlocksFoundSoFar - cumulativeBlocksIndexed) / cumulativeBlocksFoundSoFar
-				if (batchErrors.length > 0 && failureRate > 0.1) {
-					// More than 10% of blocks failed to index
-					const firstError = batchErrors[0]
-					throw new Error(
-						`Indexing partially failed: Only ${cumulativeBlocksIndexed} of ${cumulativeBlocksFoundSoFar} blocks were indexed. ${firstError.message}`,
-					)
-				}
-
-				// CRITICAL: If there were ANY batch errors and NO blocks were successfully indexed,
-				// this is a complete failure regardless of the failure rate calculation
-				if (batchErrors.length > 0 && cumulativeBlocksIndexed === 0) {
-					const firstError = batchErrors[0]
-					throw new Error(`Indexing failed completely: ${firstError.message}`)
-				}
-
-				// Final sanity check: If we found blocks but indexed none and somehow no errors were reported,
-				// this is still a failure
-				if (cumulativeBlocksFoundSoFar > 0 && cumulativeBlocksIndexed === 0) {
-					throw new Error(t("embeddings:orchestrator.indexingFailedCritical"))
 				}
 
 				await this._startWatcher()

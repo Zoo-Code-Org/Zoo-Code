@@ -373,9 +373,9 @@
 		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Yang Baru:",
-			"highlight1": "🔑 Gunakan kunci API Zoo Gateway milikmu di mana saja—pakai di client atau workflow apa pun yang kompatibel dengan OpenAI: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "🎁 Untuk waktu terbatas, dapatkan akses gratis ke MiniMax-M3 melalui Zoo Gateway.",
-			"highlight3": "✨ Kini tersedia: model terbaru GPT-6 Astra dan Claude Fable 5.1."
+			"highlight1": "✨ Dukungan model baru: Gunakan GPT-6.1 Sol, manfaatkan batas output Claude Opus 5.5 yang telah diperbaiki, dan pilih DeepSeek V4.1 Flash di OpenCode Go.",
+			"highlight2": "🧭 Pembatalan dan interupsi task yang andal: Pertahankan alasan pembatalan pertama, reset status pembatalan stream pada setiap request, dan cegah task yang terinterupsi menjalankan ulang subtask yang ditolak.",
+			"highlight3": "🛠️ Tools, prompts, dan streaming UI yang andal: Jaga argumen tool yang diterima melalui stream tetap utuh, terapkan kebijakan tool MCP, cegah nomor baris rekaan, dan buat pembaruan chat lebih lancar."
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",
