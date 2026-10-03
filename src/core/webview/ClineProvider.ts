@@ -1931,17 +1931,28 @@ export class ClineProvider
 
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {
 		const globalSettings = this.contextProxy.getValues()
-		let profileToActivate: string | undefined = globalSettings.currentApiConfigName
-
-		if (profileToDelete.name === profileToActivate) {
-			profileToActivate = this.getProviderProfileEntries().find(({ name }) => name !== profileToDelete.name)?.name
-		}
+		const deletedActiveProfile = profileToDelete.name === globalSettings.currentApiConfigName
+		const profileToActivate = deletedActiveProfile
+			? this.getProviderProfileEntries().find(({ name }) => name !== profileToDelete.name)?.name
+			: globalSettings.currentApiConfigName
 
 		if (!profileToActivate) {
 			throw new Error("You cannot delete the last profile")
 		}
 
 		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
+
+		// Purge first so a failing purge fails fast before any ContextProxy write,
+		// matching the ordering the webview delete path established.
+		await this.providerSettingsManager.deleteConfig(profileToDelete.name)
+
+		if (deletedActiveProfile) {
+			// Route through the standard activation path so the effective provider
+			// settings, mode config, and current-task wiring all end up identical to
+			// a user activating the replacement profile from the webview.
+			await this.activateProviderProfile({ name: profileToActivate })
+			return
+		}
 
 		await this.contextProxy.setValues({
 			...globalSettings,
