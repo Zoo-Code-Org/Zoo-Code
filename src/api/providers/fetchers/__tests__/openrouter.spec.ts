@@ -43,7 +43,7 @@ describe("OpenRouter API", () => {
 				description: expect.any(String),
 				supportsReasoningBudget: true,
 				requiredReasoningBudget: true,
-				supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+				supportsReasoningEffort: ["disable", "low", "medium", "high", "xhigh", "max"],
 				supportedParameters: ["max_tokens", "temperature", "reasoning", "include_reasoning"],
 			})
 
@@ -722,7 +722,38 @@ describe("OpenRouter API", () => {
 				supportedParameters: ["reasoning", "max_tokens", "temperature"],
 			})
 
-			expect(resultWithReasoningParam.supportsReasoningEffort).toEqual(["low", "medium", "high", "xhigh", "max"])
+			expect(resultWithReasoningParam.supportsReasoningEffort).toEqual([
+				"disable",
+				"low",
+				"medium",
+				"high",
+				"xhigh",
+				"max",
+			])
+		})
+
+		it("includes 'disable' as the first effort option so ThinkingBudget can offer the off-switch", () => {
+			const mockModel = {
+				name: "Reasoning Effort Model",
+				description: "Model with reasoning parameter support",
+				context_length: 128000,
+				max_completion_tokens: 8192,
+				pricing: {
+					prompt: "0.000003",
+					completion: "0.000015",
+				},
+			}
+
+			const result = parseOpenRouterModel({
+				id: "test/reasoning-effort-model",
+				model: mockModel,
+				inputModality: ["text"],
+				outputModality: ["text"],
+				maxTokens: 8192,
+				supportedParameters: ["reasoning", "max_tokens", "temperature"],
+			})
+
+			expect(result.supportsReasoningEffort).toEqual(["disable", "low", "medium", "high", "xhigh", "max"])
 		})
 	})
 })
