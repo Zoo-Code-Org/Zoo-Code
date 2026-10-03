@@ -51,6 +51,7 @@ type TaskTestAccess = {
 	getFilesReadByRooSafely: (context: string) => Promise<string[] | undefined>
 	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
 	resetAssistantMessagePersistence: () => void
+	checkpointSave: (force?: boolean, suppressMessage?: boolean) => Promise<string | undefined>
 	buildCleanConversationHistory: (
 		messages: ApiMessage[],
 		requestModelInfo: ModelInfo,
@@ -1433,7 +1434,7 @@ describe("Cline", () => {
 				info: ctxModelInfo,
 			})
 			Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
-			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
 			task.apiConversationHistory = [{ role: "user", content: [{ type: "text", text: "x" }], ts: Date.now() }]
 
 			const getSystemPromptSpy = vi
@@ -1529,7 +1530,7 @@ describe("Cline", () => {
 				condenseId: "condense-id",
 			})
 			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
-			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
 
 			await expect(task.condenseContext()).resolves.toBeUndefined()
 
@@ -1606,7 +1607,7 @@ describe("Cline", () => {
 				startTask: false,
 			})
 
-			const saySpy = vi.spyOn(cline, "say").mockResolvedValue(undefined)
+			const saySpy = vi.spyOn(cline, "say").mockResolvedValue(true)
 
 			// relPath provided -> the "...WithPath" message branch.
 			const withPath = await cline.sayAndCreateMissingParamError("read_file", "path", "src/foo.ts")
@@ -2775,7 +2776,12 @@ describe("Cline", () => {
 				await task.submitUserMessage("test message", ["image1.png"])
 
 				// Verify handleWebviewAskResponse was called directly (not webview)
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "test message", ["image1.png"])
+				expect(handleResponseSpy).toHaveBeenCalledWith(
+					"messageResponse",
+					"test message",
+					["image1.png"],
+					undefined,
+				)
 				// Should NOT route through webview anymore
 				expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 			})
@@ -2870,7 +2876,7 @@ describe("Cline", () => {
 				task.clineMessages = []
 				await task.submitUserMessage("new task", ["image1.png"])
 
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "new task", ["image1.png"])
+				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "new task", ["image1.png"], undefined)
 
 				// Clear mock
 				handleResponseSpy.mockClear()
@@ -2886,7 +2892,12 @@ describe("Cline", () => {
 				]
 				await task.submitUserMessage("follow-up message", ["image2.png"])
 
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "follow-up message", ["image2.png"])
+				expect(handleResponseSpy).toHaveBeenCalledWith(
+					"messageResponse",
+					"follow-up message",
+					["image2.png"],
+					undefined,
+				)
 			})
 
 			it("should handle undefined provider gracefully", async () => {
@@ -2918,6 +2929,103 @@ describe("Cline", () => {
 
 				// Restore console.error
 				consoleErrorSpy.mockRestore()
+			})
+
+			it("returns true when the message is handed to the ask-response channel", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+
+				const submitted = await task.submitUserMessage("test message", ["image1.png"])
+
+				expect(submitted).toBe(true)
+				expect(handleResponseSpy).toHaveBeenCalledWith(
+					"messageResponse",
+					"test message",
+					["image1.png"],
+					undefined,
+				)
+			})
+
+			it("returns false when there is nothing to submit", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse")
+
+				// Empty text without images.
+				await expect(task.submitUserMessage("", [])).resolves.toBe(false)
+				// Whitespace-only text without images.
+				await expect(task.submitUserMessage("   ", [])).resolves.toBe(false)
+
+				expect(handleResponseSpy).not.toHaveBeenCalled()
+			})
+
+			it("returns false when the provider reference is lost", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				Object.defineProperty(task, "providerRef", {
+					value: { deref: () => undefined },
+					writable: false,
+					configurable: true,
+				})
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+				try {
+					await expect(task.submitUserMessage("test message")).resolves.toBe(false)
+					expect(consoleErrorSpy).toHaveBeenCalledWith("[Task#submitUserMessage] Provider reference lost")
+				} finally {
+					consoleErrorSpy.mockRestore()
+				}
+			})
+
+			it("returns false when the submission handoff throws", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {
+					throw new Error("emit failed")
+				})
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+				try {
+					await expect(task.submitUserMessage("test message")).resolves.toBe(false)
+					expect(consoleErrorSpy).toHaveBeenCalledWith(
+						"[Task#submitUserMessage] Failed to submit user message:",
+						expect.any(Error),
+					)
+				} finally {
+					consoleErrorSpy.mockRestore()
+				}
+			})
+
+			it("coerces a nullish text into an images-only submission", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+
+				// Runtime callers outside the type system can pass a nullish text;
+				// the guard coerces it so an images-only message still submits.
+				const submitted = await task.submitUserMessage(undefined as unknown as string, ["image1.png"])
+
+				expect(submitted).toBe(true)
+				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "", ["image1.png"], undefined)
 			})
 		})
 	})
@@ -3006,7 +3114,7 @@ describe("Cline", () => {
 				ask: "resume_task" as const,
 			}
 
-			await expect(taskAccess.addToClineMessages(message)).resolves.toBeUndefined()
+			await expect(taskAccess.addToClineMessages(message)).resolves.toBe(true)
 
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
 				"[Task#addToClineMessages] postStateToWebviewThrottled failed:",
@@ -4098,7 +4206,7 @@ describe("Cline", () => {
 					totalTokensOut: 0,
 					contextTokens: 0,
 				})
-				vi.spyOn(task, "say").mockResolvedValue(undefined)
+				vi.spyOn(task, "say").mockResolvedValue(true)
 				task.apiConversationHistory = [
 					{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
 				]
@@ -4632,7 +4740,7 @@ describe("Cline", () => {
 			await task.getTaskMode()
 			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
 			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
-			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
 			// The wait never settles on its own; only the bound expires it.
 			Object.assign(task.api, { ensureModelFetched: () => new Promise<void>(() => {}) })
 			task.apiConversationHistory = [
@@ -4680,7 +4788,7 @@ describe("Cline", () => {
 			})
 			await task.getTaskMode()
 			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
-			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
 			Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
 			task.abandoned = true
 			// Only an unstarted prompt build attributes the skip to the entry
@@ -4711,7 +4819,7 @@ describe("Cline", () => {
 			await task.getTaskMode()
 			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
 			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
-			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
 			Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
 			task.apiConversationHistory = [
 				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
@@ -4724,7 +4832,7 @@ describe("Cline", () => {
 			// The early return this guards never reaches say; the spy only keeps
 			// the aborted task's post-overwrite say from throwing before the
 			// summarize/overwrite assertions can report a regression.
-			vi.spyOn(task, "say").mockResolvedValue(undefined)
+			vi.spyOn(task, "say").mockResolvedValue(true)
 			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
 			// The summarizeConversation module mock is never cleared, so pin the
 			// call count this condense starts from.
@@ -4767,7 +4875,7 @@ describe("Cline", () => {
 			await task.getTaskMode()
 			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
 			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
-			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
 			Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
 			task.apiConversationHistory = [
 				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
@@ -4776,7 +4884,7 @@ describe("Cline", () => {
 			// The early return this guards never reaches say; the spy only keeps
 			// the aborted task's post-overwrite say from throwing before the
 			// overwrite assertion can report the regression.
-			const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined)
+			const saySpy = vi.spyOn(task, "say").mockResolvedValue(true)
 			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
 			// The summarizeConversation module mock is never cleared, so pin the
 			// call count this condense starts from.
@@ -4820,13 +4928,13 @@ describe("Cline", () => {
 			await task.getTaskMode()
 			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
 			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
-			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
 			Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
 			task.apiConversationHistory = [
 				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
 			]
 			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
-			vi.spyOn(task, "say").mockResolvedValue(undefined)
+			vi.spyOn(task, "say").mockResolvedValue(true)
 			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
 			// Suspend inside the collector so the abort lands while the
 			// summarization request cannot have started yet.
@@ -4867,13 +4975,13 @@ describe("Cline", () => {
 			await task.getTaskMode()
 			vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith())
 			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
-			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
 			Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
 			task.apiConversationHistory = [
 				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
 			]
 			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
-			vi.spyOn(task, "say").mockResolvedValue(undefined)
+			vi.spyOn(task, "say").mockResolvedValue(true)
 			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
 			let releaseFilesRead!: (value: string[] | undefined) => void
 			const filesReadGate = new Promise<string[] | undefined>((resolve) => {
@@ -5348,7 +5456,7 @@ describe("Cline", () => {
 				releasePrompt = () => resolve("mock system prompt")
 			})
 			vi.mocked(SYSTEM_PROMPT).mockReturnValueOnce(promptGate)
-			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
 			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
 			vi.useFakeTimers()
@@ -5549,7 +5657,7 @@ describe("Cline", () => {
 					expect(task.clineMessages).toEqual([])
 					await pendingPostState
 				})
-			const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined)
+			const saySpy = vi.spyOn(task, "say").mockResolvedValue(true)
 			vi.spyOn(taskAccess, "getEnabledMcpToolsCount").mockResolvedValue({
 				enabledToolCount: 0,
 				enabledServerCount: 0,
@@ -6060,20 +6168,25 @@ describe("Queued message processing after condense", () => {
 
 		// Make condense fast + deterministic
 		vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("system")
-		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
 
 		// Queue a message during condensing
 		task.messageQueueService.addMessage("queued text", ["img1.png"])
 
-		// Use fake timers to capture setTimeout(0) in processQueuedMessages
-		vi.useFakeTimers()
 		await task.condenseContext()
 
-		// Flush the microtask that submits the queued message
-		vi.runAllTimers()
-		vi.useRealTimers()
-
-		expect(submitSpy).toHaveBeenCalledWith("queued text", ["img1.png"])
+		expect(submitSpy).toHaveBeenCalledWith(
+			"queued text",
+			["img1.png"],
+			undefined,
+			undefined,
+			task.messageQueueService.messages[0]?.id,
+		)
+		// Submission does not remove: the message stays queued until a
+		// conversational ask consumes it.
+		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["queued text"])
+		const result = await task.ask("followup", "Anything else?", false)
+		expect(result).toMatchObject({ response: "messageResponse", text: "queued text" })
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
@@ -6097,30 +6210,195 @@ describe("Queued message processing after condense", () => {
 		vi.spyOn(getTaskTestAccess(taskA), "getSystemPrompt").mockResolvedValue("system")
 		vi.spyOn(getTaskTestAccess(taskB), "getSystemPrompt").mockResolvedValue("system")
 
-		const spyA = vi.spyOn(taskA, "submitUserMessage").mockResolvedValue(undefined)
-		const spyB = vi.spyOn(taskB, "submitUserMessage").mockResolvedValue(undefined)
+		const spyA = vi.spyOn(taskA, "submitUserMessage").mockResolvedValue(true)
+		const spyB = vi.spyOn(taskB, "submitUserMessage").mockResolvedValue(true)
 
 		taskA.messageQueueService.addMessage("A message")
 		taskB.messageQueueService.addMessage("B message")
 
 		// Condense in task A should only drain A's queue
-		vi.useFakeTimers()
 		await taskA.condenseContext()
-		vi.runAllTimers()
-		vi.useRealTimers()
 
-		expect(spyA).toHaveBeenCalledWith("A message", undefined)
+		expect(spyA).toHaveBeenCalledWith(
+			"A message",
+			undefined,
+			undefined,
+			undefined,
+			taskA.messageQueueService.messages[0]?.id,
+		)
 		expect(spyB).not.toHaveBeenCalled()
 		expect(taskB.messageQueueService.isEmpty()).toBe(false)
 
 		// Now condense in task B should drain B's queue
-		vi.useFakeTimers()
 		await taskB.condenseContext()
-		vi.runAllTimers()
-		vi.useRealTimers()
 
-		expect(spyB).toHaveBeenCalledWith("B message", undefined)
+		expect(spyB).toHaveBeenCalledWith(
+			"B message",
+			undefined,
+			undefined,
+			undefined,
+			taskB.messageQueueService.messages[0]?.id,
+		)
+		// Drains submit but do not remove; each task retains its own message
+		// until an ask consumes it.
+		expect(taskA.messageQueueService.messages.map((message) => message.text)).toEqual(["A message"])
+		expect(taskB.messageQueueService.messages.map((message) => message.text)).toEqual(["B message"])
+
+		const resultB = await taskB.ask("followup", "Anything else?", false)
+		expect(resultB).toMatchObject({ response: "messageResponse", text: "B message" })
 		expect(taskB.messageQueueService.isEmpty()).toBe(true)
+		// Consuming B's message must not touch A's queue.
+		expect(taskA.messageQueueService.messages.map((message) => message.text)).toEqual(["A message"])
+	})
+
+	describe("processQueuedMessages drain semantics", () => {
+		const createQueueTask = () =>
+			new Task({
+				provider: createProvider(),
+				apiConfiguration: apiConfig,
+				task: "initial task",
+				startTask: false,
+			})
+
+		it("submits the next queued message and retains it until a conversational ask consumes it", async () => {
+			const task = createQueueTask()
+			vi.spyOn(getTaskTestAccess(task), "checkpointSave").mockResolvedValue(undefined)
+			task.messageQueueService.addMessage("queued text", ["img1.png"])
+
+			await expect(task.processQueuedMessages()).resolves.toBe(true)
+
+			// The real submit succeeded, but removal is tied to ask-consumption:
+			// the message stays queued until an ask claims it.
+			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["queued text"])
+
+			// An approval-gating tool ask must not consume the conversational
+			// message (this file mocks p-wait-for, so the ask resolves without a
+			// response; the explicit-approval blocking flow is covered in
+			// ask-queued-message-drain.spec.ts).
+			const approval = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+			expect(approval.text).toBeUndefined()
+			expect(approval.queuedMessageId).toBeUndefined()
+			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["queued text"])
+
+			const result = await task.ask("followup", "Anything else?", false)
+			expect(result).toMatchObject({ response: "messageResponse", text: "queued text", images: ["img1.png"] })
+			expect(task.messageQueueService.isEmpty()).toBe(true)
+		})
+
+		it("delivers queued feedback through the next conversational ask instead of losing it", async () => {
+			const task = createQueueTask()
+			vi.spyOn(getTaskTestAccess(task), "checkpointSave").mockResolvedValue(undefined)
+			task.messageQueueService.addMessage("one more change")
+
+			// Command completion drain: the real submit succeeds and the webview
+			// shows the feedback, but no ask has consumed the response yet.
+			await expect(task.processQueuedMessages()).resolves.toBe(true)
+			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["one more change"])
+
+			// The next conversational ask discards the unconsumed pending response
+			// at its start; the retained queued message must survive that discard
+			// and be consumed by the ask instead of being dropped.
+			const result = await task.ask("followup", "Anything else?", false)
+
+			expect(result).toMatchObject({ response: "messageResponse", text: "one more change" })
+			expect(task.messageQueueService.isEmpty()).toBe(true)
+		})
+
+		it("resolves false when the queue is empty", async () => {
+			const task = createQueueTask()
+			const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(true)
+
+			await expect(task.processQueuedMessages()).resolves.toBe(false)
+
+			expect(submitSpy).not.toHaveBeenCalled()
+		})
+
+		it("releases the queued message and propagates when submission fails", async () => {
+			const task = createQueueTask()
+			vi.spyOn(task, "submitUserMessage").mockResolvedValue(false)
+			task.messageQueueService.addMessage("retry me")
+
+			await expect(task.processQueuedMessages()).rejects.toThrow("Failed to submit queued message")
+
+			// The claim is released, so the message stays queued for a later drain.
+			expect(task.messageQueueService.claimNextMessage()?.text).toBe("retry me")
+		})
+
+		it("releases the queued message and propagates when submission throws", async () => {
+			const task = createQueueTask()
+			vi.spyOn(task, "submitUserMessage").mockRejectedValue(new Error("emit failed"))
+			task.messageQueueService.addMessage("retry me too")
+
+			await expect(task.processQueuedMessages()).rejects.toThrow("emit failed")
+
+			expect(task.messageQueueService.claimNextMessage()?.text).toBe("retry me too")
+		})
+
+		it("serializes concurrent drains so a blocked submission holds the next message queued", async () => {
+			const task = createQueueTask()
+			vi.spyOn(getTaskTestAccess(task), "checkpointSave").mockResolvedValue(undefined)
+			task.messageQueueService.addMessage("first")
+			task.messageQueueService.addMessage("second")
+
+			// Block the first submission mid-handoff so its response stays pending.
+			let releaseFirstSubmission!: () => void
+			const firstSubmission = new Promise<boolean>((resolve) => {
+				releaseFirstSubmission = () => resolve(true)
+			})
+			const submitSpy = vi
+				.spyOn(task, "submitUserMessage")
+				.mockReturnValueOnce(firstSubmission)
+				.mockResolvedValue(true)
+
+			const firstDrain = task.processQueuedMessages()
+			const secondDrain = task.processQueuedMessages()
+
+			// The first drain reaches its blocked submission; the serialized
+			// second drain must not claim or submit the next message yet.
+			await Promise.resolve()
+			expect(submitSpy).toHaveBeenCalledTimes(1)
+			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["first", "second"])
+
+			releaseFirstSubmission()
+			await expect(firstDrain).resolves.toBe(true)
+			await expect(secondDrain).resolves.toBe(true)
+
+			// The second drain saw "first" still pending consumption and did not
+			// re-post it (a re-post could overwrite a distinct pending response);
+			// both messages stay queued until asks consume them in order.
+			expect(submitSpy).toHaveBeenCalledTimes(1)
+			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["first", "second"])
+
+			const firstResult = await task.ask("followup", "first question?", false)
+			expect(firstResult).toMatchObject({ response: "messageResponse", text: "first" })
+			const secondResult = await task.ask("followup", "second question?", false)
+			expect(secondResult).toMatchObject({ response: "messageResponse", text: "second" })
+			expect(task.messageQueueService.isEmpty()).toBe(true)
+		})
+
+		it("does not let a failed drain block later drains", async () => {
+			const task = createQueueTask()
+			vi.spyOn(getTaskTestAccess(task), "checkpointSave").mockResolvedValue(undefined)
+			vi.spyOn(task, "submitUserMessage").mockRejectedValueOnce(new Error("emit failed")).mockResolvedValue(true)
+			task.messageQueueService.addMessage("retry me")
+			task.messageQueueService.addMessage("still deliverable")
+
+			await expect(task.processQueuedMessages()).rejects.toThrow("emit failed")
+			// The failed claim is released; the next drain retries it in order.
+			await expect(task.processQueuedMessages()).resolves.toBe(true)
+			await expect(task.processQueuedMessages()).resolves.toBe(true)
+
+			// The retried submissions stay queued until asks consume them in order.
+			expect(task.messageQueueService.messages.map((message) => message.text)).toEqual([
+				"retry me",
+				"still deliverable",
+			])
+			const firstResult = await task.ask("followup", "first question?", false)
+			expect(firstResult).toMatchObject({ response: "messageResponse", text: "retry me" })
+			const secondResult = await task.ask("followup", "second question?", false)
+			expect(secondResult).toMatchObject({ response: "messageResponse", text: "still deliverable" })
+			expect(task.messageQueueService.isEmpty()).toBe(true)
+		})
 	})
 })
 

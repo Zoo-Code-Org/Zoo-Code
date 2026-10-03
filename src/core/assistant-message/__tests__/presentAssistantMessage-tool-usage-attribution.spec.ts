@@ -2,6 +2,7 @@
 
 import type { Anthropic } from "@anthropic-ai/sdk"
 import { describe, it, expect, beforeEach, vi, type Mock } from "vitest"
+import { providerIdentifiers } from "@roo-code/types"
 import { presentAssistantMessage } from "../presentAssistantMessage"
 import { validateToolUse } from "../../tools/validateToolUse"
 import { getModeBySlug } from "../../../shared/modes"
@@ -39,6 +40,7 @@ vi.mock("@roo-code/telemetry", () => ({
 		instance: {
 			captureToolUsage: vi.fn(),
 			captureConsecutiveMistakeError: vi.fn(),
+			captureException: vi.fn(),
 			captureEvent: vi.fn(),
 		},
 	},
@@ -64,6 +66,7 @@ interface MockTask {
 	api: { getModel: () => { id: string; info: Record<string, unknown> } }
 	recordToolUsage: ReturnType<typeof vi.fn>
 	recordToolError: ReturnType<typeof vi.fn>
+	apiConfiguration?: { apiProvider: string }
 	toolRepetitionDetector: { check: ReturnType<typeof vi.fn> }
 	providerRef: {
 		deref: () =>
@@ -74,6 +77,7 @@ interface MockTask {
 			| undefined
 	}
 	say: ReturnType<typeof vi.fn>
+	sayUserFeedbackAndAckQueued: ReturnType<typeof vi.fn>
 	ask: ReturnType<typeof vi.fn>
 	pushToolResultToUserContent: ReturnType<typeof vi.fn>
 }
@@ -83,6 +87,10 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		// clearAllMocks keeps queued one-shot implementations alive; tests that skip the
+		// validation arm would otherwise leak a mockImplementationOnce throw into a
+		// later test that runs the validated arm.
+		vi.mocked(validateToolUse).mockReset()
 		vi.mocked(validateToolUse).mockImplementation(() => undefined)
 
 		mockTask = {
@@ -117,6 +125,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 				}),
 			},
 			say: vi.fn().mockResolvedValue(undefined),
+			sayUserFeedbackAndAckQueued: vi.fn().mockResolvedValue(undefined),
 			ask: vi.fn().mockResolvedValue({ response: "yesButtonClicked" }),
 			pushToolResultToUserContent: vi.fn(),
 		}
@@ -650,6 +659,113 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 			expect(mockTask.recordToolError).toHaveBeenCalledWith("use_mcp_tool", expect.any(String))
 			expect(mockTask.consecutiveMistakeCount).toBe(1)
 			expect(mockTask.didAlreadyUseTool).toBe(false)
+		})
+
+		it("routes MCP approval feedback through the queued-ack wrapper", async () => {
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({
+						mode: "code",
+						customModes: [],
+					}),
+					getMcpHub: () => ({
+						findServerNameBySanitizedName: () => "my_server",
+						getAllServers: () => [
+							{
+								name: "my_server",
+								tools: [{ name: "do_thing", enabledForPrompt: true }],
+							},
+						],
+					}),
+				}),
+			}
+			mockTask.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					id: "call_native_mcp_feedback",
+					name: "mcp_my_server_do_thing",
+					serverName: "my_server",
+					toolName: "do_thing",
+					arguments: {},
+					partial: false,
+				},
+			]
+			mockTask.ask = vi.fn().mockResolvedValue({ response: "yesButtonClicked", text: "Careful with this server" })
+
+			await presentAssistantMessage(mockTask as unknown as Task)
+
+			expect(mockTask.sayUserFeedbackAndAckQueued).toHaveBeenCalledExactlyOnceWith(
+				"Careful with this server",
+				undefined,
+				undefined,
+			)
+			expect(mockTask.say).not.toHaveBeenCalledWith("user_feedback", expect.anything(), expect.anything())
+		})
+
+		it("routes tool-repetition feedback through the queued-ack wrapper", async () => {
+			mockTask.toolRepetitionDetector.check = vi.fn().mockReturnValue({
+				allowExecution: false,
+				askUser: {
+					messageKey: "mistake_limit_reached",
+					messageDetail: "The tool {toolName} was called consecutively without progress.",
+				},
+			})
+			mockTask.apiConfiguration = { apiProvider: providerIdentifiers.anthropic }
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "call_repetition_feedback",
+					name: "read_file",
+					params: { path: "a.txt" },
+					nativeArgs: { path: "a.txt" },
+					partial: false,
+				},
+			]
+			mockTask.ask = vi.fn().mockResolvedValue({ response: "messageResponse", text: "Try another approach" })
+
+			await presentAssistantMessage(mockTask as unknown as Task)
+
+			expect(mockTask.sayUserFeedbackAndAckQueued).toHaveBeenCalledExactlyOnceWith(
+				"Try another approach",
+				undefined,
+				undefined,
+			)
+			expect(mockTask.say).not.toHaveBeenCalledWith("user_feedback", expect.anything(), expect.anything())
+			expect(mockTask.userMessageContent).toContainEqual(
+				expect.objectContaining({
+					type: "text",
+					text: expect.stringContaining("Try another approach"),
+				}),
+			)
+		})
+
+		it("acks tool-repetition feedback before it reaches the API turn", async () => {
+			mockTask.toolRepetitionDetector.check = vi.fn().mockReturnValue({
+				allowExecution: false,
+				askUser: {
+					messageKey: "mistake_limit_reached",
+					messageDetail: "The tool {toolName} was called consecutively without progress.",
+				},
+			})
+			mockTask.apiConfiguration = { apiProvider: providerIdentifiers.anthropic }
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "call_repetition_feedback",
+					name: "read_file",
+					params: { path: "a.txt" },
+					nativeArgs: { path: "a.txt" },
+					partial: false,
+				},
+			]
+			mockTask.ask = vi.fn().mockResolvedValue({ response: "messageResponse", text: "Try another approach" })
+			mockTask.sayUserFeedbackAndAckQueued = vi.fn().mockRejectedValue(new Error("persist failed"))
+
+			await expect(presentAssistantMessage(mockTask as unknown as Task)).rejects.toThrow("persist failed")
+
+			// The durable ack failed and the entry is re-queued for redelivery:
+			// the feedback must not already be part of the API turn.
+			expect(mockTask.userMessageContent).toHaveLength(0)
 		})
 	})
 

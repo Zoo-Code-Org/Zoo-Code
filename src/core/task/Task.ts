@@ -170,13 +170,27 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 				return { response: "messageResponse", requiresDurableAck: true }
 			}
 		} catch {
-			// Malformed tool asks retain the existing approve-with-feedback behavior.
+			// Malformed tool asks retain the existing behavior: the queued
+			// message is left for a conversational turn, not read as an answer.
 		}
 
-		return { response: "yesButtonClicked", requiresDurableAck: false }
+		// A queued conversational message must never approve tool execution:
+		// only an explicit user response may return yesButtonClicked.
+		return undefined
 	}
 	if (type === "command" || type === "use_mcp_server") {
-		return { response: "yesButtonClicked", requiresDurableAck: false }
+		// Approval-gating asks: a queued conversational message is not an
+		// approval, so the claim path must not convert it to yesButtonClicked.
+		return undefined
+	}
+
+	if (type === "api_req_failed" || type === "auto_approval_max_req_reached") {
+		// Failure-gate retry prompts: any non-yes answer aborts the task, so a
+		// queued conversational message must not be converted into an answer —
+		// its text and images would be destroyed with no history row and a
+		// surprise abort. The message stays queued for the next conversational
+		// ask, like the approval-gating asks above.
+		return undefined
 	}
 
 	return { response: "messageResponse", requiresDurableAck: type === "completion_result" }
@@ -377,6 +391,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private askResponse?: ClineAskResponse
 	private askResponseText?: string
 	private askResponseImages?: string[]
+	// ID of the queued message that produced the current ask-response slot
+	// value (set only when a queued-message drain submitted it). Direct
+	// responses clear it, so Task.ask can tie consumption to message identity
+	// instead of matching response text/images.
+	private askResponseQueuedMessageId?: string
 	public lastMessageTs?: number
 	private autoApprovalTimeoutRef?: NodeJS.Timeout
 
@@ -420,6 +439,39 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// Message Queue Service
 	public readonly messageQueueService: MessageQueueService
 	private messageQueueStateChangedHandler: (() => void) | undefined
+	// Serializes queued-message drains: a drain claims and submits only after
+	// the previous drain's submission handoff finished, so two concurrent
+	// drains cannot submit different messages into the single ask-response
+	// slot (which would drop the earlier response after both messages were
+	// already removed from the queue).
+	private queuedMessageDrainChain: Promise<unknown> = Promise.resolve()
+	// ID of the last drain-submitted queued message. A successful submit only
+	// posts into the pending ask-response slot (which records this ID); the
+	// message stays queued until an ask consumes that response. The consuming
+	// ask matches the slot's recorded ID against this one to decide whether the
+	// submission was consumed (hand the ID to the caller for a durable ack) or
+	// overwritten unconsumed (retain for a later ask).
+	private pendingSubmittedQueuedMessageId: string | undefined
+	// The ask currently blocked in Task.ask's response wait, when any. A
+	// background drain consults queuedResponseForAsk against this gate so a
+	// queued conversational message can never answer an approval-gating ask,
+	// exactly matching the claim path's resolution gate.
+	private inFlightAskGate: { type: ClineAsk; text?: string } | undefined
+	/**
+	 * True while a queued submission must not be posted: an ask is in flight
+	 * AND either its slot already carries a direct response or the ask type is
+	 * one the claim-path gate (queuedResponseForAsk) refuses. Outside an
+	 * in-flight ask the slot holds only stale residue the next ask clears, so
+	 * between-turn submissions proceed.
+	 */
+	private inFlightAskBlocksQueuedSubmission(): boolean {
+		const gate = this.inFlightAskGate
+		return !!gate && (this.askResponse !== undefined || queuedResponseForAsk(gate.type, gate.text) === undefined)
+	}
+	// Association between a queued message ID and the user_feedback row its ack
+	// persisted. A redelivery after a partial save failure reconciles the same
+	// row instead of appending a duplicate feedback row.
+	private queuedFeedbackRows = new Map<string, ClineMessage>()
 
 	// Streaming
 	isWaitingForFirstChunk = false
@@ -953,24 +1005,135 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		text?: string,
 		images?: string[],
 	): Promise<boolean> {
-		await this.say("user_feedback", text ?? "", images)
-		for (let attempt = 0; attempt <= QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length; attempt++) {
-			if (this.abort) {
-				this.messageQueueService.releaseMessage(messageId)
-				return false
-			}
-			if (await this.saveClineMessages()) {
-				return this.messageQueueService.removeMessage(messageId)
-			}
-			if (attempt < QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length) {
-				await delay(QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS[attempt])
+		let row = this.queuedFeedbackRows.get(messageId)
+		// The drain-side tracker only guards a submitted message against
+		// re-submission while an ask has not consumed it yet. Once persistence
+		// settles — success (entry removed), failure (entry re-queued), abort,
+		// or a failed row write — a stale tracker would block every later
+		// drain from resubmitting this message (and starve the messages
+		// behind it), so release it on every exit path.
+		const releasePendingTracker = () => {
+			if (this.pendingSubmittedQueuedMessageId === messageId) {
+				this.pendingSubmittedQueuedMessageId = undefined
 			}
 		}
-		console.error(
-			`[Task#persistQueuedFeedbackAndAcknowledge] Failed to durably save queued feedback ${messageId} after ${QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length + 1} attempts`,
-		)
-		this.messageQueueService.releaseMessage(messageId)
-		return false
+		try {
+			try {
+				if (row) {
+					// Redelivery after a partial save failure (e.g. the message file
+					// was written but metadata persistence failed): reconcile the same
+					// row instead of appending a duplicate feedback row. Awaited so a
+					// failed webview update reaches the catch below, which releases
+					// the queued message instead of acking over a stale row.
+					row.text = text ?? ""
+					row.images = images
+					await this.updateClineMessage(row)
+				} else {
+					row = {
+						ts: Date.now(),
+						type: "say",
+						say: "user_feedback",
+						text: text ?? "",
+						images,
+					}
+					// Mirrors say()'s interactive user_feedback append: bump
+					// lastMessageTs and let the retry loop below own persistence.
+					// The association is registered before the append: the append's
+					// only uncaught throw is a synchronously throwing Message
+					// listener, which runs after the row is already pushed, so a
+					// redelivery can reconcile the same row instead of appending a
+					// duplicate feedback row.
+					this.lastMessageTs = row.ts
+					this.queuedFeedbackRows.set(messageId, row)
+					await this.addToClineMessages(row)
+				}
+			} catch (error) {
+				// A failed write must not leave the message claimed: release it so a
+				// later drain can redeliver it. (No-op when the drain path already
+				// released the claim.) The pending tracker is released here too:
+				// this catch rethrows past the finally below, which must not be
+				// the only place that clears it.
+				this.messageQueueService.releaseMessage(messageId)
+				releasePendingTracker()
+				throw error
+			}
+			for (let attempt = 0; attempt <= QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length; attempt++) {
+				if (this.abort || this.abandoned) {
+					this.messageQueueService.releaseMessage(messageId)
+					return false
+				}
+				if (await this.saveClineMessages()) {
+					this.queuedFeedbackRows.delete(messageId)
+					return this.messageQueueService.removeMessage(messageId)
+				}
+				if (attempt < QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length) {
+					// Interruptible backoff: an abort or abandonment during the wait
+					// resolves promptly (releasing the claim at the loop-top check)
+					// instead of retaining the task through the full delay.
+					await this.waitForQueuedFeedbackBackoff(QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS[attempt])
+				}
+			}
+			console.error(
+				`[Task#persistQueuedFeedbackAndAcknowledge] Failed to durably save queued feedback ${messageId} after ${QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length + 1} attempts`,
+			)
+			this.messageQueueService.releaseMessage(messageId)
+			return false
+		} finally {
+			releasePendingTracker()
+		}
+	}
+
+	private waitForQueuedFeedbackBackoff(ms: number): Promise<void> {
+		return new Promise<void>((resolve) => {
+			const finish = () => {
+				clearTimeout(timer)
+				clearInterval(poll)
+				resolve()
+			}
+			const timer = setTimeout(finish, ms)
+			const poll = setInterval(() => {
+				if (this.abort === true || this.abandoned === true) {
+					finish()
+				}
+			}, 50)
+		})
+	}
+
+	/**
+	 * Persist the user feedback carried by an ask result. When the ask consumed
+	 * a queued message (intercepted its drain submission), the queue entry is
+	 * removed only after the feedback's history write succeeds; a failed write
+	 * re-queues it. Consumers that surface returned feedback as user_feedback
+	 * must call this instead of say("user_feedback", ...) so a consumed queued
+	 * message is acked exactly once instead of being redelivered by a later
+	 * drain or claim.
+	 */
+	public async sayUserFeedbackAndAckQueued(
+		text: string | undefined,
+		images: string[] | undefined,
+		queuedMessageId: string | undefined,
+	): Promise<void> {
+		if (queuedMessageId) {
+			const persisted = await this.persistQueuedFeedbackAndAcknowledge(queuedMessageId, text, images)
+			if (!persisted) {
+				throw new Error(`[Task] Failed to persist queued feedback ${queuedMessageId}`)
+			}
+			return
+		}
+		if (text || images?.length) {
+			await this.say("user_feedback", text ?? "", images)
+		}
+	}
+
+	/**
+	 * Drop a queued message whose response this ask consumed without persisting
+	 * feedback (the consumer only inspected the button response, e.g. retry and
+	 * approval gates). Removes the entry without inventing a history write.
+	 */
+	public discardConsumedQueuedMessage(queuedMessageId: string | undefined): void {
+		if (queuedMessageId) {
+			this.messageQueueService.removeMessage(queuedMessageId)
+		}
 	}
 
 	/**
@@ -1082,7 +1245,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private handleQueuedAskResponse(message: QueuedMessage, resolution: QueuedAskResolution): string | undefined {
 		this.handleWebviewAskResponse(resolution.response, message.text, message.images)
-		if (resolution.requiresDurableAck) {
+		if (resolution.requiresDurableAck || this.queuedFeedbackRows.has(message.id)) {
+			// A registered feedback row means an earlier delivery attempt left
+			// history behind: hand the ID back so the consumer reconciles that
+			// row through the durable ack instead of appending a duplicate via
+			// the say("user_feedback") fallback.
 			return message.id
 		}
 		this.messageQueueService.removeMessage(message.id)
@@ -1372,7 +1539,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return readTaskMessages({ taskId: this.taskId, globalStoragePath: this.globalStoragePath })
 	}
 
-	private async addToClineMessages(message: ClineMessage) {
+	/** Appends a message, posts it, and persists. @returns whether the history save succeeded. */
+	private async addToClineMessages(message: ClineMessage): Promise<boolean> {
 		message.messageId ??= crypto.randomUUID()
 		this.clineMessages.push(message)
 		const provider = this.providerRef.deref()
@@ -1403,7 +1571,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 		}
 		this.emit(RooCodeEventName.Message, { action: "created", message })
-		await this.saveClineMessages()
+		const saved = await this.saveClineMessages()
 
 		const shouldCaptureMessage = message.partial !== true && CloudService.isEnabled()
 
@@ -1415,6 +1583,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Track that this message has been synced to cloud
 			this.cloudSyncedMessageTimestamps.add(message.ts)
 		}
+
+		return saved
 	}
 
 	/**
@@ -1533,6 +1703,30 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		progressStatus?: ToolProgressStatus,
 		isProtected?: boolean,
 	): Promise<{ response: ClineAskResponse; text?: string; images?: string[]; queuedMessageId?: string }> {
+		// Arm the drain gate synchronously at ask() entry, before the first
+		// await, and hold it for the whole ask lifecycle: a queued submission
+		// landing anywhere in the ask prefix (auto-approval, partial handling)
+		// must hit the same queuedResponseForAsk gate as one landing in the
+		// response wait, so an approval-gating ask can never be answered by
+		// the queue. The thin-wrapper shape keeps the body at its long-standing
+		// indentation instead of re-indenting it under a wrapping try block,
+		// so whitespace-only changes do not count against the mutation-diff
+		// line budget.
+		this.inFlightAskGate = { type, text }
+		try {
+			return await this.askImpl(type, text, partial, progressStatus, isProtected)
+		} finally {
+			this.inFlightAskGate = undefined
+		}
+	}
+
+	private async askImpl(
+		type: ClineAsk,
+		text?: string,
+		partial?: boolean,
+		progressStatus?: ToolProgressStatus,
+		isProtected?: boolean,
+	): Promise<{ response: ClineAskResponse; text?: string; images?: string[]; queuedMessageId?: string }> {
 		// If this Cline instance was aborted by the provider, then the only
 		// thing keeping us alive is a promise still running in the background,
 		// in which case we don't want to send its result to the webview as it
@@ -1545,6 +1739,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			throw new Error(`[RooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
 		}
 
+		// Arm the drain gate before the first await of this ask and hold it for
+		// the whole lifecycle: a queued submission landing anywhere in the ask
+		// prefix (auto-approval, partial handling) must hit the same
+		// queuedResponseForAsk gate as one landing in the response wait, so an
+		// approval-gating ask can never be answered by the queue.
+		this.inFlightAskGate = { type, text }
 		let askTs: number
 
 		// Resolve auto-approval before adding the message so the state snapshot
@@ -1555,9 +1755,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// rendered, leaving them stuck on-screen).
 		const provider = this.providerRef.deref()
 		const state = provider ? await provider.getState() : undefined
-		const queuedMessage =
-			partial === true || type === "command_output" ? undefined : this.messageQueueService.claimNextMessage()
-		const queuedAskResolution = queuedMessage ? queuedResponseForAsk(type, text) : undefined
+		// Resolve before claiming: approval-gating ask types never consume a
+		// queued conversational message, and claiming without a resolution
+		// would leak the claim. The resolution is only actionable when a
+		// message was actually claimed: otherwise it must not force a manual
+		// ask (that would bypass auto-approval for empty-queue lifecycle asks).
+		const claimableResolution =
+			partial === true || type === "command_output" ? undefined : queuedResponseForAsk(type, text)
+		const queuedMessage = claimableResolution ? this.messageQueueService.claimNextMessage() : undefined
+		const queuedAskResolution = queuedMessage ? claimableResolution : undefined
 		// `this.cwd`, not `provider.cwd`:
 		// The path inside `text` was made relative to this task's workspace,
 		// which for a resumed or child task need not be the one the provider
@@ -1610,6 +1816,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.askResponse = undefined
 					this.askResponseText = undefined
 					this.askResponseImages = undefined
+					this.askResponseQueuedMessageId = undefined
 
 					// Bug for the history books:
 					// In the webview we use the ts as the chatrow key for the
@@ -1643,6 +1850,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.askResponse = undefined
 					this.askResponseText = undefined
 					this.askResponseImages = undefined
+					this.askResponseQueuedMessageId = undefined
 					askTs = Date.now()
 					this.lastMessageTs = askTs
 					await this.addToClineMessages({
@@ -1661,6 +1869,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.askResponse = undefined
 			this.askResponseText = undefined
 			this.askResponseImages = undefined
+			this.askResponseQueuedMessageId = undefined
 			askTs = Date.now()
 			this.lastMessageTs = askTs
 			await this.addToClineMessages({
@@ -1745,7 +1954,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			queuedMessageId = this.handleQueuedAskResponse(queuedMessage, queuedAskResolution)
 		}
 
-		// Wait for askResponse to be set
+		// Wait for askResponse to be set. The drain gate has been armed since
+		// the top of this ask, so a drain landing anywhere in the lifecycle
+		// consults the same queuedResponseForAsk gate as the claim path.
 		await pWaitFor(
 			() => {
 				if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
@@ -1754,10 +1965,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				// If a queued message arrives while we're blocked on an ask (e.g. a follow-up
 				// suggestion click that was incorrectly queued due to UI state), consume it
-				// immediately so the task doesn't hang.
+				// immediately so the task doesn't hang. Approval-gating ask types get no
+				// resolution, so the message stays queued for a conversational turn.
 				if (shouldDrainQueuedMessageForAsk && !this.messageQueueService.isEmpty()) {
-					const message = this.messageQueueService.claimNextMessage()
-					const resolution = message ? queuedResponseForAsk(type, text) : undefined
+					const resolution = queuedResponseForAsk(type, text)
+					const message = resolution ? this.messageQueueService.claimNextMessage() : undefined
 					if (message && resolution) {
 						queuedMessageId = this.handleQueuedAskResponse(message, resolution)
 					}
@@ -1786,6 +1998,34 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			throw new AskIgnoredError("superseded")
 		}
 
+		// Tie a drain-submitted queued message to actual consumption by identity:
+		// the ask consumed the submission only if the pending slot still carries
+		// that message's ID. A direct response clears the slot ID even when its
+		// text/images are identical, so it cannot consume the queue entry. The
+		// claim path is excluded (durable flows already carry queuedMessageId;
+		// non-durable flows removed the message inline).
+		if (this.pendingSubmittedQueuedMessageId) {
+			const consumedViaPendingSlot =
+				queuedMessageId === undefined &&
+				this.askResponseQueuedMessageId === this.pendingSubmittedQueuedMessageId
+			if (consumedViaPendingSlot) {
+				// Hand the ID to the caller instead of removing inline: the queue
+				// entry is deleted only after the feedback is durably saved
+				// (persistQueuedFeedbackAndAcknowledge), so a failed history write
+				// cannot lose a message that was already dequeued.
+				queuedMessageId = this.pendingSubmittedQueuedMessageId
+				this.pendingSubmittedQueuedMessageId = undefined
+			} else if (
+				!this.messageQueueService.messages.some(
+					(message) => message.id === this.pendingSubmittedQueuedMessageId,
+				)
+			) {
+				// The message was consumed via the ask claim path or discarded
+				// by an existing path; the tracker is stale, so clear it.
+				this.pendingSubmittedQueuedMessageId = undefined
+			}
+		}
+
 		const result = {
 			response: this.askResponse!,
 			text: this.askResponseText,
@@ -1795,6 +2035,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.askResponse = undefined
 		this.askResponseText = undefined
 		this.askResponseImages = undefined
+		this.askResponseQueuedMessageId = undefined
 
 		// Cancel the timeouts if they are still running.
 		timeouts.forEach((timeout) => clearTimeout(timeout))
@@ -1811,13 +2052,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return result
 	}
 
-	handleWebviewAskResponse(askResponse: ClineAskResponse, text?: string, images?: string[]) {
+	handleWebviewAskResponse(
+		askResponse: ClineAskResponse,
+		text?: string,
+		images?: string[],
+		sourceQueuedMessageId?: string,
+	) {
 		// Clear any pending auto-approval timeout when user responds
 		this.cancelAutoApprovalTimeout()
 
 		this.askResponse = askResponse
 		this.askResponseText = text
 		this.askResponseImages = images
+		this.askResponseQueuedMessageId = sourceQueuedMessageId
 
 		// Create a checkpoint whenever the user sends a message.
 		// Use allowEmpty=true to ensure a checkpoint is recorded even if there are no file changes.
@@ -1897,18 +2144,30 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.api = buildApiHandler(this.apiConfiguration)
 	}
 
+	/**
+	 * Submit a user message through the ask-response channel.
+	 *
+	 * @param sourceQueuedMessageId - ID of the durable queue message being
+	 * submitted, when this submission drains the queue. Recorded on the
+	 * ask-response slot so the consuming ask can tie consumption to message
+	 * identity; direct (non-queue) submissions leave it undefined.
+	 * @returns true when the message was handed to the ask-response channel;
+	 * false when there was nothing to submit or the handoff failed (the failure
+	 * is logged either way). Callers draining a durable queue must check this.
+	 */
 	public async submitUserMessage(
 		text: string,
 		images?: string[],
 		mode?: string,
 		providerProfile?: string,
-	): Promise<void> {
+		sourceQueuedMessageId?: string,
+	): Promise<boolean> {
 		try {
 			text = (text ?? "").trim()
 			images = images ?? []
 
 			if (text.length === 0 && images.length === 0) {
-				return
+				return false
 			}
 
 			const provider = this.providerRef.deref()
@@ -1931,17 +2190,39 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					}
 				}
 
+				// Cancellation guard immediately before the slot write: abort and
+				// dispose both set this flag, and the emit/checkpoint side effects
+				// below must never run on a cancelled task. The check is adjacent
+				// to the write so no cancellation can interleave (single-threaded).
+				if (this.abort || this.abandoned) {
+					console.error("[Task#submitUserMessage] Task aborted, dropping user message submission")
+					return false
+				}
+
+				// Never overwrite a response an ask is blocked waiting on: an
+				// approval-gating ask must not be answered by the queue, and a
+				// direct response that already landed in the slot must not be
+				// replaced (an approval would become a conversational answer).
+				// Queue drains treat the returned false as "leave the message
+				// queued".
+				if (this.inFlightAskBlocksQueuedSubmission()) {
+					return false
+				}
+
 				this.emit(RooCodeEventName.TaskUserMessage, this.taskId)
 
 				// Handle the message directly instead of routing through the webview.
 				// This avoids a race condition where the webview's message state hasn't
 				// hydrated yet, causing it to interpret the message as a new task request.
-				this.handleWebviewAskResponse("messageResponse", text, images)
+				this.handleWebviewAskResponse("messageResponse", text, images, sourceQueuedMessageId)
+				return true
 			} else {
 				console.error("[Task#submitUserMessage] Provider reference lost")
+				return false
 			}
 		} catch (error) {
 			console.error("[Task#submitUserMessage] Failed to submit user message:", error)
+			return false
 		}
 	}
 
@@ -2100,7 +2381,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		)
 
 		// Process any queued messages after condensing completes
-		this.processQueuedMessages()
+		await this.processQueuedMessages()
 	}
 
 	async say(
@@ -2115,7 +2396,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		} = {},
 		contextCondense?: ContextCondense,
 		contextTruncation?: ContextTruncation,
-	): Promise<undefined> {
+	): Promise<boolean> {
 		if (this.abort) {
 			throw new Error(`[RooCode#say] task ${this.taskId}.${this.instanceId} aborted`)
 		}
@@ -2140,6 +2421,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.updateClineMessage(lastMessage).catch((error) => {
 						console.error("[Task#say] updateClineMessage failed:", error)
 					})
+					return true
 				} else {
 					// This is a new partial message, so add it with partial state.
 					const sayTs = Date.now()
@@ -2148,7 +2430,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						this.lastMessageTs = sayTs
 					}
 
-					await this.addToClineMessages({
+					return this.addToClineMessages({
 						ts: sayTs,
 						type: "say",
 						say: type,
@@ -2175,7 +2457,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 					// Instead of streaming partialMessage events, we do a save
 					// and post like normal to persist to disk.
-					await this.saveClineMessages()
+					const saved = await this.saveClineMessages()
 
 					// More performant than an entire `postStateToWebview`.
 					// Fire-and-forget: see updateClineMessage call above for the
@@ -2183,6 +2465,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.updateClineMessage(lastMessage).catch((error) => {
 						console.error("[Task#say] updateClineMessage failed:", error)
 					})
+					return saved
 				} else {
 					// This is a new and complete message, so add it like normal.
 					const sayTs = Date.now()
@@ -2191,7 +2474,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						this.lastMessageTs = sayTs
 					}
 
-					await this.addToClineMessages({
+					return this.addToClineMessages({
 						ts: sayTs,
 						type: "say",
 						say: type,
@@ -2214,7 +2497,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.lastMessageTs = sayTs
 			}
 
-			await this.addToClineMessages({
+			return this.addToClineMessages({
 				ts: sayTs,
 				type: "say",
 				say: type,
@@ -2509,13 +2792,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			this.isInitialized = true
 
-			const { response, text, images } = await this.ask(askType) // Calls `postStateToWebview`.
+			const { response, text, images, queuedMessageId } = await this.ask(askType) // Calls `postStateToWebview`.
 
 			let responseText: string | undefined
 			let responseImages: string[] | undefined
 
 			if (response === "messageResponse") {
-				await this.say("user_feedback", text, images)
+				if (queuedMessageId) {
+					const persisted = await this.persistQueuedFeedbackAndAcknowledge(queuedMessageId, text, images)
+					if (!persisted) {
+						throw new Error(
+							`[Task#resumeTaskFromHistory] Failed to persist queued feedback ${queuedMessageId}`,
+						)
+					}
+				} else {
+					await this.say("user_feedback", text, images)
+				}
 				responseText = text
 				responseImages = images
 			}
@@ -3112,20 +3404,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					),
 				)
 
-				const { response, text, images } = await this.ask(
+				const { response, text, images, queuedMessageId } = await this.ask(
 					"mistake_limit_reached",
 					t("common:errors.mistake_limit_guidance"),
 				)
 
 				if (response === "messageResponse") {
+					// Durable ack first: the feedback must reach history before
+					// the API turn. When the ack fails the entry is re-queued for
+					// redelivery, and the model must not already have seen the text
+					// (mirrors AttemptCompletionTool's ordering).
+					await this.sayUserFeedbackAndAckQueued(text, images, queuedMessageId)
+
 					currentUserContent.push(
 						...[
 							{ type: "text" as const, text: formatResponse.tooManyMistakes(text) },
 							...formatResponse.imageBlocks(images),
 						],
 					)
-
-					await this.say("user_feedback", text, images)
 				}
 
 				this.consecutiveMistakeCount = 0
@@ -3819,7 +4115,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						} else if (error instanceof OutputTokenLimitError) {
 							// Truncation repeats on an identical request, so never auto-retry it
 							// (even with auto-approval); let the user decide once.
-							const { response } = await this.ask("api_req_failed", rawErrorMessage)
+							const { response, queuedMessageId } = await this.ask("api_req_failed", rawErrorMessage)
+							// Failure-gate asks refuse queued-message conversion
+							// (queuedResponseForAsk returns undefined), so queuedMessageId
+							// is always undefined here today; the discard stays as a
+							// defensive no-op should that seam ever change.
+							this.discardConsumedQueuedMessage(queuedMessageId)
 
 							if (response !== "yesButtonClicked") {
 								throw new Error("API request failed")
@@ -4284,10 +4585,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						continue
 					} else {
 						// Prompt the user for retry decision
-						const { response } = await this.ask(
+						const { response, queuedMessageId } = await this.ask(
 							"api_req_failed",
 							"The model returned no assistant messages. This may indicate an issue with the API or the model's output.",
 						)
+						// Only the button response is inspected; a consumed queued
+						// message is dropped without inventing a history write.
+						this.discardConsumedQueuedMessage(queuedMessageId)
 
 						if (response === "yesButtonClicked") {
 							await this.say("api_req_retried")
@@ -4943,7 +5247,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const approvalResult = await this.autoApprovalHandler.checkAutoApprovalLimits(
 			state,
 			this.combineMessages(this.clineMessages.slice(1)),
-			async (type, data) => this.ask(type, data),
+			async (type, data) => {
+				const result = await this.ask(type, data)
+				// The handler only inspects the button response; a consumed
+				// queued message is dropped without inventing a history write.
+				this.discardConsumedQueuedMessage(result.queuedMessageId)
+				return result
+			},
 		)
 
 		if (!approvalResult.shouldProceed) {
@@ -5098,10 +5408,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				return
 			} else {
-				const { response } = await this.ask(
+				const { response, queuedMessageId } = await this.ask(
 					"api_req_failed",
 					error.message ?? JSON.stringify(serializeError(error), null, 2),
 				)
+				// Only the button response is inspected; a consumed queued
+				// message is dropped without inventing a history write.
+				this.discardConsumedQueuedMessage(queuedMessageId)
 
 				if (response !== "yesButtonClicked") {
 					// This will never happen since if noButtonClicked, we will
@@ -5533,26 +5846,112 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
-	 * Process any queued messages by dequeuing and submitting them.
-	 * This ensures that queued user messages are sent when appropriate,
-	 * preventing them from getting stuck in the queue.
+	 * Process the next queued message by claiming and submitting it.
 	 *
-	 * @param context - Context string for logging (e.g., the calling tool name)
+	 * The message is claimed — not dequeued — before submission, and the claim
+	 * is released after the submission handoff succeeds so the message STAYS
+	 * queued: removal is tied to ask-consumption (Task.ask claims queued
+	 * messages and removes them via handleQueuedAskResponse, or hands them to
+	 * persistQueuedFeedbackAndAcknowledge), not to submit-return. A message
+	 * submitted between command completion and the next conversational ask is
+	 * therefore retained until an ask actually consumes it, instead of being
+	 * dropped if the turn fails or restarts first. When submission fails, the
+	 * claim is released so the message stays queued for a later drain, and the
+	 * failure propagates to the caller instead of being logged and dropped.
+	 *
+	 * Drains are serialized per task: each run claims only after the previous
+	 * run's submission handoff completed, so the background-completion drain
+	 * and the post-result drain cannot interleave two different messages into
+	 * the single pending ask-response. A drain whose claimed message is still
+	 * pending consumption (already submitted, not yet observed by an ask) does
+	 * not re-post it; it releases the claim and resolves true, leaving the
+	 * message queued so a distinct pending response cannot be overwritten. A
+	 * rejected drain does not block later drains.
+	 *
+	 * @returns Promise resolving to true when a queued message was submitted
+	 * (and remains queued until consumed) or was already pending submission and
+	 * left queued; false when the queue was empty.
 	 */
-	public processQueuedMessages(): void {
-		try {
-			if (!this.messageQueueService.isEmpty()) {
-				const queued = this.messageQueueService.dequeueMessage()
-				if (queued) {
-					setTimeout(() => {
-						this.submitUserMessage(queued.text, queued.images).catch((err) =>
-							console.error(`[Task] Failed to submit queued message:`, err),
-						)
-					}, 0)
-				}
-			}
-		} catch (e) {
-			console.error(`[Task] Queue processing error:`, e)
+	public processQueuedMessages(): Promise<boolean> {
+		const run = this.queuedMessageDrainChain.then(() => this.claimAndSubmitNextQueuedMessage())
+		// A rejected drain must not poison the chain for later drains; the
+		// caller still receives this run's outcome through the returned promise.
+		this.queuedMessageDrainChain = run.then(
+			() => {},
+			() => {},
+		)
+		return run
+	}
+
+	private async claimAndSubmitNextQueuedMessage(): Promise<boolean> {
+		// A cancelled task must not submit: abortTask sets this flag before its
+		// awaited webview flush, and dispose clears the queue afterwards, so this
+		// guard closes the window where a drain could otherwise post into a
+		// dying task.
+		if (this.abort || this.abandoned) {
+			return false
 		}
+		const queued = this.messageQueueService.claimNextMessage()
+		if (!queued) {
+			return false
+		}
+		// An earlier drain already submitted this message and no ask has
+		// consumed it yet: re-posting would overwrite a distinct pending
+		// response and lose it, so release the claim and keep the message
+		// queued for the ask.
+		if (this.pendingSubmittedQueuedMessageId === queued.id) {
+			this.messageQueueService.releaseMessage(queued.id)
+			return true
+		}
+		// An approval-gating ask is blocked in its response wait. The claim path
+		// refuses to answer it with a queued conversational message; the drain
+		// must honor the same gate instead of posting messageResponse into the
+		// ask-response slot, so release the claim and leave the message queued
+		// for a conversational turn.
+		if (this.inFlightAskBlocksQueuedSubmission()) {
+			this.messageQueueService.releaseMessage(queued.id)
+			return true
+		}
+		try {
+			const submitted = await this.submitUserMessage(queued.text, queued.images, undefined, undefined, queued.id)
+			if (!submitted) {
+				if (this.abort || this.abandoned) {
+					// Cancelled mid-handoff: the guard in submitUserMessage
+					// dropped the write, so release quietly instead of failing
+					// the drain on a task that is already stopping.
+					this.messageQueueService.releaseMessage(queued.id)
+					return false
+				}
+				if (this.inFlightAskBlocksQueuedSubmission()) {
+					// A direct response landed or an approval-gating ask is
+					// waiting: the submission was dropped to keep the slot
+					// intact, so leave the message queued instead of failing
+					// the drain.
+					this.messageQueueService.releaseMessage(queued.id)
+					return true
+				}
+				throw new Error(`[Task] Failed to submit queued message ${queued.id}`)
+			}
+			if (this.abort || this.abandoned) {
+				// The submission raced with cancellation: no consuming ask will
+				// run on a dying task, so do not track it as pending.
+				if (this.pendingSubmittedQueuedMessageId === queued.id) {
+					this.pendingSubmittedQueuedMessageId = undefined
+				}
+				this.messageQueueService.releaseMessage(queued.id)
+				return false
+			}
+		} catch (error) {
+			// Release the claim so a later drain can retry the message.
+			this.messageQueueService.releaseMessage(queued.id)
+			throw error
+		}
+		// Submission succeeded, but the message is only removed once an ask
+		// consumes it. Track the ID so the consuming ask can tell interception
+		// (consumption → durable ack) from an unconsumed overwrite (retain),
+		// and release the claim so the ask path can claim it.
+		this.pendingSubmittedQueuedMessageId = queued.id
+		this.messageQueueService.releaseMessage(queued.id)
+		return true
 	}
 }

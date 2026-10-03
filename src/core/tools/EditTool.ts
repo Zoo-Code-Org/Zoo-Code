@@ -233,7 +233,9 @@ export class EditTool extends BaseTool<"edit"> {
 			this.resetPartialState()
 
 			// Process any queued messages after file edit completes
-			task.processQueuedMessages()
+			void task.processQueuedMessages().catch((error) => {
+				console.error("[EditTool] Failed to process queued messages:", error)
+			})
 		} catch (error) {
 			await handleError("edit", error as Error)
 			await task.diffViewProvider.reset()

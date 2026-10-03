@@ -167,7 +167,10 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 			}
 
 			// Finalize the existing partial tool ask row so the UI doesn't get stuck in a spinner state.
-			await task.ask("tool", JSON.stringify(sharedMessageProps), false).catch(() => {})
+			const result = await task.ask("tool", JSON.stringify(sharedMessageProps), false).catch(() => undefined)
+			// The result is only used to finalize the row; a consumed queued
+			// message is dropped without inventing a history write.
+			task.discardConsumedQueuedMessage(result?.queuedMessageId)
 		}
 
 		const recordFailureForPathAndMaybeEscalate = async (relPath: string, formattedError: string): Promise<void> => {
@@ -467,7 +470,9 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 			this.resetPartialState()
 
 			// Process any queued messages after file edit completes
-			task.processQueuedMessages()
+			void task.processQueuedMessages().catch((error) => {
+				console.error("[EditFileTool] Failed to process queued messages:", error)
+			})
 		} catch (error) {
 			if (relPathForErrorHandling) {
 				await finalizePartialToolAskIfNeeded(relPathForErrorHandling)

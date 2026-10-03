@@ -147,7 +147,7 @@ describe("searchReplaceTool", () => {
 		mockCline.ask = vi.fn().mockResolvedValue(undefined)
 		mockCline.recordToolError = vi.fn()
 		mockCline.recordToolUsage = vi.fn()
-		mockCline.processQueuedMessages = vi.fn()
+		mockCline.processQueuedMessages = vi.fn().mockResolvedValue(undefined)
 		mockCline.sayAndCreateMissingParamError = vi.fn().mockResolvedValue("Missing param error")
 
 		mockAskApproval = vi.fn().mockResolvedValue(true)
@@ -385,6 +385,27 @@ describe("searchReplaceTool", () => {
 
 			expect(mockHandleError).toHaveBeenCalledWith("search and replace", expect.any(Error))
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+		})
+
+		it("logs a queued-message drain failure after a successful replace without changing the tool result", async () => {
+			const drainError = new Error("queued submission failed")
+			mockCline.processQueuedMessages.mockRejectedValue(drainError)
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				const result = await executeSearchReplaceTool()
+
+				// Flush the fire-and-forget drain promise so its rejection is logged.
+				await new Promise((resolve) => setTimeout(resolve, 0))
+
+				expect(result).toBe("Tool result message")
+				expect(mockHandleError).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"[SearchReplaceTool] Failed to process queued messages:",
+					drainError,
+				)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
 		})
 	})
 

@@ -542,7 +542,16 @@ export const webviewMessageHandler = async (
 			// Update the UI to reflect the deletion
 			await provider.postStateToWebview()
 
-			await currentCline.submitUserMessage(editedContent, images)
+			const submitted = await currentCline.submitUserMessage(editedContent, images)
+			if (!submitted) {
+				// The rewind above is destructive: if the task refused the slot
+				// write (an approval ask is in flight or the task is stopping),
+				// the edited message would vanish silently — surface it through
+				// the shared error dialog instead.
+				throw new Error(
+					"Edited message could not be delivered: an approval ask is in flight or the task is stopping.",
+				)
+			}
 		} catch (error) {
 			console.error("Error in edit message:", error)
 			vscode.window.showErrorMessage(
@@ -908,7 +917,17 @@ export const webviewMessageHandler = async (
 			await provider.showTaskWithId(message.text!)
 			break
 		case "condenseTaskContextRequest":
-			await provider.condenseTaskContext(message.text!)
+			try {
+				await provider.condenseTaskContext(message.text!)
+			} catch (error) {
+				// condenseContext drains queued messages after summarizing, and a
+				// failed submission rejects: log the details for support and show
+				// the triggering user a visible error like sibling handlers.
+				provider.log(
+					`[condenseTaskContextRequest] Failed: ${error instanceof Error ? error.message : String(error)}`,
+				)
+				await vscode.window.showErrorMessage(t("common:errors.condense_failed"))
+			}
 			break
 		case "deleteTaskWithId":
 			await provider.deleteTaskWithId(message.text!)
@@ -3812,7 +3831,10 @@ export const webviewMessageHandler = async (
 		case "editQueuedMessage": {
 			if (message.payload) {
 				const { id, text, images } = message.payload as EditQueuedMessagePayload
-				provider.getCurrentTask()?.messageQueueService.updateMessage(id, text, images)
+				// Edits can attach images too, so they go through the same
+				// size/mention validation as fresh queued messages.
+				const resolved = await resolveIncomingImages({ text, images })
+				provider.getCurrentTask()?.messageQueueService.updateMessage(id, resolved.text, resolved.images)
 			}
 
 			break

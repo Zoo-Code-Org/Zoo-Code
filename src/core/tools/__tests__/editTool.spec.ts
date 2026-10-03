@@ -145,7 +145,7 @@ describe("editTool", () => {
 		mockTask.ask = vi.fn().mockResolvedValue(undefined)
 		mockTask.recordToolError = vi.fn()
 		mockTask.recordToolUsage = vi.fn()
-		mockTask.processQueuedMessages = vi.fn()
+		mockTask.processQueuedMessages = vi.fn().mockResolvedValue(undefined)
 		mockTask.sayAndCreateMissingParamError = vi.fn().mockResolvedValue("Missing param error")
 
 		mockAskApproval = vi.fn().mockResolvedValue(true)
@@ -414,6 +414,27 @@ describe("editTool", () => {
 
 			expect(mockHandleError).toHaveBeenCalledWith("edit", expect.any(Error))
 			expect(mockTask.diffViewProvider.reset).toHaveBeenCalled()
+		})
+
+		it("logs a queued-message drain failure after a successful edit without changing the tool result", async () => {
+			const drainError = new Error("queued submission failed")
+			mockTask.processQueuedMessages.mockRejectedValue(drainError)
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				const result = await executeEditTool()
+
+				// Flush the fire-and-forget drain promise so its rejection is logged.
+				await new Promise((resolve) => setTimeout(resolve, 0))
+
+				expect(result).toBe("Tool result message")
+				expect(mockHandleError).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"[EditTool] Failed to process queued messages:",
+					drainError,
+				)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
 		})
 	})
 

@@ -18,6 +18,7 @@ import { isBinaryFile } from "isbinaryfile"
 
 import { readFileTool, ReadFileTool } from "../ReadFileTool"
 import { formatResponse } from "../../prompts/responses"
+import type { Task } from "../../task/Task"
 import {
 	validateImageForProcessing,
 	processImageFile,
@@ -153,6 +154,8 @@ function createMockTask(options: MockTaskOptions = {}) {
 		didRejectTool: false,
 		ask: vi.fn().mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined }),
 		say: vi.fn().mockResolvedValue(undefined),
+		sayUserFeedbackAndAckQueued: vi.fn().mockResolvedValue(undefined),
+		discardConsumedQueuedMessage: vi.fn(),
 		sayAndCreateMissingParamError: vi.fn().mockResolvedValue("Missing required parameter: path"),
 		recordToolError: vi.fn(),
 		rooIgnoreController: {
@@ -630,7 +633,12 @@ describe("ReadFileTool", () => {
 
 			await readFileTool.execute({ path: "test.ts" }, mockTask as any, callbacks)
 
-			expect(mockTask.say).toHaveBeenCalledWith("user_feedback", "Please be careful with this file", undefined)
+			expect(mockTask.sayUserFeedbackAndAckQueued).toHaveBeenCalledWith(
+				"Please be careful with this file",
+				undefined,
+				undefined,
+			)
+			expect(mockTask.say).not.toHaveBeenCalled()
 			expect(formatResponse.toolApprovedWithFeedback).toHaveBeenCalledWith("Please be careful with this file")
 		})
 
@@ -646,8 +654,121 @@ describe("ReadFileTool", () => {
 
 			await readFileTool.execute({ path: "secrets.env" }, mockTask as any, callbacks)
 
-			expect(mockTask.say).toHaveBeenCalledWith("user_feedback", "This file contains secrets", undefined)
+			expect(mockTask.sayUserFeedbackAndAckQueued).toHaveBeenCalledWith(
+				"This file contains secrets",
+				undefined,
+				undefined,
+			)
+			expect(mockTask.say).not.toHaveBeenCalled()
 			expect(formatResponse.toolDeniedWithFeedback).toHaveBeenCalledWith("This file contains secrets")
+		})
+
+		it("acks a queued message intercepted by the approval ask instead of leaving it queued", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockTask.ask.mockResolvedValue({
+				response: "noButtonClicked",
+				text: "Do not read it",
+				images: undefined,
+				queuedMessageId: "queued-1",
+			})
+
+			await readFileTool.execute(
+				{ path: "secrets.env" },
+				// Double assertion: the file's `as any` budget is capped by
+				// eslint-suppressions.json and must not grow.
+				mockTask as unknown as Task,
+				callbacks,
+			)
+
+			expect(mockTask.sayUserFeedbackAndAckQueued).toHaveBeenCalledExactlyOnceWith(
+				"Do not read it",
+				undefined,
+				"queued-1",
+			)
+			expect(mockTask.say).not.toHaveBeenCalled()
+			expect(mockTask.discardConsumedQueuedMessage).not.toHaveBeenCalled()
+		})
+
+		it("acks queued feedback on a batch approval", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockTask.ask.mockResolvedValue({
+				response: "yesButtonClicked",
+				text: "ok to proceed",
+				images: undefined,
+				queuedMessageId: "queued-batch-yes",
+			})
+
+			await readFileTool["requestApproval"](
+				mockTask as unknown as Task,
+				[
+					{ path: "a.ts", status: "pending", entry: { path: "a.ts", mode: "slice", offset: 1 } },
+					{ path: "b.ts", status: "pending", entry: { path: "b.ts", mode: "slice", offset: 1 } },
+				],
+				() => {},
+			)
+
+			expect(mockTask.sayUserFeedbackAndAckQueued).toHaveBeenCalledExactlyOnceWith(
+				"ok to proceed",
+				undefined,
+				"queued-batch-yes",
+			)
+			expect(mockTask.say).not.toHaveBeenCalled()
+		})
+
+		it("discards a queued message consumed by the batch permissions branch", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockTask.ask.mockResolvedValue({
+				response: "messageResponse",
+				text: "free-form note",
+				images: undefined,
+				queuedMessageId: "queued-batch",
+			})
+
+			await readFileTool["requestApproval"](
+				mockTask as unknown as Task,
+				[
+					{ path: "a.ts", status: "pending", entry: { path: "a.ts", mode: "slice", offset: 1 } },
+					{ path: "b.ts", status: "pending", entry: { path: "b.ts", mode: "slice", offset: 1 } },
+				],
+				() => {},
+			)
+
+			expect(mockTask.discardConsumedQueuedMessage).toHaveBeenCalledExactlyOnceWith("queued-batch")
+			expect(mockTask.sayUserFeedbackAndAckQueued).not.toHaveBeenCalled()
+			expect(mockTask.say).not.toHaveBeenCalledWith("user_feedback", expect.anything(), expect.anything())
+			// Free text is not a permissions payload, so both files are denied.
+			expect(mockTask.didRejectTool).toBe(true)
+		})
+
+		it("acks queued feedback on a legacy per-file denial", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockTask.ask.mockResolvedValue({
+				response: "noButtonClicked",
+				text: "Do not read it",
+				images: undefined,
+				queuedMessageId: "queued-legacy",
+			})
+
+			await readFileTool.execute(
+				{ files: [{ path: "legacy-secret.ts" }] } as unknown as Parameters<typeof readFileTool.execute>[0],
+				mockTask as unknown as Task,
+				callbacks,
+			)
+
+			expect(mockTask.sayUserFeedbackAndAckQueued).toHaveBeenCalledExactlyOnceWith(
+				"Do not read it",
+				undefined,
+				"queued-legacy",
+			)
+			expect(mockTask.discardConsumedQueuedMessage).not.toHaveBeenCalled()
 		})
 	})
 
@@ -936,7 +1057,8 @@ describe("ReadFileTool", () => {
 
 			await readFileTool.execute({ files: [{ path: "test.ts" }] } as any, mockTask as any, callbacks)
 
-			expect(mockTask.say).toHaveBeenCalledWith("user_feedback", "Read carefully", undefined)
+			expect(mockTask.sayUserFeedbackAndAckQueued).toHaveBeenCalledWith("Read carefully", undefined, undefined)
+			expect(mockTask.say).not.toHaveBeenCalled()
 		})
 
 		it("should handle user feedback on denial in legacy format", async () => {
@@ -951,7 +1073,8 @@ describe("ReadFileTool", () => {
 
 			await readFileTool.execute({ files: [{ path: "secret.ts" }] } as any, mockTask as any, callbacks)
 
-			expect(mockTask.say).toHaveBeenCalledWith("user_feedback", "Not allowed", undefined)
+			expect(mockTask.sayUserFeedbackAndAckQueued).toHaveBeenCalledWith("Not allowed", undefined, undefined)
+			expect(mockTask.say).not.toHaveBeenCalled()
 		})
 
 		it("should handle truncation in legacy format when no line ranges", async () => {
