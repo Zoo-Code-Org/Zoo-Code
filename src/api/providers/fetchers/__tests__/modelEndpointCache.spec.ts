@@ -76,6 +76,7 @@ describe("modelEndpointCache", () => {
 					maxTokens: 1000,
 					contextWindow: 10000,
 					supportsPromptCache: false,
+					supportsReasoningEffort: ["disable", "low", "high"],
 					supportedParameters: ["max_tokens", "temperature"] as any,
 				},
 			}
@@ -102,12 +103,18 @@ describe("modelEndpointCache", () => {
 				endpoint: "endpoint-1",
 			})
 
-			// Modify one endpoint's array
+			// Modify one endpoint's arrays
 			result["endpoint-1"].supportedParameters?.push("reasoning" as any)
+			const endpointEffort = result["endpoint-1"].supportsReasoningEffort
+			if (Array.isArray(endpointEffort)) {
+				endpointEffort.push("max")
+			}
 
-			// Verify the other endpoint's array was NOT affected (independent copy)
+			// Verify the other endpoint's arrays were NOT affected (independent copies)
 			expect(result["endpoint-1"].supportedParameters).toHaveLength(3)
 			expect(result["endpoint-2"].supportedParameters).toHaveLength(2)
+			expect(result["endpoint-1"].supportsReasoningEffort).toEqual(["disable", "low", "high", "max"])
+			expect(result["endpoint-2"].supportsReasoningEffort).toEqual(["disable", "low", "high"])
 		})
 
 		it("should handle missing parent model gracefully", async () => {
