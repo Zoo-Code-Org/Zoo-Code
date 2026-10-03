@@ -209,6 +209,24 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 	})
 
 	describe("Custom tool error recording", () => {
+		it("releases the presentation lock when dispatch throws", async () => {
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "tool_call_dispatch_failure",
+					name: "read_file",
+					params: {},
+					partial: false,
+				},
+			]
+			mockTask.providerRef.deref = () => ({
+				getState: vi.fn().mockRejectedValue(new Error("provider state failed")),
+			})
+
+			await expect(presentAssistantMessage(mockTask)).rejects.toThrow("provider state failed")
+			expect(mockTask.presentAssistantMessageLocked).toBe(false)
+		})
+
 		it("should record custom tool error as 'custom_tool'", async () => {
 			const toolCallId = "tool_call_custom_error_123"
 			mockTask.assistantMessageContent = [

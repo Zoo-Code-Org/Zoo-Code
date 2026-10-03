@@ -98,7 +98,16 @@ export async function presentAssistantMessage(cline: Task) {
 
 	cline.presentAssistantMessageLocked = true
 	cline.presentAssistantMessageHasPendingUpdates = false
+	try {
+		await presentAssistantMessageBlock(cline)
+	} finally {
+		// Tool handlers and provider-state reads can reject. Never strand the
+		// task behind a dispatch lock after the presenter has unwound.
+		cline.presentAssistantMessageLocked = false
+	}
+}
 
+async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 	if (cline.currentStreamingContentIndex >= cline.assistantMessageContent.length) {
 		// This may happen if the last content block was completed before
 		// streaming could finish. If streaming is finished, and we're out of
@@ -1115,7 +1124,7 @@ export async function presentAssistantMessage(cline: Task) {
 		if (cline.currentStreamingContentIndex < cline.assistantMessageContent.length) {
 			// There are already more content blocks to stream, so we'll call
 			// this function ourselves.
-			return presentAssistantMessage(cline)
+			return await presentAssistantMessage(cline)
 		} else {
 			// CRITICAL FIX: If we're out of bounds and the stream is complete, set userMessageContentReady
 			// This handles the case where assistantMessageContent is empty or becomes empty after processing
@@ -1127,7 +1136,7 @@ export async function presentAssistantMessage(cline: Task) {
 
 	// Block is partial, but the read stream may have finished.
 	if (cline.presentAssistantMessageHasPendingUpdates) {
-		return presentAssistantMessage(cline)
+		return await presentAssistantMessage(cline)
 	}
 }
 
