@@ -8,6 +8,11 @@ import { DEFAULT_HEADERS } from "../constants"
 // builds, so discovery excludes them from the catalog.
 const NON_TEXT_MODEL_ID = /-(asr|tts)(-|$)/i
 
+// Default cluster (Singapore), used whenever the caller leaves mimoBaseUrl
+// unset or empty. Exported so the chat-completion handler resolves the exact
+// same fallback instead of drifting a second literal.
+export const MIMO_DEFAULT_BASE_URL = "https://token-plan-sgp.xiaomimimo.com/v1"
+
 // Network-boundary allowlist: the same four Xiaomi MiMo endpoints the persisted
 // settings schema validates `mimoBaseUrl` against via a zod union of literals
 // (packages/types/src/provider-settings/mimo.ts). The definition itself is not
@@ -15,8 +20,9 @@ const NON_TEXT_MODEL_ID = /-(asr|tts)(-|$)/i
 // are mirrored here; __tests__/mimo.spec.ts cross-checks this exported set
 // against providerSettingsSchema so the two sources cannot silently drift. The
 // fetcher also receives unsaved webview values that bypass the schema entirely,
-// so this exact-match gate is the only thing guaranteeing the bearer key never
-// leaves a Xiaomi origin. Exported for that drift test only.
+// and MimoHandler (src/api/providers/mimo.ts) re-enforces this same set before
+// it builds its OpenAI chat-completion client, so this exact-match gate is what
+// guarantees the bearer key never leaves a Xiaomi origin on any path.
 export const ALLOWED_BASE_URLS: ReadonlySet<string> = new Set([
 	"https://api.xiaomimimo.com/v1",
 	"https://token-plan-cn.xiaomimimo.com/v1",
@@ -54,7 +60,7 @@ export async function getMimoModels(
 	// MiMo API uses OpenAI-compatible /v1/models endpoint.
 	// The base URL from settings already includes /v1 (e.g. https://token-plan-sgp.xiaomimimo.com/v1),
 	// so we keep it as-is and append /models directly.
-	const base = (baseUrl || "https://token-plan-sgp.xiaomimimo.com/v1").replace(/\/+$/, "")
+	const base = (baseUrl || MIMO_DEFAULT_BASE_URL).replace(/\/+$/, "")
 
 	// Reject embedded credentials first, then pin the request to the four allowed
 	// endpoints with an exact match. This subsumes the previous https-only guard

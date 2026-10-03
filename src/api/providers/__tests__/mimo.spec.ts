@@ -33,9 +33,11 @@ vi.mock("openai", () => {
 })
 
 import type { Anthropic } from "@anthropic-ai/sdk"
+import OpenAI from "openai"
 import { mimoDefaultModelId, mimoModels } from "@roo-code/types"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import { MimoHandler } from "../mimo"
+import { ALLOWED_BASE_URLS } from "../fetchers/mimo"
 import { convertToR1Format } from "../../transform/r1-format"
 import { sanitizeOpenAiCallId } from "../../../utils/tool-id"
 
@@ -76,6 +78,63 @@ describe("MimoHandler", () => {
 			const customUrl = "https://api.xiaomimimo.com/v1"
 			const h = new MimoHandler({ ...mockOptions, mimoBaseUrl: customUrl })
 			expect((h as any).options.openAiBaseUrl).toBe(customUrl)
+		})
+	})
+
+	describe("base URL allowlist (chat-completion path)", () => {
+		// The constructor mock stands in for the real OpenAI client, so its call
+		// log proves whether a network object was ever built for a given base URL.
+		const openAiConstructor = vi.mocked(OpenAI)
+
+		// Simulates the fail-open ContextProxy path, which can hand the handler a
+		// mimoBaseUrl outside the schema's literal union at runtime.
+		type RuntimeOptions = Omit<ApiHandlerOptions, "mimoBaseUrl"> & { mimoBaseUrl?: string }
+		const optionsWithBaseUrl = (mimoBaseUrl: string): ApiHandlerOptions => {
+			const options: RuntimeOptions = { ...mockOptions, mimoBaseUrl }
+			return options as ApiHandlerOptions
+		}
+
+		const lastClientBaseUrl = (): string | null | undefined => {
+			const calls = openAiConstructor.mock.calls
+			return calls[calls.length - 1]?.[0]?.baseURL
+		}
+
+		it("rejects an off-list base URL before any network client is constructed", () => {
+			const callsBefore = openAiConstructor.mock.calls.length
+
+			expect(() => new MimoHandler(optionsWithBaseUrl("https://attacker.example/v1"))).toThrow(
+				"MIMO/MimoHandler/001",
+			)
+			expect(openAiConstructor.mock.calls.length).toBe(callsBefore)
+		})
+
+		it("accepts every allowlisted Xiaomi endpoint", () => {
+			for (const allowedUrl of ALLOWED_BASE_URLS) {
+				new MimoHandler(optionsWithBaseUrl(allowedUrl))
+				expect(lastClientBaseUrl()).toBe(allowedUrl)
+			}
+		})
+
+		it("normalizes trailing slashes before the allowlist check", () => {
+			new MimoHandler(optionsWithBaseUrl("https://token-plan-sgp.xiaomimimo.com/v1/"))
+			expect(lastClientBaseUrl()).toBe("https://token-plan-sgp.xiaomimimo.com/v1/")
+		})
+
+		it("treats an empty base URL as unset and falls back to the default cluster", () => {
+			new MimoHandler(optionsWithBaseUrl(""))
+			expect(lastClientBaseUrl()).toBe("https://token-plan-sgp.xiaomimimo.com/v1")
+		})
+
+		it("never echoes a secret carried in the rejected URL", () => {
+			let thrown: unknown
+			try {
+				new MimoHandler(optionsWithBaseUrl("https://token-plan-sgp.xiaomimimo.com/v1?api_key=SECRET"))
+			} catch (error) {
+				thrown = error
+			}
+			expect(thrown).toBeInstanceOf(Error)
+			expect((thrown as Error).message).toContain("not an allowed Xiaomi MiMo endpoint")
+			expect((thrown as Error).message).not.toContain("SECRET")
 		})
 	})
 

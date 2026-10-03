@@ -16,6 +16,8 @@ import { NOT_PROVIDED } from "./constants"
 import type { ApiHandlerCreateMessageMetadata } from "../index"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 
+import { ALLOWED_BASE_URLS, MIMO_DEFAULT_BASE_URL } from "./fetchers/mimo"
+
 /**
  * MiMoHandler extends OpenAiHandler with MiMo-specific adaptations.
  *
@@ -26,11 +28,26 @@ import { sanitizeOpenAiCallId } from "../../utils/tool-id"
  */
 export class MimoHandler extends OpenAiHandler {
 	constructor(options: ApiHandlerOptions) {
+		// Fail closed on the network boundary BEFORE OpenAiHandler constructs its
+		// OpenAI client. The persisted settings schema pins mimoBaseUrl to four
+		// zod literals, but ContextProxy.getProviderSettings() fails open on a
+		// schema rejection and returns the raw stored value — so a value written
+		// by a pre-allowlist build or a crafted webview message would otherwise
+		// reach `new OpenAI({ baseURL })` and could exfiltrate the bearer key
+		// plus the whole conversation to an arbitrary origin. Unset/empty falls
+		// back to the default cluster; trailing slashes are normalized for the
+		// check exactly like the model fetcher does.
+		const mimoBaseUrl = options.mimoBaseUrl || MIMO_DEFAULT_BASE_URL
+		if (!ALLOWED_BASE_URLS.has(mimoBaseUrl.replace(/\/+$/, ""))) {
+			throw new Error(
+				"MIMO/MimoHandler/001: MiMo chat completion rejected: base URL is not an allowed Xiaomi MiMo endpoint.",
+			)
+		}
 		super({
 			...options,
 			openAiApiKey: options.mimoApiKey ?? NOT_PROVIDED,
 			openAiModelId: options.apiModelId ?? mimoDefaultModelId,
-			openAiBaseUrl: options.mimoBaseUrl || "https://token-plan-sgp.xiaomimimo.com/v1",
+			openAiBaseUrl: mimoBaseUrl,
 			openAiStreamingEnabled: true,
 			includeMaxTokens: false,
 		})
