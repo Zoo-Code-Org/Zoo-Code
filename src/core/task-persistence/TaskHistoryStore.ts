@@ -107,6 +107,18 @@ export class TaskHistoryStore {
 	 * entries, so startup reconciliation keeps repairing genuine crash orphans.
 	 */
 	private readonly locallyActiveTaskIds = new Set<string>()
+	/**
+	 * Ids whose local ownership was explicitly released (Task.dispose,
+	 * scheduler rejection, delegation rollback) AFTER an active-status write
+	 * had claimed them. `trackLocalSessionOwnership` must not re-add these from
+	 * late teardown writes (an in-flight heartbeat beat or final save that
+	 * preserves "active" status): the session is gone, and a ghost re-claim
+	 * would suppress in-window orphan repair for the window's lifetime. An
+	 * explicit `markLocallyActive` (a new session's eager claim) clears the
+	 * entry, so resumes and re-delegations re-claim normally; any non-active
+	 * status write clears it too (the record then proves no live session).
+	 */
+	private readonly releasedLocalOwnershipIds = new Set<string>()
 	private disposed = false
 
 	/**
@@ -311,6 +323,7 @@ export class TaskHistoryStore {
 			this.cache.delete(taskId)
 			this.taskFileMtimes.delete(taskId)
 			this.locallyActiveTaskIds.delete(taskId)
+			this.releasedLocalOwnershipIds.delete(taskId)
 
 			// Remove per-task file (best-effort)
 			try {
@@ -340,6 +353,7 @@ export class TaskHistoryStore {
 				this.cache.delete(taskId)
 				this.taskFileMtimes.delete(taskId)
 				this.locallyActiveTaskIds.delete(taskId)
+				this.releasedLocalOwnershipIds.delete(taskId)
 
 				// Remove per-task file (best-effort)
 				try {
@@ -430,6 +444,7 @@ export class TaskHistoryStore {
 					// The record is gone (e.g. removed by a peer window), so any
 					// local-ownership claim for it is stale too.
 					this.locallyActiveTaskIds.delete(taskId)
+					this.releasedLocalOwnershipIds.delete(taskId)
 				}
 			}
 		})
@@ -642,9 +657,15 @@ export class TaskHistoryStore {
 	 */
 	private trackLocalSessionOwnership(written: HistoryItem): void {
 		if ((written.status ?? "active") === "active") {
-			this.locallyActiveTaskIds.add(written.id)
+			// A released id must not be re-claimed by late teardown writes from
+			// its disposed session; only an explicit markLocallyActive clears
+			// the release (see releasedLocalOwnershipIds).
+			if (!this.releasedLocalOwnershipIds.has(written.id)) {
+				this.locallyActiveTaskIds.add(written.id)
+			}
 		} else {
 			this.locallyActiveTaskIds.delete(written.id)
+			this.releasedLocalOwnershipIds.delete(written.id)
 		}
 	}
 
@@ -655,19 +676,25 @@ export class TaskHistoryStore {
 	 * async gap before that write lets the periodic delegation pass see the task
 	 * as a quiet, unowned disk record and repair it mid-resume. Registering the
 	 * id eagerly closes that window; a later non-active write still removes it.
+	 * The eager claim also clears any prior ownership release, so a resumed or
+	 * re-delegated session re-claims an id its predecessor released at dispose.
 	 */
 	public markLocallyActive(taskId: string): void {
+		this.releasedLocalOwnershipIds.delete(taskId)
 		this.locallyActiveTaskIds.add(taskId)
 	}
 
 	/**
 	 * Release a task id claimed by `markLocallyActive` when its session did not
-	 * start (preparation failure, scheduler rejection, or startTask disabled).
-	 * Re-running reconciliation for the id is safe: without local ownership the
-	 * periodic pass treats it like any other persisted record.
+	 * start (preparation failure, scheduler rejection, startTask disabled) or
+	 * has been torn down (Task.dispose). Re-running reconciliation for the id
+	 * is safe: without local ownership the periodic pass treats it like any
+	 * other persisted record. The release is remembered so a late active-status
+	 * write from the dead session cannot ghost-reclaim the id.
 	 */
 	public markLocallyInactive(taskId: string): void {
 		this.locallyActiveTaskIds.delete(taskId)
+		this.releasedLocalOwnershipIds.add(taskId)
 	}
 
 	/**
@@ -692,10 +719,9 @@ export class TaskHistoryStore {
 				return { ...historyItem, lastActivityAt: at }
 			})
 		} catch (error) {
-			console.warn(`[TaskHistoryStore] Failed to record activity heartbeat for task ${taskId}:`, error)
+			console.warn(`[TaskHistoryStore] Failed to record activity heartbeat for ${taskId}:`, error)
 		}
 	}
-
 	/**
 	 * Replay the durable active-child repair intent, if one was left by a crash.
 	 * The expected fields are guards: an intent may update only the missing side
@@ -997,25 +1023,44 @@ export class TaskHistoryStore {
 
 	/**
 	 * Invalidate a single task's cache entry (re-read from disk on next access).
-	 * When the persisted record turns out to be missing or unreadable, the
-	 * cache entry is dropped together with any local ownership claim: a session
-	 * cannot own a record that no longer exists, and a stale claim would
-	 * otherwise disable orphan repair for that id for the window's lifetime.
+	 * Only a CONFIRMED absence (ENOENT) drops the cache entry together with any
+	 * local ownership claim: a session cannot own a record that no longer
+	 * exists. Transient read errors (EBUSY/EACCES/...) and malformed content
+	 * keep both the cache entry and the claim — readTaskFile maps every failure
+	 * to null, but a live session's ownership must not be dropped because ONE
+	 * locked or corrupt read could not prove absence. This mirrors the
+	 * cross-instance convention in `getChildFileMtimeMs` (transient stat
+	 * failure = evidence of life).
 	 */
 	async invalidate(taskId: string): Promise<void> {
 		return this.withLock(async () => {
+			let raw: string
 			try {
-				const item = await this.readTaskFile(taskId)
-				if (item) {
-					this.cache.set(taskId, item)
-				} else {
+				raw = await fs.readFile(await this.getTaskFilePath(taskId), "utf8")
+			} catch (error) {
+				if (this.isFileNotFoundError(error)) {
+					// Confirmed absent: the record no longer exists, so the
+					// cache entry and any local ownership claim are stale.
 					this.cache.delete(taskId)
+					this.taskFileMtimes.delete(taskId)
 					this.locallyActiveTaskIds.delete(taskId)
+					this.releasedLocalOwnershipIds.delete(taskId)
 				}
-				this.taskFileMtimes.delete(taskId)
+				// Any other read error keeps everything: the next access retries.
+				return
+			}
+			let item: HistoryItem | null = null
+			try {
+				const parsed: unknown = JSON.parse(raw)
+				if (parsed && typeof parsed === "object" && "id" in parsed && (parsed as HistoryItem).id) {
+					item = parsed as HistoryItem
+				}
 			} catch {
-				this.cache.delete(taskId)
-				this.locallyActiveTaskIds.delete(taskId)
+				// Malformed content: keep the cache entry and the claim (see above).
+			}
+			if (item) {
+				this.cache.set(taskId, item)
+				this.taskFileMtimes.delete(taskId)
 			}
 		})
 	}
@@ -1406,6 +1451,7 @@ export class TaskHistoryStore {
 							this.cache.delete(taskId)
 							this.taskFileMtimes.delete(taskId)
 							this.locallyActiveTaskIds.delete(taskId)
+							this.releasedLocalOwnershipIds.delete(taskId)
 							throw new Error(
 								`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} not found in cache`,
 							)
@@ -1422,6 +1468,7 @@ export class TaskHistoryStore {
 							this.cache.delete(taskId)
 							this.taskFileMtimes.delete(taskId)
 							this.locallyActiveTaskIds.delete(taskId)
+							this.releasedLocalOwnershipIds.delete(taskId)
 							throw new Error(
 								`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} has an invalid disk record`,
 							)
@@ -1430,6 +1477,7 @@ export class TaskHistoryStore {
 							this.cache.delete(taskId)
 							this.taskFileMtimes.delete(taskId)
 							this.locallyActiveTaskIds.delete(taskId)
+							this.releasedLocalOwnershipIds.delete(taskId)
 							throw new Error(
 								`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} has a disk record with mismatched id ${parsed.data.id}`,
 							)

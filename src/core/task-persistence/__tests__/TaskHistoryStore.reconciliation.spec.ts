@@ -134,6 +134,9 @@ async function flushUntil(
 	)
 }
 
+let syncMtimeSpy: { mockRestore(): void } | undefined
+
+
 /**
  * Write history items to `<dir>/tasks/<id>/history_item.json` so a freshly
  * constructed TaskHistoryStore sees them on `initialize()`. `dir` is the
@@ -415,6 +418,8 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 	afterEach(async () => {
 		mtimeSpy?.mockRestore()
 		mtimeSpy = undefined
+		syncMtimeSpy?.mockRestore()
+		syncMtimeSpy = undefined
 		safeWriteJsonMock.mockImplementation(writeJson)
 		for (const disposable of disposables) disposable.dispose()
 		disposables.clear()
@@ -542,6 +547,50 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		expect(persistedChild.status).toBe("active")
 
 		warnSpy.mockRestore()
+	})
+
+	it("invalidate keeps the ownership claim on a transient read failure and drops it only on confirmed absence", async () => {
+		// readTaskFile maps every failure to null; invalidate() must not let one
+		// transient Windows-style read (EBUSY/EISDIR/...) drop a LIVE session's
+		// ownership claim — only confirmed absence (ENOENT) may.
+		const item = makeItem({ id: "transient-read-claim", status: "active" })
+		await store.upsert(item)
+		const internals = store as unknown as { locallyActiveTaskIds: Set<string> }
+		expect(internals.locallyActiveTaskIds.has("transient-read-claim")).toBe(true)
+		const filePath = path.join(tmpDir, "tasks", "transient-read-claim", GlobalFileNames.historyItem)
+		// A directory at the file path makes readFile fail with EISDIR (a
+		// non-ENOENT read error) without removing the record.
+		await fs.rm(filePath)
+		await fs.mkdir(filePath)
+		await store.invalidate("transient-read-claim")
+		expect(internals.locallyActiveTaskIds.has("transient-read-claim")).toBe(true)
+		// Confirmed absence drops the claim.
+		await fs.rmdir(filePath)
+		await store.invalidate("transient-read-claim")
+		expect(internals.locallyActiveTaskIds.has("transient-read-claim")).toBe(false)
+	})
+
+	it("a dispose-style ownership release is not re-claimed by a late active-status teardown write", async () => {
+		const item = makeItem({ id: "ghost-claim", status: "active" })
+		await store.upsert(item)
+		const internals = store as unknown as {
+			locallyActiveTaskIds: Set<string>
+			releasedLocalOwnershipIds: Set<string>
+		}
+		expect(internals.locallyActiveTaskIds.has("ghost-claim")).toBe(true)
+		// Task.dispose releases the claim after stopping the heartbeat.
+		store.markLocallyInactive("ghost-claim")
+		expect(internals.locallyActiveTaskIds.has("ghost-claim")).toBe(false)
+		expect(internals.releasedLocalOwnershipIds.has("ghost-claim")).toBe(true)
+		// A late teardown write preserving "active" (an in-flight beat or the
+		// abort path's final save) must not ghost-reclaim the id.
+		await store.upsert({ ...item })
+		expect(internals.locallyActiveTaskIds.has("ghost-claim")).toBe(false)
+		// A new session's explicit eager claim clears the release and re-claims.
+		store.markLocallyActive("ghost-claim")
+		expect(internals.releasedLocalOwnershipIds.has("ghost-claim")).toBe(false)
+		await store.upsert({ ...item })
+		expect(internals.locallyActiveTaskIds.has("ghost-claim")).toBe(true)
 	})
 
 	it("repairs interrupted handoff: delegated parent with completed child → active", async () => {
@@ -2111,6 +2160,8 @@ describe("TaskHistoryStore periodic delegation reconciliation", () => {
 	afterEach(async () => {
 		mtimeSpy?.mockRestore()
 		mtimeSpy = undefined
+		syncMtimeSpy?.mockRestore()
+		syncMtimeSpy = undefined
 		store?.dispose()
 		store = undefined
 		vi.useRealTimers()
@@ -2483,6 +2534,8 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 	afterEach(async () => {
 		mtimeSpy?.mockRestore()
 		mtimeSpy = undefined
+		syncMtimeSpy?.mockRestore()
+		syncMtimeSpy = undefined
 		store?.dispose()
 		store = undefined
 		vi.useRealTimers()
