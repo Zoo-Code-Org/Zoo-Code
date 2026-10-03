@@ -52,6 +52,7 @@ describe("Model Validation Functions", () => {
 		requesty: {},
 		unbound: {},
 		litellm: {},
+		"io-intelligence": {},
 		ollama: {},
 		lmstudio: {},
 		"vercel-ai-gateway": {},
@@ -413,6 +414,27 @@ describe("Model Validation Functions", () => {
 
 			const result = getModelValidationError(config, mockRouterModels, allowAllOrganization)
 			expect(result).toBe("settings:validation.modelId")
+		})
+	})
+
+	describe("IO Intelligence validation", () => {
+		it("returns an apiKey error when the IO Intelligence API key is unset", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.ioIntelligence,
+				ioIntelligenceModelId: "zai-org/GLM-4.6",
+			}
+
+			expect(validateApiConfiguration(config, mockRouterModels)).toBe("settings:validation.apiKey")
+		})
+
+		it("accepts an IO Intelligence API key and selected model", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.ioIntelligence,
+				ioIntelligenceApiKey: "valid-key",
+				ioIntelligenceModelId: "zai-org/GLM-4.6",
+			}
+
+			expect(validateApiConfiguration(config, mockRouterModels)).toBeUndefined()
 		})
 	})
 

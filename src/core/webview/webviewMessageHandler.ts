@@ -1132,6 +1132,7 @@ export const webviewMessageHandler = async (
 						[providerIdentifiers.moonshot]: {},
 						[providerIdentifiers.opencodeGo]: {},
 						[providerIdentifiers.kenari]: {},
+						[providerIdentifiers.ioIntelligence]: {},
 						[providerIdentifiers.nanogpt]: {},
 						[providerIdentifiers.kimiCode]: {},
 					}
@@ -1300,6 +1301,18 @@ export const webviewMessageHandler = async (
 			candidates.push({
 				key: providerIdentifiers.kenari,
 				options: { provider: providerIdentifiers.kenari, apiKey: kenariApiKey },
+			})
+
+			// IO Intelligence's /models catalog is public; an optional key can scope
+			// the visible model set. Prefer an explicitly supplied unsaved key.
+			const ioIntelligenceApiKey = message?.values?.ioIntelligenceApiKey ?? apiConfiguration.ioIntelligenceApiKey
+			if (message?.values?.ioIntelligenceApiKey !== undefined) {
+				await flushModels({ provider: providerIdentifiers.ioIntelligence, apiKey: ioIntelligenceApiKey }, true)
+			}
+
+			candidates.push({
+				key: providerIdentifiers.ioIntelligence,
+				options: { provider: providerIdentifiers.ioIntelligence, apiKey: ioIntelligenceApiKey },
 			})
 
 			// NanoGPT's detailed catalog is public, while an optional key can expose a
