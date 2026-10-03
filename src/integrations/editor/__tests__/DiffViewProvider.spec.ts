@@ -846,7 +846,7 @@ describe("DiffViewProvider", () => {
 
 			// Verify file was written via safeWriteText
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {})
 
 			// Verify file was opened without focus
 			expect(vscode.window.showTextDocument).toHaveBeenCalledWith(
@@ -869,7 +869,7 @@ describe("DiffViewProvider", () => {
 
 			// Verify file was written via safeWriteText
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {})
 
 			// Verify file was NOT opened
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
@@ -884,7 +884,7 @@ describe("DiffViewProvider", () => {
 
 			// Verify file was written via safeWriteText
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {})
 
 			// Verify delay was NOT called
 			expect(mockDelay).not.toHaveBeenCalled()
@@ -930,7 +930,7 @@ describe("DiffViewProvider", () => {
 
 				await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
 
-				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {})
 			})
 
 			it("rejects an observed write whose version token is stale", async () => {
@@ -959,7 +959,7 @@ describe("DiffViewProvider", () => {
 
 				await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
 
-				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {})
 			})
 
 			it("fails closed when the owning task has been collected", async () => {
@@ -997,6 +997,7 @@ describe("DiffViewProvider", () => {
 					uri: { fsPath, scheme: "file" },
 					getText: vi.fn().mockReturnValue(text),
 					lineCount: 0,
+					encoding: "utf8",
 				},
 				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
 				edit: vi.fn().mockResolvedValue(true),
@@ -1144,8 +1145,32 @@ describe("DiffViewProvider", () => {
 
 			const result = await diffViewProvider.saveChanges(false)
 
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { encoding: "utf8" })
 			expect(result.newProblemsMessage).toBe("")
+		})
+
+		it("publishes the accepted content in the document's own encoding", async () => {
+			// A utf8bom document: getText() returns the text without the BOM, so the
+			// guarded publish must re-encode it with the BOM the document was read
+			// in rather than as plain UTF-8.
+			const bomEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8bom",
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = bomEditor
+
+			await diffViewProvider.saveChanges(false)
+
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {
+				encoding: "utf8bom",
+			})
 		})
 
 		it("rejects the accepted save when the file changed after the preview (stale version)", async () => {
@@ -1392,7 +1417,7 @@ describe("DiffViewProvider", () => {
 
 			const result = await diffViewProvider.saveChanges(false)
 
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { encoding: "utf8" })
 			expect(result.newProblemsMessage).toBe("")
 		})
 
@@ -1406,6 +1431,7 @@ describe("DiffViewProvider", () => {
 					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
 					getText: vi.fn().mockReturnValue("new content"),
 					lineCount: 0,
+					encoding: "utf8",
 					isDirty: true,
 					save: vi.fn().mockResolvedValue(undefined),
 				},
@@ -1417,7 +1443,7 @@ describe("DiffViewProvider", () => {
 
 			const result = await diffViewProvider.saveChanges(false)
 
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { encoding: "utf8" })
 			// the revert activates the exact document with the exact options:
 			// preserveFocus keeps the user's focus, preview: false pins the tab
 			expect(vi.mocked(vscode.window.showTextDocument)).toHaveBeenCalledWith(dirtyEditor.document, {
@@ -1435,6 +1461,7 @@ describe("DiffViewProvider", () => {
 					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
 					getText: vi.fn().mockReturnValue("new content"),
 					lineCount: 0,
+					encoding: "utf8",
 					isDirty: true,
 					save: vi.fn().mockResolvedValue(undefined),
 				},
@@ -1470,6 +1497,119 @@ describe("DiffViewProvider", () => {
 			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
 		})
 
+		it("disposes the active-editor listener before the programmatic revert", async () => {
+			// showTextDocument can change the active editor even with
+			// preserveFocus, so the listener must be gone before the revert
+			// activates the document: otherwise this programmatic activation is
+			// recorded as a user touch and the auto-close preference is overridden.
+			const order: string[] = []
+			const dirtyEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: true,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			diffViewProvider["disposeActiveEditorListener"] = vi.fn(() => {
+				order.push("dispose")
+			})
+			vi.mocked(vscode.commands.executeCommand).mockImplementation((command: string) => {
+				if (command === "workbench.action.files.revert") {
+					order.push("revert")
+				}
+				return Promise.resolve(undefined)
+			})
+
+			await diffViewProvider.saveChanges(false)
+
+			expect(order).toEqual(["dispose", "revert"])
+		})
+
+		it("disposes the listener before the discard revert and closes the deleted file's tab after a successful unlink", async () => {
+			const order: string[] = []
+			const dirtyEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: true,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			diffViewProvider.editType = "create"
+			const placeholderToken = versionTokenOfStat(previewStats)
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, placeholderToken, true)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(computeVersionToken).mockResolvedValue("moved-past-placeholder")
+			diffViewProvider["placeholderVersion"] = placeholderToken
+			diffViewProvider["disposeActiveEditorListener"] = vi.fn(() => {
+				order.push("dispose")
+			})
+			diffViewProvider["cancelDeferredScroll"] = vi.fn(() => {
+				order.push("cancel")
+			})
+			diffViewProvider["closeFileTab"] = vi.fn().mockImplementation(() => {
+				order.push("closeTab")
+				return Promise.resolve()
+			})
+			vi.mocked(vscode.commands.executeCommand).mockImplementation((command: string) => {
+				if (command === "workbench.action.files.revert") {
+					order.push("revert")
+				}
+				return Promise.resolve(undefined)
+			})
+
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("Stale version")
+
+			// The tab for the file that was just unlinked is closed, and only
+			// after the revert; closing only the diff views would leave a clean
+			// plain-text tab for a deleted file behind.
+			expect(order).toEqual(["dispose", "cancel", "revert", "closeTab"])
+		})
+
+		it("does not close the file tab when the placeholder unlink fails", async () => {
+			const dirtyEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: true,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			diffViewProvider.editType = "create"
+			const placeholderToken = versionTokenOfStat(previewStats)
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, placeholderToken, true)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(computeVersionToken).mockResolvedValue("moved-past-placeholder")
+			diffViewProvider["placeholderVersion"] = placeholderToken
+			const closeFileTab = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeFileTab"] = closeFileTab
+			vi.mocked(fs.unlink).mockRejectedValueOnce(new Error("EACCES: permission denied, unlink"))
+
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("Stale version")
+
+			// Nothing was deleted, so there is no deleted-file tab to close.
+			expect(closeFileTab).not.toHaveBeenCalled()
+		})
+
 		it("does not reload a clean buffer when the guard rejects - only dirty buffers are discarded", async () => {
 			// The buffer was never touched (isDirty is falsy): there is nothing
 			// to discard, so the failure cleanup must not activate the document
@@ -1496,6 +1636,7 @@ describe("DiffViewProvider", () => {
 					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
 					getText: vi.fn().mockReturnValue("new content"),
 					lineCount: 0,
+					encoding: "utf8",
 					isDirty: true,
 					save: vi.fn().mockResolvedValue(undefined),
 				},
@@ -1529,6 +1670,7 @@ describe("DiffViewProvider", () => {
 					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
 					getText: vi.fn().mockReturnValue("new content"),
 					lineCount: 0,
+					encoding: "utf8",
 					isDirty: true,
 					save: vi.fn().mockResolvedValue(undefined),
 				},
@@ -1562,6 +1704,7 @@ describe("DiffViewProvider", () => {
 					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
 					getText: vi.fn().mockReturnValue("new content"),
 					lineCount: 0,
+					encoding: "utf8",
 					isDirty: true,
 					save: vi.fn().mockResolvedValue(undefined),
 				},

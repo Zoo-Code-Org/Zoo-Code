@@ -29,6 +29,15 @@ export interface SafeWriteTextOptions {
 	execFileRunner?: typeof execFile
 
 	/**
+	 * Encoding used to turn `content` into the bytes that are staged. VS Code
+	 * documents `TextDocument.encoding` as the encoding used when a document is
+	 * saved, so publishing every document as UTF-8 unconditionally can drop a
+	 * UTF-8 BOM or rewrite a legacy-code-page document as mojibake. Defaults to
+	 * "utf8".
+	 */
+	encoding?: string
+
+	/**
 	 * Pre-written temp path to use for the commit phase.  When provided,
 	 * safeWriteText skips creating its own staging file and uses this path
 	 * instead (it still fsyncs before rename).  Useful when a caller has
@@ -105,6 +114,41 @@ async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRu
 	}
 }
 
+/** Encode `content` to the bytes staged for the commit rename.
+ *
+ * The encoding is the caller's document encoding, not an internal choice:
+ * encoding everything as UTF-8 unconditionally drops a UTF-8 BOM and rewrites a
+ * legacy-code-page document as mojibake. Node can encode the encodings listed
+ * below faithfully; for any other code page the bytes are identical to UTF-8
+ * only when the content is pure ASCII, so an ASCII-only document is still safe
+ * to publish and anything else is rejected rather than silently corrupted.
+ */
+export function encodeContent(content: string, encoding?: string): Buffer {
+	const enc = encoding ?? "utf8"
+	switch (enc) {
+		case "utf8":
+			// utf8 is Node's default encoding, so no encoding argument is passed:
+			// the StringLiteral would be an equivalent mutant.
+			return Buffer.from(content)
+		case "utf8bom":
+			return Buffer.concat([Buffer.from("\uFEFF"), Buffer.from(content)])
+		case "utf16le":
+			return Buffer.from(content, "utf16le")
+		case "utf16be":
+			// Node has no UTF-16BE encoder: it is UTF-16LE with the bytes
+			// swapped pairwise.
+			return Buffer.from(content, "utf16le").swap16()
+		default:
+			if (!/[\u0080-\uffff]/.test(content)) {
+				// ASCII is byte-identical in every VS Code text encoding.
+				return Buffer.from(content)
+			}
+			throw new Error(
+				`Cannot publish content as ${enc}: the encoding is not encodable here; re-save the file as UTF-8 and retry.`,
+			)
+	}
+}
+
 // -- public API ------------------------------------------------------------
 
 /**
@@ -177,6 +221,9 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			// Preserve the existing target's permissions: the staging file must
 			// not be published wider than the file it replaces (a 0o600 target
 			// must not become 0o644 through the atomic rename).
+			// Encode before opening the staging file: an encoding Node cannot
+			// represent must not leave a half-written temp file behind.
+			const buffer = encodeContent(content, options?.encoding)
 			let targetMode = 0o644 // default for a fresh target
 			try {
 				targetMode = fsSync.statSync(targetPath).mode & 0o777
@@ -188,7 +235,6 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				// Loop until every byte is written: writeSync can report a short
 				// (partial) write, and publishing a truncated staging file would
 				// commit corrupt content.
-				const buffer = Buffer.from(content, "utf8")
 				let offset = 0
 				while (offset < buffer.length) {
 					offset += fsSync.writeSync(fd, buffer, offset, buffer.length - offset)

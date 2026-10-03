@@ -80,7 +80,29 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, "new-file.txt", "hello", "create")
 
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("new-file.txt"), "hello")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("new-file.txt"), "hello", {})
+		})
+
+		it("forwards the caller's encoding to the publish primitive", async () => {
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1") // post-publish refresh
+			const task = createMockTask()
+
+			await guardedWrite(task, "bom.txt", "hello", "create", { encoding: "utf8bom" })
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("bom.txt"), "hello", { encoding: "utf8bom" })
+		})
+
+		it("forwards the encoding through the version guard as well", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("kept.txt"), "v1")
+			mockedFsAccess.mockResolvedValue(undefined)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "kept.txt", "rewritten", "update", { encoding: "utf16le" })
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("kept.txt"), "rewritten", { encoding: "utf16le" })
 		})
 
 		it("fails with the read-first remediation when the file exists - nothing published", async () => {
@@ -138,7 +160,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "new-file.txt", "hello", "update")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("new-file.txt"), "hello")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("new-file.txt"), "hello", {})
 		})
 
 		it("fails with the read-first remediation when the file exists - nothing published", async () => {
@@ -165,7 +187,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, "gone.txt", "back", "create")
 
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("gone.txt"), "back")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("gone.txt"), "back", {})
 		})
 
 		it("goes through the version guard when the file still exists", async () => {
@@ -177,7 +199,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "kept.txt", "rewritten", "create")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("kept.txt"), "rewritten")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("kept.txt"), "rewritten", {})
 		})
 
 		it("fails with the stale remediation suffix when the version moved", async () => {
@@ -217,7 +239,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, "doc.txt", "new content", "update")
 
 			expect(mockedComputeVersionToken).toHaveBeenCalledWith(abs("doc.txt"))
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "new content")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "new content", {})
 		})
 
 		it("fails with the stale remediation suffix when the version moved - nothing published", async () => {
@@ -257,7 +279,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "doc.txt", "new content", "update")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "new content")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "new content", {})
 		})
 
 		it("leaves edit-kind publishes unaffected by a partial observation - the model saw the edited region", async () => {
@@ -268,7 +290,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "doc.txt", "patched", "edit")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "patched")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "patched", {})
 		})
 
 		it("rejects a create-kind full-file overwrite of an existing file when only a partial read observed it", async () => {
@@ -297,7 +319,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "doc.txt", "created", "create")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "created")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "created", {})
 		})
 
 		it("publishes a create-kind overwrite of an existing file when the observation is complete", async () => {
@@ -309,7 +331,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "doc.txt", "created", "create")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "created")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "created", {})
 		})
 	})
 
@@ -326,7 +348,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, "doc.txt", "second edit", "edit")
 
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
-			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("doc.txt"), "second edit")
+			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("doc.txt"), "second edit", {})
 			// the observation now carries the post-publish token, complete
 			expect(reg.get(abs("doc.txt"))?.version).toBe("v2")
 			expect(reg.get(abs("doc.txt"))?.complete).toBe(true)
@@ -392,7 +414,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "doc.txt", "patched", "edit")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "patched")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "patched", {})
 		})
 
 		it("fails with the stale remediation suffix when the version moved", async () => {
@@ -431,8 +453,8 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(r1.status).toBe("fulfilled")
 			expect(r2.status).toBe("fulfilled")
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
-			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, abs("shared.txt"), "first")
-			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(2, abs("shared.txt"), "second")
+			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, abs("shared.txt"), "first", {})
+			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(2, abs("shared.txt"), "second", {})
 		})
 
 		it("observed-absent then two concurrent creates - the second publishes against the refreshed observation", async () => {
@@ -461,8 +483,8 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(r1.status).toBe("fulfilled")
 			expect(r2.status).toBe("fulfilled")
 			expect(publishes).toBe(2)
-			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, abs("absent.txt"), "first")
-			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(2, abs("absent.txt"), "second")
+			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, abs("absent.txt"), "first", {})
+			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(2, abs("absent.txt"), "second", {})
 		})
 
 		it("the chain settles after a rejection - a later matching write still runs", async () => {
@@ -481,7 +503,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await expect(p2).resolves.toBeUndefined()
 
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("settle.txt"), "second")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("settle.txt"), "second", {})
 		})
 
 		it("evicts settled chain entries - a later write still serializes in order", async () => {
@@ -535,7 +557,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "sub/dir.txt", "content", "update")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("sub/dir.txt"), "content")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("sub/dir.txt"), "content", {})
 		})
 
 		it("normalizes an already-absolute input (trailing separator) to the observation key", async () => {
@@ -552,7 +574,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, canonical + "/", "content", "update")
 
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(canonical, "content")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(canonical, "content", {})
 		})
 
 		it("serializes two spellings of one file through a single chain key", async () => {
@@ -578,8 +600,8 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(r1.status).toBe("fulfilled")
 			expect(r2.status).toBe("fulfilled")
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
-			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, canonical, "first")
-			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(2, canonical, "second")
+			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, canonical, "first", {})
+			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(2, canonical, "second", {})
 		})
 	})
 
@@ -594,7 +616,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			resetChain()
 			await guardedWrite(task, "x.txt", "b", "update")
 
-			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("x.txt"), "b")
+			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("x.txt"), "b", {})
 		})
 	})
 })

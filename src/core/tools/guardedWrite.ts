@@ -27,6 +27,12 @@ import type { Task } from "../task/Task"
 /** Write kind that drives guard selection. */
 export type GuardedWriteKind = "create" | "update" | "edit"
 
+/** Publish options for a guarded write. */
+export interface GuardedWriteOptions {
+	/** Encoding used to encode the content for the publish (see safeWriteText). */
+	encoding?: string
+}
+
 /** Internal error thrown when a guard rejects a write. */
 class GuardRejectedError extends Error {
 	constructor(
@@ -111,7 +117,11 @@ async function fileIsAbsent(absolutePath: string): Promise<boolean> {
  * write was issued for a file that was never read, so the caller must read
  * the file first, then retry.
  */
-export async function createIfAbsent(absolutePath: string, content: string): Promise<void> {
+export async function createIfAbsent(
+	absolutePath: string,
+	content: string,
+	options: GuardedWriteOptions = {},
+): Promise<void> {
 	try {
 		await fs.access(absolutePath)
 	} catch (error: unknown) {
@@ -119,7 +129,7 @@ export async function createIfAbsent(absolutePath: string, content: string): Pro
 			// A real I/O failure (EACCES, EIO, ...) -- not a guard verdict.
 			throw error
 		}
-		await safeWriteText(absolutePath, content)
+		await safeWriteText(absolutePath, content, options)
 		return
 	}
 
@@ -139,7 +149,12 @@ export async function createIfAbsent(absolutePath: string, content: string): Pro
  * a mismatch the write is rejected stale with a re-read-then-retry
  * remediation suffix.
  */
-export async function replaceIfVersion(absolutePath: string, expectedVersion: string, content: string): Promise<void> {
+export async function replaceIfVersion(
+	absolutePath: string,
+	expectedVersion: string,
+	content: string,
+	options: GuardedWriteOptions = {},
+): Promise<void> {
 	let currentVersion: string
 	try {
 		currentVersion = await computeVersionToken(absolutePath)
@@ -161,7 +176,7 @@ export async function replaceIfVersion(absolutePath: string, expectedVersion: st
 	}
 
 	if (currentVersion === expectedVersion) {
-		await safeWriteText(absolutePath, content)
+		await safeWriteText(absolutePath, content, options)
 		return
 	}
 
@@ -226,6 +241,7 @@ export async function guardedWrite(
 	relPathOrAbsolute: string,
 	content: string,
 	kind: GuardedWriteKind = "update",
+	options?: GuardedWriteOptions,
 ): Promise<void> {
 	const absolutePath = resolveAbsolutePath(task, relPathOrAbsolute)
 
@@ -240,7 +256,7 @@ export async function guardedWrite(
 			if (obs === undefined) {
 				await unobservedEditGuard(absolutePath)
 			} else {
-				await replaceIfVersion(absolutePath, obs.version, content)
+				await replaceIfVersion(absolutePath, obs.version, content, options)
 			}
 		} else {
 			// "create" or "update" publish a full file built on the model's
@@ -263,14 +279,14 @@ export async function guardedWrite(
 
 			if (obs === undefined) {
 				// Never read: only an absent target may be created.
-				await createIfAbsent(absolutePath, content)
+				await createIfAbsent(absolutePath, content, options)
 			} else if (absent) {
 				// A "create" on a file that vanished after the read recreates it.
-				await createIfAbsent(absolutePath, content)
+				await createIfAbsent(absolutePath, content, options)
 			} else {
 				// The version recorded at read time must still match the on-disk
 				// token.
-				await replaceIfVersion(absolutePath, obs.version, content)
+				await replaceIfVersion(absolutePath, obs.version, content, options)
 			}
 		}
 

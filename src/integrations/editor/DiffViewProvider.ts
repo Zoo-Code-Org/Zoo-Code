@@ -428,7 +428,13 @@ export class DiffViewProvider {
 				throw new Error("Cannot guard the write: the owning task is no longer available")
 			}
 			// Stryker disable next-line StringLiteral: "" is semantically identical to "update" in guardedWrite (only "edit" and "create" take distinct branches), so the StringLiteral mutant is equivalent at this sole production call site.
-			await guardedWrite(saveTask, this.relPath, editedContent, "update")
+			// Publish with the document's own encoding (BOM included when the
+			// document is utf8bom): encoding as UTF-8 unconditionally would drop
+			// the BOM and reload a legacy-code-page document as mojibake after the
+			// revert.
+			await guardedWrite(saveTask, this.relPath, editedContent, "update", {
+				encoding: updatedDocument.encoding,
+			})
 		} catch (error) {
 			// Discard-only failure cleanup. The publish was rejected (stale
 			// version, unobserved target, a partial-read observation, or an
@@ -441,6 +447,13 @@ export class DiffViewProvider {
 			// the newer disk content that caused the rejection. Best-effort —
 			// the guard verdict is rethrown below.
 			try {
+				// Dispose before any programmatic activation: showTextDocument can
+				// change the active editor even with preserveFocus, so a listener
+				// still attached here would record this cleanup as a user touch and
+				// let the auto-close preferences keep the transient tab open.
+				this.disposeActiveEditorListener()
+				this.cancelDeferredScroll()
+
 				if (updatedDocument.isDirty) {
 					await vscode.window.showTextDocument(updatedDocument, { preserveFocus: true, preview: false })
 					await vscode.commands.executeCommand("workbench.action.files.revert")
@@ -448,7 +461,18 @@ export class DiffViewProvider {
 				if (this.editType === "create" && this.placeholderVersion) {
 					const placeholderStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 					if (placeholderStats && versionTokenOfStat(placeholderStats) === this.placeholderVersion) {
-						await fs.unlink(absolutePath).catch(() => undefined)
+						let unlinked = false
+						try {
+							await fs.unlink(absolutePath)
+							unlinked = true
+						} catch {
+							// the placeholder vanished or the unlink failed
+						}
+						if (unlinked) {
+							// The file is gone, so its tab must go too: closing only the diff
+							// views would leave a clean plain-text tab for a deleted file.
+							await this.closeFileTab(absolutePath)
+						}
 					}
 				}
 				await this.closeAllDiffViews()
@@ -465,6 +489,14 @@ export class DiffViewProvider {
 		// document.save() would re-publish through the unguarded VS Code file
 		// service and advance the on-disk token, so the revert is the
 		// content-safe way to clear it.
+		// Stop tracking touches and cancel any pending scroll-to-diff before any
+		// programmatic editor activation: showTextDocument below can change the
+		// active editor even with preserveFocus, so a listener still attached would
+		// record this programmatic revert as a user touch and keep the transient
+		// tab open against the auto-close preference.
+		this.disposeActiveEditorListener()
+		this.cancelDeferredScroll()
+
 		if (updatedDocument.isDirty) {
 			try {
 				await vscode.window.showTextDocument(updatedDocument, { preserveFocus: true, preview: false })
@@ -474,11 +506,6 @@ export class DiffViewProvider {
 				// rather than risking a save-prompt loop
 			}
 		}
-
-		// Stop tracking touches and cancel any pending scroll-to-diff before any
-		// programmatic editor activation below.
-		this.disposeActiveEditorListener()
-		this.cancelDeferredScroll()
 
 		await this.closeAllDiffViews()
 

@@ -9,6 +9,7 @@ import { historyItemSchema, type HistoryItem } from "@roo-code/types"
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { LOCK_STALE_MS, withFileLock } from "../../utils/fileLock"
 import { safeWriteJson } from "../../utils/safeWriteJson"
+import { resolvePublishTarget } from "../../services/file-safety/safeWriteText"
 import { getStorageBasePath } from "../../utils/storage"
 import { assertValidTransition, settleRejectedCreateSubtaskAction, type HistoryItemStatus } from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
@@ -280,7 +281,12 @@ export class TaskHistoryStore {
 			// Remove per-task file (best-effort)
 			try {
 				const filePath = await this.getTaskFilePath(taskId)
-				await withFileLock(filePath, (absoluteFilePath) => fs.unlink(absoluteFilePath))
+				// Lock the resolved publish target, not the path as spelled:
+				// proper-lockfile keys the advisory lock by the path it is given, so a
+				// symlink alias and its referent would take two locks for one file and a
+				// deletion could run concurrently with a locked merge through the other
+				// alias. The unlink still removes the path the caller named.
+				await withFileLock(await resolvePublishTarget(filePath), () => fs.unlink(filePath))
 			} catch {
 				// File may already be deleted
 			}
@@ -308,7 +314,9 @@ export class TaskHistoryStore {
 				// Remove per-task file (best-effort)
 				try {
 					const filePath = await this.getTaskFilePath(taskId)
-					await withFileLock(filePath, (absoluteFilePath) => fs.unlink(absoluteFilePath))
+					// Same lock key as delete(): the resolved referent, while the unlink
+					// still removes the path the caller named.
+					await withFileLock(await resolvePublishTarget(filePath), () => fs.unlink(filePath))
 				} catch {
 					// File may already be deleted
 				}
