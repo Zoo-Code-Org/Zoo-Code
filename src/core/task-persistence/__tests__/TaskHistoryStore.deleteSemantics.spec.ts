@@ -200,6 +200,33 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 		})
 	})
 
+	describe("reconcile()", () => {
+		it("keeps a cached task live when its file is absent but the lock is held at the resolved referent", async () => {
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "alias-live" }))
+			const aliasPath = historyFilePath(storagePath, "alias-live")
+			const referentPath = path.join(storagePath, "tasks", "alias-live", "referent-history.json")
+
+			// Real symlinks are unavailable in this CI lane, so the alias is
+			// simulated through realpath, as in the safeWriteJson lock test.
+			const realpathSpy = vi.spyOn(fs, "realpath").mockResolvedValue(referentPath)
+			try {
+				// The rename window: the referent is momentarily missing, so the cached
+				// file cannot be stat'd while the peer holds the lock at the key it locks.
+				await actualFs.rm(aliasPath, { force: true })
+				await actualFs.writeFile(referentPath + ".lock", "")
+				await store.reconcile()
+			} finally {
+				realpathSpy.mockRestore()
+			}
+
+			// The probe must look at the same key the writer locks, otherwise a live
+			// task is evicted from the cache while its write is still in progress.
+			expect(storeInternals(store).cache.has("alias-live")).toBe(true)
+		})
+	})
+
 	describe("deleteMany()", () => {
 		it("continues the batch after a failed unlink, evicts every entry, and writes through exactly once", async () => {
 			const store = createStore()

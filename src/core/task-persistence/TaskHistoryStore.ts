@@ -383,7 +383,9 @@ export class TaskHistoryStore {
 					// held for the entire write, so its presence means a
 					// write is in progress — keep the task live.
 					try {
-						const lockPath = (await this.getTaskFilePath(taskId)) + ".lock"
+						// Probe the same key the writer locks: safeWriteJson locks the resolved
+						// publish target, so an alias and its referent share one lock file.
+						const lockPath = (await resolvePublishTarget(await this.getTaskFilePath(taskId))) + ".lock"
 						const lockStat = await fs.stat(lockPath)
 						if (Date.now() - lockStat.mtimeMs < LOCK_STALE_MS) {
 							liveIds.add(taskId)

@@ -1840,10 +1840,15 @@ describe("DiffViewProvider", () => {
 			} as unknown as vscode.TextEditor
 			vi.mocked(vscode.window).activeTextEditor = editor
 			diffViewProvider["activeDiffEditor"] = editor
+			revertClearsDirty(editor.document)
 
 			await diffViewProvider.saveChanges(false)
 
-			expect(vi.mocked(vscode.window.showTextDocument)).toHaveBeenCalledTimes(1)
+			// Only the activation happened: the focus was already on the target, so there
+			// was nothing to give back.
+			expect(vi.mocked(vscode.window.showTextDocument).mock.calls).toEqual([
+				[editor.document, { preserveFocus: false, preview: false }],
+			])
 			expect(vi.mocked(vscode.commands.executeCommand)).toHaveBeenCalledWith("workbench.action.files.revert")
 		})
 		it("keeps the placeholder when the discard fails, so a later save cannot recreate the rejected content", async () => {
