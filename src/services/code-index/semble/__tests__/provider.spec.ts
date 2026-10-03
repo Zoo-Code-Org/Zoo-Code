@@ -394,12 +394,10 @@ describe("SembleProvider", () => {
 			expect(results).toHaveLength(2)
 		})
 
-		it("should return empty array on search error and log telemetry", async () => {
+		it("should throw on search error and log telemetry", async () => {
 			mockCli.search.mockRejectedValue(new Error("Search failed"))
 
-			const results = await provider.searchIndex("test")
-
-			expect(results).toEqual([])
+			await expect(provider.searchIndex("test")).rejects.toThrow("Semble search failed: Search failed")
 			expect(TelemetryService.instance.captureEvent).toHaveBeenCalledWith(
 				TelemetryEventName.CODE_INDEX_ERROR,
 				expect.objectContaining({
@@ -413,9 +411,7 @@ describe("SembleProvider", () => {
 			// branch of the telemetry payload (stack: undefined).
 			mockCli.search.mockRejectedValue("string error")
 
-			const results = await provider.searchIndex("test")
-
-			expect(results).toEqual([])
+			await expect(provider.searchIndex("test")).rejects.toThrow("Semble search failed: string error")
 			expect(TelemetryService.instance.captureEvent).toHaveBeenCalledWith(
 				TelemetryEventName.CODE_INDEX_ERROR,
 				expect.objectContaining({
