@@ -58,8 +58,10 @@ export interface IndentationReadResult {
 	totalLines: number
 	/** Lines actually returned */
 	returnedLines: number
-	/** Whether output was truncated due to limit */
+	/** Whether output was truncated because lines were omitted */
 	wasTruncated: boolean
+	/** Whether any returned line was clipped by the per-line length cap */
+	hasClippedLines?: boolean
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -306,6 +308,7 @@ export function readWithIndentation(content: string, options: IndentationReadOpt
 			totalLines,
 			returnedLines: 0,
 			wasTruncated: false,
+			hasClippedLines: false,
 		}
 	}
 
@@ -448,16 +451,19 @@ export function readWithSlice(
 			totalLines,
 			returnedLines: 0,
 			wasTruncated: false,
+			hasClippedLines: false,
 		}
 	}
 
 	// Slice lines
 	const endIdx = Math.min(offset + limit, totalLines)
 	const selectedLines = lines.slice(offset, endIdx)
-	// Every line can still be a partial view: formatWithLineNumbers clips a
-	// line longer than MAX_LINE_LENGTH, so a slice that returns the whole file
-	// may still hide content and must not count as a complete read.
-	const wasTruncated = endIdx < totalLines || selectedLines.some((line) => line.content.length > MAX_LINE_LENGTH)
+	const wasTruncated = endIdx < totalLines
+	// A returned line can still be a partial view: formatWithLineNumbers clips a
+	// line longer than MAX_LINE_LENGTH, so a slice that returned every line may
+	// still hide content. Clipping is reported separately from omission so the
+	// caller does not suggest a next offset that is beyond the file.
+	const hasClippedLines = selectedLines.some((line) => line.content.length > MAX_LINE_LENGTH)
 
 	// Format output
 	const formattedContent = formatWithLineNumbers(selectedLines)
@@ -468,5 +474,6 @@ export function readWithSlice(
 		totalLines,
 		returnedLines: selectedLines.length,
 		wasTruncated,
+		hasClippedLines,
 	}
 }

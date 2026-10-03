@@ -280,15 +280,15 @@ describe("readWithSlice", () => {
 		expect(result.wasTruncated).toBe(true)
 	})
 
-	it("marks a full-file slice truncated when a line is clipped by the length cap", () => {
+	it("reports a clipped line separately from omitted lines", () => {
 		// Every line is returned, but formatWithLineNumbers clips a line longer
-		// than MAX_LINE_LENGTH, so the model did not see the whole file and the read
-		// must not count as complete.
-		const longLine = "x".repeat(MAX_LINE_LENGTH + 10)
-		const result = readWithSlice(longLine, 0, 10)
+		// than MAX_LINE_LENGTH, so the model did not see the whole file.
+		const lines = ["x".repeat(MAX_LINE_LENGTH + 10), "short"].join("\n")
+		const result = readWithSlice(lines, 0, 10)
 
-		expect(result.returnedLines).toBe(1)
-		expect(result.wasTruncated).toBe(true)
+		expect(result.returnedLines).toBe(2)
+		expect(result.wasTruncated).toBe(false)
+		expect(result.hasClippedLines).toBe(true)
 	})
 
 	it("keeps a slice complete when a line is exactly at the length cap", () => {
@@ -299,16 +299,17 @@ describe("readWithSlice", () => {
 
 		expect(result.returnedLines).toBe(2)
 		expect(result.wasTruncated).toBe(false)
+		expect(result.hasClippedLines).toBe(false)
 	})
 
-	it("marks a slice truncated when any line is clipped, not only when every line is", () => {
+	it("flags clipping when any line is clipped, not only when every line is", () => {
 		// The first line is clipped and the second is shown in full: some lines are
 		// a partial view even though every line was returned.
 		const lines = ["y".repeat(MAX_LINE_LENGTH + 1), "short"].join("\n")
 		const result = readWithSlice(lines, 0, 10)
 
 		expect(result.returnedLines).toBe(2)
-		expect(result.wasTruncated).toBe(true)
+		expect(result.hasClippedLines).toBe(true)
 	})
 
 	it("should handle offset beyond file end", () => {
@@ -316,6 +317,8 @@ describe("readWithSlice", () => {
 
 		expect(result.returnedLines).toBe(0)
 		expect(result.content).toContain("Error")
+		// No line was returned, so nothing could have been clipped.
+		expect(result.hasClippedLines).toBe(false)
 	})
 
 	it("should handle negative offset", () => {
@@ -329,6 +332,14 @@ describe("readWithSlice", () => {
 // ─── readWithIndentation Tests ────────────────────────────────────────────────
 
 describe("readWithIndentation", () => {
+	it("reports an out-of-range anchor as an error with no clipping", () => {
+		const result = readWithIndentation(SIMPLE_CODE, { anchorLine: 1000 })
+
+		expect(result.content).toContain("out of range")
+		expect(result.returnedLines).toBe(0)
+		expect(result.hasClippedLines).toBe(false)
+	})
+
 	describe("basic block extraction", () => {
 		it("should extract content around the anchor line", () => {
 			const result = readWithIndentation(PYTHON_CODE, {

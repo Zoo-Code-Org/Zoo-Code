@@ -8,6 +8,7 @@ import path from "path"
 import * as fsPromises from "fs/promises"
 import type { Task } from "../../task/Task"
 import { ObservationRegistry } from "../../task/observationRegistry"
+import { guardedWrite } from "../guardedWrite"
 import { ApplyPatchTool } from "../ApplyPatchTool"
 
 // The vi.mock factory exposes the fs/promises functions under a `default`
@@ -16,6 +17,7 @@ import { ApplyPatchTool } from "../ApplyPatchTool"
 const mockedFsPromises = vi.mocked(
 	fsPromises as unknown as {
 		default: {
+			access: MockedFunction<typeof fsPromises.access>
 			stat: ReturnType<typeof vi.fn>
 			unlink: MockedFunction<typeof fsPromises.unlink>
 		}
@@ -24,6 +26,9 @@ const mockedFsPromises = vi.mocked(
 
 vi.mock("fs/promises", () => ({
 	default: {
+		// The target exists on disk, so the completeness gate applies to the
+		// follow-up guarded write in the partial-observation test.
+		access: vi.fn().mockResolvedValue(undefined),
 		readFile: vi.fn().mockResolvedValue("original file content\n"),
 		// Stable on-disk version for the S2 self-read observation (the hunk
 		// read now stats before and after; equal tokens record the observe).
@@ -224,7 +229,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		tool = new ApplyPatchTool()
 	})
 
-	it("update: publishes through the guarded saveDirectly with create kind", async () => {
+	it("update: publishes the targeted hunk through the guarded saveDirectly with edit kind", async () => {
 		await tool.execute({ patch: updatePatch }, mockTask as Task, {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
@@ -237,11 +242,58 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			false,
 			true,
 			1000,
-			"create",
+			"edit",
 		)
 		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
 		expect(mockTask.didEditFile).toBe(true)
 		expect(mockHandleError).not.toHaveBeenCalled()
+	})
+
+	it("update: keeps a partial observation partial so a later full-file write is still rejected", async () => {
+		// The hunk read is the tool's own read, not a model read. Upgrading the
+		// model's partial view to complete here would let a later write_to_file
+		// replace the file with content built from the slice the model saw.
+		const key = path.resolve("/workspace/project", "src/thing.ts")
+		const reg = mockTask.observationRegistry
+		reg.observe(key, "7:4242:1234:1700000000123456789:1700000000789999999", false)
+
+		await tool.execute({ patch: updatePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(reg.get(key)?.complete).toBe(false)
+		// The targeted hunk itself is still allowed, guarded as an edit.
+		expect(mockSaveDirectly).toHaveBeenCalledWith(
+			"src/thing.ts",
+			"modified file content\n",
+			false,
+			true,
+			1000,
+			"edit",
+		)
+
+		await expect(guardedWrite(mockTask as Task, "src/thing.ts", "full replacement", "update")).rejects.toThrow(
+			"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
+				"a full-file replacement needs the complete content; re-read the whole file, then retry.",
+		)
+	})
+
+	it("update: keeps a complete observation complete across the tool's own hunk read", async () => {
+		// Completeness is the model's, not the tool's: a complete read stays complete
+		// and a partial one stays partial, so a later full-file write is still gated.
+		const key = path.resolve("/workspace/project", "src/thing.ts")
+		const reg = mockTask.observationRegistry
+		reg.observe(key, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+
+		await tool.execute({ patch: updatePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(reg.get(key)?.complete).toBe(true)
 	})
 
 	it("update: observes the hunk read so the guarded publish is not unobserved", async () => {

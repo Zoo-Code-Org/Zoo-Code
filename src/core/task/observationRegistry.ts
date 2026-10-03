@@ -31,9 +31,10 @@ export class ObservationRegistry {
 	 *
 	 * Re-observing replaces the entry with a fresh observedAt timestamp, the
 	 * new version token, and the read's completeness. `complete` defaults to
-	 * true: the existing callers (ApplyPatchTool, spec doubles) all observe
-	 * after reading the full file buffer, so a partial read must opt in
-	 * explicitly.
+	 * true for callers that read the whole file themselves (spec doubles,
+	 * WriteToFileTool). A caller whose read is internal to a targeted edit must
+	 * carry the model's prior completeness instead, so the tool's own read cannot
+	 * upgrade a partial read into authority for a full-file replacement.
 	 */
 	observe(absolutePath: string, version: string, complete: boolean = true): void {
 		this.entries.set(absolutePath, { version, observedAt: Date.now(), complete })

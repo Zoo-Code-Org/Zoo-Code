@@ -23,7 +23,7 @@ import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import { getReadablePath } from "../../utils/path"
 import { extractTextFromFile, addLineNumbers, getSupportedBinaryFormats } from "../../integrations/misc/extract-text"
 import { readWithIndentation, readWithSlice } from "../../integrations/misc/indentation-reader"
-import { DEFAULT_LINE_LIMIT } from "../prompts/tools/native-tools/read_file"
+import { DEFAULT_LINE_LIMIT, MAX_LINE_LENGTH } from "../prompts/tools/native-tools/read_file"
 import type { ToolUse, PushToolResult } from "../../shared/tools"
 
 import {
@@ -350,15 +350,20 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 	To read more: Use the read_file tool with offset=${nextOffset} and limit=${limit}.
 	
 	${result.content}`
+		} else if (result.hasClippedLines) {
+			// Every line was returned, so there is no later offset to read: report the
+			// clipping without a next-offset hint, and keep the read incomplete so a
+			// full-file replacement cannot be built from a clipped line.
+			output = `IMPORTANT: Some lines exceed ${MAX_LINE_LENGTH} characters and were clipped in this view. The file was read in full, but the clipped lines were not shown in full.`
 		} else if (result.returnedLines === 0) {
 			output = "Note: File is empty"
 		}
 
-		// Complete only when the slice starts at line 1 and is not truncated:
-		// readWithSlice then runs to the end of the file and returns every line
-		// (returnedLines === totalLines follows from those two conditions), so the
-		// model saw the whole file; a partial start or a truncated tail does not.
-		const complete = offset0 === 0 && !result.wasTruncated
+		// Complete only when the slice starts at line 1, returned every line, and
+		// showed every line in full (returnedLines === totalLines follows from the
+		// first two conditions): a partial start, a truncated tail, or a clipped
+		// line means the model did not see the whole file.
+		const complete = offset0 === 0 && !result.wasTruncated && !result.hasClippedLines
 
 		return { content: output, complete }
 	}
@@ -832,9 +837,11 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					// Read with default limits using slice mode
 					const result = readWithSlice(rawContent, 0, DEFAULT_LINE_LIMIT)
 					content = result.content
-					readComplete = !result.wasTruncated
+					readComplete = !result.wasTruncated && !result.hasClippedLines
 					if (result.wasTruncated) {
 						content += `\n\n[File truncated: showing ${result.returnedLines} of ${result.totalLines} total lines]`
+					} else if (result.hasClippedLines) {
+						content += `\n\n[Some lines exceed the per-line length cap and were clipped in this view]`
 					}
 				}
 

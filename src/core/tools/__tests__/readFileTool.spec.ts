@@ -1886,6 +1886,38 @@ describe("ReadFileTool", () => {
 				expect(reg.get(calledPath)!.complete).toBe(false)
 			})
 
+			it("native: a full read whose line content was clipped records a partial observation", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				mockedFsStat.mockResolvedValue(bigintStats())
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue(Buffer.from("a\nb\n"))
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | a\n2 | b",
+					returnedLines: 2,
+					totalLines: 2,
+					wasTruncated: false,
+					hasClippedLines: true,
+					includedRanges: [[1, 2]],
+				})
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				await readFileTool.execute({ path: "clipped.ts" }, mockTask as unknown as Task, callbacks)
+
+				const [, , calledComplete] = observeSpy.mock.calls[0]
+				expect(calledComplete).toBe(false)
+				// Every line was returned, so the notice must not point at a next
+				// offset that is beyond the file.
+				const pushed = callbacks.pushToolResult.mock.calls[0][0]
+				expect(pushed).toContain("clipped in this view")
+				expect(pushed).not.toContain("To read more")
+			})
+
 			it("native: an offset read that is not truncated still records a partial observation", async () => {
 				const mockTask = createMockTask({
 					observationRegistry: new ObservationRegistry(),
@@ -2004,6 +2036,49 @@ describe("ReadFileTool", () => {
 				expect(observeSpy).toHaveBeenCalledTimes(1)
 				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
 				expect(calledComplete).toBe(true)
+
+				// Nothing was omitted and nothing was clipped, so no note is added.
+				const pushed = callbacks.pushToolResult.mock.calls[0][0]
+				expect(pushed).not.toContain("clipped in this view")
+				expect(pushed).not.toContain("total lines")
+			})
+
+			it("legacy: a full read with a clipped line records a partial observation and reports the clipping", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				mockedFsStat.mockResolvedValue(bigintStats())
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue("a\nb")
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | a\n2 | b",
+					returnedLines: 2,
+					totalLines: 2,
+					wasTruncated: false,
+					hasClippedLines: true,
+					includedRanges: [[1, 2]],
+				})
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				const legacyParams: LegacyReadFileParams = {
+					files: [{ path: "legacy-clipped.ts" }],
+					_legacyFormat: true,
+				}
+
+				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
+
+				const [, , calledComplete] = observeSpy.mock.calls[0]
+				expect(calledComplete).toBe(false)
+
+				// Every line was returned, so the note reports the clipping instead of
+				// a showing-N-of-N count that would point past the file.
+				const pushed = callbacks.pushToolResult.mock.calls[0][0]
+				expect(pushed).toContain("clipped in this view")
+				expect(pushed).not.toContain("showing 2 of 2 total lines")
 			})
 
 			it("legacy: a slice truncated to the default limit records a partial observation", async () => {
@@ -2036,6 +2111,12 @@ describe("ReadFileTool", () => {
 				expect(observeSpy).toHaveBeenCalledTimes(1)
 				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
 				expect(calledComplete).toBe(false)
+
+				// Lines were omitted here, so the note reports the omitted range rather
+				// than clipping.
+				const pushed = callbacks.pushToolResult.mock.calls[0][0]
+				expect(pushed).toContain("showing 1 of 5000 total lines")
+				expect(pushed).not.toContain("clipped in this view")
 			})
 		})
 	})

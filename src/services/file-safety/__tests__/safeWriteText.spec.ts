@@ -172,8 +172,9 @@ describe("safeWriteText", () => {
 			await expect(safeWriteText(targetPath, "hello", { platform: "linux" })).resolves.toBeUndefined()
 
 			// the commit rename still happened and the rmdir error was swallowed
-			expect(fs.rename).toHaveBeenCalled()
-			expect(fs.rmdir).toHaveBeenCalled()
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
+			expect(fs.rmdir).toHaveBeenCalledTimes(1)
+			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
 		})
 
 		it("gives each self-staged write its own staging directory so a concurrent write cannot remove it", async () => {
@@ -423,7 +424,9 @@ describe("safeWriteText", () => {
 			await safeWriteText(targetPath, "data", { platform: "win32" })
 
 			// write succeeded despite icacls failure (fallback to plain rename)
-			expect(fs.rename).toHaveBeenCalled()
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
+			// one icacls attempt only: a failed DACL apply must not try to restore
+			expect(execFile).toHaveBeenCalledTimes(1)
 		})
 
 		it("win32 DACL: a partial dump left by a failed save is removed and never restored", async () => {

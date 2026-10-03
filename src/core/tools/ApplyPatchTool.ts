@@ -101,7 +101,12 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				if (preReadStats && postReadStats) {
 					const preReadToken = versionTokenOfStat(preReadStats)
 					if (preReadToken === versionTokenOfStat(postReadStats)) {
-						task.observationRegistry.observe(absolutePath, preReadToken)
+						// This is the tool's own hunk read, not a model read: keep the
+						// completeness the model actually earned, so a targeted patch cannot
+						// authorize a later full-file replacement. A file the model never
+						// read stays partial.
+						const prior = task.observationRegistry.get(absolutePath)
+						task.observationRegistry.observe(absolutePath, preReadToken, prior?.complete === true)
 					}
 				}
 				return content
@@ -460,15 +465,16 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		} else {
 			// Save changes to the same file
 			if (isPreventFocusDisruptionEnabled) {
-				// Guarded publish: the patched file content is complete, so create-guard
-				// semantics apply (stale observed versions are rejected with a re-read hint).
+				// Guarded publish: an update hunk is a targeted change, so it is guarded
+				// as an edit -- a partial observation authorizes it and stays partial. A
+				// stale observed version is still rejected with the re-read hint.
 				await task.diffViewProvider.saveDirectly(
 					relPath,
 					newContent,
 					false,
 					diagnosticsEnabled,
 					writeDelayMs,
-					"create",
+					"edit",
 				)
 			} else {
 				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
