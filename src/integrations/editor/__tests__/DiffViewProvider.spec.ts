@@ -1047,7 +1047,7 @@ describe("DiffViewProvider", () => {
 			vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
 		})
 
-		it("open() observes the previewed on-disk version of an existing file as a complete read", async () => {
+		it("open() observes the previewed version of an existing file as a partial read, not a model read", async () => {
 			const mockEditor = mockTextEditor(`${mockCwd}/observed.ts`)
 			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
 			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
@@ -1065,7 +1065,9 @@ describe("DiffViewProvider", () => {
 			const obs = mockTask.observationRegistry.get(`${mockCwd}/observed.ts`)
 			expect(obs).toBeDefined()
 			expect(obs!.version).toBe(versionTokenOfStat(previewStats))
-			expect(obs!.complete).toBe(true)
+			// The preview is the tool's own read, not a read the model made, so it must
+			// not claim completeness for content the model never saw.
+			expect(obs!.complete).toBe(false)
 			expect(vi.mocked(fs.stat)).toHaveBeenNthCalledWith(1, `${mockCwd}/observed.ts`, { bigint: true })
 			expect(vi.mocked(fs.stat)).toHaveBeenNthCalledWith(2, `${mockCwd}/observed.ts`, { bigint: true })
 		})

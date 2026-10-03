@@ -4,8 +4,9 @@
  *
  * Covers guard selection through the S2 observation registry, version-token
  * CAS, remediation messages, and the per-absolute-path FIFO chain: FIFO
- * ordering, exactly-one winner under concurrency, no wedge after a rejected
- * link, and independence across paths.
+ * ordering, last-write-wins for same-task writes through the post-publish
+ * observation refresh, no wedge after a rejected link, and independence across
+ * paths.
  */
 
 import * as fs from "fs/promises"

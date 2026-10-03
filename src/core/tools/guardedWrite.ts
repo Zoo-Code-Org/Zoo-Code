@@ -19,10 +19,6 @@
  * holds; an observed "create" whose target has disappeared instead uses
  * createIfAbsent and can recreate it. Observations come from the task's S2
  * ObservationRegistry and authorize the write as well as the version check.
- * when the on-disk token differs from the token the observation currently holds;
- * an observed "create" whose target has disappeared instead uses createIfAbsent
- * and can recreate it. Observations come from the task's S2 ObservationRegistry
- * and authorize the write as well as the version check.
  */
 
 import * as fs from "fs/promises"

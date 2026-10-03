@@ -146,12 +146,13 @@ export class DiffViewProvider {
 			// the save to changes that happened between the model's read and this
 			// preview (e.g. an external editor), letting a v1-based overwrite
 			// clobber the v2 change. An unread target has no observation, so the
-			// preview token is recorded (stat-matched) and the save checks against
-			// the on-disk version the preview was built on.
+			// preview token is recorded (stat-matched) but never as a complete read:
+			// this is the tool's own preview, not a read the model made, so it must
+			// not authorize a later full-file replacement.
 			if (displayTask && preStats && postStats && !displayTask.observationRegistry.has(absolutePath)) {
 				const displayToken = versionTokenOfStat(preStats)
 				if (displayToken === versionTokenOfStat(postStats)) {
-					displayTask.observationRegistry.observe(absolutePath, displayToken, true)
+					displayTask.observationRegistry.observe(absolutePath, displayToken, false)
 				}
 			}
 		} else {
