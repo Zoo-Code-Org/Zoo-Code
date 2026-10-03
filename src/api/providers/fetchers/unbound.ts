@@ -9,17 +9,18 @@ import { throwIfAborted } from "../utils/abort-signal"
 /**
  * Shape of a single entry in the real Unbound catalog
  * (GET https://api.getunbound.ai/models), which is a JSON object keyed by
- * model ID. Numeric fields arrive as strings, e.g. "maxTokens": "32000".
+ * model ID. Numeric fields usually arrive as strings, e.g. "maxTokens":
+ * "32000", but some entries ship real numbers instead, so both are accepted.
  */
 interface UnboundCatalogEntry {
-	maxTokens?: string
-	contextWindow?: string
+	maxTokens?: string | number
+	contextWindow?: string | number
 	supportsPromptCaching?: boolean
 	supportsImages?: boolean
-	inputTokenPrice?: string
-	outputTokenPrice?: string
-	cacheWritePrice?: string
-	cacheReadPrice?: string
+	inputTokenPrice?: string | number
+	outputTokenPrice?: string | number
+	cacheWritePrice?: string | number
+	cacheReadPrice?: string | number
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -33,20 +34,29 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isCatalogPayload = (value: unknown): value is Record<string, UnboundCatalogEntry> =>
 	isRecord(value) && Object.values(value).every((entry) => isRecord(entry))
 
-/** Converts the API's numeric strings to finite numbers; unparseable values yield `undefined`. */
+/**
+ * Converts the API's numeric fields to finite numbers. Empty/whitespace-only
+ * strings (live catalog ships "maxTokens": "" for some models) and non-finite
+ * results ("Infinity" parses but is not a usable limit) yield `undefined` so
+ * the callers' `?? defaults` kick in.
+ */
 const parseNumericString = (value: unknown): number | undefined => {
+	if (typeof value === "string" && value.trim() === "") {
+		return undefined
+	}
 	if (value === undefined || value === null) {
 		return undefined
 	}
 	const num = Number(value)
-	return Number.isNaN(num) ? undefined : num
+	return Number.isFinite(num) ? num : undefined
 }
 
 export async function getUnboundModels(
 	apiKey?: string | null,
 	opts?: { signal?: AbortSignal },
 ): Promise<Record<string, ModelInfo>> {
-	const models: Record<string, ModelInfo> = {}
+	// Use null-prototype object to prevent prototype pollution
+	const models: Record<string, ModelInfo> = Object.create(null)
 
 	try {
 		const headers: Record<string, string> = {}

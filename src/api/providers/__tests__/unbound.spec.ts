@@ -348,6 +348,141 @@ describe("getUnboundModels", () => {
 		expect(consoleError).not.toHaveBeenCalled()
 	})
 
+	it("treats empty-string numeric fields as missing so defaults apply", async () => {
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+		// Live entry from https://api.getunbound.ai/models (2026-10-03):
+		// fireworks-ai/kimi-k2p6 ships "maxTokens": "".
+		mockedAxios.get.mockResolvedValue({
+			data: {
+				"fireworks-ai/kimi-k2p6": {
+					maxTokens: "",
+					contextWindow: "262144",
+					cacheReadPrice: "0.16",
+					supportsImages: true,
+					cacheWritePrice: "0",
+					inputTokenPrice: "0.95",
+					outputTokenPrice: "4.00",
+					supportsWebSearch: false,
+					supportsPromptCaching: true,
+					supportsExtendedThinking: true,
+				},
+			},
+		})
+
+		const models = await getUnboundModels("test-key")
+
+		expect(models["fireworks-ai/kimi-k2p6"]).toEqual({
+			maxTokens: 8192,
+			contextWindow: 262144,
+			supportsPromptCache: true,
+			supportsImages: true,
+			inputPrice: 0.95,
+			outputPrice: 4,
+			cacheWritesPrice: 0,
+			cacheReadsPrice: 0.16,
+		})
+		expect(consoleError).not.toHaveBeenCalled()
+	})
+
+	it("ignores non-finite numeric fields such as Infinity so defaults apply", async () => {
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+		mockedAxios.get.mockResolvedValue({
+			data: {
+				"openai/gpt-5.1": {
+					maxTokens: "Infinity",
+					contextWindow: "-Infinity",
+					supportsPromptCaching: true,
+					supportsImages: false,
+					inputTokenPrice: "Infinity",
+					outputTokenPrice: "2.50",
+				},
+			},
+		})
+
+		const models = await getUnboundModels("test-key")
+
+		expect(models["openai/gpt-5.1"]).toEqual({
+			maxTokens: 8192,
+			contextWindow: 200_000,
+			supportsPromptCache: true,
+			supportsImages: false,
+			inputPrice: undefined,
+			outputPrice: 2.5,
+			cacheWritesPrice: undefined,
+			cacheReadsPrice: undefined,
+		})
+		expect(consoleError).not.toHaveBeenCalled()
+	})
+
+	it("accepts number-typed numeric fields from the live catalog", async () => {
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+		// Live entry from https://api.getunbound.ai/models (2026-10-03):
+		// openai/gpt-5.1-codex-mini mixes real numbers with numeric strings.
+		mockedAxios.get.mockResolvedValue({
+			data: {
+				"openai/gpt-5.1-codex-mini": {
+					maxTokens: 100000,
+					contextWindow: 200000,
+					cacheReadPrice: "0.030000",
+					supportsImages: true,
+					cacheWritePrice: 0,
+					inputTokenPrice: 0.25,
+					outputTokenPrice: 2,
+					supportsWebSearch: false,
+					supportsPromptCaching: true,
+				},
+			},
+		})
+
+		const models = await getUnboundModels("test-key")
+
+		expect(models["openai/gpt-5.1-codex-mini"]).toEqual({
+			maxTokens: 100000,
+			contextWindow: 200000,
+			supportsPromptCache: true,
+			supportsImages: true,
+			inputPrice: 0.25,
+			outputPrice: 2,
+			cacheWritesPrice: 0,
+			cacheReadsPrice: 0.03,
+		})
+		expect(consoleError).not.toHaveBeenCalled()
+	})
+
+	it("stores a __proto__ catalog key as an own entry on a null-prototype record", async () => {
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+		// Computed key: a plain "__proto__" literal would set the fixture's
+		// prototype instead of creating an own property like JSON.parse does.
+		mockedAxios.get.mockResolvedValue({
+			data: {
+				["__proto__"]: {
+					maxTokens: "64000",
+					contextWindow: "128000",
+					supportsPromptCaching: false,
+					supportsImages: false,
+					inputTokenPrice: "0.10",
+					outputTokenPrice: "0.20",
+				},
+			},
+		})
+
+		const models = await getUnboundModels("test-key")
+
+		expect(Object.getPrototypeOf(models)).toBeNull()
+		expect(Object.prototype.hasOwnProperty.call(models, "__proto__")).toBe(true)
+		expect(models["__proto__"]).toEqual({
+			maxTokens: 64000,
+			contextWindow: 128000,
+			supportsPromptCache: false,
+			supportsImages: false,
+			inputPrice: 0.1,
+			outputPrice: 0.2,
+			cacheWritesPrice: undefined,
+			cacheReadsPrice: undefined,
+		})
+		expect(consoleError).not.toHaveBeenCalled()
+	})
+
 	it("returns mapped models when the API responds with an array", async () => {
 		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
 		mockedAxios.get.mockResolvedValue({
