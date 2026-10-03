@@ -104,7 +104,35 @@ export class ContextProxy {
 		// Migration: Clear old default condensing prompt so users get the improved v2 default
 		await this.migrateOldDefaultCondensingPrompt()
 
+		// Migration: Move a MiMo API key persisted in plaintext globalState (from
+		// builds before the key joined SECRET_STATE_KEYS) into SecretStorage.
+		await this.migratePlaintextMimoApiKey()
+
 		this._isInitialized = true
+	}
+
+	/**
+	 * MiMo shipped with its API key in plaintext globalState. Once the key became a
+	 * secret-state key, globalState stopped being read for it, so an existing
+	 * plaintext value would sit orphaned (and exposed) while SecretStorage stayed
+	 * empty. Move it into SecretStorage once, without overwriting a value that is
+	 * already there, and clear the plaintext copy.
+	 */
+	private async migratePlaintextMimoApiKey() {
+		try {
+			const plaintextKey = this.originalContext.globalState.get<string>("mimoApiKey")
+			if (!plaintextKey) {
+				return
+			}
+			if (!this.secretCache.mimoApiKey) {
+				await this.originalContext.secrets.store("mimoApiKey", plaintextKey)
+				this.secretCache.mimoApiKey = plaintextKey
+				logger.info("Migrated mimoApiKey to secrets")
+			}
+			await this.originalContext.globalState.update("mimoApiKey", undefined)
+		} catch (error) {
+			logger.error(`Error during mimoApiKey migration: ${error instanceof Error ? error.message : String(error)}`)
+		}
 	}
 
 	/**
