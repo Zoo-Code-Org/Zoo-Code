@@ -93,3 +93,42 @@ export function createAbortError(providerName: string): Error {
 	abortError.name = "AbortError"
 	return abortError
 }
+
+/**
+ * Await pending work, but reject with a request abort error the moment the
+ * signal aborts. The underlying promise keeps running to completion — only
+ * the wait is cut — so shared work (a deduped token refresh, for example) is
+ * never cancelled by one request's signal.
+ *
+ * An undefined signal skips the race entirely, and an already-aborted signal
+ * rejects immediately: listeners registered on an already-aborted signal
+ * never fire, so the aborted state must be checked up front.
+ */
+export function settleOnAbort<T>(
+	pending: Promise<T>,
+	signal: AbortSignal | undefined,
+	providerName: string,
+): Promise<T> {
+	if (!signal) {
+		return pending
+	}
+	if (signal.aborted) {
+		return Promise.reject(createAbortError(providerName))
+	}
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = () => reject(createAbortError(providerName))
+		signal.addEventListener("abort", onAbort)
+		void pending.then(
+			(value) => {
+				// Stryker disable next-line StringLiteral: mirrors the event name registered above, whose path is covered by the abort tests; a mutated removal event is unobservable because a signal cannot re-dispatch "abort"
+				signal.removeEventListener("abort", onAbort)
+				resolve(value)
+			},
+			(error) => {
+				// Stryker disable next-line StringLiteral: mirrors the event name registered above, whose path is covered by the abort tests; a mutated removal event is unobservable because a signal cannot re-dispatch "abort"
+				signal.removeEventListener("abort", onAbort)
+				reject(error)
+			},
+		)
+	})
+}
