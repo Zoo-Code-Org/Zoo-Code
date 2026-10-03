@@ -296,6 +296,28 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(reg.get(key)?.complete).toBe(true)
 	})
 
+	it("update: does not carry completeness across a version the model never read", async () => {
+		// The model earned completeness on a different version than the one the patch
+		// helper read: the intervening change was never seen, so a later full-file
+		// replacement must still fail closed.
+		const key = path.resolve("/workspace/project", "src/thing.ts")
+		const reg = mockTask.observationRegistry
+		reg.observe(key, "7:4242:1234:1700000000123456789:1700000000789999998", true)
+
+		await tool.execute({ patch: updatePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(reg.get(key)?.complete).toBe(false)
+
+		await expect(guardedWrite(mockTask as Task, "src/thing.ts", "full replacement", "update")).rejects.toThrow(
+			"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
+				"a full-file replacement needs the complete content; re-read the whole file, then retry.",
+		)
+	})
+
 	it("update: observes the hunk read so the guarded publish is not unobserved", async () => {
 		await tool.execute({ patch: updatePatch }, mockTask as Task, {
 			askApproval: mockAskApproval,

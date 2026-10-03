@@ -102,11 +102,13 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					const preReadToken = versionTokenOfStat(preReadStats)
 					if (preReadToken === versionTokenOfStat(postReadStats)) {
 						// This is the tool's own hunk read, not a model read: keep the
-						// completeness the model actually earned, so a targeted patch cannot
-						// authorize a later full-file replacement. A file the model never
-						// read stays partial.
+						// completeness the model actually earned, and only on the version that
+						// completeness was earned on. A file the model never read, or a version
+						// that moved since its complete read, stays partial: the model cannot
+						// replace content it never saw.
 						const prior = task.observationRegistry.get(absolutePath)
-						task.observationRegistry.observe(absolutePath, preReadToken, prior?.complete === true)
+						const complete = prior?.complete === true && prior.version === preReadToken
+						task.observationRegistry.observe(absolutePath, preReadToken, complete)
 					}
 				}
 				return content
