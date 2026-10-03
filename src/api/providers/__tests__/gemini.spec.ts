@@ -599,6 +599,18 @@ describe("GeminiHandler", () => {
 			expect(modelInfo.info.tiers).toBeUndefined()
 		})
 
+		it("should strip only a trailing :thinking suffix, preserving mid-ID occurrences", () => {
+			const thinkingHandler = new GeminiHandler({
+				apiModelId: "gemini-:thinking-flash:thinking",
+				geminiApiKey: "test-key",
+			})
+
+			// String.replace eats the FIRST occurrence anywhere, which would turn this
+			// id into "gemini--flash:thinking" and leave a trailing suffix on the wire.
+			const modelInfo = thinkingHandler.getModel()
+			expect(modelInfo.id).toBe("gemini-:thinking-flash")
+		})
+
 		it("should not treat Object prototype keys as known models", () => {
 			// `"toString" in geminiModels` is true via the prototype chain, which would
 			// otherwise resolve `info` to a function. An own-property check avoids this.
