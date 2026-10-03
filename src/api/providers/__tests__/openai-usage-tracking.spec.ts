@@ -181,6 +181,31 @@ describe("OpenAiHandler with usage tracking fix", () => {
 			})
 		})
 
+		it("should report OpenAI-compatible cached prompt tokens", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "Cached response" }, index: 0 }],
+						usage: {
+							prompt_tokens: 5_053,
+							completion_tokens: 16,
+							total_tokens: 5_069,
+							prompt_tokens_details: { cached_tokens: 4_864 },
+						},
+					},
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(chunks).toContainEqual({
+				type: "usage",
+				inputTokens: 5_053,
+				outputTokens: 16,
+				cacheReadTokens: 4_864,
+			})
+		})
+
 		it("should handle case where no usage is provided", async () => {
 			// Override the mock for this specific test
 			mockCreate.mockImplementationOnce(async (options) => {
@@ -212,4 +237,160 @@ describe("OpenAiHandler with usage tracking fix", () => {
 			expect(usageChunks).toHaveLength(0)
 		})
 	})
+
+	it("should report cached prompt tokens from a non-streaming response", async () => {
+		const nonStreamingHandler = new OpenAiHandler({ ...mockOptions, openAiStreamingEnabled: false })
+		mockCreate.mockImplementationOnce(async () => ({
+			id: "test-completion",
+			choices: [{ message: { role: "assistant", content: "Cached response" } }],
+			usage: {
+				prompt_tokens: 4_621,
+				completion_tokens: 16,
+				total_tokens: 4_637,
+				prompt_tokens_details: { cached_tokens: 4_608 },
+			},
+		}))
+
+		const chunks = await collectStream(nonStreamingHandler.createMessage("system prompt", []))
+
+		expect(chunks).toContainEqual({
+			type: "usage",
+			inputTokens: 4_621,
+			outputTokens: 16,
+			cacheReadTokens: 4_608,
+		})
+	})
+
+	it("reports cached prompt tokens for a streaming O3 response", async () => {
+		const o3Handler = new OpenAiHandler({ ...mockOptions, openAiModelId: "o3-mini" })
+		mockCreate.mockImplementationOnce(async () =>
+			asyncStreamFrom([
+				{
+					choices: [{ delta: { content: "Cached response" }, index: 0 }],
+					usage: {
+						prompt_tokens: 5_053,
+						completion_tokens: 16,
+						total_tokens: 5_069,
+						prompt_tokens_details: { cached_tokens: 4_864 },
+					},
+				},
+			]),
+		)
+
+		const chunks = await collectStream(o3Handler.createMessage("system prompt", []))
+
+		expect(chunks).toContainEqual({
+			type: "usage",
+			inputTokens: 5_053,
+			outputTokens: 16,
+			cacheReadTokens: 4_864,
+		})
+	})
+
+	it.each([
+		["string", "10"],
+		["object", { tokens: 10 }],
+		["negative", -1],
+		["fractional", 10.5],
+		["non-finite", Number.POSITIVE_INFINITY],
+		["greater than prompt tokens", 101],
+	])("ignores invalid %s cached prompt tokens in streaming responses", async (_name, cachedTokens) => {
+		mockCreate.mockImplementationOnce(async () =>
+			asyncStreamFrom([
+				{
+					choices: [{ delta: { content: "Response" }, index: 0 }],
+					usage: {
+						prompt_tokens: 100,
+						completion_tokens: 5,
+						prompt_tokens_details: { cached_tokens: cachedTokens },
+					},
+				},
+			]),
+		)
+
+		const chunks = await collectStream(handler.createMessage("system prompt", []))
+
+		expect(chunks).toContainEqual({ type: "usage", inputTokens: 100, outputTokens: 5 })
+	})
+
+	it.each([
+		["string", "10"],
+		["object", { tokens: 10 }],
+		["negative", -1],
+		["fractional", 10.5],
+		["non-finite", Number.POSITIVE_INFINITY],
+		["greater than prompt tokens", 101],
+	])("ignores invalid %s cached prompt tokens in non-streaming responses", async (_name, cachedTokens) => {
+		const nonStreamingHandler = new OpenAiHandler({ ...mockOptions, openAiStreamingEnabled: false })
+		mockCreate.mockImplementationOnce(async () => ({
+			id: "test-completion",
+			choices: [{ message: { role: "assistant", content: "Response" } }],
+			usage: {
+				prompt_tokens: 100,
+				completion_tokens: 5,
+				prompt_tokens_details: { cached_tokens: cachedTokens },
+			},
+		}))
+
+		const chunks = await collectStream(nonStreamingHandler.createMessage("system prompt", []))
+
+		expect(chunks).toContainEqual({ type: "usage", inputTokens: 100, outputTokens: 5 })
+	})
+
+	describe.each([true, false])("cache accounting with streaming=%s", (openAiStreamingEnabled) => {
+		it.each([
+			["authoritative count", 23, 23],
+			["authoritative zero", 0, undefined],
+			["fully cached prompt", 100, 100],
+			["null falls back", null, 71],
+			["absent falls back", undefined, 71],
+			["negative", -1, undefined],
+			["fractional", 10.5, undefined],
+			["infinite", Infinity, undefined],
+			["NaN", NaN, undefined],
+			["string", "23", undefined],
+			["object", { tokens: 23 }, undefined],
+			["exceeds input", 101, undefined],
+		])("respects %s without substituting a conflicting fallback", async (_name, reported, expected) => {
+			const cacheHandler = new OpenAiHandler({ ...mockOptions, openAiStreamingEnabled })
+			const usage = {
+				prompt_tokens: 100,
+				completion_tokens: 5,
+				cache_creation_input_tokens: 7,
+				cache_read_input_tokens: reported,
+				prompt_tokens_details: { cached_tokens: 71 },
+			}
+			mockCreate.mockResolvedValueOnce(
+				openAiStreamingEnabled
+					? asyncStreamFrom([{ choices: [], usage }])
+					: { choices: [{ message: { content: "Response" } }], usage },
+			)
+
+			const chunks = await collectStream(cacheHandler.createMessage("system prompt", []))
+
+			expect(chunks.filter((chunk) => chunk.type === "usage")).toEqual([
+				{
+					type: "usage",
+					inputTokens: 100,
+					outputTokens: 5,
+					cacheWriteTokens: 7,
+					cacheReadTokens: expected,
+				},
+			])
+		})
+	})
+
+	it.each([null, undefined, {}, { prompt_tokens_details: null }])(
+		"defaults missing non-streaming usage counters to zero: %j",
+		async (usage) => {
+			const nonStreamingHandler = new OpenAiHandler({ ...mockOptions, openAiStreamingEnabled: false })
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "Response" } }], usage })
+
+			const chunks = await collectStream(nonStreamingHandler.createMessage("system prompt", []))
+
+			expect(chunks.filter((chunk) => chunk.type === "usage")).toEqual([
+				{ type: "usage", inputTokens: 0, outputTokens: 0 },
+			])
+		},
+	)
 })
