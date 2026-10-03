@@ -460,6 +460,8 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 
 		expect(mockSaveChanges).toHaveBeenCalledWith(true, 1000, "edit")
 		expect(mockSaveDirectly).not.toHaveBeenCalled()
+		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
+		expect(mockHandleError).not.toHaveBeenCalled()
 	})
 
 	it("add: the diff-view save uses the create guard for a new file", async () => {
@@ -473,5 +475,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		})
 
 		expect(mockSaveChanges).toHaveBeenCalledWith(true, 1000, "create")
+		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
+		expect(mockHandleError).not.toHaveBeenCalled()
 	})
 })
