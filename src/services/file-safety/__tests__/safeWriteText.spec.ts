@@ -452,7 +452,8 @@ describe("safeWriteText", () => {
 			await safeWriteText(targetPath, "data", { platform: "win32" })
 
 			// write committed; only the save was attempted (no restore from a failed dump)
-			expect(fs.rename).toHaveBeenCalled()
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+			expect(fs.rename).toHaveBeenCalledTimes(1)
 			expect(execFile).toHaveBeenCalledTimes(1)
 			const saveArgs = vi.mocked(execFile).mock.calls[0]?.[1]
 			expect(saveArgs?.[1]).toBe("/save")
@@ -506,7 +507,8 @@ describe("safeWriteText", () => {
 			await safeWriteText(targetPath, "data", { platform: "win32" })
 
 			// write succeeded despite restore failure (best-effort)
-			expect(fs.rename).toHaveBeenCalled()
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+			expect(fs.rename).toHaveBeenCalledTimes(1)
 
 			// dump file was still unlinked in finally
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))

@@ -451,6 +451,17 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					writeDelayMs,
 					"create",
 				)
+				// The destination content is the source file plus one targeted hunk, so
+				// it can only be as complete as the view the model had of the source. The
+				// create publish records the destination as complete, which would hand the
+				// model authority over lines it never read; carry the source's completeness
+				// (or none, when the source was never observed) to the destination.
+				const sourceObs = task.observationRegistry.get(absolutePath)
+				const destObs = task.observationRegistry.get(moveAbsolutePath)
+				const sourceComplete = sourceObs !== undefined && sourceObs.complete === true
+				if (destObs !== undefined && !sourceComplete) {
+					task.observationRegistry.observe(moveAbsolutePath, destObs.version, false)
+				}
 			} else {
 				// Write to new path and delete old file
 				const parentDir = path.dirname(moveAbsolutePath)

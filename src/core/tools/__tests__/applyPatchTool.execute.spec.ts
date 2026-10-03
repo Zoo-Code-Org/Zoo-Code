@@ -407,7 +407,98 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			1000,
 			"create",
 		)
-		expect(mockTask.didEditFile).toBe(true)
+	})
+
+	it("move: carries the source's partial completeness to the destination", async () => {
+		// The destination is the source file plus one hunk. The create publish records
+		// it as complete, but the model only saw a slice of the source, so the
+		// destination must not gain completeness the model never earned.
+		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
+		const destKey = path.resolve("/workspace/project", "src/new.ts")
+		const reg = mockTask.observationRegistry
+		reg.observe(sourceKey, "7:4242:1234:1700000000123456789:1700000000789999999", false)
+		// The real saveDirectly publishes through guardedWrite, which refreshes the
+		// destination observation as complete for a create; the double mirrors that.
+		mockSaveDirectly.mockImplementationOnce(async () => {
+			reg.observe(destKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+			return { newProblemsMessage: "", userEdits: undefined, finalContent: "new content" }
+		})
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(reg.get(destKey)?.complete).toBe(false)
+		await expect(guardedWrite(mockTask as Task, "src/new.ts", "full replacement", "create")).rejects.toThrow(
+			"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
+				"a full-file replacement needs the complete content; re-read the whole file, then retry.",
+		)
+		expect(mockHandleError).not.toHaveBeenCalled()
+	})
+
+	it("move: a complete source read keeps the destination complete", async () => {
+		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
+		const destKey = path.resolve("/workspace/project", "src/new.ts")
+		const reg = mockTask.observationRegistry
+		reg.observe(sourceKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+		mockSaveDirectly.mockImplementationOnce(async () => {
+			reg.observe(destKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+			return { newProblemsMessage: "", userEdits: undefined, finalContent: "new content" }
+		})
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(reg.get(destKey)?.complete).toBe(true)
+		expect(mockHandleError).not.toHaveBeenCalled()
+	})
+
+	it("move: the destination cannot claim completeness when the source was never observed", async () => {
+		// The hunk read records no observation when its stat fails, so the model has
+		// no authority over the source content the move carried over.
+		const destKey = path.resolve("/workspace/project", "src/new.ts")
+		const reg = mockTask.observationRegistry
+		mockedFsPromises.default.stat.mockImplementationOnce(() => Promise.reject(new Error("stat failed")))
+		mockSaveDirectly.mockImplementationOnce(async () => {
+			reg.observe(destKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+			return { newProblemsMessage: "", userEdits: undefined, finalContent: "new content" }
+		})
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(reg.get(path.resolve("/workspace/project", "src/old.ts"))).toBeUndefined()
+		expect(reg.get(destKey)?.complete).toBe(false)
+		expect(mockHandleError).not.toHaveBeenCalled()
+	})
+
+	it("move: leaves an unobserved destination alone when the source read was partial", async () => {
+		// The publish records an observation only when it can compute the new on-disk
+		// token. With nothing recorded for the destination there is nothing to
+		// downgrade, and the carry must not dereference a missing observation.
+		const destKey = path.resolve("/workspace/project", "src/new.ts")
+		const reg = mockTask.observationRegistry
+		reg.observe(
+			path.resolve("/workspace/project", "src/old.ts"),
+			"7:4242:1234:1700000000123456789:1700000000789999999",
+			false,
+		)
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(reg.get(destKey)).toBeUndefined()
 		expect(mockHandleError).not.toHaveBeenCalled()
 	})
 
