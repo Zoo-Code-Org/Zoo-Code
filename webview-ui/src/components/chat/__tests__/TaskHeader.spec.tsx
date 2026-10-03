@@ -330,4 +330,179 @@ describe("TaskHeader", () => {
 			expect(screen.getByText("25%")).toBeInTheDocument()
 		})
 	})
+
+	describe("Expanded task text markdown rendering", () => {
+		it("shows raw source while collapsed and formatted markdown when expanded", async () => {
+			const { container } = renderTaskHeader({
+				task: { type: "say", ts: Date.now(), text: "**bold** and `code`", images: [] },
+			})
+
+			// Collapsed state renders the raw task text (no markdown formatting yet).
+			expect(screen.getByText("**bold** and `code`")).toBeInTheDocument()
+			expect(container.querySelector("strong")).toBeNull()
+
+			// Expand the header by clicking the collapsed title.
+			fireEvent.click(screen.getByText("**bold** and `code`"))
+
+			// Expanded state applies markdown: **bold** becomes <strong>, `code` becomes <code>.
+			const bold = await screen.findByText("bold")
+			expect(bold.tagName).toBe("STRONG")
+			expect(container.querySelector("code")?.textContent).toBe("code")
+
+			// The raw markdown source must not be displayed verbatim in the expanded view.
+			expect(screen.queryByText("**bold** and `code`")).not.toBeInTheDocument()
+		})
+
+		it("uses the shared scrollable style for the expanded prompt box", () => {
+			const { container } = renderTaskHeader({
+				task: { type: "say", ts: Date.now(), text: "prompt", images: [] },
+			})
+
+			// Expand the header.
+			fireEvent.click(screen.getByText("prompt"))
+
+			// The prompt box must use the VS Code-style .scrollable scrollbar (hover-reveal),
+			// not a default always-visible Chromium scrollbar, so it matches the message list.
+			const scrollBox = container.querySelector(".scrollable")
+			expect(scrollBox).not.toBeNull()
+			expect(scrollBox?.className).toContain("max-h-80")
+		})
+
+		it("renders headings and lists in the expanded view", async () => {
+			const { container } = renderTaskHeader({
+				task: {
+					type: "say",
+					ts: Date.now(),
+					text: "# Heading\n- item one\n- item two",
+					images: [],
+				},
+			})
+
+			// Expand via the header container (the raw multi-line title is not a stable text target).
+			fireEvent.click(container.querySelector(".cursor-pointer")!)
+
+			const heading = await screen.findByRole("heading")
+			expect(heading.textContent).toBe("Heading")
+			expect(container.querySelector("ul li")).not.toBeNull()
+		})
+
+		it("does not collapse the panel when a rendered markdown link is clicked", async () => {
+			const { container } = renderTaskHeader({
+				task: {
+					type: "say",
+					ts: Date.now(),
+					text: "**bold** [example](https://example.com)",
+					images: [],
+				},
+			})
+
+			// Expand the header.
+			fireEvent.click(screen.getByText("**bold** [example](https://example.com)"))
+			const link = await screen.findByRole("link", { name: "example" })
+
+			// Clicking a rendered link must not toggle isTaskExpanded (the header click
+			// handler ignores anchor targets), so the expanded content stays visible.
+			fireEvent.click(link)
+			expect(container.querySelector("strong")).not.toBeNull()
+		})
+
+		it("keeps context mentions clickable in the expanded markdown view", async () => {
+			const { container } = renderTaskHeader({
+				task: {
+					type: "say",
+					ts: Date.now(),
+					text: "Inspect @/src/file.ts, @problems, and @terminal.",
+					images: [],
+				},
+			})
+
+			// Expand via the header container because the collapsed title contains split mention spans.
+			fireEvent.click(container.querySelector(".cursor-pointer")!)
+			await screen.findByText(/Inspect/, { exact: false })
+
+			const mentions = container.querySelectorAll("span.mention-context-highlight")
+			expect(mentions).toHaveLength(3)
+			expect(mentions[0].textContent).toBe("@/src/file.ts")
+			expect(mentions[1].textContent).toBe("@problems")
+			expect(mentions[2].textContent).toBe("@terminal")
+
+			fireEvent.click(mentions[0])
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "openMention", text: "/src/file.ts" })
+
+			// The mention click must not bubble to the header toggle (the mention handler
+			// stops propagation), so the expanded markdown stays rendered after the
+			// mention is opened instead of the panel collapsing.
+			expect(screen.getByText(/Inspect/, { exact: false })).toBeInTheDocument()
+			expect(container.querySelectorAll("span.mention-context-highlight")).toHaveLength(3)
+		})
+
+		it("keeps single newlines as line breaks in a plain-text prompt", async () => {
+			const { container } = renderTaskHeader({
+				task: { type: "say", ts: Date.now(), text: "Fix the login bug\nIt crashes on startup", images: [] },
+			})
+
+			// Expand via the header container (the raw multi-line title is not a stable text target).
+			fireEvent.click(container.querySelector(".cursor-pointer")!)
+
+			// Inexact match: the soft break splits the paragraph into text<br>text, so no
+			// single element's full text equals the first line.
+			await screen.findByText(/Fix the login bug/, { exact: false })
+
+			// The previous expanded view rendered plain text with whitespace-pre-wrap, so a
+			// single newline was always a line break. The markdown pipeline collapses soft
+			// breaks to spaces per CommonMark unless remark-breaks is enabled, so the header
+			// must keep the newline structural (<br>) instead of reflowing the prompt into
+			// one paragraph.
+			const paragraph = container.querySelector(".scrollable p")
+			expect(paragraph).not.toBeNull()
+			expect(paragraph?.querySelector("br")).not.toBeNull()
+			expect(paragraph?.textContent).toBe("Fix the login bugIt crashes on startup")
+		})
+
+		it("still parses markdown headings and lists while keeping newlines inside them", async () => {
+			const { container } = renderTaskHeader({
+				task: {
+					type: "say",
+					ts: Date.now(),
+					text: "# Heading\n- item one\n  continued line\n- item two",
+					images: [],
+				},
+			})
+
+			// Expand via the header container (the raw multi-line title is not a stable text target).
+			fireEvent.click(container.querySelector(".cursor-pointer")!)
+
+			const heading = await screen.findByRole("heading")
+			expect(heading.textContent).toBe("Heading")
+
+			// Markdown still parses (the # line is a heading, the - lines are list items)...
+			const items = container.querySelectorAll(".scrollable li")
+			expect(items).toHaveLength(2)
+
+			// ...and the soft break inside the first item renders as a line break.
+			expect(items[0]?.querySelector("br")).not.toBeNull()
+			expect(items[0]?.textContent).toBe("item onecontinued line")
+			expect(items[1]?.textContent).toBe("item two")
+		})
+
+		it("renders an empty prompt without crashing", () => {
+			const { container } = renderTaskHeader({
+				// `text` is optional on ClineMessage; omit it to exercise the empty-prompt path.
+				task: { type: "say", ts: Date.now(), images: [] },
+			})
+
+			// No title text to click, so expand via the header container itself.
+			fireEvent.click(container.querySelector(".cursor-pointer")!)
+
+			// The empty prompt renders nothing but must not crash; the rest of the
+			// expanded header (cost row) is still present.
+			expect(screen.getByText("$0.05")).toBeInTheDocument()
+
+			// The expanded text area stays empty: a missing prompt must not render
+			// placeholder content into the markdown container.
+			const textArea = container.querySelector(".scrollable")
+			expect(textArea).not.toBeNull()
+			expect(textArea?.textContent).toBe("")
+		})
+	})
 })
