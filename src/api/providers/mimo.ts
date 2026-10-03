@@ -55,7 +55,7 @@ export class MimoHandler extends OpenAiHandler {
 
 	/**
 	 * Maps the configured model ID to its MiMo model info and parameters.
-	 * Falls back to the default model (mimo-v2.5-pro) if the stored ID
+	 * Falls back to the default model (mimo-v2.6-pro) if the stored ID
 	 * doesn't match any known model — this can happen when users manually
 	 * type a model name in settings.
 	 */
