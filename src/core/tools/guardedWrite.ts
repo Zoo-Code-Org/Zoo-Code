@@ -12,10 +12,12 @@
  *
  * A per-absolute-path FIFO chain of tail promises orders concurrent
  * in-process writes to the same path. Each publish refreshes the observation to
- * the token it wrote, so same-task writes apply last-write-wins; a token changed
- * by another writer, or a read that is no longer the current version, still
- * fails stale. Observations come from the task's S2 ObservationRegistry and
- * authorize the write as well as the version check.
+ * the token it wrote, so same-task writes apply last-write-wins. A write that
+ * goes through replaceIfVersion fails stale when the on-disk token differs from
+ * the token recorded at read time; an observed "create" whose target has
+ * disappeared instead uses createIfAbsent and can recreate it. Observations come
+ * from the task's S2 ObservationRegistry and authorize the write as well as the
+ * version check.
  */
 
 import * as fs from "fs/promises"
