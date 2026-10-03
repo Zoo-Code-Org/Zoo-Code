@@ -562,7 +562,14 @@ function canonicalTask(value: unknown): string {
 	return JSON.stringify(value ?? null)
 }
 
-function runModelCheck(): number {
+interface ModelCheckResult {
+	states: number
+	reachedActions: ReadonlySet<string>
+	reachedLandmarks: ReadonlySet<string>
+	reachedWitnesses: ReadonlySet<string>
+}
+
+function runModelCheck(): ModelCheckResult {
 	const start = initialState()
 	const queue: Array<{ state: ModelState; trace: TraceStep[] }> = [
 		{ state: start, trace: [{ action: "initial", state: start }] },
@@ -626,7 +633,7 @@ function runModelCheck(): number {
 			`Task lifecycle exploration reached depth ${MAX_DEPTH} with an unseen successor (${unexploredSuccessor.name}); increase the depth bound`,
 		)
 	}
-	return visited.size
+	return { states: visited.size, reachedActions, reachedLandmarks, reachedWitnesses }
 }
 
 function runRepresentativeScenarios(): void {
@@ -707,7 +714,7 @@ function runRepresentativeScenarios(): void {
 }
 
 runRepresentativeScenarios()
-const checkedStates = runModelCheck()
+const result = runModelCheck()
 console.log(
-	`Task lifecycle model check passed: ${checkedStates} reachable states, ${expectedActions.length}/${expectedActions.length} actions reachable, ${Object.keys(semanticLandmarks).length}/${Object.keys(semanticLandmarks).length} landmarks reached, ${Object.keys(semanticWitnesses).length}/${Object.keys(semanticWitnesses).length} semantic witnesses reached, depth <= ${MAX_DEPTH}, ${taskIds.length} task slots`,
+	`Task lifecycle model check passed: ${result.states} reachable states, ${result.reachedActions.size}/${expectedActions.length} actions reachable, ${result.reachedLandmarks.size}/${Object.keys(semanticLandmarks).length} landmarks reached, ${result.reachedWitnesses.size}/${Object.keys(semanticWitnesses).length} semantic witnesses reached, depth <= ${MAX_DEPTH}, ${taskIds.length} task slots`,
 )
