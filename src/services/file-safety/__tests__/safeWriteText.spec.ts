@@ -199,6 +199,47 @@ describe("safeWriteText", () => {
 			const removed = vi.mocked(fs.rmdir).mock.calls.map((c) => String(c[0]))
 			expect(removed).toEqual([staging[0], staging[1]])
 		})
+
+		it("removes its own staging directory when a self-staged write fails", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fs.rename).mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }))
+
+			await expect(safeWriteText(targetPath, "hello", { platform: "linux" })).rejects.toThrow("EACCES")
+
+			// The failed write's temp file is unlinked, then the directory it
+			// created is removed — a failed write must not leave an empty
+			// .file-safety-staging directory behind.
+			// mkdirSync created this write's staging directory; the temp file lives
+			// inside it, so the unlink targets a path under that directory.
+			const staging = vi.mocked(fsSync.mkdirSync).mock.calls.map((c) => String(c[0]))
+			expect(staging).toHaveLength(1)
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(staging[0]))
+			expect(fs.rmdir).toHaveBeenCalledWith(staging[0])
+			// The directory is only empty after its temp file is gone, so the
+			// unlink must happen before the rmdir.
+			expect(vi.mocked(fs.unlink).mock.invocationCallOrder[0]).toBeLessThan(
+				vi.mocked(fs.rmdir).mock.invocationCallOrder[0],
+			)
+		})
+
+		it("does not remove a staging directory it did not create when a caller-staged write fails", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			const callerTemp = "/tmp/test-dir/caller-staged.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fs.rename).mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }))
+
+			await expect(
+				safeWriteText(targetPath, "hello", { platform: "linux", tempPath: callerTemp }),
+			).rejects.toThrow("EACCES")
+
+			// The caller owns that directory: only the caller's temp file is cleaned,
+			// never a rmdir of a directory safeWriteText never created.
+			expect(fs.unlink).toHaveBeenCalledWith(callerTemp)
+			expect(fs.rmdir).not.toHaveBeenCalled()
+		})
 	})
 
 	// ── Test 2: fsync ordering ───────────────────────────────────────────────

@@ -329,6 +329,13 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			// cleanup failure is non-fatal
 		}
 
+		// A failed self-staged write must not leave its staging directory behind.
+		// Only the directory this write created, and only after its temp file is
+		// gone, so the directory is empty and the removal stays best-effort.
+		if (stagingDir) {
+			await fs.rmdir(stagingDir).catch(() => {})
+		}
+
 		if (daclDumpPath !== null) {
 			await fs.unlink(daclDumpPath).catch(() => {})
 		}
