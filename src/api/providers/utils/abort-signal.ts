@@ -106,6 +106,11 @@ export function createAbortError(providerName: string): Error {
  */
 export function rejectOnAbort<T>(pending: Promise<T>, signal: AbortSignal, providerName: string): Promise<T> {
 	if (signal.aborted) {
+		// The pending work keeps running past this early return, so its later
+		// rejection has to be consumed here: without a handler it surfaces as an
+		// unhandled rejection. The settlement is intentionally ignored at this
+		// boundary (cancellation is cooperative).
+		void pending.catch(() => {})
 		return Promise.reject(createAbortError(providerName))
 	}
 

@@ -42,6 +42,30 @@ describe("rejectOnAbort", () => {
 		})
 	})
 
+	it("consumes a later pending rejection when the signal is already aborted", async () => {
+		const unhandled: unknown[] = []
+		const onUnhandled = (reason: unknown) => unhandled.push(reason)
+		process.on("unhandledRejection", onUnhandled)
+		try {
+			const controller = new AbortController()
+			controller.abort()
+			// Rejects after the early return: only a handler attached inside
+			// rejectOnAbort can consume it.
+			const pending = Promise.reject(new Error("late lookup failure"))
+
+			await expect(rejectOnAbort(pending, controller.signal, "TestProvider")).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The TestProvider request was aborted",
+			})
+
+			// Let the pending rejection settle and be reported.
+			await new Promise((resolve) => setImmediate(resolve))
+			expect(unhandled).toHaveLength(0)
+		} finally {
+			process.off("unhandledRejection", onUnhandled)
+		}
+	})
+
 	it("propagates the pending rejection when the signal stays active", async () => {
 		const controller = new AbortController()
 		const boom = new Error("lookup failed")
