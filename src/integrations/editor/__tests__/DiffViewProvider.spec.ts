@@ -29,6 +29,7 @@ vi.mock("fs/promises", () => ({
 	mkdir: vi.fn().mockResolvedValue(undefined),
 	rename: vi.fn().mockResolvedValue(undefined),
 	unlink: vi.fn().mockResolvedValue(undefined),
+	rmdir: vi.fn().mockResolvedValue(undefined),
 }))
 
 // Mock safeWriteText (used by saveDirectly)
@@ -1653,6 +1654,106 @@ describe("DiffViewProvider", () => {
 
 			// Nothing was deleted, so there is no deleted-file tab to close.
 			expect(closeFileTab).not.toHaveBeenCalled()
+		})
+
+		it("removes the directories open() created, innermost first, after the placeholder unlink", async () => {
+			const order: string[] = []
+			const dirtyEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: true,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			diffViewProvider.editType = "create"
+			const placeholderToken = versionTokenOfStat(previewStats)
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, placeholderToken, true)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(computeVersionToken).mockResolvedValue("moved-past-placeholder")
+			diffViewProvider["placeholderVersion"] = placeholderToken
+			diffViewProvider["createdDirs"] = [`${mockCwd}/new`, `${mockCwd}/new/dir`]
+			diffViewProvider["closeFileTab"] = vi.fn().mockImplementation(() => {
+				order.push("closeTab")
+				return Promise.resolve()
+			})
+			vi.mocked(fs.rmdir).mockImplementation(async (p) => {
+				order.push("rmdir:" + p)
+			})
+
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("Stale version")
+
+			// The empty directories open() made for the rejected new file go with the
+			// placeholder, innermost first, and only after the unlink succeeded.
+			expect(order).toEqual(["closeTab", "rmdir:" + `${mockCwd}/new/dir`, "rmdir:" + `${mockCwd}/new`])
+		})
+
+		it("stops removing created directories when one cannot be removed", async () => {
+			const dirtyEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: true,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			diffViewProvider.editType = "create"
+			const placeholderToken = versionTokenOfStat(previewStats)
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, placeholderToken, true)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(computeVersionToken).mockResolvedValue("moved-past-placeholder")
+			diffViewProvider["placeholderVersion"] = placeholderToken
+			diffViewProvider["createdDirs"] = [`${mockCwd}/a`, `${mockCwd}/a/b`, `${mockCwd}/a/b/c`]
+			vi.mocked(fs.rmdir).mockRejectedValueOnce(new Error("ENOTEMPTY: directory not empty"))
+
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("Stale version")
+
+			// A directory another writer populated in the meantime must not be removed,
+			// and the best-effort cleanup must still finish so the guard verdict stays
+			// the outcome.
+			expect(fs.rmdir).toHaveBeenCalledTimes(1)
+			expect(fs.rmdir).toHaveBeenCalledWith(`${mockCwd}/a/b/c`)
+			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
+		})
+
+		it("does not revert a buffer the user changed during the publish", async () => {
+			// The publish captured the buffer text before awaiting the write; a keystroke
+			// typed during that wait is newer than the published bytes, so the buffer must
+			// stay dirty instead of being reverted to disk.
+			const getText = vi.fn()
+			getText.mockReturnValueOnce("new content").mockReturnValueOnce("new content typed during the publish")
+			const dirtyEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText,
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: true,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = dirtyEditor
+
+			await diffViewProvider.saveChanges(false)
+
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"))
+			expect(vi.mocked(vscode.commands.executeCommand)).not.toHaveBeenCalledWith("workbench.action.files.revert")
+			expect(vi.mocked(vscode.window.showTextDocument)).not.toHaveBeenCalled()
 		})
 
 		it("does not reload a clean buffer when the guard rejects - only dirty buffers are discarded", async () => {

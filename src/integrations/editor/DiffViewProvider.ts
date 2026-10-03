@@ -479,6 +479,16 @@ export class DiffViewProvider {
 							// The file is gone, so its tab must go too: closing only the diff
 							// views would leave a clean plain-text tab for a deleted file.
 							await this.closeFileTab(absolutePath)
+							// The directories open() created for the new file must go with it,
+							// innermost first. rmdir refuses a directory another writer populated
+							// in the meantime, so the cleanup stops at the first failure.
+							for (let i = this.createdDirs.length - 1; i >= 0; i--) {
+								try {
+									await fs.rmdir(this.createdDirs[i])
+								} catch {
+									break
+								}
+							}
 						}
 					}
 				}
@@ -504,7 +514,11 @@ export class DiffViewProvider {
 		this.disposeActiveEditorListener()
 		this.cancelDeferredScroll()
 
-		if (updatedDocument.isDirty) {
+		// Revert only while the buffer is still exactly what the guard published.
+		// Keystrokes typed during the publish would be discarded by a revert, so a
+		// buffer that moved on stays dirty: the close helpers skip dirty tabs and
+		// the user's text survives in the editor.
+		if (updatedDocument.isDirty && updatedDocument.getText() === editedContent) {
 			try {
 				await vscode.window.showTextDocument(updatedDocument, { preserveFocus: true, preview: false })
 				await vscode.commands.executeCommand("workbench.action.files.revert")

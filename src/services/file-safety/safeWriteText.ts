@@ -189,13 +189,22 @@ export async function safeWriteText(
 			// unchanged.
 			const buffer = Buffer.from(content)
 			let targetMode = 0o644 // default for a fresh target
+			let targetExists = false
 			try {
 				targetMode = fsSync.statSync(targetPath).mode & 0o777
+				targetExists = true
 			} catch {
 				// target does not exist yet - keep the default
 			}
+			// openSync's creation mode is narrowed by the process umask, so an
+			// existing 0o664 target would be published as 0o644 through the
+			// rename. Apply the existing target's exact mode on the fd, as the
+			// caller-staged branch does; a fresh target keeps the default mode.
 			const fd = fsSync.openSync(tempPath, "w", targetMode)
 			try {
+				if (targetExists) {
+					fsSync.fchmodSync(fd, targetMode)
+				}
 				// Loop until every byte is written: writeSync can report a short
 				// (partial) write, and publishing a truncated staging file would
 				// commit corrupt content.

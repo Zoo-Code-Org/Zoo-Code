@@ -618,6 +618,39 @@ describe("safeWriteText", () => {
 			expect(openIdx).toBeLessThan(fchmodIdx)
 			expect(fs.rename).toHaveBeenCalledWith(customTempPath, targetPath)
 		})
+
+		it("applies the existing target's exact mode to the self-staged temp (umask must not narrow it)", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o664))
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(targetPath, "data", { platform: "linux" })
+
+			// openSync's creation mode is narrowed by the process umask (0o664 -> 0o644 with
+			// the common 0o022), and the rename publishes the temp's mode onto the target,
+			// so the existing target's mode must be applied on the fd before the commit.
+			expect(fsSync.fchmodSync).toHaveBeenCalledWith(1, 0o664)
+			const openIdx = vi.mocked(fsSync.openSync).mock.invocationCallOrder[0]
+			const fchmodIdx = vi.mocked(fsSync.fchmodSync).mock.invocationCallOrder[0]
+			expect(openIdx).toBeLessThan(fchmodIdx)
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+		})
+
+		it("does not fchmod the self-staged temp for a fresh target", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+			vi.mocked(fsSync.statSync).mockImplementation(() => {
+				throw enoent
+			})
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(targetPath, "data", { platform: "linux" })
+
+			// Nothing exists to preserve: the default creation mode is the intended one.
+			expect(fsSync.fchmodSync).not.toHaveBeenCalled()
+		})
 	})
 
 	// ── Test 7: symlink handling (Finding 4 regression test) ─────────────────
