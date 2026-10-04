@@ -100,4 +100,15 @@ describe("sanitizeSurrogatesDeep", () => {
 			b: { path: "bad\uFFFDend" },
 		})
 	})
+	it("still sanitizes a shared array reached twice, which is not a cycle", () => {
+		const lone = "bad\uD800end"
+		const sanitized = "bad\uFFFDend"
+		const shared = [lone]
+		// The array branch has its own cleanup; without it the second visit would
+		// be read as a cycle and throw.
+		expect(sanitizeSurrogatesDeep({ a: shared, b: shared })).toEqual({
+			a: [sanitized],
+			b: [sanitized],
+		})
+	})
 })
