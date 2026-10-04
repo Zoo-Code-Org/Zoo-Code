@@ -137,16 +137,9 @@ export async function resolvePublishTarget(absoluteFilePath: string): Promise<st
 				? (error as { code?: string }).code
 				: undefined
 		if (code !== "ENOENT") throw error
-		// ENOENT also covers a dangling symlink: realpath resolves the referent,
-		// so it fails when the link exists but its target is missing. Writing
-		// through the link path would replace the symlink with a regular file,
-		// so only a genuinely absent target may fall back to the given path.
-		let linkStat: Awaited<ReturnType<typeof fs.lstat>> | undefined
-		try {
-			linkStat = await fs.lstat(absoluteFilePath)
-		} catch {
-			// the path itself is absent: a target that has not been created yet
-		}
+		// ENOENT also covers a dangling symlink, and a broken link must never be
+		// written through: only a path that is not a link may fall back.
+		const linkStat = await fs.lstat(absoluteFilePath).catch(() => undefined)
 		if (linkStat?.isSymbolicLink()) throw error
 		return absoluteFilePath
 	})

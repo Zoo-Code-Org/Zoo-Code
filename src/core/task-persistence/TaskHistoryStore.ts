@@ -281,11 +281,9 @@ export class TaskHistoryStore {
 			// Remove per-task file (best-effort)
 			try {
 				const filePath = await this.getTaskFilePath(taskId)
-				// Lock the resolved publish target, not the path as spelled:
-				// proper-lockfile keys the advisory lock by the path it is given, so a
-				// symlink alias and its referent would take two locks for one file and a
-				// deletion could run concurrently with a locked merge through the other
-				// alias. The unlink still removes the path the caller named.
+				// Lock the resolved publish target, not the path as spelled: proper-lockfile
+				// keys the lock by the path it is given, so an alias and its referent would
+				// take two locks for one file. The unlink still removes the named path.
 				await withFileLock(await resolvePublishTarget(filePath), () => fs.unlink(filePath))
 			} catch {
 				// File may already be deleted
@@ -339,9 +337,8 @@ export class TaskHistoryStore {
 	 */
 	/**
 	 * The lock key a writer would use for a task file. resolvePublishTarget refuses a
-	 * dangling symlink because a writer must not publish through the link path, but the
-	 * liveness probe runs exactly in that window, so it reads the link one level itself
-	 * to find the lock the writer holds at the referent.
+	 * dangling symlink, but the liveness probe runs exactly in that window, so it
+	 * reads the link itself to find the lock held at the referent.
 	 */
 	private async lockKeyFor(taskFilePath: string): Promise<string> {
 		try {

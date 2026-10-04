@@ -289,12 +289,10 @@ export async function guardedWrite(
 			}
 		}
 
-		// A successful publish changes the on-disk token (the temp-file rename
-		// changes ino, size, and mtime). The model just wrote the full file
-		// content, so refresh the observation with the new complete token: a
-		// consecutive write by the same task must not fail stale against the
-		// version it just published. Rejected guards throw above, so this only
-		// runs after a publish actually happened.
+		// A publish changes the on-disk token (the rename changes ino, size, and
+		// mtime). The model just wrote the full content, so refresh the
+		// observation with the new token: a consecutive write by the same task
+		// must not fail stale against the version it just published.
 		const publishedToken = await computeVersionToken(absolutePath).catch(() => undefined)
 		if (publishedToken !== undefined) {
 			// Refresh with the new token, keeping the completeness the guard
