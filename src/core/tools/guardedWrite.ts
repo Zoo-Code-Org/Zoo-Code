@@ -33,8 +33,9 @@ import type { Task } from "../task/Task"
 /** Write kind that drives guard selection. */
 export type GuardedWriteKind = "create" | "update" | "edit"
 
-/** Internal error thrown when a guard rejects a write. */
-class GuardRejectedError extends Error {
+/** Error thrown when a guard rejects a write. Exported so a caller can tell a guard verdict from an unrelated failure.
+ */
+export class GuardRejectedError extends Error {
 	constructor(
 		message: string,
 		readonly path: string,

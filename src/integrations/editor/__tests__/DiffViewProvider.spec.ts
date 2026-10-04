@@ -1960,6 +1960,78 @@ describe("DiffViewProvider", () => {
 			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
 		})
 
+		it("adopts content autosave already published instead of reporting a stale rejection", async () => {
+			// Autosave wrote the buffer before acceptance: the document is clean and the
+			// disk already holds exactly the bytes this save intended, but the version
+			// token moved, so the compare-and-swap still rejects.
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider.editType = "modify"
+			// A partial observation must stay partial: adopting content that is already on
+			// disk cannot upgrade it into authority for a full-file replacement.
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, versionTokenOfStat(previewStats), false)
+			vi.mocked(computeVersionToken).mockResolvedValue("moved")
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("new content")
+
+			await expect(diffViewProvider.saveChanges(false)).resolves.toMatchObject({ newProblemsMessage: "" })
+
+			// The observation now points at the state that already matches, keeping the
+			// completeness of the original read.
+			const observation = mockTask.observationRegistry.get(`${mockCwd}/test.ts`)
+			expect(observation?.version).toBe(versionTokenOfStat(previewStats))
+			expect(observation?.complete).toBe(false)
+			// Nothing was clobbered, so the buffer is not reloaded and no placeholder is
+			// unlinked; the normal post-save close flow still ran.
+			expect(fs.unlink).not.toHaveBeenCalled()
+			expect(vi.mocked(vscode.window.showTextDocument)).not.toHaveBeenCalled()
+			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
+		})
+
+		it("still rejects when the disk content does not match what the save intended", async () => {
+			// Same autosave shape, different bytes: the guard verdict stands.
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider.editType = "modify"
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, versionTokenOfStat(previewStats), true)
+			vi.mocked(computeVersionToken).mockResolvedValue("moved")
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("someone else")
+
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("Stale version")
+			// The observation is left at the state the read saw, not upgraded to the
+			// autosaved content the save did not author.
+			expect(mockTask.observationRegistry.get(`${mockCwd}/test.ts`)?.version).toBe(
+				versionTokenOfStat(previewStats),
+			)
+			// The rejection still stands: the buffer is discarded and the views close,
+			// so the caller sees the guard verdict, not a silent success.
+			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
+		})
 		it("does not unlink when the placeholder stat is unavailable and still closes the diff views", async () => {
 			// The placeholder vanished between open() and the rejected save: the
 			// stat guard must short-circuit BEFORE the token comparison (no

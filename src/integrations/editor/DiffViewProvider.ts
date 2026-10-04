@@ -19,7 +19,7 @@ import { formatResponse } from "../../core/prompts/responses"
 import { diagnosticsToProblemsString, getNewDiagnostics } from "../diagnostics"
 import { Task } from "../../core/task/Task"
 import { versionTokenOfStat } from "../../utils/versionToken"
-import { guardedWrite, type GuardedWriteKind } from "../../core/tools/guardedWrite"
+import { guardedWrite, GuardRejectedError, type GuardedWriteKind } from "../../core/tools/guardedWrite"
 
 import { DecorationController } from "./DecorationController"
 
@@ -426,6 +426,45 @@ export class DiffViewProvider {
 		return !document.isDirty
 	}
 
+	/**
+	 * Adopt content that is already on disk as the result of this save.
+	 *
+	 * VS Code's autosave can write the modified side of a diff before the user
+	 * accepts it, which moves the version token without changing the bytes, so
+	 * the compare-and-swap rejects a guard that is already satisfied. The read is
+	 * paired with the bigint stat that produced the token and re-checked after the
+	 * read, so a write landing between the two cannot make an unrelated content
+	 * match look like this publish. The observation keeps the completeness of the
+	 * original read: a caller-side check must not upgrade a partial observation
+	 * into authority for a full-file replacement.
+	 *
+	 * Returns true only when the on-disk bytes are exactly the content this save
+	 * intended to publish.
+	 */
+	private async adoptAlreadyPublishedContent(
+		task: Task,
+		absolutePath: string,
+		encodedContent: Uint8Array,
+	): Promise<boolean> {
+		const before = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+		if (!before) {
+			return false
+		}
+		const disk = await fs.readFile(absolutePath).catch(() => undefined)
+		if (!disk) {
+			return false
+		}
+		const after = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+		if (!after || versionTokenOfStat(before) !== versionTokenOfStat(after)) {
+			return false
+		}
+		if (Buffer.compare(Buffer.from(disk), Buffer.from(encodedContent)) !== 0) {
+			return false
+		}
+		const observation = task.observationRegistry.get(absolutePath)
+		task.observationRegistry.observe(absolutePath, versionTokenOfStat(after), observation?.complete ?? false)
+		return true
+	}
 	async saveChanges(
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
@@ -453,6 +492,7 @@ export class DiffViewProvider {
 		// changed after the preview or the target was never observed, with the
 		// standard re-read-then-retry remediation.
 		const saveTask = this.taskRef.deref()
+		let encodedContent: Uint8Array | undefined
 		try {
 			if (!saveTask) {
 				// Fail closed: without the owning task the observation registry is
@@ -467,65 +507,85 @@ export class DiffViewProvider {
 			// the bytes unchanged. The write kind comes from the caller: a targeted
 			// edit after a partial read is authorized by the edit guard, while a
 			// full-file replacement still needs a complete observation.
-			const encodedContent = await vscode.workspace.encode(editedContent, {
+			encodedContent = await vscode.workspace.encode(editedContent, {
 				encoding: updatedDocument.encoding,
 			})
 			await guardedWrite(saveTask, this.relPath, encodedContent, writeKind)
 		} catch (error) {
-			// Discard-only failure cleanup. The publish was rejected (stale
-			// version, unobserved target, a partial-read observation, or an
-			// unavailable task), so the on-disk content is the newer source of
-			// truth. Reload it
-			// into the buffer (discarding the rejected edit), remove the empty
-			// new-file placeholder while it is still exactly the file open()
-			// wrote, and close the diff views. Never use revertChanges() here:
-			// it restores originalContent and saves it, which would overwrite
-			// the newer disk content that caused the rejection. Best-effort —
-			// the guard verdict is rethrown below.
-			try {
-				// Dispose before any programmatic activation: showTextDocument can
-				// change the active editor even with preserveFocus, so a listener
-				// still attached here would record this cleanup as a user touch and
-				// let the auto-close preferences keep the transient tab open.
-				this.disposeActiveEditorListener()
-				this.cancelDeferredScroll()
+			// Autosave can publish the modified side of the diff before the user
+			// accepts, so the bytes on disk may already be exactly what this save
+			// intended. The compare-and-swap still rejects because the version token
+			// moved, and the cleanup below would report a failure for content that is
+			// already published. When a stat-matched read returns the same bytes the
+			// write already happened, so adopt that state instead of failing.
+			if (
+				error instanceof GuardRejectedError &&
+				saveTask &&
+				encodedContent &&
+				// Only the autosave shape: a clean buffer means its content is what autosave
+				// already put on disk. A dirty buffer means the disk content came from
+				// someone else, so the discard cleanup below is still the right outcome.
+				!updatedDocument.isDirty &&
+				(await this.adoptAlreadyPublishedContent(saveTask, absolutePath, encodedContent))
+			) {
+				// The publish is already satisfied; fall through to the normal
+				// post-save flow rather than reporting a rejection.
+			} else {
+				// Discard-only failure cleanup. The publish was rejected (stale
+				// version, unobserved target, a partial-read observation, or an
+				// unavailable task), so the on-disk content is the newer source of
+				// truth. Reload it
+				// into the buffer (discarding the rejected edit), remove the empty
+				// new-file placeholder while it is still exactly the file open()
+				// wrote, and close the diff views. Never use revertChanges() here:
+				// it restores originalContent and saves it, which would overwrite
+				// the newer disk content that caused the rejection. Best-effort —
+				// the guard verdict is rethrown below.
+				try {
+					// Dispose before any programmatic activation: showTextDocument can
+					// change the active editor even with preserveFocus, so a listener
+					// still attached here would record this cleanup as a user touch and
+					// let the auto-close preferences keep the transient tab open.
+					this.disposeActiveEditorListener()
+					this.cancelDeferredScroll()
 
-				let discardSucceeded = !updatedDocument.isDirty
-				if (updatedDocument.isDirty) {
-					discardSucceeded = await this.revertDocument(updatedDocument)
-				}
-				if (discardSucceeded && this.editType === "create" && this.placeholderVersion) {
-					const placeholderStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
-					if (placeholderStats && versionTokenOfStat(placeholderStats) === this.placeholderVersion) {
-						let unlinked = false
-						try {
-							await fs.unlink(absolutePath)
-							unlinked = true
-						} catch {
-							// the placeholder vanished or the unlink failed
-						}
-						if (unlinked) {
-							// The file is gone, so its tab must go too: closing only the diff
-							// views would leave a clean plain-text tab for a deleted file.
-							await this.closeFileTab(absolutePath)
-							// The directories open() created for the new file must go with it,
-							// innermost first. rmdir refuses a directory another writer populated
-							// in the meantime, so the cleanup stops at the first failure.
-							for (let i = this.createdDirs.length - 1; i >= 0; i--) {
-								try {
-									await fs.rmdir(this.createdDirs[i])
-								} catch {
-									break
+					let discardSucceeded = !updatedDocument.isDirty
+					if (updatedDocument.isDirty) {
+						discardSucceeded = await this.revertDocument(updatedDocument)
+					}
+					if (discardSucceeded && this.editType === "create" && this.placeholderVersion) {
+						const placeholderStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+						if (placeholderStats && versionTokenOfStat(placeholderStats) === this.placeholderVersion) {
+							let unlinked = false
+							try {
+								await fs.unlink(absolutePath)
+								unlinked = true
+							} catch {
+								// the placeholder vanished or the unlink failed
+							}
+							if (unlinked) {
+								// The file is gone, so its tab must go too: closing only the diff
+								// views would leave a clean plain-text tab for a deleted file.
+								await this.closeFileTab(absolutePath)
+								// The directories open() created for the new file must go with it,
+								// innermost first. rmdir refuses a directory another writer populated
+								// in the meantime, so the cleanup stops at the first failure.
+								for (let i = this.createdDirs.length - 1; i >= 0; i--) {
+									try {
+										await fs.rmdir(this.createdDirs[i])
+									} catch {
+										break
+									}
 								}
 							}
 						}
 					}
+					await this.closeAllDiffViews()
+				} catch {
+					// cleanup is best-effort; the guard verdict below is the outcome
 				}
-				await this.closeAllDiffViews()
-			} catch {
-				// cleanup is best-effort; the guard verdict below is the outcome
+				throw error
 			}
-			throw error
 		}
 
 		// The publish wrote the buffer's exact content to disk, but the
