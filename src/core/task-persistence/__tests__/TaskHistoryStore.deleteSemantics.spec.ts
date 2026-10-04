@@ -223,7 +223,38 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 
 			// The probe must look at the same key the writer locks, otherwise a live
 			// task is evicted from the cache while its write is still in progress.
-			expect(storeInternals(store).cache.has("alias-live")).toBe(true)
+		})
+
+		it("keeps a cached task live when the alias is dangling during the rename window", async () => {
+			// resolvePublishTarget refuses a dangling link because a writer must not publish
+			// through the link path, but this probe runs exactly in that window, so it reads
+			// the link one level itself to find the lock the writer holds at the referent.
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "dangling-live" }))
+			const aliasPath = historyFilePath(storagePath, "dangling-live")
+			const referentPath = path.join(storagePath, "tasks", "dangling-live", "referent-history.json")
+
+			const realpathSpy = vi
+				.spyOn(fs, "realpath")
+				.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			const lstatSpy = vi
+				.spyOn(fs, "lstat")
+				.mockResolvedValue({ isSymbolicLink: () => true } as unknown as import("fs").Stats)
+			// A relative link target, so the probe must resolve it against the link's
+			// directory rather than the process working directory.
+			const readlinkSpy = vi.spyOn(fs, "readlink").mockResolvedValue("referent-history.json")
+			try {
+				await actualFs.rm(aliasPath, { force: true })
+				await actualFs.writeFile(referentPath + ".lock", "")
+				await store.reconcile()
+			} finally {
+				realpathSpy.mockRestore()
+				lstatSpy.mockRestore()
+				readlinkSpy.mockRestore()
+			}
+
+			expect(storeInternals(store).cache.has("dangling-live")).toBe(true)
 		})
 	})
 

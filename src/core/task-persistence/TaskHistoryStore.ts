@@ -337,6 +337,20 @@ export class TaskHistoryStore {
 	 * - Tasks on disk but missing from cache: read and add
 	 * - Tasks in cache but missing from disk: remove
 	 */
+	/**
+	 * The lock key a writer would use for a task file. resolvePublishTarget refuses a
+	 * dangling symlink because a writer must not publish through the link path, but the
+	 * liveness probe runs exactly in that window, so it reads the link one level itself
+	 * to find the lock the writer holds at the referent.
+	 */
+	private async lockKeyFor(taskFilePath: string): Promise<string> {
+		try {
+			return await resolvePublishTarget(taskFilePath)
+		} catch {
+			return path.resolve(path.dirname(taskFilePath), await fs.readlink(taskFilePath))
+		}
+	}
+
 	async reconcile(options: { forceRefresh?: boolean } = {}): Promise<void> {
 		// Run through the write lock to prevent interleaving with upsert/delete
 		return this.withLock(async () => {
@@ -385,7 +399,7 @@ export class TaskHistoryStore {
 					try {
 						// Probe the same key the writer locks: safeWriteJson locks the resolved
 						// publish target, so an alias and its referent share one lock file.
-						const lockPath = (await resolvePublishTarget(await this.getTaskFilePath(taskId))) + ".lock"
+						const lockPath = (await this.lockKeyFor(await this.getTaskFilePath(taskId))) + ".lock"
 						const lockStat = await fs.stat(lockPath)
 						if (Date.now() - lockStat.mtimeMs < LOCK_STALE_MS) {
 							liveIds.add(taskId)
