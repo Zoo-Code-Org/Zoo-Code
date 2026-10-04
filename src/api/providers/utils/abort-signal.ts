@@ -37,6 +37,23 @@ export function mergeAbortSignals(primarySignal: AbortSignal, secondarySignal?: 
 }
 
 /**
+ * Throw an AbortError if the given signal is already aborted.
+ *
+ * Use as a fast-fail guard at the top of request-building code paths so
+ * callers receive a consistent `name === "AbortError"` when the operation
+ * was cancelled before it started, without building or issuing the request.
+ */
+export function throwIfAborted(signal?: AbortSignal): void {
+	if (!signal?.aborted) {
+		return
+	}
+
+	const abortError = new Error("This operation was aborted")
+	abortError.name = "AbortError"
+	throw abortError
+}
+
+/**
  * Request options this series passes to the OpenAI SDK call. The SDK's
  * `RequestOptions` declares `signal` as `AbortSignal | null | undefined`,
  * which does not satisfy the builder's base constraint, so the builder is
@@ -90,9 +107,12 @@ export function createAbortError(providerName: string): Error {
  */
 export function rejectOnAbort<T>(pending: Promise<T>, signal: AbortSignal, providerName: string): Promise<T> {
 	if (signal.aborted) {
+		// The caller has already cancelled, so this branch never consumes `pending`;
+		// attach a handler anyway so a rejecting `pending` cannot surface as an
+		// unhandled rejection.
+		void pending.catch(() => {})
 		return Promise.reject(createAbortError(providerName))
 	}
-
 	return new Promise<T>((resolve, reject) => {
 		const onAbort = () => reject(createAbortError(providerName))
 		// Stryker disable next-line ObjectLiteral,BooleanLiteral: a signal fires its abort event exactly once and the settle handler removes this listener, so the once flag is unobservable

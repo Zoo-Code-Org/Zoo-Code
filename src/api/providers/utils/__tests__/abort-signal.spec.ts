@@ -5,6 +5,7 @@ import {
 	mergeAbortSignals,
 	rejectOnAbort,
 	resolveModelWithAbort,
+	throwIfAborted,
 } from "../abort-signal"
 import { withSettleGuard } from "../../../../test-utils/settle-guard"
 
@@ -40,6 +41,36 @@ describe("rejectOnAbort", () => {
 			name: "AbortError",
 			message: "The TestProvider request was aborted",
 		})
+	})
+
+	it("does not leave a rejecting pending unhandled when the signal is already aborted", async () => {
+		// The pre-aborted branch returns before consuming `pending`, so it must still
+		// attach a rejection handler; otherwise a rejecting lookup is reported as an
+		// unhandled rejection even though the caller already cancelled.
+		const controller = new AbortController()
+		controller.abort()
+		const lookupError = new Error("lookup failed")
+		const pending = Promise.reject(lookupError)
+
+		const unhandled: unknown[] = []
+		const onUnhandledRejection = (reason: unknown) => unhandled.push(reason)
+		process.on("unhandledRejection", onUnhandledRejection)
+		try {
+			await expect(
+				withSettleGuard(rejectOnAbort(pending, controller.signal, "TestProvider")),
+			).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The TestProvider request was aborted",
+			})
+
+			// Node reports an unhandled rejection only after the microtask queue drains.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			expect(unhandled).toHaveLength(0)
+		} finally {
+			// Remove the process-level listener on every exit path: a failed assertion
+			// must not leak it into the remaining tests in this file.
+			process.off("unhandledRejection", onUnhandledRejection)
+		}
 	})
 
 	it("propagates the pending rejection when the signal stays active", async () => {
@@ -291,6 +322,34 @@ describe("abort-signal utilities", () => {
 			const result = mergeAbortSignals(primaryController.signal, secondaryController.signal)
 
 			expect(result.aborted).toBe(true)
+		})
+	})
+
+	describe("throwIfAborted", () => {
+		it("does not throw when signal is undefined", () => {
+			expect(() => throwIfAborted()).not.toThrow()
+		})
+
+		it("does not throw when signal is not aborted", () => {
+			const controller = new AbortController()
+
+			expect(() => throwIfAborted(controller.signal)).not.toThrow()
+		})
+
+		it("throws an AbortError when signal is already aborted", () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			let caught: unknown
+			try {
+				throwIfAborted(controller.signal)
+			} catch (error) {
+				caught = error
+			}
+
+			expect(caught).toBeInstanceOf(Error)
+			expect((caught as Error).name).toBe("AbortError")
+			expect((caught as Error).message).toBe("This operation was aborted")
 		})
 	})
 

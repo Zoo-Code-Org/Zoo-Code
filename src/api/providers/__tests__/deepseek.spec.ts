@@ -1,6 +1,7 @@
 // Mocks must come first, before imports
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
 
 const mockCreate = vi.fn()
 vi.mock("openai", () => {
@@ -240,22 +241,22 @@ describe("DeepSeekHandler", () => {
 			expect(model.info).toBeDefined()
 			expect(model.info.maxTokens).toBe(384_000)
 			expect(model.info.contextWindow).toBe(1_000_000)
-			expect(model.info.supportsImages).toBe(false)
+			expect(model.info.supportsImages).toBe(true)
 			expect(model.info.supportsPromptCache).toBe(true) // Should be true now
 			expect((model.info as ModelInfo).preserveReasoning).toBe(true)
 		})
 
-		it("should use deepseek-v4-flash as the default model ID for new configs", () => {
+		it("should use deepseek-flash as the default model ID for new configs", () => {
 			const handlerWithoutModel = new DeepSeekHandler({
 				...mockOptions,
 				apiModelId: undefined,
 			})
 			const model = handlerWithoutModel.getModel()
 			expect(model.id).toBe(deepSeekDefaultModelId)
-			expect(model.id).toBe("deepseek-v4-flash")
+			expect(model.id).toBe("deepseek-flash")
 			expect(model.info.maxTokens).toBe(384_000)
 			expect(model.info.contextWindow).toBe(1_000_000)
-			expect(model.info.supportsImages).toBe(false)
+			expect(model.info.supportsImages).toBe(true)
 			expect((model.info as ModelInfo).supportsReasoningEffort).toContain("max")
 		})
 
@@ -290,7 +291,6 @@ describe("DeepSeekHandler", () => {
 				supportsPromptCache: true,
 				preserveReasoning: true,
 				reasoningEffort: "high",
-				defaultTemperature: 1.0,
 			})
 		})
 
@@ -369,41 +369,61 @@ describe("DeepSeekHandler", () => {
 			expect(textChunks[0].text).toBe("Test response")
 		})
 
-		it("should send images and V4 thinking controls to deepseek-v4-flash-vision-exp", async () => {
+		it.each(["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"] as const)(
+			"should send images and thinking controls to %s",
+			async (modelId) => {
+				const visionHandler = new DeepSeekHandler({
+					...mockOptions,
+					apiModelId: modelId,
+				})
+				const visionMessages: Anthropic.Messages.MessageParam[] = [
+					{
+						role: "user",
+						content: [
+							{ type: "text", text: "Describe this image." },
+							{
+								type: "image",
+								source: { type: "base64", media_type: "image/png", data: "image-data" },
+							},
+						],
+					},
+				]
+
+				await collectStream(visionHandler.createMessage(systemPrompt, visionMessages))
+
+				const callArgs = mockCreate.mock.calls[0][0]
+				expect(callArgs).toMatchObject({
+					model: modelId,
+					thinking: { type: "enabled" },
+					reasoning_effort: "high",
+					max_completion_tokens: 200_000,
+				})
+				expect(callArgs.temperature).toBeUndefined()
+				expect(callArgs.messages).toContainEqual({
+					role: "user",
+					content: expect.arrayContaining([
+						{ type: "text", text: expect.stringContaining("Describe this image.") },
+						{ type: "image_url", image_url: { url: "data:image/png;base64,image-data" } },
+					]),
+				})
+			},
+		)
+
+		it("should use the provider default temperature when reasoning is disabled for the vision alias", async () => {
 			const visionHandler = new DeepSeekHandler({
 				...mockOptions,
 				apiModelId: "deepseek-v4-flash-vision-exp",
+				enableReasoningEffort: false,
 			})
-			const visionMessages: Anthropic.Messages.MessageParam[] = [
-				{
-					role: "user",
-					content: [
-						{ type: "text", text: "Describe this image." },
-						{
-							type: "image",
-							source: { type: "base64", media_type: "image/png", data: "image-data" },
-						},
-					],
-				},
-			]
 
-			await collectStream(visionHandler.createMessage(systemPrompt, visionMessages))
+			await collectStream(visionHandler.createMessage(systemPrompt, messages))
 
-			const callArgs = mockCreate.mock.calls[0][0]
-			expect(callArgs).toMatchObject({
+			expect(mockCreate.mock.calls[0][0]).toMatchObject({
 				model: "deepseek-v4-flash-vision-exp",
-				thinking: { type: "enabled" },
-				reasoning_effort: "high",
-				max_completion_tokens: 200_000,
+				thinking: { type: "disabled" },
+				temperature: 0,
 			})
-			expect(callArgs.temperature).toBeUndefined()
-			expect(callArgs.messages).toContainEqual({
-				role: "user",
-				content: expect.arrayContaining([
-					{ type: "text", text: expect.stringContaining("Describe this image.") },
-					{ type: "image_url", image_url: { url: "data:image/png;base64,image-data" } },
-				]),
-			})
+			expect(mockCreate.mock.calls[0][0].reasoning_effort).toBeUndefined()
 		})
 
 		it("should include usage information", async () => {
@@ -803,5 +823,71 @@ describe("DeepSeekHandler", () => {
 				expect(result).toBe(mappedReasoningEffort)
 			}
 		})
+	})
+})
+
+describe("DeepSeekHandler lone surrogate sanitization (#461)", () => {
+	beforeEach(() => {
+		mockCreate.mockClear()
+	})
+
+	const surrogateOptions: ApiHandlerOptions = {
+		deepSeekApiKey: "test-api-key",
+		apiModelId: "deepseek-v4-flash",
+		deepSeekBaseUrl: "https://api.deepseek.com",
+	}
+
+	it("sends a request body free of lone surrogates, keeping tool call/result pairing intact", async () => {
+		const lone = "bad\uD800end"
+		const sanitized = "bad\uFFFDend"
+		const handler = new DeepSeekHandler(surrogateOptions)
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{ role: "user", content: lone },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "call-\uD800", name: "read_file", input: { path: lone } }],
+			},
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: "call-\uD800", content: lone }] },
+		]
+
+		await collectStream(
+			handler.createMessage("system \uD800 prompt", messages, {
+				taskId: "task-1",
+				tools: [
+					{
+						type: "function",
+						function: {
+							name: "read_file",
+							description: lone,
+							parameters: {
+								type: "object",
+								properties: { path: { type: "string", description: lone } },
+							},
+						},
+					},
+				],
+			}),
+		)
+
+		expect(mockCreate).toHaveBeenCalledOnce()
+		const request = mockCreate.mock.calls[0][0]
+
+		// The whole body (messages + tools) must be free of lone surrogates. Inspect the raw
+		// values: JSON.stringify escapes lone surrogates as \udXXX text, so a regex over the
+		// serialized body can never fail. See expectNoLoneSurrogates.
+		expectNoLoneSurrogates(request)
+
+		// The tool call and its result stay paired after injective id sanitization.
+		const assistantMessage = request.messages.find(
+			(message: { role: string }) => message.role === "assistant",
+		) as OpenAI.Chat.ChatCompletionAssistantMessageParam
+		const toolMessage = request.messages.find(
+			(message: { role: string }) => message.role === "tool",
+		) as OpenAI.Chat.ChatCompletionToolMessageParam
+		const toolCalls = assistantMessage.tool_calls as OpenAI.Chat.ChatCompletionMessageFunctionToolCall[]
+		expect(toolMessage.tool_call_id).toBe(toolCalls[0].id)
+		expect(toolMessage.content).toBe(sanitized)
+		expect(JSON.parse(toolCalls[0].function.arguments)).toEqual({ path: sanitized })
+		expect(request.tools[0].function.description).toBe(sanitized)
 	})
 })
