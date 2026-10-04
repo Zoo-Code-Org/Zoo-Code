@@ -414,6 +414,81 @@ describe("VsCodeLmHandler", () => {
 				])
 			})
 
+			it("discards buffered text and calls on stream failure but preserves earlier text", async () => {
+				const streamError = new Error("Stream failed")
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						yield new vscode.LanguageModelTextPart("Thinking. ")
+						yield new vscode.LanguageModelTextPart(
+							'<function_calls><invoke name="calculator"><parameter name="operation">add</parameter></invoke></function_calls>',
+						)
+						yield new vscode.LanguageModelTextPart("Buffered narration.")
+						throw streamError
+					})(),
+				})
+
+				const stream = handler.createMessage("system", [{ role: "user", content: "hi" }], {
+					taskId: "test-task",
+					tools: salvageTools,
+				})
+
+				await expect(stream.next()).resolves.toEqual({
+					done: false,
+					value: { type: "text", text: "Thinking. " },
+				})
+				await expect(stream.next()).rejects.toBe(streamError)
+				await expect(stream.next()).resolves.toEqual({ done: true, value: undefined })
+			})
+
+			it("discards buffered text and calls when the stream is cancelled", async () => {
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						yield new vscode.LanguageModelTextPart(
+							'<function_calls><invoke name="calculator"><parameter name="operation">add</parameter></invoke></function_calls>',
+						)
+						yield new vscode.LanguageModelTextPart("Buffered narration.")
+						throw new vscode.CancellationError()
+					})(),
+				})
+
+				const stream = handler.createMessage("system", [{ role: "user", content: "hi" }], {
+					taskId: "test-task",
+					tools: salvageTools,
+				})
+
+				await expect(stream.next()).rejects.toThrow(
+					new Error("Zoo Code <Language Model API>: Request cancelled by user"),
+				)
+				await expect(stream.next()).resolves.toEqual({ done: true, value: undefined })
+			})
+
+			it("yields a native tool call before a subsequent stream failure", async () => {
+				const streamError = new Error("Stream failed after native call")
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						yield new vscode.LanguageModelToolCallPart("native-1", "calculator", { operation: "add" })
+						throw streamError
+					})(),
+				})
+
+				const stream = handler.createMessage("system", [{ role: "user", content: "hi" }], {
+					taskId: "test-task",
+					tools: salvageTools,
+				})
+
+				await expect(stream.next()).resolves.toEqual({
+					done: false,
+					value: {
+						type: "tool_call",
+						id: "native-1",
+						name: "calculator",
+						arguments: '{"operation":"add"}',
+					},
+				})
+				await expect(stream.next()).rejects.toBe(streamError)
+				await expect(stream.next()).resolves.toEqual({ done: true, value: undefined })
+			})
+
 			it("recovers a null-only declared parameter as JSON null through createMessage", async () => {
 				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
 					stream: (async function* () {
@@ -586,20 +661,20 @@ describe("VsCodeLmHandler", () => {
 				expect(streamedText).toBe(parts.join(""))
 			})
 
-			it("keeps a narrated block quoted when the cap splits the stream after its close tag", async () => {
-				// Cutting the drained span at `</invoke>` hid the trailing cue, so the streaming path
-				// recovered a call the one-shot path refuses.
+			it.each(["", "\n"])("preserves a narrated block and later text with line ending %j", async (lineEnding) => {
+				// The trailing cue must remain visible when deciding whether the block is quoted.
 				const block = `<function${"_calls"}><in${"voke"} name="calculator"><parameter name="operation">add</parameter></in${"voke"}>`
 				const narration = ` is what you must never emit`
-				const chunks = await collect([block + narration, "x".repeat(270 * 1024)])
+				const filler = "x".repeat(270 * 1024)
+				const chunks = await collect([block + narration + lineEnding, filler])
 
 				expect(chunks.filter((chunk) => chunk.type === "tool_call")).toEqual([])
 				expect(
-					extractLeakedToolCalls(
-						block + narration,
-						new Map([["calculator", salvageTools[0].function.parameters]]),
-					).calls,
-				).toEqual([])
+					chunks
+						.filter((chunk) => chunk.type === "text")
+						.map((chunk) => chunk.text)
+						.join(""),
+				).toBe(block + narration + lineEnding + filler)
 			})
 
 			it.each([
