@@ -1177,8 +1177,10 @@ describe("OpenAiHandler", () => {
 			expect(capturedOptions?.timeout).toBe(50)
 
 			const result = await resultPromise
-			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("OpenAI request aborted")
+			// The timeout classification must survive the outer catch, which otherwise
+			// re-normalizes every abort as a user cancellation.
+			expect(result.name).toBe("TimeoutError")
+			expect(result.message).toBe("OpenAI request timed out")
 		})
 
 		it("should not pass a request signal for zero timeoutMs in completePrompt", async () => {

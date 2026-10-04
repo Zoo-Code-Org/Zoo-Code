@@ -289,8 +289,9 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		// default, which can still expire before a larger per-request timeoutMs.
 		const requestTimeout =
 			typeof options?.timeoutMs === "number" && options.timeoutMs > 0 ? options.timeoutMs : undefined
+		const requestSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
 		const requestConfig = new RequestConfigBuilder<OpenAiRequestConfig>()
-			.setOption("signal", mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs))
+			.setOption("signal", requestSignal)
 			.setOption("timeout", requestTimeout)
 			.build()
 
@@ -307,7 +308,7 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 
 			return response.choices?.[0]?.message.content || ""
 		} catch (error) {
-			throw handleOpenAIRequestError(error, this.providerName, options?.abortSignal)
+			throw handleOpenAIRequestError(error, this.providerName, options?.abortSignal, requestSignal)
 		}
 	}
 

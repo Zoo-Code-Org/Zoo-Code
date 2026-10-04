@@ -177,8 +177,9 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 		// taskId), so the abort/timeout merge and the per-request SDK timeout go
 		// through setOption; a positive timeoutMs overrides the client default and
 		// values <= 0 mean "no explicit timeout".
+		const requestSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
 		const requestConfig = new RequestConfigBuilder<OpenAiRequestConfig>()
-			.setOption("signal", mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs))
+			.setOption("signal", requestSignal)
 			.setOption(
 				"timeout",
 				typeof options?.timeoutMs === "number" && options.timeoutMs > 0 ? options.timeoutMs : undefined,
@@ -192,7 +193,7 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 			)
 			return response.choices?.[0]?.message.content || ""
 		} catch (error) {
-			throw handleOpenAIRequestError(error, this.providerName, options?.abortSignal)
+			throw handleOpenAIRequestError(error, this.providerName, options?.abortSignal, requestSignal)
 		}
 	}
 }

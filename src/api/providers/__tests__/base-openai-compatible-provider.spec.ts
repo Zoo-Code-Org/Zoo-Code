@@ -672,8 +672,10 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			expect(capturedOptions?.timeout).toBe(50)
 
 			const result = await resultPromise
-			expect(result.name).toBe("AbortError")
-			expect(result.message).toBe("TestProvider request aborted")
+			// A timeout that fires through the merged signal is a timeout, not a user
+			// cancellation, so the caller must still be able to tell them apart.
+			expect(result.name).toBe("TimeoutError")
+			expect(result.message).toBe("TestProvider request timed out")
 		})
 
 		it("should not set a request signal for zero completePrompt timeoutMs", async () => {

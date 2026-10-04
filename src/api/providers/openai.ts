@@ -360,19 +360,22 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			requestOptions = this.withExtraBody(requestOptions)
 
 			let response
+			const requestConfig = this.buildCompletePromptRequestConfig(isAzureAiInference, options)
 			try {
-				response = await this.client.chat.completions.create(
-					requestOptions,
-					this.buildCompletePromptRequestConfig(isAzureAiInference, options),
-				)
+				response = await this.client.chat.completions.create(requestOptions, requestConfig)
 			} catch (error) {
-				throw handleOpenAIRequestError(error, this.providerName, options?.abortSignal)
+				throw handleOpenAIRequestError(
+					error,
+					this.providerName,
+					options?.abortSignal,
+					requestConfig.signal ?? undefined,
+				)
 			}
 
 			return response.choices?.[0]?.message.content || ""
 		} catch (error) {
-			if (error instanceof Error && error.name === "AbortError") {
-				// Preserve the normalized abort error (name + message contract) as-is.
+			if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) {
+				// Preserve the normalized abort or timeout error (name + message contract) as-is.
 				throw error
 			}
 			if (error instanceof Error) {

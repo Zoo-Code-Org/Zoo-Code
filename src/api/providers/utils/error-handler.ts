@@ -124,7 +124,20 @@ export function handleOpenAIError(error: unknown, providerName: string): Error {
  * contract) instead of being wrapped as a regular completion error, which a
  * plain rethrow of the SDK abort error would produce.
  */
-export function handleOpenAIRequestError(error: unknown, providerName: string, abortSignal?: AbortSignal): Error {
+export function handleOpenAIRequestError(
+	error: unknown,
+	providerName: string,
+	abortSignal?: AbortSignal,
+	requestSignal?: AbortSignal,
+): Error {
+	if (error instanceof APIUserAbortError && !abortSignal?.aborted && requestSignal?.reason?.name === "TimeoutError") {
+		// The abort came from the request timeout, not from the caller's signal, so a
+		// timeout must stay distinguishable from a user cancellation.
+		const timeoutError = new Error(`${providerName} request timed out`, { cause: error })
+		timeoutError.name = "TimeoutError"
+		return timeoutError
+	}
+
 	if (
 		abortSignal?.aborted ||
 		(error instanceof Error && (error.name === "AbortError" || error instanceof APIUserAbortError))
