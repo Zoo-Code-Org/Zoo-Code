@@ -7,9 +7,11 @@ import {
 	retiredProviderIdentifiers,
 	type ProviderSettings,
 	type ModelInfo,
+	type ModelRecord,
 } from "@roo-code/types"
 
 import { getRouterRemovalMessage } from "../core/config/routerRemoval"
+import type { GetModelsOptions } from "../shared/api"
 import { ApiStream } from "./transform/stream"
 
 import {
@@ -117,6 +119,18 @@ export interface ApiHandlerCreateMessageMetadata {
 	abortSignal?: AbortSignal
 }
 
+/**
+ * Describes how the model cache must key and persist a provider's catalog.
+ */
+export interface ModelCacheScope {
+	/** Cache key must include the normalized baseUrl. */
+	urlScoped: boolean
+	/** Cache key must include a short, irreversible API-key discriminator. */
+	keyScoped: boolean
+	/** Never persist to disk/memory; results are per signed-in user. */
+	authScoped: boolean
+}
+
 export interface ApiHandler {
 	createMessage(
 		systemPrompt: string,
@@ -156,6 +170,18 @@ export interface ApiHandler {
 	 * @returns A promise resolving to the token count
 	 */
 	countTokens(content: Array<Anthropic.Messages.ContentBlockParam>): Promise<number>
+
+	/**
+	 * Fetch this provider's live model catalog. Only dynamic-catalog providers
+	 * implement it; others leave it undefined and the model cache rejects.
+	 */
+	fetchModels?(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord>
+
+	/**
+	 * How the model cache must key and persist this provider's catalog.
+	 * Defaults to all-false in BaseProvider.
+	 */
+	getModelCacheScope(): ModelCacheScope
 }
 
 export function buildApiHandler(configuration: ProviderSettings): ApiHandler {

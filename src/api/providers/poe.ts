@@ -7,21 +7,33 @@ import {
 	poeDefaultModelId,
 	getPoeDefaultModelInfo,
 	type ModelInfo,
+	type ModelRecord,
 	type ReasoningEffortExtended,
 	ApiProviderError,
 	providerIdentifiers,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
-import { shouldUseReasoningBudget, shouldUseReasoningEffort, type ApiHandlerOptions } from "../../shared/api"
+import {
+	shouldUseReasoningBudget,
+	shouldUseReasoningEffort,
+	type ApiHandlerOptions,
+	type GetModelsOptions,
+} from "../../shared/api"
 
 import { convertToAiSdkMessages, convertToolsForAiSdk, processAiSdkStreamPart } from "../transform/ai-sdk"
 import { ApiStream } from "../transform/stream"
 
 import { BaseProvider } from "./base-provider"
 import { NOT_PROVIDED } from "./constants"
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import type {
+	SingleCompletionHandler,
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+} from "../index"
 import { getModelsFromCache } from "./fetchers/modelCache"
+import { getPoeModels } from "./fetchers/poe"
 
 const DEFAULT_THINKING_BUDGET = 8192
 
@@ -38,13 +50,25 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 		})
 	}
 
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: true, keyScoped: true, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getPoeModels(options.apiKey, options.baseUrl, ...fetchOpts)
+	}
+
 	override getModel() {
 		const id = this.options.apiModelId ?? poeDefaultModelId
-		const cached = getModelsFromCache({
-			provider: providerIdentifiers.poe,
-			apiKey: this.options.poeApiKey,
-			baseUrl: this.options.poeBaseUrl,
-		})
+		const cached = getModelsFromCache(
+			{
+				provider: providerIdentifiers.poe,
+				apiKey: this.options.poeApiKey,
+				baseUrl: this.options.poeBaseUrl,
+			},
+			this,
+		)
 		const info: ModelInfo = cached?.[id] ?? getPoeDefaultModelInfo()
 		return { id, info }
 	}

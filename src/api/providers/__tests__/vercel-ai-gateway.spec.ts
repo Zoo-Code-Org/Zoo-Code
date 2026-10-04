@@ -121,9 +121,9 @@ vitest.mock("../fetchers/modelCache", () => ({
 			},
 		})
 	}),
-	refreshModels: vitest.fn(async (options) => {
+	refreshModels: vitest.fn(async (options, handler) => {
 		const { getModels } = await import("../fetchers/modelCache")
-		return getModels(options)
+		return getModels(options, handler)
 	}),
 	getModelsFromCache: vitest.fn().mockReturnValue(undefined),
 }))
@@ -790,6 +790,13 @@ describe("VercelAiGatewayHandler", () => {
 					temperature: 0.9,
 				}),
 			)
+		})
+	})
+
+	describe("model catalog", () => {
+		it("reports its cache scope", () => {
+			const handler = new VercelAiGatewayHandler(mockOptions)
+			expect(handler.getModelCacheScope()).toEqual({ urlScoped: false, keyScoped: false, authScoped: false })
 		})
 	})
 })
