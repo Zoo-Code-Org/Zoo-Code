@@ -47,11 +47,11 @@ Zoo Code parteix de la base creada per Roo Code i continua ampliant-la amb:
 - **Fluxos de terminal i edició més fiables** — correccions per a la finalització prematura del terminal, les condicions de cursa en l'estat de les tasques, la gestió del context, l'edició de diff i l'ús d'eines específiques de cada proveïdor.
 - **Més control sobre el teu espai de treball** — gestió de regles, restriccions MCP per mode, controls de rutes multiarrel, opcions de raonament dels models i accions per revisar els canvis en completar una tasca.
 
-## Novetats a la v3.84.0
+## Novetats a la v3.86.0
 
-- ✨ **Nous models SOTA afegits:** Utilitza GPT-6 Sol, GPT-6 Luna i Claude Opus 5.5 amb els proveïdors compatibles.
-- 🧭 **Tasques i subtasques més fiables:** Mantén aïllats els modes delegats, conserva els enllaços de les subtasques després d'aturades repetides i protegeix la configuració de l'orquestrador quan les ordres amb barra canvien de mode.
-- 🛠️ **Comportament més fiable del terminal, els proveïdors i la cerca de codi:** Millora el terminal a Windows i en entorns que no són en anglès, reforça les respostes i la cancel·lació dels proveïdors i fes que la cerca de codi utilitzi l'espai de treball correcte de manera més consistent.
+- ✨ **Compatibilitat amb nous models:** Utilitza GPT-6.1 Sol, aprofita el límit de sortida corregit de Claude Opus 5.5 i selecciona DeepSeek V4.1 Flash a OpenCode Go.
+- 🧭 **Aturades i interrupcions de tasques fiables:** Conserva el primer motiu de l'aturada, reinicia l'estat d'interrupció del flux per a cada sol·licitud i evita que les tasques interrompudes tornin a executar subtasques rebutjades.
+- 🛠️ **Eines, prompts i transmissió de la interfície fiables:** Mantén intactes els arguments de les eines transmesos en flux, aplica la política d'eines MCP, evita números de línia inventats i fes més fluides les actualitzacions del xat.
 
 ## Què pot fer Zoo Code per TU?
 
