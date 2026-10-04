@@ -583,6 +583,23 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			expect(result.message).toBe("TestProvider completion error: TestProvider API Error (1001): bad token")
 		})
 
+		it("should fall back to Unknown error when a base_resp status_msg is an empty string", async () => {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "ok" } }],
+						base_resp: { status_code: 1041, status_msg: "" },
+					},
+				]),
+			)
+
+			// Same fallback as the completePrompt path: an empty status_msg is not a
+			// message, so the error must not read as "API Error (1041): ".
+			await expect(collectStream(handler.createMessage("system prompt", []))).rejects.toThrow(
+				"TestProvider API Error (1041): Unknown error",
+			)
+		})
+
 		it("should still report a boolean base_resp status_code, as before the guard refactor", async () => {
 			mockCreate.mockImplementationOnce(() =>
 				asyncStreamFrom([

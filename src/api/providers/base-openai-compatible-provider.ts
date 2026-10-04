@@ -173,9 +173,7 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 					baseRespStatusCode !== 0
 				) {
 					throw new Error(
-						`${this.providerName} API Error (${baseRespStatusCode}): ${
-							typeof baseRespStatusMsg === "string" ? baseRespStatusMsg : "Unknown error"
-						}`,
+						`${this.providerName} API Error (${baseRespStatusCode}): ${String(baseRespStatusMsg || "Unknown error")}`,
 					)
 				}
 
