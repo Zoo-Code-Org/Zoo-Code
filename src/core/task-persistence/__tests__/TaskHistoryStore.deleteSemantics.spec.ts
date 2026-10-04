@@ -379,12 +379,19 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 				.mockResolvedValue({ isSymbolicLink: () => true } as unknown as import("fs").Stats)
 			const readlinkSpy = vi.spyOn(fs, "readlink").mockImplementation(async (p) => {
 				if (p === aPath) return "b.json"
-				if (p === bPath) return "a.json"
+				// Point back to the real alias basename so the walk actually loops; returning
+				// a name that is not the alias stops the walk after two hops and never reaches
+				// the hop limit this test is about.
+				if (p === bPath) return path.basename(aPath)
 				throw new Error("not a symbolic link")
 			})
 			try {
 				await actualFs.rm(aPath, { force: true })
 				await store.reconcile()
+				// Assert inside the try: mockRestore() clears the call counts, so checking after
+				// the finally block would read zero. Eight hops means the walk looped on the
+				// cycle instead of stopping at the first non-link.
+				expect(readlinkSpy).toHaveBeenCalledTimes(8)
 			} finally {
 				realpathSpy.mockRestore()
 				lstatSpy.mockRestore()
