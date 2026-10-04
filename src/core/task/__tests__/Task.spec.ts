@@ -33,6 +33,7 @@ import type { ApiMessage } from "../../task-persistence"
 import { asyncStreamFrom } from "../../../test-utils/stream"
 import { McpHub } from "../../../services/mcp/McpHub"
 import { McpServerManager } from "../../../services/mcp/McpServerManager"
+import { readFileTool } from "../../tools/ReadFileTool"
 import { writeToFileTool } from "../../tools/WriteToFileTool"
 
 type TaskTestAccess = {
@@ -791,6 +792,146 @@ describe("Cline", () => {
 				)
 			} finally {
 				vi.mocked(pWaitFor).mockImplementation(async () => {})
+			}
+		})
+
+		it("continues after the real presenter leaves a complete tool result behind a non-abort failure", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "real presenter continuation test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			const readFileHandleSpy = vi
+				.spyOn(readFileTool, "handle")
+				.mockImplementation(async (_task, block, callbacks) => {
+					if (!block.partial) callbacks.pushToolResult("File: README.md\nfinished")
+				})
+			const say = task.say.bind(task)
+			const saySpy = vi.spyOn(task, "say").mockImplementation(async (...args) => {
+				const [type, _text, _images, partial] = args
+				if (type === "text" && partial === false) {
+					throw new Error("presenter text failed")
+				}
+				return say(...args)
+			})
+			const readiness = getTaskTestAccess(task).hasCompleteToolResultsForCurrentTurn.bind(task)
+			let sawCompleteToolTurn = false
+			const readinessSpy = vi
+				.spyOn(getTaskTestAccess(task), "hasCompleteToolResultsForCurrentTurn")
+				.mockImplementation(() => {
+					const ready = readiness()
+					if (ready) sawCompleteToolTurn = true
+					return ready
+				})
+
+			let continuationUserContent: Anthropic.Messages.ContentBlockParam[] | undefined
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() =>
+					asyncStreamFrom<ApiStreamChunk>([
+						{ type: "tool_call_partial", index: 0, id: "call_read", name: "read_file" },
+						{ type: "tool_call_partial", index: 0, arguments: '{"path":"README.md"}' },
+						{ type: "text", text: "present this after the tool" },
+					]),
+				)
+				.mockImplementationOnce(() => {
+					const continuationMessage = task.apiConversationHistory.at(-1)
+					continuationUserContent =
+						continuationMessage?.role === "user" && Array.isArray(continuationMessage.content)
+							? continuationMessage.content
+							: undefined
+					throw new Error("continuation request reached")
+				})
+
+			const { default: realPWaitFor } = await vi.importActual<typeof import("p-wait-for")>("p-wait-for")
+			vi.mocked(pWaitFor).mockImplementation((condition) =>
+				realPWaitFor(condition, { interval: 1, timeout: 1_000 }),
+			)
+			try {
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "read a file, then continue" }])
+
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
+				expect(continuationUserContent).toEqual(
+					expect.arrayContaining([
+						expect.objectContaining({
+							type: "tool_result",
+							tool_use_id: "call_read",
+							content: "File: README.md\nfinished",
+						}),
+					]),
+				)
+				expect(task.userMessageContentReady).toBe(false)
+				expect(task.presentAssistantMessageLocked).toBe(false)
+				expect(sawCompleteToolTurn).toBe(true)
+			} finally {
+				vi.mocked(pWaitFor).mockImplementation(async () => {})
+				readinessSpy.mockRestore()
+				readFileHandleSpy.mockRestore()
+				saySpy.mockRestore()
+			}
+		})
+
+		it("lets abort win when the real presenter leaves a complete tool result", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "real presenter abort test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			const readFileHandleSpy = vi
+				.spyOn(readFileTool, "handle")
+				.mockImplementation(async (_task, block, callbacks) => {
+					if (!block.partial) callbacks.pushToolResult("File: README.md\nfinished")
+				})
+			const say = task.say.bind(task)
+			const saySpy = vi.spyOn(task, "say").mockImplementation(async (...args) => {
+				const [type, _text, _images, partial] = args
+				if (type === "text" && partial === false) {
+					task.abort = true
+					throw new Error("presenter text failed while aborting")
+				}
+				return say(...args)
+			})
+
+			const readiness = getTaskTestAccess(task).hasCompleteToolResultsForCurrentTurn.bind(task)
+			let sawReadyWhileAborted = false
+			const readinessSpy = vi
+				.spyOn(getTaskTestAccess(task), "hasCompleteToolResultsForCurrentTurn")
+				.mockImplementation(() => {
+					const ready = readiness()
+					if (ready && task.abort) sawReadyWhileAborted = true
+					return ready
+				})
+			const attemptApiRequestSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([
+					{ type: "tool_call_partial", index: 0, id: "call_read", name: "read_file" },
+					{ type: "tool_call_partial", index: 0, arguments: '{"path":"README.md"}' },
+					{ type: "text", text: "present this after the tool" },
+				]),
+			)
+
+			const { default: realPWaitFor } = await vi.importActual<typeof import("p-wait-for")>("p-wait-for")
+			vi.mocked(pWaitFor).mockImplementation((condition) =>
+				realPWaitFor(condition, { interval: 1, timeout: 1_000 }),
+			)
+			try {
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "read a file, then abort" }])
+
+				expect(attemptApiRequestSpy).toHaveBeenCalledOnce()
+				expect(sawReadyWhileAborted).toBe(true)
+				expect(task.presentAssistantMessageLocked).toBe(false)
+			} finally {
+				vi.mocked(pWaitFor).mockImplementation(async () => {})
+				readinessSpy.mockRestore()
+				readFileHandleSpy.mockRestore()
+				saySpy.mockRestore()
 			}
 		})
 
