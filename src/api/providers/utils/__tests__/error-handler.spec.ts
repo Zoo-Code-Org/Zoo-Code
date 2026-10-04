@@ -75,6 +75,9 @@ describe("handleProviderError", () => {
 			const result = handleProviderError(error, providerName)
 
 			expect(result).toBeInstanceOf(Error)
+			// Asserting only the instance type would also pass if the string "429" were
+			// copied into .status, which is the regression the typeof guard prevents.
+			expect(result).not.toHaveProperty("status")
 		})
 
 		it("should prefer a numeric statusCode when status is null", () => {
