@@ -630,7 +630,7 @@ describe("Task - Streaming Tool Call Handling", () => {
 		})
 	})
 
-	describe("tool_call_partial chunk handling - Task integration", () => {
+	describe("tool_call_partial chunk handling - NativeToolCallParser raw chunk lifecycle", () => {
 		it("should emit tool_call_start event when processing raw chunk with id and name", async () => {
 			NativeToolCallParser.clearRawChunkState(scope)
 

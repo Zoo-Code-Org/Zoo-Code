@@ -75,6 +75,38 @@ describe("handleProviderError", () => {
 			const result = handleProviderError(error, providerName)
 
 			expect(result).toBeInstanceOf(Error)
+		})
+
+		it("should prefer a numeric statusCode when status is null", () => {
+			// A null status is not a status: backoff only understands a number, so the
+			// numeric statusCode must win.
+			const error = { message: "Rate limit exceeded", status: null, statusCode: 429 }
+			const result = handleProviderError(error, providerName)
+			expect((result as { status?: number }).status).toBe(429)
+		})
+
+		it("should prefer a numeric statusCode when status is a nonnumeric value", () => {
+			// A truthy nonnumeric status would be echoed into the retry header, so it must
+			// not win over a numeric statusCode.
+			const error = new Error("weird")
+			;(error as { status?: unknown }).status = "429"
+			;(error as { statusCode?: number }).statusCode = 401
+			const result = handleProviderError(error, providerName)
+			expect((result as { status?: number }).status).toBe(401)
+		})
+
+		it("should keep a numeric status and ignore a nonnumeric statusCode", () => {
+			const error = { message: "weird", status: 503, statusCode: "429" }
+			const result = handleProviderError(error, providerName)
+			expect((result as { status?: number }).status).toBe(503)
+		})
+
+		it("should not treat a nonnumeric statusCode as a status on an Error input", () => {
+			// The typeof guard is what makes this total: an Error instance with a string
+			// statusCode must not gain a status property.
+			const error = new Error("weird")
+			;(error as { statusCode?: unknown }).statusCode = "429"
+			const result = handleProviderError(error, providerName)
 			expect(result).not.toHaveProperty("status")
 		})
 

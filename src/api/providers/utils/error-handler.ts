@@ -78,7 +78,12 @@ export function handleProviderError(
 		// to provide status-aware error messages and handling. AI SDK errors (e.g.,
 		// APICallError) expose the HTTP status as `statusCode` instead of `status`,
 		// so fall back to it: a real 429 must reach Task.backoffAndAnnounce's .status check.
-		const preservedStatus = anyErr.status !== undefined ? anyErr.status : anyErr.statusCode
+		// Only a numeric status can drive backoff: a null or nonnumeric status
+		// would be echoed straight into the retry header, so take a numeric status
+		// first and fall back to a numeric statusCode.
+		const numericStatus = typeof anyErr.status === "number" ? anyErr.status : undefined
+		const numericStatusCode = typeof anyErr.statusCode === "number" ? anyErr.statusCode : undefined
+		const preservedStatus = numericStatus !== undefined ? numericStatus : numericStatusCode
 		if (preservedStatus !== undefined) {
 			;(wrapped as any).status = preservedStatus
 		}
