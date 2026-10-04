@@ -416,14 +416,6 @@ export class CodeIndexManager {
 			rooIgnoreController,
 		)
 
-		// Validate embedder configuration before proceeding
-		const validationResult = await this._serviceFactory.validateEmbedder(embedder)
-		if (!validationResult.valid) {
-			const errorMessage = validationResult.error || "Embedder configuration validation failed"
-			this._stateManager.setSystemState("Error", errorMessage)
-			throw new Error(errorMessage)
-		}
-
 		// (Re)Initialize orchestrator
 		this._orchestrator = new CodeIndexOrchestrator(
 			this._configManager!,

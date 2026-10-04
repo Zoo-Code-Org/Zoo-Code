@@ -4,14 +4,18 @@ import {
 	mergeAbortSignalAndTimeout,
 	mergeAbortSignals,
 	rejectOnAbort,
+	resolveModelWithAbort,
 	throwIfAborted,
 } from "../abort-signal"
+import { withSettleGuard } from "../../../../test-utils/settle-guard"
 
 describe("rejectOnAbort", () => {
 	it("resolves with the pending value when it settles before the signal aborts", async () => {
 		const controller = new AbortController()
 
-		await expect(rejectOnAbort(Promise.resolve("done"), controller.signal, "TestProvider")).resolves.toBe("done")
+		await expect(
+			withSettleGuard(rejectOnAbort(Promise.resolve("done"), controller.signal, "TestProvider")),
+		).resolves.toBe("done")
 		expect(controller.signal.aborted).toBe(false)
 	})
 
@@ -22,23 +26,7 @@ describe("rejectOnAbort", () => {
 		const race = rejectOnAbort(pending, controller.signal, "TestProvider")
 		controller.abort()
 
-		// Bound the wait so a broken race fails this test fast (and fails the
-		// Stryker mutant) instead of hanging.
-		await expect(
-			new Promise<unknown>((_resolve, reject) => {
-				const deadline = setTimeout(() => reject(new Error("race deadline exceeded")), 3000)
-				void race.then(
-					(value) => {
-						clearTimeout(deadline)
-						reject(new Error(`race unexpectedly resolved: ${String(value)}`))
-					},
-					(error) => {
-						clearTimeout(deadline)
-						reject(error)
-					},
-				)
-			}),
-		).rejects.toMatchObject({
+		await expect(withSettleGuard(race)).rejects.toMatchObject({
 			name: "AbortError",
 			message: "The TestProvider request was aborted",
 		})
@@ -49,17 +37,49 @@ describe("rejectOnAbort", () => {
 		controller.abort()
 		const pending = new Promise<never>(() => {})
 
-		await expect(rejectOnAbort(pending, controller.signal, "TestProvider")).rejects.toMatchObject({
+		await expect(withSettleGuard(rejectOnAbort(pending, controller.signal, "TestProvider"))).rejects.toMatchObject({
 			name: "AbortError",
 			message: "The TestProvider request was aborted",
 		})
+	})
+
+	it("does not leave a rejecting pending unhandled when the signal is already aborted", async () => {
+		// The pre-aborted branch returns before consuming `pending`, so it must still
+		// attach a rejection handler; otherwise a rejecting lookup is reported as an
+		// unhandled rejection even though the caller already cancelled.
+		const controller = new AbortController()
+		controller.abort()
+		const lookupError = new Error("lookup failed")
+		const pending = Promise.reject(lookupError)
+
+		const unhandled: unknown[] = []
+		const onUnhandledRejection = (reason: unknown) => unhandled.push(reason)
+		process.on("unhandledRejection", onUnhandledRejection)
+		try {
+			await expect(
+				withSettleGuard(rejectOnAbort(pending, controller.signal, "TestProvider")),
+			).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The TestProvider request was aborted",
+			})
+
+			// Node reports an unhandled rejection only after the microtask queue drains.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			expect(unhandled).toHaveLength(0)
+		} finally {
+			// Remove the process-level listener on every exit path: a failed assertion
+			// must not leak it into the remaining tests in this file.
+			process.off("unhandledRejection", onUnhandledRejection)
+		}
 	})
 
 	it("propagates the pending rejection when the signal stays active", async () => {
 		const controller = new AbortController()
 		const boom = new Error("lookup failed")
 
-		await expect(rejectOnAbort(Promise.reject(boom), controller.signal, "TestProvider")).rejects.toBe(boom)
+		await expect(
+			withSettleGuard(rejectOnAbort(Promise.reject(boom), controller.signal, "TestProvider")),
+		).rejects.toBe(boom)
 	})
 
 	it("detaches the abort listener once the pending settles", async () => {
@@ -67,7 +87,9 @@ describe("rejectOnAbort", () => {
 		const addSpy = vi.spyOn(controller.signal, "addEventListener")
 		const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
 
-		await expect(rejectOnAbort(Promise.resolve("done"), controller.signal, "TestProvider")).resolves.toBe("done")
+		await expect(
+			withSettleGuard(rejectOnAbort(Promise.resolve("done"), controller.signal, "TestProvider")),
+		).resolves.toBe("done")
 
 		// The settle path must remove the exact listener that was registered, not just any
 		// function: removing a different reference would leave the original abort listener
@@ -87,9 +109,9 @@ describe("rejectOnAbort", () => {
 		const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
 		const lookupError = new Error("lookup failed")
 
-		await expect(rejectOnAbort(Promise.reject(lookupError), controller.signal, "TestProvider")).rejects.toBe(
-			lookupError,
-		)
+		await expect(
+			withSettleGuard(rejectOnAbort(Promise.reject(lookupError), controller.signal, "TestProvider")),
+		).rejects.toBe(lookupError)
 
 		// The settle path must remove the exact listener that was registered, not just any
 		// function: removing a different reference would leave the original abort listener
@@ -101,6 +123,105 @@ describe("rejectOnAbort", () => {
 		expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
 		addSpy.mockRestore()
 		removeSpy.mockRestore()
+	})
+})
+
+describe("resolveModelWithAbort", () => {
+	it("fast-fails with the provider abort error when the signal is already aborted", async () => {
+		const controller = new AbortController()
+		controller.abort()
+		let lookupRan = false
+
+		await expect(
+			withSettleGuard(
+				resolveModelWithAbort(
+					async () => {
+						lookupRan = true
+						return "model"
+					},
+					controller.signal,
+					"TestProvider",
+				),
+			),
+		).rejects.toMatchObject({
+			name: "AbortError",
+			message: "The TestProvider request was aborted",
+		})
+		// The entry guard must run before the lookup starts at all.
+		expect(lookupRan).toBe(false)
+	})
+
+	it("resolves the model when no abort signal is present", async () => {
+		await expect(resolveModelWithAbort(async () => "model", undefined, "TestProvider")).resolves.toBe("model")
+	})
+
+	it("propagates a raw resolution failure unchanged when no abort signal is present", async () => {
+		const boom = new Error("lookup failed")
+
+		await expect(
+			resolveModelWithAbort(
+				async () => {
+					throw boom
+				},
+				undefined,
+				"TestProvider",
+			),
+		).rejects.toBe(boom)
+	})
+
+	it("rejects with the provider abort error when the signal aborts while resolution is pending", async () => {
+		const controller = new AbortController()
+		let release: (value: string) => void = () => {}
+		const pending = new Promise<string>((resolve) => {
+			release = resolve
+		})
+		const race = withSettleGuard(resolveModelWithAbort(async () => pending, controller.signal, "TestProvider"))
+
+		setTimeout(() => controller.abort(), 10)
+
+		await expect(race).rejects.toMatchObject({
+			name: "AbortError",
+			message: "The TestProvider request was aborted",
+		})
+		// A late resolution after the abort won the race must not surface.
+		release("late model")
+	})
+
+	it("normalizes an abort-flavored resolution failure to the provider abort error", async () => {
+		const controller = new AbortController()
+		const abortFlavored = new Error("The operation was aborted.")
+		abortFlavored.name = "AbortError"
+
+		const error = await resolveModelWithAbort(
+			async () => {
+				throw abortFlavored
+			},
+			controller.signal,
+			"TestProvider",
+		).catch((caught: unknown) => caught)
+
+		expect(error).not.toBe(abortFlavored)
+		expect(error).toMatchObject({
+			name: "AbortError",
+			message: "The TestProvider request was aborted",
+		})
+	})
+
+	it("propagates non-abort resolution failures unchanged when a signal is present", async () => {
+		const controller = new AbortController()
+		const boom = new Error("lookup failed")
+
+		await expect(
+			withSettleGuard(
+				resolveModelWithAbort(
+					async () => {
+						throw boom
+					},
+					controller.signal,
+					"TestProvider",
+				),
+			),
+		).rejects.toBe(boom)
 	})
 })
 
@@ -264,6 +385,16 @@ describe("abort-signal utilities", () => {
 
 			const controller = new AbortController()
 			expect(isRequestAborted(new Error("boom"), controller.signal)).toBe(false)
+		})
+
+		it("requires an Error instance for the name and message checks", () => {
+			// A plain object that merely looks like an abort must not be
+			// classified as one: the instanceof guard keeps such failures
+			// propagating unchanged so callers can inspect the real shape.
+			const fakeAbort = { name: "AbortError", message: "Request was aborted." }
+			expect(isRequestAborted(fakeAbort)).toBe(false)
+			expect(isRequestAborted(Object.assign(Object.create(null), { name: "APIUserAbortError" }))).toBe(false)
+			expect(isRequestAborted("Request was aborted.")).toBe(false)
 		})
 	})
 
