@@ -669,6 +669,7 @@ describe("NanoGptHandler", () => {
 		await collectStream(new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages))
 		expect(getModels).toHaveBeenLastCalledWith(
 			expect.objectContaining({ provider: providerIdentifiers.nanogpt, apiKey: undefined }),
+			expect.anything(),
 		)
 	})
 

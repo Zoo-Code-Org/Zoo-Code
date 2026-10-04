@@ -4,6 +4,7 @@ import { LMStudioClient, LLMInstanceInfo, LLMInfo } from "@lmstudio/sdk"
 import { ModelInfo, lMStudioDefaultModelInfo, providerIdentifiers } from "@roo-code/types"
 
 import { forceFullModelDetailsLoad, getLMStudioModels, hasLoadedFullDetails, parseLMStudioModel } from "../lmstudio"
+import type { ApiHandler } from "../../../index"
 
 const mockFlushModels = vi.hoisted(() => vi.fn())
 
@@ -61,12 +62,21 @@ describe("LMStudio Fetcher", () => {
 
 			expect(hasLoadedFullDetails(modelId)).toBe(false)
 
-			await forceFullModelDetailsLoad(baseUrl, modelId)
+			const handler = {
+				fetchModels: vi.fn(),
+				getModelCacheScope: () => ({ urlScoped: true, keyScoped: false, authScoped: false }),
+			} as unknown as ApiHandler
+
+			await forceFullModelDetailsLoad(baseUrl, modelId, handler)
 
 			expect(mockedAxios.get).toHaveBeenCalledWith(`${baseUrl}/v1/models`)
 			expect(MockedLMStudioClientConstructor).toHaveBeenCalledWith({ baseUrl: "wss://securehost:4321" })
 			expect(mockLoadModel).toHaveBeenCalledWith(modelId)
-			expect(mockFlushModels).toHaveBeenCalledWith({ provider: providerIdentifiers.lmstudio, baseUrl }, true)
+			expect(mockFlushModels).toHaveBeenCalledWith(
+				{ provider: providerIdentifiers.lmstudio, baseUrl },
+				handler,
+				true,
+			)
 			expect(hasLoadedFullDetails(modelId)).toBe(true)
 		})
 	})

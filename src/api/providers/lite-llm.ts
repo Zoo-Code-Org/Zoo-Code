@@ -3,6 +3,7 @@ import { Anthropic } from "@anthropic-ai/sdk" // Keep for type usage only
 
 import {
 	type ModelInfo,
+	type ModelRecord,
 	type ReasoningEffortExtended,
 	litellmDefaultModelId,
 	litellmDefaultModelInfo,
@@ -11,7 +12,7 @@ import {
 
 import { calculateApiCostOpenAI } from "../../shared/cost"
 
-import { ApiHandlerOptions } from "../../shared/api"
+import { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
@@ -19,8 +20,14 @@ import { convertToR1Format } from "../transform/r1-format"
 import { GEMINI_THOUGHT_SIGNATURE_BYPASS } from "../transform/gemini-format"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import type {
+	SingleCompletionHandler,
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+} from "../index"
 import { RouterProvider } from "./router-provider"
+import { getLiteLLMModels } from "./fetchers/litellm"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
 /**
@@ -40,6 +47,15 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			defaultModelId: litellmDefaultModelId,
 			defaultModelInfo: litellmDefaultModelInfo,
 		})
+	}
+
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: true, keyScoped: true, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getLiteLLMModels(options.apiKey ?? "", options.baseUrl ?? "", ...fetchOpts)
 	}
 
 	private isGpt5(modelId: string): boolean {

@@ -7,6 +7,7 @@ import type {
 	SingleCompletionHandler,
 	ApiHandlerCreateMessageMetadata,
 	CompletePromptOptions,
+	ModelCacheScope,
 } from "../index"
 import type { ApiHandlerOptions } from "../../shared/api"
 import { ApiStream } from "../transform/stream"
@@ -82,5 +83,9 @@ export class FakeAIHandler implements ApiHandler, SingleCompletionHandler {
 
 	completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		return this.ai.completePrompt(prompt, options)
+	}
+
+	getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: false, keyScoped: false, authScoped: false }
 	}
 }

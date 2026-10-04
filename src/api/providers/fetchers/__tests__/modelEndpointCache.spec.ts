@@ -7,9 +7,15 @@ import { providerIdentifiers } from "@roo-code/types"
 import { getModelEndpoints } from "../modelEndpointCache"
 import * as modelCache from "../modelCache"
 import * as openrouter from "../openrouter"
+import type { ApiHandler } from "../../../index"
 
 vi.mock("../modelCache")
 vi.mock("../openrouter")
+
+const handler = {
+	fetchModels: vi.fn(),
+	getModelCacheScope: () => ({ urlScoped: false, keyScoped: false, authScoped: false }),
+} as unknown as ApiHandler
 
 describe("modelEndpointCache", () => {
 	beforeEach(() => {
@@ -56,11 +62,14 @@ describe("modelEndpointCache", () => {
 			vi.spyOn(modelCache, "getModels").mockResolvedValue(mockParentModels as any)
 			vi.spyOn(openrouter, "getOpenRouterModelEndpoints").mockResolvedValue(mockEndpoints as any)
 
-			const result = await getModelEndpoints({
-				router: providerIdentifiers.openrouter,
-				modelId: "anthropic/claude-sonnet-4",
-				endpoint: "anthropic",
-			})
+			const result = await getModelEndpoints(
+				{
+					router: providerIdentifiers.openrouter,
+					modelId: "anthropic/claude-sonnet-4",
+					endpoint: "anthropic",
+				},
+				handler,
+			)
 
 			// Verify capabilities were copied from parent to ALL endpoints
 			expect(result.anthropic.supportsReasoningEffort).toBe(true)
@@ -96,11 +105,14 @@ describe("modelEndpointCache", () => {
 			vi.spyOn(modelCache, "getModels").mockResolvedValue(mockParentModels as any)
 			vi.spyOn(openrouter, "getOpenRouterModelEndpoints").mockResolvedValue(mockEndpoints as any)
 
-			const result = await getModelEndpoints({
-				router: providerIdentifiers.openrouter,
-				modelId: "test/model",
-				endpoint: "endpoint-1",
-			})
+			const result = await getModelEndpoints(
+				{
+					router: providerIdentifiers.openrouter,
+					modelId: "test/model",
+					endpoint: "endpoint-1",
+				},
+				handler,
+			)
 
 			// Modify one endpoint's array
 			result["endpoint-1"].supportedParameters?.push("reasoning" as any)
@@ -124,11 +136,14 @@ describe("modelEndpointCache", () => {
 			vi.spyOn(modelCache, "getModels").mockResolvedValue(mockParentModels as any)
 			vi.spyOn(openrouter, "getOpenRouterModelEndpoints").mockResolvedValue(mockEndpoints as any)
 
-			const result = await getModelEndpoints({
-				router: providerIdentifiers.openrouter,
-				modelId: "missing/model",
-				endpoint: "anthropic",
-			})
+			const result = await getModelEndpoints(
+				{
+					router: providerIdentifiers.openrouter,
+					modelId: "missing/model",
+					endpoint: "anthropic",
+				},
+				handler,
+			)
 
 			// Should not crash, but copied capabilities will be undefined
 			expect(result.anthropic).toBeDefined()
@@ -136,27 +151,36 @@ describe("modelEndpointCache", () => {
 		})
 
 		it("should return empty object for non-openrouter providers", async () => {
-			const result = await getModelEndpoints({
-				router: providerIdentifiers.vercelAiGateway,
-				modelId: "claude-sonnet-4",
-				endpoint: "default",
-			})
+			const result = await getModelEndpoints(
+				{
+					router: providerIdentifiers.vercelAiGateway,
+					modelId: "claude-sonnet-4",
+					endpoint: "default",
+				},
+				handler,
+			)
 
 			expect(result).toEqual({})
 		})
 
 		it("should return empty object when modelId or endpoint is missing", async () => {
-			const result1 = await getModelEndpoints({
-				router: providerIdentifiers.openrouter,
-				modelId: undefined,
-				endpoint: "anthropic",
-			})
+			const result1 = await getModelEndpoints(
+				{
+					router: providerIdentifiers.openrouter,
+					modelId: undefined,
+					endpoint: "anthropic",
+				},
+				handler,
+			)
 
-			const result2 = await getModelEndpoints({
-				router: providerIdentifiers.openrouter,
-				modelId: "anthropic/claude-sonnet-4",
-				endpoint: undefined,
-			})
+			const result2 = await getModelEndpoints(
+				{
+					router: providerIdentifiers.openrouter,
+					modelId: "anthropic/claude-sonnet-4",
+					endpoint: undefined,
+				},
+				handler,
+			)
 
 			expect(result1).toEqual({})
 			expect(result2).toEqual({})

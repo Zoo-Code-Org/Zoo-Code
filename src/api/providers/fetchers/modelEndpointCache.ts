@@ -14,6 +14,7 @@ import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 import { getOpenRouterModelEndpoints } from "./openrouter"
 import { getModels } from "./modelCache"
+import type { ApiHandler } from "../../index"
 
 const memoryCache = new NodeCache({ stdTTL: 5 * 60, checkperiod: 5 * 60 })
 
@@ -33,15 +34,18 @@ async function readModelEndpoints(key: string): Promise<ModelRecord | undefined>
 	return exists ? JSON.parse(await fs.readFile(filePath, "utf8")) : undefined
 }
 
-export const getModelEndpoints = async ({
-	router,
-	modelId,
-	endpoint,
-}: {
-	router: RouterName
-	modelId?: string
-	endpoint?: string
-}): Promise<ModelRecord> => {
+export const getModelEndpoints = async (
+	{
+		router,
+		modelId,
+		endpoint,
+	}: {
+		router: RouterName
+		modelId?: string
+		endpoint?: string
+	},
+	handler: ApiHandler,
+): Promise<ModelRecord> => {
 	// OpenRouter is the only provider that supports model endpoints, but you
 	// can see how we'd extend this to other providers in the future.
 	if (router !== providerIdentifiers.openrouter || !modelId || !endpoint) {
@@ -61,7 +65,7 @@ export const getModelEndpoints = async ({
 	// Copy model-level capabilities from the parent model to each endpoint
 	// These are capabilities that don't vary by provider (tools, reasoning, etc.)
 	if (Object.keys(modelProviders).length > 0) {
-		const parentModels = await getModels({ provider: providerIdentifiers.openrouter })
+		const parentModels = await getModels({ provider: providerIdentifiers.openrouter }, handler)
 		const parentModel = parentModels[modelId]
 
 		if (parentModel) {
