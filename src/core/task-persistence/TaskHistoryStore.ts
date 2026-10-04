@@ -330,12 +330,6 @@ export class TaskHistoryStore {
 	// ────────────────────────────── Reconciliation ──────────────────────────────
 
 	/**
-	 * Scan task directories and fix any drift between disk and cache.
-	 *
-	 * - Tasks on disk but missing from cache: read and add
-	 * - Tasks in cache but missing from disk: remove
-	 */
-	/**
 	 * The lock key a writer would use for a task file. resolvePublishTarget refuses
 	 * a dangling link, so the delete paths and the liveness probe walk the chain
 	 * themselves to find the lock held at the referent.
@@ -357,6 +351,12 @@ export class TaskHistoryStore {
 		}
 	}
 
+	/**
+	 * Scan task directories and fix any drift between disk and cache.
+	 *
+	 * - Tasks on disk but missing from cache: read and add
+	 * - Tasks in cache but missing from disk: remove
+	 */
 	async reconcile(options: { forceRefresh?: boolean } = {}): Promise<void> {
 		// Run through the write lock to prevent interleaving with upsert/delete
 		return this.withLock(async () => {
