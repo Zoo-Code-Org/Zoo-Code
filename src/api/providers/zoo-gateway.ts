@@ -322,9 +322,23 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Same entry guard as createMessage: a cancelled task must not run the
+		// fallible auth check, and the standardized AbortError wins over anything
+		// the auth step or the lookup could raise.
+		if (options?.abortSignal?.aborted) {
+			throw createAbortError("Zoo Gateway")
+		}
+
 		this.ensureAuthenticated()
 
-		const { id: modelId, info } = await this.fetchModel()
+		// Model resolution must honour the caller's cancellation scope the same
+		// way createMessage does: a signal that fires during the lookup settles on
+		// the standardized AbortError instead of waiting for the catalog to finish.
+		const { id: modelId, info } = await resolveModelWithAbort(
+			() => this.fetchModel(),
+			options?.abortSignal,
+			"Zoo Gateway",
+		)
 
 		try {
 			const requestOptions: OpenAI.Chat.ChatCompletionCreateParams = {

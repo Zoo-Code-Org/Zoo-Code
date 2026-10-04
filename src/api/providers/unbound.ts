@@ -250,7 +250,14 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
-		const { id: model, maxTokens: max_tokens, temperature } = await this.fetchModel()
+		// Model resolution must honour the caller's cancellation scope the same
+		// way createMessage does: a signal that fires during the lookup settles on
+		// the standardized AbortError instead of waiting for the catalog to finish.
+		const {
+			id: model,
+			maxTokens: max_tokens,
+			temperature,
+		} = await resolveModelWithAbort(() => this.fetchModel(), options?.abortSignal, "Unbound")
 
 		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [{ role: "system", content: prompt }]
 

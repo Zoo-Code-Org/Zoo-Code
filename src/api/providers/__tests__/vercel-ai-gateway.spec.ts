@@ -897,25 +897,26 @@ describe("VercelAiGatewayHandler", () => {
 			expect(Object.keys(requestOptions ?? {})).not.toContain("timeout")
 		})
 
-		it("should preserve abort identity when the caller aborts", async () => {
+		it("should preserve abort identity when the caller aborts during the request", async () => {
 			// Emulate the OpenAI SDK: an aborted request signal rejects with
 			// APIUserAbortError ("Request was aborted." — the trailing period would
 			// fail task-level abort detection, so the provider must normalize it).
-			mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
-				if (options?.signal?.aborted) {
-					throw new APIUserAbortError()
-				}
-				throw new Error("boom")
+			// The abort fires inside the mock so the SDK abort branch is actually reached:
+			// a pre-aborted signal settles in the cancellation scope before the mock
+			// runs, which would leave this catch untested.
+			const controller = new AbortController()
+			mockCreate.mockImplementationOnce(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				controller.abort()
+				throw new APIUserAbortError()
 			})
 
 			const handler = new VercelAiGatewayHandler(mockOptions)
-			const controller = new AbortController()
-			controller.abort()
 
 			const error = await handler.completePrompt("test prompt", { abortSignal: controller.signal }).then(
 				() => undefined,
 				(e: unknown) => e,
 			)
+			expect(mockCreate).toHaveBeenCalledTimes(1)
 			expect(error).toMatchObject({ name: "AbortError" })
 			expect((error as Error).message).toBe("The Vercel AI Gateway request was aborted")
 		})
@@ -924,7 +925,7 @@ describe("VercelAiGatewayHandler", () => {
 			// Emulate the OpenAI SDK: when the request timeout fires, the SDK
 			// surfaces APIConnectionTimeoutError ("Request timed out.") once retries
 			// are exhausted — verified against openai v5.23.2 against a hung server.
-			mockCreate.mockImplementation(async (_params: unknown, options: { timeout?: number }) => {
+			mockCreate.mockImplementationOnce(async (_params: unknown, options: { timeout?: number }) => {
 				await new Promise((resolve) => setTimeout(resolve, options?.timeout ?? 50))
 				throw new APIConnectionTimeoutError()
 			})
@@ -939,13 +940,17 @@ describe("VercelAiGatewayHandler", () => {
 			expect((error as Error).message).toBe("The Vercel AI Gateway request was aborted")
 		})
 
-		it("should preserve abort identity when the signal is pre-aborted with a plain error", async () => {
+		it("should preserve abort identity when the signal aborts during the request with a plain error", async () => {
 			// The aborted-signal disjunct alone must normalize a plain
 			// rejection (not just SDK abort classes) to the DOM-standard
-			// AbortError.
-			mockCreate.mockRejectedValueOnce(new Error("boom"))
+			// AbortError. The abort fires inside the request so the cancellation
+			// scope still lets the model lookup finish and the catch observes an
+			// aborted signal.
 			const controller = new AbortController()
-			controller.abort()
+			mockCreate.mockImplementationOnce(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				controller.abort()
+				throw new Error("boom")
+			})
 			const handler = new VercelAiGatewayHandler(mockOptions)
 
 			const error = await handler.completePrompt("test prompt", { abortSignal: controller.signal }).then(
@@ -986,6 +991,37 @@ describe("VercelAiGatewayHandler", () => {
 		})
 	})
 
+	it("completePrompt settles on the abort while model resolution is pending", async () => {
+		// The catalog lookup parks forever, so the prompt can only settle through
+		// the cancellation scope around the lookup; without it the handler waits
+		// for the catalog and then issues the SDK request.
+		let releaseGate!: () => void
+		const gate = new Promise<void>((resolve) => {
+			releaseGate = resolve
+		})
+		vitest.mocked(getModels).mockImplementationOnce(async () => {
+			await gate
+			return {}
+		})
+
+		const handler = new VercelAiGatewayHandler(mockOptions)
+		const controller = new AbortController()
+
+		const completion = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+		await new Promise((resolve) => setTimeout(resolve, 10))
+		controller.abort()
+
+		const error = await completion.then(
+			() => undefined,
+			(caught: unknown) => caught,
+		)
+		// Release the parked lookup so the disposable mock does not leak into the
+		// next test in the file.
+		releaseGate()
+		expect(mockCreate).not.toHaveBeenCalled()
+		expect(error).toMatchObject({ name: "AbortError" })
+		expect((error as Error).message).toBe("The Vercel AI Gateway request was aborted")
+	})
 	describe("createMessage abort signal bridging", () => {
 		it("rejects with the standardized AbortError before any request work when the external signal is already aborted", async () => {
 			// A pre-aborted request must fail fast before any model-catalog or

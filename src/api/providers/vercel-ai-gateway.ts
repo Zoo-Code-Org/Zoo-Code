@@ -179,7 +179,14 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
-		const { id: modelId, info } = await this.fetchModel()
+		// Model resolution must honour the caller's cancellation scope the same
+		// way createMessage does: a signal that fires during the lookup settles on
+		// the standardized AbortError instead of waiting for the catalog to finish.
+		const { id: modelId, info } = await resolveModelWithAbort(
+			() => this.fetchModel(),
+			options?.abortSignal,
+			"Vercel AI Gateway",
+		)
 
 		try {
 			const reasoningEffort = getReasoningEffort(this.options, info)
