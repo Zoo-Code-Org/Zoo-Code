@@ -88,13 +88,20 @@ export class SkillsManager {
 	}
 
 	private async performDiscovery(): Promise<void> {
-		this.skills.clear()
-		this.diagnostics = []
+		// Stage the scan into local collections and commit them only once the scan has
+		// completed. A reader (requestSkills -> getSkillsMetadata/getSkillDiagnostics)
+		// can run between the awaits of a scan, so committing incrementally would let it
+		// observe a half-built snapshot of a scan that is still in progress.
+		const skills = new Map<string, SkillMetadata>()
+		const diagnostics: SkillDiagnostic[] = []
 		const skillsDirs = await this.getSkillsDirectories()
 
 		for (const { dir, source, mode } of skillsDirs) {
-			await this.scanSkillsDirectory(dir, source, mode)
+			await this.scanSkillsDirectory(dir, source, mode, skills, diagnostics)
 		}
+
+		this.skills = skills
+		this.diagnostics = diagnostics
 	}
 
 	/**
@@ -103,7 +110,13 @@ export class SkillsManager {
 	 * 1. The skills directory itself is a symlink (resolved by directoryExists using realpath)
 	 * 2. Individual skill subdirectories are symlinks
 	 */
-	private async scanSkillsDirectory(dirPath: string, source: "global" | "project", mode?: string): Promise<void> {
+	private async scanSkillsDirectory(
+		dirPath: string,
+		source: "global" | "project",
+		mode: string | undefined,
+		skills: Map<string, SkillMetadata>,
+		diagnostics: SkillDiagnostic[],
+	): Promise<void> {
 		if (!(await directoryExists(dirPath))) {
 			return
 		}
@@ -123,7 +136,7 @@ export class SkillsManager {
 				if (!stats?.isDirectory()) continue
 
 				// Load skill metadata - the skill name comes from the entry name (symlink name if symlinked)
-				await this.loadSkillMetadata(entryPath, source, mode, entryName)
+				await this.loadSkillMetadata(entryPath, source, mode, entryName, skills, diagnostics)
 			}
 		} catch {
 			// Directory doesn't exist or can't be read - this is fine
@@ -140,8 +153,10 @@ export class SkillsManager {
 	private async loadSkillMetadata(
 		skillDir: string,
 		source: "global" | "project",
-		mode?: string,
-		skillName?: string,
+		mode: string | undefined,
+		skillName: string | undefined,
+		skills: Map<string, SkillMetadata>,
+		diagnostics: SkillDiagnostic[],
 	): Promise<void> {
 		const skillMdPath = path.join(skillDir, "SKILL.md")
 		if (!(await fileExists(skillMdPath))) return
@@ -164,7 +179,7 @@ export class SkillsManager {
 			try {
 				parsed = matter(fileContent, {})
 			} catch (error) {
-				this.recordDiagnostic(skillMdPath, source, error)
+				this.recordDiagnostic(skillMdPath, source, error, diagnostics)
 				console.error(`Failed to parse skill at ${skillDir}:`, error)
 				// The most common cause is unescaped double quotes in the
 				// description value. Only hint at that when the parser error is
@@ -246,7 +261,7 @@ export class SkillsManager {
 			const primaryMode = modeSlugs?.[0]
 			const skillKey = this.getSkillKey(effectiveSkillName, source, primaryMode)
 
-			this.skills.set(skillKey, {
+			skills.set(skillKey, {
 				name: effectiveSkillName,
 				description,
 				path: skillMdPath,
@@ -259,7 +274,12 @@ export class SkillsManager {
 		}
 	}
 
-	private recordDiagnostic(path: string, source: "global" | "project", error: unknown): void {
+	private recordDiagnostic(
+		path: string,
+		source: "global" | "project",
+		error: unknown,
+		diagnostics: SkillDiagnostic[],
+	): void {
 		const yamlError = error as {
 			reason?: unknown
 			message?: unknown
@@ -270,7 +290,7 @@ export class SkillsManager {
 		const line = typeof yamlError.mark?.line === "number" ? yamlError.mark.line + 1 : undefined
 		const column = typeof yamlError.mark?.column === "number" ? yamlError.mark.column + 1 : undefined
 
-		this.diagnostics.push({ path, source, message: reason ?? errorMessage, line, column })
+		diagnostics.push({ path, source, message: reason ?? errorMessage, line, column })
 	}
 
 	/**

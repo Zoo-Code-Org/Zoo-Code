@@ -1710,6 +1710,54 @@ Body.`
 			expect(skillsManager.getSkillDiagnostics()).toEqual([])
 		})
 
+		it("does not expose a half-built snapshot to a reader while a scan is in progress", async () => {
+			const stablePath = p(globalSkillsDir, "stable-skill", "SKILL.md")
+			const slowPath = p(globalSkillsDir, "slow-skill", "SKILL.md")
+			const stableContent = `---
+name: stable-skill
+description: Stable before the scan
+---
+
+Body.`
+			const slowContent = `---
+name: slow-skill
+description: Loaded after the scan completes
+---
+
+Body.`
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			// The second scan sees an extra skill, and that skill's read is parked, so
+			// the reader runs while the scan is mid-flight. Committing incrementally
+			// would let the reader see the scan after the clear but before the slow
+			// skill was loaded.
+			let entries = ["stable-skill"]
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? entries : []))
+			mockStat.mockResolvedValue({ isDirectory: () => true })
+			mockFileExists.mockImplementation(async (file: string) => file === stablePath || file === slowPath)
+			let resolveSlowRead!: (content: string) => void
+			const slowRead = new Promise<string>((resolve) => {
+				resolveSlowRead = resolve
+			})
+			mockReadFile.mockImplementation(async (file: string) => (file === slowPath ? slowRead : stableContent))
+
+			await skillsManager.discoverSkills()
+			expect(skillsManager.getSkillsMetadata()).toHaveLength(1)
+
+			// Slow skill first: the reader runs after the scan started but before any of
+			// its own skills were added, so an incremental commit would show an empty list.
+			entries = ["slow-skill", "stable-skill"]
+			const scan = skillsManager.discoverSkills()
+			await vi.waitFor(() => expect(mockReadFile.mock.calls.map((c) => c[0])).toContain(slowPath))
+			expect(skillsManager.getSkillsMetadata()).toHaveLength(1)
+			expect(skillsManager.getSkillDiagnostics()).toEqual([])
+
+			resolveSlowRead(slowContent)
+			await scan
+
+			expect(skillsManager.getSkillsMetadata()).toHaveLength(2)
+		})
 		it("does not hint at unescaped quotes when the parse error is on another line", async () => {
 			const skillDir = p(globalSkillsDir, "hint-skill")
 			const skillPath = p(skillDir, "SKILL.md")
