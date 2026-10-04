@@ -223,6 +223,7 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 
 			// The probe must look at the same key the writer locks, otherwise a live
 			// task is evicted from the cache while its write is still in progress.
+			expect(storeInternals(store).cache.has("alias-live")).toBe(true)
 		})
 
 		it("keeps a cached task live when the alias is dangling during the rename window", async () => {
@@ -243,7 +244,10 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 				.mockResolvedValue({ isSymbolicLink: () => true } as unknown as import("fs").Stats)
 			// A relative link target, so the probe must resolve it against the link's
 			// directory rather than the process working directory.
-			const readlinkSpy = vi.spyOn(fs, "readlink").mockResolvedValue("referent-history.json")
+			const readlinkSpy = vi.spyOn(fs, "readlink").mockImplementation(async (p) => {
+				if (p === aliasPath) return "referent-history.json"
+				throw new Error("not a symbolic link")
+			})
 			try {
 				await actualFs.rm(aliasPath, { force: true })
 				await actualFs.writeFile(referentPath + ".lock", "")
@@ -255,6 +259,40 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			}
 
 			expect(storeInternals(store).cache.has("dangling-live")).toBe(true)
+		})
+
+		it("follows the whole link chain to the key the writer locked", async () => {
+			// realpath resolves the whole chain, so it fails when the final referent is
+			// momentarily renamed to its backup. The probe must walk the chain, not just
+			// its first link, or it looks for a lock the writer never took.
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "chain-live" }))
+			const aliasPath = historyFilePath(storagePath, "chain-live")
+			const dir = path.dirname(aliasPath)
+			const referentPath = path.join(dir, "referent-history.json")
+			const realpathSpy = vi
+				.spyOn(fs, "realpath")
+				.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			const lstatSpy = vi
+				.spyOn(fs, "lstat")
+				.mockResolvedValue({ isSymbolicLink: () => true } as unknown as import("fs").Stats)
+			const readlinkSpy = vi.spyOn(fs, "readlink").mockImplementation(async (p) => {
+				if (p === aliasPath) return "nested-link.json"
+				if (p === path.join(dir, "nested-link.json")) return "referent-history.json"
+				throw new Error("not a symbolic link")
+			})
+			try {
+				await actualFs.rm(aliasPath, { force: true })
+				await actualFs.writeFile(referentPath + ".lock", "")
+				await store.reconcile()
+			} finally {
+				realpathSpy.mockRestore()
+				lstatSpy.mockRestore()
+				readlinkSpy.mockRestore()
+			}
+
+			expect(storeInternals(store).cache.has("chain-live")).toBe(true)
 		})
 	})
 

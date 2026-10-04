@@ -338,13 +338,19 @@ export class TaskHistoryStore {
 	/**
 	 * The lock key a writer would use for a task file. resolvePublishTarget refuses a
 	 * dangling symlink, but the liveness probe runs exactly in that window, so it
-	 * reads the link itself to find the lock held at the referent.
+	 * walks the chain itself to find the lock held at the final referent.
 	 */
 	private async lockKeyFor(taskFilePath: string): Promise<string> {
 		try {
 			return await resolvePublishTarget(taskFilePath)
 		} catch {
-			return path.resolve(path.dirname(taskFilePath), await fs.readlink(taskFilePath))
+			let key = taskFilePath
+			let target: string | undefined
+			// A real readlink throws for anything that is not a link, so the walk ends.
+			while ((target = await fs.readlink(key).catch(() => undefined)) !== undefined) {
+				key = path.resolve(path.dirname(key), target)
+			}
+			return key
 		}
 	}
 

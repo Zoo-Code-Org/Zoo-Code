@@ -242,8 +242,7 @@ export async function guardedWrite(
 	return enqueue(absolutePath, async () => {
 		const obs = task.observationRegistry.get(absolutePath)
 		// A targeted edit authorizes only the view the model saw, so a partial
-		// observation must stay partial after the publish; a full-file publish
-		// carries the whole content the model supplied and is complete.
+		// observation stays partial; a full-file publish is complete.
 		let staysPartial = false
 
 		if (kind === "edit") {

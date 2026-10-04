@@ -137,8 +137,7 @@ export async function resolvePublishTarget(absoluteFilePath: string): Promise<st
 				? (error as { code?: string }).code
 				: undefined
 		if (code !== "ENOENT") throw error
-		// ENOENT also covers a dangling symlink, and a broken link must never be
-		// written through: only a path that is not a link may fall back.
+		// ENOENT also covers a dangling symlink, which must never be written through.
 		const linkStat = await fs.lstat(absoluteFilePath).catch(() => undefined)
 		if (linkStat?.isSymbolicLink()) throw error
 		return absoluteFilePath
