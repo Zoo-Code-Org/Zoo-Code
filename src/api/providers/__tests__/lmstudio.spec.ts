@@ -115,22 +115,36 @@ describe("LmStudioHandler", () => {
 		it("should forward an abort signal to the client request", async () => {
 			const controller = new AbortController()
 
-			await collectStream(
-				handler.createMessage(systemPrompt, messages, {
-					taskId: "test-task",
-					abortSignal: controller.signal,
-				}),
-			)
+			let releaseStream!: () => void
+			const streamGate = new Promise<void>((resolve) => {
+				releaseStream = resolve
+			})
+			mockCreate.mockImplementationOnce(async () => {
+				await streamGate
+				return asyncStreamFrom([{ choices: [{ delta: { content: "Test response" }, index: 0 }], usage: null }])
+			})
 
+			const stream = handler.createMessage(systemPrompt, messages, {
+				taskId: "test-task",
+				abortSignal: controller.signal,
+			})
+			const collected = collectStream(stream).catch((error: unknown) => error)
+
+			// The stream is still open, so the abort can only reach the request signal through
+			// the bridge: the provider's finally block has not run yet.
+			await new Promise((resolve) => setTimeout(resolve, 20))
 			const options = mockCreate.mock.calls[0][1] as { signal?: AbortSignal }
-			// The request uses a request-local controller, not the task signal object itself, so
-			// assert the contract that matters: a signal is forwarded and a task abort reaches it.
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({ stream: true }),
 				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
+			expect(options.signal?.aborted).toBe(false)
+
 			controller.abort()
 			expect(options.signal?.aborted).toBe(true)
+
+			releaseStream()
+			await collected
 		})
 
 		it("streams reasoning chunks from delta.reasoning_content", async () => {
@@ -252,14 +266,22 @@ describe("LmStudioHandler", () => {
 				await new Promise((resolve) => setTimeout(resolve, 5))
 			}
 			controller.abort()
-			releaseCount()
 
-			const caught = (await pending) as Error
-			countSpy.mockRestore()
+			try {
+				// The count gate is still closed, so cancellation itself has to settle the
+				// pending count. Releasing the gate first would let counting finish normally
+				// and the later pre-request abort check would make this pass anyway.
+				const raced = await Promise.race([
+					pending,
+					new Promise((resolve) => setTimeout(() => resolve(undefined), 300)),
+				])
+				expect(raced).toBeInstanceOf(Error)
+				expect((raced as Error).name).toBe("AbortError")
+				expect((raced as Error).message).toBe("The LM Studio request was aborted")
+			} finally {
+				releaseCount()
+			}
 
-			expect(caught).toBeInstanceOf(Error)
-			expect(caught.name).toBe("AbortError")
-			expect(caught.message).toBe("The LM Studio request was aborted")
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 	})
