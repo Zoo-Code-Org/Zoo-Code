@@ -169,9 +169,8 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 				const baseRespStatusMsg = baseRespFields?.["status_msg"]
 				if (
 					baseRespStatusCode &&
-					// Stryker disable next-line ConditionalExpression: a truthy baseRespStatusCode is necessarily !== 0 and the trailing typeof gate reproduces the original result for falsy values
-					baseRespStatusCode !== 0 &&
-					(typeof baseRespStatusCode === "number" || typeof baseRespStatusCode === "string")
+					// Stryker disable next-line ConditionalExpression: a truthy baseRespStatusCode is necessarily !== 0, so deleting this check cannot change the outcome
+					baseRespStatusCode !== 0
 				) {
 					throw new Error(
 						`${this.providerName} API Error (${baseRespStatusCode}): ${

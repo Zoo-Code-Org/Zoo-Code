@@ -583,7 +583,7 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			expect(result.message).toBe("TestProvider completion error: TestProvider API Error (1001): bad token")
 		})
 
-		it("should ignore a boolean base_resp status_code", async () => {
+		it("should still report a boolean base_resp status_code, as before the guard refactor", async () => {
 			mockCreate.mockImplementationOnce(() =>
 				asyncStreamFrom([
 					{
@@ -593,9 +593,11 @@ describe("BaseOpenAiCompatibleProvider", () => {
 				]),
 			)
 
-			const chunks = await collectStream(handler.createMessage("system prompt", []))
-
-			expect(chunks).toEqual([{ type: "text", text: "ok" }])
+			// The guard refactor must not change what counts as an error status:
+			// any truthy non-zero status_code is reported, whatever its type.
+			await expect(collectStream(handler.createMessage("system prompt", []))).rejects.toThrow(
+				"TestProvider API Error (true): Unknown error",
+			)
 		})
 
 		it("should still wrap non-abort request errors with the provider prefix", async () => {
