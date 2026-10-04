@@ -60,6 +60,7 @@ import {
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
+import { writeToFileTool } from "../tools/WriteToFileTool"
 import { TaskScheduler } from "../task/TaskScheduler"
 import {
 	getEffectiveTaskApiConfiguration,
@@ -635,6 +636,11 @@ export class ClineProvider
 			cleanupFunctions.forEach((cleanup) => cleanup())
 			this.taskEventListeners.delete(task)
 		}
+
+		// Dispose removes all listeners, so the tool's per-task state must be released
+		// while the task is still here; otherwise the singleton keeps the disposed task
+		// and its diff-view provider.
+		writeToFileTool.clearTaskState(task)
 
 		try {
 			await task.dispose()

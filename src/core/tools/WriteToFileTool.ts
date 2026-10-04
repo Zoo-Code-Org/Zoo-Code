@@ -111,6 +111,16 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		return pathHasStabilized && !!partialPath
 	}
 
+	/**
+	 * Clear a task's partial-stream state from a disposal path that does not abort first.
+	 * Task.dispose() removes every listener, so a task disposed directly (for example
+	 * ClineProvider.cleanupFailedHistoryTask()) never fires the TaskAborted cleanup and
+	 * this singleton would keep the disposed task and its diff-view provider.
+	 */
+	public clearTaskState(task: Task): void {
+		this.resetTaskPartialState(task)
+	}
+
 	private resetTaskPartialState(task: Task): void {
 		const key = this.getPartialStreamFailureKey(task)
 		const state = this.taskPartialStreamState.get(key)
