@@ -112,6 +112,27 @@ describe("LmStudioHandler", () => {
 			expect(textChunks[0].text).toBe("Test response")
 		})
 
+		it("should forward an abort signal to the client request", async () => {
+			const controller = new AbortController()
+
+			await collectStream(
+				handler.createMessage(systemPrompt, messages, {
+					taskId: "test-task",
+					abortSignal: controller.signal,
+				}),
+			)
+
+			const options = mockCreate.mock.calls[0][1] as { signal?: AbortSignal }
+			// The request uses a request-local controller, not the task signal object itself, so
+			// assert the contract that matters: a signal is forwarded and a task abort reaches it.
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ stream: true }),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
+			controller.abort()
+			expect(options.signal?.aborted).toBe(true)
+		})
+
 		it("streams reasoning chunks from delta.reasoning_content", async () => {
 			// Regression: Qwen3 / DeepSeek-R1 style models served by LM Studio emit
 			// thinking via reasoning_content, not <think> tags inside content.
