@@ -66,19 +66,20 @@ export type OpenAiRequestOptions = {
 
 /**
  * Whether a failure indicates an aborted request: the caller's signal fired,
- * the SDK raised a native abort error, or the error carries the OpenAI SDK
- * abort error message (exactly "Request was aborted."). The message check
- * is an exact match on purpose: a substring match would misclassify
- * unrelated errors that merely mention aborting.
+ * an `Error` carries a native abort error name (`AbortError`,
+ * `APIUserAbortError`), or an `Error` carries the OpenAI SDK abort error
+ * message (exactly "Request was aborted.").
+ *
+ * The name and message checks require an `Error` instance on purpose: a
+ * plain object that merely looks like an abort must propagate unchanged so
+ * callers can inspect the real failure shape. The message check is an exact
+ * match on purpose: a substring match would misclassify unrelated errors
+ * that merely mention aborting.
  */
 export function isRequestAborted(error: unknown, signal?: AbortSignal): boolean {
-	const candidate = error as { name?: string; message?: string }
-	return (
-		Boolean(signal?.aborted) ||
-		candidate?.name === "AbortError" ||
-		candidate?.name === "APIUserAbortError" ||
-		candidate?.message === "Request was aborted."
-	)
+	const hasAbortName = error instanceof Error && (error.name === "AbortError" || error.name === "APIUserAbortError")
+	const hasSdkAbortMessage = error instanceof Error && error.message === "Request was aborted."
+	return Boolean(signal?.aborted) || hasAbortName || hasSdkAbortMessage
 }
 
 /**
@@ -106,14 +107,12 @@ export function createAbortError(providerName: string): Error {
  */
 export function rejectOnAbort<T>(pending: Promise<T>, signal: AbortSignal, providerName: string): Promise<T> {
 	if (signal.aborted) {
-		// The pending work keeps running past this early return, so its later
-		// rejection has to be consumed here: without a handler it surfaces as an
-		// unhandled rejection. The settlement is intentionally ignored at this
-		// boundary (cancellation is cooperative).
+		// The caller has already cancelled, so this branch never consumes `pending`;
+		// attach a handler anyway so a rejecting `pending` cannot surface as an
+		// unhandled rejection.
 		void pending.catch(() => {})
 		return Promise.reject(createAbortError(providerName))
 	}
-
 	return new Promise<T>((resolve, reject) => {
 		const onAbort = () => reject(createAbortError(providerName))
 		// Stryker disable next-line ObjectLiteral,BooleanLiteral: a signal fires its abort event exactly once and the settle handler removes this listener, so the once flag is unobservable
@@ -129,4 +128,39 @@ export function rejectOnAbort<T>(pending: Promise<T>, signal: AbortSignal, provi
 			},
 		)
 	})
+}
+
+/**
+ * Resolve a provider's model metadata inside a cancellation scope.
+ *
+ * A pre-aborted signal rejects immediately with the standardized AbortError
+ * before any lookup starts; a signal that fires while the lookup is pending
+ * settles via {@link rejectOnAbort} instead of waiting for the catalog to
+ * resolve. Abort failures from the lookup itself are normalized to the
+ * provider AbortError; any other resolution failure propagates unchanged.
+ *
+ * Providers pass their own resolution step, so the entry guard, the race, and
+ * the normalization logic exist once and are exercised through every
+ * provider's spec.
+ */
+export async function resolveModelWithAbort<T>(
+	fetchModel: () => Promise<T>,
+	abortSignal: AbortSignal | undefined,
+	providerName: string,
+): Promise<T> {
+	if (abortSignal?.aborted) {
+		throw createAbortError(providerName)
+	}
+
+	try {
+		if (abortSignal) {
+			return await rejectOnAbort(fetchModel(), abortSignal, providerName)
+		}
+		return await fetchModel()
+	} catch (error) {
+		if (isRequestAborted(error, abortSignal)) {
+			throw createAbortError(providerName)
+		}
+		throw error
+	}
 }
