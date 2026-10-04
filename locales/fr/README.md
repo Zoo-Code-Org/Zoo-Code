@@ -47,11 +47,11 @@ Zoo Code s'appuie sur les fondations créées par Roo Code et continue de les en
 - **Des workflows de terminal et d'édition plus fiables** — correctifs pour les fins prématurées de commandes dans le terminal, les conditions de concurrence liées à l'état des tâches, la gestion du contexte, l'édition de diff et l'utilisation d'outils propres aux providers.
 - **Davantage de contrôle sur ton espace de travail** — gestion des règles, restrictions MCP par mode, contrôle des chemins multi-root, options de raisonnement des modèles et actions de vérification des modifications à la fin d'une tâche.
 
-## Nouveautés de la v3.84.0
+## Nouveautés de la v3.86.0
 
-- ✨ **Nouveaux modèles SOTA ajoutés :** Utilise GPT-6 Sol, GPT-6 Luna et Claude Opus 5.5 avec les providers compatibles.
-- 🧭 **Tâches et sous-tâches plus fiables :** Garde les modes délégués isolés, préserve les liens des sous-tâches après des arrêts répétés et protège les réglages de l'orchestrateur quand les commandes slash changent de mode.
-- 🛠️ **Comportement plus fiable du terminal, des providers et de la recherche de code :** Améliore le terminal sous Windows et dans les environnements non anglophones, renforce les réponses et l'annulation des providers et assure-toi que la recherche de code utilise plus systématiquement le bon workspace.
+- ✨ **Prise en charge de nouveaux modèles :** Utilise GPT-6.1 Sol, profite de la limite de sortie corrigée de Claude Opus 5.5 et sélectionne DeepSeek V4.1 Flash sur OpenCode Go.
+- 🧭 **Arrêts et interruptions de tâches fiables :** Conserve la première raison de l'arrêt, réinitialise l'état d'arrêt du flux à chaque requête et empêche les tâches interrompues de relancer les sous-tâches rejetées.
+- 🛠️ **Outils, prompts et streaming de l'interface fiables :** Préserve les arguments d'outils reçus en streaming, applique la politique des outils MCP, évite les numéros de ligne inventés et fluidifie les mises à jour du chat.
 
 ## Que peut faire Zoo Code pour VOUS ?
 

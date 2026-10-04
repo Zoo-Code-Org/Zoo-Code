@@ -19,6 +19,7 @@ import type { ApiHandlerOptions } from "../../shared/api"
 import { TagMatcher } from "../../utils/tag-matcher"
 
 import { convertToOpenAiMessages } from "../transform/openai-format"
+import { sanitizeSurrogates } from "../transform/sanitize-surrogates"
 import { convertToR1Format } from "../transform/r1-format"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
@@ -92,6 +93,9 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		const modelUrl = this.options.openAiBaseUrl ?? ""
 		const modelId = this.options.openAiModelId ?? ""
 		const enabledR1Format = this.options.openAiR1FormatEnabled ?? false
+		// Stryker disable next-line LogicalOperator: equivalent. An unset option makes `&&`
+		// yield undefined, which the parameter default in convertToolsForOpenAI turns back into
+		// the same strict value as `??`.
 		const strictToolSchemas = this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS
 		const isAzureAiInference = this._isAzureAiInference(modelUrl)
 		const deepseekReasoner = modelId.includes("deepseek-reasoner") || enabledR1Format
@@ -103,7 +107,9 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 		let systemMessage: OpenAI.Chat.ChatCompletionSystemMessageParam = {
 			role: "system",
-			content: systemPrompt,
+			// Sanitize lone UTF-16 surrogates: providers validating the JSON body
+			// (e.g. DeepSeek) reject the whole request otherwise. See #461.
+			content: sanitizeSurrogates(systemPrompt),
 		}
 
 		if (this.options.openAiStreamingEnabled ?? true) {
@@ -118,7 +124,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 						content: [
 							{
 								type: "text",
-								text: systemPrompt,
+								text: sanitizeSurrogates(systemPrompt),
 								// @ts-ignore-next-line
 								cache_control: { type: "ephemeral" },
 							},
@@ -183,10 +189,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			let stream
 			try {
-				stream = await this.client.chat.completions.create(
-					requestOptions,
-					isAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {},
-				)
+				stream = await this.client.chat.completions.create(requestOptions, {
+					signal: metadata?.abortSignal,
+					...(isAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {}),
+				})
 			} catch (error) {
 				throw handleOpenAIError(error, this.providerName)
 			}
@@ -251,10 +257,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			let response
 			try {
-				response = await this.client.chat.completions.create(
-					requestOptions,
-					this._isAzureAiInference(modelUrl) ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {},
-				)
+				response = await this.client.chat.completions.create(requestOptions, {
+					signal: metadata?.abortSignal,
+					...(this._isAzureAiInference(modelUrl) ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {}),
+				})
 			} catch (error) {
 				throw handleOpenAIError(error, this.providerName)
 			}
@@ -358,6 +364,9 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	): ApiStream {
 		const { info: modelInfo, reasoning } = this.getModel()
 		const methodIsAzureAiInference = this._isAzureAiInference(this.options.openAiBaseUrl)
+		// Stryker disable next-line LogicalOperator: equivalent. An unset option makes `&&`
+		// yield undefined, which the parameter default in convertToolsForOpenAI turns back into
+		// the same strict value as `??`.
 		const strictToolSchemas = this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS
 
 		if (this.options.openAiStreamingEnabled ?? true) {
@@ -368,7 +377,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				messages: [
 					{
 						role: "developer",
-						content: `Formatting re-enabled\n${systemPrompt}`,
+						content: sanitizeSurrogates(`Formatting re-enabled\n${systemPrompt}`),
 					},
 					...convertToOpenAiMessages(messages),
 				],
@@ -390,10 +399,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			let stream
 			try {
-				stream = await this.client.chat.completions.create(
-					requestOptions,
-					methodIsAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {},
-				)
+				stream = await this.client.chat.completions.create(requestOptions, {
+					signal: metadata?.abortSignal,
+					...(methodIsAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {}),
+				})
 			} catch (error) {
 				throw handleOpenAIError(error, this.providerName)
 			}
@@ -405,7 +414,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				messages: [
 					{
 						role: "developer",
-						content: `Formatting re-enabled\n${systemPrompt}`,
+						content: sanitizeSurrogates(`Formatting re-enabled\n${systemPrompt}`),
 					},
 					...convertToOpenAiMessages(messages),
 				],
@@ -425,10 +434,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			let response
 			try {
-				response = await this.client.chat.completions.create(
-					requestOptions,
-					methodIsAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {},
-				)
+				response = await this.client.chat.completions.create(requestOptions, {
+					signal: metadata?.abortSignal,
+					...(methodIsAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {}),
+				})
 			} catch (error) {
 				throw handleOpenAIError(error, this.providerName)
 			}

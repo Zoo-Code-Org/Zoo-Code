@@ -4,6 +4,7 @@ import { DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS, type ModelInfo } from "@roo-code/t
 
 import type { ApiHandler, ApiHandlerCreateMessageMetadata } from "../index"
 import { ApiStream } from "../transform/stream"
+import { sanitizeSurrogates, sanitizeSurrogatesDeep } from "../transform/sanitize-surrogates"
 import { countTokens } from "../../utils/countTokens"
 import { isMcpTool } from "../../utils/mcp-name"
 import { getApiRequestTimeout } from "./utils/timeout-config"
@@ -57,10 +58,16 @@ export abstract class BaseProvider implements ApiHandler {
 				...tool,
 				function: {
 					...tool.function,
+					// Sanitize lone UTF-16 surrogates: providers validating the JSON body
+					// (e.g. DeepSeek) reject the whole request otherwise. See #461.
+					name: sanitizeSurrogates(tool.function.name),
+					description: sanitizeSurrogates(tool.function.description),
 					strict: useStrict,
-					parameters: useStrict
-						? this.convertToolSchemaForOpenAI(tool.function.parameters)
-						: tool.function.parameters,
+					parameters: sanitizeSurrogatesDeep(
+						useStrict
+							? this.convertToolSchemaForOpenAI(tool.function.parameters)
+							: tool.function.parameters,
+					),
 				},
 			}
 		})

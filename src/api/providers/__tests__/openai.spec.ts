@@ -11,8 +11,9 @@ import {
 	type ModelInfo,
 } from "@roo-code/types"
 import { Package } from "../../../shared/package"
-import { makeApiHandlerOptions } from "../../../test-utils/api"
+import { makeApiHandlerOptions, makeCreateMessageMetadata } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
 import axios from "axios"
 
 vitest.mock("../utils/timeout-config", () => ({
@@ -274,6 +275,42 @@ describe("OpenAiHandler", () => {
 			const textChunks = chunks.filter((chunk) => chunk.type === "text")
 			expect(textChunks).toHaveLength(1)
 			expect(textChunks[0].text).toBe("Test response")
+		})
+
+		it("should forward the task abortSignal to streaming requests", async () => {
+			const controller = new AbortController()
+
+			await collectStream(
+				handler.createMessage(
+					systemPrompt,
+					messages,
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
+			)
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ stream: true }), {
+				signal: controller.signal,
+			})
+		})
+
+		it("should forward the task abortSignal to non-streaming requests", async () => {
+			const controller = new AbortController()
+			const nonStreamingHandler = new OpenAiHandler({
+				...mockOptions,
+				openAiStreamingEnabled: false,
+			})
+
+			await collectStream(
+				nonStreamingHandler.createMessage(
+					systemPrompt,
+					messages,
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
+			)
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: mockOptions.openAiModelId }), {
+				signal: controller.signal,
+			})
 		})
 
 		it("adds Extra Body fields to streaming requests without allowing reserved field overrides", async () => {
@@ -1148,6 +1185,24 @@ describe("OpenAiHandler", () => {
 			expect(callArgs).not.toHaveProperty("max_completion_tokens")
 		})
 
+		it("should forward the task abortSignal together with the Azure AI Inference path", async () => {
+			const azureHandler = new OpenAiHandler(azureOptions)
+			const controller = new AbortController()
+
+			await collectStream(
+				azureHandler.createMessage(
+					"You are a helpful assistant.",
+					[{ role: "user", content: "Hello!" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
+			)
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ stream: true }), {
+				signal: controller.signal,
+				path: "/models/chat/completions",
+			})
+		})
+
 		it("should handle non-streaming responses with Azure AI Inference Service", async () => {
 			const azureHandler = new OpenAiHandler({
 				...azureOptions,
@@ -1387,6 +1442,48 @@ describe("OpenAiHandler", () => {
 				}),
 				{},
 			)
+		})
+
+		it("should forward the task abortSignal to O3 requests", async () => {
+			const o3Handler = new OpenAiHandler(o3Options)
+			const controller = new AbortController()
+
+			await collectStream(
+				o3Handler.createMessage(
+					"You are a helpful assistant.",
+					[{ role: "user", content: "Hello!" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
+			)
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: "o3-mini", stream: true }), {
+				signal: controller.signal,
+			})
+		})
+
+		it.each([
+			{ name: "standard", baseUrl: undefined },
+			{ name: "Azure AI Inference", baseUrl: "https://test.services.ai.azure.com" },
+		])("should forward the task abortSignal to non-streaming O3 requests ($name)", async ({ baseUrl }) => {
+			const o3Handler = new OpenAiHandler({
+				...o3Options,
+				openAiStreamingEnabled: false,
+				...(baseUrl ? { openAiBaseUrl: baseUrl, azureApiVersion: "2024-05-01-preview" } : {}),
+			})
+			const controller = new AbortController()
+
+			await collectStream(
+				o3Handler.createMessage(
+					"You are a helpful assistant.",
+					[{ role: "user", content: "Hello!" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
+			)
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: "o3-mini" }), {
+				signal: controller.signal,
+				...(baseUrl ? { path: "/models/chat/completions" } : {}),
+			})
 		})
 
 		it.each([true, false])("adds Extra Body fields to O3 requests when streaming is %s", async (streaming) => {
@@ -2018,5 +2115,165 @@ describe("getOpenAiModels", () => {
 		const result = await getOpenAiModels("https://api.example.com/v1", "test-key")
 
 		expect(result).toEqual(["gpt-4", "gpt-3.5-turbo"])
+	})
+})
+
+describe("OpenAiHandler lone surrogate sanitization (#461)", () => {
+	beforeEach(() => {
+		mockCreate.mockClear()
+	})
+
+	it("sends a request body free of lone surrogates, keeping tool call/result pairing intact", async () => {
+		const lone = "bad\uD800end"
+		const sanitized = "bad\uFFFDend"
+		const handler = new OpenAiHandler(
+			makeApiHandlerOptions({
+				openAiApiKey: "test-api-key",
+				openAiModelId: "gpt-4",
+				openAiBaseUrl: "https://api.openai.com/v1",
+			}),
+		)
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{ role: "user", content: lone },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "call-\uD800", name: "read_file", input: { path: lone } }],
+			},
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: "call-\uD800", content: lone }] },
+		]
+
+		await collectStream(
+			handler.createMessage("system \uD800 prompt", messages, {
+				taskId: "task-1",
+				tools: [
+					{
+						type: "function",
+						function: {
+							name: "read_file",
+							description: lone,
+							parameters: {
+								type: "object",
+								properties: { path: { type: "string", description: lone } },
+							},
+						},
+					},
+				],
+			}),
+		)
+
+		expect(mockCreate).toHaveBeenCalledOnce()
+		const request = mockCreate.mock.calls[0][0]
+
+		// The whole body (system prompt, messages, tools) must be free of lone surrogates.
+		// Inspect the raw values: JSON.stringify escapes lone surrogates as \udXXX text, so
+		// a regex over the serialized body can never fail. See expectNoLoneSurrogates.
+		expectNoLoneSurrogates(request)
+
+		expect(request.messages[0]).toEqual({ role: "system", content: "system \uFFFD prompt" })
+
+		// The tool call and its result stay paired after injective id sanitization.
+		const assistantMessage = request.messages.find(
+			(message: { role: string }) => message.role === "assistant",
+		) as OpenAI.Chat.ChatCompletionAssistantMessageParam
+		const toolMessage = request.messages.find(
+			(message: { role: string }) => message.role === "tool",
+		) as OpenAI.Chat.ChatCompletionToolMessageParam
+		const toolCalls = assistantMessage.tool_calls as OpenAI.Chat.ChatCompletionMessageFunctionToolCall[]
+		expect(toolMessage.tool_call_id).toBe(toolCalls[0].id)
+		expect(toolMessage.content).toBe(sanitized)
+		expect(JSON.parse(toolCalls[0].function.arguments)).toEqual({ path: sanitized })
+		expect(request.tools[0].function.description).toBe(sanitized)
+	})
+
+	it("sanitizes the system prompt inside the cache_control block when streaming with prompt caching", async () => {
+		const handler = new OpenAiHandler(
+			makeApiHandlerOptions({
+				openAiApiKey: "test-api-key",
+				openAiModelId: "gpt-4",
+				openAiBaseUrl: "https://api.openai.com/v1",
+				openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, supportsPromptCache: true },
+			}),
+		)
+
+		await collectStream(
+			handler.createMessage("system \uD800 prompt", [{ role: "user", content: "hi" }], { taskId: "task-1" }),
+		)
+
+		expect(mockCreate).toHaveBeenCalledOnce()
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.messages[0]).toEqual({
+			role: "system",
+			content: [{ type: "text", text: "system \uFFFD prompt", cache_control: { type: "ephemeral" } }],
+		})
+		expect(request.stream).toBe(true)
+		expectNoLoneSurrogates(request)
+	})
+
+	it("sanitizes the system prompt string for non-streaming requests", async () => {
+		const handler = new OpenAiHandler(
+			makeApiHandlerOptions({
+				openAiApiKey: "test-api-key",
+				openAiModelId: "gpt-4",
+				openAiBaseUrl: "https://api.openai.com/v1",
+				openAiStreamingEnabled: false,
+			}),
+		)
+
+		await collectStream(
+			handler.createMessage("system \uD800 prompt", [{ role: "user", content: "hi" }], { taskId: "task-1" }),
+		)
+
+		expect(mockCreate).toHaveBeenCalledOnce()
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.messages[0]).toEqual({ role: "system", content: "system \uFFFD prompt" })
+		expect(request.stream).toBeUndefined()
+		expectNoLoneSurrogates(request)
+	})
+
+	it("sanitizes the o3 developer message when streaming", async () => {
+		const handler = new OpenAiHandler(
+			makeApiHandlerOptions({
+				openAiApiKey: "test-api-key",
+				openAiModelId: "o3-mini",
+				openAiBaseUrl: "https://api.openai.com/v1",
+			}),
+		)
+
+		await collectStream(
+			handler.createMessage("system \uD800 prompt", [{ role: "user", content: "hi" }], { taskId: "task-1" }),
+		)
+
+		expect(mockCreate).toHaveBeenCalledOnce()
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.messages[0]).toEqual({
+			role: "developer",
+			content: "Formatting re-enabled\nsystem \uFFFD prompt",
+		})
+		expect(request.stream).toBe(true)
+		expectNoLoneSurrogates(request)
+	})
+
+	it("sanitizes the o3 developer message for non-streaming requests", async () => {
+		const handler = new OpenAiHandler(
+			makeApiHandlerOptions({
+				openAiApiKey: "test-api-key",
+				openAiModelId: "o3-mini",
+				openAiBaseUrl: "https://api.openai.com/v1",
+				openAiStreamingEnabled: false,
+			}),
+		)
+
+		await collectStream(
+			handler.createMessage("system \uD800 prompt", [{ role: "user", content: "hi" }], { taskId: "task-1" }),
+		)
+
+		expect(mockCreate).toHaveBeenCalledOnce()
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.messages[0]).toEqual({
+			role: "developer",
+			content: "Formatting re-enabled\nsystem \uFFFD prompt",
+		})
+		expect(request.stream).toBeUndefined()
+		expectNoLoneSurrogates(request)
 	})
 })

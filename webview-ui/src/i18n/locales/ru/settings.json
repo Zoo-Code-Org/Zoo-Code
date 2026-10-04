@@ -346,6 +346,10 @@
 				"label": "Включить защиту от разрушительных команд",
 				"description": "Скачивает и использует Destructive Command Guard (DCG) для этой платформы. Разрешённые DCG команды выполняются автоматически. Команды, заблокированные DCG, требуют твоего подтверждения. Пока эта настройка включена, списки команд Zoo отключены. Скачанный исполняемый файл сохраняется после отключения настройки."
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "Разрешённые авто-выполняемые команды",
 			"allowedCommandsDescription": "Префиксы команд, которые могут быть автоматически выполнены при включённом параметре \"Всегда одобрять выполнение операций\". Добавьте * для разрешения всех команд (используйте с осторожностью).",
 			"deniedCommands": "Запрещенные команды",
