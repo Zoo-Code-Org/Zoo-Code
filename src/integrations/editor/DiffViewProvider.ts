@@ -519,6 +519,10 @@ export class DiffViewProvider {
 			// already published. When a stat-matched read returns the same bytes the
 			// write already happened, so adopt that state instead of failing.
 			if (
+				// Stryker disable next-line LogicalOperator: GuardRejectedError is only thrown
+				// by guardedWrite, and guardedWrite is reached only after the !saveTask check
+				// above has thrown a plain Error. So whenever this operand is evaluated saveTask
+				// is provably non-null: dropping it cannot change which branch is taken.
 				error instanceof GuardRejectedError &&
 				saveTask &&
 				encodedContent &&
