@@ -291,8 +291,73 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 				lstatSpy.mockRestore()
 				readlinkSpy.mockRestore()
 			}
+		})
 
-			expect(storeInternals(store).cache.has("chain-live")).toBe(true)
+		it("probes the key the bounded walk actually reached on a long chain", async () => {
+			// A chain longer than the hop limit: the walk stops at the limit, so the probe
+			// must look at the key it reached, not at the far end of the chain.
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "long-chain" }))
+			const startPath = historyFilePath(storagePath, "long-chain")
+			const dir = path.dirname(startPath)
+			const hops = Array.from({ length: 9 }, (_, index) => path.join(dir, "h" + (index + 1) + ".json"))
+			const reachedPath = hops[7]
+			const realpathSpy = vi
+				.spyOn(fs, "realpath")
+				.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			const lstatSpy = vi
+				.spyOn(fs, "lstat")
+				.mockResolvedValue({ isSymbolicLink: () => true } as unknown as import("fs").Stats)
+			const readlinkSpy = vi.spyOn(fs, "readlink").mockImplementation(async (p) => {
+				const index = [startPath, ...hops].indexOf(String(p))
+				if (index === -1 || index === hops.length) throw new Error("not a symbolic link")
+				return hops[index]
+			})
+			try {
+				await actualFs.rm(startPath, { force: true })
+				await actualFs.writeFile(reachedPath + ".lock", "")
+				await store.reconcile()
+			} finally {
+				realpathSpy.mockRestore()
+				lstatSpy.mockRestore()
+				readlinkSpy.mockRestore()
+			}
+
+			expect(storeInternals(store).cache.has("long-chain")).toBe(true)
+		})
+
+		it("terminates on a link cycle instead of holding the store lock forever", async () => {
+			// Two links that point at each other: every readlink succeeds, so an unbounded
+			// walk would never release the store lock.
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "cycle-live" }))
+			const aPath = historyFilePath(storagePath, "cycle-live")
+			const bPath = path.join(path.dirname(aPath), "b.json")
+			const realpathSpy = vi
+				.spyOn(fs, "realpath")
+				.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			const lstatSpy = vi
+				.spyOn(fs, "lstat")
+				.mockResolvedValue({ isSymbolicLink: () => true } as unknown as import("fs").Stats)
+			const readlinkSpy = vi.spyOn(fs, "readlink").mockImplementation(async (p) => {
+				if (p === aPath) return "b.json"
+				if (p === bPath) return "a.json"
+				throw new Error("not a symbolic link")
+			})
+			try {
+				await actualFs.rm(aPath, { force: true })
+				await store.reconcile()
+			} finally {
+				realpathSpy.mockRestore()
+				lstatSpy.mockRestore()
+				readlinkSpy.mockRestore()
+			}
+
+			// The walk is bounded, so reconcile returned; the probe looked at the key it
+			// reached after the bounded hops, found no lock there, and evicted the task.
+			expect(storeInternals(store).cache.has("cycle-live")).toBe(false)
 		})
 	})
 
