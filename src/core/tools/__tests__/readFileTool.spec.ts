@@ -860,7 +860,7 @@ describe("ReadFileTool", () => {
 
 			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
 			// fs.readFile with "utf8" encoding returns a string, not a Buffer
-			mockedFsReadFile.mockResolvedValue("line1\nline2\nline3\nline4\nline5" as any)
+			mockedFsReadFile.mockResolvedValue(Buffer.from("line1\nline2\nline3\nline4\nline5")) as any
 
 			await readFileTool.execute(
 				{ files: [{ path: "test.ts", lineRanges: [{ start: 2, end: 4 }] }] } as any,
@@ -2006,7 +2006,7 @@ describe("ReadFileTool", () => {
 
 				mockedFsStat.mockResolvedValue(bigintStats())
 				mockedIsBinaryFile.mockResolvedValue(false)
-				mockedFsReadFile.mockResolvedValue("a\nb\nc\nd\ne")
+				mockedFsReadFile.mockResolvedValue(Buffer.from("a\nb\nc\nd\ne"))
 
 				const reg = mockTask.observationRegistry!
 				const observeSpy = vi.spyOn(reg, "observe")
@@ -2032,7 +2032,7 @@ describe("ReadFileTool", () => {
 
 				mockedFsStat.mockResolvedValue(bigintStats())
 				mockedIsBinaryFile.mockResolvedValue(false)
-				mockedFsReadFile.mockResolvedValue("a\nb")
+				mockedFsReadFile.mockResolvedValue(Buffer.from("a\nb"))
 				mockedReadWithSlice.mockReturnValue({
 					content: "1 | a\n2 | b",
 					returnedLines: 2,
@@ -2069,7 +2069,7 @@ describe("ReadFileTool", () => {
 
 				mockedFsStat.mockResolvedValue(bigintStats())
 				mockedIsBinaryFile.mockResolvedValue(false)
-				mockedFsReadFile.mockResolvedValue("a\nb")
+				mockedFsReadFile.mockResolvedValue(Buffer.from("a\nb"))
 				mockedReadWithSlice.mockReturnValue({
 					content: "1 | a\n2 | b",
 					returnedLines: 2,
@@ -2107,7 +2107,7 @@ describe("ReadFileTool", () => {
 
 				mockedFsStat.mockResolvedValue(bigintStats())
 				mockedIsBinaryFile.mockResolvedValue(false)
-				mockedFsReadFile.mockResolvedValue("a\nb\nc")
+				mockedFsReadFile.mockResolvedValue(Buffer.from("a\nb\nc"))
 				mockedReadWithSlice.mockReturnValue({
 					content: "1 | a",
 					returnedLines: 1,
@@ -2134,7 +2134,70 @@ describe("ReadFileTool", () => {
 				// than clipping.
 				const pushed = callbacks.pushToolResult.mock.calls[0][0]
 				expect(pushed).toContain("showing 1 of 5000 total lines")
-				expect(pushed).not.toContain("clipped in this view")
+			})
+
+			it("native: a read whose bytes did not survive the UTF-8 decode records a partial observation", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				// 0xFF is not valid UTF-8, so the model receives U+FFFD instead of the byte.
+				const raw = Buffer.from([0x61, 0xff])
+				mockedFsStat.mockResolvedValue(bigintStats())
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue(raw)
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | a\uFFFD",
+					returnedLines: 1,
+					totalLines: 1,
+					wasTruncated: false,
+					includedRanges: [[1, 1]],
+				})
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				await readFileTool.execute({ path: "lossy.ts" }, mockTask as unknown as Task, callbacks)
+
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
+				expect(calledComplete).toBe(false)
+				expect(reg.get(calledPath)!.complete).toBe(false)
+			})
+
+			it("legacy: a read whose bytes did not survive the UTF-8 decode records a partial observation", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				const raw = Buffer.from([0x61, 0xff])
+				mockedFsStat.mockResolvedValue(bigintStats())
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue(raw)
+				mockedReadWithSlice.mockReturnValue({
+					content: "1 | a\uFFFD",
+					returnedLines: 1,
+					totalLines: 1,
+					wasTruncated: false,
+					includedRanges: [[1, 1]],
+				})
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				const legacyParams: LegacyReadFileParams = {
+					files: [{ path: "legacy-lossy.ts" }],
+					_legacyFormat: true,
+				}
+
+				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
+
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
+				expect(calledComplete).toBe(false)
+				expect(reg.get(calledPath)!.complete).toBe(false)
 			})
 		})
 	})

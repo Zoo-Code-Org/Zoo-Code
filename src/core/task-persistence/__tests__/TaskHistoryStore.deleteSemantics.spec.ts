@@ -196,6 +196,36 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			// One lock for the underlying file, keyed by the referent; the unlink
 			// still targets the path the store named.
 			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(referentPath, expect.any(Function))
+		})
+
+		it("waits on the peer's lock at the referent when the link is dangling", async () => {
+			// delete() must resolve the chain itself: resolvePublishTarget refuses a
+			// dangling link, and the old code treated that rejection as "already deleted"
+			// so the link was never removed.
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "alias-dangling" }))
+			const aliasPath = historyFilePath(storagePath, "alias-dangling")
+			const referentPath = path.join(storagePath, "tasks", "alias-dangling", "referent-history.json")
+			const realpathSpy = vi
+				.spyOn(fs, "realpath")
+				.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			const lstatSpy = vi
+				.spyOn(fs, "lstat")
+				.mockResolvedValue({ isSymbolicLink: () => true } as unknown as import("fs").Stats)
+			const readlinkSpy = vi.spyOn(fs, "readlink").mockImplementation(async (p) => {
+				if (p === aliasPath) return "referent-history.json"
+				throw new Error("not a symbolic link")
+			})
+			try {
+				await expect(store.delete("alias-dangling")).resolves.toBeUndefined()
+			} finally {
+				realpathSpy.mockRestore()
+				lstatSpy.mockRestore()
+				readlinkSpy.mockRestore()
+			}
+
+			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(referentPath, expect.any(Function))
 			expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith(aliasPath)
 		})
 	})

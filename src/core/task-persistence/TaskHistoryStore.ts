@@ -284,7 +284,7 @@ export class TaskHistoryStore {
 				// Lock the resolved publish target, not the path as spelled: proper-lockfile
 				// keys the lock by the path it is given, so an alias and its referent would
 				// take two locks for one file. The unlink still removes the named path.
-				await withFileLock(await resolvePublishTarget(filePath), () => fs.unlink(filePath))
+				await withFileLock(await this.lockKeyFor(filePath), () => fs.unlink(filePath))
 			} catch {
 				// File may already be deleted
 			}
@@ -314,7 +314,7 @@ export class TaskHistoryStore {
 					const filePath = await this.getTaskFilePath(taskId)
 					// Same lock key as delete(): the resolved referent, while the unlink
 					// still removes the path the caller named.
-					await withFileLock(await resolvePublishTarget(filePath), () => fs.unlink(filePath))
+					await withFileLock(await this.lockKeyFor(filePath), () => fs.unlink(filePath))
 				} catch {
 					// File may already be deleted
 				}
@@ -336,9 +336,9 @@ export class TaskHistoryStore {
 	 * - Tasks in cache but missing from disk: remove
 	 */
 	/**
-	 * The lock key a writer would use for a task file. resolvePublishTarget refuses a
-	 * dangling symlink, but the liveness probe runs exactly in that window, so it
-	 * walks the chain itself (bounded) to find the lock held at the referent.
+	 * The lock key a writer would use for a task file. resolvePublishTarget refuses
+	 * a dangling link, so the delete paths and the liveness probe walk the chain
+	 * themselves to find the lock held at the referent.
 	 */
 	private async lockKeyFor(taskFilePath: string): Promise<string> {
 		try {

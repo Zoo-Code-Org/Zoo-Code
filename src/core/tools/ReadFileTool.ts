@@ -220,6 +220,8 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					const preReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
 					const buffer = await fs.readFile(fullPath)
 					const fileContent = buffer.toString("utf-8")
+					// A lossy decode is not the whole file: the model never saw those bytes.
+					const lossyDecode = !Buffer.from(fileContent).equals(buffer)
 					// S4b follow-up (#46 / epic #1375): processTextFile reports whether the
 					// returned content is the whole file; the observation below records that
 					// scope so the write guard can deny full-file updates built on a partial view.
@@ -237,7 +239,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					if (preReadStats && postReadStats) {
 						const preReadToken = versionTokenOfStat(preReadStats)
 						if (preReadToken === versionTokenOfStat(postReadStats)) {
-							task.observationRegistry.observe(fullPath, preReadToken, processed.complete)
+							task.observationRegistry.observe(fullPath, preReadToken, processed.complete && !lossyDecode)
 						}
 					}
 
@@ -811,7 +813,10 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				// A2 (epic #1375): capture the on-disk token before the read so a mutation
 				// landing mid-read is detected by the post-read stat below.
 				const preReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
-				const rawContent = await fs.readFile(fullPath, "utf8")
+				const rawBuffer = await fs.readFile(fullPath)
+				const rawContent = rawBuffer.toString("utf-8")
+				// Same contract: a lossy decode is a partial view.
+				const lossyDecode = !Buffer.from(rawContent).equals(rawBuffer)
 
 				// Handle line ranges if specified
 				// S4b follow-up (#46 / epic #1375): a line-range read returns only the requested
@@ -860,7 +865,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				if (preReadStats && postReadStats) {
 					const preReadToken = versionTokenOfStat(preReadStats)
 					if (preReadToken === versionTokenOfStat(postReadStats)) {
-						task.observationRegistry.observe(fullPath, preReadToken, readComplete)
+						task.observationRegistry.observe(fullPath, preReadToken, readComplete && !lossyDecode)
 					}
 				}
 			} catch (error) {
