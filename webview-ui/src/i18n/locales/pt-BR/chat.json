@@ -344,9 +344,9 @@
 		"support": "Apoie o Zoo Code nos dando uma estrela no <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novidades:",
-			"highlight1": "🔑 Use sua chave de API do Zoo Gateway em qualquer lugar: leve-a para qualquer cliente ou workflow compatível com OpenAI: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "🎁 Por tempo limitado, tenha acesso grátis ao MiniMax-M3 pelo Zoo Gateway.",
-			"highlight3": "✨ Já disponíveis: os novíssimos modelos GPT-6 Astra e Claude Fable 5.1."
+			"highlight1": "✨ Suporte a novos modelos: Use GPT-6.1 Sol, aproveite o limite de saída corrigido do Claude Opus 5.5 e selecione DeepSeek V4.1 Flash no OpenCode Go.",
+			"highlight2": "🧭 Cancelamentos e interrupções de tarefas confiáveis: Preserve o primeiro motivo do cancelamento, redefina o estado de cancelamento do stream a cada requisição e impeça tarefas interrompidas de executar novamente subtarefas rejeitadas.",
+			"highlight3": "🛠️ Ferramentas, prompts e streaming da interface confiáveis: Mantenha intactos os argumentos das ferramentas recebidos por streaming, aplique a política de ferramentas MCP, evite números de linha inventados e torne as atualizações do chat mais fluidas."
 		},
 		"cloudAgents": {
 			"heading": "Novidades na Nuvem:",

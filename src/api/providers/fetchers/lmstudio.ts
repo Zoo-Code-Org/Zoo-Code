@@ -3,6 +3,8 @@ import { LLM, LLMInfo, LLMInstanceInfo, LMStudioClient } from "@lmstudio/sdk"
 
 import { type ModelInfo, lMStudioDefaultModelInfo, providerIdentifiers } from "@roo-code/types"
 
+import { throwIfAborted } from "../utils/abort-signal"
+
 import { flushModels, getModels } from "./modelCache"
 
 const modelsWithLoadedDetails = new Set<string>()
@@ -49,7 +51,10 @@ export const parseLMStudioModel = (rawModel: LLMInstanceInfo | LLMInfo): ModelIn
 	return modelInfo
 }
 
-export async function getLMStudioModels(baseUrl = "http://localhost:1234"): Promise<Record<string, ModelInfo>> {
+export async function getLMStudioModels(
+	baseUrl = "http://localhost:1234",
+	opts?: { signal?: AbortSignal },
+): Promise<Record<string, ModelInfo>> {
 	// clear the set of models that have full details loaded
 	modelsWithLoadedDetails.clear()
 	// clearing the input can leave an empty string; use the default in that case
@@ -66,8 +71,11 @@ export async function getLMStudioModels(baseUrl = "http://localhost:1234"): Prom
 
 		// test the connection to LM Studio first
 		// errors will be caught further down
-		await axios.get(`${baseUrl}/v1/models`)
+		await axios.get(`${baseUrl}/v1/models`, { signal: opts?.signal })
 
+		// The SDK's model-list calls expose no cancellation option, so an abort
+		// during them cannot reach the network; releasing the shared cache entry
+		// and stopping the waiters happens at the model-cache layer.
 		const client = new LMStudioClient({ baseUrl: lmsUrl })
 
 		// First, try to get all downloaded models
@@ -116,6 +124,10 @@ export async function getLMStudioModels(baseUrl = "http://localhost:1234"): Prom
 			modelsWithLoadedDetails.add(lmstudioModel.modelKey)
 		}
 	} catch (error) {
+		// An aborted connection probe must reject instead of falling through to
+		// the empty-catalog handling below.
+		throwIfAborted(opts?.signal)
+
 		if (error.code === "ECONNREFUSED") {
 			console.warn(`Error connecting to LMStudio at ${baseUrl}`)
 		} else {

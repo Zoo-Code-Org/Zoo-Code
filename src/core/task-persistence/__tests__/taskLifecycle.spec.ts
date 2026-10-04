@@ -5,6 +5,8 @@ import {
 	completeDelegatedChild,
 	delegateTaskToChild,
 	interruptDelegatedChild,
+	LifecycleTransitionError,
+	settleRejectedCreateSubtaskAction,
 } from "../taskLifecycle"
 
 function item(id: string, overrides: Partial<HistoryItem> = {}): HistoryItem {
@@ -100,5 +102,86 @@ describe("task lifecycle transitions", () => {
 		const abandoned = abandonDelegatedChild(parent, { ...activeChild, status: "interrupted" })
 		expect(abandoned.parent).toMatchObject({ status: "active", awaitingChildId: undefined })
 		expect(abandoned.child).toMatchObject({ parentTaskId: undefined, rootTaskId: undefined })
+	})
+})
+
+describe("settleRejectedCreateSubtaskAction", () => {
+	const createSubtaskAction = {
+		kind: "create_subtask" as const,
+		actionId: "create-action",
+		approvalText: "{}",
+		mode: "code",
+		message: "Do something",
+		todos: [],
+	}
+
+	it("clears only the matching pending create_subtask action", () => {
+		const parent = item("parent", {
+			status: "interrupted",
+			parentTaskId: "root",
+			rootTaskId: "root",
+			awaitingChildId: undefined,
+			tokensIn: 12,
+			totalCost: 0.5,
+			pendingAction: createSubtaskAction,
+		})
+
+		const settled = settleRejectedCreateSubtaskAction(parent, "create-action")
+
+		expect(settled).toEqual({
+			...parent,
+			pendingAction: undefined,
+		})
+		expect(settled).toMatchObject({
+			status: "interrupted",
+			parentTaskId: "root",
+			rootTaskId: "root",
+			tokensIn: 12,
+			totalCost: 0.5,
+		})
+	})
+
+	it("never clears a replacement action with a different ID", () => {
+		const parent = item("parent", {
+			status: "interrupted",
+			pendingAction: { ...createSubtaskAction, actionId: "replacement-action" },
+		})
+
+		expect(settleRejectedCreateSubtaskAction(parent, "stale-action")).toBe(parent)
+	})
+
+	it("never clears a pending action of a different kind", () => {
+		const parent = item("parent", {
+			pendingAction: {
+				kind: "finish_subtask",
+				actionId: "create-action",
+				approvalText: "{}",
+				parentTaskId: "root",
+				result: "done",
+			},
+		})
+
+		expect(settleRejectedCreateSubtaskAction(parent, "create-action")).toBe(parent)
+	})
+
+	it("leaves a record without a pending action unchanged", () => {
+		const parent = item("parent", { status: "interrupted" })
+
+		expect(settleRejectedCreateSubtaskAction(parent, "create-action")).toBe(parent)
+	})
+
+	it("never mutates a completed record", () => {
+		const parent = item("parent", { status: "completed", pendingAction: createSubtaskAction })
+
+		expect(settleRejectedCreateSubtaskAction(parent, "create-action")).toBe(parent)
+	})
+
+	it("rejects an interrupted parent's delegation with a typed transition error", () => {
+		const parent = item("parent", { status: "interrupted", pendingAction: createSubtaskAction })
+
+		expect(() => delegateTaskToChild(parent, "child")).toThrow(LifecycleTransitionError)
+		expect(() => delegateTaskToChild(parent, "child")).toThrow(
+			"Invalid task status transition: interrupted → delegated",
+		)
 	})
 })
