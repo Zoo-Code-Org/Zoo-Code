@@ -2985,7 +2985,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			let responseText: string | undefined
 			let responseImages: string[] | undefined
 
-			if (response === "messageResponse") {
+			// The Continue button (`yesButtonClicked`) can also carry chat box input.
+			if (response === "messageResponse" || text || (images && images.length > 0)) {
 				await this.say("user_feedback", text, images)
 				responseText = text
 				responseImages = images
