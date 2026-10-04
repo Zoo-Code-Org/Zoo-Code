@@ -243,7 +243,12 @@ describe("ExtensionStateContext", () => {
 			expect.objectContaining({ name: "good-skill" }),
 		])
 		expect(JSON.parse(screen.getByTestId("skill-diagnostics").textContent!)).toEqual([
-			expect.objectContaining({ path: "/workspace/.roo/skills/bad-skill/SKILL.md", line: 3 }),
+			expect.objectContaining({
+				path: "/workspace/.roo/skills/bad-skill/SKILL.md",
+				source: "project",
+				message: "bad indentation of a mapping entry",
+				line: 3,
+			}),
 		])
 	})
 
@@ -285,7 +290,12 @@ describe("ExtensionStateContext", () => {
 			expect.objectContaining({ name: "good-skill" }),
 		])
 		expect(JSON.parse(screen.getByTestId("skill-diagnostics").textContent!)).toEqual([
-			expect.objectContaining({ path: "/workspace/.roo/skills/bad-skill/SKILL.md", line: 3 }),
+			expect.objectContaining({
+				path: "/workspace/.roo/skills/bad-skill/SKILL.md",
+				source: "project",
+				message: "bad indentation of a mapping entry",
+				line: 3,
+			}),
 		])
 
 		// ...and a later message that omits skillDiagnostics must clear the
