@@ -291,6 +291,8 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 				lstatSpy.mockRestore()
 				readlinkSpy.mockRestore()
 			}
+
+			expect(storeInternals(store).cache.has("chain-live")).toBe(true)
 		})
 
 		it("probes the key the bounded walk actually reached on a long chain", async () => {
