@@ -1247,6 +1247,13 @@ describe("writeToFileTool", () => {
 			// remaining cleanup (diff view reset + per-task state teardown) always completes.
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 			try {
+				let abortCleanup: (() => void) | undefined
+				mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+					if (event === RooCodeEventName.TaskAborted) {
+						abortCleanup = listener
+					}
+					return mockCline
+				})
 				mockedCreateDirectoriesForFile.mockRejectedValue(
 					Object.assign(new Error("EACCES: permission denied, mkdir '/ro'"), { code: "EACCES" }),
 				)
@@ -1265,7 +1272,9 @@ describe("writeToFileTool", () => {
 				)
 				// The diff view is still reset and the per-task stream state still torn down.
 				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
-				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+				// The reference that was registered must be the one removed.
+				expect(abortCleanup).toBeTypeOf("function")
+				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
 			} finally {
 				consoleErrorSpy.mockRestore()
 			}
