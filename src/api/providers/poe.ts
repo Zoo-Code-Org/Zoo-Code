@@ -208,7 +208,10 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		const { id } = this.getModel()
 		// Merge the caller's abort signal with the per-request timeout (timeoutMs <= 0 disables it).
-		const mergedAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+		// A caller-supplied timeout wins; otherwise fall back to the configured request
+		// timeout. An explicit non-positive timeoutMs still means "disabled", so the
+		// fallback must not resurrect it.
+		const mergedAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs ?? this.timeoutMs)
 		try {
 			const { text } = await generateText({
 				model: this.poe(id),

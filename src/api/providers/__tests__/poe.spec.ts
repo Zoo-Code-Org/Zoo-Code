@@ -729,22 +729,24 @@ describe("PoeHandler", () => {
 			)
 		})
 
-		it("completePrompt should pass abort signal through to generateText", async () => {
+		it("keeps the caller abort signal effective when no per-request timeout is supplied", async () => {
 			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
 			const controller = new AbortController()
 			mockGenerateText.mockResolvedValueOnce({ text: "response" })
 
 			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
-			expect(mockGenerateText).toHaveBeenCalledWith(
-				expect.objectContaining({
-					model: mockLanguageModel,
-					prompt: "test prompt",
-					abortSignal: controller.signal,
-				}),
-			)
+			const callArgs = mockGenerateText.mock.calls[0][0]
+			// The configured request timeout now also bounds the call, so the signal handed to
+			// generateText is the merged one rather than the caller's own signal; the caller
+			// signal must still be able to abort it.
+			expect(callArgs.abortSignal).toBeInstanceOf(AbortSignal)
+			expect(callArgs.abortSignal).not.toBe(controller.signal)
+			expect(callArgs.abortSignal.aborted).toBe(false)
+			controller.abort()
+			expect(callArgs.abortSignal.aborted).toBe(true)
 		})
 
-		it("completePrompt should work without options (backward compatible)", async () => {
+		it("applies the configured request timeout when the caller supplies no options", async () => {
 			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
 			mockGenerateText.mockResolvedValueOnce({ text: "response" })
 
@@ -756,7 +758,20 @@ describe("PoeHandler", () => {
 					prompt: "test prompt",
 				}),
 			)
-			// Without options there is no merged signal: the call must not carry an abortSignal key.
+			// No caller options must not mean no timeout: the configured apiRequestTimeout
+			// still bounds the request, otherwise a prompt-enhancement call can hang past it.
+			const callArgs = mockGenerateText.mock.calls[0][0]
+			expect(callArgs.abortSignal).toBeInstanceOf(AbortSignal)
+			expect(callArgs.abortSignal.aborted).toBe(false)
+		})
+
+		it("keeps an explicit non-positive timeout disabled", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			mockGenerateText.mockResolvedValueOnce({ text: "response" })
+
+			await handler.completePrompt("test prompt", { timeoutMs: 0 })
+			// timeoutMs <= 0 means "no timeout"; the fallback must not override an
+			// explicit disable.
 			expect(mockGenerateText.mock.calls[0][0]).not.toHaveProperty("abortSignal")
 		})
 
