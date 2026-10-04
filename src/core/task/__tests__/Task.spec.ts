@@ -808,7 +808,7 @@ describe("Cline", () => {
 			const readFileHandleSpy = vi
 				.spyOn(readFileTool, "handle")
 				.mockImplementation(async (_task, block, callbacks) => {
-					if (!block.partial) callbacks.pushToolResult("File: README.md\nfinished")
+					if (!block.partial) callbacks.pushToolResult(`File: ${block.params.path}\nfinished`)
 				})
 			const say = task.say.bind(task)
 			const saySpy = vi.spyOn(task, "say").mockImplementation(async (...args) => {
@@ -833,8 +833,10 @@ describe("Cline", () => {
 				.spyOn(task, "attemptApiRequest")
 				.mockImplementationOnce(() =>
 					asyncStreamFrom<ApiStreamChunk>([
-						{ type: "tool_call_partial", index: 0, id: "call_read", name: "read_file" },
+						{ type: "tool_call_partial", index: 0, id: "call_read_first", name: "read_file" },
 						{ type: "tool_call_partial", index: 0, arguments: '{"path":"README.md"}' },
+						{ type: "tool_call_partial", index: 1, id: "call_read_second", name: "read_file" },
+						{ type: "tool_call_partial", index: 1, arguments: '{"path":"package.json"}' },
 						{ type: "text", text: "present this after the tool" },
 					]),
 				)
@@ -855,15 +857,18 @@ describe("Cline", () => {
 				await task.recursivelyMakeClineRequests([{ type: "text", text: "read a file, then continue" }])
 
 				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
-				expect(continuationUserContent).toEqual(
-					expect.arrayContaining([
-						expect.objectContaining({
-							type: "tool_result",
-							tool_use_id: "call_read",
-							content: "File: README.md\nfinished",
-						}),
-					]),
-				)
+				expect(continuationUserContent?.filter((block) => block.type === "tool_result")).toEqual([
+					expect.objectContaining({
+						type: "tool_result",
+						tool_use_id: "call_read_first",
+						content: "File: README.md\nfinished",
+					}),
+					expect.objectContaining({
+						type: "tool_result",
+						tool_use_id: "call_read_second",
+						content: "File: package.json\nfinished",
+					}),
+				])
 				expect(task.userMessageContentReady).toBe(false)
 				expect(task.presentAssistantMessageLocked).toBe(false)
 				expect(sawCompleteToolTurn).toBe(true)
