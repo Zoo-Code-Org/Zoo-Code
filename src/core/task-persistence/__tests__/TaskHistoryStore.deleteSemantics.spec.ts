@@ -196,6 +196,10 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			// One lock for the underlying file, keyed by the referent; the unlink
 			// still targets the path the store named.
 			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(referentPath, expect.any(Function))
+			// Assert the unlink target itself: locking the referent while unlinking the
+			// referent instead of the alias would keep the dangling link in place.
+			expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith(aliasPath)
+			expect(vi.mocked(fs.unlink)).not.toHaveBeenCalledWith(referentPath)
 		})
 
 		it("waits on the peer's lock at the referent when the link is dangling", async () => {
