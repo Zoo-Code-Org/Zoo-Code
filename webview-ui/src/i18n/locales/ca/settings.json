@@ -535,7 +535,7 @@
 		"apiKey": "Clau API",
 		"openAiBaseUrl": "URL base",
 		"openAiStrictToolSchemas": "Esquemes d'eines estrictes (strict: true)",
-		"openAiStrictToolSchemasDescription": "Envia strict: true amb els esquemes d'eines, com requereix OpenAI. Desactiva només si el teu punt d'accés compatible amb OpenAI rebutja els esquemes d'eines estrictes.",
+		"openAiStrictToolSchemasDescription": "Envia strict: true amb els esquemes d'eines per activar l'adherència estricta a l'esquema. Desactiva només per usar la crida d'eines no estricta.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nom de desplegament d'Azure",
 		"azureOpenAiDeploymentNameDescription": "Introduïu el nom del desplegament d'Azure AI Studio, no el nom del model subjacent.",

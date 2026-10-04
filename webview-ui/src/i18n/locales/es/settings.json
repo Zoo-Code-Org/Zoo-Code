@@ -535,7 +535,7 @@
 		"apiKey": "Clave API",
 		"openAiBaseUrl": "URL base",
 		"openAiStrictToolSchemas": "Esquemas de herramientas estrictos (strict: true)",
-		"openAiStrictToolSchemasDescription": "Envía strict: true con los esquemas de herramientas, como exige OpenAI. Desactívalo solo si tu punto de acceso compatible con OpenAI rechaza los esquemas de herramientas estrictos.",
+		"openAiStrictToolSchemasDescription": "Envía strict: true con los esquemas de herramientas para habilitar la adherencia estricta al esquema. Desactívalo para usar el llamado de herramientas no estricto.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nombre de implementación de Azure",
 		"azureOpenAiDeploymentNameDescription": "Introduce el nombre de la implementación de Azure AI Studio, no el nombre del modelo subyacente.",

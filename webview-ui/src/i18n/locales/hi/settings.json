@@ -535,7 +535,7 @@
 		"apiKey": "API कुंजी",
 		"openAiBaseUrl": "बेस URL",
 		"openAiStrictToolSchemas": "कड़े टूल स्कीमा (strict: true)",
-		"openAiStrictToolSchemasDescription": "OpenAI की आवश्यकता के अनुसार, टूल स्कीमा के साथ strict: true भेजें। केवल तभी अक्षम करें जब आपका OpenAI-समरूप endpoint कड़े टूल स्कीमा का खारिज करे।",
+		"openAiStrictToolSchemasDescription": "strict schema adherence को सक्षम करने के लिए टूल स्कीमा के साथ strict: true भेजें। गैर-कड़े टूल कॉलिंग के लिए अक्षम करें।",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure परिनियोजन नाम",
 		"azureOpenAiDeploymentNameDescription": "अंतर्निहित मॉडल नाम के बजाय Azure AI Studio में दिया गया परिनियोजन नाम दर्ज करें।",

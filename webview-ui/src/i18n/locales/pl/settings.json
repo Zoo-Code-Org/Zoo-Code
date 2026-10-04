@@ -535,7 +535,7 @@
 		"openAiApiKey": "Klucz API OpenAI",
 		"openAiBaseUrl": "URL bazowy",
 		"openAiStrictToolSchemas": "Ścisłe schematy narzędzi (strict: true)",
-		"openAiStrictToolSchemasDescription": "Wysyła strict: true wraz ze schematami narzędzi, zgodnie z wymogami OpenAI. Wyłącz tylko wtedy, gdy Twój endpoint zgodny z OpenAI odrzuca ścisłe schematy narzędzi.",
+		"openAiStrictToolSchemasDescription": "Wysyła strict: true wraz ze schematami narzędzi, aby włączyć ścisłe przestrzeganie schematu. Wyłącz, aby korzystać z niesurowego wywoływania narzędzi.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nazwa wdrożenia Azure",
 		"azureOpenAiDeploymentNameDescription": "Wprowadź nazwę wdrożenia z Azure AI Studio, a nie nazwę bazowego modelu.",

@@ -535,7 +535,7 @@
 		"openAiApiKey": "OpenAI API-sleutel",
 		"openAiBaseUrl": "Basis-URL",
 		"openAiStrictToolSchemas": "Strikte toolschemas (strict: true)",
-		"openAiStrictToolSchemasDescription": "Verstuurt strict: true met de toolschemas, zoals OpenAI vereist. Schakel alleen uit als je OpenAI-compatibele endpoint strikte toolschemas afwijst.",
+		"openAiStrictToolSchemasDescription": "Verstuurt strict: true met de toolschemas om strikte schema-naleving in te schakelen. Schakel uit voor niet-strikte tool calls.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Naam van Azure-implementatie",
 		"azureOpenAiDeploymentNameDescription": "Voer de implementatienaam uit Azure AI Studio in, niet de naam van het onderliggende model.",

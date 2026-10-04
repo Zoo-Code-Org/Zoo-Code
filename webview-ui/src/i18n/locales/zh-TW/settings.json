@@ -562,7 +562,7 @@
 		"apiKey": "API 金鑰",
 		"openAiBaseUrl": "基礎 URL",
 		"openAiStrictToolSchemas": "嚴格工具 schema（strict: true）",
-		"openAiStrictToolSchemasDescription": "向 OpenAI 相容端點傳送 strict: true 工具 schema。僅當您的端點拒收 strict 工具 schema 時才停用。",
+		"openAiStrictToolSchemasDescription": "向工具 schema 一併傳送 strict: true 以啟用嚴格的 schema 遵循。停用以使用非嚴格工具呼叫。",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure 部署名稱",
 		"azureOpenAiDeploymentNameDescription": "請輸入 Azure AI Studio 中的部署名稱，而不是底層模型名稱。",

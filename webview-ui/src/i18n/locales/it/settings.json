@@ -535,7 +535,7 @@
 		"apiKey": "Chiave API",
 		"openAiBaseUrl": "URL base",
 		"openAiStrictToolSchemas": "Schemi di strumenti strict (strict: true)",
-		"openAiStrictToolSchemasDescription": "Invia strict: true con gli schemi di strumenti, come richiesto da OpenAI. Disattiva solo se il tuo endpoint compatibile con OpenAI rifiuta gli schemi di strumenti strict.",
+		"openAiStrictToolSchemasDescription": "Invia strict: true con gli schemi di strumenti per abilitare l'aderenza rigorosa allo schema. Disattiva per usare il tool calling non rigoroso.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nome della distribuzione Azure",
 		"azureOpenAiDeploymentNameDescription": "Inserisci il nome della distribuzione configurato in Azure AI Studio, non il nome del modello sottostante.",

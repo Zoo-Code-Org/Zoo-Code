@@ -535,7 +535,7 @@
 		"apiKey": "API Anahtarı",
 		"openAiBaseUrl": "Temel URL",
 		"openAiStrictToolSchemas": "Katı araç şemaları (strict: true)",
-		"openAiStrictToolSchemasDescription": "OpenAI gereksinimi olarak araç şemalarıyla strict: true gönderir. Yalnızca OpenAI uyumlu endpoint'ünüz katı araç şemalarını reddediyorsa devre dışı bırakın.",
+		"openAiStrictToolSchemasDescription": "Şema uyumunu etkinleştirmek için araç şemalarıyla strict: true gönderir. Katı olmayan araç çağırmak için devre dışı bırakın.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure dağıtım adı",
 		"azureOpenAiDeploymentNameDescription": "Temel model adı yerine Azure AI Studio'daki dağıtım adını girin.",
