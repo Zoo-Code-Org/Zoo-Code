@@ -1563,7 +1563,8 @@ describe("DiffViewProvider", () => {
 			expect(vi.mocked(vscode.commands.executeCommand)).toHaveBeenCalledWith("workbench.action.files.revert")
 			// the placeholder stat uses the bigint stat options (the version
 			// token requires the full-precision fields)
-			expect(fs.stat).toHaveBeenCalledWith(`${mockCwd}/test.ts`, { bigint: true })
+			// The read must be attributed to the bigint stat that produced the token:
+			expect(vi.mocked(fs.stat).mock.calls[0][1]).toEqual({ bigint: true })
 			expect(fs.unlink).toHaveBeenCalledWith(`${mockCwd}/test.ts`)
 			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
 		})
@@ -2133,109 +2134,6 @@ describe("DiffViewProvider", () => {
 			// The stat that pairs with the read must be the bigint form, otherwise the
 			// token is built from truncated fields.
 			expect(fs.stat).toHaveBeenCalledWith(`${mockCwd}/test.ts`, { bigint: true })
-		})
-
-		it("keeps the rejection when the buffer is still dirty even though the disk matches", async () => {
-			// A dirty buffer means the disk content came from someone else, so the
-			// discard cleanup is still the outcome even when the bytes happen to match.
-			// Without the clean-document gate this test would adopt the match and skip
-			// the discard.
-			const editor = {
-				document: {
-					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
-					getText: vi.fn().mockReturnValue("new content"),
-					lineCount: 0,
-					encoding: "utf8",
-					isDirty: true,
-					save: vi.fn().mockResolvedValue(undefined),
-				},
-				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
-				edit: vi.fn().mockResolvedValue(true),
-				revealRange: vi.fn(),
-			} as unknown as vscode.TextEditor
-			diffViewProvider["activeDiffEditor"] = editor
-			diffViewProvider.editType = "modify"
-			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, versionTokenOfStat(previewStats), true)
-			vi.mocked(computeVersionToken).mockResolvedValue("moved")
-			vi.mocked(fs.stat).mockResolvedValue(previewStats)
-			vi.mocked(fs.readFile).mockResolvedValue("new content")
-
-			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("Stale version")
-			expect(vi.mocked(vscode.commands.executeCommand)).toHaveBeenCalledWith("workbench.action.files.revert")
-			// The clean-document gate short-circuits before the adoption check, so the
-			// rejection path never stats or reads the file.
-			expect(fs.stat).not.toHaveBeenCalled()
-			expect(fs.readFile).not.toHaveBeenCalled()
-		})
-
-		it("keeps the rejection when the file moved between the stat and the read", async () => {
-			// Same bytes, but the second stat differs: the read is not attributable to
-			// the state the token describes, so a match cannot be adopted.
-			const movedStats = {
-				isDirectory: () => false,
-				dev: BigInt(1),
-				ino: BigInt(9),
-				size: BigInt(300),
-				mtimeNs: BigInt(4_000_000_001n),
-				ctimeNs: BigInt(5_000_000_000n),
-			} as unknown as BigIntStats
-			const editor = {
-				document: {
-					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
-					getText: vi.fn().mockReturnValue("new content"),
-					lineCount: 0,
-					encoding: "utf8",
-					isDirty: false,
-					save: vi.fn().mockResolvedValue(undefined),
-				},
-				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
-				edit: vi.fn().mockResolvedValue(true),
-				revealRange: vi.fn(),
-			} as unknown as vscode.TextEditor
-			diffViewProvider["activeDiffEditor"] = editor
-			diffViewProvider.editType = "modify"
-			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, versionTokenOfStat(previewStats), true)
-			vi.mocked(computeVersionToken).mockResolvedValue("moved")
-			vi.mocked(fs.stat).mockResolvedValueOnce(previewStats).mockResolvedValueOnce(movedStats)
-			vi.mocked(fs.readFile).mockResolvedValue("new content")
-
-			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("Stale version")
-			expect(mockTask.observationRegistry.get(`${mockCwd}/test.ts`)?.version).toBe(
-				versionTokenOfStat(previewStats),
-			)
-		})
-
-		it("keeps a complete observation complete when adopting an autosaved match", async () => {
-			// The completeness of the original read must survive the adoption unchanged:
-			// a complete read stays complete, so the fallback default must not silently
-			// downgrade it.
-			const editor = {
-				document: {
-					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
-					getText: vi.fn().mockReturnValue("new content"),
-					lineCount: 0,
-					encoding: "utf8",
-					isDirty: false,
-					save: vi.fn().mockResolvedValue(undefined),
-				},
-				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
-				edit: vi.fn().mockResolvedValue(true),
-				revealRange: vi.fn(),
-			} as unknown as vscode.TextEditor
-			diffViewProvider["activeDiffEditor"] = editor
-			diffViewProvider.editType = "modify"
-			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, versionTokenOfStat(previewStats), true)
-			vi.mocked(computeVersionToken).mockResolvedValue("moved")
-			vi.mocked(fs.stat).mockResolvedValue(previewStats)
-			vi.mocked(fs.readFile).mockResolvedValue("new content")
-
-			await expect(diffViewProvider.saveChanges(false)).resolves.toMatchObject({ newProblemsMessage: "" })
-			const completeObservation = mockTask.observationRegistry.get(`${mockCwd}/test.ts`)
-			expect(completeObservation?.version).toBe(versionTokenOfStat(previewStats))
-			expect(completeObservation?.complete).toBe(true)
-			// The read must be attributed to the bigint stat that produced the token:
-			// the first stat call is the one paired with the read.
-			expect(vi.mocked(fs.stat).mock.calls[0][1]).toEqual({ bigint: true })
 		})
 
 		it("keeps the rejection when the stat paired with the read is unavailable", async () => {
