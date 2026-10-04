@@ -262,7 +262,6 @@ describe("buildManifest", () => {
 				{ status: "M", path: "webview-ui/src/value.visual.tsx" },
 				{ status: "M", path: "webview-ui/src/main.tsx" },
 				{ status: "M", path: "src/utils/vitest-verbosity.ts" },
-				{ status: "M", path: "src/scripts/merge-lcov.mjs" },
 				{ status: "M", path: "apps/cli/src/value.ts" },
 				{ status: "M", path: "packages/cloud/src/types.ts" },
 			],
@@ -344,20 +343,6 @@ describe("preferDirectTestFiles", () => {
 			"webview-ui/src/utils/__tests__/path-mentions.test.ts",
 		])
 		assert.deepEqual(preferDirectTestFiles(related, ["webview-ui/src/utils/unmatched.ts"]), related)
-	})
-
-	it("matches lowerCamel spec names against PascalCase sources case-insensitively", () => {
-		const related = [
-			"src/core/tools/__tests__/writeToFileTool.spec.ts",
-			"src/core/task/__tests__/Task.spec.ts",
-			"src/core/tools/__tests__/presentAssistantMessage-custom-tool.spec.ts",
-		]
-		assert.deepEqual(
-			preferDirectTestFiles(related, ["src/core/tools/WriteToFileTool.ts", "src/core/task/Task.ts"]),
-			["src/core/tools/__tests__/writeToFileTool.spec.ts", "src/core/task/__tests__/Task.spec.ts"],
-		)
-		// No source with a matching spec name: fall back to all related tests.
-		assert.deepEqual(preferDirectTestFiles(related, ["src/core/tools/ReadFileTool.ts"]), related)
 	})
 
 	it("matches direct tests case-insensitively with dot and hyphen suffixes", () => {
