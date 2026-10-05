@@ -117,4 +117,59 @@ describe("IPC Types", () => {
 			expect(result.success).toBe(false)
 		})
 	})
+
+	describe("StartNewTask requestId", () => {
+		const legacyCommand = {
+			commandName: TaskCommandName.StartNewTask,
+			data: {
+				configuration: {},
+				text: "review the diff",
+			},
+		}
+
+		it("should accept a legacy StartNewTask without requestId", () => {
+			const result = taskCommandSchema.safeParse(legacyCommand)
+			expect(result.success).toBe(true)
+
+			if (result.success && result.data.commandName === TaskCommandName.StartNewTask) {
+				expect(result.data.data.requestId).toBeUndefined()
+			}
+		})
+
+		it("should accept and preserve a valid requestId", () => {
+			const result = taskCommandSchema.safeParse({
+				...legacyCommand,
+				data: { ...legacyCommand.data, requestId: "final-smoke-0123abcdef456789" },
+			})
+			expect(result.success).toBe(true)
+
+			if (result.success && result.data.commandName === TaskCommandName.StartNewTask) {
+				expect(result.data.data.requestId).toBe("final-smoke-0123abcdef456789")
+			}
+		})
+
+		it("should reject an empty requestId", () => {
+			const result = taskCommandSchema.safeParse({
+				...legacyCommand,
+				data: { ...legacyCommand.data, requestId: "" },
+			})
+			expect(result.success).toBe(false)
+		})
+
+		it("should reject a requestId longer than 128 characters", () => {
+			const result = taskCommandSchema.safeParse({
+				...legacyCommand,
+				data: { ...legacyCommand.data, requestId: "a".repeat(129) },
+			})
+			expect(result.success).toBe(false)
+		})
+
+		it("should reject a requestId with characters outside the allowed set", () => {
+			const result = taskCommandSchema.safeParse({
+				...legacyCommand,
+				data: { ...legacyCommand.data, requestId: "id with spaces" },
+			})
+			expect(result.success).toBe(false)
+		})
+	})
 })

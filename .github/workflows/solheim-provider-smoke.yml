@@ -1,0 +1,60 @@
+name: Solheim provider smoke
+
+# Project A: infrastructure validation only. No PR diff, review judgment, router,
+# deterministic review rule, or GitHub posting. Only trusted main-branch code runs.
+on:
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: solheim-provider-smoke
+    cancel-in-progress: false
+
+jobs:
+    smoke:
+        if: github.ref == 'refs/heads/main'
+        runs-on: ubuntu-24.04
+        timeout-minutes: 25
+        # Retain the existing protected environment and secret names for compatibility.
+        # Repository policy must restrict deployments to main and require approval.
+        environment: final-vscode-review-smoke
+        steps:
+            - name: Checkout exact trusted main revision
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  ref: ${{ github.sha }}
+                  persist-credentials: false
+
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+              with:
+                  install-args: "--frozen-lockfile"
+
+            - name: Build trusted extension and webview
+              run: |
+                  pnpm -w bundle
+                  pnpm --filter @roo-code/vscode-webview build
+
+            - name: Install display dependencies
+              run: sudo apt-get update && sudo apt-get install -y xvfb ffmpeg libasound2t64
+
+            - name: Run Solheim provider smoke
+              id: provider
+              timeout-minutes: 8
+              env:
+                  SOLHEIM_API_KEY: ${{ secrets.FINAL_SMOKE_OPENAI_API_KEY }}
+                  SOLHEIM_SMOKE_OUT_DIR: ${{ runner.temp }}/solheim-provider-smoke
+              run: xvfb-run -a -s "-screen 0 1280x720x24 -nolisten tcp" bash scripts/solheim-smoke/record.sh
+
+            - name: Upload provider smoke verdict and recording
+              if: ${{ !cancelled() && (steps.provider.outcome == 'success' || steps.provider.outcome == 'failure') }}
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              with:
+                  name: solheim-provider-smoke-${{ github.sha }}
+                  path: |
+                      ${{ runner.temp }}/solheim-provider-smoke/verdict.json
+                      ${{ runner.temp }}/solheim-provider-smoke/smoke.mp4
+                  if-no-files-found: error
+                  retention-days: 7
