@@ -428,10 +428,6 @@ export async function safeWriteText(
 			let accessError: unknown = null
 			try {
 				await fs.access(targetPath) // target exists?
-			} catch (error: unknown) {
-				accessError = error
-			}
-			if (accessError === null) {
 				const dumpPath = _tempName(dirPath, "safeWriteText.acl")
 				const saved = await _saveDaclWindows(targetPath, dumpPath, options?.execFileRunner)
 				if (saved) {
