@@ -148,11 +148,21 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		if (newFileToCleanupWithinCatch) {
 			try {
 				await fs.unlink(newFileToCleanupWithinCatch)
-			} catch (cleanupError) {
-				console.error(
-					`[Catch] Failed to clean up temporary new file ${newFileToCleanupWithinCatch}:`,
-					cleanupError,
-				)
+			} catch (cleanupError: unknown) {
+				// The expected case: safeWriteText already removed its own temp file, so a
+				// missing file here is not a cleanup failure worth logging. Returning would
+				// also swallow the original error the caller needs.
+				const isAbsent =
+					typeof cleanupError === "object" &&
+					cleanupError !== null &&
+					"code" in cleanupError &&
+					cleanupError.code === "ENOENT"
+				if (!isAbsent) {
+					console.error(
+						`[Catch] Failed to clean up temporary new file ${newFileToCleanupWithinCatch}:`,
+						cleanupError,
+					)
+				}
 			}
 		}
 

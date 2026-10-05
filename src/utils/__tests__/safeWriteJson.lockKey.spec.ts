@@ -149,3 +149,27 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		expect(await resolveLockKey(file)).toBe(path.join(canonicalDir, "history_item.json"))
 	})
 })
+
+it("does not log a cleanup error when the safety net finds the temp file already gone", async () => {
+	// safeWriteText removes its own temp file on failure, so the safety net in
+	// safeWriteJson normally finds it gone. That is the expected outcome, not a
+	// second failure, and it must not be logged as one.
+	const dir = await makeDir("cleanup-")
+	const target = path.join(dir, "history_item.json")
+	currentLink = ""
+	mockedRealpath.mockImplementation(async (t) => String(t))
+	mockedLstat.mockImplementation(async (t) => symlinkStat(t))
+
+	const renameSpy = vi.spyOn(fs, "rename").mockRejectedValue(new Error("commit rename failed"))
+	const unlinkSpy = vi.spyOn(fs, "unlink").mockRejectedValue(enoent)
+	const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+
+	await expect(safeWriteJson(target, { id: "task-1" })).rejects.toThrow("commit rename failed")
+
+	// Only the original failure is reported.
+	expect(consoleError).toHaveBeenCalledTimes(1)
+
+	renameSpy.mockRestore()
+	unlinkSpy.mockRestore()
+	consoleError.mockRestore()
+})
