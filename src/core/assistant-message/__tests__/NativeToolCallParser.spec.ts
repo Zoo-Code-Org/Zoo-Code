@@ -1054,6 +1054,35 @@ describe("NativeToolCallParser", () => {
 
 			NativeToolCallParser.clearRawChunkState(scope)
 		})
+
+		it("keeps the name that started a call when a later chunk carries a different name", () => {
+			// The name is locked once the call has started. Without that lock a later chunk
+			// carrying a different name would rekey the tracked entry, so the delta and the
+			// end event would report a name the consumer never started with.
+			const scope = NativeToolCallParser.createScope()
+			const start = NativeToolCallParser.processRawChunk(
+				{ index: 0, id: "call_locked", name: "read_file" },
+				scope,
+			)
+			expect(start).toEqual([{ type: "tool_call_start", id: "call_locked", name: "read_file" }])
+
+			const delta = NativeToolCallParser.processRawChunk(
+				{ index: 0, name: "write_file", arguments: JSON.stringify({ path: "a.ts" }) },
+				scope,
+			)
+			expect(delta).toEqual([
+				{
+					type: "tool_call_delta",
+					id: "call_locked",
+					name: "read_file",
+					delta: JSON.stringify({ path: "a.ts" }),
+				},
+			])
+
+			expect(NativeToolCallParser.finalizeRawChunks(scope)).toEqual([
+				{ type: "tool_call_end", id: "call_locked", name: "read_file" },
+			])
+		})
 	})
 
 	// The compound-key contract in isolation: the gate verifies the escape itself (a behavioral
