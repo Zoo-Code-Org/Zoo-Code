@@ -1956,6 +1956,31 @@ describe("OpenAiHandler - strict tool schemas", () => {
 		expect(request.tools[0].function.parameters.required).toEqual(["path", "offset"])
 	})
 
+	it("sends strict: false with the declared schema for O3-family streaming requests when disabled", async () => {
+		// The streaming O3 branch builds its own request, so the strict argument
+		// must be asserted on that path as well: dropping it at the streaming call
+		// would otherwise keep passing the non-streaming test.
+		const handler = new OpenAiHandler({
+			...baseOptions(),
+			openAiModelId: "o3-mini",
+			openAiStrictToolSchemas: false,
+			openAiCustomModelInfo: {
+				contextWindow: 128_000,
+				maxTokens: 65_536,
+				supportsPromptCache: false,
+				reasoningEffort: "medium" as "low" | "medium" | "high",
+			},
+		})
+		const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task", tools })
+		await collectStream(stream)
+
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.model).toBe("o3-mini")
+		expect(request.stream).toBe(true)
+		expect(request.tools[0].function.strict).toBe(false)
+		expect(request.tools[0].function.parameters).toEqual(tools[0].function.parameters)
+	})
+
 	it("sends strict: false with the declared schema for O3-family non-streaming requests when disabled", async () => {
 		const handler = new OpenAiHandler({
 			...baseOptions(),
