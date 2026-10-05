@@ -860,7 +860,7 @@ describe("ReadFileTool", () => {
 
 			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
 			// fs.readFile with "utf8" encoding returns a string, not a Buffer
-			mockedFsReadFile.mockResolvedValue(Buffer.from("line1\nline2\nline3\nline4\nline5")) as any
+			mockedFsReadFile.mockResolvedValue(Buffer.from("line1\nline2\nline3\nline4\nline5"))
 
 			await readFileTool.execute(
 				{ files: [{ path: "test.ts", lineRanges: [{ start: 2, end: 4 }] }] } as any,
