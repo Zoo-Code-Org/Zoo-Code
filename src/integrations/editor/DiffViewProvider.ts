@@ -18,6 +18,10 @@ import { arePathsEqual, getReadablePath } from "../../utils/path"
 import { formatResponse } from "../../core/prompts/responses"
 import { diagnosticsToProblemsString, getNewDiagnostics } from "../diagnostics"
 import { Task } from "../../core/task/Task"
+import { versionTokenOfStat } from "../../utils/versionToken"
+import { withFileLock } from "../../utils/fileLock"
+import { resolveLockKey } from "../../services/file-safety/safeWriteText"
+import { guardedWrite, GuardRejectedError, type GuardedWriteKind } from "../../core/tools/guardedWrite"
 
 import { DecorationController } from "./DecorationController"
 
@@ -39,6 +43,7 @@ export class DiffViewProvider {
 	// it when re-showing the edited file afterward.
 	private documentWasPinned = false
 	private relPath?: string
+	private teardownInFlight: Promise<void> | undefined
 	private newContent?: string
 	private activeDiffEditor?: vscode.TextEditor
 	private fadedOverlayController?: DecorationController
@@ -82,6 +87,14 @@ export class DiffViewProvider {
 		viewColumn: vscode.ViewColumn
 	}> = []
 	private taskRef: WeakRef<Task>
+	/**
+	 * Version token of the empty placeholder open() wrote for a new file (the
+	 * create branch), captured under the S2 stat-matched contract. A rejected
+	 * guarded save removes the placeholder only while its on-disk token still
+	 * equals this value, so a file created by someone else in the meantime is
+	 * never unlinked.
+	 */
+	private placeholderVersion: string | undefined = undefined
 
 	constructor(
 		private cwd: string,
@@ -120,7 +133,31 @@ export class DiffViewProvider {
 		this.preDiagnostics = vscode.languages.getDiagnostics()
 
 		if (fileExists) {
+			// S4b follow-up (#44 / epic #1375): the preview is a full read of the
+			// on-disk original. Observe it with the S2 stat-matched contract so the
+			// accepted save (a full-file replacement) publishes through the guard's
+			// version check instead of bypassing it; a stat mismatch (or failure)
+			// leaves the target unobserved and the save fails closed.
+			const preStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 			this.originalContent = await fs.readFile(absolutePath, "utf-8")
+			const postStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+			const displayTask = this.taskRef.deref()
+			// Only record the preview token when the task has no observation for
+			// this path: a read_file observation recorded the version the model's
+			// content was built on, and the accept-time guard must compare against
+			// THAT token. Replacing it with the current on-disk token would blind
+			// the save to changes that happened between the model's read and this
+			// preview (e.g. an external editor), letting a v1-based overwrite
+			// clobber the v2 change. An unread target has no observation, so the
+			// preview token is recorded (stat-matched) but never as a complete read:
+			// this is the tool's own preview, not a read the model made, so it must
+			// not authorize a later full-file replacement.
+			if (displayTask && preStats && postStats && !displayTask.observationRegistry.has(absolutePath)) {
+				const displayToken = versionTokenOfStat(preStats)
+				if (displayToken === versionTokenOfStat(postStats)) {
+					displayTask.observationRegistry.observe(absolutePath, displayToken, false)
+				}
+			}
 		} else {
 			this.originalContent = ""
 		}
@@ -132,6 +169,46 @@ export class DiffViewProvider {
 		// Make sure the file exists before we open it.
 		if (!fileExists) {
 			await fs.writeFile(absolutePath, "")
+			// S4b follow-up (#44 / epic #1375): the empty placeholder is fully
+			// known (empty), but verify it with the same S2 stat-matched contract
+			// as the modify branch above: a stat-mismatched or non-empty read
+			// means another writer touched the placeholder in the window after
+			// open() wrote it, and that writer's token must not be observed as
+			// complete (observing it would claim we saw content we never read, and
+			// the token-guarded cleanup would unlink their file) - nothing is
+			// recorded and the save fails closed instead. When the placeholder is
+			// verified empty, its token replaces any prior observation for the
+			// path: a prior observation describes a file that no longer exists, and
+			// keeping it would make the accept-time CAS (the placeholder token on
+			// disk vs. the vanished file's token) fail every time, so recreating
+			// the file would always fail. The placeholder token is the correct
+			// baseline for the new file: an external change to the placeholder
+			// before the accept moves the on-disk token and fails the CAS. The
+			// cleanup token is captured whether or not the task is still live:
+			// a rejected save must not leave the placeholder behind even when the
+			// owning task has been collected.
+			const placeholderPreStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+			if (placeholderPreStats) {
+				const placeholderContent = await fs.readFile(absolutePath, "utf-8").catch(() => undefined)
+				const placeholderPostStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+				const placeholderToken = versionTokenOfStat(placeholderPreStats)
+				// Stat-matched (S2): the read is trusted only while the bracketing
+				// stats agree and the content is exactly the empty placeholder.
+				if (
+					placeholderPostStats &&
+					placeholderToken === versionTokenOfStat(placeholderPostStats) &&
+					placeholderContent === ""
+				) {
+					// Remember the placeholder token so a rejected save can remove
+					// the placeholder only while it is still the exact file open()
+					// wrote.
+					this.placeholderVersion = placeholderToken
+					const displayTask = this.taskRef.deref()
+					if (displayTask) {
+						displayTask.observationRegistry.observe(absolutePath, placeholderToken, true)
+					}
+				}
+			}
 		}
 
 		// If the file was already open, close it (must happen after showing the
@@ -323,9 +400,81 @@ export class DiffViewProvider {
 		}
 	}
 
+	/**
+	 * Revert one document through the workbench command. The command takes no
+	 * resource argument: when the Open Editors view has focus with a selection it
+	 * force-reverts every selected editor, otherwise the active editor. Activate
+	 * the target first so only this document is reverted, then give the user
+	 * their focus back.
+	 */
+	private async revertDocument(document: vscode.TextDocument): Promise<boolean> {
+		const previous = vscode.window.activeTextEditor
+		try {
+			await vscode.window.showTextDocument(document, { preserveFocus: false, preview: false })
+			await vscode.commands.executeCommand("workbench.action.files.revert")
+		} catch {
+			// best-effort: a document that cannot be reverted stays dirty
+		}
+		if (previous && previous.document !== document) {
+			// Give the user their focus back.
+			try {
+				await vscode.window.showTextDocument(previous.document, { preserveFocus: false, preview: false })
+			} catch {
+				// best-effort: the focus cannot always be restored
+			}
+		}
+		// The caller must know whether the discard actually completed: a document
+		// that stays dirty can still be saved by VS Code's ordinary file service,
+		// which would recreate a placeholder the cleanup removed.
+		return !document.isDirty
+	}
+
+	/**
+	 * Adopt content that is already on disk as the result of this save.
+	 *
+	 * VS Code's autosave can write the modified side of a diff before the user
+	 * accepts it, which moves the version token without changing the bytes, so
+	 * the compare-and-swap rejects a guard that is already satisfied. The read is
+	 * paired with the bigint stat that produced the token and re-checked after the
+	 * read, so a write landing between the two cannot make an unrelated content
+	 * match look like this publish. The observation keeps the completeness of the
+	 * original read: a caller-side check must not upgrade a partial observation
+	 * into authority for a full-file replacement.
+	 *
+	 * Returns true only when the on-disk bytes are exactly the content this save
+	 * intended to publish.
+	 */
+	private async adoptAlreadyPublishedContent(
+		task: Task,
+		absolutePath: string,
+		encodedContent: Uint8Array,
+	): Promise<boolean> {
+		const before = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+		if (!before) {
+			return false
+		}
+		const disk = await fs.readFile(absolutePath).catch(() => undefined)
+		if (!disk) {
+			return false
+		}
+		const after = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+		if (!after || versionTokenOfStat(before) !== versionTokenOfStat(after)) {
+			return false
+		}
+		if (Buffer.compare(Buffer.from(disk), Buffer.from(encodedContent)) !== 0) {
+			return false
+		}
+		const observation = task.observationRegistry.get(absolutePath)
+		task.observationRegistry.observe(absolutePath, versionTokenOfStat(after), observation?.complete ?? false)
+		return true
+	}
 	async saveChanges(
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
+		// Stryker disable next-line StringLiteral: an empty kind dispatches exactly
+		// like "update" in guardedWrite (only "edit" and "create" branch distinctly),
+		// so the StringLiteral mutant here is equivalent.
+		writeKind: GuardedWriteKind = "update",
 	): Promise<{
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
@@ -339,20 +488,156 @@ export class DiffViewProvider {
 		const updatedDocument = this.activeDiffEditor.document
 		const editedContent = updatedDocument.getText()
 
-		if (updatedDocument.isDirty) {
-			await updatedDocument.save()
+		// S4b follow-up (#44 / epic #1375): the accepted diff is a full-file
+		// replacement, so publish it through the guarded-write API instead of
+		// saving the document raw. open() observed the on-disk version the
+		// preview was built on; replaceIfVersion rejects the save when the file
+		// changed after the preview or the target was never observed, with the
+		// standard re-read-then-retry remediation.
+		const saveTask = this.taskRef.deref()
+		let encodedContent: Uint8Array | undefined
+		try {
+			if (!saveTask) {
+				// Fail closed: without the owning task the observation registry is
+				// unreachable and the save cannot be guarded. The rejection flows
+				// through the same discard-only cleanup as a guard verdict, so a
+				// dead task cannot leave the empty placeholder behind either.
+				throw new Error("Cannot guard the write: the owning task is no longer available")
+			}
+			// Publish with the document's own encoding. VS Code's codec covers the
+			// legacy code pages Node cannot represent (a hand-rolled encoder would
+			// have to reject them), so encode here and let the guarded write publish
+			// the bytes unchanged. The write kind comes from the caller: a targeted
+			// edit after a partial read is authorized by the edit guard, while a
+			// full-file replacement still needs a complete observation.
+			encodedContent = await vscode.workspace.encode(editedContent, {
+				encoding: updatedDocument.encoding,
+			})
+			await guardedWrite(saveTask, this.relPath, encodedContent, writeKind)
+		} catch (error) {
+			// Autosave can publish the modified side of the diff before the user
+			// accepts, so the bytes on disk may already be exactly what this save
+			// intended. The compare-and-swap still rejects because the version token
+			// moved, and the cleanup below would report a failure for content that is
+			// already published. When a stat-matched read returns the same bytes the
+			// write already happened, so adopt that state instead of failing.
+			if (
+				// Stryker disable next-line LogicalOperator: GuardRejectedError is only thrown
+				// by guardedWrite, and guardedWrite is reached only after the !saveTask check
+				// above has thrown a plain Error. So whenever this operand is evaluated saveTask
+				// is provably non-null: dropping it cannot change which branch is taken.
+				error instanceof GuardRejectedError &&
+				saveTask &&
+				encodedContent &&
+				// Only the autosave shape: a clean buffer means its content is what autosave
+				// already put on disk. A dirty buffer means the disk content came from
+				// someone else, so the discard cleanup below is still the right outcome.
+				!updatedDocument.isDirty &&
+				(await this.adoptAlreadyPublishedContent(saveTask, absolutePath, encodedContent))
+			) {
+				// The publish is already satisfied; fall through to the normal
+				// post-save flow rather than reporting a rejection.
+			} else {
+				// Discard-only failure cleanup. The publish was rejected (stale
+				// version, unobserved target, a partial-read observation, or an
+				// unavailable task), so the on-disk content is the newer source of
+				// truth. Reload it
+				// into the buffer (discarding the rejected edit), remove the empty
+				// new-file placeholder while it is still exactly the file open()
+				// wrote, and close the diff views. Never use revertChanges() here:
+				// it restores originalContent and saves it, which would overwrite
+				// the newer disk content that caused the rejection. Best-effort —
+				// the guard verdict is rethrown below.
+				try {
+					// Dispose before any programmatic activation: showTextDocument can
+					// change the active editor even with preserveFocus, so a listener
+					// still attached here would record this cleanup as a user touch and
+					// let the auto-close preferences keep the transient tab open.
+					this.disposeActiveEditorListener()
+					this.cancelDeferredScroll()
+
+					await this.runTeardown(async () => {
+						let discardSucceeded = !updatedDocument.isDirty
+						if (updatedDocument.isDirty) {
+							discardSucceeded = await this.revertDocument(updatedDocument)
+						}
+						if (discardSucceeded && this.editType === "create" && this.placeholderVersion) {
+							// Cleanup has to be serialized with the same resolved-path advisory lock
+							// every other writer to this file uses. A token check and an unlink in
+							// separate steps let a peer writer commit in the gap and lose its write.
+							// A differing token, or a lock that cannot be taken, leaves the file in place.
+							await withFileLock(await resolveLockKey(absolutePath), async () => {
+								const placeholderStats = await fs
+									.stat(absolutePath, { bigint: true })
+									.catch(() => undefined)
+								if (
+									!placeholderStats ||
+									versionTokenOfStat(placeholderStats) !== this.placeholderVersion
+								) {
+									return
+								}
+								let unlinked = false
+								try {
+									await fs.unlink(absolutePath)
+									unlinked = true
+								} catch {
+									// the placeholder vanished or the unlink failed
+								}
+								if (!unlinked) {
+									return
+								}
+								// The file is gone, so its tab must go too: closing only the diff
+								// views would leave a clean plain-text tab for a deleted file.
+								await this.closeFileTab(absolutePath)
+								// The directories open() created for the new file must go with it,
+								// innermost first. rmdir refuses a directory another writer populated
+								// in the meantime, so the cleanup stops at the first failure.
+								for (let i = this.createdDirs.length - 1; i >= 0; i--) {
+									try {
+										await fs.rmdir(this.createdDirs[i])
+									} catch {
+										break
+									}
+								}
+							})
+						}
+						await this.closeOwnDiffView(absolutePath)
+					})
+				} catch {
+					// cleanup is best-effort; the guard verdict below is the outcome
+				}
+				throw error
+			}
 		}
 
+		// The publish wrote the buffer's exact content to disk, but the
+		// document still carries its pre-save dirty flag and the close helpers
+		// skip dirty tabs. Revert from disk (content is identical — no write,
+		// no token change) to clear the dirty state before the close logic.
+		// document.save() would re-publish through the unguarded VS Code file
+		// service and advance the on-disk token, so the revert is the
+		// content-safe way to clear it.
 		// Stop tracking touches and cancel any pending scroll-to-diff before any
-		// programmatic editor activation below.
+		// programmatic editor activation: showTextDocument below can change the
+		// active editor even with preserveFocus, so a listener still attached would
+		// record this programmatic revert as a user touch and keep the transient
+		// tab open against the auto-close preference.
 		this.disposeActiveEditorListener()
 		this.cancelDeferredScroll()
+
+		// Revert only while the buffer is still exactly what the guard published.
+		// Keystrokes typed during the publish would be discarded by a revert, so a
+		// buffer that moved on stays dirty: the close helpers skip dirty tabs and
+		// the user's text survives in the editor.
+		if (updatedDocument.isDirty && updatedDocument.getText() === editedContent) {
+			await this.revertDocument(updatedDocument)
+		}
 
 		await this.closeAllDiffViews()
 
 		// Read auto-close preferences from state; fall back to defaults that
-		// preserve the existing behavior when unset.
-		const saveTask = this.taskRef.deref()
+		// preserve the existing behavior when unset (saveTask was resolved above
+		// for the guarded publish).
 		const saveState = await saveTask?.providerRef.deref()?.getState()
 
 		await this.keepOrCloseEditedFile(
@@ -527,55 +812,56 @@ export class DiffViewProvider {
 		this.disposeActiveEditorListener()
 		this.cancelDeferredScroll()
 
-		if (!fileExists) {
-			if (updatedDocument.isDirty) {
+		await this.runTeardown(async () => {
+			if (!fileExists) {
+				if (updatedDocument.isDirty) {
+					await updatedDocument.save()
+				}
+
+				await this.closeAllDiffViews()
+				// The file was newly created for this edit; close its transiently
+				// opened tab before deleting it from disk.
+				await this.closeFileTab(absolutePath)
+				await fs.unlink(absolutePath)
+
+				// Remove only the directories we created, in reverse order.
+				for (let i = this.createdDirs.length - 1; i >= 0; i--) {
+					await fs.rmdir(this.createdDirs[i])
+				}
+			} else {
+				// Revert document.
+				const edit = new vscode.WorkspaceEdit()
+
+				const fullRange = new vscode.Range(
+					updatedDocument.positionAt(0),
+					updatedDocument.positionAt(updatedDocument.getText().length),
+				)
+
+				edit.replace(updatedDocument.uri, fullRange, this.stripAllBOMs(this.originalContent ?? ""))
+
+				// Apply the edit and save, since contents shouldn't have changed
+				// this won't show in local history unless of course the user made
+				// changes and saved during the edit.
+				await vscode.workspace.applyEdit(edit)
 				await updatedDocument.save()
+
+				await this.closeAllDiffViews()
+
+				// Read auto-close preferences from state; fall back to defaults that
+				// preserve the existing behavior when unset.
+				const revertTask = this.taskRef.deref()
+				const revertState = await revertTask?.providerRef.deref()?.getState()
+
+				await this.keepOrCloseEditedFile(
+					absolutePath,
+					false,
+					revertState?.autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
+					revertState?.autoCloseZooOpenedFilesAfterUserEdited ??
+						DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
+					revertState?.autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
+				)
 			}
-
-			await this.closeAllDiffViews()
-			// The file was newly created for this edit; close its transiently
-			// opened tab before deleting it from disk.
-			await this.closeFileTab(absolutePath)
-			await fs.unlink(absolutePath)
-
-			// Remove only the directories we created, in reverse order.
-			for (let i = this.createdDirs.length - 1; i >= 0; i--) {
-				await fs.rmdir(this.createdDirs[i])
-			}
-		} else {
-			// Revert document.
-			const edit = new vscode.WorkspaceEdit()
-
-			const fullRange = new vscode.Range(
-				updatedDocument.positionAt(0),
-				updatedDocument.positionAt(updatedDocument.getText().length),
-			)
-
-			edit.replace(updatedDocument.uri, fullRange, this.stripAllBOMs(this.originalContent ?? ""))
-
-			// Apply the edit and save, since contents shouldn't have changed
-			// this won't show in local history unless of course the user made
-			// changes and saved during the edit.
-			await vscode.workspace.applyEdit(edit)
-			await updatedDocument.save()
-
-			await this.closeAllDiffViews()
-
-			// Read auto-close preferences from state; fall back to defaults that
-			// preserve the existing behavior when unset.
-			const revertTask = this.taskRef.deref()
-			const revertState = await revertTask?.providerRef.deref()?.getState()
-
-			await this.keepOrCloseEditedFile(
-				absolutePath,
-				false,
-				revertState?.autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
-				revertState?.autoCloseZooOpenedFilesAfterUserEdited ??
-					DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
-				revertState?.autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
-			)
-		}
-
+		})
 		// Restore any preview tabs the diff evicted, reconstructing the user's
 		// prior not-yet-edited tab state.
 		await this.restorePreviewTabs()
@@ -616,6 +902,69 @@ export class DiffViewProvider {
 			)
 
 		await Promise.all(closeOps)
+	}
+
+	/**
+	 * Close only this provider's diff tab. closeAllDiffViews() closes every clean
+	 * diff tab in the workbench, so a rejected save would also close another task's
+	 * diff view while that task's provider still holds its activation listener and
+	 * deferred scroll timer against a tab that is gone. A rejection belongs to one
+	 * task, so the cleanup must stay inside that task's view.
+	 */
+	private async closeOwnDiffView(absolutePath: string): Promise<void> {
+		const target = path.resolve(absolutePath)
+		const tabs = vscode.window.tabGroups.all
+			.flatMap((group) => group.tabs)
+			.filter((tab) => {
+				if (tab.isDirty) {
+					return false
+				}
+				if (tab.input instanceof vscode.TabInputTextDiff) {
+					// Only Zoo's own diff tabs, not a Source Control diff the user has open
+					// for the same file.
+					return (
+						tab.input.original.scheme === DIFF_VIEW_URI_SCHEME &&
+						path.resolve(tab.input.modified.fsPath) === target
+					)
+				}
+				// A diff tab for a file that was already open is identified by its label
+				// rather than by the URI scheme. A basename alone cannot tell two tasks in
+				// different directories apart, so the label only counts when the tab's own
+				// URI points at this provider's target.
+				const uri = (tab.input as { uri?: { fsPath?: string } })?.uri
+				return (
+					typeof uri?.fsPath === "string" &&
+					path.resolve(uri.fsPath) === target &&
+					typeof tab.label === "string" &&
+					tab.label.startsWith(`${path.basename(target)}: ${DIFF_VIEW_LABEL_CHANGES}`)
+				)
+			})
+		for (const tab of tabs) {
+			try {
+				await vscode.window.tabGroups.close(tab)
+			} catch {
+				// best-effort: the tab stays open
+			}
+		}
+	}
+	/**
+	 * Only one teardown path may act on a document at a time. A cancellation can reach
+	 * revertChanges() while a rejected save is already discarding the same buffer, and
+	 * both would edit the document and close the same tabs. The second caller awaits the
+	 * cleanup already in flight instead of repeating it.
+	 */
+	private async runTeardown(cleanup: () => Promise<void>): Promise<void> {
+		if (this.teardownInFlight !== undefined) {
+			await this.teardownInFlight
+			return
+		}
+		const inFlight = cleanup()
+		this.teardownInFlight = inFlight
+		try {
+			await inFlight
+		} finally {
+			this.teardownInFlight = undefined
+		}
 	}
 
 	// Stop tracking user activation of the target file. Called before any
@@ -1108,7 +1457,15 @@ export class DiffViewProvider {
 		this.disposeActiveEditorListener()
 		this.cancelDeferredScroll()
 
-		await this.closeAllDiffViews()
+		// A reset belongs to one task. Closing every clean diff tab would close another
+		// task's view while that task's provider still holds its activation listener and
+		// deferred scroll timer against a tab that is gone, so the cleanup stays inside
+		// this provider's view whenever it knows which file it was editing.
+		if (this.relPath) {
+			await this.closeOwnDiffView(path.resolve(this.cwd, this.relPath))
+		} else {
+			await this.closeAllDiffViews()
+		}
 		this.editType = undefined
 		this.isEditing = false
 		this.originalContent = undefined
@@ -1127,6 +1484,7 @@ export class DiffViewProvider {
 		this.userTouchedDocument = false
 		this.userTouchedDiffEditor = false
 		this.snapshotPreviewTabs = []
+		this.placeholderVersion = undefined
 	}
 
 	/**
@@ -1136,6 +1494,10 @@ export class DiffViewProvider {
 	 * @param relPath - Relative path to the file
 	 * @param content - Content to write to the file
 	 * @param openFile - Whether to show the file in editor (false = open in memory only for diagnostics)
+	 * @param writeKind - Guarded-write kind that selects the S4a guard for this publish.
+	 *   Defaults to "create" because this method always publishes a complete file
+	 *   content: an unobserved target may only be created when absent, and an
+	 *   observed target must still carry the current observation token.
 	 * @returns Result of the save operation including any new problems detected
 	 */
 	async saveDirectly(
@@ -1144,6 +1506,10 @@ export class DiffViewProvider {
 		openFile: boolean = true,
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
+		writeKind: GuardedWriteKind = "create",
+		// Completeness the caller earned elsewhere; a move carries the source's
+		// view through the publish instead of claiming completeness for lines it never read.
+		completeOverride?: boolean,
 	): Promise<{
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
@@ -1154,9 +1520,19 @@ export class DiffViewProvider {
 		// Get diagnostics before editing the file
 		this.preDiagnostics = vscode.languages.getDiagnostics()
 
-		// Write the content directly to the file
+		// Publish through the S4 guarded-write API (epic #1375): an unobserved
+		// write to an existing file and a stale observed version are rejected
+		// with a re-read-then-retry remediation instead of overwriting the file.
+		// Concurrent in-process writes to the same path are already ordered by
+		// the guard's per-path FIFO chain, so no additional locking is added here.
+		const task = this.taskRef.deref()
+		if (!task) {
+			// Fail closed: without the owning task the observation registry is
+			// unreachable and the write cannot be guarded.
+			throw new Error("Cannot guard the write: the owning task is no longer available")
+		}
 		await createDirectoriesForFile(absolutePath)
-		await fs.writeFile(absolutePath, content, "utf-8")
+		await guardedWrite(task, relPath, content, writeKind, completeOverride)
 
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory
@@ -1167,13 +1543,11 @@ export class DiffViewProvider {
 				preserveFocus: true,
 			})
 		} else {
-			// Just open the document in memory to trigger diagnostics without showing it
-			const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
-
-			// Save the document to ensure VSCode recognizes it as saved and triggers diagnostics
-			if (doc.isDirty) {
-				await doc.save()
-			}
+			// Just open the document in memory to trigger diagnostics without showing it.
+			// Do not save here: the guarded publish already committed the accepted content,
+			// and saving a dirty buffer would republish its stale bytes through VS Code's
+			// unguarded save path, over what the guard wrote.
+			await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
 
 			// Force a small delay to ensure diagnostics are triggered
 			await new Promise((resolve) => setTimeout(resolve, 100))
