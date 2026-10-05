@@ -194,4 +194,18 @@ describe("ChatRow - user feedback bubble layout & contrast", () => {
 		expect(container.querySelector("textarea")).not.toBeInTheDocument()
 		expect(mockPostMessage).not.toHaveBeenCalled()
 	})
+
+	it("does not enter edit mode when the message body is clicked while streaming", () => {
+		const { container } = renderRow(makeUserFeedback(), true)
+		mockPostMessage.mockClear()
+
+		const bubble = container.querySelector('[title="chat:queuedMessages.clickToEdit"]') as HTMLElement | null
+		expect(bubble).toBeTruthy()
+
+		fireEvent.click(bubble!)
+
+		// The streaming guard prevents the body click from entering edit mode.
+		expect(container.querySelector("textarea")).not.toBeInTheDocument()
+		expect(mockPostMessage).not.toHaveBeenCalled()
+	})
 })

@@ -460,14 +460,15 @@ describe("ApiConfigSelector", () => {
 		const searchInput = screen.getByPlaceholderText("common:ui.search_placeholder") as HTMLInputElement
 		fireEvent.change(searchInput, { target: { value: "Config" } })
 
-		// Pin a config (target the pin button, not the selection button)
-		const config2Row = screen.getByText("Config 2").closest('[role="group"]') as HTMLElement | null
-		const pinButton = Array.from(config2Row?.querySelectorAll("button") ?? []).find((btn) =>
+		// Pin a config: locate the row from the Config 2 selection button, then its pin control.
+		const config2Button = screen.getByText("Config 2").closest("button") as HTMLButtonElement | null
+		expect(config2Button).toBeTruthy()
+		const config2Row = config2Button!.parentElement as HTMLElement
+		const pinButton = Array.from(config2Row.querySelectorAll("button")).find((btn) =>
 			btn.querySelector(".codicon-pin"),
-		)
-		if (pinButton) {
-			fireEvent.click(pinButton)
-		}
+		) as HTMLButtonElement | undefined
+		expect(pinButton).toBeTruthy()
+		fireEvent.click(pinButton!)
 
 		// Search value should be maintained
 		expect(searchInput.value).toBe("Config")
