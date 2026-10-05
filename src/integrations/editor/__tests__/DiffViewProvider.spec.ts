@@ -885,6 +885,47 @@ describe("DiffViewProvider", () => {
 		})
 	})
 
+	it("reset() closes only this provider's tab, not another task's", async () => {
+		// A guard rejection belongs to one task, and every tool caller resets that
+		// task's provider in its catch block, so the teardown must stay inside this
+		// provider's view.
+		const ownTab = {
+			input: {
+				constructor: { name: "TabInputTextDiff" },
+				original: { scheme: DIFF_VIEW_URI_SCHEME },
+				modified: { fsPath: `${mockCwd}/test.ts` },
+			},
+			label: `test.ts: ${DIFF_VIEW_LABEL_CHANGES} (Editable)`,
+			isDirty: false,
+		}
+		const otherTaskTab = {
+			input: {
+				constructor: { name: "TabInputTextDiff" },
+				original: { scheme: DIFF_VIEW_URI_SCHEME },
+				modified: { fsPath: `${mockCwd}/other-task.ts` },
+			},
+			label: `other-task.ts: ${DIFF_VIEW_LABEL_CHANGES} (Editable)`,
+			isDirty: false,
+		}
+		for (const tab of [ownTab, otherTaskTab]) {
+			Object.setPrototypeOf(tab.input, vscode.TabInputTextDiff.prototype)
+		}
+		Object.defineProperty(vscode.window.tabGroups, "all", {
+			get: () => [{ tabs: [ownTab, otherTaskTab] }],
+			configurable: true,
+		})
+		const closedTabs: unknown[] = []
+		vi.mocked(vscode.window.tabGroups.close).mockImplementation((tab) => {
+			closedTabs.push(tab)
+			return Promise.resolve(true)
+		})
+
+		diffViewProvider["relPath"] = "test.ts"
+		await diffViewProvider.reset()
+
+		expect(closedTabs).toEqual([ownTab])
+	})
+
 	describe("saveDirectly method", () => {
 		beforeEach(() => {
 			// Mock vscode functions

@@ -908,13 +908,24 @@ export class DiffViewProvider {
 		const target = path.resolve(absolutePath)
 		const tabs = vscode.window.tabGroups.all
 			.flatMap((group) => group.tabs)
-			.filter(
-				(tab) =>
+			.filter((tab) => {
+				if (tab.isDirty) {
+					return false
+				}
+				if (
 					tab.input instanceof vscode.TabInputTextDiff &&
 					tab.input.original.scheme === DIFF_VIEW_URI_SCHEME &&
-					path.resolve(tab.input.modified.fsPath) === target &&
-					!tab.isDirty,
-			)
+					path.resolve(tab.input.modified.fsPath) === target
+				) {
+					return true
+				}
+				// A diff tab for a file that was already open is identified by its label
+				// rather than by the URI scheme, so the label has to be matched too.
+				return (
+					typeof tab.label === "string" &&
+					tab.label.startsWith(`${path.basename(target)}: ${DIFF_VIEW_LABEL_CHANGES}`)
+				)
+			})
 		for (const tab of tabs) {
 			try {
 				await vscode.window.tabGroups.close(tab)
@@ -1414,7 +1425,15 @@ export class DiffViewProvider {
 		this.disposeActiveEditorListener()
 		this.cancelDeferredScroll()
 
-		await this.closeAllDiffViews()
+		// A reset belongs to one task. Closing every clean diff tab would close another
+		// task's view while that task's provider still holds its activation listener and
+		// deferred scroll timer against a tab that is gone, so the cleanup stays inside
+		// this provider's view whenever it knows which file it was editing.
+		if (this.relPath) {
+			await this.closeOwnDiffView(path.resolve(this.cwd, this.relPath))
+		} else {
+			await this.closeAllDiffViews()
+		}
 		this.editType = undefined
 		this.isEditing = false
 		this.originalContent = undefined
