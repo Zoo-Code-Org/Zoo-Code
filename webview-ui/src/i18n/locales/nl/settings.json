@@ -346,6 +346,10 @@
 				"label": "Beveiliging tegen destructieve opdrachten inschakelen",
 				"description": "Download en gebruik Destructive Command Guard (DCG) voor dit platform. Opdrachten die DCG toestaat, worden automatisch uitgevoerd. Voor opdrachten die DCG blokkeert, is jouw goedkeuring nodig. De opdrachtenlijsten van Zoo zijn uitgeschakeld zolang deze optie actief is. Het gedownloade uitvoerbare bestand blijft bewaard als je de optie uitschakelt."
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "Toegestane automatisch uit te voeren commando's",
 			"allowedCommandsDescription": "Commando-prefixen die automatisch kunnen worden uitgevoerd als 'Altijd goedkeuren voor uitvoeren' is ingeschakeld. Voeg * toe om alle commando's toe te staan (gebruik met voorzichtigheid).",
 			"deniedCommands": "Geweigerde commando's",
