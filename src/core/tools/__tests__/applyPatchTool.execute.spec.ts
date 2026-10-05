@@ -24,8 +24,10 @@ const mockedFsPromises = vi.mocked(
 	},
 )
 
-vi.mock("fs/promises", () => ({
-	default: {
+vi.mock("fs/promises", () => {
+	// The SUT imports the module two ways: applyPatchTool uses the default
+	// export, safeWriteText uses the namespace. Both must see the same doubles.
+	const doubles = {
 		// The target exists on disk, so the completeness gate applies to the
 		// follow-up guarded write in the partial-observation test.
 		access: vi.fn().mockResolvedValue(undefined),
@@ -40,8 +42,14 @@ vi.mock("fs/promises", () => ({
 			ctimeNs: 1_700_000_000_789_999_999n,
 		}),
 		unlink: vi.fn().mockResolvedValue(undefined),
-	},
-}))
+		// resolveLockKey canonicalizes the lock key, so the guard needs these
+		// even when no symlink is involved.
+		lstat: vi.fn().mockResolvedValue({ isSymbolicLink: () => false }),
+		readlink: vi.fn().mockRejectedValue(new Error("not a symbolic link")),
+		realpath: vi.fn(async (p: string) => String(p)),
+	}
+	return { default: doubles, ...doubles }
+})
 
 // Mock the shared advisory lock that the guarded-write path uses; the real
 // proper-lockfile would try to create a lock directory on the mocked fs.
@@ -415,18 +423,20 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		)
 	})
 
-	it("move: carries the source's partial completeness to the destination", async () => {
-		// The destination is the source file plus one hunk. The create publish records
-		// it as complete, but the model only saw a slice of the source, so the
-		// destination must not gain completeness the model never earned.
+	it("move: carries the source's partial completeness to the destination before the publish", async () => {
+		// The destination is the source file plus one hunk, so it can only be as
+		// complete as the view the model had of the source. The carry has to happen
+		// before the guarded publish, because the guard decides completeness at publish
+		// time: downgrading afterwards leaves a window in which a concurrent writer sees
+		// the destination as complete for content the model never fully read.
 		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
 		const destKey = path.resolve("/workspace/project", "src/new.ts")
 		const reg = mockTask.observationRegistry
 		reg.observe(sourceKey, "7:4242:1234:1700000000123456789:1700000000789999999", false)
-		// The real saveDirectly publishes through guardedWrite, which refreshes the
-		// destination observation as complete for a create; the double mirrors that.
+		reg.observe(destKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+		const completeAtPublish: Array<boolean | undefined> = []
 		mockSaveDirectly.mockImplementationOnce(async () => {
-			reg.observe(destKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+			completeAtPublish.push(reg.get(destKey)?.complete)
 			return { newProblemsMessage: "", userEdits: undefined, finalContent: "new content" }
 		})
 
@@ -436,7 +446,10 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			pushToolResult: mockPushToolResult,
 		})
 
+		// Partial at the moment the write chain ran, not merely afterwards.
+		expect(completeAtPublish).toEqual([false])
 		expect(reg.get(destKey)?.complete).toBe(false)
+		// The guard still refuses a full-file replacement built from the slice.
 		await expect(guardedWrite(mockTask as Task, "src/new.ts", "full replacement", "create")).rejects.toThrow(
 			"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
 				"a full-file replacement needs the complete content; re-read the whole file, then retry.",
@@ -466,12 +479,15 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 
 	it("move: the destination cannot claim completeness when the source was never observed", async () => {
 		// The hunk read records no observation when its stat fails, so the model has
-		// no authority over the source content the move carried over.
+		// no authority over the source content the move carried over. Nothing is
+		// recorded for the destination before the write chain runs, so the guard still
+		// refuses a full-file write to a file the model never read.
 		const destKey = path.resolve("/workspace/project", "src/new.ts")
 		const reg = mockTask.observationRegistry
 		mockedFsPromises.default.stat.mockImplementationOnce(() => Promise.reject(new Error("stat failed")))
+		const observedAtPublish: boolean[] = []
 		mockSaveDirectly.mockImplementationOnce(async () => {
-			reg.observe(destKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+			observedAtPublish.push(reg.has(destKey))
 			return { newProblemsMessage: "", userEdits: undefined, finalContent: "new content" }
 		})
 
@@ -482,7 +498,12 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		})
 
 		expect(reg.get(path.resolve("/workspace/project", "src/old.ts"))).toBeUndefined()
-		expect(reg.get(destKey)?.complete).toBe(false)
+		expect(observedAtPublish).toEqual([false])
+		await expect(guardedWrite(mockTask as Task, "src/new.ts", "full replacement", "create")).rejects.toThrow(
+			"File already exists at " +
+				destKey +
+				" and was not read before this write -- read the file first, then retry.",
+		)
 		expect(mockHandleError).not.toHaveBeenCalled()
 	})
 

@@ -440,7 +440,25 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 			// Save new content to the new path
 			if (isPreventFocusDisruptionEnabled) {
-				// The move destination is published with the complete new content.
+				// The destination content is the source file plus one targeted hunk, so it can
+				// only be as complete as the view the model had of the source. Carry that
+				// completeness to the destination BEFORE the guarded publish: the guard decides
+				// completeness at publish time, so a partial view must already be recorded when
+				// the per-path chain runs. Downgrading only after saveDirectly leaves a window
+				// in which a concurrent writer sees the destination as complete for content the
+				// model never fully read.
+				const sourceObs = task.observationRegistry.get(absolutePath)
+				const sourceComplete = sourceObs !== undefined && sourceObs.complete === true
+				if (!sourceComplete) {
+					// Only carry completeness the model already had for the destination. An
+					// unobserved destination stays unobserved so the guard's "read before a
+					// full-file write" rule still applies; recording a partial observation here
+					// would hand the model authority to edit a file it never read.
+					const destObs = task.observationRegistry.get(moveAbsolutePath)
+					if (destObs !== undefined) {
+						task.observationRegistry.observe(moveAbsolutePath, destObs.version, false)
+					}
+				}
 				await task.diffViewProvider.saveDirectly(
 					change.movePath,
 					newContent,
@@ -449,17 +467,6 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					writeDelayMs,
 					"create",
 				)
-				// The destination content is the source file plus one targeted hunk, so
-				// it can only be as complete as the view the model had of the source. The
-				// create publish records the destination as complete, which would hand the
-				// model authority over lines it never read; carry the source's completeness
-				// (or none, when the source was never observed) to the destination.
-				const sourceObs = task.observationRegistry.get(absolutePath)
-				const destObs = task.observationRegistry.get(moveAbsolutePath)
-				const sourceComplete = sourceObs !== undefined && sourceObs.complete === true
-				if (destObs !== undefined && !sourceComplete) {
-					task.observationRegistry.observe(moveAbsolutePath, destObs.version, false)
-				}
 			} else {
 				// Write to new path and delete old file
 				const parentDir = path.dirname(moveAbsolutePath)
