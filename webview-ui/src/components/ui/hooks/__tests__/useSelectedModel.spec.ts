@@ -18,6 +18,8 @@ import {
 	nanoGptDefaultModelId,
 	nanoGptDefaultModelInfo,
 	openAiModelInfoSaneDefaults,
+	openAiNativeDefaultModelId,
+	openAiNativeModels,
 	minimaxDefaultModelId,
 	minimaxModels,
 	friendliDefaultModelId,
@@ -108,6 +110,35 @@ describe("useSelectedModel", () => {
 		[providerIdentifiers.zooGateway, "zooGatewayModelId"],
 	] as const
 	const configuredModelInfo: ModelInfo = { contextWindow: 1, supportsPromptCache: false }
+
+	describe("OpenAI Native model selection", () => {
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({}))
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+		})
+
+		it.each([false, true])("uses the canonical default with router loading=%s", (isLoading) => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult(isLoading ? undefined : {}, { isLoading }))
+
+			const { result } = renderHook(() => useSelectedModel({ apiProvider: providerIdentifiers.openaiNative }), {
+				wrapper: createWrapper(),
+			})
+
+			expect(result.current.id).toBe(openAiNativeDefaultModelId)
+			expect(result.current.info).toEqual(openAiNativeModels[openAiNativeDefaultModelId])
+			expect(result.current.isLoading).toBe(false)
+		})
+
+		it("preserves an explicitly configured model even when it is the former fallback", () => {
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.openaiNative, apiModelId: "gpt-4o" }),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe("gpt-4o")
+			expect(result.current.info).toEqual(openAiNativeModels["gpt-4o"])
+		})
+	})
 
 	it.each(dynamicProviderCases)("uses router data for %s", (provider, modelIdKey) => {
 		const modelInfo: ModelInfo = { contextWindow: 42_000, supportsPromptCache: false }
@@ -1382,10 +1413,49 @@ describe("useSelectedModel", () => {
 			expect(result.current.info).toEqual(getZAiModels("international_api")["glm-5.3"])
 		})
 
-		it("falls back when GLM-5.3 is unavailable on the China API", () => {
+		it("displays the configured model ID with sane defaults when it is not in the API line catalog", () => {
+			expect(getZAiModels("china_api")["glm-5.3"]).toBeUndefined()
+
 			const apiConfiguration: ProviderSettings = {
 				apiProvider: providerIdentifiers.zai,
 				apiModelId: "glm-5.3",
+				zaiApiLine: "china_api",
+			}
+
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
+
+			expect(result.current.id).toBe("glm-5.3")
+			expect(result.current.info).toEqual(openAiModelInfoSaneDefaults)
+		})
+
+		it("displays a custom model ID that is in no Z.ai catalog", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.zai,
+				apiModelId: "glm-custom-preview",
+			}
+
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
+
+			expect(result.current.id).toBe("glm-custom-preview")
+			expect(result.current.info).toEqual(openAiModelInfoSaneDefaults)
+		})
+
+		it("falls back to the API line default when no model is configured", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.zai,
+				zaiApiLine: "china_api",
+			}
+
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
+
+			expect(result.current.id).toBe(mainlandZAiDefaultModelId)
+			expect(result.current.info).toEqual(getZAiModels("china_api")[mainlandZAiDefaultModelId])
+		})
+
+		it("falls back to the API line default when the configured model ID is empty", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.zai,
+				apiModelId: "",
 				zaiApiLine: "china_api",
 			}
 

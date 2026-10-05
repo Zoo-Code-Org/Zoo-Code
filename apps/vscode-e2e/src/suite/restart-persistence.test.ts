@@ -25,6 +25,16 @@ async function quitGracefully(): Promise<void> {
 	await vscode.commands.executeCommand("workbench.action.quit")
 }
 
+async function waitForMarkedCompletion(api: RooCodeAPI, taskId: string): Promise<void> {
+	await waitFor(() =>
+		api.hasTaskApiConversationHistorySequence(taskId, {
+			userText: "RESTART_PERSISTENCE_SMOKE",
+			assistantToolName: "attempt_completion",
+			assistantToolInputText: MARKER,
+		}),
+	)
+}
+
 async function runCreate(api: RooCodeAPI): Promise<void> {
 	let taskId: string | undefined
 	let createPhasePassed = false
@@ -86,16 +96,7 @@ async function runVerify(api: RooCodeAPI): Promise<void> {
 		const historyItem = await api.getTaskHistoryItem(taskId)
 		assert.ok(historyItem, "Task history item should be available after restart")
 		assert.ok(historyItem.task.includes("RESTART_PERSISTENCE_SMOKE"), "History title should persist after restart")
-		const restoredCompletion = await api.hasTaskApiConversationHistorySequence(taskId, {
-			userText: "RESTART_PERSISTENCE_SMOKE",
-			assistantToolName: "attempt_completion",
-			assistantToolInputText: MARKER,
-		})
-		assert.strictEqual(
-			restoredCompletion,
-			true,
-			"Fresh-host history should restore the marked user turn followed by its assistant completion",
-		)
+		await waitForMarkedCompletion(api, taskId)
 
 		await api.resumeTask(taskId)
 		await waitFor(() => taskMessages.some(({ type, ask }) => type === "ask" && ask === "resume_completed_task"))
@@ -106,16 +107,7 @@ async function runVerify(api: RooCodeAPI): Promise<void> {
 			reopenedHistoryItem.task.includes("RESTART_PERSISTENCE_SMOKE"),
 			"Reopened task should retain its persisted history title",
 		)
-		const reopenedCompletion = await api.hasTaskApiConversationHistorySequence(taskId, {
-			userText: "RESTART_PERSISTENCE_SMOKE",
-			assistantToolName: "attempt_completion",
-			assistantToolInputText: MARKER,
-		})
-		assert.strictEqual(
-			reopenedCompletion,
-			true,
-			"Reopened-host history should restore the marked user turn followed by its assistant completion",
-		)
+		await waitForMarkedCompletion(api, taskId)
 
 		await writePhaseResult(getResultsDir(), {
 			version: PHASE_RESULT_VERSION,

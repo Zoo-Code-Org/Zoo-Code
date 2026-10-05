@@ -4,6 +4,7 @@ import type { ModelInfo } from "@roo-code/types"
 
 import { BaseProvider } from "../base-provider"
 import type { ApiStream } from "../../transform/stream"
+import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
 
 // Create a concrete implementation for testing
 class TestProvider extends BaseProvider {
@@ -265,6 +266,84 @@ describe("BaseProvider", () => {
 
 			// MCP tools pass through original parameters in base-provider
 			expect(result?.[0].function.parameters.additionalProperties).toBeUndefined()
+		})
+
+		it("should sanitize lone UTF-16 surrogates in name, description, and parameters (#461)", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "read_file",
+						description: "bad\uD800end",
+						parameters: {
+							type: "object",
+							properties: {
+								path: { type: "string", description: "bad\uDC00end" },
+							},
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+
+			expect(result?.[0].function.description).toBe("bad\uFFFDend")
+			expect(result?.[0].function.parameters.properties.path.description).toBe("bad\uFFFDend")
+			// Inspect the raw values: JSON.stringify escapes lone surrogates as \udXXX text,
+			// so a regex over the serialized body can never fail. See expectNoLoneSurrogates.
+			expectNoLoneSurrogates(result)
+		})
+
+		it("should sanitize lone UTF-16 surrogates in nested MCP tool parameters (#461)", () => {
+			const lone = "bad\uD800end"
+			const sanitized = "bad\uFFFDend"
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "mcp__srv__tool",
+						description: "Run an MCP tool",
+						parameters: {
+							type: "object",
+							properties: {
+								path: { type: "string" },
+								nested: {
+									type: "object",
+									properties: {
+										list: { type: "string", description: lone },
+									},
+								},
+							},
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+
+			// MCP tools keep their original schema (no strict-mode conversion) ...
+			expect(result?.[0].function.strict).toBe(false)
+			expect(result?.[0].function.parameters.additionalProperties).toBeUndefined()
+			// ... but strings nested in the parameters are still sanitized.
+			expect(result?.[0].function.parameters.properties.nested.properties.list.description).toBe(sanitized)
+			expectNoLoneSurrogates(result)
+		})
+
+		it("should sanitize lone UTF-16 surrogates in tool names (#461)", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "read\uD800file",
+						description: "Read a file",
+						parameters: { type: "object", properties: {} },
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+
+			expect(result?.[0].function.name).toBe("read\uFFFDfile")
 		})
 
 		it("should preserve non-function tools unchanged", () => {

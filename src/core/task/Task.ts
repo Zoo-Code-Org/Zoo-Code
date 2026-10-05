@@ -30,6 +30,7 @@ import {
 	type ClineMessage,
 	type ClineSay,
 	type ClineAsk,
+	type ExtensionState,
 	type ToolProgressStatus,
 	type HistoryItem,
 	type PendingTaskAction,
@@ -64,6 +65,7 @@ import { CloudService } from "@roo-code/cloud"
 import { ApiHandler, ApiHandlerCreateMessageMetadata, buildApiHandler } from "../../api"
 import { ApiStream, GroundingSource } from "../../api/transform/stream"
 import { maybeRemoveImageBlocks } from "../../api/transform/image-cleaning"
+import { OutputTokenLimitError } from "../../api/providers/utils/output-token-limit-error"
 
 // shared
 import { findLastIndex } from "../../shared/array"
@@ -73,7 +75,13 @@ import { t } from "../../i18n"
 import { getApiMetrics, hasTokenUsageChanged, hasToolUsageChanged } from "../../shared/getApiMetrics"
 import { ClineAskResponse } from "../../shared/WebviewMessage"
 import { defaultModeSlug, getModeBySlug } from "../../shared/modes"
-import { DiffStrategy, type ToolUse, type ToolParamName, toolParamNames } from "../../shared/tools"
+import {
+	DiffStrategy,
+	type AutoApprovalContext,
+	type ToolUse,
+	type ToolParamName,
+	toolParamNames,
+} from "../../shared/tools"
 import { getModelMaxOutputTokens } from "../../shared/api"
 
 // services
@@ -132,7 +140,7 @@ import {
 import { processUserContentMentions } from "../mentions/processUserContentMentions"
 import { getMessagesSinceLastSummary, summarizeConversation, getEffectiveApiHistory } from "../condense"
 import { MessageQueueService } from "../message-queue/MessageQueueService"
-import { AutoApprovalHandler, checkAutoApproval } from "../auto-approval"
+import { type AutoDenyDetail, AutoApprovalHandler, checkAutoApproval } from "../auto-approval"
 import { MessageManager } from "../message-manager"
 import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
@@ -142,9 +150,65 @@ import { type TaskExecutionContext } from "./providerHandoff"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
+// Upper bound on awaiting lazily loaded model metadata. Some model-catalog
+// fetchers (e.g. OpenRouter's bare axios GET) have no request timeout, so a
+// hung endpoint must not stall streaming, condense, or context-window
+// handling. On expiry the caller aborts its per-call AbortSignal (detaching
+// the provider-side waiter) and falls back to the handler's existing
+// getModel().info metadata — the same degradation a rejected fetch produces.
+// Kept in sync with PREVIEW_MODEL_FETCH_TIMEOUT_MS in the preview path
+// (src/core/webview/generateSystemPrompt.ts). Deliberately duplicated, not
+// shared: importing from the webview layer would close a
+// Task -> generateSystemPrompt -> ClineProvider -> Task circular import.
+export const MODEL_FETCH_TIMEOUT_MS = 5_000
 const QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const
 
 type QueuedAskResolution = { response: ClineAskResponse; requiresDurableAck: boolean }
+
+/**
+ * Denial kinds the command policy produces only while blanket auto-deny is on
+ * (`checkAutoApproval` returns `ask` for these when the setting is off — see
+ * the command branch of `src/core/auto-approval/index.ts`), so a denial of one
+ * of these kinds is blanket-caused. `denylist` and `guard_unavailable` are
+ * excluded: they deny independently of the blanket setting.
+ */
+export const BLANKET_DENY_AUTO_DENY_KINDS: ReadonlySet<AutoDenyDetail["kind"]> = new Set([
+	"dcg",
+	"not_allowlisted",
+	"dangerous_substitution",
+	"malformed_command",
+])
+
+/**
+ * What to do with a claimed queued message about to answer a command ask,
+ * decided against the auto-approval policy as it stands NOW.
+ */
+type QueuedCommandPolicyAction =
+	| { action: "consume" }
+	| { action: "approve" }
+	| { action: "deny"; detail?: AutoDenyDetail }
+	| { action: "release" }
+
+/**
+ * Whether blanket auto-deny currently engages. The three settings act as a
+ * conjunction: blanket deny only means anything while auto-approval is on and
+ * command auto-approval is on — without those two an unapproved command is
+ * prompted rather than auto-approved, so there is nothing to deny.
+ *
+ * Single source of truth for the derivation: the ask-time snapshot, the
+ * consume-site re-reads, and the tool-level execute-time re-check must not
+ * drift apart, or a flip landing between two of them decides execution or
+ * consumption on stale policy.
+ */
+export function isBlanketDenyEngaged(
+	state?: Pick<ExtensionState, "alwaysDenyUnapprovedCommands" | "autoApprovalEnabled" | "alwaysAllowExecute">,
+): boolean {
+	return (
+		state?.alwaysDenyUnapprovedCommands === true &&
+		state?.autoApprovalEnabled === true &&
+		state?.alwaysAllowExecute === true
+	)
+}
 
 function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolution | undefined {
 	if (type === "command_output") {
@@ -203,6 +267,13 @@ type AssistantMessagePersistenceCancellation = {
 	cancelled: boolean
 	promise: Promise<void>
 	resolve: () => void
+}
+
+export class PendingActionSettlementError extends Error {
+	constructor(message: string, options?: ErrorOptions) {
+		super(message, options)
+		this.name = "PendingActionSettlementError"
+	}
 }
 
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
@@ -313,6 +384,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private readonly globalStoragePath: string
 	abort: boolean = false
 	currentRequestAbortController?: AbortController
+	/**
+	 * Controller for the waiter on an in-flight `ensureModelFetched()` call (see
+	 * safeEnsureModelFetched). Aborting it detaches this task from the provider-side
+	 * metadata fetch; it is aborted when the bounded wait expires and when the task's
+	 * current request is cancelled (cancel/dispose path in cancelCurrentRequest).
+	 */
+	metadataFetchAbortController?: AbortController
 	skipPrevResponseIdOnce: boolean = false
 
 	// TaskStatus
@@ -324,7 +402,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	abandoned = false
 	abortReason?: ClineApiReqCancelReason
 	isInitialized = false
-	isPaused: boolean = false
 
 	// API
 	apiConfiguration: ProviderSettings
@@ -351,6 +428,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private askResponse?: ClineAskResponse
 	private askResponseText?: string
 	private askResponseImages?: string[]
+	/**
+	 * Structured detail of the automatic denial that resolved the current ask,
+	 * set when `checkAutoApproval` denies via policy (denylist, blanket
+	 * auto-deny, or a DCG block in blanket mode) and consumed (cleared) by the
+	 * `ask()` result. System-generated, unlike `askResponseText` which carries
+	 * user feedback and triggers a `user_feedback` say row.
+	 */
+	private pendingAutoDenyDetail?: AutoDenyDetail
+	/**
+	 * Set while the current turn has blanket-denied a command ask. The queued
+	 * messages such a denial deliberately leaves in place were typed in response
+	 * to that denial, not as approval — so a later ask in the same turn must not
+	 * consume one as `yesButtonClicked` (which would silently approve it with the
+	 * interactive prompt suppressed). Read at the queued-message consume sites;
+	 * cleared by the per-turn reset beside `didToolFailInCurrentTurn`.
+	 */
+	private blanketDeniedCommandThisTurn = false
 	public lastMessageTs?: number
 	private autoApprovalTimeoutRef?: NodeJS.Timeout
 
@@ -591,7 +685,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		this.parentTask = parentTask
 		this.taskNumber = taskNumber
-		this.initialStatus = initialStatus
+		this.initialStatus = initialStatus ?? historyItem?.status
 		this.pendingAction = historyItem?.pendingAction
 
 		// Store the task's mode and API config name when it's created.
@@ -976,6 +1070,84 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
+	/**
+	 * An interrupted task cannot legally delegate, so a staged create-subtask
+	 * action is a durable rejection marker rather than replayable work. The
+	 * constructor-injected history item can be stale, so the persisted record
+	 * is refreshed first and the refreshed action is the one settled. A failed
+	 * refresh, lookup, or settlement stops replay instead of risking another
+	 * doomed child. A refreshed action kept for replay must also appear in the
+	 * loaded conversation, because a replayed acknowledgment without a matching
+	 * tool use could answer the wrong tool call.
+	 */
+	private async settleInterruptedCreateSubtaskBeforeReplay(): Promise<void> {
+		if (this.initialStatus !== "interrupted") {
+			return
+		}
+
+		const provider = this.providerRef.deref()
+		if (!provider) {
+			throw new PendingActionSettlementError(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Provider unavailable for task ${this.taskId}`,
+			)
+		}
+
+		try {
+			await provider.taskHistoryStore.reconcile({ forceRefresh: true })
+		} catch (error) {
+			throw new PendingActionSettlementError(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Failed to refresh task history for task ${this.taskId}`,
+				{ cause: error },
+			)
+		}
+
+		const refreshedItem = provider.taskHistoryStore.get(this.taskId)
+		if (!refreshedItem) {
+			throw new PendingActionSettlementError(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Task ${this.taskId} not found in refreshed task history`,
+			)
+		}
+		this.pendingAction = refreshedItem.pendingAction
+
+		const action = refreshedItem.pendingAction
+		if (action?.kind === "create_subtask") {
+			let authoritative: HistoryItem
+			try {
+				authoritative = await provider.taskHistoryStore.clearPendingActionIfMatching(
+					this.taskId,
+					action.actionId,
+				)
+			} catch (error) {
+				throw new PendingActionSettlementError(
+					`[Task#settleInterruptedCreateSubtaskBeforeReplay] Failed to settle rejected action for task ${this.taskId}`,
+					{ cause: error },
+				)
+			}
+			this.pendingAction = authoritative.pendingAction
+		}
+
+		const replayAction = this.pendingAction
+		if (replayAction && !this.loadedConversationContainsToolUse(replayAction.actionId)) {
+			throw new PendingActionSettlementError(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Refreshed action ${replayAction.actionId} for task ${this.taskId} is missing from the loaded conversation`,
+			)
+		}
+	}
+
+	/**
+	 * A replayed acknowledgment is safe only when its tool call is part of the
+	 * conversation the task just loaded. A tool result for an unmatched action
+	 * id could otherwise answer a tool call the model never made here.
+	 */
+	private loadedConversationContainsToolUse(actionId: string): boolean {
+		return this.apiConversationHistory.some(
+			(message) =>
+				message.role === "assistant" &&
+				Array.isArray(message.content) &&
+				message.content.some((block) => block.type === "tool_use" && block.id === actionId),
+		)
+	}
+
 	private handleQueuedAskResponse(message: QueuedMessage, resolution: QueuedAskResolution): string | undefined {
 		this.handleWebviewAskResponse(resolution.response, message.text, message.images)
 		if (resolution.requiresDurableAck) {
@@ -983,6 +1155,146 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 		this.messageQueueService.removeMessage(message.id)
 		return undefined
+	}
+
+	/**
+	 * Re-read the auto-approval policy immediately before a queued message would
+	 * stand in for a command ask's approval, and consult the full command policy
+	 * under the fresh state if blanket deny now engages.
+	 *
+	 * The queued-answer shortcut skips `checkAutoApproval` and the ask's decision
+	 * otherwise rides on a single settings snapshot taken before the prompt was
+	 * shown. A blanket-deny flip landing between the snapshot and the consume is
+	 * invisible to that frozen gate, and the queued message would auto-approve an
+	 * unallowlisted command — fail-OPEN through a window as wide as the prompt
+	 * dwell. Re-reading here closes it: while blanket deny engages, the message
+	 * is never consumed as approval and the ask gets the structured denial policy
+	 * would have produced without a queued message.
+	 *
+	 * With `abortSignal`, the re-check settles on the abort itself instead of
+	 * merely losing a race against it: the fresh-state read ends in uncancellable
+	 * provider work, so a post-await check alone would leave this promise pending
+	 * whenever the read never lands, retaining the task and running policy work
+	 * after the abort. An aborted re-check resolves to the `release` no-op,
+	 * leaving the claim and the pending ask to the caller's release path.
+	 */
+	private async recheckQueuedCommandPolicy(
+		{
+			text,
+			isProtected,
+			dcgDecision,
+		}: {
+			text?: string
+			isProtected?: boolean
+			dcgDecision?: AutoApprovalContext["dcgDecision"]
+		},
+		abortSignal?: AbortSignal,
+	): Promise<QueuedCommandPolicyAction> {
+		// Resolving a sentinel rather than rejecting keeps a late rejection from
+		// the uncancellable read unhandled once the abort has won the race, and
+		// routes the abort through the same release early-return as the checks.
+		const signal = abortSignal
+		const abortPromise = signal
+			? new Promise<"aborted">((resolve) => {
+					if (signal.aborted) {
+						resolve("aborted")
+					} else {
+						signal.addEventListener("abort", () => resolve("aborted"), { once: true })
+					}
+				})
+			: undefined
+		const freshState = abortPromise
+			? await Promise.race([this.providerRef.deref()?.getState(), abortPromise])
+			: await this.providerRef.deref()?.getState()
+		// The abort either won the race (sentinel) or landed while the read was
+		// still resolving; both settle the re-check before any policy work.
+		if (freshState === "aborted" || signal?.aborted) {
+			return { action: "release" }
+		}
+		if (!isBlanketDenyEngaged(freshState)) {
+			// Disengaged: the queued answer is a legitimate approval, as before.
+			return { action: "consume" }
+		}
+		// Engaged: the full policy decides, with the fresh state. `cwd` and the
+		// forwarded DCG verdict match the ask-time `checkAutoApproval` call.
+		const approval = await checkAutoApproval({
+			state: freshState,
+			cwd: this.cwd,
+			ask: "command",
+			text,
+			isProtected,
+			dcgDecision,
+		})
+		if (signal?.aborted) {
+			return { action: "release" }
+		}
+		if (approval.decision === "deny") {
+			return { action: "deny", detail: approval.autoDeny }
+		}
+		if (approval.decision === "approve") {
+			return { action: "approve" }
+		}
+		return { action: "release" }
+	}
+
+	/**
+	 * Apply a queued-command policy re-check outcome to a claimed message: the
+	 * claim is released on every path except the legitimate consume, and an
+	 * engaged-policy outcome resolves the ask the same way the no-queued-message
+	 * path would (structured denial, approval, or — for a plain `ask` decision —
+	 * left pending for the user).
+	 */
+	private applyQueuedCommandPolicyAction(
+		action: QueuedCommandPolicyAction,
+		message: QueuedMessage,
+		resolution: QueuedAskResolution,
+	): string | undefined {
+		if (action.action !== "consume") {
+			this.messageQueueService.releaseMessage(message.id)
+		}
+		switch (action.action) {
+			case "consume":
+				return this.handleQueuedAskResponse(message, resolution)
+			case "deny":
+				if (action.detail && BLANKET_DENY_AUTO_DENY_KINDS.has(action.detail.kind)) {
+					this.blanketDeniedCommandThisTurn = true
+				}
+				this.pendingAutoDenyDetail = action.detail
+				this.denyAsk()
+				return undefined
+			case "approve":
+				this.approveAsk()
+				return undefined
+			case "release":
+				return undefined
+		}
+	}
+
+	/**
+	 * Shared claim-gate for the two queued-message consume sites.
+	 *
+	 * The latch blocks a message left in the queue by a command this turn already
+	 * blanket-denied (it answers that denial, not the current ask), and
+	 * `hasUnclaimed()` replaces the length-only `isEmpty()`, which reports a
+	 * queue containing nothing but claims as available for a new consumer.
+	 * `isMessageQueued`/`isStatusMutable` keep `isEmpty()` semantics on purpose:
+	 * flipping those would re-enable interactive prompt timers whenever a claim
+	 * is outstanding.
+	 */
+	private mayDrainQueuedMessageForAsk(): boolean {
+		return !this.blanketDeniedCommandThisTurn && this.messageQueueService.hasUnclaimed()
+	}
+
+	/**
+	 * Latch the turn after a blanket-caused command denial detected outside
+	 * the ask path (the tool's execute-time policy re-check). A message left
+	 * in the queue by that denial answers the denial, not the next ask, so
+	 * without the latch a later non-command ask would consume it as an
+	 * approval. Deliberately not cleared mid-turn: the per-turn reset owns
+	 * clearing.
+	 */
+	public recordBlanketCommandDenial(): void {
+		this.blanketDeniedCommandThisTurn = true
 	}
 
 	static create(options: TaskOptions): [Task, Promise<void>] {
@@ -1273,8 +1585,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.clineMessages.push(message)
 		const provider = this.providerRef.deref()
 		// Unanswered asks must reach the webview before Message listeners can respond against its state.
-		const requiresImmediateState =
-			message.partial === true || (message.type === "ask" && message.isAnswered !== true)
+		//
+		// Partial `say` messages deliberately do NOT flush. `flushPostStateToWebviewThrottled()`
+		// invoked right after a leading-edge debounce call has no pending trailing invocation to
+		// run, so it only cancels the trailing timer — which makes the *next* call hit the leading
+		// edge and post immediately. Flushing on every partial therefore defeated the debounce
+		// entirely (one full-state post per message, the very behaviour #1078 set out to remove).
+		// They are safe on the throttled path: the trailing/maxWait post carries the message's
+		// current text, so a `messageUpdated` dropped for a not-yet-known `ts` is superseded
+		// rather than lost.
+		//
+		// Partial *asks* still flush, via the clause below — `Task#ask` adds them without
+		// `isAnswered`, so they keep the ordering guarantee that unanswered asks depend on.
+		const requiresImmediateState = message.type === "ask" && message.isAnswered !== true
 		try {
 			await provider?.postStateToWebviewThrottled()
 		} catch (error) {
@@ -1417,7 +1740,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		partial?: boolean,
 		progressStatus?: ToolProgressStatus,
 		isProtected?: boolean,
-	): Promise<{ response: ClineAskResponse; text?: string; images?: string[]; queuedMessageId?: string }> {
+		autoApprovalContext?: AutoApprovalContext,
+	): Promise<{
+		response: ClineAskResponse
+		text?: string
+		images?: string[]
+		queuedMessageId?: string
+		/**
+		 * Present when the ask was resolved by an automatic (policy) denial
+		 * rather than a user click. Consumers must not treat this as a user
+		 * rejection: the denial is scoped to its own tool call.
+		 */
+		autoDenyDetail?: AutoDenyDetail
+	}> {
 		// If this Cline instance was aborted by the provider, then the only
 		// thing keeping us alive is a promise still running in the background,
 		// in which case we don't want to send its result to the webview as it
@@ -1440,8 +1775,28 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// rendered, leaving them stuck on-screen).
 		const provider = this.providerRef.deref()
 		const state = provider ? await provider.getState() : undefined
+		// The blanket auto-deny setting only engages while command auto-approval
+		// is on; while it is disengaged, the queued-message shortcut below is
+		// unaffected.
+		const blanketDenyEngaged = isBlanketDenyEngaged(state)
+		// A queued message normally answers the pending ask, which for command asks
+		// means an unconditional auto-approve. That shortcut must never bypass
+		// blanket deny: while it is engaged, a command ask keeps its policy
+		// decision and the queued message is left in place for a later turn
+		// instead of being consumed as approval. The shared claim gate adds the
+		// per-turn latch: a message a blanket denial left behind answers that
+		// denial, not this ask, and a claim would force the `ask` decision below
+		// while the policy would have auto-answered it — holding a prompt no user
+		// has to see and stalling a hands-free session. Leaving the message
+		// unclaimed lets the policy decision stand and keeps the message queued.
+		const queueMayAnswerThisAsk = !(blanketDenyEngaged && type === "command")
 		const queuedMessage =
-			partial === true || type === "command_output" ? undefined : this.messageQueueService.claimNextMessage()
+			partial === true ||
+			type === "command_output" ||
+			!queueMayAnswerThisAsk ||
+			!this.mayDrainQueuedMessageForAsk()
+				? undefined
+				: this.messageQueueService.claimNextMessage()
 		const queuedAskResolution = queuedMessage ? queuedResponseForAsk(type, text) : undefined
 		// `this.cwd`, not `provider.cwd`:
 		// The path inside `text` was made relative to this task's workspace,
@@ -1449,9 +1804,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// currently reports.
 		const approval = queuedAskResolution
 			? ({ decision: "ask" } as const)
-			: await checkAutoApproval({ state, cwd: this.cwd, ask: type, text, isProtected })
+			: await checkAutoApproval({
+					state,
+					cwd: this.cwd,
+					ask: type,
+					text,
+					isProtected,
+					dcgDecision: autoApprovalContext?.dcgDecision,
+				})
 		const isAutoAnswered = approval.decision === "approve" || approval.decision === "deny"
 		const autoApprovalDecision = isAutoAnswered ? approval.decision : undefined
+
+		// Re-check: an abort during the getState/checkAutoApproval awaits must not post an ask row.
+		if (this.abort) {
+			if (queuedMessage) {
+				this.messageQueueService.releaseMessage(queuedMessage.id)
+			}
+			throw new Error(`[RooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
+		}
 
 		if (partial !== undefined) {
 			const lastMessage = this.clineMessages.at(-1)
@@ -1561,6 +1931,28 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		const timeouts: NodeJS.Timeout[] = []
 
+		// Record the structured detail of an automatic (policy) denial so the
+		// `ask()` result can hand it to the caller. Assigned unconditionally so
+		// a stale detail from a previous ask can never leak into this result.
+		// Deliberately not routed through `askResponseText`: that field means
+		// *user feedback* and triggers a `user_feedback` say row, while this
+		// reason is system-generated.
+		this.pendingAutoDenyDetail = approval.decision === "deny" ? approval.autoDeny : undefined
+		// A blanket-caused denial leaves the queued messages this turn for later
+		// turns; latch so no ask in this turn consumes one as approval. Set only on
+		// blanket-caused denials — here and at the consume-site re-check
+		// (`applyQueuedCommandPolicyAction`) — and never cleared mid-turn: the
+		// per-turn reset owns clearing, so a later non-denied ask cannot drop the
+		// latch prematurely.
+		if (
+			type === "command" &&
+			approval.decision === "deny" &&
+			approval.autoDeny &&
+			BLANKET_DENY_AUTO_DENY_KINDS.has(approval.autoDeny.kind)
+		) {
+			this.blanketDeniedCommandThisTurn = true
+		}
+
 		if (approval.decision === "approve") {
 			this.approveAsk()
 		} else if (approval.decision === "deny") {
@@ -1585,12 +1977,45 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const isStatusMutable = !partial && isBlocking && !isMessageQueued && approval.decision === "ask"
 
 		let queuedMessageId: string | undefined
-		if (isStatusMutable) {
+		// Arm the interactive/resumable/idle status timers for this ask: the
+		// single source of that arm, shared between the queue-free case and the
+		// claim-gated and queued-release paths below. A gated or released claim
+		// keeps the message in the queue, so `isMessageQueued` stays true and
+		// `isStatusMutable` — which requires an empty queue — stays false while
+		// the ask waits for the user; arming only from `isStatusMutable` would
+		// leave hands-free/API consumers seeing `Running` with no
+		// `TaskInteractive`/`interactionRequired` for a prompt that is in fact
+		// pending. Idempotent: several arm sites can fire for one ask (e.g. the
+		// queue-free arm, then a drain-site release), and a second arm would
+		// double-emit the event. The `timeouts` array is the arm ledger, and a
+		// `finally` around the wait owns the `clearTimeout` teardown on every
+		// settle path, including the abort and supersession throws. The
+		// callbacks still re-check liveness at fire time: an already-due timer
+		// can outrun that teardown, and a status transition published after
+		// abort would describe a task that no longer runs.
+		const armAskStatusTimers = (): void => {
+			const askStillPending = this.askResponse === undefined && this.lastMessageTs === askTs
+			if (!askStillPending || this.abort || partial || approval.decision !== "ask" || timeouts.length > 0) {
+				return
+			}
+
 			const statusMutationTimeout = 2_000
+
+			// Fire-time liveness check for the timers armed below. Clearing a due
+			// timer does not retract it: when abort lands between the wait's last
+			// poll tick and the timer's due time, the callback runs before
+			// `ask()`'s continuation reaches the teardown sweep, so liveness has
+			// to be re-checked here. Read-only: the `timeouts` ledger is never
+			// touched from the callbacks.
+			const statusTimerStillLive = (): boolean =>
+				!this.abort && this.askResponse === undefined && this.lastMessageTs === askTs
 
 			if (isInteractiveAsk(type)) {
 				timeouts.push(
 					setTimeout(() => {
+						if (!statusTimerStillLive()) {
+							return
+						}
 						const message = this.findMessageByTimestamp(askTs)
 
 						if (message) {
@@ -1606,6 +2031,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			} else if (isResumableAsk(type)) {
 				timeouts.push(
 					setTimeout(() => {
+						if (!statusTimerStillLive()) {
+							return
+						}
 						const message = this.findMessageByTimestamp(askTs)
 
 						if (message) {
@@ -1617,6 +2045,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			} else if (isIdleAsk(type)) {
 				timeouts.push(
 					setTimeout(() => {
+						if (!statusTimerStillLive()) {
+							return
+						}
 						const message = this.findMessageByTimestamp(askTs)
 
 						if (message) {
@@ -1626,74 +2057,236 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					}, statusMutationTimeout),
 				)
 			}
-		} else if (isMessageQueued && shouldDrainQueuedMessageForAsk && queuedMessage && queuedAskResolution) {
-			queuedMessageId = this.handleQueuedAskResponse(queuedMessage, queuedAskResolution)
+		}
+
+		if (isStatusMutable) {
+			armAskStatusTimers()
+		} else if (queuedMessage && queuedAskResolution) {
+			if (type === "command") {
+				// The snapshot gate is frozen; blanket deny may have engaged since the
+				// ask began. Re-read policy before the message stands in for approval.
+				// Drain-site parity for cancellation and cleanup: the fresh policy
+				// read ends in an uncancellable provider read, so an abort poller
+				// aborts a signal the re-check itself awaits — settling it on the
+				// abort instead of leaving a pending promise that retains this task
+				// and runs policy post-abort — and one `finally` releases the claim
+				// on the abort, throw, supersession, and "release" outcomes alike.
+				const recheckAbort = new AbortController()
+				const checkAbort = () => {
+					if (this.abort) {
+						recheckAbort.abort()
+					}
+				}
+				checkAbort()
+				const abortWatcher = setInterval(checkAbort, 100)
+				try {
+					const action = await this.recheckQueuedCommandPolicy(
+						{
+							text,
+							isProtected,
+							dcgDecision: autoApprovalContext?.dcgDecision,
+						},
+						recheckAbort.signal,
+					)
+					if (!this.abort && this.askResponse === undefined && this.lastMessageTs === askTs) {
+						// Any outcome on a still-live ask — the user answered or the
+						// ask was superseded — leaves the message for the next
+						// consumer; the `finally` below releases the claim and the ask
+						// resolves with the user's own response via the pWaitFor.
+						queuedMessageId = this.applyQueuedCommandPolicyAction(
+							action,
+							queuedMessage,
+							queuedAskResolution,
+						)
+						// A "release" outcome leaves the ask pending; consume/deny/approve
+						// resolved it, and the arm's pending check declines to arm then.
+						armAskStatusTimers()
+					}
+				} catch (error) {
+					// Drain-site parity: a failed re-check must not reject ask() nor
+					// strand the claim; the prompt stays pending for the user.
+					console.error("[Task#ask] queued command policy re-check failed:", error)
+					armAskStatusTimers()
+				} finally {
+					clearInterval(abortWatcher)
+					// One release path for abort, throw, supersession, and "release".
+					// `releaseMessage` is idempotent, so it stays safe beside the
+					// helper-internal release. The durable consume is the one outcome
+					// that must keep its claim until persistence removes the message —
+					// it is the only path that assigned `queuedMessageId` here.
+					if (queuedMessageId !== queuedMessage.id) {
+						this.messageQueueService.releaseMessage(queuedMessage.id)
+					}
+				}
+			} else {
+				queuedMessageId = this.handleQueuedAskResponse(queuedMessage, queuedAskResolution)
+			}
+		} else if (shouldDrainQueuedMessageForAsk && isMessageQueued) {
+			// The claim gate (per-turn latch, or blanket deny engaged for a command
+			// ask) left the queued message untouched. If the policy still leaves the
+			// prompt pending, the non-empty queue keeps `isStatusMutable` false, so
+			// the interactive arm must run from here — the same reason a release
+			// re-arms. For an auto-answered ask the arm's pending check declines.
+			armAskStatusTimers()
+		}
+
+		// At most one drain-site policy re-check is in flight per ask; the
+		// pWaitFor predicate is synchronous, so its await runs out here.
+		let queuedCommandPolicyCheck: Promise<void> | undefined
+		const verifyDrainedCommandMessage = async (
+			message: QueuedMessage,
+			resolution: QueuedAskResolution,
+		): Promise<void> => {
+			// The fresh policy read ends in `provider.getState()`, which awaits
+			// custom-mode file work that cannot be cancelled from here. An abort
+			// poller aborts a signal the re-check itself awaits, settling it within
+			// one poll of the abort instead of leaving `ask()` blocked on the pending
+			// read or a lost race retaining this task. The re-check's own race
+			// attaches handlers to the read, so it rejecting after the abort settles
+			// is already considered handled — no extra `.catch` needed.
+			const recheckAbort = new AbortController()
+			const checkAbort = () => {
+				if (this.abort) {
+					recheckAbort.abort()
+				}
+			}
+			checkAbort()
+			const abortWatcher = setInterval(checkAbort, 100)
+			try {
+				const action = await this.recheckQueuedCommandPolicy(
+					{
+						text,
+						isProtected,
+						dcgDecision: autoApprovalContext?.dcgDecision,
+					},
+					recheckAbort.signal,
+				)
+				if (!this.abort && this.askResponse === undefined && this.lastMessageTs === askTs) {
+					queuedMessageId = this.applyQueuedCommandPolicyAction(action, message, resolution)
+					// A "release" outcome leaves the ask pending while the queue stays
+					// non-empty, so the arm that `isStatusMutable` gates — computed
+					// once, before the claim — must run here.
+					armAskStatusTimers()
+				}
+			} finally {
+				clearInterval(abortWatcher)
+				// One release path for abort, throw, supersession, and "release".
+				// `releaseMessage` is idempotent, so it stays safe beside the
+				// branch-local releases. The durable consume is the one outcome
+				// that must keep its claim until persistence removes the message —
+				// it is the only path that assigned `queuedMessageId`.
+				if (queuedMessageId !== message.id) {
+					this.messageQueueService.releaseMessage(message.id)
+				}
+			}
 		}
 
 		// Wait for askResponse to be set
-		await pWaitFor(
-			() => {
-				if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
-					return true
-				}
-
-				// If a queued message arrives while we're blocked on an ask (e.g. a follow-up
-				// suggestion click that was incorrectly queued due to UI state), consume it
-				// immediately so the task doesn't hang.
-				if (shouldDrainQueuedMessageForAsk && !this.messageQueueService.isEmpty()) {
-					const message = this.messageQueueService.claimNextMessage()
-					const resolution = message ? queuedResponseForAsk(type, text) : undefined
-					if (message && resolution) {
-						queuedMessageId = this.handleQueuedAskResponse(message, resolution)
+		try {
+			await pWaitFor(
+				() => {
+					if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
+						return true
 					}
+
+					// If a queued message arrives while we're blocked on an ask (e.g. a follow-up
+					// suggestion click that was incorrectly queued due to UI state), consume it
+					// immediately so the task doesn't hang. Command asks under blanket deny are
+					// excluded (`queueMayAnswerThisAsk`): a queued message must never stand in
+					// for the explicit approval the policy withheld.
+					if (
+						queueMayAnswerThisAsk &&
+						shouldDrainQueuedMessageForAsk &&
+						!queuedCommandPolicyCheck &&
+						this.mayDrainQueuedMessageForAsk()
+					) {
+						const message = this.messageQueueService.claimNextMessage()
+						const resolution = message ? queuedResponseForAsk(type, text) : undefined
+						if (message && resolution) {
+							if (type === "command") {
+								// Claim first, then verify the policy off-predicate: a
+								// blanket-deny flip landing during the prompt dwell is
+								// invisible to the frozen snapshot gate, so the claim is
+								// provisional until the fresh check clears it.
+								queuedCommandPolicyCheck = verifyDrainedCommandMessage(message, resolution).catch(
+									(error) => {
+										// The background check must never reject unhandled;
+										// on failure the claim is released so the message
+										// stays available to a later consumer.
+										console.error("[Task#ask] queued command policy re-check failed:", error)
+										this.messageQueueService.releaseMessage(message.id)
+										armAskStatusTimers()
+									},
+								)
+							} else {
+								queuedMessageId = this.handleQueuedAskResponse(message, resolution)
+							}
+						}
+					}
+
+					return false
+				},
+				{ interval: 100 },
+			)
+
+			// Let a policy re-check that was in flight when the wait resolved run to
+			// completion: its bail-out path releases the claim, and leaving it
+			// unresolved would let the consume race the result below. On abort, detach
+			// instead: the re-check settles on the abort and its `finally` releases the
+			// claim either way, while awaiting past the abort could stall on an
+			// uncancellable read instead of letting the throw below settle the ask.
+			if (queuedCommandPolicyCheck && !this.abort) {
+				await queuedCommandPolicyCheck
+			}
+
+			/* v8 ignore next 3 -- abort-while-waiting path; covered by e2e standalone-resume test */
+			if (this.abort) {
+				if (queuedMessageId) {
+					this.messageQueueService.releaseMessage(queuedMessageId)
 				}
-
-				return false
-			},
-			{ interval: 100 },
-		)
-
-		/* v8 ignore next 3 -- abort-while-waiting path; covered by e2e standalone-resume test */
-		if (this.abort) {
-			if (queuedMessageId) {
-				this.messageQueueService.releaseMessage(queuedMessageId)
+				throw new Error(`[ZooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
 			}
-			throw new Error(`[ZooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
-		}
 
-		if (this.lastMessageTs !== askTs) {
-			// Could happen if we send multiple asks in a row i.e. with
-			// command_output. It's important that when we know an ask could
-			// fail, it is handled gracefully.
-			if (queuedMessageId) {
-				this.messageQueueService.releaseMessage(queuedMessageId)
+			if (this.lastMessageTs !== askTs) {
+				// Could happen if we send multiple asks in a row i.e. with
+				// command_output. It's important that when we know an ask could
+				// fail, it is handled gracefully.
+				if (queuedMessageId) {
+					this.messageQueueService.releaseMessage(queuedMessageId)
+				}
+				throw new AskIgnoredError("superseded")
 			}
-			throw new AskIgnoredError("superseded")
+
+			const result = {
+				response: this.askResponse!,
+				text: this.askResponseText,
+				images: this.askResponseImages,
+				queuedMessageId,
+				autoDenyDetail: this.pendingAutoDenyDetail,
+			}
+			this.askResponse = undefined
+			this.askResponseText = undefined
+			this.askResponseImages = undefined
+			this.pendingAutoDenyDetail = undefined
+
+			// Switch back to an active state.
+			if (this.idleAsk || this.resumableAsk || this.interactiveAsk) {
+				this.idleAsk = undefined
+				this.resumableAsk = undefined
+				this.interactiveAsk = undefined
+				this.emit(RooCodeEventName.TaskActive, this.taskId)
+			}
+
+			this.emit(RooCodeEventName.TaskAskResponded)
+			return result
+		} finally {
+			// Teardown for every settle path: the normal resolve and the
+			// abort/supersession throws that never reach the result handling
+			// above. The fire-time guard in the armed callbacks covers the
+			// sub-tick window where an already-due timer fires before this
+			// sweep runs.
+			timeouts.forEach((timeout) => clearTimeout(timeout))
 		}
-
-		const result = {
-			response: this.askResponse!,
-			text: this.askResponseText,
-			images: this.askResponseImages,
-			queuedMessageId,
-		}
-		this.askResponse = undefined
-		this.askResponseText = undefined
-		this.askResponseImages = undefined
-
-		// Cancel the timeouts if they are still running.
-		timeouts.forEach((timeout) => clearTimeout(timeout))
-
-		// Switch back to an active state.
-		if (this.idleAsk || this.resumableAsk || this.interactiveAsk) {
-			this.idleAsk = undefined
-			this.resumableAsk = undefined
-			this.interactiveAsk = undefined
-			this.emit(RooCodeEventName.TaskActive, this.taskId)
-		}
-
-		this.emit(RooCodeEventName.TaskAskResponded)
-		return result
 	}
 
 	handleWebviewAskResponse(askResponse: ClineAskResponse, text?: string, images?: string[]) {
@@ -1852,10 +2445,27 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// to ensure tool_use/tool_result pairs are complete in history
 		await this.flushPendingToolResultsToHistory()
 
-		const systemPrompt = await this.getSystemPrompt()
+		// Capture provider state and one model-info snapshot once and thread them into
+		// getSystemPrompt so the prompt and the condensing tool array below resolve
+		// from one snapshot.
+		const state = await this.providerRef.deref()?.getState()
+		const requestModelInfo = await this.safeEnsureModelFetched()
+
+		// A cancellation landing during the bounded metadata wait must stop
+		// manual condensation before any prompt build or summarization request.
+		if (this.abort || this.abandoned) {
+			return
+		}
+
+		const systemPrompt = await this.getSystemPrompt(state, requestModelInfo)
+
+		// A cancellation landing during the prompt build's bounded MCP wait must
+		// stop manual condensation before any summarization request is issued.
+		if (this.abort || this.abandoned) {
+			return
+		}
 
 		// Get condensing configuration
-		const state = await this.providerRef.deref()?.getState()
 		const customCondensingPrompt = state?.customSupportPrompts?.CONDENSE
 		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
 		const mode = await this.getTaskMode()
@@ -1867,7 +2477,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const provider = this.providerRef.deref()
 		let allTools: import("openai").default.Chat.ChatCompletionTool[] = []
 		if (provider) {
-			const modelInfo = this.api.getModel().info
 			const toolsResult = await buildNativeToolsArrayWithRestrictions({
 				provider,
 				cwd: this.cwd,
@@ -1876,7 +2485,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				experiments: state?.experiments,
 				apiConfiguration,
 				disabledTools: state?.disabledTools,
-				modelInfo,
+				modelInfo: requestModelInfo,
 				includeAllToolsWithRestrictions: false,
 			})
 			allTools = toolsResult.tools
@@ -1904,6 +2513,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		const filesReadByRoo = await this.getFilesReadByRooSafely("condenseContext")
 
+		// A cancellation landing while the summarization inputs are gathered must
+		// stop manual condensation before any summarization request is issued.
+		if (this.abort || this.abandoned) {
+			return
+		}
+
 		const {
 			messages,
 			summary,
@@ -1925,6 +2540,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			cwd: this.cwd,
 			rooIgnoreController: this.rooIgnoreController,
 		})
+		// A cancellation landing during the summarization request must stop
+		// manual condensation before it replaces and persists the history.
+		if (this.abort || this.abandoned) {
+			return
+		}
 		if (error) {
 			await this.say(
 				"condense_context_error",
@@ -2327,6 +2947,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// This is important in case the user deletes messages without resuming
 			// the task first.
 			this.hydrateApiConversationHistory(savedApiConversationHistory)
+			await this.settleInterruptedCreateSubtaskBeforeReplay()
 			if (
 				this.pendingAction &&
 				this.apiConversationHistory.some(
@@ -2613,6 +3234,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.currentRequestAbortController.abort()
 			this.currentRequestAbortController = undefined
 		}
+		// A metadata-fetch waiter still in flight is as stale as an abandoned
+		// stream: detach it from the provider-side fetch on cancel/dispose.
+		if (this.metadataFetchAbortController) {
+			this.metadataFetchAbortController.abort()
+			this.metadataFetchAbortController = undefined
+		}
 	}
 
 	/**
@@ -2708,6 +3335,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		} catch (error) {
 			console.error("Error flushing shutdown telemetry:", error)
 		}
+
+		// A task being disposed is no longer serving requests: set the same
+		// cancellation state `abortTask()` sets, synchronously before the aborts
+		// below, so the request-construction guard (`abort || abandoned` in
+		// attemptApiRequest) and the outer loop's `abort` checks observe disposal
+		// even when it lands before any explicit cancel. Without this, only the
+		// signals below are cancelled and a request already past those checks
+		// could still build tools and call `createMessage()`.
+		this.abort = true
 
 		// Cancel any in-progress HTTP request
 		try {
@@ -3031,7 +3667,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					const state = await provider.getState()
 					const targetMode = getModeBySlug(slashCommandMode, state?.customModes)
 					if (targetMode) {
-						await provider.handleModeSwitch(slashCommandMode)
+						await provider.handleModeSwitch(slashCommandMode, null)
 					}
 				}
 			}
@@ -3175,11 +3811,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.didRejectTool = false
 				this.didAlreadyUseTool = false
 				this.assistantMessageSavedToHistory = false
+				this.didFinishAbortingStream = false
 				this.resetAssistantMessagePersistence()
 				// Reset tool failure flag for each new assistant turn - this ensures that tool failures
 				// only prevent attempt_completion within the same assistant message, not across turns
 				// (e.g., if a tool fails, then user sends a message saying "just complete anyway")
 				this.didToolFailInCurrentTurn = false
+				// A blanket command denial only suppresses queued-message approval
+				// for the turn that earned it: a message the user queues afterward
+				// (a new turn) is fair game for the next ask to answer.
+				this.blanketDeniedCommandThisTurn = false
 				this.presentAssistantMessageLocked = false
 				this.presentAssistantMessageHasPendingUpdates = false
 				// No legacy text-stream tool parser.
@@ -3199,7 +3840,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// Yields only if the first chunk is successful, otherwise will
 				// allow the user to retry the request (most likely due to rate
 				// limit error, which gets thrown on the first chunk).
-				const stream = this.attemptApiRequest(currentItem.retryAttempt ?? 0, { skipProviderRateLimit: true })
+				const stream = this.attemptApiRequest(currentItem.retryAttempt ?? 0, {
+					skipProviderRateLimit: true,
+					requestModelInfo: streamModelInfo,
+				})
 				let assistantMessage = ""
 				let reasoningMessage = ""
 				const pendingGroundingSources: GroundingSource[] = []
@@ -3651,9 +4295,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						await abortStream(cancelReason, streamingFailedMessage)
 
 						if (this.abort) {
-							// User cancelled - abort the entire task
-							this.abortReason = cancelReason
+							// ??= keeps the first reason; a cancel can land during abortStream after cancelReason was already computed.
+							this.abortReason ??= "user_cancelled"
 							await this.abortTask()
+						} else if (error instanceof OutputTokenLimitError) {
+							// Truncation repeats on an identical request, so never auto-retry it
+							// (even with auto-approval); let the user decide once.
+							const { response } = await this.ask("api_req_failed", rawErrorMessage)
+
+							if (response !== "yesButtonClicked") {
+								throw new Error("API request failed")
+							}
+
+							await this.say("api_req_retried")
+							stack.push({
+								userContent: currentUserContent,
+								includeFileDetails: false,
+								retryAttempt: 0,
+							})
+							continue
 						} else {
 							// Stream failed - log the error and retry with the same content
 							// The existing rate limiting will prevent rapid retries
@@ -3671,8 +4331,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									console.log(
 										`[Task#${this.taskId}.${this.instanceId}] Task aborted during mid-stream retry backoff`,
 									)
-									// Abort the entire task
-									this.abortReason = "user_cancelled"
+									this.abortReason ??= "user_cancelled"
 									await this.abortTask()
 									break
 								}
@@ -3746,12 +4405,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
 							this.presentAssistantMessageSafe()
 						} else if (toolUseIndex !== undefined) {
-							// finalizeStreamingToolCall returned null (malformed JSON or missing args)
-							// We still need to mark the tool as non-partial so it gets executed
-							// The tool's validation will catch any missing required parameters
+							// finalizeStreamingToolCall returned null (malformed JSON or missing args).
+							// existingToolUse is the same object the streaming phase was mutating in
+							// place, so it still carries nativeArgs AND params built from the incomplete
+							// partial parse (e.g. a truncated write_to_file `content` string) - both were
+							// only ever meant for live progress display, never for execution or for
+							// ending up in conversation history. Mark the tool as non-partial so it's
+							// presented as complete, and clear both so presentAssistantMessage's
+							// `!block.nativeArgs` guard short-circuits with a structured tool_result
+							// instead of executing the truncated value, and so the toolUse.nativeArgs ||
+							// toolUse.params fallback used when recording history doesn't fall through to
+							// the same truncated data under a different name.
 							const existingToolUse = this.assistantMessageContent[toolUseIndex]
 							if (existingToolUse && existingToolUse.type === "tool_use") {
 								existingToolUse.partial = false
+								existingToolUse.nativeArgs = undefined
+								existingToolUse.params = {}
 								// Ensure it has the ID for native protocol
 								;(existingToolUse as any).id = event.id
 							}
@@ -4018,9 +4687,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						this.consecutiveNoToolUseCount = 0
 					}
 
-					// Push to stack if there's content OR if we're paused waiting for a subtask.
-					// When paused, we push an empty item so the loop continues to the pause check.
-					if (this.userMessageContent.length > 0 || this.isPaused) {
+					if (this.userMessageContent.length > 0) {
 						stack.push({
 							userContent: [...this.userMessageContent], // Create a copy to avoid mutation issues
 							includeFileDetails: false, // Subsequent iterations don't need file details
@@ -4161,8 +4828,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return false
 	}
 
-	private async getSystemPrompt(): Promise<string> {
-		const { mcpEnabled } = (await this.providerRef.deref()?.getState()) ?? {}
+	/**
+	 * Builds the SYSTEM_PROMPT from the caller's provider-state snapshot. This
+	 * method never reads provider state itself: callers that also construct
+	 * runtime tools for the same request (attemptApiRequest, condenseContext,
+	 * handleContextWindowExceededError) must thread the very snapshot they build
+	 * those tools from, so the prompt and the runtime tool array resolve from one
+	 * consistent set of values — otherwise a settings change during the MCP wait
+	 * can make the prompt advertise a tool the runtime rejects, or hide a
+	 * callable tool. An `undefined` snapshot declares that the caller's own read
+	 * came back empty because the provider was already gone; the prompt then
+	 * resolves from defaults. Pass `requestModelInfo` (captured via
+	 * safeEnsureModelFetched) in the same situation so the prompt's tool
+	 * guidance and the request's tool arrays resolve from one model-metadata
+	 * snapshot.
+	 */
+	private async getSystemPrompt(
+		requestState: Awaited<ReturnType<ClineProvider["getState"]>> | undefined,
+		requestModelInfo?: ModelInfo,
+	): Promise<string> {
+		const { mcpEnabled } = requestState ?? {}
 		let mcpHub: McpHub | undefined
 		if (mcpEnabled ?? true) {
 			const provider = this.providerRef.deref()
@@ -4186,10 +4871,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		const rooIgnoreInstructions = this.rooIgnoreController?.getInstructions()
 
-		const state = await this.providerRef.deref()?.getState()
-
 		const { customModes, customModePrompts, customInstructions, experiments, language, enableSubfolderRules } =
-			state ?? {}
+			requestState ?? {}
 		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
 		const mode = await this.getTaskMode()
 		const apiConfiguration = this.apiConfiguration
@@ -4201,7 +4884,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				throw new Error("Provider not available")
 			}
 
-			const modelInfo = this.api.getModel().info
+			// Load dynamically discovered model metadata (router providers) before
+			// reading it, so the prompt's included/excluded tool guidance matches
+			// the runtime path; prefer the caller's per-request snapshot when threaded.
+			const modelInfo = requestModelInfo ?? (await this.safeEnsureModelFetched())
 
 			return SYSTEM_PROMPT(
 				provider.context,
@@ -4229,6 +4915,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				undefined, // todoList
 				this.api.getModel().id,
 				provider.getSkillsManager(),
+				requestState?.disabledTools,
+				modelInfo,
 			)
 		})()
 	}
@@ -4243,20 +4931,67 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	/**
 	 * Ensures router-provider model metadata is loaded before getModel() is used for
 	 * context management or streaming. Failures fall back to hardcoded defaults rather
-	 * than aborting the task.
+	 * than aborting the task; the wait is bounded by MODEL_FETCH_TIMEOUT_MS (see the
+	 * constant for the degradation semantics). On expiry or cancellation the per-call
+	 * AbortSignal detaches this task's waiter from the provider-side fetch instead of
+	 * leaving a handler-side promise waiting on it indefinitely.
+	 *
+	 * The return value is the settled post-wait read of getModel().info: request
+	 * entry points (attemptApiRequest, condenseContext) await this once before
+	 * prompt generation and share the returned snapshot between getSystemPrompt
+	 * and every tool-array build of the same request, so a fetch that resolves after
+	 * the bounded wait was abandoned cannot move model-specific tool policy between
+	 * prompt time and request time. Callers that do not thread a snapshot keep
+	 * awaiting this immediately before their own getModel() read; that per-site guard
+	 * remains the standalone/fallback read path, and repeat awaits stay cheap once a
+	 * fetch has succeeded because the provider caches successes. RouterProvider
+	 * already negative-caches catalog misses with a TTL (`missingModelRefreshAt`).
 	 */
-	private async safeEnsureModelFetched(): Promise<void> {
+	private async safeEnsureModelFetched(): Promise<ModelInfo> {
+		// Per-call controller: its signal makes ensureModelFetched() settle on
+		// abort, so neither this race nor the provider-side waiter outlives the
+		// bounded wait. cancel/dispose aborts it early via cancelCurrentRequest.
+		const controller = new AbortController()
+		this.metadataFetchAbortController = controller
+		// Promise.race attaches handlers to both inputs, so the fetch rejecting
+		// after the abort is already considered handled — no extra .catch needed.
+		let timeoutId: ReturnType<typeof setTimeout> | undefined
+		let timedOut = false
 		try {
-			await this.api.ensureModelFetched?.()
+			await Promise.race([
+				this.api.ensureModelFetched?.(controller.signal),
+				new Promise<void>((resolve) => {
+					timeoutId = setTimeout(() => {
+						timedOut = true
+						resolve()
+					}, MODEL_FETCH_TIMEOUT_MS)
+				}),
+			])
+			if (timedOut) {
+				console.warn(
+					`[Task#${this.taskId}] Timed out after ${MODEL_FETCH_TIMEOUT_MS}ms fetching model metadata; using fallback model info.`,
+				)
+			}
 		} catch (error) {
 			console.error(
 				`[Task#${this.taskId}] Failed to fetch model metadata:`,
 				error instanceof Error ? error.message : error,
 			)
+		} finally {
+			if (timeoutId) {
+				clearTimeout(timeoutId)
+			}
+			if (this.metadataFetchAbortController === controller) {
+				this.metadataFetchAbortController = undefined
+			}
+			// Unconditional: settles any waiter still attached to this call.
+			controller.abort()
 		}
+		// The post-wait read is the settled snapshot callers must share per request.
+		return this.api.getModel().info
 	}
 
-	private async handleContextWindowExceededError(): Promise<void> {
+	private async handleContextWindowExceededError(requestModelInfo: ModelInfo): Promise<void> {
 		const state = await this.providerRef.deref()?.getState()
 		const { profileThresholds = {} } = state ?? {}
 		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
@@ -4264,8 +4999,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const apiConfiguration = this.apiConfiguration
 
 		const { contextTokens } = this.getTokenUsage()
-		await this.safeEnsureModelFetched()
-		const modelInfo = this.api.getModel().info
+		// Truncation permanently rewrites apiConversationHistory, and the retry
+		// hop that consumes the result builds from the caller's snapshot; sizing
+		// against a fresh read here could discard history the retry would still
+		// have fit, so recovery shares the caller's snapshot instead of re-fetching.
+		const modelInfo = requestModelInfo
 
 		const maxTokens = getModelMaxOutputTokens({
 			modelId: this.api.getModel().id,
@@ -4339,7 +5077,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				apiHandler: this.api,
 				autoCondenseContext: true,
 				autoCondenseContextPercent: FORCED_CONTEXT_REDUCTION_PERCENT,
-				systemPrompt: await this.getSystemPrompt(),
+				systemPrompt: await this.getSystemPrompt(state, modelInfo),
 				taskId: this.taskId,
 				profileThresholds,
 				currentProfileId,
@@ -4429,7 +5167,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	public async *attemptApiRequest(
 		retryAttempt: number = 0,
-		options: { skipProviderRateLimit?: boolean } = {},
+		options: { skipProviderRateLimit?: boolean; requestModelInfo?: ModelInfo } = {},
 	): ApiStream {
 		const state = await this.providerRef.deref()?.getState()
 
@@ -4460,12 +5198,36 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// in the caller.
 		this.rateLimitClock.recordRequest()
 
-		const systemPrompt = await this.getSystemPrompt()
+		// Thread the request state snapshot into prompt generation so the prompt
+		// and the runtime tools (built below from the same `state`) stay aligned
+		// even if settings change while this method waits on MCP or rate limits.
+		// Capture one bounded-wait model-info snapshot per request, shared by the
+		// prompt and every tool array built below; prefer the caller's snapshot
+		// when one was threaded.
+		const requestModelInfo = options.requestModelInfo ?? (await this.safeEnsureModelFetched())
+		// Retry recursions must reuse this snapshot instead of re-deriving it: a
+		// metadata fetch landing between attempts would otherwise move
+		// model-specific tool policy or `preserveReasoning` mid-request. When the
+		// caller threaded a snapshot its options object is forwarded unchanged —
+		// same reference, and never mutated.
+		const retryOptions = options.requestModelInfo === undefined ? { ...options, requestModelInfo } : options
+		const systemPrompt = await this.getSystemPrompt(state, requestModelInfo)
+
+		// A cancellation landing during the rate-limit countdown, the bounded metadata
+		// wait, or the MCP wait inside getSystemPrompt must stop this request before any
+		// tool array, AbortController, or createMessage call is issued for it.
+		if (this.abort || this.abandoned) {
+			throw new Error(
+				`[Task#attemptApiRequest] task ${this.taskId}.${this.instanceId} aborted during request construction`,
+			)
+		}
+
 		const { contextTokens } = this.getTokenUsage()
 
 		if (contextTokens) {
-			await this.safeEnsureModelFetched()
-			const modelInfo = this.api.getModel().info
+			// Context sizing resolves from the same model-info snapshot as the prompt and
+			// every tool array of this request, not from a fresh getModel() re-read.
+			const modelInfo = requestModelInfo
 
 			const maxTokens = getModelMaxOutputTokens({
 				modelId: this.api.getModel().id,
@@ -4527,7 +5289,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						experiments: state?.experiments,
 						apiConfiguration,
 						disabledTools: state?.disabledTools,
-						modelInfo,
+						modelInfo: requestModelInfo,
 						includeAllToolsWithRestrictions: false,
 					})
 					contextMgmtTools = toolsResult.tools
@@ -4652,7 +5414,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// mergeConsecutiveApiMessages implementation) without mutating stored history.
 		const mergedForApi = mergeConsecutiveApiMessages(messagesSinceLastSummary, { roles: ["user"] })
 		const messagesWithoutImages = maybeRemoveImageBlocks(mergedForApi, this.api)
-		const cleanConversationHistory = this.buildCleanConversationHistory(messagesWithoutImages as ApiMessage[])
+		const cleanConversationHistory = this.buildCleanConversationHistory(
+			messagesWithoutImages as ApiMessage[],
+			requestModelInfo,
+		)
 
 		// Check auto-approval limits
 		const approvalResult = await this.autoApprovalHandler.checkAutoApprovalLimits(
@@ -4666,8 +5431,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			throw new Error("Auto-approval limit reached and user did not approve continuation")
 		}
 
-		// Whether we include tools is determined by whether we have any tools to send.
-		const modelInfo = this.api.getModel().info
+		// Tool policy resolves from the same model-info snapshot as the system prompt
+		// built earlier in this request, not from a fresh getModel() re-read.
+		const modelInfo = requestModelInfo
 
 		// Build complete tools array: native tools + dynamic MCP tools
 		// When includeAllToolsWithRestrictions is true, returns all tools but provides
@@ -4786,9 +5552,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						`Retry attempt ${retryAttempt + 1}/${MAX_CONTEXT_WINDOW_RETRIES}. ` +
 						`Attempting automatic truncation...`,
 				)
-				await this.handleContextWindowExceededError()
+				await this.handleContextWindowExceededError(requestModelInfo)
 				// Retry the request after handling the context window error
-				yield* this.attemptApiRequest(retryAttempt + 1)
+				yield* this.attemptApiRequest(retryAttempt + 1, retryOptions)
 				return
 			}
 
@@ -4808,7 +5574,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				// Delegate generator output from the recursive call with
 				// incremented retry count.
-				yield* this.attemptApiRequest(retryAttempt + 1)
+				yield* this.attemptApiRequest(retryAttempt + 1, retryOptions)
 
 				return
 			} else {
@@ -4826,7 +5592,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				await this.say("api_req_retried")
 
 				// Delegate generator output from the recursive call.
-				yield* this.attemptApiRequest()
+				yield* this.attemptApiRequest(0, retryOptions)
 				return
 			}
 		}
@@ -4925,6 +5691,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private buildCleanConversationHistory(
 		messages: ApiMessage[],
+		requestModelInfo: ModelInfo,
 	): Array<
 		Anthropic.Messages.MessageParam | { type: "reasoning"; encrypted_content: string; id?: string; summary?: any[] }
 	> {
@@ -5024,10 +5791,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 					continue
 				} else if (hasPlainTextReasoning) {
-					// Check if the model's preserveReasoning flag is set
+					// Check if the model's preserveReasoning flag is set, resolved from
+					// the request's threaded model snapshot (same per-request source as
+					// the prompt and tool arrays) rather than a fresh getModel() re-read,
+					// so a mid-request metadata refresh cannot change what this request sends.
 					// If true, include the reasoning block in API requests
 					// If false/undefined, strip it out (stored for history only, not sent back to API)
-					const shouldPreserveForApi = this.api.getModel().info.preserveReasoning === true
+					const shouldPreserveForApi = requestModelInfo.preserveReasoning === true
 					let assistantContent: Anthropic.Messages.MessageParam["content"]
 
 					if (shouldPreserveForApi) {
