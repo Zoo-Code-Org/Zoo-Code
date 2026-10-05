@@ -1594,7 +1594,7 @@ describe("OpenAiHandler", () => {
 			expect(model.id).toBe(mockOptions.openAiModelId)
 			expect(model.info).toBeDefined()
 			expect(model.info.contextWindow).toBe(128_000)
-			expect(model.info.supportsImages).toBe(true)
+			expect(model.info.supportsImages).toBe(false)
 		})
 
 		it("should handle undefined model ID", () => {

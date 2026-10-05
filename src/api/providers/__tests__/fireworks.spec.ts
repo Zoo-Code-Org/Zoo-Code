@@ -100,6 +100,29 @@ describe("FireworksHandler", () => {
 		expect(model.info).toEqual(expect.objectContaining(fireworksModels[testModelId]))
 	})
 
+	it("should omit max_tokens for a custom model", async () => {
+		const handlerWithCustomModel = new FireworksHandler({
+			apiModelId: "accounts/fireworks/models/deepseek-v4p1-flash",
+			fireworksApiKey: "test-fireworks-api-key",
+		})
+
+		await collectStream(handlerWithCustomModel.createMessage("system prompt", []))
+
+		expect(mockCreate.mock.calls[0][0].model).toBe("accounts/fireworks/models/deepseek-v4p1-flash")
+		expect(mockCreate.mock.calls[0][0].max_tokens).toBeUndefined()
+	})
+
+	it("should still send a positive max_tokens for a known model", async () => {
+		const handlerWithModel = new FireworksHandler({
+			apiModelId: "accounts/fireworks/models/kimi-k2-instruct",
+			fireworksApiKey: "test-fireworks-api-key",
+		})
+
+		await collectStream(handlerWithModel.createMessage("system prompt", []))
+
+		expect(mockCreate.mock.calls[0][0].max_tokens).toBe(16384)
+	})
+
 	it.each([
 		{
 			modelId: "accounts/fireworks/models/glm-5p1" as const,
