@@ -971,15 +971,25 @@ describe("resolveLockKey", () => {
 		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
 		vi.mocked(fs.realpath).mockRejectedValue(enoent)
 		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
-		// Only the link path is read, so a single answer is enough and keeps the mock's
-		// return type matching fs.promises.readlink.
-		vi.mocked(fs.readlink).mockResolvedValue("referent.json")
+		// The walk ends when readlink throws, because a plain file is not a link.
+		// Answering every call with the same value would let a walk that never
+		// stopped return the same key, so the mock has to distinguish the link from
+		// the referent and the test has to check that the walk stopped.
+		const notALink = Object.assign(new Error("EINVAL: not a link"), { code: "EINVAL" })
+		vi.mocked(fs.readlink).mockImplementation(async (target: string) => {
+			if (target === "/tmp/linkdir/file.json") return "referent.json"
+			throw notALink
+		})
 
 		// Mid-commit a peer writer renames the referent away and back, so the key
 		// must still be computable while the link dangles.
 		await expect(resolveLockKey("/tmp/linkdir/file.json")).resolves.toBe(
 			path.resolve(path.join("/tmp/linkdir", "referent.json")),
 		)
+		// Two calls means the walk stopped at the referent: the link, then one more
+		// on the referent that reports it is not a link. A walk that never stopped
+		// would run the full 8 steps.
+		expect(fs.readlink).toHaveBeenCalledTimes(2)
 	})
 
 	it("terminates on a two-link cycle instead of walking forever", async () => {
@@ -1049,7 +1059,11 @@ describe("cleanup before a rollback failure is reported", () => {
 		// The backup is what the caller can still recover, so it stays on disk; the
 		// staging file and this write's own directory must not leak alongside it.
 		expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
-		expect(fs.rmdir).toHaveBeenCalled()
+		// The title says this write releases its own staging directory, so check
+		// which directory was removed rather than that some rmdir ran.
+		const staging = vi.mocked(fsSync.mkdirSync).mock.calls.map(function (call) { return String(call[0]) })
+		expect(staging).toHaveLength(1)
+		expect(fs.rmdir).toHaveBeenCalledWith(staging[0])
 
 		const failingRenameOrder = vi.mocked(fs.rename).mock.invocationCallOrder[2]
 		const unlinkOrder = vi.mocked(fs.unlink).mock.invocationCallOrder[0]
