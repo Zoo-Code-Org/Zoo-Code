@@ -173,7 +173,14 @@ export async function resolvePublishTarget(absoluteFilePath: string): Promise<st
 				: undefined
 		if (code !== "ENOENT") throw error
 		// ENOENT also covers a dangling symlink, which must never be written through.
-		const linkStat = await fs.lstat(absoluteFilePath).catch(() => undefined)
+		// Only a lstat that also reports the path as absent may fall back to the
+		// given path; a real lstat failure (EACCES, EIO) says nothing about whether
+		// the path is a link, so falling back would write through a link we were
+		// simply not allowed to inspect.
+		const linkStat = await fs.lstat(absoluteFilePath).catch((lstatError: unknown) => {
+			if (errorCode(lstatError) === "ENOENT") return undefined
+			throw lstatError
+		})
 		if (linkStat?.isSymbolicLink()) throw error
 		return absoluteFilePath
 	})
