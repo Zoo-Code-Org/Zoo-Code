@@ -10,6 +10,7 @@ import * as fs from "fs/promises"
 import { computeVersionToken, versionTokenOfStat } from "../../../utils/versionToken"
 import type { BigIntStats } from "fs"
 import { safeWriteText } from "../../../services/file-safety/safeWriteText"
+import { withFileLock } from "../../../utils/fileLock"
 import { ObservationRegistry } from "../../../core/task/observationRegistry"
 import type { Task } from "../../../core/task/Task"
 
@@ -997,7 +998,7 @@ describe("DiffViewProvider", () => {
 				mockTask.observationRegistry.clear()
 
 				await expect(diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)).rejects.toThrow(
-					"File already exists at /mock/cwd/test.ts and was not read before this write -- read the file first, then retry.",
+					"File already exists at test.ts and was not read before this write -- read the file first, then retry.",
 				)
 				expect(safeWriteText).not.toHaveBeenCalled()
 			})
@@ -1161,7 +1162,7 @@ describe("DiffViewProvider", () => {
 			await expect(
 				diffViewProvider.saveDirectly("observed.ts", "new content", false, false, 0, "update"),
 			).rejects.toThrow(
-				"File already exists at /mock/cwd/observed.ts and was not read before this write -- read the file first, then retry.",
+				"File already exists at observed.ts and was not read before this write -- read the file first, then retry.",
 			)
 		})
 		it("open() observes the empty placeholder of a new file so the accepted save can be guarded", async () => {
@@ -1314,7 +1315,7 @@ describe("DiffViewProvider", () => {
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
 
 			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow(
-				"File already exists at /mock/cwd/test.ts and was not read before this write -- read the file first, then retry.",
+				"File already exists at test.ts and was not read before this write -- read the file first, then retry.",
 			)
 			expect(safeWriteText).not.toHaveBeenCalled()
 		})
@@ -1562,6 +1563,46 @@ describe("DiffViewProvider", () => {
 
 			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"))
 			expect(result.newProblemsMessage).toBe("")
+		})
+
+		it("saveChanges() checks the placeholder token and unlinks inside the same lock", async () => {
+			// A peer writer that commits between the token check and the unlink would lose
+			// its write, so the cleanup runs under the same resolved-path advisory lock every
+			// other writer to this file uses. A token that moved inside the lock window means
+			// the file is no longer the placeholder and must be left in place.
+			const mockEditor = mockTextEditor(`${mockCwd}/test.ts`, "new content")
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockTextDocument(`${mockCwd}/test.ts`)), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("")
+			diffViewProvider.editType = "create"
+
+			await diffViewProvider.open("test.ts")
+
+			const lockKeys: string[] = []
+			vi.mocked(withFileLock).mockImplementation(async (lockKey, operation) => {
+				lockKeys.push(lockKey)
+				if (lockKeys.length === 2) {
+					// the peer committed while the cleanup waited for the lock
+					vi.mocked(fs.stat).mockResolvedValue({ ...previewStats, size: 9999n, mtimeNs: 5n, ctimeNs: 6n })
+				}
+				return operation(lockKey)
+			})
+
+			// The publish is rejected against the peer's token, so the discard cleanup runs.
+			vi.mocked(computeVersionToken).mockResolvedValue("peer-token")
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow(
+				/Stale version|not read before this write/,
+			)
+
+			// One acquisition for the guarded publish, one for the cleanup.
+			expect(lockKeys).toEqual([`${mockCwd}/test.ts`, `${mockCwd}/test.ts`])
+			expect(vi.mocked(fs.unlink)).not.toHaveBeenCalled()
 		})
 
 		it("clears the dirty buffer via a disk revert after a successful guarded publish", async () => {

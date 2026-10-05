@@ -19,6 +19,8 @@ import { formatResponse } from "../../core/prompts/responses"
 import { diagnosticsToProblemsString, getNewDiagnostics } from "../diagnostics"
 import { Task } from "../../core/task/Task"
 import { versionTokenOfStat } from "../../utils/versionToken"
+import { withFileLock } from "../../utils/fileLock"
+import { resolveLockKey } from "../../services/file-safety/safeWriteText"
 import { guardedWrite, GuardRejectedError, type GuardedWriteKind } from "../../core/tools/guardedWrite"
 
 import { DecorationController } from "./DecorationController"
@@ -558,8 +560,17 @@ export class DiffViewProvider {
 						discardSucceeded = await this.revertDocument(updatedDocument)
 					}
 					if (discardSucceeded && this.editType === "create" && this.placeholderVersion) {
-						const placeholderStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
-						if (placeholderStats && versionTokenOfStat(placeholderStats) === this.placeholderVersion) {
+						// Cleanup has to be serialized with the same resolved-path advisory lock
+						// every other writer to this file uses. A token check and an unlink in
+						// separate steps let a peer writer commit in the gap and lose its write.
+						// A differing token, or a lock that cannot be taken, leaves the file in place.
+						await withFileLock(await resolveLockKey(absolutePath), async () => {
+							const placeholderStats = await fs
+								.stat(absolutePath, { bigint: true })
+								.catch(() => undefined)
+							if (!placeholderStats || versionTokenOfStat(placeholderStats) !== this.placeholderVersion) {
+								return
+							}
 							let unlinked = false
 							try {
 								await fs.unlink(absolutePath)
@@ -567,22 +578,23 @@ export class DiffViewProvider {
 							} catch {
 								// the placeholder vanished or the unlink failed
 							}
-							if (unlinked) {
-								// The file is gone, so its tab must go too: closing only the diff
-								// views would leave a clean plain-text tab for a deleted file.
-								await this.closeFileTab(absolutePath)
-								// The directories open() created for the new file must go with it,
-								// innermost first. rmdir refuses a directory another writer populated
-								// in the meantime, so the cleanup stops at the first failure.
-								for (let i = this.createdDirs.length - 1; i >= 0; i--) {
-									try {
-										await fs.rmdir(this.createdDirs[i])
-									} catch {
-										break
-									}
+							if (!unlinked) {
+								return
+							}
+							// The file is gone, so its tab must go too: closing only the diff
+							// views would leave a clean plain-text tab for a deleted file.
+							await this.closeFileTab(absolutePath)
+							// The directories open() created for the new file must go with it,
+							// innermost first. rmdir refuses a directory another writer populated
+							// in the meantime, so the cleanup stops at the first failure.
+							for (let i = this.createdDirs.length - 1; i >= 0; i--) {
+								try {
+									await fs.rmdir(this.createdDirs[i])
+								} catch {
+									break
 								}
 							}
-						}
+						})
 					}
 					await this.closeOwnDiffView(absolutePath)
 				} catch {
