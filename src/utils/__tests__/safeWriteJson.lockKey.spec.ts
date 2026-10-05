@@ -35,7 +35,7 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// symbolic link. A strict resolve here rejects the caller before it can ever
 		// queue behind the peer, and the caller's delta write is lost.
 		mockedRealpath
-			.mockImplementationOnce(() => {
+			.mockImplementationOnce(async () => {
 				order.push("resolve-failed")
 				throw enoent
 			})
