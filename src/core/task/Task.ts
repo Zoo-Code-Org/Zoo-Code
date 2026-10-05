@@ -108,7 +108,6 @@ import { restoreTodoListForTask } from "../tools/UpdateTodoListTool"
 import { FileContextTracker } from "../context-tracking/FileContextTracker"
 import { ObservationRegistry } from "./observationRegistry"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
-import { ObservationRegistry } from "./observationRegistry"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
 import { DispatchState, type PendingWork } from "./dispatchState"
@@ -308,7 +307,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly parentTask: Task | undefined = undefined
 	readonly taskNumber: number
 	readonly workspacePath: string
-	readonly observationRegistry = new ObservationRegistry()
 
 	/**
 	 * The mode associated with this task. Persisted across sessions
