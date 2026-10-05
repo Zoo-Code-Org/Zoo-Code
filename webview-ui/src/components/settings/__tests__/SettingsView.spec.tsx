@@ -4,7 +4,8 @@ import { renderWithExtensionState, screen, fireEvent, within, waitFor } from "@/
 import { act } from "@testing-library/react"
 
 import { vscode } from "@/utils/vscode"
-import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS } from "@roo-code/types"
+import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, type ProviderSettings } from "@roo-code/types"
+import type { ApiOptionsProps } from "../ApiOptions"
 
 import SettingsView from "../SettingsView"
 
@@ -14,7 +15,7 @@ vi.mock("@src/utils/vscode", () => ({ vscode: { postMessage: vi.fn() } }))
 // save round trip can be observed without rendering the whole provider tree.
 vi.mock("../ApiOptions", () => ({
 	__esModule: true,
-	default: ({ apiConfiguration, setApiConfigurationField }: any) => (
+	default: ({ apiConfiguration, setApiConfigurationField }: Pick<ApiOptionsProps, "apiConfiguration" | "setApiConfigurationField">) => (
 		<div data-testid="api-options">
 			<span data-testid="received-strict">{String(apiConfiguration?.openAiStrictToolSchemas)}</span>
 			<button
@@ -940,7 +941,7 @@ describe("SettingsView - openAiStrictToolSchemas save round trip", () => {
 		vi.clearAllMocks()
 	})
 
-	const renderWithConfig = (apiConfiguration: any) => {
+	const renderWithConfig = (apiConfiguration: ProviderSettings) => {
 		const onDone = vi.fn()
 		renderWithExtensionState(<SettingsView onDone={onDone} targetSection={"providers"} />, {
 			state: { currentApiConfigName: "test-config", apiConfiguration },
@@ -951,7 +952,7 @@ describe("SettingsView - openAiStrictToolSchemas save round trip", () => {
 		vi
 			.mocked(vscode.postMessage)
 			.mock.calls.map((call) => call[0])
-			.find((message: any) => message?.type === "upsertApiConfiguration")
+			.find((message) => message?.type === "upsertApiConfiguration")
 
 	it("restores the control from a loaded API configuration", () => {
 		// The control must show the stored value rather than the display default, so
