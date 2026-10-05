@@ -121,21 +121,6 @@ export async function resolvePublishTarget(absoluteFilePath: string): Promise<st
 		return absoluteFilePath
 	})
 }
-
-/**
- * Lock key for a publish target: the symlink referent when the path is an
- * existing symlink, the path itself otherwise. Unlike resolvePublishTarget this
- * tolerates a dangling link, because the lock key has to be computable while a
- * peer writer is mid-commit (backup mode renames the referent away and back).
- * The walk is bounded so a two-link cycle terminates.
- */
-/**
- * Canonicalize the parent directory and re-join the basename. fs.realpath
- * canonicalizes every component, including a symlinked ancestor directory or a
- * Windows 8.3 short name, so a lock key must be canonical even when the file
- * itself is not there yet -- otherwise the key for one file depends on whether
- * the file exists when the key is computed, and two writers take two locks.
- */
 /**
  * Distinguish "the target does not exist" from a real I/O failure (EACCES,
  * EIO, ...). The mode-preservation path may only fall back to the fresh-file
@@ -147,6 +132,14 @@ function errorCode(error: unknown): string | undefined {
 		? String((error as { code: unknown }).code)
 		: undefined
 }
+
+/**
+ * Canonicalize the parent directory and re-join the basename. fs.realpath
+ * canonicalizes every component, including a symlinked ancestor directory or a
+ * Windows 8.3 short name, so a lock key must be canonical even when the file
+ * itself is not there yet -- otherwise the key for one file depends on whether
+ * the file exists when the key is computed, and two writers take two locks.
+ */
 
 async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
 	const dirPath = path.dirname(absoluteFilePath)
