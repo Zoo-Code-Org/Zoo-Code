@@ -34,6 +34,28 @@ export interface SafeWriteTextOptions {
 	tempPath?: string
 }
 
+/**
+ * A publish that failed and whose rollback also failed: the content survives only
+ * at the backup path, not at the canonical target. The publish failure stays the
+ * cause, and the rollback failure plus the backup location travel with the error so
+ * the caller can tell what it is looking at.
+ */
+export class RollbackFailureError extends Error {
+	readonly publishError: unknown
+	readonly rollbackError: unknown
+	readonly backupPath: string
+
+	constructor(publishError: unknown, rollbackError: unknown, backupPath: string) {
+		super(
+			"Publish failed and the backup could not be restored to its original path -- the content is preserved at the backup location reported on this error.",
+			{ cause: publishError },
+		)
+		this.name = "RollbackFailureError"
+		this.publishError = publishError
+		this.rollbackError = rollbackError
+		this.backupPath = backupPath
+	}
+}
 // -- helpers ---------------------------------------------------------------
 
 /** Generate a unique temp file name in the given directory. */
@@ -365,16 +387,17 @@ export async function safeWriteText(
 			await fs.rmdir(stagingDir).catch(() => {})
 		}
 	} catch (originalError: unknown) {
-		// -- Rollback / cleanup on failure ----------------------------------
 		if (backupPath && releaseBackupOnSuccess) {
 			try {
 				await fs.rename(backupPath, targetPath)
-			} catch {
-				// rollback failed — do not mask original error
+			} catch (rollbackError: unknown) {
+				// The content survives only at the backup path now, and the canonical
+				// target is gone. Reporting just the publish failure would leave the
+				// caller with data it cannot find at the expected path, so the
+				// partial-failure state travels with the error.
+				throw new RollbackFailureError(originalError, rollbackError, backupPath)
 			}
 		}
-
-		// Always clean up the staging temp file on failure.
 		try {
 			await fs.unlink(tempPath).catch(() => {})
 		} catch {

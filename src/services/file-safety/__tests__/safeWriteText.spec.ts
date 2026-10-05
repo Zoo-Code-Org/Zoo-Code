@@ -4,7 +4,7 @@ import { execFile } from "child_process"
 import type { ChildProcess } from "child_process"
 import * as path from "path"
 
-import { safeWriteText, type SafeWriteTextOptions } from "../safeWriteText"
+import { RollbackFailureError, safeWriteText, type SafeWriteTextOptions } from "../safeWriteText"
 
 // Full mock for fs/promises — all methods are vi.fn() stubs
 vi.mock("fs/promises", () => ({
@@ -359,7 +359,8 @@ describe("safeWriteText", () => {
 			vi.mocked(fs.rename).mockImplementation(async () => {
 				callCount++
 				if (callCount === 1) return // target -> backup
-				throw new Error("ENOSPC") // temp -> target fails
+				if (callCount === 2) throw new Error("ENOSPC") // temp -> target fails
+				return // the rollback rename succeeds
 			})
 
 			await expect(safeWriteText(targetPath, "new data", { backup: true })).rejects.toThrow("ENOSPC")
@@ -369,6 +370,38 @@ describe("safeWriteText", () => {
 
 			// temp was cleaned up on failure
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		})
+
+		it("a failed rollback reports the partial state, not only the publish error", async () => {
+			// The content is still on disk, but only at the backup path. A caller that gets
+			// just the publish error has data it cannot find at the expected path.
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			let callCount = 0
+			vi.mocked(fs.rename).mockImplementation(async () => {
+				callCount++
+				if (callCount === 1) return // target -> backup
+				if (callCount === 2) throw new Error("ENOSPC") // temp -> target fails
+				throw new Error("EACCES") // the rollback rename fails too
+			})
+
+			let failure: RollbackFailureError | undefined
+			await safeWriteText(targetPath, "new data", { backup: true }).catch((e: unknown) => {
+				if (e instanceof RollbackFailureError) {
+					failure = e
+					return
+				}
+				throw e
+			})
+
+			expect(failure).toBeInstanceOf(RollbackFailureError)
+			expect(failure?.publishError).toBeInstanceOf(Error)
+			expect((failure?.publishError as Error).message).toBe("ENOSPC")
+			expect((failure?.rollbackError as Error).message).toBe("EACCES")
+			expect(failure?.backupPath).toContain("safeWriteText.bak_")
+			// The backup is what the caller can still recover, so it must stay on disk.
+			expect(fs.unlink).not.toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
 		})
 
 		it("backup:true when target does not exist: no backup created, just commit", async () => {

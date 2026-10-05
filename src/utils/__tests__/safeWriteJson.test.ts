@@ -4,6 +4,7 @@ import * as path from "path"
 import * as os from "os"
 
 import { safeWriteJson } from "../safeWriteJson"
+import { RollbackFailureError } from "../../services/file-safety/safeWriteText"
 import * as lockfile from "proper-lockfile"
 
 // Capture actual implementations before the vi.mock factory runs,
@@ -463,7 +464,21 @@ describe("safeWriteJson", () => {
 		})
 
 		// The original error must propagate, not the rollback error
-		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Primary rename failed")
+		// The rollback also failed, so the error reports the partial state: the publish
+		// failure stays the cause and the backup location is named.
+		let failure: RollbackFailureError | undefined
+		await safeWriteJson(currentTestFilePath, newData).catch((e: unknown) => {
+			if (e instanceof RollbackFailureError) {
+				failure = e
+				return
+			}
+			throw e
+		})
+
+		expect(failure).toBeInstanceOf(RollbackFailureError)
+		expect(failure?.cause).toBeInstanceOf(Error)
+		expect(failure?.rollbackError).toBeInstanceOf(Error)
+		expect(failure?.backupPath).toContain("safeWriteText.bak_")
 
 		// The rollback failed inside safeWriteText, so the target is gone and
 		// the backup is orphaned on disk.
