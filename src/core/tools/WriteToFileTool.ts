@@ -2,7 +2,7 @@ import path from "path"
 import delay from "delay"
 import fs from "fs/promises"
 
-import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
+import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS, RooCodeEventName } from "@roo-code/types"
 
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
@@ -23,8 +23,164 @@ interface WriteToFileParams {
 	content: string
 }
 
+/**
+ * Per-task partial-streaming state tracked by WriteToFileTool.
+ */
+interface TaskPartialStreamState {
+	/** Last path seen during streaming; undefined until the first delta. */
+	lastSeenPartialPath: string | undefined
+	/** True once a streaming delta hit a fatal filesystem error. */
+	streamFailed: boolean
+	/** The original filesystem error of the failed streaming delta, reported once
+	 * by onParameterParseFailure() when the final block fails to parse (so
+	 * execute() never runs and would never report it). */
+	streamError: Error | undefined
+	/** The task that owns this state; target for abort-listener deregistration. */
+	task: Task
+	/** TaskAborted listener that tears this state down; registered once per task. */
+	abortCleanup: () => void
+}
+
 export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	readonly name = "write_to_file" as const
+
+	/**
+	 * Per-task partial-streaming state, keyed by task id (taskId + instanceId).
+	 *
+	 * All per-task fields live in one object per task so that resetTaskPartialState() /
+	 * resetPartialState() cannot clear a subset of them and leak the rest (abort
+	 * listener, failure mark, path-stabilization entry) for an abandoned stream.
+	 *
+	 * This deliberately diverges from the sibling streaming tools (ApplyDiffTool,
+	 * EditFileTool, SearchReplaceTool, EditTool), which rely on BaseTool's singleton
+	 * lastSeenPartialPath / resetPartialState and keep no failure state. The divergence is
+	 * intentional, for two reasons:
+	 *
+	 * 1. Only this tool's handlePartial performs failure-prone streaming work
+	 *    (diffViewProvider.open/update, which can throw EACCES/EROFS); the siblings only
+	 *    send a task.ask preview. Without per-task failure tracking, every later delta for
+	 *    a failed path would re-attempt the failing operation and re-spawn a partial tool
+	 *    message.
+	 *
+	 * 2. The tool instance is a module-level singleton shared by every task, including
+	 *    tasks from different ClineProvider instances (e.g. sidebar and tab-panel
+	 *    providers, which activate independently). A single provider streams at most one
+	 *    task at a time — TaskScheduler gates task.run() at maxConcurrency=1 and
+	 *    delegation disposes the parent before the child starts — so per-task keying is
+	 *    reachable specifically across providers, where two providers can stream
+	 *    write_to_file concurrently through this same singleton.
+	 *
+	 * Lifting this per-task keying into BaseTool for all streaming tools is a follow-up
+	 * (separate PR); it is deliberately not done here.
+	 */
+	private taskPartialStreamState = new Map<string, TaskPartialStreamState>()
+
+	private getPartialStreamFailureKey(task: Task): string {
+		return `${task.taskId}.${task.instanceId}`
+	}
+
+	/**
+	 * Get this task's partial stream state, creating it on first use and registering the
+	 * TaskAborted teardown listener exactly once per task.
+	 */
+	private getTaskPartialStreamState(task: Task): TaskPartialStreamState {
+		const key = this.getPartialStreamFailureKey(task)
+		const existing = this.taskPartialStreamState.get(key)
+		if (existing) {
+			return existing
+		}
+
+		const state: TaskPartialStreamState = {
+			lastSeenPartialPath: undefined,
+			streamFailed: false,
+			streamError: undefined,
+			task,
+			abortCleanup: () => this.resetTaskPartialState(task),
+		}
+		this.taskPartialStreamState.set(key, state)
+		task.once(RooCodeEventName.TaskAborted, state.abortCleanup)
+		return state
+	}
+
+	private hasPathStabilizedForTask(state: TaskPartialStreamState, partialPath: string | undefined): boolean {
+		// Stryker disable next-line ConditionalExpression: the `!== undefined` clause is redundant: when
+		// lastSeenPartialPath is undefined, the second clause only matches an undefined partialPath, which
+		// the `!!partialPath` in the return value rejects either way -- no test can distinguish the two.
+		const pathHasStabilized = state.lastSeenPartialPath !== undefined && state.lastSeenPartialPath === partialPath
+		state.lastSeenPartialPath = partialPath
+		return pathHasStabilized && !!partialPath
+	}
+
+	/**
+	 * Clear a task's partial-stream state from a disposal path that does not abort first.
+	 * Task.dispose() removes every listener, so a task disposed directly (for example
+	 * ClineProvider.cleanupFailedHistoryTask()) never fires the TaskAborted cleanup and
+	 * this singleton would keep the disposed task and its diff-view provider.
+	 */
+	public clearTaskState(task: Task): void {
+		this.resetTaskPartialState(task)
+	}
+
+	private resetTaskPartialState(task: Task): void {
+		const key = this.getPartialStreamFailureKey(task)
+		const state = this.taskPartialStreamState.get(key)
+		if (!state) {
+			return
+		}
+		state.task.off(RooCodeEventName.TaskAborted, state.abortCleanup)
+		this.taskPartialStreamState.delete(key)
+	}
+
+	private async resetDiffViewAfterWrite(task: Task): Promise<void> {
+		await task.diffViewProvider.reset().catch((resetError) => {
+			console.error("Error resetting write_to_file diff view:", resetError)
+		})
+	}
+
+	/**
+	 * Restore the diff editor document to its pre-streaming state and close the view.
+	 *
+	 * reset() clears the provider's state but leaves the diff document dirty with the
+	 * streamed content; a user save would then persist a write the task never completed
+	 * (denied or failed before approval). Must run BEFORE resetDiffViewAfterWrite(),
+	 * since reset() clears the state revertChanges() relies on. No-op when no diff view
+	 * is open. Failures are logged and swallowed so the remaining cleanup (reset,
+	 * per-task state teardown) always continues.
+	 */
+	private async revertDiffChangesBeforeReset(task: Task): Promise<void> {
+		await task.diffViewProvider.revertChanges().catch((revertError) => {
+			console.error("Error reverting write_to_file diff view changes:", revertError)
+		})
+	}
+
+	private async finalizePartialToolAskAfterFailure(task: Task, text?: string): Promise<void> {
+		await task.finalizePartialToolAsk(text).catch((finalizeError) => {
+			console.error("Error finalizing write_to_file partial tool ask:", finalizeError)
+		})
+	}
+
+	/**
+	 * Teardown boundary for the handle() parse-failure path, where execute() never
+	 * runs and therefore its finally (resetTaskPartialState) never runs either.
+	 *
+	 * Tears down the per-task stream state: otherwise the abort listener leaks for
+	 * the task's lifetime, and when a streaming delta had failed, the streamFailed
+	 * guard would suppress the diff preview of every later write_to_file in this
+	 * task. Restores the diff document: streaming may have opened it with
+	 * unapproved partial content, and execute()'s error cleanup (revert + reset)
+	 * never fires on this path, so a user save could persist the content without
+	 * the teardown here. When a streaming delta already hit a fatal filesystem
+	 * error, that error is what the user can act on, so report it with the same
+	 * "writing file" context execute()'s catch uses, and suppress the incidental
+	 * parse error.
+	 */
+	override resetPartialState(): void {
+		super.resetPartialState()
+		for (const state of this.taskPartialStreamState.values()) {
+			state.task.off(RooCodeEventName.TaskAborted, state.abortCleanup)
+		}
+		this.taskPartialStreamState.clear()
+	}
 
 	async execute(params: WriteToFileParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
 		const { pushToolResult, handleError, askApproval } = callbacks
@@ -197,8 +353,13 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		const relPath: string | undefined = block.params.path
 		const newContent: string | undefined = block.params.content
 
+
+		// Get (or create) this task's state; registers the TaskAborted teardown listener
+		// once, so abandoned streams are torn down even if execute() never runs.
+		const partialStreamState = this.getTaskPartialStreamState(task)
+
 		// Wait for path to stabilize before showing UI (prevents truncated paths)
-		if (!this.hasPathStabilized(relPath) || newContent === undefined) {
+		if (!this.hasPathStabilizedForTask(partialStreamState, relPath) || newContent === undefined) {
 			return
 		}
 

@@ -1,5 +1,6 @@
 import * as path from "path"
 
+import { RooCodeEventName } from "@roo-code/types"
 import type { MockedFunction } from "vitest"
 
 import { fileExistsAtPath, createDirectoriesForFile } from "../../../utils/fs"
@@ -118,6 +119,9 @@ describe("writeToFileTool", () => {
 
 		mockedPathResolve.mockReturnValue(absoluteFilePath)
 		mockedFileExistsAtPath.mockResolvedValue(false)
+		// vi.clearAllMocks() keeps the last mock implementation; reset the factory default here
+		// so no test depends on declaration order or an earlier test's rejection.
+		mockedCreateDirectoriesForFile.mockResolvedValue([])
 		mockedIsPathOutsideWorkspace.mockReturnValue(false)
 		mockedGetReadablePath.mockReturnValue("test/path.txt")
 		mockedUnescapeHtmlEntities.mockImplementation((content) => {
@@ -128,6 +132,8 @@ describe("writeToFileTool", () => {
 			return content
 		})
 
+		mockCline.taskId = "task-1"
+		mockCline.instanceId = "instance-1"
 		mockCline.cwd = "/"
 		mockCline.consecutiveMistakeCount = 0
 		mockCline.didEditFile = false
@@ -186,8 +192,12 @@ describe("writeToFileTool", () => {
 		}
 		mockCline.say = vi.fn().mockResolvedValue(undefined)
 		mockCline.ask = vi.fn().mockResolvedValue(undefined)
+		mockCline.once = vi.fn()
+		mockCline.off = vi.fn()
+		mockCline.finalizePartialToolAsk = vi.fn().mockResolvedValue(undefined)
 		mockCline.recordToolError = vi.fn()
 		mockCline.sayAndCreateMissingParamError = vi.fn().mockResolvedValue("Missing param error")
+		mockCline.processQueuedMessages = vi.fn()
 
 		mockAskApproval = vi.fn().mockResolvedValue(true)
 		mockHandleError = vi.fn().mockResolvedValue(undefined)
@@ -419,6 +429,111 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.open).toHaveBeenCalledWith(testFilePath)
 			expect(mockCline.diffViewProvider.update).toHaveBeenCalledWith(testContent, false)
 		})
+
+		it("cleans per-task partial state when the task aborts before execute finalization", async () => {
+			let abortCleanup: (() => void) | undefined
+			mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+				if (event === RooCodeEventName.TaskAborted) {
+					abortCleanup = listener
+				}
+				return mockCline
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+			expect(mockCline.once).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+
+			abortCleanup?.()
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(2)
+		})
+
+		it("does not treat a changed path between deltas as stabilized", async () => {
+			// Delta 1 streams "alpha.txt"; delta 2 streams "beta.txt" for the same task. The path changed
+			// between deltas, so it must not count as stabilized and no partial `tool` ask may be issued for
+			// the still-changing second path.
+			await executeWriteFileTool({ path: "alpha.txt" }, { isPartial: true })
+			await executeWriteFileTool({ path: "beta.txt" }, { isPartial: true })
+
+			expect(mockCline.ask).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+		})
+
+
+
+
+
+	})
+
+	describe("path stabilization predicate", () => {
+		// The predicate is exercised directly (it is private) because not all of its branches are
+		// observable through handlePartial(): an undefined path reaches the same early return either
+		// way, so the clause-by-clause behavior must be pinned at the predicate level.
+		function makeState(lastSeenPartialPath: string | undefined) {
+			return {
+				lastSeenPartialPath,
+				streamFailed: false,
+				streamError: undefined,
+				task: mockCline,
+				abortCleanup: () => {},
+			}
+		}
+
+		it("reports a first delta as not stabilized and records the seen path", () => {
+			const state = makeState(undefined)
+
+			expect(writeToFileTool["hasPathStabilizedForTask"](state, "a.txt")).toBe(false)
+			expect(state.lastSeenPartialPath).toBe("a.txt")
+		})
+
+		it("reports a repeated path as stabilized", () => {
+			const state = makeState("a.txt")
+
+			expect(writeToFileTool["hasPathStabilizedForTask"](state, "a.txt")).toBe(true)
+		})
+
+		it("reports a changed path as not stabilized", () => {
+			const state = makeState("a.txt")
+
+			expect(writeToFileTool["hasPathStabilizedForTask"](state, "b.txt")).toBe(false)
+			expect(state.lastSeenPartialPath).toBe("b.txt")
+		})
+	})
+
+	describe("resetPartialState", () => {
+		it("resets the base partial path and detaches every task's abort listener", async () => {
+			let abortCleanup: (() => void) | undefined
+			mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+				if (event === RooCodeEventName.TaskAborted) {
+					abortCleanup = listener
+				}
+				return mockCline
+			})
+
+			// Seed one per-task state with an abort listener attached.
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+			expect(abortCleanup).toBeTypeOf("function")
+
+			// The base-class singleton field is reset by super.resetPartialState().
+			writeToFileTool["lastSeenPartialPath"] = "stale-path"
+			writeToFileTool.resetPartialState()
+
+			expect(writeToFileTool["lastSeenPartialPath"]).toBeUndefined()
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
+
+			// The per-task map was cleared too: a fresh delta sequence starts un-stabilized, so no
+			// second partial ask is issued.
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+		})
 	})
 
 	describe("user interaction", () => {
@@ -470,6 +585,7 @@ describe("writeToFileTool", () => {
 			// Second call with same path - path is now stabilized, error occurs
 			await executeWriteFileTool({}, { isPartial: true })
 			expect(mockHandleError).toHaveBeenCalledWith("handling partial write_to_file", expect.any(Error))
+
 		})
 	})
 })
