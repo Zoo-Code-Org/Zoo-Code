@@ -1091,7 +1091,9 @@ describe("cleanup before a rollback failure is reported", () => {
 		// The backup is what the caller can still recover, so it stays on disk; the
 		// staging file and this write's own directory must not leak alongside it.
 		expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
-		expect(fs.rmdir).toHaveBeenCalled()
+		const stagingDirs = vi.mocked(fsSync.mkdirSync).mock.calls.map((call) => String(call[0]))
+		expect(stagingDirs.length).toBe(1)
+		expect(fs.rmdir).toHaveBeenCalledWith(stagingDirs[0])
 
 		const failingRenameOrder = vi.mocked(fs.rename).mock.invocationCallOrder[2]
 		const unlinkOrder = vi.mocked(fs.unlink).mock.invocationCallOrder[0]
