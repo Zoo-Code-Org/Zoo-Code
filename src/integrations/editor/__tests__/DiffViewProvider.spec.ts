@@ -934,6 +934,43 @@ describe("DiffViewProvider", () => {
 
 			expect(closedTabs).toEqual([ownTab, labelOnlyOwn])
 		})
+
+		it("leaves a Source Control diff the user has open for the same file", async () => {
+			// A git diff of the same file is the user's tab, not this task's, so a reset
+			// must not close it.
+			const ownTab = {
+				input: {
+					constructor: { name: "TabInputTextDiff" },
+					original: { scheme: DIFF_VIEW_URI_SCHEME },
+					modified: { fsPath: `${mockCwd}/test.ts` },
+				},
+				isDirty: false,
+			}
+			const gitDiffTab = {
+				input: {
+					constructor: { name: "TabInputTextDiff" },
+					original: { scheme: "git" },
+					modified: { fsPath: `${mockCwd}/test.ts` },
+				},
+				isDirty: false,
+			}
+			for (const tab of [ownTab, gitDiffTab]) {
+				Object.setPrototypeOf(tab.input, vscode.TabInputTextDiff.prototype)
+			}
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: () => [{ tabs: [ownTab, gitDiffTab] }],
+				configurable: true,
+			})
+			const closedTabs: unknown[] = []
+			vi.mocked(vscode.window.tabGroups.close).mockImplementation((tab) => {
+				closedTabs.push(tab)
+				return Promise.resolve(true)
+			})
+
+			await diffViewProvider["closeOwnDiffView"](path.join(mockCwd, "test.ts"))
+
+			expect(closedTabs).toEqual([ownTab])
+		})
 	})
 
 	it("reset() closes only this provider's tab, not another task's", async () => {

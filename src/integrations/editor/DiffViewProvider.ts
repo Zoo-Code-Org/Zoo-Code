@@ -913,7 +913,12 @@ export class DiffViewProvider {
 					return false
 				}
 				if (tab.input instanceof vscode.TabInputTextDiff) {
-					return path.resolve(tab.input.modified.fsPath) === target
+					// Only Zoo's own diff tabs, not a Source Control diff the user has open
+					// for the same file.
+					return (
+						tab.input.original.scheme === DIFF_VIEW_URI_SCHEME &&
+						path.resolve(tab.input.modified.fsPath) === target
+					)
 				}
 				// A diff tab for a file that was already open is identified by its label
 				// rather than by the URI scheme. A basename alone cannot tell two tasks in
