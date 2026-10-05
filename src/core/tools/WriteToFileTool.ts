@@ -245,12 +245,6 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			task.diffViewProvider.editType = fileExists ? "modify" : "create"
 		}
 
-		// Create parent directories early for new files to prevent ENOENT errors
-		// in subsequent operations (e.g., diffViewProvider.open, fs.readFile)
-		if (!fileExists) {
-			await createDirectoriesForFile(absolutePath)
-		}
-
 		if (newContent.startsWith("```")) {
 			newContent = newContent.split("\n").slice(1).join("\n")
 		}
@@ -274,7 +268,19 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			isProtected: isWriteProtected,
 		}
 
+		// Tracks whether the user approved the write, so the error path only reverts the
+		// diff document when the content was never approved (an approved edit is kept in
+		// the editor so the user can save it manually after a late failure).
+		let writeApproved = false
+
 		try {
+			// Create parent directories for new files inside the try block so filesystem
+			// errors (EROFS, EACCES, etc.) route through handleError with proper cleanup
+			// and consecutive-mistake counting, rather than escaping unhandled.
+			if (!fileExists) {
+				await createDirectoriesForFile(absolutePath)
+			}
+
 			task.consecutiveMistakeCount = 0
 
 			const provider = task.providerRef.deref()
@@ -308,8 +314,16 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				const didApprove = await askApproval("tool", completeMessage, undefined, isWriteProtected)
 
 				if (!didApprove) {
+					// The prevent-focus branch set editType/originalContent on the provider
+					// before asking. Clear them on denial (no diff document was opened in
+					// this branch, so reset() is sufficient; the non-prevent-focus denial
+					// branch resets through revertChanges()), so a later write re-checks
+					// the file system instead of reusing the stale editType.
+					await this.resetDiffViewAfterWrite(task)
 					return
 				}
+
+				writeApproved = true
 
 				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
 			} else {
@@ -344,6 +358,8 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					return
 				}
 
+				writeApproved = true
+
 				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
 			}
 
@@ -357,17 +373,35 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 			pushToolResult(message)
 
-			await task.diffViewProvider.reset()
-			this.resetPartialState()
+			await this.resetDiffViewAfterWrite(task)
 
 			task.processQueuedMessages()
 
 			return
 		} catch (error) {
-			await handleError("writing file", error as Error)
-			await task.diffViewProvider.reset()
-			this.resetPartialState()
+			// Finalize any open partial tool message so the UI spinner doesn't get stuck.
+			// The partial ask fired during streaming (handlePartial) or early in execute sets
+			// partial: true on the webview message; without this, the spinner persists even
+			// after the error bubble appears.
+			await this.finalizePartialToolAskAfterFailure(task)
+			// The diff cleanup runs in a finally around handleError: the production
+			// handleError awaits Task.say(), which rejects when the task is aborted, and a
+			// rejected handleError must not skip restoring the unapproved streamed content.
+			try {
+				await handleError("writing file", error as Error)
+			} finally {
+				// Before approval the diff document holds unapproved streamed content:
+				// restore it so a user save cannot persist it. After approval the content
+				// is the user's accepted edit -- keep it in the editor (dirty) so they can
+				// save it manually.
+				if (!writeApproved) {
+					await this.revertDiffChangesBeforeReset(task)
+				}
+				await this.resetDiffViewAfterWrite(task)
+			}
 			return
+		} finally {
+			this.resetTaskPartialState(task)
 		}
 	}
 
