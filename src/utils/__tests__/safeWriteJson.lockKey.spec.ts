@@ -23,12 +23,18 @@ const mockedAcquireFileLock = vi.mocked(acquireFileLock)
 
 const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
 
+// Only isSymbolicLink() is consulted by the guard, so the double carries just
+// that method. The mocks reject asynchronously: a synchronous throw would bypass
+// resolvePublishTarget's catch and skip the ENOENT/symlink branch under test.
+const symlinkStat = (target: unknown) => ({ isSymbolicLink: () => target === currentLink }) as unknown as BigIntStats
+let currentLink = ""
+
 describe("safeWriteJson lock key under a peer commit", () => {
 	it("waits for the peer instead of rejecting, and locks the referent", async () => {
 		const order: string[] = []
 		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lockkey-"))
 		const referent = path.join(dir, "history_item.json")
-		const link = path.join(dir, "link.json")
+		currentLink = path.join(dir, "link.json")
 
 		// The peer writer has renamed the referent away and has not committed yet,
 		// so the first resolution fails with ENOENT while lstat still reports a
@@ -42,30 +48,26 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			.mockImplementation(async (target) => {
 				order.push("resolve")
 				// The second call happens under the lock, where the peer has committed.
-				return target === link ? referent : String(target)
+				return target === currentLink ? referent : String(target)
 			})
-		// Only isSymbolicLink() is consulted by the guard, so the double carries
-		// just that method.
-		mockedLstat.mockImplementation(
-			async (target) => ({ isSymbolicLink: () => target === link }) as unknown as BigIntStats,
-		)
+		mockedLstat.mockImplementation(async (target) => {
+			order.push("lstat")
+			return symlinkStat(target)
+		})
 		mockedReadlink.mockImplementation(async (target) =>
-			target === link ? referent : Promise.reject(new Error("not a link")),
+			target === currentLink ? referent : Promise.reject(new Error("not a link")),
 		)
 		mockedAcquireFileLock.mockImplementation(async () => {
 			order.push("lock")
 			return async () => {}
 		})
 
-		await safeWriteJson(link, { id: "task-1" })
+		await safeWriteJson(currentLink, { id: "task-1" })
 
 		// The lock key is the key every other writer to this file uses, so the caller
 		// queued behind the peer instead of failing before the lock.
-		// The async rejection is what lets the ENOENT branch run, so the symlink
-		// check is part of the path under test rather than skipped by a sync throw.
-		expect(mockedLstat).toHaveBeenCalledWith(link)
 		expect(mockedAcquireFileLock).toHaveBeenCalledWith(referent)
-		expect(order).toEqual(["resolve-failed", "lock", "resolve", "resolve"])
+		expect(order).toEqual(["resolve-failed", "lstat", "lock", "resolve", "resolve"])
 		expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ id: "task-1" })
 	})
 
@@ -74,20 +76,21 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		let released = false
 		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lockkey-"))
 		const referent = path.join(dir, "history_item.json")
-		const link = path.join(dir, "link.json")
+		currentLink = path.join(dir, "link.json")
 
 		// A real dangling link: the walk tolerates it so the caller can queue behind
 		// the peer, but once the lock is held the strict rejection still applies. A
 		// rejection outside the protected block would leave the lock held until the
 		// stale timeout for every other writer to the same file.
-		mockedRealpath.mockImplementation(() => {
+		mockedRealpath.mockImplementation(async () => {
 			throw enoent
 		})
-		mockedLstat.mockImplementation(
-			async (target) => ({ isSymbolicLink: () => target === link }) as unknown as BigIntStats,
-		)
+		mockedLstat.mockImplementation(async (target) => {
+			order.push("lstat")
+			return symlinkStat(target)
+		})
 		mockedReadlink.mockImplementation(async (target) =>
-			target === link ? referent : Promise.reject(new Error("not a link")),
+			target === currentLink ? referent : Promise.reject(new Error("not a link")),
 		)
 		mockedAcquireFileLock.mockImplementation(async () => {
 			order.push("lock")
@@ -97,8 +100,10 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			}
 		})
 
-		await expect(safeWriteJson(link, { id: "task-1" })).rejects.toThrow(enoent)
+		await expect(safeWriteJson(currentLink, { id: "task-1" })).rejects.toThrow(enoent)
 		expect(released).toBe(true)
-		expect(order).toEqual(["lock", "release"])
+		// The strict rejection is reached through the ENOENT + symlink branch, not
+		// through a synchronous throw that skips it.
+		expect(order).toEqual(["lstat", "lock", "lstat", "release"])
 	})
 })
