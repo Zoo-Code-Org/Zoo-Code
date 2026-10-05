@@ -261,10 +261,11 @@ describe("executeCommand", () => {
 			}
 
 			// Execute
-			const [rejected, result] = await executeCommandInTerminal(mockTask, options)
+			const [rejected, result, commandSubmitted] = await executeCommandInTerminal(mockTask, options)
 
 			// Verify
 			expect(rejected).toBe(false)
+			expect(commandSubmitted).toBe(false)
 			expect(result).toBe(`Working directory '${nonExistentCwd}' does not exist.`)
 			expect(TerminalRegistry.getOrCreateTerminal).not.toHaveBeenCalled()
 		})
@@ -387,10 +388,11 @@ describe("executeCommand", () => {
 			}
 
 			// Execute
-			const [rejected, result] = await executeCommandInTerminal(mockTask, options)
+			const [rejected, result, commandSubmitted] = await executeCommandInTerminal(mockTask, options)
 
 			// Verify
 			expect(rejected).toBe(false)
+			expect(commandSubmitted).toBe(true)
 			expect(result).toContain("Exit code: 0")
 			expect(result).toContain("within working directory '/test/project'")
 		})
