@@ -43,6 +43,12 @@ vi.mock("fs/promises", () => ({
 	},
 }))
 
+// Mock the shared advisory lock that the guarded-write path uses; the real
+// proper-lockfile would try to create a lock directory on the mocked fs.
+vi.mock("../../../utils/fileLock", () => ({
+	withFileLock: vi.fn(async (filePath: string, operation: (p: string) => Promise<void>) => operation(filePath)),
+}))
+
 vi.mock("../../../utils/fs", () => ({
 	fileExistsAtPath: vi.fn().mockResolvedValue(true),
 }))
