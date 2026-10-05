@@ -975,6 +975,15 @@ describe("SettingsView - openAiStrictToolSchemas save round trip", () => {
 		)
 	})
 
+	it("persists a toggled-on value as true in the upsert payload", () => {
+		// The save path must carry the value the user set, not only the loaded one:
+		// toggling on from a stored false and saving has to put true in the payload.
+		renderWithConfig({ openAiStrictToolSchemas: false })
+		fireEvent.click(screen.getByTestId("set-strict-true"))
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(posted()?.apiConfiguration?.openAiStrictToolSchemas).toBe(true)
+	})
+
 	it("saves a loaded false back as false when toggled on and off again", () => {
 		renderWithConfig({ openAiStrictToolSchemas: false })
 		fireEvent.click(screen.getByTestId("set-strict-true"))
