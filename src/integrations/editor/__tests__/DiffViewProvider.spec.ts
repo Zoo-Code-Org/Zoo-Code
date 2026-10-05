@@ -64,7 +64,7 @@ vi.mock("../../../utils/fs", () => ({
 
 // Mock path
 vi.mock("path", () => ({
-	resolve: vi.fn((cwd, relPath) => `${cwd}/${relPath}`),
+	resolve: vi.fn((cwd: string, relPath?: string) => (relPath === undefined ? cwd : `${cwd}/${relPath}`)),
 	isAbsolute: vi.fn((p: string) => p.startsWith("/")),
 	basename: vi.fn((path) => path.split("/").pop()),
 	dirname: vi.fn((path) => path.split("/").slice(0, -1).join("/") || "/"),
@@ -882,6 +882,57 @@ describe("DiffViewProvider", () => {
 			await diffViewProvider["closeOwnDiffView"](path.join(mockCwd, "test.ts"))
 
 			expect(closedTabs).toEqual([ownTab])
+		})
+
+		it("leaves another task's tab when the same basename sits in another directory", async () => {
+			// Two tasks can edit files with the same name. Matching by basename alone
+			// would close the other task's clean tab, so the tab's own URI has to decide.
+			const ownTab = {
+				input: {
+					constructor: { name: "TabInputTextDiff" },
+					original: { scheme: DIFF_VIEW_URI_SCHEME },
+					modified: { fsPath: `${mockCwd}/test.ts` },
+				},
+				label: `test.ts: ${DIFF_VIEW_LABEL_CHANGES} (Editable)`,
+				isDirty: false,
+			}
+			const sameNameOtherDir = {
+				input: {
+					constructor: { name: "TabInputTextDiff" },
+					original: { scheme: DIFF_VIEW_URI_SCHEME },
+					modified: { fsPath: "/other-cwd/test.ts" },
+				},
+				label: `test.ts: ${DIFF_VIEW_LABEL_CHANGES} (Editable)`,
+				isDirty: false,
+			}
+			// A pre-opened file's tab is identified by its label, so the URI check is the
+			// only thing that can tell the two apart here.
+			const labelOnlyOtherDir = {
+				input: { uri: { fsPath: "/other-cwd/test.ts" } },
+				label: `test.ts: ${DIFF_VIEW_LABEL_CHANGES} (Editable)`,
+				isDirty: false,
+			}
+			const labelOnlyOwn = {
+				input: { uri: { fsPath: `${mockCwd}/test.ts` } },
+				label: `test.ts: ${DIFF_VIEW_LABEL_CHANGES} (Editable)`,
+				isDirty: false,
+			}
+			for (const tab of [ownTab, sameNameOtherDir]) {
+				Object.setPrototypeOf(tab.input, vscode.TabInputTextDiff.prototype)
+			}
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: () => [{ tabs: [ownTab, sameNameOtherDir, labelOnlyOtherDir, labelOnlyOwn] }],
+				configurable: true,
+			})
+			const closedTabs: unknown[] = []
+			vi.mocked(vscode.window.tabGroups.close).mockImplementation((tab) => {
+				closedTabs.push(tab)
+				return Promise.resolve(true)
+			})
+
+			await diffViewProvider["closeOwnDiffView"](path.join(mockCwd, "test.ts"))
+
+			expect(closedTabs).toEqual([ownTab, labelOnlyOwn])
 		})
 	})
 

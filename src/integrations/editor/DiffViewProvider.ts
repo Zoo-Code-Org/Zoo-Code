@@ -912,16 +912,17 @@ export class DiffViewProvider {
 				if (tab.isDirty) {
 					return false
 				}
-				if (
-					tab.input instanceof vscode.TabInputTextDiff &&
-					tab.input.original.scheme === DIFF_VIEW_URI_SCHEME &&
-					path.resolve(tab.input.modified.fsPath) === target
-				) {
-					return true
+				if (tab.input instanceof vscode.TabInputTextDiff) {
+					return path.resolve(tab.input.modified.fsPath) === target
 				}
 				// A diff tab for a file that was already open is identified by its label
-				// rather than by the URI scheme, so the label has to be matched too.
+				// rather than by the URI scheme. A basename alone cannot tell two tasks in
+				// different directories apart, so the label only counts when the tab's own
+				// URI points at this provider's target.
+				const uri = (tab.input as { uri?: { fsPath?: string } })?.uri
 				return (
+					typeof uri?.fsPath === "string" &&
+					path.resolve(uri.fsPath) === target &&
 					typeof tab.label === "string" &&
 					tab.label.startsWith(`${path.basename(target)}: ${DIFF_VIEW_LABEL_CHANGES}`)
 				)
