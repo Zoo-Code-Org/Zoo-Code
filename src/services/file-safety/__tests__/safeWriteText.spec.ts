@@ -404,15 +404,11 @@ describe("safeWriteText", () => {
 
 			await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).rejects.toThrow(PostCommitDurabilityError)
 
-			// The commit rename already published the new content, and the backup was only
-			// ever a copy: the target was never moved, so there is nothing to rename back.
-			expect(fs.copyFile).toHaveBeenCalledWith(targetPath, expect.stringContaining("safeWriteText.bak_"))
-			expect(fs.rename).toHaveBeenCalledTimes(1)
-			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
-
-			// The durability failure is reported, not swallowed - and the backup copy is not
-			// left beside the target where no caller could find it.
-			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
+			// The commit rename already published the new content, so the backup must
+			// not be renamed back over it: only target->backup and temp->target run.
+			expect(fs.rename).toHaveBeenNthCalledWith(1, targetPath, expect.stringContaining("safeWriteText.bak_"))
+			expect(fs.rename).toHaveBeenNthCalledWith(2, expect.stringContaining("safeWriteText_"), targetPath)
+			expect(fs.rename).toHaveBeenCalledTimes(2)
 		})
 	})
 
@@ -697,7 +693,29 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))
 		})
 
-		it("win32 DACL save runs before the backup copy, not after it", async () => {
+		it("win32 DACL save runs before the backup rename, not after it", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			// The title is about order, so assert the order the mocks were actually
+			// called in. If the save ran after the backup rename the target would
+			// already be gone and the dump would describe the wrong file.
+			await safeWriteText(targetPath, "data", { backup: true, platform: "win32" })
+
+			const callOrder = vi.mocked(execFile).mock.invocationCallOrder
+			const renameOrder = vi.mocked(fs.rename).mock.invocationCallOrder
+			const saveCall = callOrder[0]
+			const restoreCall = callOrder[1]
+			const backupRename = renameOrder[0]
+			const commitRename = renameOrder[1]
+
+			expect(saveCall).toBeLessThan(backupRename)
+			expect(backupRename).toBeLessThan(commitRename)
+			expect(commitRename).toBeLessThan(restoreCall)
+		})
+
+		it("win32 DACL: dump is unlinked even when restore fails", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
@@ -1276,7 +1294,6 @@ describe("cleanup when a backed-up write fails before commit", () => {
 		// The staging file and this write's own directory must not leak, and neither may
 		// the backup copy: the target still holds the pre-write content on disk.
 		expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
-		expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
 		const stagingDirs = vi.mocked(fsSync.mkdirSync).mock.calls.map((call) => String(call[0]))
 		expect(stagingDirs.length).toBe(1)
 		expect(fs.rmdir).toHaveBeenCalledWith(stagingDirs[0])
