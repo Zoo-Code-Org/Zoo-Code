@@ -43,6 +43,7 @@ export class DiffViewProvider {
 	// it when re-showing the edited file afterward.
 	private documentWasPinned = false
 	private relPath?: string
+	private teardownInFlight: Promise<void> | undefined
 	private newContent?: string
 	private activeDiffEditor?: vscode.TextEditor
 	private fadedOverlayController?: DecorationController
@@ -555,48 +556,53 @@ export class DiffViewProvider {
 					this.disposeActiveEditorListener()
 					this.cancelDeferredScroll()
 
-					let discardSucceeded = !updatedDocument.isDirty
-					if (updatedDocument.isDirty) {
-						discardSucceeded = await this.revertDocument(updatedDocument)
-					}
-					if (discardSucceeded && this.editType === "create" && this.placeholderVersion) {
-						// Cleanup has to be serialized with the same resolved-path advisory lock
-						// every other writer to this file uses. A token check and an unlink in
-						// separate steps let a peer writer commit in the gap and lose its write.
-						// A differing token, or a lock that cannot be taken, leaves the file in place.
-						await withFileLock(await resolveLockKey(absolutePath), async () => {
-							const placeholderStats = await fs
-								.stat(absolutePath, { bigint: true })
-								.catch(() => undefined)
-							if (!placeholderStats || versionTokenOfStat(placeholderStats) !== this.placeholderVersion) {
-								return
-							}
-							let unlinked = false
-							try {
-								await fs.unlink(absolutePath)
-								unlinked = true
-							} catch {
-								// the placeholder vanished or the unlink failed
-							}
-							if (!unlinked) {
-								return
-							}
-							// The file is gone, so its tab must go too: closing only the diff
-							// views would leave a clean plain-text tab for a deleted file.
-							await this.closeFileTab(absolutePath)
-							// The directories open() created for the new file must go with it,
-							// innermost first. rmdir refuses a directory another writer populated
-							// in the meantime, so the cleanup stops at the first failure.
-							for (let i = this.createdDirs.length - 1; i >= 0; i--) {
-								try {
-									await fs.rmdir(this.createdDirs[i])
-								} catch {
-									break
+					await this.runTeardown(async () => {
+						let discardSucceeded = !updatedDocument.isDirty
+						if (updatedDocument.isDirty) {
+							discardSucceeded = await this.revertDocument(updatedDocument)
+						}
+						if (discardSucceeded && this.editType === "create" && this.placeholderVersion) {
+							// Cleanup has to be serialized with the same resolved-path advisory lock
+							// every other writer to this file uses. A token check and an unlink in
+							// separate steps let a peer writer commit in the gap and lose its write.
+							// A differing token, or a lock that cannot be taken, leaves the file in place.
+							await withFileLock(await resolveLockKey(absolutePath), async () => {
+								const placeholderStats = await fs
+									.stat(absolutePath, { bigint: true })
+									.catch(() => undefined)
+								if (
+									!placeholderStats ||
+									versionTokenOfStat(placeholderStats) !== this.placeholderVersion
+								) {
+									return
 								}
-							}
-						})
-					}
-					await this.closeOwnDiffView(absolutePath)
+								let unlinked = false
+								try {
+									await fs.unlink(absolutePath)
+									unlinked = true
+								} catch {
+									// the placeholder vanished or the unlink failed
+								}
+								if (!unlinked) {
+									return
+								}
+								// The file is gone, so its tab must go too: closing only the diff
+								// views would leave a clean plain-text tab for a deleted file.
+								await this.closeFileTab(absolutePath)
+								// The directories open() created for the new file must go with it,
+								// innermost first. rmdir refuses a directory another writer populated
+								// in the meantime, so the cleanup stops at the first failure.
+								for (let i = this.createdDirs.length - 1; i >= 0; i--) {
+									try {
+										await fs.rmdir(this.createdDirs[i])
+									} catch {
+										break
+									}
+								}
+							})
+						}
+						await this.closeOwnDiffView(absolutePath)
+					})
 				} catch {
 					// cleanup is best-effort; the guard verdict below is the outcome
 				}
@@ -806,55 +812,56 @@ export class DiffViewProvider {
 		this.disposeActiveEditorListener()
 		this.cancelDeferredScroll()
 
-		if (!fileExists) {
-			if (updatedDocument.isDirty) {
+		await this.runTeardown(async () => {
+			if (!fileExists) {
+				if (updatedDocument.isDirty) {
+					await updatedDocument.save()
+				}
+
+				await this.closeAllDiffViews()
+				// The file was newly created for this edit; close its transiently
+				// opened tab before deleting it from disk.
+				await this.closeFileTab(absolutePath)
+				await fs.unlink(absolutePath)
+
+				// Remove only the directories we created, in reverse order.
+				for (let i = this.createdDirs.length - 1; i >= 0; i--) {
+					await fs.rmdir(this.createdDirs[i])
+				}
+			} else {
+				// Revert document.
+				const edit = new vscode.WorkspaceEdit()
+
+				const fullRange = new vscode.Range(
+					updatedDocument.positionAt(0),
+					updatedDocument.positionAt(updatedDocument.getText().length),
+				)
+
+				edit.replace(updatedDocument.uri, fullRange, this.stripAllBOMs(this.originalContent ?? ""))
+
+				// Apply the edit and save, since contents shouldn't have changed
+				// this won't show in local history unless of course the user made
+				// changes and saved during the edit.
+				await vscode.workspace.applyEdit(edit)
 				await updatedDocument.save()
+
+				await this.closeAllDiffViews()
+
+				// Read auto-close preferences from state; fall back to defaults that
+				// preserve the existing behavior when unset.
+				const revertTask = this.taskRef.deref()
+				const revertState = await revertTask?.providerRef.deref()?.getState()
+
+				await this.keepOrCloseEditedFile(
+					absolutePath,
+					false,
+					revertState?.autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
+					revertState?.autoCloseZooOpenedFilesAfterUserEdited ??
+						DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
+					revertState?.autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
+				)
 			}
-
-			await this.closeAllDiffViews()
-			// The file was newly created for this edit; close its transiently
-			// opened tab before deleting it from disk.
-			await this.closeFileTab(absolutePath)
-			await fs.unlink(absolutePath)
-
-			// Remove only the directories we created, in reverse order.
-			for (let i = this.createdDirs.length - 1; i >= 0; i--) {
-				await fs.rmdir(this.createdDirs[i])
-			}
-		} else {
-			// Revert document.
-			const edit = new vscode.WorkspaceEdit()
-
-			const fullRange = new vscode.Range(
-				updatedDocument.positionAt(0),
-				updatedDocument.positionAt(updatedDocument.getText().length),
-			)
-
-			edit.replace(updatedDocument.uri, fullRange, this.stripAllBOMs(this.originalContent ?? ""))
-
-			// Apply the edit and save, since contents shouldn't have changed
-			// this won't show in local history unless of course the user made
-			// changes and saved during the edit.
-			await vscode.workspace.applyEdit(edit)
-			await updatedDocument.save()
-
-			await this.closeAllDiffViews()
-
-			// Read auto-close preferences from state; fall back to defaults that
-			// preserve the existing behavior when unset.
-			const revertTask = this.taskRef.deref()
-			const revertState = await revertTask?.providerRef.deref()?.getState()
-
-			await this.keepOrCloseEditedFile(
-				absolutePath,
-				false,
-				revertState?.autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
-				revertState?.autoCloseZooOpenedFilesAfterUserEdited ??
-					DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
-				revertState?.autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
-			)
-		}
-
+		})
 		// Restore any preview tabs the diff evicted, reconstructing the user's
 		// prior not-yet-edited tab state.
 		await this.restorePreviewTabs()
@@ -938,6 +945,25 @@ export class DiffViewProvider {
 			} catch {
 				// best-effort: the tab stays open
 			}
+		}
+	}
+	/**
+	 * Only one teardown path may act on a document at a time. A cancellation can reach
+	 * revertChanges() while a rejected save is already discarding the same buffer, and
+	 * both would edit the document and close the same tabs. The second caller awaits the
+	 * cleanup already in flight instead of repeating it.
+	 */
+	private async runTeardown(cleanup: () => Promise<void>): Promise<void> {
+		if (this.teardownInFlight !== undefined) {
+			await this.teardownInFlight
+			return
+		}
+		const inFlight = cleanup()
+		this.teardownInFlight = inFlight
+		try {
+			await inFlight
+		} finally {
+			this.teardownInFlight = undefined
 		}
 	}
 

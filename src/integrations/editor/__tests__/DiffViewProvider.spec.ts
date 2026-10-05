@@ -2914,6 +2914,34 @@ describe("DiffViewProvider", () => {
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
 		})
 
+		it("revertChanges() does not run a second teardown while one is already in flight", async () => {
+			// Cancellation can reach revertChanges() while a rejected save is still
+			// discarding the same buffer. Both paths acting on the document and the same
+			// tabs is duplicate cleanup, so the second caller waits for the first.
+			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
+			applyEdit.mockResolvedValue(true)
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
+			const editor = makeTextEditor({
+				document: makeTextDocument({
+					uri: makeUri(mockTargetPath),
+					getText: vi.fn().mockReturnValue("content"),
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				}),
+			})
+			diffViewProvider["activeDiffEditor"] = editor
+
+			const first = diffViewProvider.revertChanges()
+			const second = diffViewProvider.revertChanges()
+			await Promise.all([first, second])
+
+			expect(applyEdit).toHaveBeenCalledTimes(1)
+		})
+
 		it("saveChanges() keeps the file open when the user touched it", async () => {
 			const closeFileTab = vi.fn().mockResolvedValue(undefined)
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue({ revealRange: vi.fn() } as any)
