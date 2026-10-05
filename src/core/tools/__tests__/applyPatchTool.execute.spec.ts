@@ -47,6 +47,8 @@ vi.mock("fs/promises", () => {
 		lstat: vi.fn().mockResolvedValue({ isSymbolicLink: () => false }),
 		readlink: vi.fn().mockRejectedValue(new Error("not a symbolic link")),
 		realpath: vi.fn(async (p: string) => String(p)),
+		// safeWriteText creates the backup directory before publishing.
+		mkdir: vi.fn().mockResolvedValue(undefined),
 	}
 	return { default: doubles, ...doubles }
 })
@@ -322,6 +324,25 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(reg.get(key)?.complete).toBe(true)
 	})
 
+	it("update: a hunk read with no prior observation records a complete observation", async () => {
+		// Nothing was earned before, so there is nothing to carry. The hunk read returned
+		// the whole file, which is a complete read, and the guarded publish must not be
+		// rejected for a file the tool itself read in full.
+		const key = path.resolve("/workspace/project", "src/thing.ts")
+		const reg = mockTask.observationRegistry
+
+		await tool.execute({ patch: updatePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(reg.get(key)?.complete).toBe(true)
+		// The guard reads the same entry, so a complete read here is what lets a later
+		// full-file publish through.
+		expect(reg.has(key)).toBe(true)
+	})
+
 	it("update: does not carry completeness across a version the model never read", async () => {
 		// The model earned completeness on a different version than the one the patch
 		// helper read: the intervening change was never seen, so a later full-file
@@ -437,6 +458,8 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			pushToolResult: mockPushToolResult,
 		})
 
+		// The source had no prior observation and the hunk read returned the whole file,
+		// so the destination publish is a complete-content publish.
 		expect(mockSaveDirectly).toHaveBeenCalledWith(
 			"src/new.ts",
 			"modified file content\n",
@@ -444,7 +467,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			true,
 			1000,
 			"create",
-			false,
+			true,
 		)
 	})
 
