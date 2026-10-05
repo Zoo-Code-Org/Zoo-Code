@@ -1053,3 +1053,33 @@ describe("cleanup before a rollback failure is reported", () => {
 		expect(rmdirOrder).toBeGreaterThan(failingRenameOrder)
 	})
 })
+
+describe("resolvePublishTarget", () => {
+	beforeEach(() => mockDefaults())
+
+	it("propagates an lstat failure that is not ENOENT instead of falling back to the link path", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		const eacces = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+		vi.mocked(fs.realpath).mockRejectedValue(enoent)
+		vi.mocked(fs.lstat).mockRejectedValue(eacces)
+
+		// A failed lstat says nothing about whether the path is a link, so the
+		// fallback would publish through a link we were not allowed to inspect.
+		await expect(safeWriteText(targetPath, "data", { platform: "linux" })).rejects.toBe(eacces)
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("still falls back to the given path when lstat also reports the path as absent", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		vi.mocked(fs.realpath).mockRejectedValue(enoent)
+		vi.mocked(fs.lstat).mockRejectedValue(enoent)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+		await safeWriteText(targetPath, "data", { platform: "linux" })
+
+		// The fallback is the resolved path, not the string that was handed in.
+		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), path.resolve(targetPath))
+	})
+})
