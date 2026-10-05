@@ -600,6 +600,41 @@ describe("safeWriteText", () => {
 			expect(fs.rename).toHaveBeenCalledWith(customTempPath, targetPath)
 		})
 
+		it("propagates a non-ENOENT stat failure rather than defaulting the mode (caller-staged)", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			const eacces = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+			vi.mocked(fsSync.statSync).mockImplementation(() => {
+				throw eacces
+			})
+			vi.mocked(fsSync.openSync).mockReturnValue(2)
+
+			const customTempPath = "/tmp/custom-temp.tmp"
+
+			// A target that cannot be stat'd is not a fresh target: publishing with
+			// the default mode would widen a restrictive target through the rename.
+			await expect(
+				safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" }),
+			).rejects.toThrow("EACCES")
+			expect(fsSync.fchmodSync).not.toHaveBeenCalled()
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
+
+		it("propagates a non-ENOENT stat failure rather than defaulting the mode (self-staged)", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			const eio = Object.assign(new Error("EIO: i/o error"), { code: "EIO" })
+			vi.mocked(fsSync.statSync).mockImplementation(() => {
+				throw eio
+			})
+
+			// The mode is read before the temp is opened, so a real I/O failure stops
+			// the write before anything is staged.
+			await expect(safeWriteText(targetPath, "hello world", { platform: "linux" })).rejects.toThrow("EIO")
+			expect(fsSync.openSync).not.toHaveBeenCalled()
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
+
 		it("opens the temp before applying a read-only target's mode (0o444 does not block the open)", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)

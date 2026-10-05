@@ -136,6 +136,18 @@ export async function resolvePublishTarget(absoluteFilePath: string): Promise<st
  * itself is not there yet -- otherwise the key for one file depends on whether
  * the file exists when the key is computed, and two writers take two locks.
  */
+/**
+ * Distinguish "the target does not exist" from a real I/O failure (EACCES,
+ * EIO, ...). The mode-preservation path may only fall back to the fresh-file
+ * default on ENOENT; any other failure is propagated, otherwise a restrictive
+ * target (0o600) would be published with the default 0o644 through the rename.
+ */
+function errorCode(error: unknown): string | undefined {
+	return typeof error === "object" && error !== null && "code" in error
+		? String((error as { code: unknown }).code)
+		: undefined
+}
+
 async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
 	const dirPath = path.dirname(absoluteFilePath)
 	const canonicalDir = await fs.realpath(dirPath).catch(() => dirPath)
@@ -219,7 +231,8 @@ export async function safeWriteText(
 			try {
 				targetMode = fsSync.statSync(targetPath).mode & 0o777
 				targetExists = true
-			} catch {
+			} catch (error: unknown) {
+				if (errorCode(error) !== "ENOENT") throw error
 				// target does not exist yet - keep the default
 			}
 			// openSync's creation mode is narrowed by the process umask, so an
@@ -252,7 +265,8 @@ export async function safeWriteText(
 			let targetMode: number | null = null
 			try {
 				targetMode = fsSync.statSync(targetPath).mode & 0o777
-			} catch {
+			} catch (error: unknown) {
+				if (errorCode(error) !== "ENOENT") throw error
 				// target does not exist yet - keep the temp's default mode
 			}
 			const fd = fsSync.openSync(tempPath, "r+")
