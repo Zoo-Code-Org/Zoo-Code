@@ -541,7 +541,123 @@ describe("writeToFileTool", () => {
 			}
 		})
 
+		it("reports the captured streaming error instead of the parse error when the final block fails to parse, and clears the per-task state", async () => {
+			// A streaming delta fails with a filesystem error (streamFailed + streamError are
+			// captured). The final block then arrives without nativeArgs, so execute() never
+			// runs: the parse-failure teardown boundary must report the original filesystem
+			// error under the "writing file" context (not the incidental parse error) and tear
+			// down the per-task state, so the next write_to_file stream in this task is not
+			// blocked by the stale streamFailed guard and no abort listener leaks.
+			const fsError = new Error("EACCES: permission denied")
+			mockCline.diffViewProvider.open.mockRejectedValue(fsError)
+			// Capture the abort listener of the state created by the first deltas: it is the
+			// exact reference that the parse-failure teardown must detach.
+			let abortListener: (() => void) | undefined
+			mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+				if (event === RooCodeEventName.TaskAborted && abortListener === undefined) {
+					abortListener = listener
+				}
+				return mockCline
+			})
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				await executeWriteFileTool({}, { isPartial: true })
+				await executeWriteFileTool({}, { isPartial: true })
 
+				const toolUse: ToolUse = {
+					type: "tool_use",
+					name: "write_to_file",
+					params: { path: testFilePath, content: testContent },
+					nativeArgs: undefined,
+					partial: false,
+				}
+				await writeToFileTool.handle(mockCline, toolUse as ToolUse<"write_to_file">, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: vi.fn(),
+				})
+
+				expect(mockHandleError).toHaveBeenCalledTimes(1)
+				expect(mockHandleError).toHaveBeenCalledWith("writing file", fsError)
+				expect(mockHandleError).not.toHaveBeenCalledWith(
+					expect.stringContaining("parsing write_to_file"),
+					expect.anything(),
+				)
+				// The parse-failure teardown also restores the diff document: the
+				// streaming failure above already reverted it once (revert + reset),
+				// and the parse path runs the same cleanup again because execute()
+				// never runs on this path.
+				expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(2)
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(2)
+				// Per-task state torn down at this boundary: guard cleared, the exact
+				// registered abort listener detached.
+				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+				expect(abortListener).toBeTypeOf("function")
+				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+
+				// The next stream for the same task must issue a partial ask again (the stale
+				// streamFailed guard is gone).
+				mockCline.diffViewProvider.open.mockResolvedValue(undefined)
+				await executeWriteFileTool({}, { isPartial: true })
+				await executeWriteFileTool({}, { isPartial: true })
+				expect(mockCline.ask).toHaveBeenCalledTimes(2)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
+
+		it("restores the diff document when the final block fails to parse after successful streaming", async () => {
+			// Streaming opened the diff view with unapproved partial content (open and
+			// update both succeeded, so no streaming error was captured). The final block
+			// then arrives without nativeArgs: execute() never runs, so its error cleanup
+			// never fires. The parse-failure teardown must still restore the document
+			// (revert before reset) or a user save could persist content the write never
+			// completed, and must report the generic parse error (no streaming error to
+			// surface instead).
+			let abortListener: (() => void) | undefined
+			mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+				if (event === RooCodeEventName.TaskAborted && abortListener === undefined) {
+					abortListener = listener
+				}
+				return mockCline
+			})
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				// Delta 1 - stabilize path; delta 2 - streams the partial content into the
+				// diff view (open + update resolve).
+				await executeWriteFileTool({}, { isPartial: true })
+				await executeWriteFileTool({}, { isPartial: true })
+				expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(1)
+				expect(mockCline.diffViewProvider.update).toHaveBeenCalledTimes(1)
+
+				const toolUse: ToolUse = {
+					type: "tool_use",
+					name: "write_to_file",
+					params: { path: testFilePath, content: testContent },
+					nativeArgs: undefined,
+					partial: false,
+				}
+				await writeToFileTool.handle(mockCline, toolUse as ToolUse<"write_to_file">, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: vi.fn(),
+				})
+
+				// No streaming error was captured: the generic parse error is reported.
+				expect(mockHandleError).toHaveBeenCalledTimes(1)
+				expect(mockHandleError).toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
+				// The diff document is restored by the parse path itself (no streaming
+				// failure happened, so this is the only revert + reset in the test).
+				expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+				// Per-task state torn down: guard cleared, exact listener detached.
+				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+				expect(abortListener).toBeTypeOf("function")
+				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
 	})
 
 	describe("path stabilization predicate", () => {
@@ -755,7 +871,83 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(1)
 		})
 
+		it("finalizes any open partial tool ask when final args cannot be parsed", async () => {
+			// Regression test: a write_to_file block whose final args fail to parse (e.g. the
+			// tool call was truncated mid-JSON by the output token limit) never reaches
+			// execute(). A streaming delta for that block may already have opened a partial
+			// `tool` ask (partial: true) -- BaseTool.handle must finalize it, otherwise the
+			// UI spinner stays stuck even though the parse error bubble was shown.
+			// Delta 1 - stabilize path (no ask yet)
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			// Delta 2 - path stabilized, partial ask issued once
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+			expect(mockCline.finalizePartialToolAsk).not.toHaveBeenCalled()
 
+			// Final block arrives but its native args cannot be parsed, so execute() is skipped.
+			const toolUse: ToolUse = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: {
+					path: testFilePath,
+					content: testContent,
+				},
+				partial: false,
+			}
+			await writeToFileTool.handle(mockCline, toolUse as ToolUse<"write_to_file">, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			// The parse error is still reported, and the open partial ask is finalized first.
+			// No argument: BaseTool.handle() calls finalizePartialToolAsk() with no text, so a
+			// mutation passing wrong text would leave findLast() unmatched and the spinner
+			// stuck. (toHaveBeenCalledWith(undefined) does not match a no-arg call under
+			// vitest's matcher semantics: [] is not equal to [undefined].)
+			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledTimes(1)
+			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith()
+			expect(mockHandleError).toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
+		})
+
+		it("continues parse failure cleanup when finalizing the partial ask fails", async () => {
+			// Pins the .catch arm on task.finalizePartialToolAsk() in BaseTool.handle(): when the
+			// final args cannot be parsed and finalizing the open partial ask also fails, the
+			// failure must only be logged so the parse error is still reported to the user.
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				mockCline.finalizePartialToolAsk.mockRejectedValue(new Error("finalize failed"))
+
+				// Final block arrives but its native args cannot be parsed, so execute() is skipped.
+				const toolUse: ToolUse = {
+					type: "tool_use",
+					name: "write_to_file",
+					params: {
+						path: testFilePath,
+						content: testContent,
+					},
+					partial: false,
+				}
+				await writeToFileTool.handle(mockCline, toolUse as ToolUse<"write_to_file">, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: vi.fn(),
+				})
+
+				// Same no-argument contract as the sibling test above: the finalize call in
+				// BaseTool.handle() carries no text.
+				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledTimes(1)
+				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith()
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"Error finalizing write_to_file partial tool ask:",
+					expect.any(Error),
+				)
+				// The parse error is still reported despite the failed finalization.
+				expect(mockHandleError).toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
 
 
 

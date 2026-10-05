@@ -174,6 +174,28 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 * "writing file" context execute()'s catch uses, and suppress the incidental
 	 * parse error.
 	 */
+	override async onParameterParseFailure(task: Task, callbacks: ToolCallbacks, parseError: Error): Promise<boolean> {
+		const state = this.taskPartialStreamState.get(this.getPartialStreamFailureKey(task))
+		if (!state) {
+			return false
+		}
+		this.resetTaskPartialState(task)
+		// Streaming may have opened the diff view with unapproved partial content.
+		// execute() never runs on this path, so its error cleanup (revert + reset)
+		// never fires: restore the document here so a user save cannot persist
+		// content the write never completed (the same invariant the denial and
+		// streaming-failure paths maintain). Both helpers no-op when no view is
+		// open.
+		await this.revertDiffChangesBeforeReset(task)
+		await this.resetDiffViewAfterWrite(task)
+		if (!state.streamError) {
+			return false
+		}
+		void parseError
+		await callbacks.handleError("writing file", state.streamError)
+		return true
+	}
+
 	override resetPartialState(): void {
 		super.resetPartialState()
 		for (const state of this.taskPartialStreamState.values()) {
