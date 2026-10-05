@@ -26,6 +26,13 @@ vi.mock("delay", () => ({
 	default: vi.fn(),
 }))
 
+// The focus-disruption save path reads the original file content via fs.readFile.
+vi.mock("fs/promises", () => ({
+	default: {
+		readFile: vi.fn().mockResolvedValue("original content"),
+	},
+}))
+
 vi.mock("../../../utils/fs", () => ({
 	fileExistsAtPath: vi.fn().mockResolvedValue(false),
 	createDirectoriesForFile: vi.fn().mockResolvedValue([]),
@@ -156,6 +163,11 @@ describe("writeToFileTool", () => {
 				userEdits: null,
 				finalContent: "final content",
 			}),
+			saveDirectly: vi.fn().mockResolvedValue({
+				newProblemsMessage: "",
+				userEdits: undefined,
+				finalContent: "final content",
+			}),
 			scrollToFirstDiff: vi.fn(),
 			updateDiagnosticSettings: vi.fn(),
 			pushToolWriteResult: vi.fn().mockImplementation(async function (
@@ -187,6 +199,7 @@ describe("writeToFileTool", () => {
 		mockCline.say = vi.fn().mockResolvedValue(undefined)
 		mockCline.ask = vi.fn().mockResolvedValue(undefined)
 		mockCline.recordToolError = vi.fn()
+		mockCline.processQueuedMessages = vi.fn()
 		mockCline.sayAndCreateMissingParamError = vi.fn().mockResolvedValue("Missing param error")
 
 		mockAskApproval = vi.fn().mockResolvedValue(true)
@@ -204,6 +217,7 @@ describe("writeToFileTool", () => {
 			fileExists?: boolean
 			isPartial?: boolean
 			accessAllowed?: boolean
+			experiments?: Record<string, boolean>
 		} = {},
 	): Promise<ToolResponse | undefined> {
 		// Configure mocks based on test scenario
@@ -213,6 +227,13 @@ describe("writeToFileTool", () => {
 
 		mockedFileExistsAtPath.mockResolvedValue(fileExists)
 		mockCline.rooIgnoreController.validateAccess.mockReturnValue(accessAllowed)
+		mockCline.providerRef.deref.mockReturnValue({
+			getState: vi.fn().mockResolvedValue({
+				diagnosticsEnabled: true,
+				writeDelayMs: 1000,
+				experiments: options.experiments ?? {},
+			}),
+		})
 
 		// Create a tool use object
 		const toolUse: ToolUse = {
@@ -447,6 +468,58 @@ describe("writeToFileTool", () => {
 				"user_feedback_diff",
 				expect.stringContaining("editedExistingFile"),
 			)
+		})
+	})
+
+	describe("guarded write (S4b, epic #1375)", () => {
+		const focusDisruption = { preventFocusDisruption: true }
+
+		it("publishes through saveDirectly with create kind when the write is approved", async () => {
+			const result = await executeWriteFileTool({}, { fileExists: true, experiments: focusDisruption })
+
+			expect(mockCline.diffViewProvider.saveDirectly).toHaveBeenCalledWith(
+				testFilePath,
+				testContent,
+				false,
+				true,
+				1000,
+				"create",
+			)
+			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockCline.fileContextTracker.trackFileContext).toHaveBeenCalledWith(testFilePath, "roo_edited")
+			expect(mockCline.didEditFile).toBe(true)
+			expect(mockCline.consecutiveMistakeCount).toBe(0)
+			expect(result).toBe("Tool result message")
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("surfaces the unobserved-existing remediation as a tool error and publishes nothing", async () => {
+			const guardError = new Error(
+				`File already exists at ${absoluteFilePath} and was not read before this write -- read the file first, then retry.`,
+			)
+			mockCline.diffViewProvider.saveDirectly.mockRejectedValue(guardError)
+
+			const result = await executeWriteFileTool({}, { fileExists: true, experiments: focusDisruption })
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", guardError)
+			expect(result).toBeUndefined()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockCline.didEditFile).toBe(false)
+		})
+
+		it("surfaces the stale-version remediation as a tool error and publishes nothing", async () => {
+			const guardError = new Error(
+				"Stale version -- the file changed since you read it (expected v1, current v2); re-read the file, then retry.",
+			)
+			mockCline.diffViewProvider.saveDirectly.mockRejectedValue(guardError)
+
+			const result = await executeWriteFileTool({}, { fileExists: true, experiments: focusDisruption })
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", guardError)
+			expect(result).toBeUndefined()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			expect(mockCline.didEditFile).toBe(false)
 		})
 	})
 
