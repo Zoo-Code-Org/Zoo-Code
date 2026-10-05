@@ -262,6 +262,10 @@ export async function guardedWrite(
 	relPathOrAbsolute: string,
 	content: string | Uint8Array,
 	kind: GuardedWriteKind = "update",
+	// Optional completeness for the refresh. A tool that built its content from a
+	// view of another file must carry that view's completeness through the publish
+	// instead of claiming completeness for lines it never read.
+	completeOverride?: boolean,
 ): Promise<void> {
 	const absolutePath = resolveAbsolutePath(task, relPathOrAbsolute)
 
@@ -328,7 +332,7 @@ export async function guardedWrite(
 			// established: a partial observation that authorized a targeted edit
 			// must stay partial, otherwise a later full-file replacement would
 			// publish content built from the slice alone.
-			task.observationRegistry.observe(absolutePath, publishedToken, !staysPartial)
+			task.observationRegistry.observe(absolutePath, publishedToken, completeOverride ?? !staysPartial)
 		}
 	})
 }

@@ -420,6 +420,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			true,
 			1000,
 			"create",
+			false,
 		)
 	})
 

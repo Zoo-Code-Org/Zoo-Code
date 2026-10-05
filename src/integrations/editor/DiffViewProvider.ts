@@ -1444,6 +1444,9 @@ export class DiffViewProvider {
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
 		writeKind: GuardedWriteKind = "create",
+		// Completeness the caller earned elsewhere; a move carries the source's
+		// view through the publish instead of claiming completeness for lines it never read.
+		completeOverride?: boolean,
 	): Promise<{
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
@@ -1466,7 +1469,7 @@ export class DiffViewProvider {
 			throw new Error("Cannot guard the write: the owning task is no longer available")
 		}
 		await createDirectoriesForFile(absolutePath)
-		await guardedWrite(task, relPath, content, writeKind)
+		await guardedWrite(task, relPath, content, writeKind, completeOverride)
 
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory

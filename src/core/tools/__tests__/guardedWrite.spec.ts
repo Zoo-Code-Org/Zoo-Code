@@ -120,6 +120,20 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(reg.get(abs("new-file.txt"))?.complete).toBe(true)
 		})
 
+		it("carries a caller-supplied completeness through the publish for a fresh destination", async () => {
+			// A move publishes content built from a view of another file. Recording the
+			// create as complete would hand the model authority over source lines it never
+			// read, so the caller's completeness has to survive the refresh.
+			const reg = new ObservationRegistry()
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "new-file.txt", "hello", "create", false)
+
+			expect(reg.get(abs("new-file.txt"))?.complete).toBe(false)
+		})
+
 		it("fails with the read-first remediation when the file exists - nothing published", async () => {
 			mockedFsAccess.mockResolvedValue(undefined)
 			const task = createMockTask()

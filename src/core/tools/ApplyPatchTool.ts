@@ -466,6 +466,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					diagnosticsEnabled,
 					writeDelayMs,
 					"create",
+					sourceComplete,
 				)
 			} else {
 				// Write to new path and delete old file
