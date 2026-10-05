@@ -68,6 +68,9 @@ interface HarnessOptions {
 	timelineErrorStatus?: number
 	permissions?: Record<string, string>
 	permissionErrors?: Record<string, number>
+	commitParents?: string[]
+	getCommitErrorStatus?: number
+	openPrHeads?: Array<{ number: number; sha: string }>
 	permissionErrorStatus?: number
 	requiredContexts?: string[]
 	requiredIntegrationId?: number | null
@@ -274,7 +277,13 @@ async function runWorkflow(options: HarnessOptions = {}) {
 				return [{ ...pr, base: { ...pr.base, repo: { full_name: "another/repository" } } }]
 			}
 		}
-		return [pr]
+		return [pr, ...(options.openPrHeads ?? []).map((entry) => ({ number: entry.number, head: { sha: entry.sha } }))]
+	})
+	const getCommit = vi.fn(async () => {
+		if (options.getCommitErrorStatus) {
+			throw Object.assign(new Error("Commit lookup failed"), { status: options.getCommitErrorStatus })
+		}
+		return { data: { parents: (options.commitParents ?? []).map((sha) => ({ sha })) } }
 	})
 	let pullRequestGetIndex = 0
 	const getPullRequest = vi.fn(async () => {
@@ -332,6 +341,9 @@ async function runWorkflow(options: HarnessOptions = {}) {
 				listEventsForTimeline,
 				createComment,
 				updateComment,
+			},
+			git: {
+				getCommit,
 			},
 			checks: {
 				listForRef: vi.fn(async () => checkRuns),
@@ -436,6 +448,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		warning: core.warning,
 		getPullRequest,
 		listPullRequests: github.rest.pulls.list,
+		getCommit,
 		listCommitStatusesForRef: github.rest.repos.listCommitStatusesForRef,
 		permissionFor,
 	}
@@ -467,6 +480,7 @@ describe("PR review-state workflow", () => {
 			issues: "write",
 			checks: "read",
 			statuses: "write",
+			contents: "read",
 		})
 		expect(JSON.stringify(workflow.jobs.reconcile.steps)).not.toMatch(/actions\/checkout|\bpnpm\b|\bnpm\b/)
 		expect(workflowScript).not.toContain("@coderabbitai")
@@ -501,6 +515,42 @@ describe("PR review-state workflow", () => {
 		expect(result.createCommitStatus).toHaveBeenCalled()
 	})
 
+	it("labels a stacked unit from its head commit's parent", async () => {
+		const result = await runWorkflow({
+			commitParents: [OLD_SHA],
+			openPrHeads: [{ number: 1436, sha: OLD_SHA }],
+		})
+		fs.writeFileSync("C:/work/Zoo-Code-fork/.dbg.txt", JSON.stringify({ getCommit: result.getCommit.mock.calls, list: result.listPullRequests.mock.calls.length, info: result.info.mock.calls.map(function (x) { return x[0] }), warn: result.warning.mock.calls.map(function (x) { return x[0] }) }, null, 1) + "\n")
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["stacked"] }))
+		console.log("GETCOMMIT", JSON.stringify(result.getCommit.mock.calls), "LIST", result.listPullRequests.mock.calls.length, "INFO", result.info.mock.calls.map(function (x) { return x[0] }).join(" | ").slice(0, 300))
+		expect(result.warning).not.toHaveBeenCalled()
+	})
+
+	it("removes a stale stacked label when the parent is not another open PR head", async () => {
+		const result = await runWorkflow({
+			labels: ["stacked"],
+			commitParents: [OLD_SHA],
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
+	})
+
+	it("keeps the stacked label read-only on fork review events", async () => {
+		const result = await runWorkflow({ eventName: "pull_request_review", fork: true, commitParents: [OLD_SHA] })
+
+		expect(result.addLabels).not.toHaveBeenCalled()
+		expect(result.removeLabel).not.toHaveBeenCalled()
+		expect(result.getCommit).not.toHaveBeenCalled()
+	})
+
+	it("advises instead of failing when the stacked parent cannot be read", async () => {
+		const result = await runWorkflow({ getCommitErrorStatus: 500 })
+
+		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("could not reconcile the stacked label"))
+		expect(result.setFailed).not.toHaveBeenCalled()
+	})
+
 	it("reconciles CodeRabbit status comments with the canonical bot identity", async () => {
 		expect(workflow.on.issue_comment.types).toEqual(["created", "edited"])
 		expect(workflow.jobs.reconcile.if).toContain("github.event.comment.user.login == 'coderabbitai[bot]'")
@@ -520,7 +570,9 @@ describe("PR review-state workflow", () => {
 		})
 
 		expect(result.getPullRequest).toHaveBeenCalledTimes(1)
-		expect(result.listPullRequests).not.toHaveBeenCalled()
+		// The open-PR map is read once to identify a stacked parent; reconciliation still targets only the comment's PR.
+		expect(result.listPullRequests).toHaveBeenCalledTimes(1)
+		expect(result.getCommit).toHaveBeenCalledTimes(1)
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
@@ -554,7 +606,7 @@ describe("PR review-state workflow", () => {
 	it("creates missing workflow labels", async () => {
 		const result = await runWorkflow({ labelLookupStatus: 404 })
 
-		expect(result.createLabel).toHaveBeenCalledTimes(5)
+		expect(result.createLabel).toHaveBeenCalledTimes(6)
 		const communityApproved = result.createLabel.mock.calls
 			.map(([args]) => args as { name: string; description: string })
 			.find((label) => label.name === "community-approved")
@@ -1729,14 +1781,16 @@ describe("PR review-state workflow", () => {
 	it("reconciles only the requested PR during manual dispatch", async () => {
 		const result = await runWorkflow({ eventName: "workflow_dispatch", workflowDispatchPrNumber: 1437 })
 
-		expect(result.listPullRequests).not.toHaveBeenCalled()
+		// One read for the open-PR map; only the requested PR is reconciled.
+		expect(result.listPullRequests).toHaveBeenCalledTimes(1)
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
 
 	it("reconciles the PR associated with a workflow run", async () => {
 		const result = await runWorkflow({ eventName: "workflow_run" })
 
-		expect(result.listPullRequests).not.toHaveBeenCalled()
+		// One read for the open-PR map; only the requested PR is reconciled.
+		expect(result.listPullRequests).toHaveBeenCalledTimes(1)
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
 

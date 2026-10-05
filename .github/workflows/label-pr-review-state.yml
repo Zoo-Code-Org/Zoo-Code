@@ -33,6 +33,8 @@ permissions:
   issues: write
   checks: read
   statuses: write
+  # Reading a commit's parents is metadata only; no PR code is checked out or executed.
+  contents: read
 
 concurrency:
   group: label-pr-review-state
@@ -85,6 +87,11 @@ jobs:
                 name: 'community-approved',
                 color: 'c2e0c6',
                 description: 'Fresh community approval on the current head; maintainer review still required',
+              },
+              {
+                name: 'stacked',
+                color: 'c2c2c2',
+                description: 'Head commit sits on another open PR, so its diff is only this unit',
               },
             ];
             const guideMarker = '<!-- zoo-code-pr-review-process -->';
@@ -241,6 +248,48 @@ jobs:
               }
               if (labelErrors.length > 0) {
                 throw new Error(`Could not reconcile labels: ${labelErrors.map(err => err.message).join('; ')}`);
+              }
+            }
+
+            // A stacked unit's head commit has exactly one parent, and that parent is another open
+            // PR's head. Reviewers filter on this label to tell a unit apart from a standalone PR.
+            // It is orthogonal to the review-state labels, so it is reconciled separately and never
+            // removed by reconcileLabels.
+            const stackedLabel = 'stacked';
+
+            async function buildOpenPrHeads() {
+              const candidates = await github.paginate(github.rest.pulls.list, {
+                owner, repo, state: 'open', per_page: 100,
+              });
+              const heads = new Map();
+              for (const candidate of candidates) {
+                if (candidate.head?.sha) heads.set(candidate.head.sha.toLowerCase(), candidate.number);
+              }
+              return heads;
+            }
+
+            async function reconcileStackedLabel(pr, openPrHeads) {
+              if (isReadOnlyRun && isForkPR(pr)) {
+                core.info(`PR #${pr.number}: fork PR on a read-only run — skipping the stacked label`);
+                return;
+              }
+              try {
+                const { data: commit } = await github.rest.git.getCommit({ owner, repo, commit_sha: pr.head.sha });
+                const parents = Array.isArray(commit.parents) ? commit.parents : [];
+                const parentPr = parents.length === 1
+                  ? openPrHeads.get(String(parents[0].sha).toLowerCase())
+                  : undefined;
+                const hasLabel = pr.labels.some(label => label.name === stackedLabel);
+                if (hasLabel && parentPr === undefined) {
+                  await github.rest.issues.removeLabel({ owner, repo, issue_number: pr.number, name: stackedLabel });
+                  pr.labels = pr.labels.filter(label => label.name !== stackedLabel);
+                } else if (parentPr && !hasLabel) {
+                  await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels: [stackedLabel] });
+                  pr.labels = pr.labels.concat([{ name: stackedLabel }]);
+                  core.info(`PR #${pr.number}: stacked on #${parentPr}`);
+                }
+              } catch (error) {
+                core.warning(`PR #${pr.number}: could not reconcile the stacked label: ${error.message}`);
               }
             }
 
@@ -534,8 +583,13 @@ jobs:
 
             const failures = [];
 
+            // Only read the open-PR map when there is a PR to reconcile, so an
+            // unassociated workflow run still resolves to zero API reads.
+            const openPrHeads = prs.length > 0 ? await buildOpenPrHeads() : new Map();
+
             for (const pr of prs) {
               let failurePhase = 'ci-pending';
+              await reconcileStackedLabel(pr, openPrHeads);
               try {
                 const selfReferentialRequirements = (requiredChecks ?? []).filter(check =>
                   check.context === reviewGateName || check.context === reconciliationCheckName
