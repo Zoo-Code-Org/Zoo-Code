@@ -20,7 +20,15 @@ export class CodeIndexScanExecutor {
 		const summary = await this.scanWorkspace(signal, "incremental")
 		if (!summary) return false
 
-		// Preserve the existing incremental policy: reported batch errors do not prevent completion.
+		// Do not mark an existing index complete when some updates failed.
+		if (summary.batchErrors.length > 0) {
+			const messages = [...new Set(summary.batchErrors.map((error) => error.message))]
+			throw new AggregateError(
+				summary.batchErrors,
+				`Incremental scan failed with ${summary.batchErrors.length} errors:\n${messages.join("\n")}`,
+			)
+		}
+
 		if (summary.found > 0) {
 			console.log(
 				`[CodeIndexOrchestrator] Incremental scan completed: ${summary.indexed} blocks indexed from new/changed files`,
