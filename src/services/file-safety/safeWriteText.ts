@@ -370,7 +370,7 @@ export async function safeWriteText(
 		if (platform === "win32") {
 			try {
 				await fs.access(targetPath) // target exists?
-				const dumpPath = targetPath + ".acl.tmp"
+				const dumpPath = _tempName(dirPath, "safeWriteText.acl")
 				const saved = await _saveDaclWindows(targetPath, dumpPath, options?.execFileRunner)
 				if (saved) {
 					// Only a successfully saved dump may be restored onto the
