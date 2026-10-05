@@ -3,9 +3,6 @@ import * as fsSync from "fs"
 import * as path from "path"
 import { execFile } from "child_process"
 
-/**
- * Options for safeWriteText atomic text publish primitive.
- */
 export interface SafeWriteTextOptions {
 	/**
 	 * When true, preserve the old-file semantics: rename target -> backup first,
@@ -64,11 +61,6 @@ function _stagingDir(dir: string): string {
 	return sd
 }
 
-/**
- * fsync a file descriptor so its data is durable before the atomic rename.
- * Uses the sync form because this repo's @types/node does not declare
- * fs.promises.fsync; the staging file is small, so the blocking window is bounded.
- */
 function _fsyncFile(fd: number): void {
 	fsSync.fsyncSync(fd)
 }
@@ -108,20 +100,6 @@ async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRu
 // -- public API ------------------------------------------------------------
 
 /**
- * Atomic text publish primitive.
- *
- * 1. Write content to a temp file in a private per-write staging subdir
- *    (same volume -> atomic rename guaranteed).
- * 2. fsync the temp file, then close it.
- * 3. win32 only: if target exists save its DACL dump BEFORE backup rename.
- * 4. Optionally rename target -> backup (when backup:true).
- * 5. Atomic rename temp -> target.
- * 6. win32 only: restore DACL onto the directory AFTER commit rename.
- * 7. On success: delete backup (if any) and unlink DACL dump.
- * 8. On failure: rollback backup to target path; clean up temp + dump.
- */
-
-/**
  * Resolve the publish target: the symlink referent when the given path is an
  * existing symlink, the path itself otherwise. Only ENOENT (target absent yet)
  * may fall back to the given path; any other resolution error (EACCES, EIO, ...)
@@ -151,9 +129,30 @@ export async function resolvePublishTarget(absoluteFilePath: string): Promise<st
  * peer writer is mid-commit (backup mode renames the referent away and back).
  * The walk is bounded so a two-link cycle terminates.
  */
+/**
+ * Canonicalize the parent directory and re-join the basename. fs.realpath
+ * canonicalizes every component, including a symlinked ancestor directory or a
+ * Windows 8.3 short name, so a lock key must be canonical even when the file
+ * itself is not there yet -- otherwise the key for one file depends on whether
+ * the file exists when the key is computed, and two writers take two locks.
+ */
+async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
+	const dirPath = path.dirname(absoluteFilePath)
+	const canonicalDir = await fs.realpath(dirPath).catch(() => dirPath)
+	return path.join(canonicalDir, path.basename(absoluteFilePath))
+}
+
+/**
+ * Lock key for a publish target: the symlink referent when the path is an
+ * existing symlink, the path itself otherwise. Unlike resolvePublishTarget this
+ * tolerates a dangling link, because the lock key has to be computable while a
+ * peer writer is mid-commit (backup mode renames the referent away and back).
+ * The walk is bounded so a two-link cycle terminates, and every key it returns is
+ * canonicalized through canonicalDirKey.
+ */
 export async function resolveLockKey(absoluteFilePath: string): Promise<string> {
 	try {
-		return await resolvePublishTarget(absoluteFilePath)
+		return await canonicalDirKey(await resolvePublishTarget(absoluteFilePath))
 	} catch {
 		// A real readlink throws for anything that is not a link, so a normal chain
 		// ends the walk. Two links that point at each other never would, so the
@@ -161,10 +160,10 @@ export async function resolveLockKey(absoluteFilePath: string): Promise<string> 
 		let key = absoluteFilePath
 		for (let depth = 0; depth < 8; depth++) {
 			const target = await fs.readlink(key).catch(() => undefined)
-			if (target === undefined) return key
-			key = path.resolve(path.dirname(key), target)
+			if (target === undefined) return await canonicalDirKey(key)
+			key = await canonicalDirKey(path.resolve(path.dirname(key), target))
 		}
-		return key
+		return await canonicalDirKey(key)
 	}
 }
 

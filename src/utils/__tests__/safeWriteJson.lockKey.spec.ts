@@ -6,6 +6,7 @@ import type { BigIntStats } from "fs"
 import * as fs from "fs/promises"
 import { acquireFileLock } from "../fileLock"
 import { safeWriteJson } from "../safeWriteJson"
+import { resolveLockKey } from "../../services/file-safety/safeWriteText"
 
 vi.mock("../fileLock", () => ({
 	acquireFileLock: vi.fn(async () => async () => {}),
@@ -67,7 +68,7 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// The lock key is the key every other writer to this file uses, so the caller
 		// queued behind the peer instead of failing before the lock.
 		expect(mockedAcquireFileLock).toHaveBeenCalledWith(referent)
-		expect(order).toEqual(["resolve-failed", "lstat", "lock", "resolve", "resolve"])
+		expect(order).toEqual(["resolve-failed", "lstat", "resolve", "resolve", "lock", "resolve", "resolve"])
 		expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ id: "task-1" })
 	})
 
@@ -105,5 +106,23 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// The strict rejection is reached through the ENOENT + symlink branch, not
 		// through a synchronous throw that skips it.
 		expect(order).toEqual(["lstat", "lock", "lstat", "release"])
+	})
+
+	it("canonicalizes the parent directory when the file itself is not there yet", async () => {
+		// fs.realpath canonicalizes every component, including a symlinked ancestor
+		// directory or a Windows 8.3 short name. If the fallback returns the alias
+		// directory, the key depends on whether the file exists at the moment the key
+		// is computed, and a writer that resolved the canonical directory takes a
+		// different lock for the same file.
+		const aliasDir = path.join(os.tmpdir(), "alias-dir")
+		const canonicalDir = path.join(os.tmpdir(), "canonical-dir")
+		const file = path.join(aliasDir, "history_item.json")
+		mockedRealpath.mockImplementation(async (target) => {
+			if (target === file) throw enoent
+			return canonicalDir
+		})
+		mockedLstat.mockImplementation(async () => ({ isSymbolicLink: () => false }) as unknown as BigIntStats)
+
+		expect(await resolveLockKey(file)).toBe(path.join(canonicalDir, "history_item.json"))
 	})
 })

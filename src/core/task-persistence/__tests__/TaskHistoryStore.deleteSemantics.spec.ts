@@ -186,7 +186,11 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 
 			// Real symlinks are unavailable in this CI lane, so the alias is
 			// simulated through realpath, as in the safeWriteJson lock test.
-			const realpathSpy = vi.spyOn(fs, "realpath").mockResolvedValue(referentPath)
+			// Only the file resolves through the alias; the directory is already canonical,
+			// so canonicalDirKey leaves it unchanged and the key stays the referent.
+			const realpathSpy = vi
+				.spyOn(fs, "realpath")
+				.mockImplementation(async (target) => (target === aliasPath ? referentPath : String(target)))
 			try {
 				await expect(store.delete("alias-del")).resolves.toBeUndefined()
 			} finally {
@@ -211,9 +215,13 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			await store.upsert(makeHistoryItem({ id: "alias-dangling" }))
 			const aliasPath = historyFilePath(storagePath, "alias-dangling")
 			const referentPath = path.join(storagePath, "tasks", "alias-dangling", "referent-history.json")
-			const realpathSpy = vi
-				.spyOn(fs, "realpath")
-				.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			// Only the file resolves through the alias; the directory is already canonical,
+			// so canonicalDirKey leaves it unchanged and the key stays the referent.
+			const enoent = Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			const realpathSpy = vi.spyOn(fs, "realpath").mockImplementation(async (target) => {
+				if (target === aliasPath) throw enoent
+				return String(target)
+			})
 			const lstatSpy = vi
 				.spyOn(fs, "lstat")
 				.mockResolvedValue({ isSymbolicLink: () => true } as unknown as import("fs").Stats)
@@ -244,7 +252,11 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 
 			// Real symlinks are unavailable in this CI lane, so the alias is
 			// simulated through realpath, as in the safeWriteJson lock test.
-			const realpathSpy = vi.spyOn(fs, "realpath").mockResolvedValue(referentPath)
+			// Only the file resolves through the alias; the directory is already canonical,
+			// so canonicalDirKey leaves it unchanged and the key stays the referent.
+			const realpathSpy = vi
+				.spyOn(fs, "realpath")
+				.mockImplementation(async (target) => (target === aliasPath ? referentPath : String(target)))
 			try {
 				// The rename window: the referent is momentarily missing, so the cached
 				// file cannot be stat'd while the peer holds the lock at the key it locks.
@@ -476,7 +488,11 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			const aliasPath = historyFilePath(storagePath, "alias-batch")
 			const referentPath = path.join(storagePath, "tasks", "alias-batch", "referent-history.json")
 
-			const realpathSpy = vi.spyOn(fs, "realpath").mockResolvedValue(referentPath)
+			// Only the file resolves through the alias; the directory is already canonical,
+			// so canonicalDirKey leaves it unchanged and the key stays the referent.
+			const realpathSpy = vi
+				.spyOn(fs, "realpath")
+				.mockImplementation(async (target) => (target === aliasPath ? referentPath : String(target)))
 			try {
 				await expect(store.deleteMany(["alias-batch"])).resolves.toBeUndefined()
 			} finally {

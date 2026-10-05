@@ -566,7 +566,11 @@ describe("safeWriteJson", () => {
 		// backup, and the commit all target the resolved referent.
 		await fsPromisesActuals.writeFile!(referentPath, JSON.stringify({ seed: true }))
 
-		vi.spyOn(fs, "realpath").mockResolvedValue(referentPath)
+		// Only the file resolves through the link; the directory is already canonical,
+		// so the lock key is the referent rather than the alias directory + basename.
+		vi.spyOn(fs, "realpath").mockImplementation(async (target) =>
+			target === callerPath ? referentPath : String(target),
+		)
 
 		await safeWriteJson(callerPath, { after: true })
 
@@ -597,7 +601,11 @@ describe("safeWriteJson", () => {
 		const referentPath = path.join(referentDir, "locked.json")
 		await fsPromisesActuals.writeFile!(referentPath, JSON.stringify({ seed: 1 }))
 
-		const realpathSpy = vi.spyOn(fs, "realpath").mockResolvedValue(referentPath)
+		// Only the file resolves through the link; the directory is already canonical,
+		// so the lock key is the referent rather than the alias directory + basename.
+		const realpathSpy = vi
+			.spyOn(fs, "realpath")
+			.mockImplementation(async (target) => (target === callerPath ? referentPath : String(target)))
 
 		// Wrap the real lock in a capturing mock, and drive the two rare error paths
 		// (the onCompromised callback and a failing release) so they stay covered
