@@ -167,11 +167,7 @@ async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRu
  */
 export async function resolvePublishTarget(absoluteFilePath: string): Promise<string> {
 	return fs.realpath(absoluteFilePath).catch(async (error: unknown) => {
-		const code =
-			typeof error === "object" && error !== null && "code" in error
-				? (error as { code?: string }).code
-				: undefined
-		if (code !== "ENOENT") throw error
+		if (errorCode(error) !== "ENOENT") throw error
 		// ENOENT also covers a dangling symlink, which must never be written through.
 		// Only a lstat that also reports the path as absent may fall back to the
 		// given path; a real lstat failure (EACCES, EIO) says nothing about whether
@@ -401,11 +397,7 @@ export async function safeWriteText(
 					await fs.rename(targetPath, backupPath)
 					releaseBackupOnSuccess = true
 				} catch (err: unknown) {
-					const code =
-						typeof err === "object" && err !== null && "code" in err
-							? (err as { code?: string }).code
-							: undefined
-					if (code !== "ENOENT") throw err
+					if (errorCode(err) !== "ENOENT") throw err
 				}
 			}
 
