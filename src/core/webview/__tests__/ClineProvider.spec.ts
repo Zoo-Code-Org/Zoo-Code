@@ -2223,9 +2223,10 @@ describe("ClineProvider", () => {
 			// mode should come from viewLocalState
 			expect(state.mode).toBe("architect")
 
-			// Other values should still come from global state / contextProxy
-			expect(state.language).toBeDefined()
-			expect(state.customModes).toBeDefined()
+			// Other values should still come from global state / contextProxy: the fixture's
+			// vscode.env.language is "en" and no custom modes are persisted.
+			expect(state.language).toBe("en")
+			expect(state.customModes).toEqual([])
 
 			await provider.dispose()
 		})
@@ -2291,16 +2292,13 @@ describe("ClineProvider", () => {
 				openRouterApiKey: "profile-a-key",
 			})
 
-			// @ts-ignore - Replace providerSettingsManager with a test double.
-			provider.providerSettingsManager = {
-				saveConfig: vi.fn().mockResolvedValue("profile-b-id"),
-				listConfig: vi
-					.fn()
-					.mockResolvedValue([
-						{ name: "profile-b", id: "profile-b-id", apiProvider: providerIdentifiers.anthropic },
-					]),
-				setModeConfig: vi.fn().mockResolvedValue(undefined),
-			}
+			// Typed spies on the real manager (instance-scoped): the upsert-activate path
+			// reads only these methods, so no manager replacement is needed.
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("profile-b-id")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "profile-b", id: "profile-b-id", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
 			await provider.upsertProviderProfile("profile-b", { apiProvider: providerIdentifiers.anthropic }, true)
@@ -2323,20 +2321,17 @@ describe("ClineProvider", () => {
 				openRouterApiKey: "profile-a-key",
 			})
 
-			// @ts-ignore - Replace providerSettingsManager with a test double.
-			provider.providerSettingsManager = {
-				activateProfile: vi.fn().mockResolvedValue({
-					name: "profile-b",
-					id: "profile-b-id",
-					apiProvider: providerIdentifiers.anthropic,
-				}),
-				listConfig: vi
-					.fn()
-					.mockResolvedValue([
-						{ name: "profile-b", id: "profile-b-id", apiProvider: providerIdentifiers.anthropic },
-					]),
-				setModeConfig: vi.fn().mockResolvedValue(undefined),
-			}
+			// Typed spies on the real manager (instance-scoped): the direct-activation path
+			// reads only these methods, so no manager replacement is needed.
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "profile-b",
+				id: "profile-b-id",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "profile-b", id: "profile-b-id", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
 			// The direct-activation path (activateProviderProfileUnlocked) carries its own
@@ -3092,6 +3087,41 @@ describe("ClineProvider", () => {
 
 		// Should post state and theme to webview
 		expect(mockPostMessage).toHaveBeenCalled()
+	})
+
+	it("should re-pin the view to a valid global selection when the first listed profile has no name", async () => {
+		const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+		// @ts-ignore - Replace providerSettingsManager with a test double: the view's pinned config no
+		// longer exists, the shared global selection is still valid, and the only listed profile is a
+		// legacy entry without a name.
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn(async (name: string) => name === "global-valid"),
+			listConfig: vi.fn(async () => [{ id: "legacy-id", apiProvider: providerIdentifiers.openai }]),
+			saveConfig: vi.fn(async () => "legacy-id"),
+			dispose: vi.fn(),
+		}
+		// @ts-ignore - Replace customModesManager with a test double (no custom modes).
+		provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
+		// The view's own pin points at a deleted profile; the shared global selection is still valid.
+		await provider.saveViewState("currentApiConfigName", "gone-pin")
+		await provider.contextProxy.setValue("currentApiConfigName", "global-valid")
+
+		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview")
+		const contextProxySetValueSpy = vi.spyOn(provider.contextProxy, "setValue")
+		await webviewMessageHandler(provider, { type: "webviewDidLaunch" })
+		// The launch flow's profile-list sync is fire-and-forget; wait for its final post.
+		await vi.waitFor(() =>
+			expect(postMessageSpy).toHaveBeenCalledWith(expect.objectContaining({ type: "listApiConfig" })),
+		)
+
+		// The valid shared selection is adopted by this view only: the view-local pin switches to it
+		// while the shared global selection is left untouched for the other views.
+		expect(provider["viewLocalState"].currentApiConfigName).toBe("global-valid")
+		expect(mockContext.globalState.get("currentApiConfigName")).toBe("global-valid")
+		// A nameless first listed profile must never clear the shared selection with undefined.
+		expect(contextProxySetValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", undefined)
+
+		await provider.dispose()
 	})
 
 	test("logs detached workspace initialization failures", async () => {
