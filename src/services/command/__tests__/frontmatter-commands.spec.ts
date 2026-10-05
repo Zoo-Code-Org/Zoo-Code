@@ -497,12 +497,15 @@ Global init instructions.`
 			mockFs.readFile = vi.fn().mockResolvedValue(globalInitContent)
 
 			const result = await getCommands("/test/cwd")
-			const init = result.find((command) => command.name === "init")
+			const init = result.filter((command) => command.name === "init")
 
-			expect(init).toEqual(
+			// A duplicate init row would mean the built-in was listed twice.
+			expect(init).toHaveLength(1)
+			expect(init[0]).toEqual(
 				expect.objectContaining({
 					source: "global",
 					content: "# Global Init\n\nGlobal init instructions.",
+					filePath: expect.stringContaining(path.join(".roo", "commands", "init.md")),
 				}),
 			)
 		})
@@ -523,12 +526,83 @@ Project init instructions.`
 			mockFs.readFile = vi.fn().mockResolvedValueOnce(globalInitContent).mockResolvedValueOnce(projectInitContent)
 
 			const result = await getCommands("/test/cwd")
-			const init = result.find((command) => command.name === "init")
+			const init = result.filter((command) => command.name === "init")
 
-			expect(init).toEqual(
+			expect(init).toHaveLength(1)
+			expect(init[0]).toEqual(
 				expect.objectContaining({
 					source: "project",
 					content: "# Project Init\n\nProject init instructions.",
+					filePath: path.resolve(path.join("/test/cwd", ".roo", "commands", "init.md")),
+				}),
+			)
+		})
+
+		it("should list a project command over a colliding built-in command when no global command exists", async () => {
+			const projectInitContent = `# Project Init
+
+Project init instructions.`
+
+			mockGetBuiltInCommands.mockResolvedValueOnce([
+				{
+					name: "init",
+					content: "Built-in init instructions.",
+					source: "built-in",
+					filePath: "built-in://init",
+				},
+			])
+			mockFs.stat = vi.fn().mockResolvedValue({ isDirectory: () => true })
+			mockFs.readdir = vi
+				.fn()
+				.mockResolvedValueOnce([]) // global commands directory is empty
+				.mockResolvedValueOnce([{ name: "init.md", isFile: () => true }])
+			mockFs.readFile = vi.fn().mockResolvedValue(projectInitContent)
+
+			const result = await getCommands("/test/cwd")
+			const init = result.filter((command) => command.name === "init")
+
+			expect(init).toHaveLength(1)
+			expect(init[0]).toEqual(
+				expect.objectContaining({
+					source: "project",
+					content: "# Project Init\n\nProject init instructions.",
+					filePath: path.resolve(path.join("/test/cwd", ".roo", "commands", "init.md")),
+				}),
+			)
+		})
+
+		it("should list exactly one command for a three-way built-in/global/project collision", async () => {
+			const globalInitContent = `# Global Init
+
+Global init instructions.`
+			const projectInitContent = `# Project Init
+
+Project init instructions.`
+
+			mockGetBuiltInCommands.mockResolvedValueOnce([
+				{
+					name: "init",
+					content: "Built-in init instructions.",
+					source: "built-in",
+					filePath: "built-in://init",
+				},
+			])
+			mockFs.stat = vi.fn().mockResolvedValue({ isDirectory: () => true })
+			mockFs.readdir = vi
+				.fn()
+				.mockResolvedValueOnce([{ name: "init.md", isFile: () => true }])
+				.mockResolvedValueOnce([{ name: "init.md", isFile: () => true }])
+			mockFs.readFile = vi.fn().mockResolvedValueOnce(globalInitContent).mockResolvedValueOnce(projectInitContent)
+
+			const result = await getCommands("/test/cwd")
+			const init = result.filter((command) => command.name === "init")
+
+			expect(init).toHaveLength(1)
+			expect(init[0]).toEqual(
+				expect.objectContaining({
+					source: "project",
+					content: "# Project Init\n\nProject init instructions.",
+					filePath: path.resolve(path.join("/test/cwd", ".roo", "commands", "init.md")),
 				}),
 			)
 		})
