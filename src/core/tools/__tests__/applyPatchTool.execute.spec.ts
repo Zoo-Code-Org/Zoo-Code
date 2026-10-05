@@ -448,22 +448,17 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		)
 	})
 
-	it("move: carries the source's partial completeness to the destination before the publish", async () => {
-		// The destination is the source file plus one hunk, so it can only be as
-		// complete as the view the model had of the source. The carry has to happen
-		// before the guarded publish, because the guard decides completeness at publish
-		// time: downgrading afterwards leaves a window in which a concurrent writer sees
-		// the destination as complete for content the model never fully read.
+	it("move: rejects a partial source onto an observed destination before changing any state", async () => {
+		// The destination content is the source file plus one hunk, so it can only be
+		// as complete as the view the model had of the source. Rejecting before the
+		// registry is modified keeps a full destination read intact, and the message
+		// must name the source, because re-reading the destination cannot restore the
+		// source's completeness and would loop.
 		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
 		const destKey = path.resolve("/workspace/project", "src/new.ts")
 		const reg = mockTask.observationRegistry
 		reg.observe(sourceKey, "7:4242:1234:1700000000123456789:1700000000789999999", false)
 		reg.observe(destKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
-		const completeAtPublish: Array<boolean | undefined> = []
-		mockSaveDirectly.mockImplementationOnce(async () => {
-			completeAtPublish.push(reg.get(destKey)?.complete)
-			return { newProblemsMessage: "", userEdits: undefined, finalContent: "new content" }
-		})
 
 		await tool.execute({ patch: movePatch }, mockTask as Task, {
 			askApproval: mockAskApproval,
@@ -471,15 +466,16 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			pushToolResult: mockPushToolResult,
 		})
 
-		// Partial at the moment the write chain ran, not merely afterwards.
-		expect(completeAtPublish).toEqual([false])
-		expect(reg.get(destKey)?.complete).toBe(false)
-		// The guard still refuses a full-file replacement built from the slice.
-		await expect(guardedWrite(mockTask as Task, "src/new.ts", "full replacement", "create")).rejects.toThrow(
-			"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
-				"a full-file replacement needs the complete content; re-read the whole file, then retry.",
+		// Nothing was downgraded: the destination keeps the completeness the model earned.
+		expect(reg.get(destKey)?.complete).toBe(true)
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
+		expect(mockHandleError).toHaveBeenCalledWith(
+			"apply patch",
+			expect.objectContaining({
+				message:
+					"Cannot move a partially read file onto src/new.ts: re-read the whole source (src/old.ts) first, then retry.",
+			}),
 		)
-		expect(mockHandleError).not.toHaveBeenCalled()
 	})
 
 	it("move: a complete source read keeps the destination complete", async () => {

@@ -12,6 +12,7 @@ import { fileExistsAtPath } from "../../utils/fs"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { sanitizeUnifiedDiff, computeDiffStats } from "../diff/stats"
 import { versionTokenOfStat } from "../../utils/versionToken"
+import { GuardRejectedError } from "./guardedWrite"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import type { ToolUse } from "../../shared/tools"
 import { parsePatch, ParseError, processAllHunks } from "./apply-patch"
@@ -456,7 +457,15 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					// would hand the model authority to edit a file it never read.
 					const destObs = task.observationRegistry.get(moveAbsolutePath)
 					if (destObs !== undefined) {
-						task.observationRegistry.observe(moveAbsolutePath, destObs.version, false)
+						// Replacing an existing destination with content built from a partial
+						// source view must be re-authorized by reading the source in full. Reject
+						// before any state changes and name the source: a remediation that names
+						// only the destination sends the model to re-read the wrong file, and a
+						// downgrade that survives a rejected publish loses a full destination read.
+						throw new GuardRejectedError(
+							`Cannot move a partially read file onto ${change.movePath}: re-read the whole source (${change.path}) first, then retry.`,
+							moveAbsolutePath,
+						)
 					}
 				}
 				await task.diffViewProvider.saveDirectly(
