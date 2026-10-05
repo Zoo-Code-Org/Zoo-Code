@@ -243,6 +243,7 @@ vi.mock("@roo-code/cloud", () => ({
 				getOrganizationMemberships: vi.fn().mockResolvedValue([]),
 				getUserSettings: vi.fn().mockReturnValue(null),
 				isTaskSyncEnabled: vi.fn().mockReturnValue(false),
+				off: vi.fn(),
 			}
 		},
 	},
@@ -382,6 +383,32 @@ describe("ClineProvider Task History Synchronization", () => {
 	const findCallsByType = (calls: any[][], type: string) => {
 		return calls.filter((call) => call[0]?.type === type)
 	}
+
+	it("uses per-task files without registering a globalState write-through callback", () => {
+		expect(provider.taskHistoryStore["onWrite"]).toBeUndefined()
+	})
+
+	it("does not write task history to globalState after a history mutation", async () => {
+		vi.mocked(mockContext.globalState.update).mockClear()
+
+		await provider.updateTaskHistory(createHistoryItem({ id: "file-backed-task", task: "File-backed task" }), {
+			broadcast: false,
+		})
+
+		expect(mockContext.globalState.update).not.toHaveBeenCalledWith("taskHistory", expect.anything())
+	})
+
+	it("does not write task history to globalState during disposal", async () => {
+		await provider.updateTaskHistory(
+			createHistoryItem({ id: "disposed-file-backed-task", task: "Disposed file-backed task" }),
+			{ broadcast: false },
+		)
+		vi.mocked(mockContext.globalState.update).mockClear()
+
+		await provider.dispose()
+
+		expect(mockContext.globalState.update).not.toHaveBeenCalledWith("taskHistory", expect.anything())
+	})
 
 	describe("updateTaskHistory", () => {
 		it("broadcasts task history update by default", async () => {
@@ -929,6 +956,25 @@ describe("ClineProvider Task History Synchronization", () => {
 			await fakeTask.emit(RooCodeEventName.TaskCompleted, "task-cb-3", {}, {})
 
 			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[onTaskCompleted] Failed to write"))
+		})
+
+		it("onTaskAborted does not call createTaskWithHistoryItem", async () => {
+			// Store the item so getTaskWithId succeeds: without it, the old branch's catch
+			// swallows the error and the test passes even if the branch comes back.
+			const existing = createHistoryItem({ id: "task-abort-1", task: "T" })
+			await provider.updateTaskHistory(existing, { broadcast: false })
+
+			const createSpy = vi.spyOn(provider, "createTaskWithHistoryItem")
+			const abortedListener = vi.fn()
+			provider.on(RooCodeEventName.TaskAborted, abortedListener)
+
+			const fakeTask = { ...makeFakeTask("task-abort-1"), abortReason: "streaming_failed" }
+			// Double cast: taskCreationCallback reads only on/taskId/abortReason from the fake.
+			provider["taskCreationCallback"](fakeTask as unknown as Task)
+			await fakeTask.emit(RooCodeEventName.TaskAborted)
+
+			expect(abortedListener).toHaveBeenCalledExactlyOnceWith("task-abort-1")
+			expect(createSpy).not.toHaveBeenCalled()
 		})
 
 		it("emits delegated completion through the provider after the child is disposed", () => {
