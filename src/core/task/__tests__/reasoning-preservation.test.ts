@@ -512,4 +512,70 @@ describe("Task reasoning preservation", () => {
 			text: assistantText,
 		})
 	})
+
+	it("should keep plain text reasoning in buildCleanConversationHistory when preserveReasoning is true", async () => {
+		const task = new Task({
+			provider: mockProvider as ClineProvider,
+			apiConfiguration: mockApiConfiguration,
+			task: "Test task",
+			startTask: false,
+		})
+
+		const requestModelInfo: ModelInfo = {
+			contextWindow: 16000,
+			supportsPromptCache: true,
+			preserveReasoning: true,
+		}
+
+		await task["addToApiConversationHistory"](
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "Reading the file." }],
+			},
+			"I should read the file first.",
+		)
+
+		const history = task["buildCleanConversationHistory"](task.apiConversationHistory, requestModelInfo)
+
+		expect(history).toHaveLength(1)
+		expect(history[0]).toMatchObject({
+			role: "assistant",
+			content: [
+				{ type: "reasoning", text: "I should read the file first.", summary: [] },
+				{ type: "text", text: "Reading the file." },
+			],
+		})
+	})
+
+	it("should strip plain text reasoning in buildCleanConversationHistory when preserveReasoning is not set", async () => {
+		const task = new Task({
+			provider: mockProvider as ClineProvider,
+			apiConfiguration: mockApiConfiguration,
+			task: "Test task",
+			startTask: false,
+		})
+
+		// preserveReasoning is undefined on this model info
+		const requestModelInfo: ModelInfo = {
+			contextWindow: 16000,
+			supportsPromptCache: true,
+		}
+
+		await task["addToApiConversationHistory"](
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "Reading the file." }],
+			},
+			"I should read the file first.",
+		)
+
+		const history = task["buildCleanConversationHistory"](task.apiConversationHistory, requestModelInfo)
+
+		expect(history).toHaveLength(1)
+		expect(history[0]).toMatchObject({
+			role: "assistant",
+			content: "Reading the file.",
+		})
+		expect(JSON.stringify(history)).not.toContain("reasoning")
+	})
 })
