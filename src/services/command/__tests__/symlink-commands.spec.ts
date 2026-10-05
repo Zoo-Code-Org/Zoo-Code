@@ -219,10 +219,11 @@ description: Symlinked command
 			// Mock readlink for symlink to directory
 			mockFs.readlink = vi.fn().mockResolvedValue("/mock/shared-commands")
 
-			// Mock readFile for content
+			// Mock readFile for content: nested.md only exists inside the symlink
+			// target, never as a direct file in a commands directory.
 			mockFs.readFile = vi.fn().mockImplementation((filePath: string) => {
 				const normalizedPath = filePath.toString().replace(/\\/g, "/")
-				if (normalizedPath.includes("nested.md")) {
+				if (normalizedPath.includes("shared-commands") && normalizedPath.includes("nested.md")) {
 					return Promise.resolve(nestedContent)
 				}
 				return Promise.reject(new Error("File not found"))
