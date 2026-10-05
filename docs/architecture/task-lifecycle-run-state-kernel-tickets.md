@@ -316,7 +316,7 @@ Shadow mode must report disagreement. Before any read flips, the kernel must agr
 - [ ] Gate the comparison as described in the Rollout gate section. Do not gate the kernel.
 - [ ] Do not throw on divergence in production. Log only.
 
-Exit criteria: a forced divergence in a test produces one log line and one metric increment. A forced R-3 window (an abort during the `checkAutoApproval` await, before RSK-20) produces a tagged mismatch, not an untagged one.
+Exit criteria: a forced divergence in a test produces one log line and one metric increment. A forced divergence on a known race that still has an open fix ticket produces a tagged mismatch, not an untagged one.
 
 Reversibility: additive observability.
 
