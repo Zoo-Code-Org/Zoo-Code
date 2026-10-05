@@ -814,29 +814,28 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		expect(error?.path).toBe("src/thing.ts")
 		expect(mockedSafeWriteText).not.toHaveBeenCalled()
 	})
-})
+	it("names the caller's path on a stale-version rejection as well", async () => {
+		// The stale branch is the most common rejection, so it has to follow the same rule
+		// as the create, delete and cancellation branches.
+		mockedFsAccess.mockResolvedValue(undefined)
+		mockedComputeVersionToken.mockResolvedValue("v2")
+		const reg = new ObservationRegistry()
+		reg.observe(abs("src/thing.ts"), "v1", true)
+		const task = createMockTask({ observationRegistry: reg })
 
-it("names the caller's path on a stale-version rejection as well", async () => {
-	// The stale branch is the most common rejection, so it has to follow the same rule
-	// as the create, delete and cancellation branches.
-	mockedFsAccess.mockResolvedValue(undefined)
-	mockedComputeVersionToken.mockResolvedValue("v2")
-	const reg = new ObservationRegistry()
-	reg.observe(abs("src/thing.ts"), "v1", true)
-	const task = createMockTask({ observationRegistry: reg })
+		let staleError: GuardRejectedError | undefined
+		await guardedWrite(task, "src/thing.ts", "hello", "update").catch((e: unknown) => {
+			if (e instanceof GuardRejectedError) {
+				staleError = e
+				return
+			}
+			throw e
+		})
 
-	let staleError: GuardRejectedError | undefined
-	await guardedWrite(task, "src/thing.ts", "hello", "update").catch((e: unknown) => {
-		if (e instanceof GuardRejectedError) {
-			staleError = e
-			return
-		}
-		throw e
+		expect(staleError?.message).toBe(
+			"Stale version -- the file changed since you read it (expected v1, current v2); re-read the file, then retry.",
+		)
+		expect(staleError?.path).toBe("src/thing.ts")
+		expect(mockedSafeWriteText).not.toHaveBeenCalled()
 	})
-
-	expect(staleError?.message).toBe(
-		"Stale version -- the file changed since you read it (expected v1, current v2); re-read the file, then retry.",
-	)
-	expect(staleError?.path).toBe("src/thing.ts")
-	expect(mockedSafeWriteText).not.toHaveBeenCalled()
 })
