@@ -843,6 +843,47 @@ describe("DiffViewProvider", () => {
 		})
 	})
 
+	// A rejected save belongs to one task. closeAllDiffViews() closes every clean
+	// diff tab in the workbench, so it would close another task's diff view while
+	// that task's provider still holds its activation listener and deferred scroll
+	// timer against a tab that is gone.
+	describe("closeOwnDiffView method", () => {
+		it("closes only this provider's tab and leaves another task's diff view open", async () => {
+			const ownTab = {
+				input: {
+					constructor: { name: "TabInputTextDiff" },
+					original: { scheme: DIFF_VIEW_URI_SCHEME },
+					modified: { fsPath: `${mockCwd}/test.ts` },
+				},
+				isDirty: false,
+			}
+			const otherTaskTab = {
+				input: {
+					constructor: { name: "TabInputTextDiff" },
+					original: { scheme: DIFF_VIEW_URI_SCHEME },
+					modified: { fsPath: `${mockCwd}/other-task.ts` },
+				},
+				isDirty: false,
+			}
+			for (const tab of [ownTab, otherTaskTab]) {
+				Object.setPrototypeOf(tab.input, vscode.TabInputTextDiff.prototype)
+			}
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: () => [{ tabs: [ownTab, otherTaskTab] }],
+				configurable: true,
+			})
+			const closedTabs: unknown[] = []
+			vi.mocked(vscode.window.tabGroups.close).mockImplementation((tab) => {
+				closedTabs.push(tab)
+				return Promise.resolve(true)
+			})
+
+			await diffViewProvider["closeOwnDiffView"](path.join(mockCwd, "test.ts"))
+
+			expect(closedTabs).toEqual([ownTab])
+		})
+	})
+
 	describe("saveDirectly method", () => {
 		beforeEach(() => {
 			// Mock vscode functions
@@ -1066,6 +1107,7 @@ describe("DiffViewProvider", () => {
 			diffViewProvider["activeDiffEditor"] = mockTextEditor(`${mockCwd}/test.ts`, "new content")
 			diffViewProvider["preDiagnostics"] = []
 			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeOwnDiffView"] = vi.fn().mockResolvedValue(undefined)
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockTextEditor(`${mockCwd}/test.ts`))
 			vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
 		})
@@ -1288,7 +1330,7 @@ describe("DiffViewProvider", () => {
 			// cleanup still runs before the error is rethrown.
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
 			expect(safeWriteText).not.toHaveBeenCalled()
-			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalledTimes(1)
+			expect(diffViewProvider["closeOwnDiffView"]).toHaveBeenCalledTimes(1)
 		})
 
 		it("open() keeps the model's existing observation instead of replacing it with the preview token", async () => {
@@ -1573,7 +1615,7 @@ describe("DiffViewProvider", () => {
 			// The read must be attributed to the bigint stat that produced the token:
 			expect(vi.mocked(fs.stat).mock.calls[0][1]).toEqual({ bigint: true })
 			expect(fs.unlink).toHaveBeenCalledWith(`${mockCwd}/test.ts`)
-			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
+			expect(diffViewProvider["closeOwnDiffView"]).toHaveBeenCalled()
 		})
 
 		it("disposes the active-editor listener before the programmatic revert", async () => {
@@ -1752,7 +1794,7 @@ describe("DiffViewProvider", () => {
 			// the outcome.
 			expect(fs.rmdir).toHaveBeenCalledTimes(1)
 			expect(fs.rmdir).toHaveBeenCalledWith(`${mockCwd}/a/b/c`)
-			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
+			expect(diffViewProvider["closeOwnDiffView"]).toHaveBeenCalled()
 		})
 
 		it("does not revert a buffer the user changed during the publish", async () => {
@@ -1929,7 +1971,7 @@ describe("DiffViewProvider", () => {
 			// A clean buffer has nothing that can be saved back, so the placeholder
 			// cleanup still runs even though no revert was needed.
 			expect(fs.unlink).toHaveBeenCalledWith(`${mockCwd}/test.ts`)
-			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
+			expect(diffViewProvider["closeOwnDiffView"]).toHaveBeenCalled()
 		})
 
 		it("does not unlink the placeholder when the edit type is not create - the outer gate short-circuits", async () => {
@@ -1965,7 +2007,7 @@ describe("DiffViewProvider", () => {
 			expect(fs.unlink).not.toHaveBeenCalled()
 			// the dirty discard and the view close still ran
 			expect(vi.mocked(vscode.commands.executeCommand)).toHaveBeenCalledWith("workbench.action.files.revert")
-			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
+			expect(diffViewProvider["closeOwnDiffView"]).toHaveBeenCalled()
 		})
 
 		it("adopts content autosave already published instead of reporting a stale rejection", async () => {
@@ -2038,7 +2080,7 @@ describe("DiffViewProvider", () => {
 			)
 			// The rejection still stands: the buffer is discarded and the views close,
 			// so the caller sees the guard verdict, not a silent success.
-			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
+			expect(diffViewProvider["closeOwnDiffView"]).toHaveBeenCalled()
 		})
 		it("keeps the rejection when the buffer is still dirty even though the disk matches", async () => {
 			// A dirty buffer means the disk content came from someone else, so the
@@ -2254,7 +2296,7 @@ describe("DiffViewProvider", () => {
 			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("EACCES: permission denied")
 			// No adoption read, so the guard verdict is the outcome.
 			expect(fs.readFile).not.toHaveBeenCalled()
-			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
+			expect(diffViewProvider["closeOwnDiffView"]).toHaveBeenCalled()
 		})
 		it("does not adopt content when the failure is not a guard verdict", async () => {
 			// The bytes match and the buffer is clean, but the failure is the dead-task
@@ -2346,7 +2388,7 @@ describe("DiffViewProvider", () => {
 			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("Stale version")
 
 			expect(fs.unlink).not.toHaveBeenCalled()
-			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
+			expect(diffViewProvider["closeOwnDiffView"]).toHaveBeenCalled()
 		})
 
 		it("does not unlink a placeholder whose content changed after open() - the token gate refuses", async () => {
@@ -2384,7 +2426,7 @@ describe("DiffViewProvider", () => {
 			expect(fs.stat).toHaveBeenCalledWith(`${mockCwd}/test.ts`, { bigint: true })
 			// token mismatch -> the placeholder is NOT ours anymore: no unlink
 			expect(fs.unlink).not.toHaveBeenCalled()
-			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
+			expect(diffViewProvider["closeOwnDiffView"]).toHaveBeenCalled()
 		})
 	})
 

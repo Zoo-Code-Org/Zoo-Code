@@ -584,7 +584,7 @@ export class DiffViewProvider {
 							}
 						}
 					}
-					await this.closeAllDiffViews()
+					await this.closeOwnDiffView(absolutePath)
 				} catch {
 					// cleanup is best-effort; the guard verdict below is the outcome
 				}
@@ -883,6 +883,33 @@ export class DiffViewProvider {
 			)
 
 		await Promise.all(closeOps)
+	}
+
+	/**
+	 * Close only this provider's diff tab. closeAllDiffViews() closes every clean
+	 * diff tab in the workbench, so a rejected save would also close another task's
+	 * diff view while that task's provider still holds its activation listener and
+	 * deferred scroll timer against a tab that is gone. A rejection belongs to one
+	 * task, so the cleanup must stay inside that task's view.
+	 */
+	private async closeOwnDiffView(absolutePath: string): Promise<void> {
+		const target = path.resolve(absolutePath)
+		const tabs = vscode.window.tabGroups.all
+			.flatMap((group) => group.tabs)
+			.filter(
+				(tab) =>
+					tab.input instanceof vscode.TabInputTextDiff &&
+					tab.input.original.scheme === DIFF_VIEW_URI_SCHEME &&
+					path.resolve(tab.input.modified.fsPath) === target &&
+					!tab.isDirty,
+			)
+		for (const tab of tabs) {
+			try {
+				await vscode.window.tabGroups.close(tab)
+			} catch {
+				// best-effort: the tab stays open
+			}
+		}
 	}
 
 	// Stop tracking user activation of the target file. Called before any
