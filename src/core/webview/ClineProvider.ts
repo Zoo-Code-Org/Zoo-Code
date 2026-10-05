@@ -57,7 +57,6 @@ import {
 	getModelId,
 	isRetiredProvider,
 	providerIdentifiers,
-	PROVIDER_SETTINGS_KEYS,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
@@ -2312,10 +2311,10 @@ export class ClineProvider
 						this.providerSettingsManager.setModeConfig(mode, id),
 						this.contextProxy.setProviderSettings(providerSettings),
 						// setProviderSettings writes the shared store directly, bypassing the
-						// view-local mutation path: also refresh this view's buffer so a stale
-						// loaded apiConfiguration cannot keep shadowing the new settings in
-						// getState().
-						this._saveViewLocalStateFromMutation(providerSettings),
+						// view-local mutation path: clear this view's buffered apiConfiguration
+						// overlay (if any) so a stale loaded profile cannot keep shadowing the
+						// new settings in getState().
+						this._saveViewLocalStateFromMutation({ apiConfiguration: undefined }),
 					])
 
 					// Other live views may have buffered this profile's settings earlier;
@@ -2514,10 +2513,10 @@ export class ClineProvider
 				this.setValue("currentApiConfigName", name),
 				this.contextProxy.setProviderSettings(providerSettings),
 				// setProviderSettings writes the shared store directly, bypassing the
-				// view-local mutation path: also refresh this view's buffer so a stale
-				// loaded apiConfiguration cannot keep shadowing the new settings in
-				// getState().
-				this._saveViewLocalStateFromMutation(providerSettings),
+				// view-local mutation path: clear this view's buffered apiConfiguration
+				// overlay (if any) so a stale loaded profile cannot keep shadowing the
+				// new settings in getState().
+				this._saveViewLocalStateFromMutation({ apiConfiguration: undefined }),
 			])
 
 			// Other live views may have buffered this profile's settings earlier;
@@ -3583,6 +3582,8 @@ export class ClineProvider
 			alwaysAllowExecute: mergedStateValues.alwaysAllowExecute ?? false,
 			destructiveCommandGuardEnabled:
 				mergedStateValues.destructiveCommandGuardEnabled ?? DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED,
+			alwaysDenyUnapprovedCommands:
+				mergedStateValues.alwaysDenyUnapprovedCommands ?? DEFAULT_ALWAYS_DENY_UNAPPROVED_COMMANDS,
 			alwaysAllowMcp: mergedStateValues.alwaysAllowMcp ?? false,
 			alwaysAllowModeSwitch: mergedStateValues.alwaysAllowModeSwitch ?? false,
 			alwaysAllowSubtasks: mergedStateValues.alwaysAllowSubtasks ?? false,
@@ -3819,23 +3820,12 @@ export class ClineProvider
 			} else {
 				this.viewLocalState.apiConfiguration = val
 			}
-		} else if (PROVIDER_SETTINGS_KEYS.some((key) => key in values)) {
-			const providerSettingsUpdate = PROVIDER_SETTINGS_KEYS.reduce((acc, key) => {
-				if (key in values) {
-					return { ...acc, [key]: values[key as keyof RooCodeSettings] }
-				}
-
-				return acc
-			}, {} as ProviderSettings)
-
-			this.viewLocalState.apiConfiguration =
-				"apiProvider" in providerSettingsUpdate
-					? providerSettingsUpdate
-					: {
-							...(this.viewLocalState.apiConfiguration ?? {}),
-							...providerSettingsUpdate,
-						}
 		}
+
+		// Flat provider-settings keys (PROVIDER_SETTINGS_KEYS) are shared settings:
+		// they are written through the ContextProxy above and must NOT be merged
+		// into viewLocalState.apiConfiguration, which would turn them into a
+		// per-view override masking later shared updates from other views.
 	}
 
 	/**
