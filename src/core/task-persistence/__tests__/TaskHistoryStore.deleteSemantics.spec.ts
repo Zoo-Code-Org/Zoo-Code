@@ -52,6 +52,13 @@ function historyFilePath(storagePath: string, taskId: string): string {
 	return path.join(storagePath, "tasks", taskId, GlobalFileNames.historyItem)
 }
 
+// The lock key is canonicalized through the parent directory, so the expected key is
+// the canonical directory plus the basename rather than the path built from
+// os.tmpdir(), which can be an 8.3 short path on the Windows runner.
+async function canonicalKey(filePath: string): Promise<string> {
+	return path.join(await actualFs.realpath(path.dirname(filePath)), path.basename(filePath))
+}
+
 function storeInternals(store: TaskHistoryStore): {
 	cache: Map<string, HistoryItem>
 	taskFileMtimes: Map<string, number>
@@ -71,6 +78,7 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 		storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-delete-semantics-"))
 		stores = []
 		onWrite = vi.fn().mockResolvedValue(undefined)
+		vi.mocked(withFileLock).mockClear()
 		vi.mocked(withFileLock).mockImplementation(actualFileLock.withFileLock)
 		vi.mocked(fs.unlink).mockImplementation(actualFs.unlink)
 	})
@@ -201,7 +209,7 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 
 			// One lock for the underlying file, keyed by the referent; the unlink
 			// still targets the path the store named.
-			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(referentPath, expect.any(Function))
+			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(await canonicalKey(referentPath), expect.any(Function))
 			// Assert the unlink target itself: locking the referent while unlinking the
 			// referent instead of the alias would keep the dangling link in place.
 			expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith(aliasPath)
@@ -239,7 +247,7 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 				readlinkSpy.mockRestore()
 			}
 
-			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(referentPath, expect.any(Function))
+			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(await canonicalKey(referentPath), expect.any(Function))
 			expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith(aliasPath)
 		})
 	})
@@ -505,7 +513,7 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 				realpathSpy.mockRestore()
 			}
 
-			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(referentPath, expect.any(Function))
+			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(await canonicalKey(referentPath), expect.any(Function))
 			expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith(aliasPath)
 		})
 	})
