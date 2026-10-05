@@ -361,8 +361,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 			// Every line was returned, so there is no later offset to read: report the
 			// clipping without a next-offset hint, and keep the read incomplete so a
 			// full-file replacement cannot be built from a clipped line.
-			output = `IMPORTANT: Some lines exceed ${MAX_LINE_LENGTH} characters and were clipped in this view. The file was read in full, but the clipped lines were not shown in full.
-				${result.content}`
+			output = `IMPORTANT: Some lines exceed ${MAX_LINE_LENGTH} characters and were clipped in this view. The file was read in full, but the clipped lines were not shown in full.\n${result.content}`
 		} else if (result.returnedLines === 0) {
 			output = "Note: File is empty"
 		}
