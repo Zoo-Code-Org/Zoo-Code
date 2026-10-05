@@ -920,9 +920,15 @@ describe("DiffViewProvider", () => {
 			const result = await diffViewProvider.saveChanges()
 
 			// Verify default behavior (enabled=true, delay falls back to DEFAULT_WRITE_DELAY_MS)
-			expect(mockDelay).toHaveBeenCalledWith(DEFAULT_WRITE_DELAY_MS)
+			expect(mockDelay).toHaveBeenCalledWith(0)
 			expect(vscode.languages.getDiagnostics).toHaveBeenCalled()
 			expect(result.newProblemsMessage).toBe("")
+		})
+
+		it("pins the default write delay to zero", () => {
+			// The tests above compare against the constant, so they would still pass if the
+			// default were changed back to 1000. Pin the value the write path actually uses.
+			expect(DEFAULT_WRITE_DELAY_MS).toBe(0)
 		})
 
 		it("should handle custom delay values", async () => {
