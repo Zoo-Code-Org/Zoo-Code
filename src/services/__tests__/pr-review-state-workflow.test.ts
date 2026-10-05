@@ -520,11 +520,9 @@ describe("PR review-state workflow", () => {
 			commitParents: [OLD_SHA],
 			openPrHeads: [{ number: 1436, sha: OLD_SHA }],
 		})
-		fs.writeFileSync("C:/work/Zoo-Code-fork/.dbg.txt", JSON.stringify({ getCommit: result.getCommit.mock.calls, list: result.listPullRequests.mock.calls.length, info: result.info.mock.calls.map(function (x) { return x[0] }), warn: result.warning.mock.calls.map(function (x) { return x[0] }) }, null, 1) + "\n")
-
+		
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["stacked"] }))
-		console.log("GETCOMMIT", JSON.stringify(result.getCommit.mock.calls), "LIST", result.listPullRequests.mock.calls.length, "INFO", result.info.mock.calls.map(function (x) { return x[0] }).join(" | ").slice(0, 300))
-		expect(result.warning).not.toHaveBeenCalled()
+				expect(result.warning).not.toHaveBeenCalled()
 	})
 
 	it("removes a stale stacked label when the parent is not another open PR head", async () => {
