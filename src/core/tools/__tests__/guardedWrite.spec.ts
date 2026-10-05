@@ -58,6 +58,7 @@ const abs = (relPath: string): string => path.resolve(WORKSPACE, relPath)
 interface MockTaskOptions {
 	cwd?: string
 	observationRegistry?: ObservationRegistry
+	abort?: boolean
 }
 
 /**
@@ -68,6 +69,7 @@ interface MockTaskOptions {
 function createMockTask(options: MockTaskOptions = {}): Task {
 	const task = {
 		cwd: options.cwd ?? WORKSPACE,
+		abort: options.abort ?? false,
 		observationRegistry: options.observationRegistry ?? new ObservationRegistry(),
 	}
 	return task as unknown as Task
@@ -760,5 +762,34 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("x.txt"), "b")
 		})
+	})
+
+	it("does not run a queued write once the owning task is cancelled", async () => {
+		const task = createMockTask({ abort: true })
+		mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+
+		await expect(guardedWrite(task, "new-file.txt", "hello", "create")).rejects.toThrow(
+			"Task was cancelled before this write ran -- the queued publish is not performed.",
+		)
+
+		expect(mockedSafeWriteText).not.toHaveBeenCalled()
+	})
+
+	it("re-checks cancellation under the publish lock before writing", async () => {
+		// The dequeue check passed; the abort landed while the lock was being taken,
+		// so the guard must refuse before the publish rather than write for a task that
+		// is already gone.
+		const task = createMockTask()
+		mockedWithFileLock.mockImplementation(function (filePath, operation) {
+			task.abort = true
+			return operation(path.resolve(filePath))
+		})
+		mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+
+		await expect(guardedWrite(task, "new-file.txt", "hello", "create")).rejects.toThrow(
+			"Task was cancelled before this write published -- nothing was written.",
+		)
+
+		expect(mockedSafeWriteText).not.toHaveBeenCalled()
 	})
 })

@@ -1159,7 +1159,7 @@ describe("DiffViewProvider", () => {
 			// fails closed instead of publishing content built on a preview that could not
 			// be tied to a version token.
 			await expect(
-				diffViewProvider.saveDirectly("observed.ts", "new content", false, false, 0, "modify"),
+				diffViewProvider.saveDirectly("observed.ts", "new content", false, false, 0, "update"),
 			).rejects.toThrow(
 				"File already exists at /mock/cwd/observed.ts and was not read before this write -- read the file first, then retry.",
 			)

@@ -103,6 +103,20 @@ export function errorCode(error: unknown): string | undefined {
 		: undefined
 }
 
+/**
+ * Cancellation re-check under the publish lock. A write queued on the FIFO
+ * chain can outlive its task: the caller already reported the write to the model,
+ * so a task aborted while its link waited must not publish afterwards.
+ */
+function cancelledBeforePublish(absolutePath: string, isCancelled?: () => boolean): void {
+	if (isCancelled?.()) {
+		throw new GuardRejectedError(
+			"Task was cancelled before this write published -- nothing was written.",
+			absolutePath,
+		)
+	}
+}
+
 /** True when the path is absent on disk (fs.access reports ENOENT). */
 async function fileIsAbsent(absolutePath: string): Promise<boolean> {
 	try {
@@ -129,10 +143,17 @@ async function tokenAfterPublish(absolutePath: string): Promise<string | undefin
 	return computeVersionToken(absolutePath).catch(() => undefined)
 }
 
-export async function createIfAbsent(absolutePath: string, content: string | Uint8Array): Promise<string | undefined> {
+export async function createIfAbsent(
+	absolutePath: string,
+	content: string | Uint8Array,
+	// Re-checked under the lock: a link that waited on the FIFO chain can outlive
+	// the task that queued it.
+	isCancelled?: () => boolean,
+): Promise<string | undefined> {
 	// Lock the key every other writer to this file uses: the resolved publish
 	// target, so a symlink alias and its referent share one lock.
 	return withFileLock(await resolveLockKey(absolutePath), async () => {
+		cancelledBeforePublish(absolutePath, isCancelled)
 		try {
 			await fs.access(absolutePath)
 		} catch (error: unknown) {
@@ -168,10 +189,14 @@ export async function replaceIfVersion(
 	absolutePath: string,
 	expectedVersion: string,
 	content: string | Uint8Array,
+	// Re-checked under the lock: a link that waited on the FIFO chain can outlive
+	// the task that queued it.
+	isCancelled?: () => boolean,
 ): Promise<string | undefined> {
 	// Lock the key every other writer to this file uses: the resolved publish
 	// target, so a symlink alias and its referent share one lock.
 	return withFileLock(await resolveLockKey(absolutePath), async () => {
+		cancelledBeforePublish(absolutePath, isCancelled)
 		let currentVersion: string
 		try {
 			currentVersion = await computeVersionToken(absolutePath)
@@ -270,6 +295,15 @@ export async function guardedWrite(
 	const absolutePath = resolveAbsolutePath(task, relPathOrAbsolute)
 
 	return enqueue(absolutePath, async () => {
+		// Cancellation is checked when the link is dequeued, not when it was enqueued:
+		// a write queued before an abort can still reach its turn on the chain after the
+		// task is gone, and the caller has already reported the write to the model.
+		if (task.abort) {
+			throw new GuardRejectedError(
+				"Task was cancelled before this write ran -- the queued publish is not performed.",
+				absolutePath,
+			)
+		}
 		const obs = task.observationRegistry.get(absolutePath)
 		// A targeted edit authorizes only the view the model saw, so a partial
 		// observation stays partial; a full-file publish is complete.
@@ -286,7 +320,7 @@ export async function guardedWrite(
 			if (obs === undefined) {
 				await unobservedEditGuard(absolutePath)
 			} else {
-				publishedToken = await replaceIfVersion(absolutePath, obs.version, content)
+				publishedToken = await replaceIfVersion(absolutePath, obs.version, content, () => task.abort)
 				staysPartial = obs.complete === false
 			}
 		} else {
@@ -310,14 +344,14 @@ export async function guardedWrite(
 
 			if (obs === undefined) {
 				// Never read: only an absent target may be created.
-				publishedToken = await createIfAbsent(absolutePath, content)
+				publishedToken = await createIfAbsent(absolutePath, content, () => task.abort)
 			} else if (absent) {
 				// A "create" on a file that vanished after the read recreates it.
-				publishedToken = await createIfAbsent(absolutePath, content)
+				publishedToken = await createIfAbsent(absolutePath, content, () => task.abort)
 			} else {
 				// The version recorded at read time must still match the on-disk
 				// token.
-				publishedToken = await replaceIfVersion(absolutePath, obs.version, content)
+				publishedToken = await replaceIfVersion(absolutePath, obs.version, content, () => task.abort)
 			}
 		}
 
