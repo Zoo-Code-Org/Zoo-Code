@@ -837,9 +837,9 @@ describe("VsCodeLmHandler", () => {
 				const below = (rng: Rng, limit: number) => Math.floor(rng() * limit)
 
 				const tagPrefix = (rng: Rng) => (rng() < 0.25 ? "antml:" : "")
-				// Opener whitespace stays short: a fragment past MAX_PARTIAL_INVOKE_CARRY is deliberately not held.
+				// Long opener whitespace exercises unbounded carry across chunk splits.
 				const opener = (rng: Rng, tool: string) =>
-					`<${tagPrefix(rng)}${INVOKE}${pick(rng, [" ", " ", "\n", " \n "])}name="${tool}"${pick(rng, [">", ">", " >", ">\n"])}`
+					`<${tagPrefix(rng)}${INVOKE}${pick(rng, [" ", " ", "\n", " \n ", " ".repeat(80)])}name="${tool}"${pick(rng, [">", ">", " >", ">\n"])}`
 				const parameter = (rng: Rng) => {
 					const tag = tagPrefix(rng) + PARAMETER
 					const body = pick(rng, [
