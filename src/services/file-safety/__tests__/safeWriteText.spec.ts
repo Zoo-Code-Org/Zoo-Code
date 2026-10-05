@@ -348,6 +348,26 @@ describe("safeWriteText", () => {
 			// temp-shaped is unlinked afterwards
 			expect(fs.unlink).not.toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
 		})
+
+		it("a failed post-commit directory fsync does not roll the backup back over the published content", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			const dirPath = path.dirname(targetPath)
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			// The file fd opens normally; the parent-directory open after the commit
+			// rename fails, which is the post-commit durability failure.
+			vi.mocked(fsSync.openSync).mockImplementation((target: string) => {
+				if (target === dirPath) throw new Error("EBADF")
+				return 1
+			})
+
+			await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).rejects.toThrow(PostCommitDurabilityError)
+
+			// The commit rename already published the new content, so the backup must
+			// not be renamed back over it: only target->backup and temp->target run.
+			expect(fs.rename).toHaveBeenNthCalledWith(1, targetPath, expect.stringContaining("safeWriteText.bak_"))
+			expect(fs.rename).toHaveBeenNthCalledWith(2, expect.stringContaining("safeWriteText_"), targetPath)
+			expect(fs.rename).toHaveBeenCalledTimes(2)
+		})
 	})
 
 	// ── Test 4: backup:true keeps old safeWriteJson semantics incl. rollback ──

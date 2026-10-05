@@ -289,6 +289,10 @@ export async function safeWriteText(
 
 	let backupPath: string | null = null
 	let releaseBackupOnSuccess = false
+	// Set once the commit rename has published the new content. After that point the
+	// backup is no longer a safe restore source: rolling it back would overwrite
+	// content the caller can already observe at the target path.
+	let committed = false
 	// Non-null only when the win32 step-2 block saved a successful DACL dump:
 	// it gates the step-5 restore and is tracked for the cleanup unlinks.
 	let daclDumpPath: string | null = null
@@ -407,6 +411,7 @@ export async function safeWriteText(
 
 			// -- Step 4: atomic rename temp -> target ---------------------
 			await fs.rename(tempPath, targetPath)
+			committed = true
 
 			// -- Step 4b (POSIX): fsync the parent directory so the directory entry
 			// changed by the commit rename is durable, not just the file content.
@@ -463,7 +468,10 @@ export async function safeWriteText(
 			await fs.rmdir(stagingDir).catch(() => {})
 		}
 	} catch (originalError: unknown) {
-		if (backupPath && releaseBackupOnSuccess) {
+		// Only a pre-commit failure can restore the backup. Once the commit rename
+		// published, a later failure (for example the post-commit directory fsync)
+		// must not overwrite the published content with the old file.
+		if (backupPath && releaseBackupOnSuccess && !committed) {
 			try {
 				await fs.rename(backupPath, targetPath)
 			} catch (rollbackError: unknown) {
