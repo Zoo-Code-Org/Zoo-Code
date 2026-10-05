@@ -58,8 +58,12 @@ function _dirPath(filePath: string): string {
 }
 // Minimal Stats stand-in: the SUT only reads `.mode` from it.
 // Async lstat stand-in: the SUT only asks whether the path is a link or a file.
-function _fileStats(isLink: boolean) {
-	return { isSymbolicLink: () => isLink, isFile: () => !isLink }
+// Built on the Stats prototype so the mock value still satisfies fsSync.Stats.
+function _fileStats(isLink: boolean): fsSync.Stats {
+	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats
+	s.isSymbolicLink = () => isLink
+	s.isFile = () => !isLink
+	return s
 }
 
 function mockDefaults(): void {
@@ -951,10 +955,11 @@ describe("resolveLockKey", () => {
 	beforeEach(() => mockDefaults())
 
 	it("canonicalizes the parent directory, not just the file", async () => {
-		vi.mocked(fs.realpath).mockImplementation(async (target: string) => {
-			if (target === "/tmp/linkdir/file.json") return "/real/dir/file.json"
-			if (target === "/real/dir") return "/real/dir"
-			return target
+		vi.mocked(fs.realpath).mockImplementation(async (target) => {
+			const key = String(target)
+			if (key === "/tmp/linkdir/file.json") return "/real/dir/file.json"
+			if (key === "/real/dir") return "/real/dir"
+			return key
 		})
 
 		// The key is the canonical directory plus the basename, so a symlinked
@@ -966,9 +971,9 @@ describe("resolveLockKey", () => {
 		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
 		vi.mocked(fs.realpath).mockRejectedValue(enoent)
 		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
-		vi.mocked(fs.readlink).mockImplementation(async (target: string) =>
-			target === "/tmp/linkdir/file.json" ? "referent.json" : undefined,
-		)
+		// Only the link path is read, so a single answer is enough and keeps the mock's
+		// return type matching fs.promises.readlink.
+		vi.mocked(fs.readlink).mockResolvedValue("referent.json")
 
 		// Mid-commit a peer writer renames the referent away and back, so the key
 		// must still be computable while the link dangles.
