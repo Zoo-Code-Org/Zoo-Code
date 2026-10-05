@@ -367,7 +367,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		statMock.mockResolvedValueOnce({ dev: 7n, ino: 4242n, size: 9999n, mtimeNs: 3n, ctimeNs: 4n })
 
 		const guardError = new Error(
-			"File already exists at /workspace/project/src/thing.ts and was not read before this write -- read the file first, then retry.",
+			"File already exists at src/thing.ts and was not read before this write -- read the file first, then retry.",
 		)
 		mockSaveDirectly.mockRejectedValue(guardError)
 
@@ -395,7 +395,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		statMock.mockRejectedValueOnce(new Error("EACCES: permission denied"))
 
 		const guardError = new Error(
-			"File already exists at /workspace/project/src/thing.ts and was not read before this write -- read the file first, then retry.",
+			"File already exists at src/thing.ts and was not read before this write -- read the file first, then retry.",
 		)
 		mockSaveDirectly.mockRejectedValue(guardError)
 
@@ -578,7 +578,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(observedAtPublish).toEqual([false])
 		await expect(guardedWrite(mockTask as Task, "src/new.ts", "full replacement", "create")).rejects.toThrow(
 			"File already exists at " +
-				destKey +
+				"src/new.ts" +
 				" and was not read before this write -- read the file first, then retry.",
 		)
 		expect(mockHandleError).not.toHaveBeenCalled()
@@ -608,7 +608,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 
 	it("update: surfaces the unobserved-existing remediation as a tool error", async () => {
 		const guardError = new Error(
-			"File already exists at /workspace/project/src/thing.ts and was not read before this write -- read the file first, then retry.",
+			"File already exists at src/thing.ts and was not read before this write -- read the file first, then retry.",
 		)
 		mockSaveDirectly.mockRejectedValue(guardError)
 

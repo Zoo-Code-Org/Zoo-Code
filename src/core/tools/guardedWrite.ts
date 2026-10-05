@@ -108,11 +108,11 @@ export function errorCode(error: unknown): string | undefined {
  * chain can outlive its task: the caller already reported the write to the model,
  * so a task aborted while its link waited must not publish afterwards.
  */
-function cancelledBeforePublish(absolutePath: string, isCancelled?: () => boolean): void {
+function cancelledBeforePublish(absolutePath: string, displayPath: string, isCancelled?: () => boolean): void {
 	if (isCancelled?.()) {
 		throw new GuardRejectedError(
 			"Task was cancelled before this write published -- nothing was written.",
-			absolutePath,
+			displayPath,
 		)
 	}
 }
@@ -146,6 +146,7 @@ async function tokenAfterPublish(absolutePath: string): Promise<string | undefin
 export async function createIfAbsent(
 	absolutePath: string,
 	content: string | Uint8Array,
+	displayPath: string,
 	// Re-checked under the lock: a link that waited on the FIFO chain can outlive
 	// the task that queued it.
 	isCancelled?: () => boolean,
@@ -153,7 +154,7 @@ export async function createIfAbsent(
 	// Lock the key every other writer to this file uses: the resolved publish
 	// target, so a symlink alias and its referent share one lock.
 	return withFileLock(await resolveLockKey(absolutePath), async () => {
-		cancelledBeforePublish(absolutePath, isCancelled)
+		cancelledBeforePublish(absolutePath, displayPath, isCancelled)
 		try {
 			await fs.access(absolutePath)
 		} catch (error: unknown) {
@@ -170,9 +171,9 @@ export async function createIfAbsent(
 
 		throw new GuardRejectedError(
 			"File already exists at " +
-				absolutePath +
+				displayPath +
 				" and was not read before this write -- read the file first, then retry.",
-			absolutePath,
+			displayPath,
 		)
 	})
 }
@@ -191,12 +192,13 @@ export async function replaceIfVersion(
 	content: string | Uint8Array,
 	// Re-checked under the lock: a link that waited on the FIFO chain can outlive
 	// the task that queued it.
+	displayPath: string,
 	isCancelled?: () => boolean,
 ): Promise<string | undefined> {
 	// Lock the key every other writer to this file uses: the resolved publish
 	// target, so a symlink alias and its referent share one lock.
 	return withFileLock(await resolveLockKey(absolutePath), async () => {
-		cancelledBeforePublish(absolutePath, isCancelled)
+		cancelledBeforePublish(absolutePath, displayPath, isCancelled)
 		let currentVersion: string
 		try {
 			currentVersion = await computeVersionToken(absolutePath)
@@ -210,7 +212,7 @@ export async function replaceIfVersion(
 					"File was deleted after it was read -- the version recorded at read time (" +
 						expectedVersion +
 						") no longer exists; re-read the file, then retry.",
-					absolutePath,
+					displayPath,
 				)
 			}
 			// A real I/O failure (EACCES, EIO, ...) -- not a guard verdict.
@@ -244,8 +246,8 @@ export async function replaceIfVersion(
  * Returns Promise<never> because the rejection is total: this function
  * never resolves.
  */
-export async function unobservedEditGuard(absolutePath: string): Promise<never> {
-	throw new GuardRejectedError("File not read yet -- read the file, then retry.", absolutePath)
+export async function unobservedEditGuard(absolutePath: string, displayPath: string): Promise<never> {
+	throw new GuardRejectedError("File not read yet -- read the file, then retry.", displayPath)
 }
 
 // -- Public API --------------------------------------------------------------
@@ -293,15 +295,20 @@ export async function guardedWrite(
 	completeOverride?: boolean,
 ): Promise<void> {
 	const absolutePath = resolveAbsolutePath(task, relPathOrAbsolute)
+	// Model-facing path: the caller's own spelling, not the resolved absolute
+	// path. The guard key stays absolute, but a rejection must not put a
+	// user-specific absolute path into the model's context.
 
 	return enqueue(absolutePath, async () => {
 		// Cancellation is checked when the link is dequeued, not when it was enqueued:
 		// a write queued before an abort can still reach its turn on the chain after the
 		// task is gone, and the caller has already reported the write to the model.
+		const displayPath = relPathOrAbsolute
+
 		if (task.abort) {
 			throw new GuardRejectedError(
 				"Task was cancelled before this write ran -- the queued publish is not performed.",
-				absolutePath,
+				displayPath,
 			)
 		}
 		const obs = task.observationRegistry.get(absolutePath)
@@ -318,9 +325,15 @@ export async function guardedWrite(
 			// partial observation is valid for the edit itself; the version
 			// check still rejects a file that moved since the read.
 			if (obs === undefined) {
-				await unobservedEditGuard(absolutePath)
+				await unobservedEditGuard(absolutePath, displayPath)
 			} else {
-				publishedToken = await replaceIfVersion(absolutePath, obs.version, content, () => task.abort)
+				publishedToken = await replaceIfVersion(
+					absolutePath,
+					obs.version,
+					content,
+					displayPath,
+					() => task.abort,
+				)
 				staysPartial = obs.complete === false
 			}
 		} else {
@@ -338,20 +351,26 @@ export async function guardedWrite(
 				throw new GuardRejectedError(
 					"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
 						"a full-file replacement needs the complete content; re-read the whole file, then retry.",
-					absolutePath,
+					displayPath,
 				)
 			}
 
 			if (obs === undefined) {
 				// Never read: only an absent target may be created.
-				publishedToken = await createIfAbsent(absolutePath, content, () => task.abort)
+				publishedToken = await createIfAbsent(absolutePath, content, displayPath, () => task.abort)
 			} else if (absent) {
 				// A "create" on a file that vanished after the read recreates it.
-				publishedToken = await createIfAbsent(absolutePath, content, () => task.abort)
+				publishedToken = await createIfAbsent(absolutePath, content, displayPath, () => task.abort)
 			} else {
 				// The version recorded at read time must still match the on-disk
 				// token.
-				publishedToken = await replaceIfVersion(absolutePath, obs.version, content, () => task.abort)
+				publishedToken = await replaceIfVersion(
+					absolutePath,
+					obs.version,
+					content,
+					displayPath,
+					() => task.abort,
+				)
 			}
 		}
 

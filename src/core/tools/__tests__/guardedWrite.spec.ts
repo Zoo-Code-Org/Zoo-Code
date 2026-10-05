@@ -14,7 +14,7 @@ import * as path from "path"
 
 import { describe, expect, it, beforeEach, vi } from "vitest"
 
-import { createIfAbsent, guardedWrite, replaceIfVersion, resetChain } from "../guardedWrite"
+import { createIfAbsent, guardedWrite, replaceIfVersion, resetChain, GuardRejectedError } from "../guardedWrite"
 import { safeWriteText } from "../../../services/file-safety/safeWriteText"
 import { computeVersionToken } from "../../../utils/versionToken"
 import { withFileLock } from "../../../utils/fileLock"
@@ -142,7 +142,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await expect(guardedWrite(task, "existing.txt", "hello", "create")).rejects.toThrow(
 				"File already exists at " +
-					abs("existing.txt") +
+					"existing.txt" +
 					" and was not read before this write -- read the file first, then retry.",
 			)
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
@@ -152,7 +152,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			const failures = [{ code: "EACCES" }, null, "volume offline", new Error("EIO-ish failure")]
 			for (const failure of failures) {
 				mockedFsAccess.mockRejectedValueOnce(failure)
-				await expect(createIfAbsent(abs("io-error.txt"), "x")).rejects.toBe(failure)
+				await expect(createIfAbsent(abs("io-error.txt"), "x", "io-error.txt")).rejects.toBe(failure)
 			}
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
@@ -179,7 +179,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			const failure = { code: "EACCES" }
 			mockedComputeVersionToken.mockRejectedValueOnce(failure)
 
-			await expect(replaceIfVersion(abs("locked.txt"), "v1", "next")).rejects.toBe(failure)
+			await expect(replaceIfVersion(abs("locked.txt"), "v1", "next", "locked.txt")).rejects.toBe(failure)
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
 	})
@@ -200,7 +200,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await expect(guardedWrite(task, "existing.txt", "hello", "update")).rejects.toThrow(
 				"File already exists at " +
-					abs("existing.txt") +
+					"existing.txt" +
 					" and was not read before this write -- read the file first, then retry.",
 			)
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
@@ -675,7 +675,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 				order.push("publish")
 			})
 
-			await replaceIfVersion(abs("a.txt"), "v1", "content")
+			await replaceIfVersion(abs("a.txt"), "v1", "content", "a.txt")
 
 			expect(order).toEqual(["lock", "check", "publish", "check", "release"])
 			expect(mockedWithFileLock).toHaveBeenCalledWith(abs("a.txt"), expect.any(Function))
@@ -702,7 +702,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 				return "v1"
 			})
 
-			await createIfAbsent(abs("new.txt"), "hello")
+			await createIfAbsent(abs("new.txt"), "hello", "new.txt")
 
 			expect(order).toEqual(["lock", "check", "publish", "token", "release"])
 		})
@@ -716,7 +716,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
 			mockedComputeVersionToken.mockResolvedValue("v1")
 
-			await createIfAbsent(abs("link.txt"), "hello")
+			await createIfAbsent(abs("link.txt"), "hello", "link.txt")
 
 			expect(mockedResolveLockKey).toHaveBeenCalledWith(abs("link.txt"))
 			expect(mockedWithFileLock).toHaveBeenCalledWith(referent, expect.any(Function))
@@ -742,7 +742,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 				return undefined
 			})
 
-			const token = await replaceIfVersion(abs("a.txt"), "v1", "content")
+			const token = await replaceIfVersion(abs("a.txt"), "v1", "content", "a.txt")
 
 			expect(order).toEqual(["lock", "check", "publish", "check", "release"])
 			expect(token).toBe("v1")
@@ -790,6 +790,28 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			"Task was cancelled before this write published -- nothing was written.",
 		)
 
+		expect(mockedSafeWriteText).not.toHaveBeenCalled()
+	})
+
+	it("names the caller's path, not the resolved absolute path, in a model-facing rejection", async () => {
+		// The guard key stays absolute, but the message and the error field go to the
+		// model, so they must not carry a user-specific absolute path.
+		mockedFsAccess.mockResolvedValue(undefined)
+		const task = createMockTask()
+
+		let error: GuardRejectedError | undefined
+		await guardedWrite(task, "src/thing.ts", "hello", "create").catch((e: unknown) => {
+			if (e instanceof GuardRejectedError) {
+				error = e
+				return
+			}
+			throw e
+		})
+
+		expect(error?.message).toBe(
+			"File already exists at src/thing.ts and was not read before this write -- read the file first, then retry.",
+		)
+		expect(error?.path).toBe("src/thing.ts")
 		expect(mockedSafeWriteText).not.toHaveBeenCalled()
 	})
 })

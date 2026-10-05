@@ -476,7 +476,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 							// downgrade that survives a rejected publish loses a full destination read.
 							throw new GuardRejectedError(
 								`Cannot move a partially read file onto ${change.movePath}: re-read the whole source (${change.path}) first, then retry.`,
-								moveAbsolutePath,
+								change.movePath,
 							)
 						}
 						// The destination was read and then deleted: the create guard permits the
