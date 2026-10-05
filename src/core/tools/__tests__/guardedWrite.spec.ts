@@ -18,6 +18,7 @@ import { createIfAbsent, guardedWrite, replaceIfVersion, resetChain } from "../g
 import { safeWriteText } from "../../../services/file-safety/safeWriteText"
 import { computeVersionToken } from "../../../utils/versionToken"
 import { withFileLock } from "../../../utils/fileLock"
+import { resolveLockKey } from "../../../services/file-safety/safeWriteText"
 import { ObservationRegistry } from "../../task/observationRegistry"
 import type { Task } from "../../task/Task"
 
@@ -34,6 +35,7 @@ vi.mock("../../../utils/versionToken", () => ({
 
 vi.mock("../../../services/file-safety/safeWriteText", () => ({
 	safeWriteText: vi.fn(),
+	resolveLockKey: vi.fn(async (p: string) => p),
 }))
 
 vi.mock("../../../utils/fileLock", () => ({
@@ -41,6 +43,7 @@ vi.mock("../../../utils/fileLock", () => ({
 }))
 
 const mockedWithFileLock = vi.mocked(withFileLock)
+const mockedResolveLockKey = vi.mocked(resolveLockKey)
 const mockedFsAccess = vi.mocked(fs.access)
 const mockedComputeVersionToken = vi.mocked(computeVersionToken)
 const mockedSafeWriteText = vi.mocked(safeWriteText)
@@ -658,7 +661,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await replaceIfVersion(abs("a.txt"), "v1", "content")
 
-			expect(order).toEqual(["lock", "check", "publish", "release"])
+			expect(order).toEqual(["lock", "check", "publish", "check", "release"])
 			expect(mockedWithFileLock).toHaveBeenCalledWith(abs("a.txt"), expect.any(Function))
 		})
 
@@ -678,9 +681,55 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 				order.push("publish")
 			})
 
+			mockedComputeVersionToken.mockImplementation(async () => {
+				order.push("token")
+				return "v1"
+			})
+
 			await createIfAbsent(abs("new.txt"), "hello")
 
-			expect(order).toEqual(["lock", "check", "publish", "release"])
+			expect(order).toEqual(["lock", "check", "publish", "token", "release"])
+		})
+
+		it("locks the resolved publish target instead of the link path", async () => {
+			// proper-lockfile keys by the path it is given, so a symlink alias and its
+			// referent would take two locks for one file. The guard must lock the key
+			// every other writer to that file uses.
+			const referent = abs("real/file.txt")
+			mockedResolveLockKey.mockResolvedValue(referent)
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+
+			await createIfAbsent(abs("link.txt"), "hello")
+
+			expect(mockedResolveLockKey).toHaveBeenCalledWith(abs("link.txt"))
+			expect(mockedWithFileLock).toHaveBeenCalledWith(referent, expect.any(Function))
+		})
+
+		it("reads the post-publish token inside the lock, before releasing it", async () => {
+			// A peer lock-using writer can publish in the gap between the publish and
+			// a post-publish stat made after the lock is released, and the task would
+			// then record that peer's token as its own observation.
+			const order: string[] = []
+			mockedWithFileLock.mockImplementation(async (filePath, operation) => {
+				order.push("lock")
+				const result = await operation(path.resolve(filePath))
+				order.push("release")
+				return result
+			})
+			mockedComputeVersionToken.mockImplementation(async () => {
+				order.push("check")
+				return "v1"
+			})
+			mockedSafeWriteText.mockImplementation(async () => {
+				order.push("publish")
+				return undefined
+			})
+
+			const token = await replaceIfVersion(abs("a.txt"), "v1", "content")
+
+			expect(order).toEqual(["lock", "check", "publish", "check", "release"])
+			expect(token).toBe("v1")
 		})
 	})
 

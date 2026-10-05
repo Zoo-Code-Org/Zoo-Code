@@ -144,6 +144,30 @@ export async function resolvePublishTarget(absoluteFilePath: string): Promise<st
 	})
 }
 
+/**
+ * Lock key for a publish target: the symlink referent when the path is an
+ * existing symlink, the path itself otherwise. Unlike resolvePublishTarget this
+ * tolerates a dangling link, because the lock key has to be computable while a
+ * peer writer is mid-commit (backup mode renames the referent away and back).
+ * The walk is bounded so a two-link cycle terminates.
+ */
+export async function resolveLockKey(absoluteFilePath: string): Promise<string> {
+	try {
+		return await resolvePublishTarget(absoluteFilePath)
+	} catch {
+		// A real readlink throws for anything that is not a link, so a normal chain
+		// ends the walk. Two links that point at each other never would, so the
+		// walk is bounded and callers use the key they actually reached.
+		let key = absoluteFilePath
+		for (let depth = 0; depth < 8; depth++) {
+			const target = await fs.readlink(key).catch(() => undefined)
+			if (target === undefined) return key
+			key = path.resolve(path.dirname(key), target)
+		}
+		return key
+	}
+}
+
 export async function safeWriteText(
 	filePath: string,
 	content: string | Uint8Array,

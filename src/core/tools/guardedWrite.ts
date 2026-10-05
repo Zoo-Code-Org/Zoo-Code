@@ -27,6 +27,7 @@ import * as path from "path"
 import { safeWriteText } from "../../services/file-safety/safeWriteText"
 import { computeVersionToken } from "../../utils/versionToken"
 import { withFileLock } from "../../utils/fileLock"
+import { resolveLockKey } from "../../services/file-safety/safeWriteText"
 import type { Task } from "../task/Task"
 
 // -- Types ------------------------------------------------------------------
@@ -119,12 +120,19 @@ async function fileIsAbsent(absolutePath: string): Promise<boolean> {
  * write was issued for a file that was never read, so the caller must read
  * the file first, then retry.
  */
-export async function createIfAbsent(absolutePath: string, content: string | Uint8Array): Promise<void> {
-	// The absence check and the publish must happen under the same advisory
-	// lock every other writer to this path uses (safeWriteJson, task-history
-	// deletion), otherwise a lock-using writer can land between the check and
-	// the publish.
-	await withFileLock(absolutePath, async () => {
+/**
+ * Read the on-disk token after a publish, best-effort: a publish that
+ * succeeded is not undone by a failed stat, so the caller keeps the publish
+ * and only skips the observation refresh.
+ */
+async function tokenAfterPublish(absolutePath: string): Promise<string | undefined> {
+	return computeVersionToken(absolutePath).catch(() => undefined)
+}
+
+export async function createIfAbsent(absolutePath: string, content: string | Uint8Array): Promise<string | undefined> {
+	// Lock the key every other writer to this file uses: the resolved publish
+	// target, so a symlink alias and its referent share one lock.
+	return withFileLock(await resolveLockKey(absolutePath), async () => {
 		try {
 			await fs.access(absolutePath)
 		} catch (error: unknown) {
@@ -133,7 +141,10 @@ export async function createIfAbsent(absolutePath: string, content: string | Uin
 				throw error
 			}
 			await safeWriteText(absolutePath, content)
-			return
+			// Read the new token under the same lock, otherwise a peer lock-using
+			// writer can publish in the gap and the caller records that writer's
+			// token as its own observation.
+			return tokenAfterPublish(absolutePath)
 		}
 
 		throw new GuardRejectedError(
@@ -157,11 +168,10 @@ export async function replaceIfVersion(
 	absolutePath: string,
 	expectedVersion: string,
 	content: string | Uint8Array,
-): Promise<void> {
-	// The compare and the publish are one operation under the shared advisory
-	// lock, so a lock-using writer (safeWriteJson, task-history deletion) cannot
-	// land between the version check and the publish.
-	await withFileLock(absolutePath, async () => {
+): Promise<string | undefined> {
+	// Lock the key every other writer to this file uses: the resolved publish
+	// target, so a symlink alias and its referent share one lock.
+	return withFileLock(await resolveLockKey(absolutePath), async () => {
 		let currentVersion: string
 		try {
 			currentVersion = await computeVersionToken(absolutePath)
@@ -184,7 +194,10 @@ export async function replaceIfVersion(
 
 		if (currentVersion === expectedVersion) {
 			await safeWriteText(absolutePath, content)
-			return
+			// Read the new token under the same lock, otherwise a peer lock-using
+			// writer can publish in the gap and the caller records that writer's
+			// token as its own observation.
+			return tokenAfterPublish(absolutePath)
 		}
 
 		throw new GuardRejectedError(
@@ -257,6 +270,9 @@ export async function guardedWrite(
 		// A targeted edit authorizes only the view the model saw, so a partial
 		// observation stays partial; a full-file publish is complete.
 		let staysPartial = false
+		// Token the guard read under the lock, so the refresh records the token
+		// this write published rather than a peer writer's.
+		let publishedToken: string | undefined
 
 		if (kind === "edit") {
 			// Edit-style writes require a prior read: no observation, no write.
@@ -266,7 +282,7 @@ export async function guardedWrite(
 			if (obs === undefined) {
 				await unobservedEditGuard(absolutePath)
 			} else {
-				await replaceIfVersion(absolutePath, obs.version, content)
+				publishedToken = await replaceIfVersion(absolutePath, obs.version, content)
 				staysPartial = obs.complete === false
 			}
 		} else {
@@ -290,14 +306,14 @@ export async function guardedWrite(
 
 			if (obs === undefined) {
 				// Never read: only an absent target may be created.
-				await createIfAbsent(absolutePath, content)
+				publishedToken = await createIfAbsent(absolutePath, content)
 			} else if (absent) {
 				// A "create" on a file that vanished after the read recreates it.
-				await createIfAbsent(absolutePath, content)
+				publishedToken = await createIfAbsent(absolutePath, content)
 			} else {
 				// The version recorded at read time must still match the on-disk
 				// token.
-				await replaceIfVersion(absolutePath, obs.version, content)
+				publishedToken = await replaceIfVersion(absolutePath, obs.version, content)
 			}
 		}
 
@@ -305,7 +321,8 @@ export async function guardedWrite(
 		// mtime). The model just wrote the full content, so refresh the
 		// observation with the new token: a consecutive write by the same task
 		// must not fail stale against the version it just published.
-		const publishedToken = await computeVersionToken(absolutePath).catch(() => undefined)
+		// The guard already read the token under the lock; a failed stat after a
+		// successful publish only skips the refresh, it does not undo the publish.
 		if (publishedToken !== undefined) {
 			// Refresh with the new token, keeping the completeness the guard
 			// established: a partial observation that authorized a targeted edit

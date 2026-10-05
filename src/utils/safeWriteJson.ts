@@ -4,7 +4,12 @@ import * as path from "path"
 import { JsonStreamStringify } from "json-stream-stringify"
 
 import { acquireFileLock } from "./fileLock"
-import { resolvePublishTarget, safeWriteText, type SafeWriteTextOptions } from "../services/file-safety/safeWriteText"
+import {
+	resolveLockKey,
+	resolvePublishTarget,
+	safeWriteText,
+	type SafeWriteTextOptions,
+} from "../services/file-safety/safeWriteText"
 
 /**
  * Options for safeWriteJson function
@@ -59,22 +64,20 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		throw dirError
 	}
 
-	// Resolve the publish target BEFORE acquiring the lock: proper-lockfile keys
-	// the lock by the given path (realpath is false in acquireFileLock because the
-	// file may not exist yet), so a symlink alias and its referent would otherwise
-	// take two distinct locks for one underlying file — a concurrent merge through
-	// both aliases could then read the same JSON and overwrite one update.
-	// Locking the resolved referent coordinates every alias through one lock, and
-	// acquireFileLock keeps the staleness/retry protocol identical to every other
-	// holder of the same advisory lock (for example task-history deletion).
-	// resolvePublishTarget tolerates a not-yet-existing file (it returns the
-	// given path on ENOENT), preserving the previous create-from-absent flow.
-	const resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
+	// Lock key: the symlink referent when the path is an existing symlink, so a
+	// symlink alias and its referent share one lock. The key must be computable
+	// while a peer writer is mid-commit (backup mode renames the referent away and
+	// back), so the walk tolerates a dangling link instead of rejecting it here.
+	const lockKey = await resolveLockKey(absoluteFilePath)
 
 	// Acquire the lock before any file operations. If acquisition fails it throws
 	// immediately, and releaseLock stays a no-op so the finally block does not try
 	// to release an unacquired lock.
-	releaseLock = await acquireFileLock(resolvedTargetPath)
+	releaseLock = await acquireFileLock(lockKey)
+
+	// Resolve the publish target under the lock: the peer has committed by now, so
+	// the strict dangling-link rejection still applies to a real dangling link.
+	const resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
 
 	// Variables to hold the actual path of the temp file if it is created.
 	let actualTempNewFilePath: string | null = null
