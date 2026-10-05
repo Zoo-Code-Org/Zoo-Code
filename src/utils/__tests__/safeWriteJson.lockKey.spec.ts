@@ -24,6 +24,29 @@ const mockedAcquireFileLock = vi.mocked(acquireFileLock)
 
 const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
 
+// Each test creates a real temp directory so the real fs calls still work.
+// doubles between tests so an implementation from one test cannot carry over.
+const createdDirs: string[] = []
+async function makeDir(prefix: string): Promise<string> {
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix))
+	createdDirs.push(dir)
+	return dir
+}
+
+beforeEach(() => {
+	mockedRealpath.mockReset()
+	mockedLstat.mockReset()
+	mockedReadlink.mockReset()
+	mockedAcquireFileLock.mockReset()
+})
+
+afterEach(async () => {
+	for (const dir of createdDirs) {
+		await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined)
+	}
+	createdDirs.length = 0
+})
+
 // Only isSymbolicLink() is consulted by the guard, so the double carries just
 // that method. The mocks reject asynchronously: a synchronous throw would bypass
 // resolvePublishTarget's catch and skip the ENOENT/symlink branch under test.
@@ -33,7 +56,7 @@ let currentLink = ""
 describe("safeWriteJson lock key under a peer commit", () => {
 	it("waits for the peer instead of rejecting, and locks the referent", async () => {
 		const order: string[] = []
-		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lockkey-"))
+		const dir = await makeDir("lockkey-")
 		const referent = path.join(dir, "history_item.json")
 		currentLink = path.join(dir, "link.json")
 
@@ -75,7 +98,7 @@ describe("safeWriteJson lock key under a peer commit", () => {
 	it("releases the lock when the resolution under the lock rejects", async () => {
 		const order: string[] = []
 		let released = false
-		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lockkey-"))
+		const dir = await makeDir("lockkey-")
 		const referent = path.join(dir, "history_item.json")
 		currentLink = path.join(dir, "link.json")
 
