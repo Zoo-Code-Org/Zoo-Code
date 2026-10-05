@@ -798,8 +798,12 @@ describe("BaseOpenAiCompatibleProvider", () => {
 
 			await customHandler.completePrompt("hello")
 
+			// completePrompt forwards the request config (abort signal + per-request timeout) as the
+			// SDK second argument. With no signal and no timeoutMs the builder returns undefined, so
+			// the argument is still passed - asserting it keeps the two-argument call shape pinned.
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({ model: "some/custom-model-not-in-list" }),
+				undefined,
 			)
 		})
 	})
