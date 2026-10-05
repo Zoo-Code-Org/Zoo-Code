@@ -170,7 +170,7 @@ describe("safeWriteText", () => {
 				// through the default icacls path (options?.execFileRunner must
 				// not throw when options is undefined)
 				expect(vi.mocked(execFile)).toHaveBeenCalledTimes(2)
-				expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))
+				expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))
 			}
 		})
 
@@ -515,7 +515,7 @@ describe("safeWriteText", () => {
 			const saveArgs = vi.mocked(execFile).mock.calls[0]?.[1]
 			expect(saveArgs?.[1]).toBe("/save")
 			// the dump path (possibly partially created by icacls) was unlinked
-			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))
 		})
 
 		it("win32 DACL save args are [targetPath, /save, dumpPath, /T] before backup rename", async () => {
@@ -531,7 +531,7 @@ describe("safeWriteText", () => {
 			// First call: save DACL from target before backup rename
 			const firstCall = vi.mocked(execFile).mock.calls[0]
 			expect(firstCall[0]).toBe("icacls")
-			expect(firstCall[1]).toEqual([targetPath, "/save", expect.stringContaining(".acl.tmp"), "/T"])
+			expect(firstCall[1]).toEqual([targetPath, "/save", expect.stringContaining("safeWriteText.acl"), "/T"])
 
 			// Second call: restore DACL onto directory after commit rename
 			const secondCall = vi.mocked(execFile).mock.calls[1]
@@ -539,11 +539,11 @@ describe("safeWriteText", () => {
 			expect(secondCall[1]).toEqual([
 				expect.stringContaining("/tmp/test-dir"),
 				"/restore",
-				expect.stringContaining(".acl.tmp"),
+				expect.stringContaining("safeWriteText.acl"),
 			])
 
 			// dump file was unlinked after restore
-			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))
 		})
 
 		it("win32 DACL: dump is unlinked even when restore fails", async () => {
@@ -568,7 +568,7 @@ describe("safeWriteText", () => {
 			expect(fs.rename).toHaveBeenCalledTimes(1)
 
 			// dump file was still unlinked in finally
-			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))
 		})
 
 		it("win32 DACL: when target does not exist, no save/restore/dump", async () => {
