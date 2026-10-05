@@ -300,6 +300,10 @@ export async function safeWriteText(
 
 	let backupPath: string | null = null
 	let releaseBackupOnSuccess = false
+	// Set once the commit rename has published the new content. After that point the
+	// backup is no longer a safe restore source: rolling it back would overwrite
+	// content the caller can already observe at the target path.
+	let committed = false
 	// Non-null only when the win32 step-2 block saved a successful DACL dump:
 	// it gates the step-5 restore and is tracked for the cleanup unlinks.
 	let daclDumpPath: string | null = null
@@ -478,6 +482,7 @@ export async function safeWriteText(
 
 			// -- Step 4: atomic rename temp -> target ---------------------
 			await fs.rename(tempPath, targetPath)
+			committed = true
 
 			// -- Step 4b (POSIX): fsync the parent directory so the directory entry
 			// changed by the commit rename is durable, not just the file content.
@@ -543,15 +548,22 @@ export async function safeWriteText(
 			await fs.rmdir(stagingDir).catch(() => {})
 		}
 	} catch (originalError: unknown) {
-		// The backup is never restored: it is a copy, and the target already holds
-		// either the pre-write content (before the commit) or the published content.
-		if (backupPath && releaseBackupOnSuccess) {
-			// Nothing to restore: the backup is a copy, so the target still holds whatever
-			// the commit left there - before the commit that is the pre-write content, and
-			// after it the published content. Either way the copy has served its purpose
-			// and must not be left beside the target where no caller can find it.
-			await fs.unlink(backupPath).catch(() => {})
-			backupPath = null
+		// Only a pre-commit failure can restore the backup. Once the commit rename
+		// published, a later failure (for example the post-commit directory fsync)
+		// must not overwrite the published content with the old file.
+		if (backupPath && releaseBackupOnSuccess && !committed) {
+			try {
+				await fs.rename(backupPath, targetPath)
+			} catch (rollbackError: unknown) {
+				// The content survives only at the backup path now, and the canonical
+				// target is gone. Reporting just the publish failure would leave the
+				// caller with data it cannot find at the expected path, so the
+				// partial-failure state travels with the error. The staged temp file
+				// and this write's staging directory are released first: a rollback
+				// failure is already a hard enough state to reason about without also
+				// leaking the staging file.
+				rollbackFailure = { error: rollbackError, backupPath }
+			}
 		}
 		try {
 			await fs.unlink(tempPath).catch(() => {})
