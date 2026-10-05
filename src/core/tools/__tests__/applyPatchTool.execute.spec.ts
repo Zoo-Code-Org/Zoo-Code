@@ -324,10 +324,11 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(reg.get(key)?.complete).toBe(true)
 	})
 
-	it("update: a hunk read with no prior observation records a complete observation", async () => {
-		// Nothing was earned before, so there is nothing to carry. The hunk read returned
-		// the whole file, which is a complete read, and the guarded publish must not be
-		// rejected for a file the tool itself read in full.
+	it("update: a hunk read with no prior observation records a partial observation", async () => {
+		// Nothing was earned before, so there is nothing to carry. The tool read the whole
+		// file for its own hunk matching, but the model only ever saw the patch context, so
+		// this read cannot grant authority for a later full-file replacement. The targeted
+		// patch itself is still allowed: the "edit" guard accepts a partial observation.
 		const key = path.resolve("/workspace/project", "src/thing.ts")
 		const reg = mockTask.observationRegistry
 
@@ -337,9 +338,9 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			pushToolResult: mockPushToolResult,
 		})
 
-		expect(reg.get(key)?.complete).toBe(true)
-		// The guard reads the same entry, so a complete read here is what lets a later
-		// full-file publish through.
+		expect(reg.get(key)?.complete).toBe(false)
+		// The guard reads the same entry: a partial observation authorizes targeted edits on
+		// the view the model saw, but not a full-file replacement.
 		expect(reg.has(key)).toBe(true)
 	})
 
