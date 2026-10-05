@@ -108,6 +108,7 @@ import { restoreTodoListForTask } from "../tools/UpdateTodoListTool"
 import { FileContextTracker } from "../context-tracking/FileContextTracker"
 import { ObservationRegistry } from "./observationRegistry"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
+import { ObservationRegistry } from "./observationRegistry"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
 import { DispatchState, type PendingWork } from "./dispatchState"
@@ -307,6 +308,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly parentTask: Task | undefined = undefined
 	readonly taskNumber: number
 	readonly workspacePath: string
+	readonly observationRegistry = new ObservationRegistry()
 
 	/**
 	 * The mode associated with this task. Persisted across sessions
@@ -420,6 +422,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	didFinishAbortingStream = false
 	abandoned = false
 	isInitialized = false
+	isPaused: boolean = false
 
 	runState: RunState = initialRunState
 	readonly runRejections: RunRejection[] = []
@@ -2005,14 +2008,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				})
 		const isAutoAnswered = approval.decision === "approve" || approval.decision === "deny"
 		const autoApprovalDecision = isAutoAnswered ? approval.decision : undefined
-
-		// Re-check: an abort during the getState/checkAutoApproval awaits must not post an ask row.
-		if (this.abort) {
-			if (queuedMessage) {
-				this.messageQueueService.releaseMessage(queuedMessage.id)
-			}
-			throw new Error(`[RooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
-		}
 
 		if (partial !== undefined) {
 			const lastMessage = this.clineMessages.at(-1)
@@ -5212,7 +5207,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						this.consecutiveNoToolUseCount = 0
 					}
 
-					if (this.userMessageContent.length > 0) {
+					// Push to stack if there's content OR if we're paused waiting for a subtask.
+					// When paused, we push an empty item so the loop continues to the pause check.
+					if (this.userMessageContent.length > 0 || this.isPaused) {
 						stack.push({
 							userContent: [...this.userMessageContent], // Create a copy to avoid mutation issues
 							includeFileDetails: false, // Subsequent iterations don't need file details
