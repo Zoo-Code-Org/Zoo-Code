@@ -162,6 +162,8 @@ export async function createIfAbsent(
 				// A real I/O failure (EACCES, EIO, ...) -- not a guard verdict.
 				throw error
 			}
+			// Immediately before publication starts.
+			cancelledBeforePublish(absolutePath, displayPath, isCancelled)
 			await safeWriteText(absolutePath, content)
 			// Read the new token under the same lock, otherwise a peer lock-using
 			// writer can publish in the gap and the caller records that writer's
@@ -230,7 +232,14 @@ export async function replaceIfVersion(
 			throw error
 		}
 
+		// Re-checked after the awaited preflight: the task can be aborted while this
+		// operation waits, and a publish that starts after that is a write the caller
+		// has already reported as not performed.
+		cancelledBeforePublish(absolutePath, displayPath, isCancelled)
+
 		if (currentVersion === expectedVersion) {
+			// Immediately before publication starts.
+			cancelledBeforePublish(absolutePath, displayPath, isCancelled)
 			await safeWriteText(absolutePath, content)
 			// Read the new token under the same lock, otherwise a peer lock-using
 			// writer can publish in the gap and the caller records that writer's

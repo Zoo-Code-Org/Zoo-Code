@@ -793,6 +793,24 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		expect(mockedSafeWriteText).not.toHaveBeenCalled()
 	})
 
+	it("re-checks cancellation after the awaited preflight, before publication starts", async () => {
+		// The abort lands while the version token is being computed. The guard has to
+		// refuse on the way to the publish, not write for a task that is already gone.
+		mockedComputeVersionToken.mockImplementation(async () => {
+			task.abort = true
+			return "v1"
+		})
+		const reg = new ObservationRegistry()
+		reg.observe(abs("a.txt"), "v1", true)
+		const task = createMockTask({ observationRegistry: reg })
+
+		await expect(guardedWrite(task, "a.txt", "content", "update")).rejects.toThrow(
+			"Task was cancelled before this write published -- nothing was written.",
+		)
+
+		expect(mockedSafeWriteText).not.toHaveBeenCalled()
+	})
+
 	it("names the caller's path, not the resolved absolute path, in a model-facing rejection", async () => {
 		// The guard key stays absolute, but the message and the error field go to the
 		// model, so they must not carry a user-specific absolute path.
