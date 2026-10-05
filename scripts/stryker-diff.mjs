@@ -281,6 +281,22 @@ export function resolvePullRequestBase(repoRoot, baseSha, headSha) {
 	return parents[0]
 }
 
+// A stacked unit branch is built on the previous unit's head, so the pull request's own base (main)
+// attributes every unmerged ancestor to this pull request. When the head commit's first parent is the
+// head of another open pull request, that parent is the unit's real base and the diff contains only
+// this unit's delta. A pull request whose parent is not another pull request's head keeps the event
+// base, so a multi-commit pull request is never charged only its last commit.
+export function resolveStackedUnitBase(repoRoot, eventBaseSha, prHeadSha, openPullRequests = []) {
+	validateSha(eventBaseSha, "base SHA")
+	validateSha(prHeadSha, "pull request head SHA")
+	const parents = git(repoRoot, ["rev-list", "--parents", "-n", "1", prHeadSha]).trim().split(/\s+/).slice(1)
+	if (parents.length !== 1) return { baseSha: eventBaseSha, stackedOn: null }
+	const parentSha = parents[0].toLowerCase()
+	const parent = openPullRequests.find((pr) => String(pr.headSha).toLowerCase() === parentSha)
+	if (!parent) return { baseSha: eventBaseSha, stackedOn: null }
+	return { baseSha: parentSha, stackedOn: parent.number }
+}
+
 export function selectFromGit(repoRoot, baseSha, headSha) {
 	validateSha(baseSha, "base SHA")
 	validateSha(headSha, "head SHA")
@@ -566,12 +582,17 @@ export function formatBlockingMutants(blockingMutants, packageRoot) {
 }
 
 export function formatSummary(rows, advisories, manifest = {}) {
-	const lines = [
-		"## Changed-code mutation testing",
-		"",
+	const lines = ["## Changed-code mutation testing", ""]
+	if (manifest.stackedOn) {
+		lines.push(
+			`Stacked unit: measured against the head of parent PR #${manifest.stackedOn}, not the event base.`,
+			"",
+		)
+	}
+	lines.push(
 		"| Package | Changed executable lines | Valid | Killed | Timeout | Survived | No coverage | Result |",
 		"| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
-	]
+	)
 	for (const row of rows) {
 		lines.push(
 			`| ${row.id} | ${row.changedLines} | ${row.valid} | ${row.killed} | ${row.timeout} | ${row.survived} | ${row.noCoverage} | ${row.result} |`,
@@ -796,18 +817,37 @@ function argument(name) {
 	return index === -1 ? undefined : process.argv[index + 1]
 }
 
+// The workflow passes the open pull requests as a JSON array of { number, headSha }. An unparsable
+// map must not change the gate's base, so it degrades to the event base instead of throwing.
+export function parseStackedMap(value) {
+	if (!value) return []
+	try {
+		const parsed = JSON.parse(value)
+		if (!Array.isArray(parsed)) return []
+		return parsed.filter((entry) => entry && entry.number && /^[0-9a-f]{40}$/i.test(String(entry.headSha)))
+	} catch {
+		return []
+	}
+}
+
 function main() {
 	const command = process.argv[2]
 	if (command !== "ci")
-		throw new Error("Usage: node scripts/stryker-diff.mjs ci --base <sha> --head <sha> [--reports <path>]")
+		throw new Error(
+			"Usage: node scripts/stryker-diff.mjs ci --base <sha> --head <sha> [--reports <path>] [--stacked-map <json>]",
+		)
 
 	const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 	const baseSha = argument("--base")
 	const headSha = argument("--head")
 	if (!baseSha || !headSha) throw new Error("--base and --head are required")
 
+	const openPullRequests = parseStackedMap(argument("--stacked-map"))
+	const resolved = resolveStackedUnitBase(repoRoot, baseSha, headSha, openPullRequests)
+	if (resolved.stackedOn) console.log(`Stacked unit: measured against the head of parent PR #${resolved.stackedOn}, not the event base.`)
+
 	const reportRoot = path.resolve(repoRoot, argument("--reports") ?? "reports/mutation")
-	const manifest = selectFromGit(repoRoot, baseSha, headSha)
+	const manifest = { ...selectFromGit(repoRoot, resolved.baseSha, headSha), stackedOn: resolved.stackedOn }
 	if (manifest.packages.length === 0) {
 		appendSummary([], manifest.advisories, manifest)
 		console.log("No changed executable lines in mutation-tested packages; mutation testing is not applicable.")

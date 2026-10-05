@@ -8,6 +8,8 @@ on:
 
 permissions:
     contents: read
+    # The gate only reads open pull request heads to recognise a stacked unit.
+    pull-requests: read
 
 concurrency:
     group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -50,9 +52,15 @@ jobs:
               if: github.event_name == 'pull_request'
               env:
                   HEAD_SHA: ${{ github.sha }}
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
                   BASE_SHA="$(git rev-parse "$HEAD_SHA^1")"
-                  node scripts/stryker-diff.mjs ci --base "$BASE_SHA" --head "$HEAD_SHA"
+                  # The merge commit's second parent is the pull request head. When that head's own
+                  # parent is another open pull request's head, this PR is a stacked unit, so the gate
+                  # measures only this unit's delta instead of every unmerged ancestor.
+                  PR_HEAD_SHA="$(git rev-parse "$HEAD_SHA^2" 2>/dev/null || git rev-parse "$HEAD_SHA")"
+                  STACKED_MAP="$(gh api "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" --jq '[.[] | {number: .number, headSha: .head.sha}]' || '[]')"
+                  node scripts/stryker-diff.mjs ci --base "$BASE_SHA" --head "$HEAD_SHA" --stacked-map "$STACKED_MAP"
 
             - name: Upload mutation reports
               id: mutation_report

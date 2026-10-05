@@ -25,6 +25,8 @@ import {
 	parseNameStatus,
 	parseVitestTestFiles,
 	preferDirectTestFiles,
+	parseStackedMap,
+	resolveStackedUnitBase,
 	resolveStrykerTempDir,
 	resolveVitestBinary,
 	shouldUseVitestRelated,
@@ -58,6 +60,9 @@ describe("mutation testing workflow", () => {
 		assert.ok(workflow.includes("HEAD_SHA: ${{ github.sha }}"))
 		assert.ok(!workflow.includes("HEAD_SHA: ${{ github.event.pull_request.head.sha }}"))
 		assert.ok(workflow.includes('BASE_SHA="$(git rev-parse "$HEAD_SHA^1")"'))
+		assert.ok(workflow.includes("pull-requests: read"))
+		assert.ok(workflow.includes('PR_HEAD_SHA="$(git rev-parse "$HEAD_SHA^2" 2>/dev/null || git rev-parse "$HEAD_SHA")"'))
+		assert.ok(workflow.includes('--stacked-map "$STACKED_MAP"'))
 		assert.ok(!workflow.includes("github.event.pull_request.base.sha"))
 		assert.ok(workflow.includes("steps.mutation_report.outputs.artifact-url"))
 		assert.ok(workflow.includes("open the package's mutation.html file"))
@@ -172,6 +177,88 @@ describe("pull request revision selection", () => {
 		} finally {
 			fs.rmSync(repository, { recursive: true, force: true })
 		}
+	})
+})
+
+describe("stacked unit base resolution", () => {
+	const createSyntheticStack = () => {
+		const repository = fs.mkdtempSync(path.join(os.tmpdir(), "mutation-stack-"))
+		const run = (...args) => execFileSync("git", args, { cwd: repository, encoding: "utf8" }).trim()
+		const write = (filePath, contents) => {
+			fs.mkdirSync(path.join(repository, path.dirname(filePath)), { recursive: true })
+			fs.writeFileSync(path.join(repository, filePath), contents)
+		}
+
+		run("init", "--quiet", "--initial-branch", "main")
+		run("config", "user.email", "gate@example.com")
+		run("config", "user.name", "Gate")
+		run("config", "commit.gpgsign", "false")
+
+		write("packages/core/src/unrelated.ts", "export const unrelated = () => 1\n")
+		run("add", ".")
+		run("commit", "--quiet", "-m", "initial")
+		const eventBaseSha = run("rev-parse", "HEAD")
+
+		run("checkout", "--quiet", "-b", "unit-1")
+		write("packages/core/src/unit1.ts", "export const unit1 = () => 1\n")
+		run("add", ".")
+		run("commit", "--quiet", "-m", "unit 1")
+		const parentSha = run("rev-parse", "HEAD")
+
+		// The stacked unit is one commit on top of the parent unit's head.
+		write("packages/core/src/unit2.ts", "export const unit2 = () => 2\n")
+		run("add", ".")
+		run("commit", "--quiet", "-m", "unit 2")
+		const childSha = run("rev-parse", "HEAD")
+
+		return { repository, eventBaseSha, parentSha, childSha }
+	}
+
+	it("measures a stacked unit against the parent pull request head", () => {
+		const { repository, eventBaseSha, parentSha, childSha } = createSyntheticStack()
+
+		try {
+			const resolved = resolveStackedUnitBase(repository, eventBaseSha, childSha, [{ number: 1, headSha: parentSha }])
+			assert.equal(resolved.baseSha, parentSha)
+			assert.equal(resolved.stackedOn, 1)
+
+			const manifest = selectFromGit(repository, resolved.baseSha, childSha)
+			assert.deepEqual(
+				manifest.packages.flatMap((entry) => entry.files.map((file) => file.path)),
+				["packages/core/src/unit2.ts"],
+			)
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
+	})
+
+	it("keeps the event base when the parent commit is not another pull request head", () => {
+		const { repository, eventBaseSha, parentSha, childSha } = createSyntheticStack()
+
+		try {
+			const resolved = resolveStackedUnitBase(repository, eventBaseSha, childSha, [])
+			assert.equal(resolved.baseSha, eventBaseSha)
+			assert.equal(resolved.stackedOn, null)
+
+			// A multi-commit pull request must not be charged only its last commit.
+			const manifest = selectFromGit(repository, resolved.baseSha, childSha)
+			assert.deepEqual(
+				manifest.packages.flatMap((entry) => entry.files.map((file) => file.path)).sort(),
+				["packages/core/src/unit1.ts", "packages/core/src/unit2.ts"],
+			)
+			void parentSha
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
+	})
+
+	it("degrades to the event base for an unparsable stacked map", () => {
+		assert.deepEqual(parseStackedMap("not json"), [])
+		assert.deepEqual(parseStackedMap('{"number": 1}'), [])
+		assert.deepEqual(parseStackedMap("[{\"number\": 1, \"headSha\": \"abc\"}]"), [])
+		assert.deepEqual(parseStackedMap("[{\"number\": 1, \"headSha\": \"" + "a".repeat(40) + "\"}]"), [
+			{ number: 1, headSha: "a".repeat(40) },
+		])
 	})
 })
 
