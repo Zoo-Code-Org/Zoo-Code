@@ -46,7 +46,7 @@
 	},
 	"__tests__/new-task-delegation.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 9
+			"count": 8
 		}
 	},
 	"activate/CodeActionProvider.ts": {
