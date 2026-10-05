@@ -17,6 +17,7 @@ import { describe, expect, it, beforeEach, vi } from "vitest"
 import { createIfAbsent, guardedWrite, replaceIfVersion, resetChain } from "../guardedWrite"
 import { safeWriteText } from "../../../services/file-safety/safeWriteText"
 import { computeVersionToken } from "../../../utils/versionToken"
+import { withFileLock } from "../../../utils/fileLock"
 import { ObservationRegistry } from "../../task/observationRegistry"
 import type { Task } from "../../task/Task"
 
@@ -35,6 +36,11 @@ vi.mock("../../../services/file-safety/safeWriteText", () => ({
 	safeWriteText: vi.fn(),
 }))
 
+vi.mock("../../../utils/fileLock", () => ({
+	withFileLock: vi.fn(),
+}))
+
+const mockedWithFileLock = vi.mocked(withFileLock)
 const mockedFsAccess = vi.mocked(fs.access)
 const mockedComputeVersionToken = vi.mocked(computeVersionToken)
 const mockedSafeWriteText = vi.mocked(safeWriteText)
@@ -69,6 +75,7 @@ function createMockTask(options: MockTaskOptions = {}): Task {
 describe("guardedWrite (S4a, epic #1375)", () => {
 	beforeEach(() => {
 		vi.resetAllMocks()
+		mockedWithFileLock.mockImplementation((filePath, operation) => operation(path.resolve(filePath)))
 		resetChain()
 	})
 
@@ -626,6 +633,54 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
 			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, canonical, "first")
 			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(2, canonical, "second")
+		})
+	})
+
+	describe("lock serialization with other writers", () => {
+		it("holds the shared advisory lock across the version check and the publish", async () => {
+			// The guard decision and the publish must be one operation under the same
+			// advisory lock that safeWriteJson and task-history deletion use, otherwise
+			// a lock-using writer can land between the check and the write.
+			const order: string[] = []
+			mockedWithFileLock.mockImplementation(async (filePath, operation) => {
+				order.push("lock")
+				const result = await operation(path.resolve(filePath))
+				order.push("release")
+				return result
+			})
+			mockedComputeVersionToken.mockImplementation(async () => {
+				order.push("check")
+				return "v1"
+			})
+			mockedSafeWriteText.mockImplementation(async () => {
+				order.push("publish")
+			})
+
+			await replaceIfVersion(abs("a.txt"), "v1", "content")
+
+			expect(order).toEqual(["lock", "check", "publish", "release"])
+			expect(mockedWithFileLock).toHaveBeenCalledWith(abs("a.txt"), expect.any(Function))
+		})
+
+		it("holds the same lock across the absence check and the publish for an unobserved create", async () => {
+			const order: string[] = []
+			mockedWithFileLock.mockImplementation(async (filePath, operation) => {
+				order.push("lock")
+				const result = await operation(path.resolve(filePath))
+				order.push("release")
+				return result
+			})
+			mockedFsAccess.mockImplementation(async () => {
+				order.push("check")
+				throw { code: "ENOENT" }
+			})
+			mockedSafeWriteText.mockImplementation(async () => {
+				order.push("publish")
+			})
+
+			await createIfAbsent(abs("new.txt"), "hello")
+
+			expect(order).toEqual(["lock", "check", "publish", "release"])
 		})
 	})
 

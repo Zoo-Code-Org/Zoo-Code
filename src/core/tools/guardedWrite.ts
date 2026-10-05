@@ -26,6 +26,7 @@ import * as path from "path"
 
 import { safeWriteText } from "../../services/file-safety/safeWriteText"
 import { computeVersionToken } from "../../utils/versionToken"
+import { withFileLock } from "../../utils/fileLock"
 import type { Task } from "../task/Task"
 
 // -- Types ------------------------------------------------------------------
@@ -119,23 +120,29 @@ async function fileIsAbsent(absolutePath: string): Promise<boolean> {
  * the file first, then retry.
  */
 export async function createIfAbsent(absolutePath: string, content: string | Uint8Array): Promise<void> {
-	try {
-		await fs.access(absolutePath)
-	} catch (error: unknown) {
-		if (errorCode(error) !== "ENOENT") {
-			// A real I/O failure (EACCES, EIO, ...) -- not a guard verdict.
-			throw error
+	// The absence check and the publish must happen under the same advisory
+	// lock every other writer to this path uses (safeWriteJson, task-history
+	// deletion), otherwise a lock-using writer can land between the check and
+	// the publish.
+	await withFileLock(absolutePath, async () => {
+		try {
+			await fs.access(absolutePath)
+		} catch (error: unknown) {
+			if (errorCode(error) !== "ENOENT") {
+				// A real I/O failure (EACCES, EIO, ...) -- not a guard verdict.
+				throw error
+			}
+			await safeWriteText(absolutePath, content)
+			return
 		}
-		await safeWriteText(absolutePath, content)
-		return
-	}
 
-	throw new GuardRejectedError(
-		"File already exists at " +
-			absolutePath +
-			" and was not read before this write -- read the file first, then retry.",
-		absolutePath,
-	)
+		throw new GuardRejectedError(
+			"File already exists at " +
+				absolutePath +
+				" and was not read before this write -- read the file first, then retry.",
+			absolutePath,
+		)
+	})
 }
 
 /**
@@ -151,39 +158,44 @@ export async function replaceIfVersion(
 	expectedVersion: string,
 	content: string | Uint8Array,
 ): Promise<void> {
-	let currentVersion: string
-	try {
-		currentVersion = await computeVersionToken(absolutePath)
-	} catch (error: unknown) {
-		if (errorCode(error) === "ENOENT") {
-			// The observed file was deleted after the read: the version recorded
-			// at read time no longer exists on disk. Normalize the raw ENOENT
-			// into the guard's re-read-then-retry contract so the caller gets a
-			// remediation it can act on, not a raw errno.
-			throw new GuardRejectedError(
-				"File was deleted after it was read -- the version recorded at read time (" +
-					expectedVersion +
-					") no longer exists; re-read the file, then retry.",
-				absolutePath,
-			)
+	// The compare and the publish are one operation under the shared advisory
+	// lock, so a lock-using writer (safeWriteJson, task-history deletion) cannot
+	// land between the version check and the publish.
+	await withFileLock(absolutePath, async () => {
+		let currentVersion: string
+		try {
+			currentVersion = await computeVersionToken(absolutePath)
+		} catch (error: unknown) {
+			if (errorCode(error) === "ENOENT") {
+				// The observed file was deleted after the read: the version recorded
+				// at read time no longer exists on disk. Normalize the raw ENOENT
+				// into the guard's re-read-then-retry contract so the caller gets a
+				// remediation it can act on, not a raw errno.
+				throw new GuardRejectedError(
+					"File was deleted after it was read -- the version recorded at read time (" +
+						expectedVersion +
+						") no longer exists; re-read the file, then retry.",
+					absolutePath,
+				)
+			}
+			// A real I/O failure (EACCES, EIO, ...) -- not a guard verdict.
+			throw error
 		}
-		// A real I/O failure (EACCES, EIO, ...) -- not a guard verdict.
-		throw error
-	}
 
-	if (currentVersion === expectedVersion) {
-		await safeWriteText(absolutePath, content)
-		return
-	}
+		if (currentVersion === expectedVersion) {
+			await safeWriteText(absolutePath, content)
+			return
+		}
 
-	throw new GuardRejectedError(
-		"Stale version -- the file changed since you read it (expected " +
-			expectedVersion +
-			", current " +
-			currentVersion +
-			"); re-read the file, then retry.",
-		absolutePath,
-	)
+		throw new GuardRejectedError(
+			"Stale version -- the file changed since you read it (expected " +
+				expectedVersion +
+				", current " +
+				currentVersion +
+				"); re-read the file, then retry.",
+			absolutePath,
+		)
+	})
 }
 
 /**
