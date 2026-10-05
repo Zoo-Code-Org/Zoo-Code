@@ -976,8 +976,8 @@ describe("resolveLockKey", () => {
 		// stopped return the same key, so the mock has to distinguish the link from
 		// the referent and the test has to check that the walk stopped.
 		const notALink = Object.assign(new Error("EINVAL: not a link"), { code: "EINVAL" })
-		vi.mocked(fs.readlink).mockImplementation(async (target: string) => {
-			if (target === "/tmp/linkdir/file.json") return "referent.json"
+		vi.mocked(fs.readlink).mockImplementation(async (target) => {
+			if (String(target) === "/tmp/linkdir/file.json") return "referent.json"
 			throw notALink
 		})
 
