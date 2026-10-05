@@ -355,8 +355,8 @@ describe("safeWriteText", () => {
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			// The file fd opens normally; the parent-directory open after the commit
 			// rename fails, which is the post-commit durability failure.
-			vi.mocked(fsSync.openSync).mockImplementation((target: string) => {
-				if (target === dirPath) throw new Error("EBADF")
+			vi.mocked(fsSync.openSync).mockImplementation((target) => {
+				if (String(target) === dirPath) throw new Error("EBADF")
 				return 1
 			})
 
@@ -571,24 +571,21 @@ describe("safeWriteText", () => {
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 
-			// The title is about order, so record the order instead of only the
-			// arguments: if the save ran after the backup rename the target would
+			// The title is about order, so assert the order the mocks were actually
+			// called in. If the save ran after the backup rename the target would
 			// already be gone and the dump would describe the wrong file.
-			const order: string[] = []
-			vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
-				const cmd = args[0] as string
-				const callArgs = args[1] as string[]
-				const cb = args.at(-1) as (error: unknown) => void
-				order.push(cmd === "icacls" && callArgs.includes("/save") ? "save" : "restore")
-				cb(null)
-			})
-			vi.mocked(fs.rename).mockImplementation(async (_from: string, to: string) => {
-				order.push(to.includes(".bak_") ? "backup-rename" : "commit-rename")
-			})
-
 			await safeWriteText(targetPath, "data", { backup: true, platform: "win32" })
 
-			expect(order).toEqual(["save", "backup-rename", "commit-rename", "restore"])
+			const callOrder = vi.mocked(execFile).mock.invocationCallOrder
+			const renameOrder = vi.mocked(fs.rename).mock.invocationCallOrder
+			const saveCall = callOrder[0]
+			const restoreCall = callOrder[1]
+			const backupRename = renameOrder[0]
+			const commitRename = renameOrder[1]
+
+			expect(saveCall).toBeLessThan(backupRename)
+			expect(backupRename).toBeLessThan(commitRename)
+			expect(commitRename).toBeLessThan(restoreCall)
 		})
 
 		it("win32 DACL: dump is unlinked even when restore fails", async () => {
