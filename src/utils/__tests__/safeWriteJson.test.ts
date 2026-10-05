@@ -4,6 +4,8 @@ import * as path from "path"
 import * as os from "os"
 
 import { safeWriteJson } from "../safeWriteJson"
+import { RollbackFailureError } from "../../services/file-safety/safeWriteText"
+import * as lockfile from "proper-lockfile"
 
 // Capture actual implementations before the vi.mock factory runs,
 // so they are never wrapped by vi.fn() — avoids infinite recursion when
@@ -328,9 +330,8 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual(newData)
 	})
 
-	// Test for console error suppression during backup deletion
-	test("should suppress console.error when backup deletion fails", async () => {
-		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {}) // Suppress console.error
+	// Test for best-effort backup deletion (the backup lifecycle now lives in safeWriteText)
+	test("does not fail the write when backup deletion fails (orphaned backup is acceptable)", async () => {
 		const initialData = { message: "Initial" }
 		const newData = { message: "New" }
 
@@ -349,12 +350,17 @@ describe("safeWriteJson", () => {
 			return fsPromisesActuals.unlink!(filePath)
 		})
 
+		// The write must still succeed: backup cleanup is best-effort inside
+		// safeWriteText and never masks the committed content.
 		await safeWriteJson(currentTestFilePath, newData)
 
-		// Verify console.error was called with the expected message
-		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Successfully wrote"), expect.any(Error))
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual(newData)
 
-		consoleErrorSpy.mockRestore()
+		// The orphaned backup is still on disk because its deletion failed.
+		const entries = await fs.readdir(tempDir)
+		expect(entries.some((entry) => entry.includes("safeWriteText.bak_"))).toBe(true)
+
 		vi.mocked(fs.unlink).mockRestore()
 	})
 
@@ -481,11 +487,16 @@ describe("safeWriteJson", () => {
 			},
 		})
 
-		// Verify console.error was called for the rollback failure
-		expect(consoleErrorSpy).toHaveBeenCalledWith(
-			expect.stringContaining("Failed to restore backup"),
-			expect.objectContaining({ message: "Rollback rename failed" }),
-		)
+		expect(failure).toBeInstanceOf(RollbackFailureError)
+		expect(failure?.cause).toBeInstanceOf(Error)
+		expect(failure?.rollbackError).toBeInstanceOf(Error)
+		expect(failure?.backupPath).toContain("safeWriteText.bak_")
+
+		// The rollback failed inside safeWriteText, so the target is gone and
+		// the backup is orphaned on disk.
+		expect(await fileExists(currentTestFilePath)).toBe(false)
+		const entries = await fs.readdir(tempDir)
+		expect(entries.some((entry) => entry.includes("safeWriteText.bak_"))).toBe(true)
 
 		consoleErrorSpy.mockRestore()
 	})

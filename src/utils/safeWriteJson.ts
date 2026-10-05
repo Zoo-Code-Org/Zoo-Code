@@ -79,29 +79,31 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 	const dirPath = path.dirname(absoluteFilePath)
 
 	// Ensure directory structure exists with improved reliability
-	try {
-		// Create directory with recursive option
-		await fs.mkdir(dirPath, { recursive: true })
+	// Declared outside the protected block so the catch and finally can still name
+	// the target when the resolution itself rejects.
+	let resolvedTargetPath: string | undefined
 
-		// Verify directory exists after creation attempt
+	try {
+		await fs.mkdir(dirPath, { recursive: true })
 		await fs.access(dirPath)
 	} catch (dirError: unknown) {
 		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
 		throw dirError
 	}
 
-	// Acquire the lock before any file operations. `acquireFileLock` owns the
-	// shared advisory lock protocol, so callers that lock the same path with
-	// it (for example task-history deletion) serialize with this write.
-	// If lock acquisition fails, it throws immediately. The releaseLock
-	// remains a no-op, so the finally block in the main file operations
-	// try-catch-finally won't try to release an unacquired lock if this
-	// path is taken.
-	releaseLock = await acquireFileLock(absoluteFilePath)
+	// Lock key: the symlink referent when the path is an existing symlink, so a
+	// symlink alias and its referent share one lock. The key must be computable
+	// while a peer writer is mid-commit (backup mode renames the referent away and
+	// back), so the walk tolerates a dangling link instead of rejecting it here.
+	const lockKey = await resolveLockKey(absoluteFilePath)
 
-	// Variables to hold the actual paths of temp files if they are created.
+	// Acquire the lock before any file operations. If acquisition fails it throws
+	// immediately, and releaseLock stays a no-op so the finally block does not try
+	// to release an unacquired lock.
+	releaseLock = await acquireFileLock(lockKey)
+
+	// Variables to hold the actual path of the temp file if it is created.
 	let actualTempNewFilePath: string | null = null
-	let actualTempBackupFilePath: string | null = null
 
 	try {
 		// Heal any state an interrupted previous write left behind: an absent
@@ -122,7 +124,7 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		if (options?.merge) {
 			let existing: unknown = null
 			try {
-				existing = JSON.parse(await fs.readFile(absoluteFilePath, "utf8"))
+				existing = JSON.parse(await fs.readFile(resolvedTargetPath, "utf8"))
 			} catch (error: unknown) {
 				const code = getErrorCode(error)
 				if (!(error instanceof SyntaxError) && code !== "ENOENT") {
@@ -165,9 +167,8 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			await fs.rename(actualTempNewFilePath, absoluteFilePath)
 		}
 
-		// If we reach here, the new file is successfully in place.
-		// The original actualTempNewFilePath is now the main file, so we shouldn't try to clean it up as "temp".
-		// Mark as "used" or "committed"
+		// If we reach here, the new file is successfully in place and any
+		// backup has already been handled by safeWriteText.
 		actualTempNewFilePath = null
 		options?.trace?.({ stage: "write-complete" })
 
@@ -187,35 +188,35 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			}
 		}
 	} catch (originalError) {
-		console.error(`Operation failed for ${absoluteFilePath}: [Original Error Caught]`, originalError)
+		console.error(
+			`Operation failed for ${resolvedTargetPath ?? absoluteFilePath}: [Original Error Caught]`,
+			originalError,
+		)
 
 		const newFileToCleanupWithinCatch = actualTempNewFilePath
-		const backupFileToRollbackOrCleanupWithinCatch = actualTempBackupFilePath
 
-		// Attempt rollback if a backup was made
-		if (backupFileToRollbackOrCleanupWithinCatch) {
-			try {
-				await fs.rename(backupFileToRollbackOrCleanupWithinCatch, absoluteFilePath)
-				// Mark as handled, prevent later unlink of this path
-				actualTempBackupFilePath = null
-			} catch (rollbackError) {
-				// actualTempBackupFilePath (outer scope) remains pointing to backupFileToRollbackOrCleanupWithinCatch
-				console.error(
-					`[Catch] Failed to restore backup ${backupFileToRollbackOrCleanupWithinCatch} to ${absoluteFilePath}:`,
-					rollbackError,
-				)
-			}
-		}
-
-		// Cleanup the .new file if it exists
+		// A failed safeWriteText already rolled the backup (if any) back to
+		// the target path. Clean up the .new file if it still exists
+		// (safeWriteText also cleans up its tempPath on failure; this is a
+		// safety net in case its cleanup missed it).
 		if (newFileToCleanupWithinCatch) {
 			try {
 				await fs.unlink(newFileToCleanupWithinCatch)
-			} catch (cleanupError) {
-				console.error(
-					`[Catch] Failed to clean up temporary new file ${newFileToCleanupWithinCatch}:`,
-					cleanupError,
-				)
+			} catch (cleanupError: unknown) {
+				// The expected case: safeWriteText already removed its own temp file, so a
+				// missing file here is not a cleanup failure worth logging. Returning would
+				// also swallow the original error the caller needs.
+				const isAbsent =
+					typeof cleanupError === "object" &&
+					cleanupError !== null &&
+					"code" in cleanupError &&
+					cleanupError.code === "ENOENT"
+				if (!isAbsent) {
+					console.error(
+						`[Catch] Failed to clean up temporary new file ${newFileToCleanupWithinCatch}:`,
+						cleanupError,
+					)
+				}
 			}
 		}
 
@@ -225,12 +226,9 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 	} finally {
 		// Release the lock in the main finally block.
 		try {
-			// releaseLock will be the actual unlock function if lock was acquired,
-			// or the initial no-op if acquisition failed.
 			await releaseLock()
 		} catch (unlockError) {
-			// Do not re-throw here, as the originalError from the try/catch (if any) is more important.
-			console.error(`Failed to release lock for ${absoluteFilePath}:`, unlockError)
+			console.error(`Failed to release lock for ${resolvedTargetPath ?? absoluteFilePath}:`, unlockError)
 		}
 	}
 }
