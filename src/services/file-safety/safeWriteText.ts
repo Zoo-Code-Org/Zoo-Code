@@ -45,6 +45,29 @@ export interface SafeWriteTextOptions {
 }
 
 /**
+ * A publish that failed and whose rollback also failed: the content survives only
+ * at the backup path, not at the canonical target. The publish failure stays the
+ * cause, and the rollback failure plus the backup location travel with the error so
+ * the caller can tell what it is looking at.
+ */
+export class RollbackFailureError extends Error {
+	readonly publishError: unknown
+	readonly rollbackError: unknown
+	readonly backupPath: string
+
+	constructor(publishError: unknown, rollbackError: unknown, backupPath: string) {
+		super(
+			`Publish failed (${publishError instanceof Error ? publishError.message : String(publishError)}) and the backup could not be restored to its original path -- the content is preserved at the backup location reported on this error.`,
+			{ cause: publishError },
+		)
+		this.name = "RollbackFailureError"
+		this.publishError = publishError
+		this.rollbackError = rollbackError
+		this.backupPath = backupPath
+	}
+}
+
+/**
  * A caller-supplied staging path that is not a file this write may publish: it
  * sits outside the target's directory (so the commit rename would cross
  * filesystems) or is not a regular file. Rejecting it before any write keeps the
