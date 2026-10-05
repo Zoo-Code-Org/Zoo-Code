@@ -345,9 +345,9 @@
 		"support": "请在 <githubLink>GitHub</githubLink> 上为 Zoo Code 点星支持我们。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "🤖 在全新的 Zoo Gateway 上，有余额的用户可在 2 周内以 5 折优惠试用 GLM-5.3-Flash 和 Gemini 3.7 Flash，并可完全免费使用 MiniMax M3：<modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "新模型 — GLM-5.3-Flash 现已通过 Z AI 提供。",
-			"highlight3": "可靠性修复 — 恢复了子任务批准，解决了 Vertex Gemini 3.7 工具输出为空、终端启动失败和后台服务错误问题，并提升了不同 IDE 主题下的可读性。"
+			"highlight1": "✨ 支持新模型：使用 GPT-6.1 Sol，享受修正后的 Claude Opus 5.5 输出 Token 上限，并在 OpenCode Go 上选择 DeepSeek V4.1 Flash。",
+			"highlight2": "🧭 更可靠的任务中止与中断：保留首次中止原因，为每次请求重置流中止状态，并阻止中断的任务重新执行已拒绝的子任务。",
+			"highlight3": "🛠️ 更可靠的工具、Prompt 和界面流式更新：完整保留流式传输的工具参数，执行 MCP 工具策略，防止编造行号，让聊天更新更流畅。"
 		},
 		"cloudAgents": {
 			"heading": "云端新功能：",

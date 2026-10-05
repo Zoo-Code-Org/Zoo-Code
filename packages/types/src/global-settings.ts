@@ -14,6 +14,7 @@ import { telemetrySettingsSchema } from "./telemetry.js"
 import { toolNamesSchema } from "./tool.js"
 import { type Keys } from "./type-fu.js"
 import { languagesSchema } from "./vscode.js"
+import { providerIdentifiers } from "./provider-identifiers.js"
 
 /**
  * Default delay in milliseconds after writes to allow diagnostics to detect potential problems.
@@ -47,6 +48,15 @@ export const DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES = false
 export const DEFAULT_DIFF_FUZZY_THRESHOLD = 1.0
 
 export const DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED = false
+
+/**
+ * Whether commands that are not explicitly auto-approved are automatically
+ * denied (with a structured reason sent to the model) instead of prompting the
+ * user. Opt-in: by default, unapproved commands still ask for confirmation.
+ * Only engages when command auto-approval (`autoApprovalEnabled` +
+ * `alwaysAllowExecute`) is on.
+ */
+export const DEFAULT_ALWAYS_DENY_UNAPPROVED_COMMANDS = false
 
 /**
  * Terminal output preview size options for persisted command output.
@@ -114,7 +124,7 @@ export const globalSettingsSchema = z.object({
 	dismissedUpsells: z.array(z.string()).optional(),
 
 	// Image generation settings (experimental) - flattened for simplicity
-	imageGenerationProvider: z.enum(["openrouter"]).optional(),
+	imageGenerationProvider: z.enum([providerIdentifiers.openrouter]).optional(),
 	openRouterImageApiKey: z.string().optional(),
 	openRouterImageGenerationSelectedModel: z.string().optional(),
 
@@ -153,6 +163,14 @@ export const globalSettingsSchema = z.object({
 	alwaysAllowSubtasks: z.boolean().optional(),
 	alwaysAllowExecute: z.boolean().optional(),
 	destructiveCommandGuardEnabled: z.boolean().optional(),
+	/**
+	 * Blanket auto-deny for unapproved commands. When true (and command
+	 * auto-approval is engaged), every command that is not explicitly
+	 * auto-approved is automatically denied with a structured reason delivered
+	 * to the model, instead of prompting the user.
+	 * @default false
+	 */
+	alwaysDenyUnapprovedCommands: z.boolean().optional(),
 	alwaysAllowFollowupQuestions: z.boolean().optional(),
 	followupAutoApproveTimeoutMs: z.number().optional(),
 	allowedCommands: z.array(z.string()).optional(),

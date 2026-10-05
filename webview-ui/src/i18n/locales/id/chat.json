@@ -373,9 +373,9 @@
 		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Yang Baru:",
-			"highlight1": "🤖 Coba GLM-5.3-Flash dan Gemini 3.7 Flash dengan diskon 50% selama 2 minggu, dan dapatkan MiniMax M3 sepenuhnya GRATIS bagi pengguna dengan saldo di Zoo Gateway baru: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "Model baru — GLM-5.3-Flash kini tersedia melalui Z AI.",
-			"highlight3": "Perbaikan keandalan — persetujuan subtask dipulihkan, output tool kosong pada Vertex Gemini 3.7, kegagalan startup terminal, error background service, dan keterbacaan tema turut diperbaiki."
+			"highlight1": "✨ Dukungan model baru: Gunakan GPT-6.1 Sol, manfaatkan batas output Claude Opus 5.5 yang telah diperbaiki, dan pilih DeepSeek V4.1 Flash di OpenCode Go.",
+			"highlight2": "🧭 Pembatalan dan interupsi task yang andal: Pertahankan alasan pembatalan pertama, reset status pembatalan stream pada setiap request, dan cegah task yang terinterupsi menjalankan ulang subtask yang ditolak.",
+			"highlight3": "🛠️ Tools, prompts, dan streaming UI yang andal: Jaga argumen tool yang diterima melalui stream tetap utuh, terapkan kebijakan tool MCP, cegah nomor baris rekaan, dan buat pembaruan chat lebih lancar."
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",

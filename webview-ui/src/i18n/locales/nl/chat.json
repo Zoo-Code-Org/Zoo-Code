@@ -317,9 +317,9 @@
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Wat is nieuw:",
-			"highlight1": "🤖 Probeer GLM-5.3-Flash en Gemini 3.7 Flash 2 weken lang met 50% korting en MiniMax M3 helemaal gratis voor gebruikers met een saldo op de nieuwe Zoo Gateway: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "Nieuw model — GLM-5.3-Flash is nu beschikbaar via Z AI.",
-			"highlight3": "Betrouwbaarheidsfixes — herstelde goedkeuringen voor subtaken en oplossingen voor lege tooloutput bij Vertex Gemini 3.7, opstartfouten van de terminal, fouten in achtergrondservices en de leesbaarheid in verschillende IDE-thema's."
+			"highlight1": "✨ Ondersteuning voor nieuwe modellen: Gebruik GPT-6.1 Sol, profiteer van de gecorrigeerde uitvoerlimiet van Claude Opus 5.5 en selecteer DeepSeek V4.1 Flash op OpenCode Go.",
+			"highlight2": "🧭 Betrouwbaar afbreken en onderbreken van taken: Bewaar de eerste afbreekreden, reset de afbreekstatus van de stream bij elk verzoek en voorkom dat onderbroken taken afgewezen subtaken opnieuw uitvoeren.",
+			"highlight3": "🛠️ Betrouwbare tools, prompts en UI-streaming: Houd gestreamde toolargumenten intact, handhaaf het MCP-toolbeleid, voorkom verzonnen regelnummers en maak chatupdates vloeiender."
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",

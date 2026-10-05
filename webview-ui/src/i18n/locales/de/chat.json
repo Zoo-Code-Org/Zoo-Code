@@ -344,9 +344,9 @@
 		"support": "Bitte unterstütze Zoo Code, indem du uns auf <githubLink>GitHub</githubLink> einen Stern gibst.",
 		"release": {
 			"heading": "Was ist neu:",
-			"highlight1": "🤖 Teste GLM-5.3-Flash und Gemini 3.7 Flash zwei Wochen lang mit 50 % Rabatt und MiniMax M3 komplett KOSTENLOS für Nutzer mit Guthaben auf dem neuen Zoo Gateway: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "Neues Modell — GLM-5.3-Flash ist jetzt über Z AI verfügbar.",
-			"highlight3": "Zuverlässigkeits-Fixes — Unteraufgaben-Genehmigungen wiederhergestellt, leere Tool-Ausgabe bei Vertex Gemini 3.7, Fehler beim Terminalstart, Fehler im Hintergrunddienst und die Lesbarkeit der IDE-Themes."
+			"highlight1": "✨ Unterstützung für neue Modelle: Nutze GPT-6.1 Sol, profitiere vom korrigierten Ausgabelimit von Claude Opus 5.5 und wähle DeepSeek V4.1 Flash bei OpenCode Go.",
+			"highlight2": "🧭 Zuverlässige Aufgabenabbrüche und Unterbrechungen: Bewahre den ersten Abbruchgrund, setze den Stream-Abbruchstatus für jede Anfrage zurück und verhindere, dass unterbrochene Aufgaben abgelehnte Unteraufgaben erneut ausführen.",
+			"highlight3": "🛠️ Zuverlässige Tools, Prompts und UI-Streams: Erhalte gestreamte Tool-Argumente vollständig, setze die MCP-Tool-Richtlinien durch, verhindere erfundene Zeilennummern und sorge für flüssigere Chat-Updates."
 		},
 		"cloudAgents": {
 			"heading": "Neu in der Cloud:",

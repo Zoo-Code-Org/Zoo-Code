@@ -4,6 +4,7 @@ import {
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
 	OpenAiCodexServiceTier,
 	providerIdentifiers,
+	openAiModelInfoSaneDefaults,
 	retiredProviderIdentifiers,
 	type ProviderSettings,
 } from "@roo-code/types"
@@ -484,6 +485,59 @@ describe("ProviderSettingsManager", () => {
 			},
 		)
 
+		it.each([true, false, undefined])(
+			"round-trips OpenAI-compatible reasoning settings through profile storage when enabled is %s",
+			async (enableReasoningEffort) => {
+				const configuration: ProviderSettings = {
+					apiProvider: providerIdentifiers.openai,
+					openAiModelId: "custom-model",
+					enableReasoningEffort,
+					reasoningEffort: "low",
+					openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, reasoningEffort: "max" },
+				}
+				await providerSettingsManager.saveConfig("compatible", configuration)
+
+				const serializedProfiles: string = mockSecrets.store.mock.calls.at(-1)![1]
+				mockSecrets.get.mockResolvedValue(serializedProfiles)
+				const reloadedManager = new ProviderSettingsManager(mockContext)
+				const profile = await reloadedManager.getProfile({ name: "compatible" })
+
+				expect(profile.enableReasoningEffort).toBe(enableReasoningEffort)
+				expect(profile.reasoningEffort).toBe("low")
+				expect(profile.openAiCustomModelInfo).toEqual(configuration.openAiCustomModelInfo)
+			},
+		)
+
+		it("persists OpenAI-compatible Extra Body only on OpenAI-compatible profiles", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: { default: {} },
+					modeApiConfigs: {},
+				}),
+			)
+			const openAiExtraBody = JSON.stringify({ metadata: { completion_window: "balanced" } })
+
+			await providerSettingsManager.saveConfig("sail", {
+				apiProvider: providerIdentifiers.openai,
+				openAiModelId: "zai-org/GLM-5.2-FP8",
+				openAiExtraBody,
+			})
+
+			let storedProfiles = JSON.parse(mockSecrets.store.mock.calls.at(-1)?.[1])
+			expect(storedProfiles.apiConfigs.sail).toMatchObject({ openAiExtraBody })
+
+			mockSecrets.get.mockResolvedValue(JSON.stringify(storedProfiles))
+			await providerSettingsManager.saveConfig("anthropic", {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "test-key",
+				openAiExtraBody,
+			})
+
+			storedProfiles = JSON.parse(mockSecrets.store.mock.calls.at(-1)?.[1])
+			expect(storedProfiles.apiConfigs.anthropic).not.toHaveProperty("openAiExtraBody")
+		})
+
 		it("should only save provider relevant settings", async () => {
 			mockSecrets.get.mockResolvedValue(
 				JSON.stringify({
@@ -595,6 +649,21 @@ describe("ProviderSettingsManager", () => {
 			await expect(providerSettingsManager.saveConfig("test", {})).rejects.toThrow(
 				"Failed to save config: Error: Failed to write provider profiles to secrets: Error: Storage failed",
 			)
+		})
+
+		it("keeps nested defaults pristine when the initial save fails", async () => {
+			mockSecrets.store.mockRejectedValueOnce(new Error("Storage failed"))
+
+			await expect(
+				providerSettingsManager.saveConfig("default", {
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "test-key",
+				}),
+			).rejects.toThrow("Storage failed")
+
+			await expect(providerSettingsManager.listConfig()).resolves.toEqual([
+				{ name: "default", id: expect.any(String), apiProvider: undefined },
+			])
 		})
 
 		it("should preserve full fields including legacy provider-specific keys when saving retired provider profiles", async () => {

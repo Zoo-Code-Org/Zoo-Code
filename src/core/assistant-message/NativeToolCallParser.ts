@@ -53,25 +53,48 @@ export type ToolCallStreamEvent = ApiStreamToolCallStartChunk | ApiStreamToolCal
 export class NativeToolCallParser {
 	// Streaming state management for argument accumulation (keyed by tool call id)
 	// Note: name is string to accommodate dynamic MCP tools (mcp--serverName--toolName)
-	private static streamingToolCalls = new Map<
-		string,
-		{
-			id: string
-			name: string
-			argumentsAccumulator: string
-		}
+	private static streamingToolCallsByScope = new WeakMap<
+		object,
+		Map<string, { id: string; name: string; argumentsAccumulator: string }>
 	>()
 
-	// Raw chunk tracking state (keyed by index from API stream)
-	private static rawChunkTracker = new Map<
-		number,
-		{
-			id: string
-			name: string
-			hasStarted: boolean
-			deltaBuffer: string[]
-		}
+	// Raw chunk tracking state (keyed by index from one API stream)
+	private static rawChunkTrackersByScope = new WeakMap<
+		object,
+		Map<
+			number,
+			{
+				id?: string
+				name: string
+				// Track whether the provider sent a name, including an empty name.
+				nameSeen: boolean
+				hasStarted: boolean
+				deltaBuffer: string[]
+			}
+		>
 	>()
+
+	public static createScope(): object {
+		return {}
+	}
+
+	private static getStreamingToolCalls(scope: object) {
+		let streamingToolCalls = this.streamingToolCallsByScope.get(scope)
+		if (!streamingToolCalls) {
+			streamingToolCalls = new Map()
+			this.streamingToolCallsByScope.set(scope, streamingToolCalls)
+		}
+		return streamingToolCalls
+	}
+
+	private static getRawChunkTracker(scope: object) {
+		let rawChunkTracker = this.rawChunkTrackersByScope.get(scope)
+		if (!rawChunkTracker) {
+			rawChunkTracker = new Map()
+			this.rawChunkTrackersByScope.set(scope, rawChunkTracker)
+		}
+		return rawChunkTracker
+	}
 
 	private static coerceOptionalBoolean(value: unknown): boolean | undefined {
 		if (typeof value === "boolean") {
@@ -96,60 +119,69 @@ export class NativeToolCallParser {
 	 * This is the entry point for providers that emit tool_call_partial chunks.
 	 * Returns an array of events to be processed by the consumer.
 	 */
-	public static processRawChunk(chunk: {
-		index: number
-		id?: string
-		name?: string
-		arguments?: string
-	}): ToolCallStreamEvent[] {
+	public static processRawChunk(
+		chunk: {
+			index: number
+			id?: string
+			name?: string
+			arguments?: string
+		},
+		scope: object,
+	): ToolCallStreamEvent[] {
 		const events: ToolCallStreamEvent[] = []
 		const { index, id, name, arguments: args } = chunk
+		const rawChunkTracker = this.getRawChunkTracker(scope)
 
-		let tracked = this.rawChunkTracker.get(index)
+		let tracked = rawChunkTracker.get(index)
 
-		// Initialize new tool call tracking when we receive an id
-		if (id && !tracked) {
+		// Create the tracker on first sight of this index, independent of whether
+		// an id has arrived yet. Keying the lifecycle by index (not id) ensures any
+		// `arguments` that stream before the id is known are buffered rather than dropped.
+		if (!tracked) {
 			tracked = {
 				id,
 				name: name || "",
+				nameSeen: name !== undefined,
 				hasStarted: false,
 				deltaBuffer: [],
 			}
-			this.rawChunkTracker.set(index, tracked)
+			rawChunkTracker.set(index, tracked)
 		}
 
-		if (!tracked) {
-			return events
+		// Record id and name as they arrive (they may come in separate chunks).
+		if (id) {
+			tracked.id = id
 		}
-
-		// Update name if present in chunk and not yet set
-		if (name) {
+		if (name !== undefined) {
 			tracked.name = name
+			tracked.nameSeen = true
 		}
 
-		// Emit start event when we have the name
-		if (!tracked.hasStarted && tracked.name) {
+		// Emit start event only once both id and name are known. Using a local
+		// non-null id keeps emitted events typed as id: string.
+		if (!tracked.hasStarted && tracked.id && tracked.nameSeen) {
+			const startedId = tracked.id
 			events.push({
 				type: "tool_call_start",
-				id: tracked.id,
+				id: startedId,
 				name: tracked.name,
 			})
 			tracked.hasStarted = true
 
-			// Flush buffered deltas
+			// Flush buffered deltas accumulated during the pre-start window.
 			for (const bufferedDelta of tracked.deltaBuffer) {
 				events.push({
 					type: "tool_call_delta",
-					id: tracked.id,
+					id: startedId,
 					delta: bufferedDelta,
 				})
 			}
 			tracked.deltaBuffer = []
 		}
 
-		// Emit delta event for argument chunks
+		// Emit delta event for argument chunks, buffering until start is emitted.
 		if (args) {
-			if (tracked.hasStarted) {
+			if (tracked.hasStarted && tracked.id) {
 				events.push({
 					type: "tool_call_delta",
 					id: tracked.id,
@@ -164,42 +196,24 @@ export class NativeToolCallParser {
 	}
 
 	/**
-	 * Process stream finish reason.
-	 * Emits end events when finish_reason is 'tool_calls'.
-	 */
-	public static processFinishReason(finishReason: string | null | undefined): ToolCallStreamEvent[] {
-		const events: ToolCallStreamEvent[] = []
-
-		if (finishReason === "tool_calls" && this.rawChunkTracker.size > 0) {
-			for (const [, tracked] of this.rawChunkTracker.entries()) {
-				events.push({
-					type: "tool_call_end",
-					id: tracked.id,
-				})
-			}
-		}
-
-		return events
-	}
-
-	/**
 	 * Finalize any remaining tool calls that weren't explicitly ended.
 	 * Should be called at the end of stream processing.
 	 */
-	public static finalizeRawChunks(): ToolCallStreamEvent[] {
+	public static finalizeRawChunks(scope: object): ToolCallStreamEvent[] {
 		const events: ToolCallStreamEvent[] = []
+		const rawChunkTracker = this.rawChunkTrackersByScope.get(scope)
 
-		if (this.rawChunkTracker.size > 0) {
-			for (const [, tracked] of this.rawChunkTracker.entries()) {
-				if (tracked.hasStarted) {
+		if (rawChunkTracker) {
+			for (const [, tracked] of rawChunkTracker.entries()) {
+				if (tracked.hasStarted && tracked.id) {
 					events.push({
 						type: "tool_call_end",
 						id: tracked.id,
 					})
 				}
 			}
-			this.rawChunkTracker.clear()
 		}
+		this.rawChunkTrackersByScope.delete(scope)
 
 		return events
 	}
@@ -208,8 +222,8 @@ export class NativeToolCallParser {
 	 * Clear all raw chunk tracking state.
 	 * Should be called when a new API request starts.
 	 */
-	public static clearRawChunkState(): void {
-		this.rawChunkTracker.clear()
+	public static clearRawChunkState(scope: object): void {
+		this.rawChunkTrackersByScope.delete(scope)
 	}
 
 	/**
@@ -217,8 +231,8 @@ export class NativeToolCallParser {
 	 * Initializes tracking for incremental argument parsing.
 	 * Accepts string to support both ToolName and dynamic MCP tools (mcp--serverName--toolName).
 	 */
-	public static startStreamingToolCall(id: string, name: string): void {
-		this.streamingToolCalls.set(id, {
+	public static startStreamingToolCall(id: string, name: string, scope: object): void {
+		this.getStreamingToolCalls(scope).set(id, {
 			id,
 			name,
 			argumentsAccumulator: "",
@@ -230,16 +244,16 @@ export class NativeToolCallParser {
 	 * Should be called when a new API request starts to prevent memory leaks
 	 * from interrupted streams.
 	 */
-	public static clearAllStreamingToolCalls(): void {
-		this.streamingToolCalls.clear()
+	public static clearAllStreamingToolCalls(scope: object): void {
+		this.streamingToolCallsByScope.delete(scope)
 	}
 
 	/**
 	 * Check if there are any active streaming tool calls.
 	 * Useful for debugging and testing.
 	 */
-	public static hasActiveStreamingToolCalls(): boolean {
-		return this.streamingToolCalls.size > 0
+	public static hasActiveStreamingToolCalls(scope: object): boolean {
+		return (this.streamingToolCallsByScope.get(scope)?.size ?? 0) > 0
 	}
 
 	/**
@@ -247,8 +261,8 @@ export class NativeToolCallParser {
 	 * Uses partial-json-parser to extract values from incomplete JSON immediately.
 	 * Returns a partial ToolUse with currently parsed parameters.
 	 */
-	public static processStreamingChunk(id: string, chunk: string): ToolUse | null {
-		const toolCall = this.streamingToolCalls.get(id)
+	public static processStreamingChunk(id: string, chunk: string, scope: object): ToolUse | null {
+		const toolCall = this.streamingToolCallsByScope.get(scope)?.get(id)
 		if (!toolCall) {
 			return null
 		}
@@ -291,8 +305,12 @@ export class NativeToolCallParser {
 	 * Finalize a streaming tool call.
 	 * Parses the complete JSON and returns the final ToolUse or McpToolUse.
 	 */
-	public static finalizeStreamingToolCall(id: string): ToolUse | McpToolUse | null {
-		const toolCall = this.streamingToolCalls.get(id)
+	public static finalizeStreamingToolCall(id: string, scope: object): ToolUse | McpToolUse | null {
+		const streamingToolCalls = this.streamingToolCallsByScope.get(scope)
+		if (!streamingToolCalls) {
+			return null
+		}
+		const toolCall = streamingToolCalls.get(id)
 		if (!toolCall) {
 			return null
 		}
@@ -306,7 +324,12 @@ export class NativeToolCallParser {
 		})
 
 		// Clean up streaming state
-		this.streamingToolCalls.delete(id)
+		streamingToolCalls.delete(id)
+		// Stryker disable next-line ConditionalExpression: the guard and delete are both GC-only; observability is equivalent to the CallExpression rationale below.
+		if (streamingToolCalls.size === 0) {
+			// Stryker disable next-line CallExpression: deleting an empty WeakMap value is only observable as GC eligibility.
+			this.streamingToolCallsByScope.delete(scope)
+		}
 
 		return finalToolUse
 	}

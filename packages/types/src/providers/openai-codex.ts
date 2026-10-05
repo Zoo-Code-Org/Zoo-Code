@@ -24,6 +24,74 @@ export const openAiCodexDefaultModelId: OpenAiCodexModelId = "gpt-5.6-sol"
  * Costs are 0 as they are covered by the subscription.
  */
 export const openAiCodexModels = {
+	// https://github.com/openai/codex/blob/main/codex-rs/models-manager/models.json
+	"gpt-6.1-sol": {
+		maxTokens: 128000,
+		// Use Codex's supported maximum rather than its 272K default compaction budget.
+		contextWindow: 872000,
+		includedTools: ["apply_patch"],
+		excludedTools: ["apply_diff", "write_to_file"],
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+		requiredReasoningEffort: true,
+		reasoningEffort: "low",
+		inputPrice: 0,
+		outputPrice: 0,
+		supportsVerbosity: true,
+		supportsTemperature: false,
+		description:
+			"GPT-6.1 Sol: Near-Astra performance for complex coding and professional work via ChatGPT subscription",
+	},
+	"gpt-6-astra": {
+		maxTokens: 128000,
+		contextWindow: 872000,
+		includedTools: ["apply_patch"],
+		excludedTools: ["apply_diff", "write_to_file"],
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+		requiredReasoningEffort: true,
+		reasoningEffort: "low",
+		inputPrice: 0,
+		outputPrice: 0,
+		supportsVerbosity: true,
+		supportsTemperature: false,
+		description: "GPT-6 Astra: OpenAI's most capable model for complex, demanding work via ChatGPT subscription",
+	},
+	"gpt-6-sol": {
+		maxTokens: 128000,
+		contextWindow: 372000,
+		includedTools: ["apply_patch"],
+		excludedTools: ["apply_diff", "write_to_file"],
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+		reasoningEffort: "medium",
+		// Subscription-based: no per-token costs
+		inputPrice: 0,
+		outputPrice: 0,
+		supportsVerbosity: true,
+		supportsTemperature: false,
+		description:
+			"GPT-6 Sol: OpenAI's cost-efficient frontier model for complex coding and agentic workflows via ChatGPT subscription",
+	},
+	"gpt-6-luna": {
+		maxTokens: 128000,
+		contextWindow: 372000,
+		includedTools: ["apply_patch"],
+		excludedTools: ["apply_diff", "write_to_file"],
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+		reasoningEffort: "medium",
+		// Subscription-based: no per-token costs
+		inputPrice: 0,
+		outputPrice: 0,
+		supportsVerbosity: true,
+		supportsTemperature: false,
+		description: "GPT-6 Luna: The fastest, most affordable member of the GPT-6 family via ChatGPT subscription",
+	},
 	"gpt-5.6-sol": {
 		maxTokens: 128000,
 		contextWindow: 372000,

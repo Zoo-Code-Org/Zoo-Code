@@ -5,6 +5,8 @@ out-*
 node_modules
 package-lock.json
 coverage/
+reports/mutation/
+.stryker-tmp/
 mock/
 
 .DS_Store

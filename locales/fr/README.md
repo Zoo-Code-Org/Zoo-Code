@@ -47,12 +47,11 @@ Zoo Code s'appuie sur les fondations créées par Roo Code et continue de les en
 - **Des workflows de terminal et d'édition plus fiables** — correctifs pour les fins prématurées de commandes dans le terminal, les conditions de concurrence liées à l'état des tâches, la gestion du contexte, l'édition de diff et l'utilisation d'outils propres aux providers.
 - **Davantage de contrôle sur ton espace de travail** — gestion des règles, restrictions MCP par mode, contrôle des chemins multi-root, options de raisonnement des modèles et actions de vérification des modifications à la fin d'une tâche.
 
-## Nouveautés de la v3.80.1
+## Nouveautés de la v3.86.0
 
-🤖 Essaie GLM-5.3-Flash et Gemini 3.7 Flash à 50 % de réduction pendant 2 semaines, et MiniMax M3 totalement GRATUIT pour les utilisateurs avec un solde sur le nouveau Zoo Gateway. https://zoocode.dev/models
-
-- **Nouveau modèle** — GLM-5.3-Flash est désormais disponible via Z AI.
-- **Correctifs de fiabilité** — approbations de sous-tâches restaurées, sortie d'outils vide de Vertex Gemini 3.7, échecs de démarrage du terminal, erreurs du service en arrière-plan et la lisibilité des thèmes d'IDE.
+- ✨ **Prise en charge de nouveaux modèles :** Utilise GPT-6.1 Sol, profite de la limite de sortie corrigée de Claude Opus 5.5 et sélectionne DeepSeek V4.1 Flash sur OpenCode Go.
+- 🧭 **Arrêts et interruptions de tâches fiables :** Conserve la première raison de l'arrêt, réinitialise l'état d'arrêt du flux à chaque requête et empêche les tâches interrompues de relancer les sous-tâches rejetées.
+- 🛠️ **Outils, prompts et streaming de l'interface fiables :** Préserve les arguments d'outils reçus en streaming, applique la politique des outils MCP, évite les numéros de ligne inventés et fluidifie les mises à jour du chat.
 
 ## Que peut faire Zoo Code pour VOUS ?
 

@@ -344,9 +344,9 @@
 		"support": "<githubLink>GitHub</githubLink>でスターを付けて Zoo Code を応援してください。",
 		"release": {
 			"heading": "新機能:",
-			"highlight1": "🤖 新しい Zoo Gateway に残高があるユーザーは、GLM-5.3-Flash と Gemini 3.7 Flash を 2 週間 50% 割引で、MiniMax M3 を完全無料でお試しいただけます: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "新しいモデル — GLM-5.3-Flash が Z AI で利用可能になりました。",
-			"highlight3": "信頼性の修正 — サブタスクの承認を復元し、Vertex Gemini 3.7 のツール出力が空になる問題、ターミナルの起動失敗、バックグラウンドサービスのエラー、テーマでの読みやすさを修正しました。"
+			"highlight1": "✨ 新しいモデルに対応: GPT-6.1 Sol を利用し、修正された Claude Opus 5.5 の出力上限を活用して、OpenCode Go で DeepSeek V4.1 Flash を選択できます。",
+			"highlight2": "🧭 確実なタスクの中止と中断: 最初の中止理由を保持し、リクエストごとにストリームの中止状態をリセットして、中断されたタスクが拒否済みのサブタスクを再実行しないようにします。",
+			"highlight3": "🛠️ 安定したツール、Prompt、UI ストリーミング: ストリーミングされたツール引数を完全に保持し、MCP ツールのポリシーを適用して、存在しない行番号の生成を防ぎ、チャットの更新を滑らかにします。"
 		},
 		"cloudAgents": {
 			"heading": "クラウドの新機能:",
