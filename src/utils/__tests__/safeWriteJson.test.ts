@@ -479,6 +479,11 @@ describe("safeWriteJson", () => {
 		expect(failure?.rollbackError).toBeInstanceOf(Error)
 		expect(failure?.backupPath).toContain("safeWriteText.bak_")
 
+			// Telemetry callers record only error.message, so the publish error text must
+			// survive in the wrapper message.
+			expect(String(failure?.message)).toContain("Primary rename failed")
+			expect(String(failure?.message)).toContain("backup could not be restored")
+
 		// The rollback failed inside safeWriteText, so the target is gone and
 		// the backup is orphaned on disk.
 		expect(await fileExists(currentTestFilePath)).toBe(false)
