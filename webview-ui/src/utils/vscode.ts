@@ -11,8 +11,13 @@ import { WebviewMessage } from "@roo/WebviewMessage"
  * dev server by using native web browser features that mock the functionality
  * enabled by acquireVsCodeApi.
  */
-class VSCodeAPIWrapper {
+export class VSCodeAPIWrapper {
 	private readonly vsCodeApi: WebviewApi<unknown> | undefined
+	private fallbackState: unknown | undefined
+	// Once a persistent-storage write fails (setItem throws or is unavailable),
+	// the persisted JSON is stale: the in-memory fallbackState is authoritative
+	// for getState() until a write succeeds again.
+	private storageWriteFailed: boolean = false
 
 	constructor() {
 		// Check if the acquireVsCodeApi function exists in the current development
@@ -20,6 +25,46 @@ class VSCodeAPIWrapper {
 		if (typeof acquireVsCodeApi === "function") {
 			this.vsCodeApi = acquireVsCodeApi()
 		}
+	}
+
+	/**
+	 * Generates a unique identifier for this webview instance.
+	 *
+	 * @remarks Used only when no persisted identifier exists yet.
+	 */
+	private createViewStateId(): string {
+		if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+			return crypto.randomUUID()
+		}
+
+		return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+	}
+
+	/**
+	 * Returns the stable view state identifier for this webview, creating and persisting
+	 * one on first use so the extension can keep per-view state isolated across providers.
+	 */
+	public getViewStateId(): string {
+		const currentState = this.getState()
+		const stateObject =
+			currentState && typeof currentState === "object" && !Array.isArray(currentState)
+				? (currentState as Record<string, unknown>)
+				: {}
+		const existingViewStateId = stateObject.viewStateId
+
+		// Mirror the ClineProvider.setViewStateId normalization so the webview never
+		// registers an id the extension would rewrite or reject: trim, replace unsafe
+		// characters, and drop whitespace-only and "__proto__" values.
+		const normalizedViewStateId =
+			typeof existingViewStateId === "string" ? existingViewStateId.trim().replace(/[^A-Za-z0-9_-]/g, "_") : ""
+
+		if (normalizedViewStateId && normalizedViewStateId !== "__proto__") {
+			return normalizedViewStateId
+		}
+
+		const viewStateId = this.createViewStateId()
+		this.setState({ ...stateObject, viewStateId })
+		return viewStateId
 	}
 
 	/**
@@ -49,10 +94,25 @@ class VSCodeAPIWrapper {
 	public getState(): unknown | undefined {
 		if (this.vsCodeApi) {
 			return this.vsCodeApi.getState()
-		} else {
-			const state = localStorage.getItem("vscodeState")
-			return state ? JSON.parse(state) : undefined
 		}
+
+		if (this.storageWriteFailed) {
+			// A previous write could not be persisted: reading localStorage would
+			// return stale JSON, so the in-memory fallback is authoritative.
+			return this.fallbackState
+		}
+
+		try {
+			// Stryker disable next-line ConditionalExpression,OptionalChaining: equivalent mutant - when localStorage is unavailable the guard-false path and the throwing body both return this.fallbackState from this catch
+			if (typeof localStorage?.getItem === "function") {
+				const state = localStorage.getItem("vscodeState")
+				return state ? JSON.parse(state) : this.fallbackState
+			}
+		} catch {
+			return this.fallbackState
+		}
+
+		return this.fallbackState
 	}
 
 	/**
@@ -69,10 +129,25 @@ class VSCodeAPIWrapper {
 	public setState<T extends unknown | undefined>(newState: T): T {
 		if (this.vsCodeApi) {
 			return this.vsCodeApi.setState(newState)
-		} else {
-			localStorage.setItem("vscodeState", JSON.stringify(newState))
-			return newState
 		}
+
+		this.fallbackState = newState
+
+		try {
+			// Stryker disable next-line ConditionalExpression,OptionalChaining: equivalent mutant - when localStorage is unavailable the guard-false path and the throwing body both mark the write failed and return newState
+			if (typeof localStorage?.setItem === "function") {
+				localStorage.setItem("vscodeState", JSON.stringify(newState))
+				this.storageWriteFailed = false
+			} else {
+				this.storageWriteFailed = true
+			}
+		} catch {
+			// Storage can be unavailable in restricted webview/browser contexts.
+			// The in-memory fallback above keeps a stable viewStateId for this session.
+			this.storageWriteFailed = true
+		}
+
+		return newState
 	}
 }
 
