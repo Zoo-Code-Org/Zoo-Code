@@ -446,30 +446,30 @@ describe("Cline", () => {
 		baseProviderState = await mockProvider.getState()
 	})
 
+	function stream(chunks: ApiStreamChunk[]): AsyncGenerator<ApiStreamChunk> {
+		return (async function* () {
+			yield* chunks
+		})()
+	}
+
+	async function createTaskWithManualRetries() {
+		const task = new Task({
+			provider: mockProvider,
+			apiConfiguration: mockApiConfig,
+			task: "test task",
+			startTask: false,
+		})
+		const state = await mockProvider.getState()
+		vi.spyOn(mockProvider, "getState").mockResolvedValue({
+			...state,
+			apiConfiguration: mockApiConfig,
+			autoApprovalEnabled: false,
+		})
+		vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+		return task
+	}
+
 	describe("empty-response retries", () => {
-		function stream(chunks: ApiStreamChunk[]): AsyncGenerator<ApiStreamChunk> {
-			return (async function* () {
-				yield* chunks
-			})()
-		}
-
-		async function createTaskWithManualRetries() {
-			const task = new Task({
-				provider: mockProvider,
-				apiConfiguration: mockApiConfig,
-				task: "test task",
-				startTask: false,
-			})
-			const state = await mockProvider.getState()
-			vi.spyOn(mockProvider, "getState").mockResolvedValue({
-				...state,
-				apiConfiguration: mockApiConfig,
-				autoApprovalEnabled: false,
-			})
-			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
-			return task
-		}
-
 		it("restores the user message before a confirmed empty-response retry", async () => {
 			const task = await createTaskWithManualRetries()
 			let retryHistory: ApiMessage[] | undefined
@@ -520,6 +520,40 @@ describe("Cline", () => {
 				{ role: "assistant", content: [{ type: "text", text: "Failure: I did not provide a response." }] },
 			])
 			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+		})
+	})
+
+	describe("request continuation", () => {
+		it("sends the no-tool-use reminder in a second request when the first response has no tool use", async () => {
+			const task = await createTaskWithManualRetries()
+			let secondRequestHistory: ApiMessage[] | undefined
+
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => stream([{ type: "text", text: "no tool here" }]))
+				.mockImplementationOnce(() => {
+					secondRequestHistory = structuredClone(task.apiConversationHistory)
+					throw new Error("stop after continuation request")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
+			expect(secondRequestHistory).toMatchObject([
+				{
+					role: "user",
+					content: expect.arrayContaining([expect.objectContaining({ text: "original user request" })]),
+				},
+				{ role: "assistant", content: [{ type: "text", text: "no tool here" }] },
+				{
+					role: "user",
+					content: expect.arrayContaining([
+						expect.objectContaining({
+							text: expect.stringContaining("You did not use a tool in your previous response"),
+						}),
+					]),
+				},
+			])
 		})
 	})
 
