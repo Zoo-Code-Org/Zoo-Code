@@ -21,6 +21,8 @@ const mockedLstat = vi.mocked(fs.lstat)
 const mockedReadlink = vi.mocked(fs.readlink)
 const mockedAcquireFileLock = vi.mocked(acquireFileLock)
 
+const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+
 describe("safeWriteJson lock key under a peer commit", () => {
 	it("waits for the peer instead of rejecting, and locks the referent", async () => {
 		const order: string[] = []
@@ -32,7 +34,6 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// so the first resolution fails with ENOENT while lstat still reports a
 		// symbolic link. A strict resolve here rejects the caller before it can ever
 		// queue behind the peer, and the caller's delta write is lost.
-		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
 		mockedRealpath
 			.mockImplementationOnce(() => {
 				order.push("resolve-failed")
@@ -63,5 +64,38 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		expect(mockedAcquireFileLock).toHaveBeenCalledWith(referent)
 		expect(order).toEqual(["resolve-failed", "lock", "resolve", "resolve"])
 		expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ id: "task-1" })
+	})
+
+	it("releases the lock when the resolution under the lock rejects", async () => {
+		const order: string[] = []
+		let released = false
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lockkey-"))
+		const referent = path.join(dir, "history_item.json")
+		const link = path.join(dir, "link.json")
+
+		// A real dangling link: the walk tolerates it so the caller can queue behind
+		// the peer, but once the lock is held the strict rejection still applies. A
+		// rejection outside the protected block would leave the lock held until the
+		// stale timeout for every other writer to the same file.
+		mockedRealpath.mockImplementation(() => {
+			throw enoent
+		})
+		mockedLstat.mockImplementation(
+			async (target) => ({ isSymbolicLink: () => target === link }) as unknown as BigIntStats,
+		)
+		mockedReadlink.mockImplementation(async (target) =>
+			target === link ? referent : Promise.reject(new Error("not a link")),
+		)
+		mockedAcquireFileLock.mockImplementation(async () => {
+			order.push("lock")
+			return async () => {
+				order.push("release")
+				released = true
+			}
+		})
+
+		await expect(safeWriteJson(link, { id: "task-1" })).rejects.toThrow(enoent)
+		expect(released).toBe(true)
+		expect(order).toEqual(["lock", "release"])
 	})
 })
