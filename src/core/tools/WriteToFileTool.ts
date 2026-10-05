@@ -353,6 +353,14 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		const relPath: string | undefined = block.params.path
 		const newContent: string | undefined = block.params.content
 
+		const partialStreamFailureKey = this.getPartialStreamFailureKey(task)
+
+		// A prior streaming delta for this task already hit a fatal filesystem error.
+		// Skip further streaming work so we don't create a new partial tool message on every
+		// subsequent delta. execute() will report the error once when the block completes.
+		if (this.taskPartialStreamState.get(partialStreamFailureKey)?.streamFailed) {
+			return
+		}
 
 		// Get (or create) this task's state; registers the TaskAborted teardown listener
 		// once, so abandoned streams are torn down even if execute() never runs.
@@ -385,12 +393,6 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			task.diffViewProvider.editType = fileExists ? "modify" : "create"
 		}
 
-		// Create parent directories early for new files to prevent ENOENT errors
-		// in subsequent operations (e.g., diffViewProvider.open)
-		if (!fileExists) {
-			await createDirectoriesForFile(absolutePath)
-		}
-
 		const isWriteProtected = task.rooProtectedController?.isWriteProtected(relPath!) || false
 		const isOutsideWorkspace = isPathOutsideWorkspace(absolutePath)
 
@@ -406,14 +408,37 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		await task.ask("tool", partialMessage, block.partial).catch(() => {})
 
 		if (newContent) {
-			if (!task.diffViewProvider.isEditing) {
-				await task.diffViewProvider.open(relPath!)
-			}
+			try {
+				if (!task.diffViewProvider.isEditing) {
+					await task.diffViewProvider.open(relPath!)
+				}
 
-			await task.diffViewProvider.update(
-				everyLineHasLineNumbers(newContent) ? stripLineNumbers(newContent) : newContent,
-				false,
-			)
+				await task.diffViewProvider.update(
+					everyLineHasLineNumbers(newContent) ? stripLineNumbers(newContent) : newContent,
+					false,
+				)
+			} catch (error) {
+				// Opening or updating the diff view can throw on filesystem errors
+				// (EACCES/EROFS on read-only paths). Finalize the partial tool message
+				// so the UI spinner doesn't get stuck and reset the diff view. Do NOT
+				// rethrow: the same filesystem operation is retried in execute() once the
+				// block completes, and that authoritative non-partial path reports the
+				// error to the user. Surfacing it here too would show the same error twice.
+				// Swallowing it here is safe because the agent loop advances naturally when
+				// the non-partial block arrives (it does not depend on this throw).
+				console.error(`Error streaming write_to_file diff view:`, error)
+				// Mark the stream as failed so later deltas don't re-attempt and spawn a new
+				// partial tool message each time. Retain the original error: if the final
+				// block later fails to parse, execute() never runs and only
+				// onParameterParseFailure() can report this failure to the user.
+				partialStreamState.streamFailed = true
+				partialStreamState.streamError = error instanceof Error ? error : new Error(String(error))
+				await this.finalizePartialToolAskAfterFailure(task, partialMessage)
+				// The write was never approved: restore the document so a user save cannot
+				// persist the failed streamed content (reset() alone leaves it dirty).
+				await this.revertDiffChangesBeforeReset(task)
+				await this.resetDiffViewAfterWrite(task)
+			}
 		}
 	}
 }
