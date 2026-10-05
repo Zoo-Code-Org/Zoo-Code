@@ -1935,6 +1935,34 @@ describe("ReadFileTool", () => {
 				// The notice is added on top of the read, it does not replace it.
 				expect(pushed).toContain("1 | a")
 			})
+			it("native: a clipped slice that starts after line 1 names the slice instead of claiming a full read", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				mockedFsStat.mockResolvedValue(bigintStats())
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue(Buffer.from("a\nb\nc\nd\ne\n"))
+				mockedReadWithSlice.mockReturnValue({
+					content: "3 | c\n4 | d",
+					returnedLines: 2,
+					totalLines: 5,
+					wasTruncated: false,
+					hasClippedLines: true,
+					includedRanges: [[3, 4]],
+				})
+
+				await readFileTool.execute({ path: "clipped-slice.ts", offset: 3 }, mockTask as unknown as Task, callbacks)
+
+				const pushed = callbacks.pushToolResult.mock.calls[0][0]
+				expect(pushed).toContain("clipped in this view")
+				// Lines 1-2 were omitted, so the notice must describe the slice that was
+				// returned rather than claim the whole file was read.
+				expect(pushed).toContain("starts at line 3")
+				expect(pushed).not.toContain("The file was read in full")
+				expect(pushed).toContain("3 | c")
+			})
 
 			it("native: a truncated slice that also clipped a line reports both notices", async () => {
 				// A long line inside a slice that also cut lines off is a plausible case,
