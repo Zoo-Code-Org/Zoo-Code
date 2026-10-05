@@ -1935,6 +1935,40 @@ describe("ReadFileTool", () => {
 				// The notice is added on top of the read, it does not replace it.
 				expect(pushed).toContain("1 | a")
 			})
+			it("native: a clipped slice that starts past line 1 does not claim the file was read in full", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				mockedFsStat.mockResolvedValue(bigintStats())
+				mockedIsBinaryFile.mockResolvedValue(false)
+				mockedFsReadFile.mockResolvedValue(Buffer.from("a\nb\n"))
+				mockedReadWithSlice.mockReturnValue({
+					content: "2 | b",
+					returnedLines: 1,
+					totalLines: 2,
+					wasTruncated: false,
+					hasClippedLines: true,
+					includedRanges: [[2, 2]],
+				})
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				await readFileTool.execute({ path: "clipped.ts", offset: 2 }, mockTask as unknown as Task, callbacks)
+
+				const [, , calledComplete] = observeSpy.mock.calls[0]
+				expect(calledComplete).toBe(false)
+
+				const pushed = callbacks.pushToolResult.mock.calls[0][0]
+				expect(pushed).toContain("clipped in this view")
+				// The notice has to agree with the recorded completeness: the view
+				// started past line 1, so it cannot claim a full read.
+				expect(pushed).not.toContain("The file was read in full")
+				expect(pushed).toContain("The view starts at line 2, so lines 1-1 were not shown")
+			})
+
 
 			it("native: a truncated slice that also clipped a line reports both notices", async () => {
 				// A long line inside a slice that also cut lines off is a plausible case,
