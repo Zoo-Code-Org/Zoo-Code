@@ -248,8 +248,13 @@ describe("writeToFileTool", () => {
 				...params,
 			},
 			nativeArgs: {
-				path: (params.path ?? testFilePath) as any,
-				content: (params.content ?? testContent) as any,
+				// The missing-parameter tests inject `undefined` where
+				// NativeToolArgs["write_to_file"] declares `string`, so the casts are required to
+				// model a malformed payload.
+				path: (Object.prototype.hasOwnProperty.call(params, "path") ? params.path : testFilePath) as any,
+				content: (Object.prototype.hasOwnProperty.call(params, "content")
+					? params.content
+					: testContent) as any,
 			},
 			partial: isPartial,
 		}
@@ -273,6 +278,155 @@ describe("writeToFileTool", () => {
 
 			expect(mockCline.rooIgnoreController.validateAccess).toHaveBeenCalledWith(testFilePath)
 			expect(mockCline.diffViewProvider.open).toHaveBeenCalledWith(testFilePath)
+		})
+
+		it("finalizes the partial ask and clears per-task state when rooignore denies access", async () => {
+			// handlePartial() has no rooignore guard, so streaming deltas for a denied path
+			// still create a partial `tool` ask (partial: true) and open the diff view before
+			// execute() reaches the access check. The denial must clean up all of that:
+			// finalize the partial ask (spinner does not stick), revert the diff document so a
+			// user save cannot persist the denied content, reset the diff view (reset failures
+			// swallowed), and clear the per-task stream state (abort listener + entries).
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				let abortCleanup: (() => void) | undefined
+				mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+					if (event === RooCodeEventName.TaskAborted) {
+						abortCleanup = listener
+					}
+					return mockCline
+				})
+				// Record the relative order of revertChanges() and reset(): vitest mocks expose
+				// no invocationCallOrder, so the ordering assertion uses this sequence.
+				const diffViewCallOrder: string[] = []
+				mockCline.diffViewProvider.revertChanges.mockImplementation(async () => {
+					diffViewCallOrder.push("revert")
+				})
+				mockCline.diffViewProvider.reset.mockImplementation(async () => {
+					diffViewCallOrder.push("reset")
+					throw new Error("reset failed")
+				})
+
+				// Stream two deltas so the path stabilizes: handlePartial registers the abort
+				// cleanup and opens the partial ask + diff view for the (soon denied) path.
+				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+				expect(mockCline.ask).toHaveBeenCalledTimes(1)
+				expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(1)
+				expect(abortCleanup).toBeTypeOf("function")
+
+				// The completed block now reaches the access check, which denies the path.
+				await executeWriteFileTool({}, { fileExists: false, accessAllowed: false })
+
+				expect(mockCline.say).toHaveBeenCalledWith("rooignore_error", testFilePath)
+				// The denial finalizes without a text match: any open partial tool ask is closed.
+				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(undefined)
+				// The denied write's streamed content must be reverted from the diff document
+				// BEFORE reset() clears the state revertChanges() relies on.
+				expect(diffViewCallOrder).toEqual(["revert", "reset"])
+				expect(mockHandleError).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"Error resetting write_to_file diff view:",
+					expect.any(Error),
+				)
+				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
+	})
+
+	describe("missing-parameter early-return cleanup", () => {
+		// handlePartial() has no missing-parameter guard: two partial streaming calls
+		// stabilize the path and open the partial `tool` ask + diff view. This establishes
+		// the "partial ask is open" precondition for the missing-parameter branches below.
+		async function streamPartialAsk() {
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+		}
+
+		it("finalizes the partial ask when content is missing after partial streaming", async () => {
+			// Streaming deltas create a partial `tool` ask (partial: true), then the completed
+			// payload is missing `content`. The missing-parameter branch must finalize the ask
+			// (the spinner must not stick) and still perform the same diff-view revert / reset
+			// and per-task-state cleanup as the other early-return paths.
+			// Record the relative order of revertChanges() and reset(): vitest mocks expose
+			// no invocationCallOrder, so the ordering assertion uses this sequence. The
+			// revert mock awaits a deferred so the test proves the branch AWAITs
+			// revertChanges() before reset(): with the revert still pending, reset() must
+			// not have run yet.
+			const diffViewCallOrder: string[] = []
+			let resolveRevert: () => void = () => {}
+			const revertDeferred = new Promise<void>((resolve) => {
+				resolveRevert = resolve
+			})
+			mockCline.diffViewProvider.revertChanges.mockImplementation(async () => {
+				diffViewCallOrder.push("revert")
+				await revertDeferred
+			})
+			mockCline.diffViewProvider.reset.mockImplementation(async () => {
+				diffViewCallOrder.push("reset")
+			})
+			await streamPartialAsk()
+
+			// The missing-parameter branch awaits revertChanges() before reset(): with the
+			// deferred revert still pending, reset() must not have run yet.
+			const executePromise = executeWriteFileTool({ content: undefined }, { fileExists: false })
+			await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
+
+			resolveRevert()
+			await executePromise
+
+			expect(mockCline.sayAndCreateMissingParamError).toHaveBeenCalledWith("write_to_file", "content")
+			// The missing-parameter path finalizes without a text match: any open partial ask is closed.
+			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(undefined)
+			// The streamed content of the failed write must be reverted from the diff
+			// document before reset() clears the state revertChanges() relies on.
+			expect(diffViewCallOrder).toEqual(["revert", "reset"])
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("finalizes the partial ask when path is missing after partial streaming", async () => {
+			// Same scenario with the `path` field missing: the missing-`path` branch must run
+			// the identical partial-ask + diff-view + per-task-state cleanup. As in the
+			// content-missing test above, the revert mock awaits a deferred so the test
+			// proves the branch AWAITs revertChanges() before reset(): with the revert
+			// still pending, reset() must not have run yet.
+			const diffViewCallOrder: string[] = []
+			let resolveRevert: () => void = () => {}
+			const revertDeferred = new Promise<void>((resolve) => {
+				resolveRevert = resolve
+			})
+			mockCline.diffViewProvider.revertChanges.mockImplementation(async () => {
+				diffViewCallOrder.push("revert")
+				await revertDeferred
+			})
+			mockCline.diffViewProvider.reset.mockImplementation(async () => {
+				diffViewCallOrder.push("reset")
+			})
+			await streamPartialAsk()
+
+			// The missing-parameter branch awaits revertChanges() before reset(): with the
+			// deferred revert still pending, reset() must not have run yet.
+			const executePromise = executeWriteFileTool({ path: undefined }, { fileExists: false })
+			await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
+
+			resolveRevert()
+			await executePromise
+
+			expect(mockCline.sayAndCreateMissingParamError).toHaveBeenCalledWith("write_to_file", "path")
+			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(undefined)
+			// The diff document must be reverted before reset() clears the state
+			// revertChanges() relies on.
+			expect(diffViewCallOrder).toEqual(["revert", "reset"])
+			expect(mockHandleError).not.toHaveBeenCalled()
 		})
 	})
 
@@ -785,7 +939,61 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 		})
 
+		it("uses safe reset and clears partial state when path is missing", async () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				let abortCleanup: (() => void) | undefined
+				mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+					if (event === RooCodeEventName.TaskAborted) {
+						abortCleanup = listener
+					}
+					return mockCline
+				})
+				mockCline.diffViewProvider.reset.mockRejectedValue(new Error("reset failed"))
 
+				await executeWriteFileTool({}, { isPartial: true })
+				await executeWriteFileTool({ path: "" })
+
+				expect(mockCline.recordToolError).toHaveBeenCalledWith("write_to_file")
+				expect(mockPushToolResult).toHaveBeenCalledWith("Missing param error")
+				expect(mockHandleError).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"Error resetting write_to_file diff view:",
+					expect.any(Error),
+				)
+				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
+
+		it("uses safe reset and clears partial state when content is missing", async () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				let abortCleanup: (() => void) | undefined
+				mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+					if (event === RooCodeEventName.TaskAborted) {
+						abortCleanup = listener
+					}
+					return mockCline
+				})
+				mockCline.diffViewProvider.reset.mockRejectedValue(new Error("reset failed"))
+
+				await executeWriteFileTool({}, { isPartial: true })
+				await executeWriteFileTool({ content: undefined })
+
+				expect(mockCline.recordToolError).toHaveBeenCalledWith("write_to_file")
+				expect(mockPushToolResult).toHaveBeenCalledWith("Missing param error")
+				expect(mockHandleError).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"Error resetting write_to_file diff view:",
+					expect.any(Error),
+				)
+				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
 
 		it("swallows partial streaming errors instead of surfacing a duplicate error bubble", async () => {
 			// The same filesystem operation is retried in execute() once the block completes,

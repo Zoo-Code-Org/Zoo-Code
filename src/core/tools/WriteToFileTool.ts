@@ -213,7 +213,14 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			task.consecutiveMistakeCount++
 			task.recordToolError("write_to_file")
 			pushToolResult(await task.sayAndCreateMissingParamError("write_to_file", "path"))
-			await task.diffViewProvider.reset()
+			// handlePartial() has no missing-parameter guard, so streaming deltas for a
+			// stabilized path may already have created a partial `tool` ask (partial: true)
+			// before execute() saw the malformed payload. Finalize it so the UI spinner
+			// does not stay stuck, mirroring the rooignore and execute-error cleanups.
+			await this.finalizePartialToolAskAfterFailure(task)
+			await this.revertDiffChangesBeforeReset(task)
+			await this.resetDiffViewAfterWrite(task)
+			this.resetTaskPartialState(task)
 			return
 		}
 
@@ -221,7 +228,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			task.consecutiveMistakeCount++
 			task.recordToolError("write_to_file")
 			pushToolResult(await task.sayAndCreateMissingParamError("write_to_file", "content"))
-			await task.diffViewProvider.reset()
+			// Same partial-ask cleanup as the missing-`path` branch above: a partial `tool`
+			// ask created during streaming would otherwise stay open (partial: true).
+			await this.finalizePartialToolAskAfterFailure(task)
+			await this.revertDiffChangesBeforeReset(task)
+			await this.resetDiffViewAfterWrite(task)
+			this.resetTaskPartialState(task)
 			return
 		}
 
@@ -230,6 +242,19 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		if (!accessAllowed) {
 			await task.say("rooignore_error", relPath)
 			pushToolResult(formatResponse.rooIgnoreError(relPath))
+			// handlePartial() has no rooignore guard, so streaming deltas for this denied
+			// path may already have created a partial `tool` ask (partial: true) and opened
+			// the diff view before execute() reached the access check. Denying here without
+			// cleanup would leave the UI spinner stuck (partial: true), the diff view open
+			// with the denied content still dirty in the editor, and this task's per-task
+			// stream state leaked. Perform the same cleanup the try/finally path does
+			// before returning.
+			await this.finalizePartialToolAskAfterFailure(task)
+			// The write was denied before approval: restore the document so a user save
+			// cannot persist the streamed content.
+			await this.revertDiffChangesBeforeReset(task)
+			await this.resetDiffViewAfterWrite(task)
+			this.resetTaskPartialState(task)
 			return
 		}
 
