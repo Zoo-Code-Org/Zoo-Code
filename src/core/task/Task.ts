@@ -2072,10 +2072,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const autoApprovalDecision = isAutoAnswered ? approval.decision : undefined
 
 		// Re-check: an abort during the getState/checkAutoApproval awaits must not post an ask row.
+		// No queued claim exists yet at this point — claiming is deferred to the handoff
+		// branch below, which owns its release — so there is nothing to release here.
 		if (this.abort) {
-			if (queuedMessage) {
-				this.messageQueueService.releaseMessage(queuedMessage.id)
-			}
 			throw new Error(`[RooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
 		}
 
