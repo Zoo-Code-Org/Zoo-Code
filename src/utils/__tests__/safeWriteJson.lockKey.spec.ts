@@ -61,6 +61,9 @@ describe("safeWriteJson lock key under a peer commit", () => {
 
 		// The lock key is the key every other writer to this file uses, so the caller
 		// queued behind the peer instead of failing before the lock.
+		// The async rejection is what lets the ENOENT branch run, so the symlink
+		// check is part of the path under test rather than skipped by a sync throw.
+		expect(mockedLstat).toHaveBeenCalledWith(link)
 		expect(mockedAcquireFileLock).toHaveBeenCalledWith(referent)
 		expect(order).toEqual(["resolve-failed", "lock", "resolve", "resolve"])
 		expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ id: "task-1" })
