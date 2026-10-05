@@ -130,15 +130,13 @@ export class CodeIndexOrchestrator {
 		const signal = this._abortController.signal
 		this.stateManager.setSystemState("Indexing", "Initializing services...")
 
-		// Track whether we successfully connected to Qdrant and started indexing
-		// This helps us decide whether to preserve cache on error
-		let indexingStarted = false
+		// Only clean up collections created by this run; existing data must survive failed retries.
+		let clearIndexOnError = false
 
 		try {
 			const collectionCreated = await this.vectorStore.initialize()
 
-			// Successfully connected to Qdrant
-			indexingStarted = true
+			clearIndexOnError = collectionCreated
 
 			if (collectionCreated) {
 				await this.cacheManager.clearCacheFile()
@@ -188,37 +186,29 @@ export class CodeIndexOrchestrator {
 			}
 
 			console.error("[CodeIndexOrchestrator] Error during indexing:", error)
+			// Scanner/provider errors and stacks may contain local paths or other private data.
+			// Keep details local; send only a fixed failure category across the telemetry boundary.
 			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-				error: error instanceof Error ? error.message : String(error),
-				stack: error instanceof Error ? error.stack : undefined,
+				error: "Indexing failed",
 				location: "startIndexing",
 			})
-			if (indexingStarted) {
+			if (clearIndexOnError) {
 				try {
 					await this.vectorStore.clearCollection()
 				} catch (cleanupError) {
 					console.error("[CodeIndexOrchestrator] Failed to clean up after error:", cleanupError)
 					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-						error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
-						stack: cleanupError instanceof Error ? cleanupError.stack : undefined,
+						error: "Index cleanup failed",
 						location: "startIndexing.cleanup",
 					})
 				}
-			}
-
-			// Only clear cache if indexing had started (Qdrant connection succeeded)
-			// If we never connected to Qdrant, preserve cache for incremental scan when it comes back
-			if (indexingStarted) {
 				// Indexing started but failed mid-way - clear cache to avoid cache-Qdrant mismatch
 				await this.cacheManager.clearCacheFile()
 				console.log(
 					"[CodeIndexOrchestrator] Indexing failed after starting. Clearing cache to avoid inconsistency.",
 				)
 			} else {
-				// Never connected to Qdrant - preserve cache for future incremental scan
-				console.log(
-					"[CodeIndexOrchestrator] Failed to connect to Qdrant. Preserving cache for future incremental scan.",
-				)
+				console.log("[CodeIndexOrchestrator] Preserving existing index and cache for a retry.")
 			}
 
 			this.stateManager.setSystemState(
