@@ -45,8 +45,12 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			})
 		// Only isSymbolicLink() is consulted by the guard, so the double carries
 		// just that method.
-		mockedLstat.mockImplementation(async (target) => ({ isSymbolicLink: () => target === link } as unknown as BigIntStats))
-		mockedReadlink.mockImplementation(async (target) => (target === link ? referent : Promise.reject(new Error("not a link"))))
+		mockedLstat.mockImplementation(
+			async (target) => ({ isSymbolicLink: () => target === link }) as unknown as BigIntStats,
+		)
+		mockedReadlink.mockImplementation(async (target) =>
+			target === link ? referent : Promise.reject(new Error("not a link")),
+		)
 		mockedAcquireFileLock.mockImplementation(async () => {
 			order.push("lock")
 			return async () => {}
