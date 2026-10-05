@@ -163,6 +163,19 @@ const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
 export const MODEL_FETCH_TIMEOUT_MS = 5_000
 const QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const
 
+// Compares two queued-entry image lists by value. An edit replaces the entry's
+// array with a fresh one, so identity alone cannot tell "edited to equal
+// content" apart from "not edited".
+function queuedEntryImagesEqual(a: string[] | undefined, b: string[] | undefined): boolean {
+	if (a === b) {
+		return true
+	}
+	if (!a || !b || a.length !== b.length) {
+		return false
+	}
+	return a.every((image, index) => image === b[index])
+}
+
 type QueuedAskResolution = { response: ClineAskResponse; requiresDurableAck: boolean }
 
 /**
@@ -1105,6 +1118,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.pendingSubmittedQueuedMessageId = undefined
 			}
 		}
+		// The entry stays claimed (and editable in the queue UI) for the whole
+		// ack, so its content can drift from the submission copy while saves
+		// retry. Snapshot the entry now and reconcile the row against it before
+		// every save; comparing against this snapshot rather than the row keeps
+		// the trimmed submission text from reading as an edit next to the
+		// untrimmed entry text.
+		const entrySnapshot = (() => {
+			const entry = this.messageQueueService.messages.find((queued) => queued.id === messageId)
+			return entry ? { text: entry.text, images: entry.images } : undefined
+		})()
 		try {
 			try {
 				if (row) {
@@ -1135,6 +1158,49 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.queuedFeedbackRows.set(messageId, row)
 					await this.addToClineMessages(row)
 				}
+				for (let attempt = 0; attempt <= QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length; attempt++) {
+					if (this.abort || this.abandoned) {
+						this.messageQueueService.releaseMessage(messageId)
+						return false
+					}
+					if (entrySnapshot) {
+						// An edit during a failed-save backoff changed only the queue
+						// entry: fold it into the row before this attempt's save so the
+						// ack persists the edit instead of the stale submission copy.
+						await this.reconcileQueuedFeedbackRowWithQueueEntry(row, messageId, entrySnapshot)
+					}
+					if (await this.saveClineMessages()) {
+						// The save clones history up front, so an edit that lands
+						// while it is in flight is missing from the persisted copy.
+						// Confirm the entry still matches the row and repeat the save
+						// when it does not; only then may the entry be removed.
+						let confirmed = !entrySnapshot
+						while (entrySnapshot && !this.abort && !this.abandoned) {
+							if (!(await this.reconcileQueuedFeedbackRowWithQueueEntry(row, messageId, entrySnapshot))) {
+								confirmed = true
+								break
+							}
+							if (!(await this.saveClineMessages())) {
+								break
+							}
+						}
+						if (confirmed) {
+							this.queuedFeedbackRows.delete(messageId)
+							return this.messageQueueService.removeMessage(messageId)
+						}
+					}
+					if (attempt < QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length) {
+						// Interruptible backoff: an abort or abandonment during the wait
+						// resolves promptly (releasing the claim at the loop-top check)
+						// instead of retaining the task through the full delay.
+						await this.waitForQueuedFeedbackBackoff(QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS[attempt])
+					}
+				}
+				console.error(
+					`[Task#persistQueuedFeedbackAndAcknowledge] Failed to durably save queued feedback ${messageId} after ${QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length + 1} attempts`,
+				)
+				this.messageQueueService.releaseMessage(messageId)
+				return false
 			} catch (error) {
 				// A failed write must not leave the message claimed: release it so a
 				// later drain can redeliver it. (No-op when the drain path already
@@ -1145,30 +1211,37 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				releasePendingTracker()
 				throw error
 			}
-			for (let attempt = 0; attempt <= QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length; attempt++) {
-				if (this.abort || this.abandoned) {
-					this.messageQueueService.releaseMessage(messageId)
-					return false
-				}
-				if (await this.saveClineMessages()) {
-					this.queuedFeedbackRows.delete(messageId)
-					return this.messageQueueService.removeMessage(messageId)
-				}
-				if (attempt < QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length) {
-					// Interruptible backoff: an abort or abandonment during the wait
-					// resolves promptly (releasing the claim at the loop-top check)
-					// instead of retaining the task through the full delay.
-					await this.waitForQueuedFeedbackBackoff(QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS[attempt])
-				}
-			}
-			console.error(
-				`[Task#persistQueuedFeedbackAndAcknowledge] Failed to durably save queued feedback ${messageId} after ${QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length + 1} attempts`,
-			)
-			this.messageQueueService.releaseMessage(messageId)
-			return false
 		} finally {
 			releasePendingTracker()
 		}
+	}
+
+	/**
+	 * Fold the latest content of a retained (claimed) queue entry into its
+	 * in-flight feedback row. The queue UI accepts edits while the entry is
+	 * claimed, so during a failed-save backoff an edit would otherwise change
+	 * only the entry and be lost when the ack removes it. The row receives the
+	 * trimmed text, mirroring what submitting the entry would have sent.
+	 * Returns true when an edit was folded in.
+	 */
+	private async reconcileQueuedFeedbackRowWithQueueEntry(
+		row: ClineMessage,
+		messageId: string,
+		snapshot: { text: string; images?: string[] },
+	): Promise<boolean> {
+		const latest = this.messageQueueService.messages.find((queued) => queued.id === messageId)
+		if (!latest) {
+			return false
+		}
+		if (latest.text === snapshot.text && queuedEntryImagesEqual(latest.images, snapshot.images)) {
+			return false
+		}
+		snapshot.text = latest.text
+		snapshot.images = latest.images
+		row.text = latest.text.trim()
+		row.images = latest.images
+		await this.updateClineMessage(row)
+		return true
 	}
 
 	private waitForQueuedFeedbackBackoff(ms: number): Promise<void> {

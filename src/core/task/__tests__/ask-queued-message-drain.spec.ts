@@ -283,6 +283,48 @@ describe("Task.ask queued message drain", () => {
 		}
 	})
 
+	it("persists an entry edit made during a failed-save backoff", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+		const submitSpy = vi.spyOn(task, "submitUserMessage")
+
+		task.messageQueueService.addMessage("original text")
+		// Between-turns drain: submits the message and tracks it as pending.
+		await expect(task.processQueuedMessages()).resolves.toBe(true)
+		expect(submitSpy).toHaveBeenCalledTimes(1)
+
+		// A completion ask claims the retained entry through the durable path.
+		const result = await task.ask("completion_result", "Done", false)
+		expect(result.queuedMessageId).toBe(task.messageQueueService.messages[0]?.id)
+
+		const access = getQueueTaskTestAccess(task)
+		access.say = vi.fn().mockResolvedValue(undefined)
+		access.saveClineMessages = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true)
+
+		vi.useFakeTimers()
+		try {
+			const persistence = task.persistQueuedFeedbackAndAcknowledge(
+				result.queuedMessageId!,
+				result.text,
+				result.images,
+			)
+			// First save attempt fails; the ack is now waiting in the backoff delay.
+			await vi.advanceTimersByTimeAsync(0)
+			expect(task.messageQueueService.isEmpty()).toBe(false)
+			// The queue UI still accepts edits while the entry is retained.
+			task.editQueuedMessage(result.queuedMessageId!, "edited text")
+			await vi.advanceTimersByTimeAsync(250)
+			await expect(persistence).resolves.toBe(true)
+		} finally {
+			vi.useRealTimers()
+		}
+
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+		// One retry after the initial failure, with no extra save storm.
+		expect(access.saveClineMessages).toHaveBeenCalledTimes(2)
+		// The ack persisted the edit, not the stale submission copy.
+		expect(access.updateClineMessage).toHaveBeenCalledWith(expect.objectContaining({ text: "edited text" }))
+	})
+
 	it("releases the drain tracker when a claimed durable ack keeps failing", async () => {
 		const task = await createTask({ getState: async () => ({}) })
 		const submitSpy = vi.spyOn(task, "submitUserMessage")
