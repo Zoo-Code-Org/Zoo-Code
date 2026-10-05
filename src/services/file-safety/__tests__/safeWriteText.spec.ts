@@ -4,7 +4,14 @@ import { execFile } from "child_process"
 import type { ChildProcess } from "child_process"
 import * as path from "path"
 
-import { RollbackFailureError, safeWriteText, type SafeWriteTextOptions } from "../safeWriteText"
+import {
+	PostCommitDurabilityError,
+	resolveLockKey,
+	RollbackFailureError,
+	safeWriteText,
+	StagingPathError,
+	type SafeWriteTextOptions,
+} from "../safeWriteText"
 
 // Full mock for fs/promises — all methods are vi.fn() stubs
 vi.mock("fs/promises", () => ({
@@ -15,6 +22,7 @@ vi.mock("fs/promises", () => ({
 	rmdir: vi.fn(),
 	realpath: vi.fn(),
 	lstat: vi.fn(),
+	readlink: vi.fn(),
 }))
 
 // Full mock for fs — all sync methods are vi.fn() stubs. Stats is a bare
@@ -49,6 +57,25 @@ function _dirPath(filePath: string): string {
 	return path.dirname(_resolvedTarget(filePath))
 }
 // Minimal Stats stand-in: the SUT only reads `.mode` from it.
+// Async lstat stand-in: the SUT only asks whether the path is a link or a file.
+function _fileStats(isLink: boolean) {
+	return { isSymbolicLink: () => isLink, isFile: () => !isLink }
+}
+
+function mockDefaults(): void {
+	vi.resetAllMocks()
+	// After resetAllMocks, vi.fn() returns undefined — restore promise defaults.
+	vi.mocked(fs.mkdir).mockResolvedValue(undefined)
+	vi.mocked(fs.access).mockResolvedValue(undefined)
+	vi.mocked(fs.rename).mockResolvedValue(undefined)
+	vi.mocked(fs.unlink).mockResolvedValue(undefined)
+	vi.mocked(fs.rmdir).mockResolvedValue(undefined)
+	// Existing-target default: a regular 0o644 file.
+	vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o644))
+	// Staged-file default: a regular file, not a link, so a caller-supplied
+	// tempPath passes the location and file-type check by default.
+	vi.mocked(fs.lstat).mockResolvedValue(_fileStats(false))
+}
 function _stats(mode: number): fsSync.Stats {
 	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats
 	Object.assign(s, { mode })
@@ -59,15 +86,7 @@ function _stats(mode: number): fsSync.Stats {
 
 describe("safeWriteText", () => {
 	beforeEach(() => {
-		vi.resetAllMocks()
-		// After resetAllMocks, vi.fn() returns undefined — restore promise defaults.
-		vi.mocked(fs.mkdir).mockResolvedValue(undefined)
-		vi.mocked(fs.access).mockResolvedValue(undefined)
-		vi.mocked(fs.rename).mockResolvedValue(undefined)
-		vi.mocked(fs.unlink).mockResolvedValue(undefined)
-		vi.mocked(fs.rmdir).mockResolvedValue(undefined)
-		// Existing-target default: a regular 0o644 file.
-		vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o644))
+		mockDefaults()
 		// Default sync-write behaviour: report that all requested bytes were
 		// written. The Buffer overload passes (fd, buffer, offset, length),
 		// so the fourth argument is the requested length.
@@ -577,7 +596,7 @@ describe("safeWriteText", () => {
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 
-			const customTempPath = "/tmp/custom-temp.tmp"
+			const customTempPath = "/tmp/test-dir/custom-temp.tmp"
 
 			// platform:linux skips DACL entirely so this test focuses on tempPath only
 			await safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" })
@@ -604,7 +623,7 @@ describe("safeWriteText", () => {
 			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o600))
 			vi.mocked(fsSync.openSync).mockReturnValue(2)
 
-			const customTempPath = "/tmp/custom-temp.tmp"
+			const customTempPath = "/tmp/test-dir/custom-temp.tmp"
 
 			await safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" })
 
@@ -624,7 +643,7 @@ describe("safeWriteText", () => {
 			})
 			vi.mocked(fsSync.openSync).mockReturnValue(2)
 
-			const customTempPath = "/tmp/custom-temp.tmp"
+			const customTempPath = "/tmp/test-dir/custom-temp.tmp"
 
 			await safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" })
 
@@ -642,7 +661,7 @@ describe("safeWriteText", () => {
 			})
 			vi.mocked(fsSync.openSync).mockReturnValue(2)
 
-			const customTempPath = "/tmp/custom-temp.tmp"
+			const customTempPath = "/tmp/test-dir/custom-temp.tmp"
 
 			// A target that cannot be stat'd is not a fresh target: publishing with
 			// the default mode would widen a restrictive target through the rename.
@@ -674,7 +693,7 @@ describe("safeWriteText", () => {
 			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o444))
 			vi.mocked(fsSync.openSync).mockReturnValue(3)
 
-			const customTempPath = "/tmp/custom-temp.tmp"
+			const customTempPath = "/tmp/test-dir/custom-temp.tmp"
 
 			await safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" })
 
@@ -843,7 +862,7 @@ describe("safeWriteText", () => {
 			expect(fsSync.closeSync).toHaveBeenCalledWith(2)
 		})
 
-		it("treats a failed parent-directory fsync as best-effort", async () => {
+		it("reports a failed parent-directory fsync instead of claiming a durable write", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync)
@@ -852,8 +871,13 @@ describe("safeWriteText", () => {
 					throw new Error("EBADF")
 				})
 
-			// the content rename already committed; a missing directory fsync is not fatal
-			await safeWriteText(targetPath, "data", { platform: "linux" })
+			// The content rename committed, so the caller can still find the data at
+			// the target; what the write cannot claim is that the directory entry
+			// reached the disk. Returning success here would claim durability the
+			// filesystem did not grant.
+			await expect(safeWriteText(targetPath, "data", { platform: "linux" })).rejects.toThrow(
+				PostCommitDurabilityError,
+			)
 
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 		})
@@ -918,5 +942,114 @@ describe("safeWriteText", () => {
 			await safeWriteText(targetPath, bytes, { platform: "linux" })
 			expect(fsSync.writeSync).toHaveBeenCalledWith(1, bytes, 0, 4)
 		})
+	})
+})
+
+// ── Test 12: lock key, staging path, and post-commit durability ─────────────
+
+describe("resolveLockKey", () => {
+	beforeEach(() => mockDefaults())
+
+	it("canonicalizes the parent directory, not just the file", async () => {
+		vi.mocked(fs.realpath).mockImplementation(async (target: string) => {
+			if (target === "/tmp/linkdir/file.json") return "/real/dir/file.json"
+			if (target === "/real/dir") return "/real/dir"
+			return target
+		})
+
+		// The key is the canonical directory plus the basename, so a symlinked
+		// ancestor and its referent share one lock.
+		await expect(resolveLockKey("/tmp/linkdir/file.json")).resolves.toBe(path.join("/real/dir", "file.json"))
+	})
+
+	it("computes a key for a dangling link, which resolvePublishTarget refuses", async () => {
+		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		vi.mocked(fs.realpath).mockRejectedValue(enoent)
+		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
+		vi.mocked(fs.readlink).mockImplementation(async (target: string) =>
+			target === "/tmp/linkdir/file.json" ? "referent.json" : undefined,
+		)
+
+		// Mid-commit a peer writer renames the referent away and back, so the key
+		// must still be computable while the link dangles.
+		await expect(resolveLockKey("/tmp/linkdir/file.json")).resolves.toBe(
+			path.resolve(path.join("/tmp/linkdir", "referent.json")),
+		)
+	})
+
+	it("terminates on a two-link cycle instead of walking forever", async () => {
+		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		vi.mocked(fs.realpath).mockRejectedValue(enoent)
+		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
+		// Every readlink answers with the same link, so an unbounded walk would
+		// never end; the bounded walk returns the key it actually reached.
+		vi.mocked(fs.readlink).mockImplementation(async () => "a.json")
+
+		await expect(resolveLockKey("/tmp/linkdir/a.json")).resolves.toBe(
+			path.resolve(path.join("/tmp/linkdir", "a.json")),
+		)
+		expect(fs.readlink).toHaveBeenCalledTimes(8)
+	})
+})
+
+describe("caller-supplied staging path", () => {
+	beforeEach(() => mockDefaults())
+
+	it("rejects a staging file outside the target's directory before writing anything", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+
+		// A rename across filesystems fails with EXDEV, and a path elsewhere lets
+		// a caller publish an unrelated file onto the target.
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: "/tmp/other-dir/x.tmp", platform: "linux" }),
+		).rejects.toThrow(StagingPathError)
+		expect(fsSync.openSync).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("rejects a staging path that is a symlink", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
+
+		// Renaming a link over the target publishes whatever the link points at.
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: "/tmp/test-dir/x.tmp", platform: "linux" }),
+		).rejects.toThrow(StagingPathError)
+		expect(fsSync.openSync).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+})
+
+describe("cleanup before a rollback failure is reported", () => {
+	beforeEach(() => mockDefaults())
+
+	it("releases the staged file and its own staging directory before throwing", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		let callCount = 0
+		vi.mocked(fs.rename).mockImplementation(async () => {
+			callCount++
+			if (callCount === 1) return // target -> backup
+			if (callCount === 2) throw new Error("ENOSPC") // temp -> target fails
+			throw new Error("EACCES") // the rollback rename fails too
+		})
+
+		await expect(safeWriteText(targetPath, "data", { backup: true, platform: "linux" })).rejects.toThrow(
+			RollbackFailureError,
+		)
+
+		// The backup is what the caller can still recover, so it stays on disk; the
+		// staging file and this write's own directory must not leak alongside it.
+		expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		expect(fs.rmdir).toHaveBeenCalled()
+
+		const failingRenameOrder = vi.mocked(fs.rename).mock.invocationCallOrder[2]
+		const unlinkOrder = vi.mocked(fs.unlink).mock.invocationCallOrder[0]
+		const rmdirOrder = vi.mocked(fs.rmdir).mock.invocationCallOrder[0]
+		expect(unlinkOrder).toBeGreaterThan(failingRenameOrder)
+		expect(rmdirOrder).toBeGreaterThan(failingRenameOrder)
 	})
 })
