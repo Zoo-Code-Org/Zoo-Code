@@ -352,6 +352,11 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 	To read more: Use the read_file tool with offset=${nextOffset} and limit=${limit}.
 	
 	${result.content}`
+			if (result.hasClippedLines) {
+				// The slice cut lines off and also clipped long lines inside it, so both
+				// notices belong to the response.
+				output += `\nNote: Some lines in this view exceed ${MAX_LINE_LENGTH} characters and were clipped in this view.`
+			}
 		} else if (result.hasClippedLines) {
 			// Every line was returned, so there is no later offset to read: report the
 			// clipping without a next-offset hint, and keep the read incomplete so a
@@ -846,6 +851,11 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					readComplete = !result.wasTruncated && !result.hasClippedLines
 					if (result.wasTruncated) {
 						content += `\n\n[File truncated: showing ${result.returnedLines} of ${result.totalLines} total lines]`
+						if (result.hasClippedLines) {
+							// Both notices: the slice was truncated and a line inside it was
+							// clipped.
+							content += `\n\n[Some lines exceed the per-line length cap and were clipped in this view]`
+						}
 					} else if (result.hasClippedLines) {
 						content += `\n\n[Some lines exceed the per-line length cap and were clipped in this view]`
 					}
