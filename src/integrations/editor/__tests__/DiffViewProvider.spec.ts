@@ -1137,6 +1137,33 @@ describe("DiffViewProvider", () => {
 			expect(vi.mocked(fs.stat)).toHaveBeenNthCalledWith(2, `${mockCwd}/observed.ts`, { bigint: true })
 		})
 
+		it("open() records no observation when the post-read stat rejects", async () => {
+			const mockEditor = mockTextEditor(`${mockCwd}/observed.ts`)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockTextDocument(`${mockCwd}/observed.ts`)), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			vi.mocked(fs.stat)
+				.mockResolvedValueOnce(previewStats)
+				.mockRejectedValueOnce(Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }))
+			diffViewProvider.editType = "modify"
+			mockTask.observationRegistry.clear()
+
+			await diffViewProvider.open("observed.ts")
+
+			expect(mockTask.observationRegistry.has(`${mockCwd}/observed.ts`)).toBe(false)
+			// The accepted save is a full-file replacement, so an unobserved target still
+			// fails closed instead of publishing content built on a preview that could not
+			// be tied to a version token.
+			await expect(
+				diffViewProvider.saveDirectly("observed.ts", "new content", false, false, 0, "modify"),
+			).rejects.toThrow(
+				"File already exists at /mock/cwd/observed.ts and was not read before this write -- read the file first, then retry.",
+			)
+		})
 		it("open() observes the empty placeholder of a new file so the accepted save can be guarded", async () => {
 			const mockEditor = mockTextEditor(`${mockCwd}/brand-new.ts`)
 			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
