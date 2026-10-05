@@ -56,6 +56,41 @@ export class RollbackFailureError extends Error {
 		this.backupPath = backupPath
 	}
 }
+
+/**
+ * A caller-supplied staging path that is not a file this write may publish: it
+ * sits outside the target's directory (so the commit rename would cross
+ * filesystems) or is not a regular file. Rejecting it before any write keeps the
+ * target from being replaced by whatever the path points at.
+ */
+export class StagingPathError extends Error {
+	readonly stagingPath: string
+
+	constructor(message: string, stagingPath: string) {
+		super(message)
+		this.name = "StagingPathError"
+		this.stagingPath = stagingPath
+	}
+}
+
+/**
+ * The commit rename succeeded but the parent-directory fsync did not, so the
+ * directory entry is not known to be durable. The content is at the target; the
+ * caller cannot assume it survives a crash. Reported as its own error so a
+ * successful return never claims durability the filesystem did not grant.
+ */
+export class PostCommitDurabilityError extends Error {
+	readonly targetPath: string
+
+	constructor(targetPath: string, cause: unknown) {
+		super(
+			"The rename committed but the parent directory could not be fsynced -- the content is at the target path reported on this error, and the directory entry may not be durable.",
+			{ cause },
+		)
+		this.name = "PostCommitDurabilityError"
+		this.targetPath = targetPath
+	}
+}
 // -- helpers ---------------------------------------------------------------
 
 /** Generate a unique temp file name in the given directory. */
@@ -216,6 +251,29 @@ export async function safeWriteText(
 	let stagingDir: string | null = null
 	let tempPath: string
 	if (options?.tempPath) {
+		// A caller-supplied staging file is only safe when it is the file this
+		// write is staging, not an arbitrary path. Two properties are checked:
+		// it must sit beside the resolved target (a rename across filesystems
+		// fails with EXDEV, and a path elsewhere lets a caller publish an
+		// unrelated file onto the target), and it must be a regular file rather
+		// than a link — renaming a link over the target publishes whatever the
+		// link points at, which is the same trust problem as writing through a
+		// dangling symlink in resolvePublishTarget.
+		const supplied = path.resolve(options.tempPath)
+		if (path.dirname(supplied) !== path.resolve(dirPath)) {
+			throw new StagingPathError(
+				`Staging file must sit in the target's directory (${dirPath}), got ${supplied}`,
+				supplied,
+			)
+		}
+		const stagingStat = await fs.lstat(supplied)
+		if (stagingStat.isSymbolicLink() || !stagingStat.isFile()) {
+			throw new StagingPathError(
+				`Staging file must be a regular file, not ${stagingStat.isSymbolicLink() ? "a symlink" : "another file type"}`,
+				supplied,
+			)
+		}
+		// The caller's own path is used as given; only the check is canonical.
 		tempPath = options.tempPath
 	} else {
 		stagingDir = _stagingDir(dirPath)
@@ -227,6 +285,9 @@ export async function safeWriteText(
 	// Non-null only when the win32 step-2 block saved a successful DACL dump:
 	// it gates the step-5 restore and is tracked for the cleanup unlinks.
 	let daclDumpPath: string | null = null
+	// Set when the rollback itself fails, so cleanup runs before the error that
+	// reports the partial state is thrown.
+	let rollbackFailure: unknown = undefined
 
 	try {
 		// -- Step 1: write content to staging temp file -------------------
@@ -348,8 +409,14 @@ export async function safeWriteText(
 					} finally {
 						fsSync.closeSync(dirFd)
 					}
-				} catch {
-					// best-effort: the content rename already committed
+				} catch (error: unknown) {
+					// The content rename committed, but the directory entry that
+					// points at it is not known to be durable. Reporting success
+					// here would let a caller believe the write survives a crash,
+					// so the failure is surfaced as its own error: the caller can
+					// still find the content at the target, it just cannot rely on
+					// the directory entry having reached the disk.
+					throw new PostCommitDurabilityError(targetPath, error)
 				}
 			}
 
@@ -394,8 +461,11 @@ export async function safeWriteText(
 				// The content survives only at the backup path now, and the canonical
 				// target is gone. Reporting just the publish failure would leave the
 				// caller with data it cannot find at the expected path, so the
-				// partial-failure state travels with the error.
-				throw new RollbackFailureError(originalError, rollbackError, backupPath)
+				// partial-failure state travels with the error. The staged temp file
+				// and this write's staging directory are released first: a rollback
+				// failure is already a hard enough state to reason about without also
+				// leaking the staging file.
+				rollbackFailure = rollbackError
 			}
 		}
 		try {
@@ -413,6 +483,10 @@ export async function safeWriteText(
 
 		if (daclDumpPath !== null) {
 			await fs.unlink(daclDumpPath).catch(() => {})
+		}
+
+		if (rollbackFailure) {
+			throw new RollbackFailureError(originalError, rollbackFailure, backupPath)
 		}
 
 		throw originalError
