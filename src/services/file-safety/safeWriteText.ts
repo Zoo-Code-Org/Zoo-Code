@@ -47,7 +47,7 @@ export class RollbackFailureError extends Error {
 
 	constructor(publishError: unknown, rollbackError: unknown, backupPath: string) {
 		super(
-			"Publish failed and the backup could not be restored to its original path -- the content is preserved at the backup location reported on this error.",
+			`Publish failed (${publishError instanceof Error ? publishError.message : String(publishError)}) and the backup could not be restored to its original path -- the content is preserved at the backup location reported on this error.`,
 			{ cause: publishError },
 		)
 		this.name = "RollbackFailureError"
