@@ -194,8 +194,8 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 
 			// Real symlinks are unavailable in this CI lane, so the alias is
 			// simulated through realpath, as in the safeWriteJson lock test.
-			// Only the file resolves through the alias; the directory is canonicalized by
-			// The directory is canonicalized by the real fs exactly as in production, so the key
+			// Only the file resolves through the alias; the directory is canonicalized by the
+			// the real fs exactly as in production, so the key matches the canonical directory
 			const realpathSpy = vi
 				.spyOn(fs, "realpath")
 				.mockImplementation(async (target) =>
@@ -225,12 +225,12 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			await store.upsert(makeHistoryItem({ id: "alias-dangling" }))
 			const aliasPath = historyFilePath(storagePath, "alias-dangling")
 			const referentPath = path.join(storagePath, "tasks", "alias-dangling", "referent-history.json")
-			// Only the file resolves through the alias; the directory is canonicalized by
-			// The directory is canonicalized by the real fs exactly as in production, so the key
+			// Only the file resolves through the alias; the directory is canonicalized by the
+			// the real fs exactly as in production, so the key matches the canonical directory
 			const enoent = Object.assign(new Error("ENOENT"), { code: "ENOENT" })
 			const realpathSpy = vi.spyOn(fs, "realpath").mockImplementation(async (target) => {
 				if (target === aliasPath) throw enoent
-				return String(target)
+				return actualFs.realpath(String(target))
 			})
 			const lstatSpy = vi
 				.spyOn(fs, "lstat")
@@ -262,8 +262,8 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 
 			// Real symlinks are unavailable in this CI lane, so the alias is
 			// simulated through realpath, as in the safeWriteJson lock test.
-			// Only the file resolves through the alias; the directory is canonicalized by
-			// The directory is canonicalized by the real fs exactly as in production, so the key
+			// Only the file resolves through the alias; the directory is canonicalized by the
+			// the real fs exactly as in production, so the key matches the canonical directory
 			const realpathSpy = vi
 				.spyOn(fs, "realpath")
 				.mockImplementation(async (target) =>
@@ -500,8 +500,8 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			const aliasPath = historyFilePath(storagePath, "alias-batch")
 			const referentPath = path.join(storagePath, "tasks", "alias-batch", "referent-history.json")
 
-			// Only the file resolves through the alias; the directory is canonicalized by
-			// The directory is canonicalized by the real fs exactly as in production, so the key
+			// Only the file resolves through the alias; the directory is canonicalized by the
+			// the real fs exactly as in production, so the key matches the canonical directory
 			const realpathSpy = vi
 				.spyOn(fs, "realpath")
 				.mockImplementation(async (target) =>
