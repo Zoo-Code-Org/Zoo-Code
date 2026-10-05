@@ -12,7 +12,7 @@ import { fileExistsAtPath } from "../../utils/fs"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { sanitizeUnifiedDiff, computeDiffStats } from "../diff/stats"
 import { versionTokenOfStat } from "../../utils/versionToken"
-import { GuardRejectedError } from "./guardedWrite"
+import { GuardRejectedError, errorCode } from "./guardedWrite"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import type { ToolUse } from "../../shared/tools"
 import { parsePatch, ParseError, processAllHunks } from "./apply-patch"
@@ -457,7 +457,18 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					// would hand the model authority to edit a file it never read.
 					const destObs = task.observationRegistry.get(moveAbsolutePath)
 					if (destObs !== undefined) {
-						if (await fileExistsAtPath(moveAbsolutePath)) {
+						let destAbsent = false
+						try {
+							await fs.access(moveAbsolutePath)
+						} catch (error: unknown) {
+							// Only an access error that means "not there" is an absence verdict. An
+							// ELOOP or EACCES is a real I/O failure: reading it as absent would mark
+							// the destination partial and let the publish run against a path the tool
+							// never actually observed.
+							if (errorCode(error) !== "ENOENT") throw error
+							destAbsent = true
+						}
+						if (!destAbsent) {
 							// Replacing an existing destination with content built from a partial
 							// source view must be re-authorized by reading the source in full. Reject
 							// before any state changes and name the source: a remediation that names

@@ -488,7 +488,9 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		const reg = mockTask.observationRegistry
 		reg.observe(sourceKey, "7:4242:1234:1700000000123456789:1700000000789999999", false)
 		reg.observe(destKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
-		mockedFileExistsAtPath.mockImplementation(async (p) => p !== destKey)
+		mockedFsPromises.default.access.mockRejectedValueOnce(
+			Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+		)
 		const completeAtPublish: Array<boolean | undefined> = []
 		mockSaveDirectly.mockImplementationOnce(async () => {
 			completeAtPublish.push(reg.get(destKey)?.complete)
@@ -503,6 +505,33 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 
 		expect(completeAtPublish).toEqual([false])
 		expect(mockHandleError).not.toHaveBeenCalled()
+	})
+
+	it("move: propagates a non-ENOENT destination access error before changing the observation", async () => {
+		// An ELOOP is not an absence verdict. Reading it as "the destination is gone"
+		// would mark the observation partial and let the publish run against a path the
+		// tool never actually observed.
+		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
+		const destKey = path.resolve("/workspace/project", "src/new.ts")
+		const reg = mockTask.observationRegistry
+		reg.observe(sourceKey, "7:4242:1234:1700000000123456789:1700000000789999999", false)
+		reg.observe(destKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+		mockedFsPromises.default.access.mockRejectedValueOnce(
+			Object.assign(new Error("ELOOP: too many symbolic links"), { code: "ELOOP" }),
+		)
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(reg.get(destKey)?.complete).toBe(true)
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
+		expect(mockHandleError).toHaveBeenCalledWith(
+			"apply patch",
+			expect.objectContaining({ message: "ELOOP: too many symbolic links" }),
+		)
 	})
 
 	it("move: a complete source read keeps the destination complete", async () => {

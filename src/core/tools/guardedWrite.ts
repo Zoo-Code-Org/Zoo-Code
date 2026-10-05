@@ -97,7 +97,7 @@ function enqueue(pathKey: string, fn: () => Promise<void>): Promise<void> {
  * Extract a Node errno code (e.g. "ENOENT") from a thrown value, or
  * undefined when the value carries none.
  */
-function errorCode(error: unknown): string | undefined {
+export function errorCode(error: unknown): string | undefined {
 	return typeof error === "object" && error !== null && "code" in error
 		? (error as { code?: string }).code
 		: undefined
