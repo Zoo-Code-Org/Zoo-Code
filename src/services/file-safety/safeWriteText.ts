@@ -294,7 +294,9 @@ export async function safeWriteText(
 	let daclDumpPath: string | null = null
 	// Set when the rollback itself fails, so cleanup runs before the error that
 	// reports the partial state is thrown.
-	let rollbackFailure: unknown = undefined
+	// Held as a pair so the reported error still names the path the content survived at;
+	// declaring it as `unknown` alone would lose the string narrowing at the throw site.
+	let rollbackFailure: { error: unknown; backupPath: string } | null = null
 
 	try {
 		// -- Step 1: write content to staging temp file -------------------
@@ -472,7 +474,7 @@ export async function safeWriteText(
 				// and this write's staging directory are released first: a rollback
 				// failure is already a hard enough state to reason about without also
 				// leaking the staging file.
-				rollbackFailure = rollbackError
+				rollbackFailure = { error: rollbackError, backupPath }
 			}
 		}
 		try {
@@ -493,7 +495,7 @@ export async function safeWriteText(
 		}
 
 		if (rollbackFailure) {
-			throw new RollbackFailureError(originalError, rollbackFailure, backupPath)
+			throw new RollbackFailureError(originalError, rollbackFailure.error, rollbackFailure.backupPath)
 		}
 
 		throw originalError
