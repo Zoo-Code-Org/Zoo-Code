@@ -9,6 +9,7 @@ import { historyItemSchema, type HistoryItem } from "@roo-code/types"
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { LOCK_STALE_MS, withFileLock } from "../../utils/fileLock"
 import { safeWriteJson } from "../../utils/safeWriteJson"
+import { resolveLockKey } from "../../services/file-safety/safeWriteText"
 import { getStorageBasePath } from "../../utils/storage"
 import { assertValidTransition, settleRejectedCreateSubtaskAction, type HistoryItemStatus } from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
@@ -280,7 +281,10 @@ export class TaskHistoryStore {
 			// Remove per-task file (best-effort)
 			try {
 				const filePath = await this.getTaskFilePath(taskId)
-				await withFileLock(filePath, (absoluteFilePath) => fs.unlink(absoluteFilePath))
+				// Lock the resolved publish target, not the path as spelled: proper-lockfile
+				// keys the lock by the path it is given, so an alias and its referent would
+				// take two locks for one file. The unlink still removes the named path.
+				await withFileLock(await this.lockKeyFor(filePath), () => fs.unlink(filePath))
 			} catch {
 				// File may already be deleted
 			}
@@ -308,7 +312,9 @@ export class TaskHistoryStore {
 				// Remove per-task file (best-effort)
 				try {
 					const filePath = await this.getTaskFilePath(taskId)
-					await withFileLock(filePath, (absoluteFilePath) => fs.unlink(absoluteFilePath))
+					// Same lock key as delete(): the resolved referent, while the unlink
+					// still removes the path the caller named.
+					await withFileLock(await this.lockKeyFor(filePath), () => fs.unlink(filePath))
 				} catch {
 					// File may already be deleted
 				}
@@ -322,6 +328,15 @@ export class TaskHistoryStore {
 	}
 
 	// ────────────────────────────── Reconciliation ──────────────────────────────
+
+	/**
+	 * The lock key a writer would use for a task file. resolvePublishTarget refuses
+	 * a dangling link, so the delete paths and the liveness probe walk the chain
+	 * themselves to find the lock held at the referent.
+	 */
+	private async lockKeyFor(taskFilePath: string): Promise<string> {
+		return resolveLockKey(taskFilePath)
+	}
 
 	/**
 	 * Scan task directories and fix any drift between disk and cache.
@@ -375,7 +390,9 @@ export class TaskHistoryStore {
 					// held for the entire write, so its presence means a
 					// write is in progress — keep the task live.
 					try {
-						const lockPath = (await this.getTaskFilePath(taskId)) + ".lock"
+						// Probe the same key the writer locks: safeWriteJson locks the resolved
+						// publish target, so an alias and its referent share one lock file.
+						const lockPath = (await this.lockKeyFor(await this.getTaskFilePath(taskId))) + ".lock"
 						const lockStat = await fs.stat(lockPath)
 						if (Date.now() - lockStat.mtimeMs < LOCK_STALE_MS) {
 							liveIds.add(taskId)
