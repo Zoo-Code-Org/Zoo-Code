@@ -52,6 +52,13 @@ function historyFilePath(storagePath: string, taskId: string): string {
 	return path.join(storagePath, "tasks", taskId, GlobalFileNames.historyItem)
 }
 
+// The lock key is canonicalized through the parent directory, so the expected key is
+// the canonical directory plus the basename rather than the path built from
+// os.tmpdir(), which can be an 8.3 short path on the Windows runner.
+async function canonicalKey(filePath: string): Promise<string> {
+	return path.join(await actualFs.realpath(path.dirname(filePath)), path.basename(filePath))
+}
+
 function storeInternals(store: TaskHistoryStore): {
 	cache: Map<string, HistoryItem>
 	taskFileMtimes: Map<string, number>
@@ -71,6 +78,7 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 		storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-delete-semantics-"))
 		stores = []
 		onWrite = vi.fn().mockResolvedValue(undefined)
+		vi.mocked(withFileLock).mockClear()
 		vi.mocked(withFileLock).mockImplementation(actualFileLock.withFileLock)
 		vi.mocked(fs.unlink).mockImplementation(actualFs.unlink)
 	})
@@ -97,12 +105,15 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			await store.upsert(makeHistoryItem({ id: "locked-delete" }))
 			onWrite.mockClear()
 
+			// The lock key is the resolved publish target, so the expected key is
+			// captured through realpath before the delete: on Windows os.tmpdir()
+			// can be an 8.3 short path (C:\Users\RUNNER~1) that realpath expands
+			// to the long form, and the file is gone after the unlink.
+			const lockKey = await fs.realpath(historyFilePath(storagePath, "locked-delete"))
+
 			await expect(store.delete("locked-delete")).resolves.toBeUndefined()
 
-			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(
-				historyFilePath(storagePath, "locked-delete"),
-				expect.any(Function),
-			)
+			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(lockKey, expect.any(Function))
 			await expect(fs.access(historyFilePath(storagePath, "locked-delete"))).rejects.toMatchObject({
 				code: "ENOENT",
 			})
@@ -173,6 +184,248 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			expect(store.get("never-existed")).toBeUndefined()
 			expect(onWrite).toHaveBeenCalledTimes(1)
 		})
+
+		it("locks the resolved publish target while unlinking the path it was given", async () => {
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "alias-del" }))
+			const aliasPath = historyFilePath(storagePath, "alias-del")
+			const referentPath = path.join(storagePath, "tasks", "alias-del", "referent-history.json")
+
+			// Real symlinks are unavailable in this CI lane, so the alias is
+			// simulated through realpath, as in the safeWriteJson lock test.
+			// Only the file resolves through the alias; the directory is canonicalized by the
+			// the real fs exactly as in production, so the key matches the canonical directory
+			const realpathSpy = vi
+				.spyOn(fs, "realpath")
+				.mockImplementation(async (target) =>
+					target === aliasPath ? referentPath : actualFs.realpath(String(target)),
+				)
+			try {
+				await expect(store.delete("alias-del")).resolves.toBeUndefined()
+			} finally {
+				realpathSpy.mockRestore()
+			}
+
+			// One lock for the underlying file, keyed by the referent; the unlink
+			// still targets the path the store named.
+			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(await canonicalKey(referentPath), expect.any(Function))
+			// Assert the unlink target itself: locking the referent while unlinking the
+			// referent instead of the alias would keep the dangling link in place.
+			expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith(aliasPath)
+			expect(vi.mocked(fs.unlink)).not.toHaveBeenCalledWith(referentPath)
+		})
+
+		it("waits on the peer's lock at the referent when the link is dangling", async () => {
+			// delete() must resolve the chain itself: resolvePublishTarget refuses a
+			// dangling link, and the old code treated that rejection as "already deleted"
+			// so the link was never removed.
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "alias-dangling" }))
+			const aliasPath = historyFilePath(storagePath, "alias-dangling")
+			const referentPath = path.join(storagePath, "tasks", "alias-dangling", "referent-history.json")
+			// Only the file resolves through the alias; the directory is canonicalized by the
+			// the real fs exactly as in production, so the key matches the canonical directory
+			const enoent = Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			const realpathSpy = vi.spyOn(fs, "realpath").mockImplementation(async (target) => {
+				if (target === aliasPath) throw enoent
+				return actualFs.realpath(String(target))
+			})
+			const lstatSpy = vi
+				.spyOn(fs, "lstat")
+				.mockResolvedValue({ isSymbolicLink: () => true } as unknown as import("fs").Stats)
+			const readlinkSpy = vi.spyOn(fs, "readlink").mockImplementation(async (p) => {
+				if (p === aliasPath) return "referent-history.json"
+				throw new Error("not a symbolic link")
+			})
+			try {
+				await expect(store.delete("alias-dangling")).resolves.toBeUndefined()
+			} finally {
+				realpathSpy.mockRestore()
+				lstatSpy.mockRestore()
+				readlinkSpy.mockRestore()
+			}
+
+			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(await canonicalKey(referentPath), expect.any(Function))
+			expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith(aliasPath)
+		})
+	})
+
+	describe("reconcile()", () => {
+		it("keeps a cached task live when its file is absent but the lock is held at the resolved referent", async () => {
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "alias-live" }))
+			const aliasPath = historyFilePath(storagePath, "alias-live")
+			const referentPath = path.join(storagePath, "tasks", "alias-live", "referent-history.json")
+
+			// Real symlinks are unavailable in this CI lane, so the alias is
+			// simulated through realpath, as in the safeWriteJson lock test.
+			// Only the file resolves through the alias; the directory is canonicalized by the
+			// the real fs exactly as in production, so the key matches the canonical directory
+			const realpathSpy = vi
+				.spyOn(fs, "realpath")
+				.mockImplementation(async (target) =>
+					target === aliasPath ? referentPath : actualFs.realpath(String(target)),
+				)
+			try {
+				// The rename window: the referent is momentarily missing, so the cached
+				// file cannot be stat'd while the peer holds the lock at the key it locks.
+				await actualFs.rm(aliasPath, { force: true })
+				await actualFs.writeFile(referentPath + ".lock", "")
+				await store.reconcile()
+			} finally {
+				realpathSpy.mockRestore()
+			}
+
+			// The probe must look at the same key the writer locks, otherwise a live
+			// task is evicted from the cache while its write is still in progress.
+			expect(storeInternals(store).cache.has("alias-live")).toBe(true)
+		})
+
+		it("keeps a cached task live when the alias is dangling during the rename window", async () => {
+			// resolvePublishTarget refuses a dangling link because a writer must not publish
+			// through the link path, but this probe runs exactly in that window, so it reads
+			// the link one level itself to find the lock the writer holds at the referent.
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "dangling-live" }))
+			const aliasPath = historyFilePath(storagePath, "dangling-live")
+			const referentPath = path.join(storagePath, "tasks", "dangling-live", "referent-history.json")
+
+			const realpathSpy = vi
+				.spyOn(fs, "realpath")
+				.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			const lstatSpy = vi
+				.spyOn(fs, "lstat")
+				.mockResolvedValue({ isSymbolicLink: () => true } as unknown as import("fs").Stats)
+			// A relative link target, so the probe must resolve it against the link's
+			// directory rather than the process working directory.
+			const readlinkSpy = vi.spyOn(fs, "readlink").mockImplementation(async (p) => {
+				if (p === aliasPath) return "referent-history.json"
+				throw new Error("not a symbolic link")
+			})
+			try {
+				await actualFs.rm(aliasPath, { force: true })
+				await actualFs.writeFile(referentPath + ".lock", "")
+				await store.reconcile()
+			} finally {
+				realpathSpy.mockRestore()
+				lstatSpy.mockRestore()
+				readlinkSpy.mockRestore()
+			}
+
+			expect(storeInternals(store).cache.has("dangling-live")).toBe(true)
+		})
+
+		it("follows the whole link chain to the key the writer locked", async () => {
+			// realpath resolves the whole chain, so it fails when the final referent is
+			// momentarily renamed to its backup. The probe must walk the chain, not just
+			// its first link, or it looks for a lock the writer never took.
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "chain-live" }))
+			const aliasPath = historyFilePath(storagePath, "chain-live")
+			const dir = path.dirname(aliasPath)
+			const referentPath = path.join(dir, "referent-history.json")
+			const realpathSpy = vi
+				.spyOn(fs, "realpath")
+				.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			const lstatSpy = vi
+				.spyOn(fs, "lstat")
+				.mockResolvedValue({ isSymbolicLink: () => true } as unknown as import("fs").Stats)
+			const readlinkSpy = vi.spyOn(fs, "readlink").mockImplementation(async (p) => {
+				if (p === aliasPath) return "nested-link.json"
+				if (p === path.join(dir, "nested-link.json")) return "referent-history.json"
+				throw new Error("not a symbolic link")
+			})
+			try {
+				await actualFs.rm(aliasPath, { force: true })
+				await actualFs.writeFile(referentPath + ".lock", "")
+				await store.reconcile()
+			} finally {
+				realpathSpy.mockRestore()
+				lstatSpy.mockRestore()
+				readlinkSpy.mockRestore()
+			}
+
+			expect(storeInternals(store).cache.has("chain-live")).toBe(true)
+		})
+
+		it("probes the key the bounded walk actually reached on a long chain", async () => {
+			// A chain longer than the hop limit: the walk stops at the limit, so the probe
+			// must look at the key it reached, not at the far end of the chain.
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "long-chain" }))
+			const startPath = historyFilePath(storagePath, "long-chain")
+			const dir = path.dirname(startPath)
+			const hops = Array.from({ length: 9 }, (_, index) => path.join(dir, "h" + (index + 1) + ".json"))
+			const reachedPath = hops[7]
+			const realpathSpy = vi
+				.spyOn(fs, "realpath")
+				.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			const lstatSpy = vi
+				.spyOn(fs, "lstat")
+				.mockResolvedValue({ isSymbolicLink: () => true } as unknown as import("fs").Stats)
+			const readlinkSpy = vi.spyOn(fs, "readlink").mockImplementation(async (p) => {
+				const index = [startPath, ...hops].indexOf(String(p))
+				if (index === -1 || index === hops.length) throw new Error("not a symbolic link")
+				return hops[index]
+			})
+			try {
+				await actualFs.rm(startPath, { force: true })
+				await actualFs.writeFile(reachedPath + ".lock", "")
+				await store.reconcile()
+			} finally {
+				realpathSpy.mockRestore()
+				lstatSpy.mockRestore()
+				readlinkSpy.mockRestore()
+			}
+
+			expect(storeInternals(store).cache.has("long-chain")).toBe(true)
+		})
+
+		it("terminates on a link cycle instead of holding the store lock forever", async () => {
+			// Two links that point at each other: every readlink succeeds, so an unbounded
+			// walk would never release the store lock.
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "cycle-live" }))
+			const aPath = historyFilePath(storagePath, "cycle-live")
+			const bPath = path.join(path.dirname(aPath), "b.json")
+			const realpathSpy = vi
+				.spyOn(fs, "realpath")
+				.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			const lstatSpy = vi
+				.spyOn(fs, "lstat")
+				.mockResolvedValue({ isSymbolicLink: () => true } as unknown as import("fs").Stats)
+			const readlinkSpy = vi.spyOn(fs, "readlink").mockImplementation(async (p) => {
+				if (p === aPath) return "b.json"
+				// Point back to the real alias basename so the walk actually loops; returning
+				// a name that is not the alias stops the walk after two hops and never reaches
+				// the hop limit this test is about.
+				if (p === bPath) return path.basename(aPath)
+				throw new Error("not a symbolic link")
+			})
+			try {
+				await actualFs.rm(aPath, { force: true })
+				await store.reconcile()
+				// Assert inside the try: mockRestore() clears the call counts, so checking after
+				// the finally block would read zero. Eight hops means the walk looped on the
+				// cycle instead of stopping at the first non-link.
+				expect(readlinkSpy).toHaveBeenCalledTimes(8)
+			} finally {
+				realpathSpy.mockRestore()
+				lstatSpy.mockRestore()
+				readlinkSpy.mockRestore()
+			}
+
+			// The walk is bounded, so reconcile returned; the probe looked at the key it
+			// reached after the bounded hops, found no lock there, and evicted the task.
+			expect(storeInternals(store).cache.has("cycle-live")).toBe(false)
+		})
 	})
 
 	describe("deleteMany()", () => {
@@ -238,6 +491,30 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			expect(onWrite).toHaveBeenCalledTimes(1)
 			const writtenIds = (onWrite.mock.calls[0][0] as HistoryItem[]).map((item) => item.id)
 			expect(writtenIds).toEqual([])
+		})
+
+		it("locks the resolved publish target for every item while unlinking the given paths", async () => {
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "alias-batch", ts: 1000 }))
+			const aliasPath = historyFilePath(storagePath, "alias-batch")
+			const referentPath = path.join(storagePath, "tasks", "alias-batch", "referent-history.json")
+
+			// Only the file resolves through the alias; the directory is canonicalized by the
+			// the real fs exactly as in production, so the key matches the canonical directory
+			const realpathSpy = vi
+				.spyOn(fs, "realpath")
+				.mockImplementation(async (target) =>
+					target === aliasPath ? referentPath : actualFs.realpath(String(target)),
+				)
+			try {
+				await expect(store.deleteMany(["alias-batch"])).resolves.toBeUndefined()
+			} finally {
+				realpathSpy.mockRestore()
+			}
+
+			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(await canonicalKey(referentPath), expect.any(Function))
+			expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith(aliasPath)
 		})
 	})
 })
