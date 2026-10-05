@@ -37,6 +37,12 @@ export const PACKAGE_CONFIGS = [
 		vitestConfig: "vitest.config.ts",
 	},
 	{
+		id: "types",
+		root: "packages/types",
+		sourceRoot: "packages/types/src/",
+		vitestConfig: "vitest.config.ts",
+	},
+	{
 		id: "webview",
 		root: "webview-ui",
 		runRoot: ".",
