@@ -459,8 +459,9 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			pushToolResult: mockPushToolResult,
 		})
 
-		// The source had no prior observation and the hunk read returned the whole file,
-		// so the destination publish is a complete-content publish.
+		// The source had no prior observation, so the hunk read records a partial
+		// observation: the model only saw the patch context, not the whole source. The
+		// destination is still published (create kind), but the completeness flag stays false.
 		expect(mockSaveDirectly).toHaveBeenCalledWith(
 			"src/new.ts",
 			"modified file content\n",
@@ -468,7 +469,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			true,
 			1000,
 			"create",
-			true,
+			false,
 		)
 	})
 
