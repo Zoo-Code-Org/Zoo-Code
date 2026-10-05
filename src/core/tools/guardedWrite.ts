@@ -185,6 +185,17 @@ export async function createIfAbsent(
  * On a match the content is published via the S3 safeWriteText primitive; on
  * a mismatch the write is rejected stale with a re-read-then-retry
  * remediation suffix.
+ *
+ * Atomicity boundary: the check and the publish run inside one acquisition of the
+ * shared advisory lock, and the post-publish token is read under that same lock, so
+ * no writer that participates in the protocol can interleave here. Every production
+ * caller of the publish primitive holds the same canonical key (safeWriteJson
+ * acquires it before publishing; TaskHistoryStore deletion takes it on the same
+ * resolved key). The primitive itself cannot re-acquire the lock -- withFileLock must
+ * not be re-entered inside an operation, and the callers already hold it, so wrapping
+ * it would deadlock them. A writer that never takes the lock is outside the supported
+ * threat model: a plain rename has no conditional form, so no advisory mechanism can
+ * bind a checked version to it.
  */
 export async function replaceIfVersion(
 	absolutePath: string,
@@ -233,7 +244,7 @@ export async function replaceIfVersion(
 				", current " +
 				currentVersion +
 				"); re-read the file, then retry.",
-			absolutePath,
+			displayPath,
 		)
 	})
 }
