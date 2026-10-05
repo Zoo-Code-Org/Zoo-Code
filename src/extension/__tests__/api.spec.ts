@@ -55,7 +55,7 @@ vi.mock("@roo-code/ipc", () => ({
 }))
 
 describe("API.sendMessage", () => {
-	it("enqueues directly when the current webview task is streaming", async () => {
+	it("enqueues directly with api origin when the current webview task is streaming", async () => {
 		const addMessage = vi.fn()
 		const postMessageToWebview = vi.fn()
 		const provider = {
@@ -73,12 +73,90 @@ describe("API.sendMessage", () => {
 
 		await api.sendMessage("Use this before completing", images)
 
-		expect(addMessage).toHaveBeenCalledWith("Use this before completing", images)
+		expect(addMessage).toHaveBeenCalledWith("Use this before completing", images, { origin: "api" })
 		expect(postMessageToWebview).not.toHaveBeenCalled()
 
 		addMessage.mockClear()
 		await api.sendMessage(undefined, images)
-		expect(addMessage).toHaveBeenCalledWith("", images)
+		expect(addMessage).toHaveBeenCalledWith("", images, { origin: "api" })
+	})
+
+	it("falls through to the webview invoke when the current task is not streaming", async () => {
+		const addMessage = vi.fn()
+		const postMessageToWebview = vi.fn()
+		const provider = {
+			viewLaunched: true,
+			getCurrentTask: vi.fn().mockReturnValue({
+				isStreaming: false,
+				messageQueueService: { addMessage },
+			}),
+			getCurrentTaskStack: vi.fn().mockReturnValue([]),
+			postMessageToWebview,
+			on: vi.fn(),
+		} as unknown as ClineProvider
+		const api = new API({} as vscode.OutputChannel, provider)
+
+		await api.sendMessage("Done with the follow-up")
+
+		expect(addMessage).not.toHaveBeenCalled()
+		expect(postMessageToWebview).toHaveBeenCalledWith({
+			type: "invoke",
+			invoke: "sendMessage",
+			text: "Done with the follow-up",
+			images: undefined,
+		})
+	})
+
+	it("falls through to the webview invoke when there is no current task", async () => {
+		const postMessageToWebview = vi.fn()
+		const provider = {
+			viewLaunched: true,
+			getCurrentTask: vi.fn().mockReturnValue(undefined),
+			getCurrentTaskStack: vi.fn().mockReturnValue([]),
+			postMessageToWebview,
+			on: vi.fn(),
+		} as unknown as ClineProvider
+		const api = new API({} as vscode.OutputChannel, provider)
+
+		await api.sendMessage("Start over")
+
+		expect(postMessageToWebview).toHaveBeenCalledWith({
+			type: "invoke",
+			invoke: "sendMessage",
+			text: "Start over",
+			images: undefined,
+		})
+	})
+
+	it("does not approve a protected ask from streaming IPC input queued before the ask", async () => {
+		const provider = {
+			context: {},
+			cwd: "/test/cwd",
+			viewLaunched: true,
+			getState: vi.fn().mockResolvedValue({ autoApprovalEnabled: false }),
+			getCurrentTask: vi.fn(),
+			getCurrentTaskStack: vi.fn().mockReturnValue([]),
+			postMessageToWebview: vi.fn(),
+			on: vi.fn(),
+		} as unknown as ClineProvider
+		const task = createStreamingTask(provider)
+		vi.mocked(provider.getCurrentTask).mockReturnValue(task)
+		const api = new API({} as vscode.OutputChannel, provider)
+		const images = ["data:image/png;base64,image1data"]
+
+		await api.sendMessage("Steer the next turn", images)
+		expect(task.messageQueueService.messages[0]?.origin).toBe("api")
+
+		task.isStreaming = false
+		const ask = task.ask("command", "npm publish", false)
+		await vi.waitFor(() => expect(task.clineMessages).toHaveLength(1))
+		setTimeout(() => task.denyAsk(), 0)
+		const result = await ask
+
+		expect(result.response).not.toBe("yesButtonClicked")
+		expect(result.response).toBe("noButtonClicked")
+		expect(task.messageQueueService.messages).toHaveLength(1)
+		expect(task.messageQueueService.claimNextMessage()?.text).toBe("Steer the next turn")
 	})
 
 	it.each([

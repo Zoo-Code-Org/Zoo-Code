@@ -324,12 +324,16 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		return this.sidebarProvider.abandonSubtask(childTaskId)
 	}
 
+	/**
+	 * Sends conversational input to the current task. Queued input never
+	 * approves a protected ask; use approveCurrentAsk() for explicit approval.
+	 */
 	public async sendMessage(text?: string, images?: string[]) {
 		const currentTask = this.sidebarProvider.getCurrentTask()
 
 		// In headless/sandbox flows the webview may not be launched, so routing
 		// through invoke=sendMessage drops the message. Keep this path on the task
-		// ask-response channel so queued input cannot approve protected tool asks.
+		// ask-response channel; it resolves asks as feedback, never as approval.
 		if (!this.sidebarProvider.viewLaunched) {
 			if (!currentTask) {
 				this.log("[API#sendMessage] no current task in headless mode; message dropped")
@@ -341,8 +345,9 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		}
 
 		// Ensure steering input reaches the active task before it can finish.
+		// Origin "api" keeps the queued message from answering protected asks.
 		if (currentTask?.isStreaming) {
-			currentTask.messageQueueService.addMessage(text ?? "", images)
+			currentTask.messageQueueService.addMessage(text ?? "", images, { origin: "api" })
 			return
 		}
 
