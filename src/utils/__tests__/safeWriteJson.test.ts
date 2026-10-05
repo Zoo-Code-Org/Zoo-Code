@@ -441,7 +441,7 @@ describe("safeWriteJson", () => {
 	})
 
 	// Test for rollback failure scenario (the rollback rename now lives in safeWriteText)
-	test("re-throws the original error when the rollback rename fails, leaving an orphaned backup", async () => {
+	test("throws RollbackFailureError with the publish failure as cause when the rollback rename also fails, leaving an orphaned backup", async () => {
 		const initialData = { message: "Initial, orphaned when rollback fails" }
 		const newData = { message: "New content" }
 
@@ -463,8 +463,7 @@ describe("safeWriteJson", () => {
 			return fsPromisesActuals.rename!(oldPath, newPath)
 		})
 
-		// The original error must propagate, not the rollback error
-		// The rollback also failed, so the error reports the partial state: the publish
+				// The rollback also failed, so the error reports the partial state: the publish
 		// failure stays the cause and the backup location is named.
 		let failure: RollbackFailureError | undefined
 		await safeWriteJson(currentTestFilePath, newData).catch((e: unknown) => {
