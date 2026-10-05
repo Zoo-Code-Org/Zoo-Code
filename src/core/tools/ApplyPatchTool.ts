@@ -457,15 +457,22 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					// would hand the model authority to edit a file it never read.
 					const destObs = task.observationRegistry.get(moveAbsolutePath)
 					if (destObs !== undefined) {
-						// Replacing an existing destination with content built from a partial
-						// source view must be re-authorized by reading the source in full. Reject
-						// before any state changes and name the source: a remediation that names
-						// only the destination sends the model to re-read the wrong file, and a
-						// downgrade that survives a rejected publish loses a full destination read.
-						throw new GuardRejectedError(
-							`Cannot move a partially read file onto ${change.movePath}: re-read the whole source (${change.path}) first, then retry.`,
-							moveAbsolutePath,
-						)
+						if (await fileExistsAtPath(moveAbsolutePath)) {
+							// Replacing an existing destination with content built from a partial
+							// source view must be re-authorized by reading the source in full. Reject
+							// before any state changes and name the source: a remediation that names
+							// only the destination sends the model to re-read the wrong file, and a
+							// downgrade that survives a rejected publish loses a full destination read.
+							throw new GuardRejectedError(
+								`Cannot move a partially read file onto ${change.movePath}: re-read the whole source (${change.path}) first, then retry.`,
+								moveAbsolutePath,
+							)
+						}
+						// The destination was read and then deleted: the create guard permits the
+						// publish, and the content is still only as complete as the view the model
+						// had of the source, so carry the source's completeness instead of the
+						// destination's stale one.
+						task.observationRegistry.observe(moveAbsolutePath, destObs.version, false)
 					}
 				}
 				await task.diffViewProvider.saveDirectly(

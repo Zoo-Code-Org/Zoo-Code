@@ -478,6 +478,33 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		)
 	})
 
+	it("move: carries the source's completeness when the observed destination was deleted", async () => {
+		// The destination was read and then deleted, so its observation is stale but the
+		// create guard permits the publish. Rejecting here would refuse a move onto an
+		// absent path; the content is still only as complete as the source view, so the
+		// source's completeness is carried instead of the destination's stale one.
+		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
+		const destKey = path.resolve("/workspace/project", "src/new.ts")
+		const reg = mockTask.observationRegistry
+		reg.observe(sourceKey, "7:4242:1234:1700000000123456789:1700000000789999999", false)
+		reg.observe(destKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+		mockedFileExistsAtPath.mockImplementation(async (p) => p !== destKey)
+		const completeAtPublish: Array<boolean | undefined> = []
+		mockSaveDirectly.mockImplementationOnce(async () => {
+			completeAtPublish.push(reg.get(destKey)?.complete)
+			return { newProblemsMessage: "", userEdits: undefined, finalContent: "new content" }
+		})
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(completeAtPublish).toEqual([false])
+		expect(mockHandleError).not.toHaveBeenCalled()
+	})
+
 	it("move: a complete source read keeps the destination complete", async () => {
 		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
 		const destKey = path.resolve("/workspace/project", "src/new.ts")
