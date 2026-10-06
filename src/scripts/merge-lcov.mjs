@@ -7,6 +7,16 @@ const parseCount = (value, description) => {
 	return count
 }
 
+// The v8 provider emits negative BRDA counts for short-circuit conditions, where
+// an uncovered inner branch range is subtracted from a covered outer one
+// (e.g. `a === X || b?.flag`). A negative delta means the branch was never taken
+// on its own, so clamp it to uncovered instead of failing the merge.
+const parseBranchCount = (value, description) => {
+	const count = Number(value)
+	if (!Number.isSafeInteger(count)) throw new Error(`Invalid ${description}: ${value}`)
+	return count > 0 ? count : 0
+}
+
 const mergeCount = (records, key, count) => records.set(key, Math.max(records.get(key) ?? 0, count))
 
 const parseLcov = (lcov, label) => {
@@ -48,7 +58,7 @@ const parseLcov = (lcov, label) => {
 		} else if (record && line.startsWith("BRDA:")) {
 			const [lineNumber, block, branch, taken] = line.slice(5).split(",")
 			const key = `${lineNumber},${block},${branch}`
-			const count = taken === "-" ? 0 : parseCount(taken, `BRDA for ${record.source}`)
+			const count = taken === "-" ? 0 : parseBranchCount(taken, `BRDA for ${record.source}`)
 			mergeCount(record.branches, key, count)
 		} else if (record && line.startsWith("DA:")) {
 			const [lineNumber, count, checksum] = line.slice(3).split(",")
