@@ -5,8 +5,10 @@
  * independent. The S4 guarded-write will compare these versions against the
  * token recomputed pre-write to detect stale reads or file replacement.
  *
- * Pure in-memory — zero I/O, no dependencies. No behavior change in this PR:
- * observations are recorded but not consulted.
+ * Pure in-memory — zero I/O, no dependencies. The observations ARE consulted:
+ * guardedWrite reads this registry before publishing (src/core/tools/guardedWrite.ts)
+ * and compares the recorded version token against the token recomputed from disk, so
+ * a stale read or an out-of-band replacement is rejected instead of published over.
  */
 
 export interface FileObservation {

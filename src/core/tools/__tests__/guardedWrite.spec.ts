@@ -494,13 +494,13 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("x.txt"), "b")
 		})
 	})
-})
 
 	describe("atomicity of the guard check and publish", () => {
-		beforeEach(() => { vi.resetAllMocks(); resetChain() })
 		it("holds the lock across the version check and the publish", async () => {
 			const order: string[] = []
-			releaseMock = async () => { order.push("release") }
+			releaseMock = async () => {
+				order.push("release")
+			}
 			mockedAcquireFileLock.mockImplementation(async () => {
 				order.push("acquire")
 				return releaseMock
@@ -523,7 +523,9 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 		it("releases the lock when the guard rejects as stale", async () => {
 			const order: string[] = []
-			releaseMock = async () => { order.push("release") }
+			releaseMock = async () => {
+				order.push("release")
+			}
 			mockedAcquireFileLock.mockImplementation(async () => {
 				order.push("acquire")
 				return releaseMock
@@ -537,7 +539,9 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 		it("holds the lock across the absence check and the create publish", async () => {
 			const order: string[] = []
-			releaseMock = async () => { order.push("release") }
+			releaseMock = async () => {
+				order.push("release")
+			}
 			mockedAcquireFileLock.mockImplementation(async () => {
 				order.push("acquire")
 				return releaseMock
@@ -555,3 +559,4 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(order).toEqual(["acquire", "check", "publish", "release"])
 		})
 	})
+})

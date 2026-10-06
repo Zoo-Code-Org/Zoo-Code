@@ -1598,8 +1598,15 @@ describe("ReadFileTool", () => {
 
 				expect(observeSpy).toHaveBeenCalledTimes(1)
 				const [calledPath, calledVersion] = observeSpy.mock.calls[0]
-				expect(calledPath).toContain("legacy.ts")
-				expect(calledVersion).toMatch(/^\d+:\d+:\d+:\d+:\d+$/)
+				// Exact key and token, mirroring the native-format test: a mismatch between the
+				// key the read side records under and the key the guard looks up would otherwise
+				// still pass a substring/regex assertion.
+				expect(calledPath).toBe(path.resolve("/test/workspace", "legacy.ts"))
+				expect(calledVersion).toBe("1:2:300:4000000000:5000000000")
+				// The observation is retrievable under that exact key.
+				const obs = reg.get(calledPath)
+				expect(obs).toBeDefined()
+				expect(obs!.version).toBe(calledVersion)
 			})
 
 			it("does not observe when the file mutates between the pre-read and post-read stats", async () => {
