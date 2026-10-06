@@ -247,10 +247,13 @@ describe("writeToFileTool", () => {
 				content: testContent,
 				...params,
 			},
+			// The harness builds deliberately malformed payloads (a missing or
+			// undefined path/content), which the typed args cannot express. One assertion
+			// through unknown keeps that case testable without introducing `any`.
 			nativeArgs: {
-				path: (params.path ?? testFilePath) as any,
-				content: (params.content ?? testContent) as any,
-			},
+				path: params.path ?? testFilePath,
+				content: params.content ?? testContent,
+			} as unknown as ToolUse<"write_to_file">["nativeArgs"],
 			partial: isPartial,
 		}
 
