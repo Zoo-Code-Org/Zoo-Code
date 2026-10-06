@@ -310,14 +310,17 @@ describe("writeToFileTool", () => {
 		)
 
 		it.skipIf(process.platform === "win32")(
-			"creates parent directories when path has stabilized (partial)",
+			"defers parent directory creation to execute() while streaming",
 			async () => {
-				// First call - path not yet stabilized
+				// Streaming deltas must not touch the filesystem at all. An unguarded
+				// createDirectoriesForFile here threw EROFS up into BaseTool.handle(), which never
+				// set didRejectTool/didAlreadyUseTool, so the agent loop stalled permanently.
+				// The directories are still created - by the authoritative non-partial execute().
+				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 				expect(mockedCreateDirectoriesForFile).not.toHaveBeenCalled()
 
-				// Second call with same path - path is now stabilized
-				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+				await executeWriteFileTool({}, { fileExists: false })
 				expect(mockedCreateDirectoriesForFile).toHaveBeenCalledWith(absoluteFilePath)
 			},
 		)
