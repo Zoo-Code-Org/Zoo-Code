@@ -16,6 +16,7 @@ import { describe, expect, it, beforeEach, vi } from "vitest"
 import { createIfAbsent, guardedWrite, replaceIfVersion, resetChain } from "../guardedWrite"
 import { safeWriteText } from "../../../services/file-safety/safeWriteText"
 import { computeVersionToken } from "../../../utils/versionToken"
+import { acquireFileLock } from "../../../utils/fileLock"
 import { ObservationRegistry } from "../../task/observationRegistry"
 import type { Task } from "../../task/Task"
 
@@ -30,6 +31,10 @@ vi.mock("../../../utils/versionToken", () => ({
 	computeVersionToken: vi.fn(),
 }))
 
+vi.mock("../../../utils/fileLock", () => ({
+	acquireFileLock: vi.fn(async () => releaseMock), // resolves to the release function
+}))
+
 vi.mock("../../../services/file-safety/safeWriteText", () => ({
 	safeWriteText: vi.fn(),
 }))
@@ -37,6 +42,8 @@ vi.mock("../../../services/file-safety/safeWriteText", () => ({
 const mockedFsAccess = vi.mocked(fs.access)
 const mockedComputeVersionToken = vi.mocked(computeVersionToken)
 const mockedSafeWriteText = vi.mocked(safeWriteText)
+let releaseMock: () => Promise<void> = async () => {}
+const mockedAcquireFileLock = vi.mocked(acquireFileLock)
 
 // -- Fixtures ----------------------------------------------------------------
 
@@ -452,3 +459,61 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		})
 	})
 })
+
+	describe("atomicity of the guard check and publish", () => {
+		beforeEach(() => { vi.resetAllMocks(); resetChain() })
+		it("holds the lock across the version check and the publish", async () => {
+			const order: string[] = []
+			releaseMock = async () => { order.push("release") }
+			mockedAcquireFileLock.mockImplementation(async () => {
+				order.push("acquire")
+				return releaseMock
+			})
+			mockedComputeVersionToken.mockImplementation(async () => {
+				order.push("check")
+				return "v1"
+			})
+			mockedSafeWriteText.mockImplementation(async () => {
+				order.push("publish")
+			})
+
+			await replaceIfVersion(abs("x.txt"), "v1", "new")
+
+			// A writer that honors the same lock cannot slip between the check and the publish.
+			expect(order).toEqual(["acquire", "check", "publish", "release"])
+		})
+
+		it("releases the lock when the guard rejects as stale", async () => {
+			const order: string[] = []
+			releaseMock = async () => { order.push("release") }
+			mockedAcquireFileLock.mockImplementation(async () => {
+				order.push("acquire")
+				return releaseMock
+			})
+			mockedComputeVersionToken.mockResolvedValue("v2")
+
+			await expect(replaceIfVersion(abs("x.txt"), "v1", "new")).rejects.toThrow(/Stale version/)
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+			expect(order).toEqual(["acquire", "release"])
+		})
+
+		it("holds the lock across the absence check and the create publish", async () => {
+			const order: string[] = []
+			releaseMock = async () => { order.push("release") }
+			mockedAcquireFileLock.mockImplementation(async () => {
+				order.push("acquire")
+				return releaseMock
+			})
+			mockedFsAccess.mockImplementation(async () => {
+				order.push("check")
+				throw { code: "ENOENT" }
+			})
+			mockedSafeWriteText.mockImplementation(async () => {
+				order.push("publish")
+			})
+
+			await createIfAbsent(abs("new.txt"), "hello")
+
+			expect(order).toEqual(["acquire", "check", "publish", "release"])
+		})
+	})

@@ -20,6 +20,7 @@ import * as path from "path"
 
 import { safeWriteText } from "../../services/file-safety/safeWriteText"
 import { computeVersionToken } from "../../utils/versionToken"
+import { acquireFileLock } from "../../utils/fileLock"
 import type { Task } from "../task/Task"
 
 // -- Types ------------------------------------------------------------------
@@ -94,6 +95,21 @@ function errorCode(error: unknown): string | undefined {
 		: undefined
 }
 
+/**
+ * Run a guard check and its publish as one atomic step with respect to every writer
+ * that honors the same advisory lock (safeWriteJson acquires it through fileLock).
+ * Without the lock the version token can change between the check and the rename, so
+ * a write that looked valid on the check can overwrite a newer file.
+ */
+async function withWriteLock(absolutePath: string, run: () => Promise<void>): Promise<void> {
+	const release = await acquireFileLock(absolutePath)
+	try {
+		await run()
+	} finally {
+		await release()
+	}
+}
+
 /** True when the path is absent on disk (fs.access reports ENOENT). */
 async function fileIsAbsent(absolutePath: string): Promise<boolean> {
 	try {
@@ -112,23 +128,27 @@ async function fileIsAbsent(absolutePath: string): Promise<boolean> {
  * the file first, then retry.
  */
 export async function createIfAbsent(absolutePath: string, content: string): Promise<void> {
-	try {
-		await fs.access(absolutePath)
-	} catch (error: unknown) {
-		if (errorCode(error) !== "ENOENT") {
-			// A real I/O failure (EACCES, EIO, ...) -- not a guard verdict.
-			throw error
+	await withWriteLock(absolutePath, async () => {
+		try {
+			await fs.access(absolutePath)
+		} catch (error: unknown) {
+			if (errorCode(error) !== "ENOENT") {
+				// A real I/O failure (EACCES, EIO, ...) -- not a guard verdict.
+				throw error
+			}
+			// Absent under the lock: no other lock-honoring writer can create it between
+			// this check and the publish.
+			await safeWriteText(absolutePath, content)
+			return
 		}
-		await safeWriteText(absolutePath, content)
-		return
-	}
 
-	throw new GuardRejectedError(
-		"File already exists at " +
-			absolutePath +
-			" and was not read before this write -- read the file first, then retry.",
-		absolutePath,
-	)
+		throw new GuardRejectedError(
+			"File already exists at " +
+				absolutePath +
+				" and was not read before this write -- read the file first, then retry.",
+			absolutePath,
+		)
+	})
 }
 
 /**
@@ -140,39 +160,43 @@ export async function createIfAbsent(absolutePath: string, content: string): Pro
  * remediation suffix.
  */
 export async function replaceIfVersion(absolutePath: string, expectedVersion: string, content: string): Promise<void> {
-	let currentVersion: string
-	try {
-		currentVersion = await computeVersionToken(absolutePath)
-	} catch (error: unknown) {
-		if (errorCode(error) === "ENOENT") {
-			// The observed file was deleted after the read: the version recorded
-			// at read time no longer exists on disk. Normalize the raw ENOENT
-			// into the guard's re-read-then-retry contract so the caller gets a
-			// remediation it can act on, not a raw errno.
-			throw new GuardRejectedError(
-				"File was deleted after it was read -- the version recorded at read time (" +
-					expectedVersion +
-					") no longer exists; re-read the file, then retry.",
-				absolutePath,
-			)
+	await withWriteLock(absolutePath, async () => {
+		let currentVersion: string
+		try {
+			currentVersion = await computeVersionToken(absolutePath)
+		} catch (error: unknown) {
+			if (errorCode(error) === "ENOENT") {
+				// The observed file was deleted after the read: the version recorded
+				// at read time no longer exists on disk. Normalize the raw ENOENT
+				// into the guard's re-read-then-retry contract so the caller gets a
+				// remediation it can act on, not a raw errno.
+				throw new GuardRejectedError(
+					"File was deleted after it was read -- the version recorded at read time (" +
+						expectedVersion +
+						") no longer exists; re-read the file, then retry.",
+					absolutePath,
+				)
+			}
+			// A real I/O failure (EACCES, EIO, ...) -- not a guard verdict.
+			throw error
 		}
-		// A real I/O failure (EACCES, EIO, ...) -- not a guard verdict.
-		throw error
-	}
 
-	if (currentVersion === expectedVersion) {
-		await safeWriteText(absolutePath, content)
-		return
-	}
+		if (currentVersion === expectedVersion) {
+			// The check and the publish run under the same lock, so the token cannot
+			// change between them for any writer that honors it.
+			await safeWriteText(absolutePath, content)
+			return
+		}
 
-	throw new GuardRejectedError(
-		"Stale version -- the file changed since you read it (expected " +
-			expectedVersion +
-			", current " +
-			currentVersion +
-			"); re-read the file, then retry.",
-		absolutePath,
-	)
+		throw new GuardRejectedError(
+			"Stale version -- the file changed since you read it (expected " +
+				expectedVersion +
+				", current " +
+				currentVersion +
+				"); re-read the file, then retry.",
+			absolutePath,
+		)
+	})
 }
 
 /**
