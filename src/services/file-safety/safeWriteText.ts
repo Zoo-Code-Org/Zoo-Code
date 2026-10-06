@@ -268,7 +268,7 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			}
 
 			// -- Step 5 (win32): restore DACL AFTER commit rename ---------
-			if (platform === "win32" && daclSaved) {
+			if (platform === "win32" && daclSaved && daclDumpPath !== null) {
 				const restoredDir = path.dirname(targetPath)
 				await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
 			}
