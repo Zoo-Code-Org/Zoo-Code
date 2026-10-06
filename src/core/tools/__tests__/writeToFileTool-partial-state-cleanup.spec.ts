@@ -171,6 +171,20 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 		errorSpy.mockRestore()
 	})
 
+	it("surfaces the rollback hazard from the failed-stream cleanup as well", async () => {
+		const task = buildTask("failed-stream-cleanup", "inst-9")
+		const t = task as unknown as CleanupTask
+		t.diffViewProvider.revertChanges = vi.fn().mockRejectedValue(new Error("revert failed"))
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		await writeToFileTool["cleanupFailedPartialStream"](task)
+
+		// Same contract as the parse-failure teardown: a failed restore is reported.
+		expect(t.say).toHaveBeenCalledWith("error", expect.stringContaining("unapproved"))
+		expect(t.diffViewProvider.reset).toHaveBeenCalled()
+		errorSpy.mockRestore()
+	})
+
 	it("logs and continues when finalizing the open partial ask fails", async () => {
 		const task = buildTask("finalize-fails", "inst-5")
 		const t = task as unknown as CleanupTask
