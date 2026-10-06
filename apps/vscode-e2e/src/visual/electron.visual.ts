@@ -236,9 +236,29 @@ for (const scenario of scenarios) {
 			await expect.poll(() => contentFrame.evaluate(() => document.activeElement === document.body)).toBe(true)
 			await contentFrame.evaluate(() => document.fonts.ready)
 
+			// The selected model's metadata resolves asynchronously: router models
+			// arrive over the extension-host message channel after the webview
+			// launches. Until they land, the context-window readout renders the `1`
+			// fallback (see TaskHeader's `model?.contextWindow || 1`)
+			//  Wait for a resolved context window so the screenshot is deterministic.
+			if (scenario.scene === "chat") {
+				await expect(contentFrame.locator('[data-testid="context-window-size"]')).not.toHaveText("1", {
+					timeout: 60_000,
+				})
+			}
+
 			const sidebar = running.page.locator(".part.sidebar")
 			await expect(sidebar).toBeVisible()
-			await expect(sidebar).toHaveScreenshot(`electron-${scenario.name}-sidebar.png`)
+
+			// Mask the dynamic token counter so system-prompt changes that alter
+			// token counts do not cause pixel diffs when layout is unchanged.
+			const webviewFrame = running.page.frameLocator('iframe[src*="extensionId=ZooCodeOrganization.zoo-code"]')
+			const tokenCountMask = webviewFrame
+				.frameLocator("iframe")
+				.locator('[data-testid="context-tokens-count"],[data-testid="context-window-size"]')
+			await expect(sidebar).toHaveScreenshot(`electron-${scenario.name}-sidebar.png`, {
+				mask: [tokenCountMask],
+			})
 
 			if (scenario.webviewSnapshot) {
 				const webview = running.page.locator('iframe[src*="extensionId=ZooCodeOrganization.zoo-code"]')

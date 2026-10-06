@@ -115,7 +115,7 @@ export const ImageGenerationSettings = ({
 							value={currentProvider}
 							onChange={(e: any) => handleProviderChange(e.target.value)}
 							className="w-full">
-							<VSCodeOption value="openrouter" className="py-2 px-3">
+							<VSCodeOption value={providerIdentifiers.openrouter} className="py-2 px-3">
 								OpenRouter
 							</VSCodeOption>
 						</VSCodeDropdown>

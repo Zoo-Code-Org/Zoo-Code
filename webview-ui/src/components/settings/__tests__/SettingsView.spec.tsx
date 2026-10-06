@@ -277,6 +277,7 @@ const mockPostMessage = (state: any) => {
 				shouldShowAnnouncement: false,
 				allowedCommands: [],
 				alwaysAllowExecute: false,
+				alwaysDenyUnapprovedCommands: false,
 				ttsEnabled: false,
 				ttsSpeed: 1,
 				soundEnabled: false,
@@ -806,6 +807,7 @@ describe("SettingsView - Duplicate Commands", () => {
 	})
 })
 
+
 describe("SettingsView - Experimental Settings", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -848,6 +850,90 @@ describe("SettingsView - Experimental Settings", () => {
 				updatedSettings: expect.objectContaining({
 					experiments: expect.objectContaining({ dynamicThinkingEffort: false }),
 				}),
+			}),
+		)
+	})
+})
+
+describe("SettingsView - Blanket Auto-Deny", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	// Completes the persisted-setting round trip required by the repo's
+	// AGENTS.md "Persisted Setting Checklist" for the blanket auto-deny
+	// toggle: UI binding buffers in cachedState, and only Save persists the
+	// value to the extension host.
+	it("saves the blanket auto-deny toggle when clicking Save", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView()
+		activateTab("autoApprove")
+		const content = getSettingsContent()
+		const executeCheckbox = within(content).getByTestId("always-allow-execute-toggle")
+		fireEvent.click(executeCheckbox)
+		const autoDenyCheckbox = within(content).getByTestId("auto-deny-unapproved-checkbox")
+		fireEvent.click(autoDenyCheckbox)
+		expect(autoDenyCheckbox).toBeChecked()
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ alwaysDenyUnapprovedCommands: true }),
+			}),
+		)
+	})
+
+	it("posts blanket auto-deny as false when the setting is unset", () => {
+		// The submit path coerces an omitted setting to false
+		// (`alwaysDenyUnapprovedCommands ?? false`) rather than omitting the
+		// key, so the host always receives an explicit boolean.
+		const { activateTab, getSettingsContent } = renderSettingsView({
+			alwaysDenyUnapprovedCommands: undefined,
+		})
+		activateTab("autoApprove")
+		const content = getSettingsContent()
+		const executeCheckbox = within(content).getByTestId("always-allow-execute-toggle")
+		fireEvent.click(executeCheckbox)
+		expect(within(content).getByTestId("auto-deny-unapproved-checkbox")).not.toBeChecked()
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ alwaysDenyUnapprovedCommands: false }),
+			}),
+		)
+	})
+
+	it("buffers the blanket auto-deny toggle until Save", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView()
+
+		// Activate the autoApprove tab
+		activateTab("autoApprove")
+
+		const content = getSettingsContent()
+		// Enable always allow execute to reveal the execute section
+		const executeCheckbox = within(content).getByTestId("always-allow-execute-toggle")
+		fireEvent.click(executeCheckbox)
+
+		// Toggle blanket auto-deny on
+		const autoDenyCheckbox = within(content).getByTestId("auto-deny-unapproved-checkbox")
+		fireEvent.click(autoDenyCheckbox)
+		expect(autoDenyCheckbox).toBeChecked()
+
+		// Toggling must NOT persist before Save; it only buffers in cachedState.
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ alwaysDenyUnapprovedCommands: true }),
+			}),
+		)
+
+		// Save now persists the buffered value.
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ alwaysDenyUnapprovedCommands: true }),
 			}),
 		)
 	})

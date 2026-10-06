@@ -29,6 +29,11 @@ interface DelegationProvider {
 	getTaskWithId(id: string): Promise<{ historyItem: HistoryItem }>
 	setPendingTaskAction(taskId: string, pendingAction: PendingTaskAction): Promise<void>
 	clearPendingTaskAction(taskId: string, actionId: string): Promise<boolean>
+	emitDelegatedTaskCompleted(
+		taskId: string,
+		tokenUsage: ReturnType<Task["getTokenUsage"]>,
+		toolUsage: Task["toolUsage"],
+	): void
 	reopenParentFromDelegation(params: {
 		parentTaskId: string
 		childTaskId: string
@@ -142,6 +147,14 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 								task.flushTelemetryInstallment("attempt_completion")
 								hasFlushedTelemetry = true
 
+								try {
+									const persistenceReady = await task.waitForCurrentAssistantMessagePersistence()
+									if (!persistenceReady) return
+								} catch (error) {
+									await handleError("persisting task completion", error as Error)
+									return
+								}
+
 								const delegation = await this.delegateToParent(
 									task,
 									result,
@@ -151,7 +164,12 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 									pushToolResult,
 								)
 								if (delegation === "delegated") {
-									this.emitPublicTaskCompleted(task)
+									task.emitFinalTokenUsageUpdate()
+									provider.emitDelegatedTaskCompleted(
+										task.taskId,
+										task.getTokenUsage(),
+										task.toolUsage,
+									)
 								}
 								if (delegation !== "continue") return
 							} else {
@@ -207,7 +225,11 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 				// subtask that already completed (and already emitted TaskCompleted) the first
 				// time through -- re-acknowledging it from history must not emit it again.
 				if (!isStaleHistoryReplay) {
-					this.emitPublicTaskCompleted(task)
+					try {
+						await this.emitPublicTaskCompleted(task)
+					} catch (error) {
+						await handleError("persisting task completion", error as Error)
+					}
 				}
 				return
 			}
@@ -234,6 +256,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 	 * Returns:
 	 * - "delegated" when completion was approved and parent resumed
 	 * - "denied" when user denied finishing the subtask
+	 * - undefined when the persistence generation ended during approval
 	 * - "continue" when caller should fall through to normal completion ask flow
 	 */
 	private async delegateToParent(
@@ -243,12 +266,15 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 		pendingActionId: string | undefined,
 		askFinishSubTaskApproval: () => Promise<boolean>,
 		pushToolResult: (result: string) => void,
-	): Promise<"delegated" | "denied" | "continue"> {
+	): Promise<"delegated" | "denied" | "continue" | undefined> {
 		const didApprove = await askFinishSubTaskApproval()
 
 		if (!didApprove) {
 			pushToolResult(formatResponse.toolDenied())
 			return "denied"
+		}
+		if (!(await task.waitForCurrentAssistantMessagePersistence())) {
+			return
 		}
 
 		const didReopen = await provider.reopenParentFromDelegation({
@@ -290,10 +316,13 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 	/**
 	 * Emits the public RooCodeEventName.TaskCompleted API event. Only called once the
 	 * task is genuinely finished (user accepted, or a subtask was successfully delegated
-	 * back to its parent) -- unlike the PostHog telemetry flush, which reports on every
-	 * model-initiated attempt_completion call regardless of outcome.
+	 * back to its parent) and the matching assistant turn is restart-visible -- unlike the
+	 * PostHog telemetry flush, which reports on every model-initiated attempt_completion call.
 	 */
-	private emitPublicTaskCompleted(task: Task): void {
+	private async emitPublicTaskCompleted(task: Task): Promise<void> {
+		const persistenceReady = await task.waitForCurrentAssistantMessagePersistence()
+		if (!persistenceReady) return
+
 		// Force final token usage update before emitting TaskCompleted.
 		// This ensures the latest stats are captured regardless of throttle timer.
 		task.emitFinalTokenUsageUpdate()

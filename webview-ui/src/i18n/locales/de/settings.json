@@ -346,6 +346,10 @@
 				"label": "Schutz vor destruktiven Befehlen aktivieren",
 				"description": "Lädt Destructive Command Guard (DCG) für diese Plattform herunter und verwendet es. Von DCG erlaubte Befehle werden automatisch ausgeführt. Von DCG blockierte Befehle benötigen deine Zustimmung. Die Befehlslisten von Zoo sind währenddessen deaktiviert. Die heruntergeladene ausführbare Datei bleibt erhalten, wenn du die Option ausschaltest."
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "Erlaubte Auto-Ausführungsbefehle",
 			"allowedCommandsDescription": "Befehlspräfixe, die automatisch ausgeführt werden können, wenn 'Ausführungsoperationen immer genehmigen' aktiviert ist. Fügen Sie * hinzu, um alle Befehle zu erlauben (mit Vorsicht verwenden).",
 			"deniedCommands": "Verweigerte Befehle",

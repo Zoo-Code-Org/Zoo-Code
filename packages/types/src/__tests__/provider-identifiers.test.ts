@@ -21,6 +21,8 @@ import {
 	retiredProviderNamesSchema,
 } from "../index.js"
 
+// Raw values are intentional here: these fixtures protect the persisted provider identifier contract.
+/* eslint-disable zoo/no-raw-provider-identifiers */
 const expectedProviderIdentifiers = [
 	"openrouter",
 	"vercel-ai-gateway",
@@ -70,6 +72,7 @@ const expectedRetiredProviderIdentifiers = [
 	"io-intelligence",
 	"roo",
 ]
+/* eslint-enable zoo/no-raw-provider-identifiers */
 
 describe("provider identifiers", () => {
 	it("preserves active provider serialized values", () => {
