@@ -297,6 +297,18 @@ export function resolveStackedUnitBase(repoRoot, eventBaseSha, prHeadSha, openPu
 	return { baseSha: parentSha, stackedOn: parent.number }
 }
 
+// The ci command decides two things from the commit graph: which base to charge this pull request
+// to, and which commit to diff against. A stacked unit diffs against its own pull request head,
+// because the merge commit also carries whatever main advanced since the parent unit.
+// The ci command decides two things from the commit graph: which base to charge this pull request
+// to, and which commit to diff against. A stacked unit diffs against its own pull request head,
+// because the merge commit also carries whatever main advanced since the parent unit. A plain
+// pull request keeps the merge commit as the diff head.
+export function resolveCiInvocation(repoRoot, eventBaseSha, mergeCommitSha, prHeadSha, openPullRequests = []) {
+	const resolved = resolveStackedUnitBase(repoRoot, eventBaseSha, prHeadSha, openPullRequests)
+	return { baseSha: resolved.baseSha, diffHead: resolved.stackedOn ? prHeadSha : mergeCommitSha, stackedOn: resolved.stackedOn }
+}
+
 export function selectFromGit(repoRoot, baseSha, headSha, options = {}) {
 	validateSha(baseSha, "base SHA")
 	validateSha(headSha, "head SHA")
@@ -857,16 +869,13 @@ function main() {
 	// first parent is the base tip, so the merge commit cannot identify the stacked unit; its second
 	// parent can. The merge commit stays the diff head.
 	const prHeadSha = argument("--pr-head") ?? headSha
-	const resolved = resolveStackedUnitBase(repoRoot, baseSha, prHeadSha, openPullRequests)
-	if (resolved.stackedOn) console.log(`Stacked unit: measured against the head of parent PR #${resolved.stackedOn}, not the event base.`)
+	const invocation = resolveCiInvocation(repoRoot, baseSha, headSha, prHeadSha, openPullRequests)
+	if (invocation.stackedOn) console.log(`Stacked unit: measured against the head of parent PR #${invocation.stackedOn}, not the event base.`)
 
 	const reportRoot = path.resolve(repoRoot, argument("--reports") ?? "reports/mutation")
-	// A stacked unit is measured against its own head, not the merge commit: the merge commit also
-	// carries whatever main advanced since the parent unit, and those lines are not this unit's.
-	const diffHead = resolved.stackedOn ? prHeadSha : headSha
 	const manifest = {
-		...selectFromGit(repoRoot, resolved.baseSha, diffHead, { preserveBase: Boolean(resolved.stackedOn) }),
-		stackedOn: resolved.stackedOn,
+		...selectFromGit(repoRoot, invocation.baseSha, invocation.diffHead, { preserveBase: Boolean(invocation.stackedOn) }),
+		stackedOn: invocation.stackedOn,
 	}
 	if (manifest.packages.length === 0) {
 		appendSummary([], manifest.advisories, manifest)

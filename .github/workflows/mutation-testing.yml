@@ -48,21 +48,37 @@ jobs:
               if: github.event_name == 'pull_request'
               run: pnpm test:mutation-ci
 
+            - name: Resolve the stacked parent from the open pull requests
+              if: github.event_name == 'pull_request'
+              id: stacked_map
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  # The fallback must itself be a command: this step runs bash with -e, so a bare '[]' is
+                  # executed as a program name and an API failure would abort the job instead of measuring
+                  # against the event base.
+                  # --jq runs once per page, so a paginated call emits one JSON array per page; the gate
+                  # reads that stream, not a single array.
+                  STACKED_MAP="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" --jq '[.[] | {number: .number, headSha: .head.sha}]')" || STACKED_MAP="$(printf '[]')"
+                  {
+                      echo "stacked_map<<EOF"
+                      echo "$STACKED_MAP"
+                      echo "EOF"
+                  } >> "$GITHUB_OUTPUT" || echo "::warning title=Stacked unit base::Could not publish the stacked map"
+
             - name: Enforce executable-line scope and run advisory mutation testing
               if: github.event_name == 'pull_request'
               env:
                   HEAD_SHA: ${{ github.sha }}
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  # The gate passes its environment to the Vitest discovery subprocesses, so the API token
+                  # stays in the previous step and only the filtered map crosses here.
+                  STACKED_MAP: ${{ steps.stacked_map.outputs.stacked_map }}
               run: |
                   BASE_SHA="$(git rev-parse "$HEAD_SHA^1")"
                   # The merge commit's second parent is the pull request head. When that head's own
                   # parent is another open pull request's head, this PR is a stacked unit, so the gate
                   # measures only this unit's delta instead of every unmerged ancestor.
                   PR_HEAD_SHA="$(git rev-parse "$HEAD_SHA^2" 2>/dev/null || git rev-parse "$HEAD_SHA")"
-                  # The fallback must itself be a command: these steps run bash with -e, so a bare '[]' is
-                  # executed as a program name and an API failure would abort the step instead of measuring
-                  # against the event base.
-                  STACKED_MAP="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" --jq '[.[] | {number: .number, headSha: .head.sha}]')" || STACKED_MAP="$(printf '[]')"
                   node scripts/stryker-diff.mjs ci --base "$BASE_SHA" --head "$HEAD_SHA" --pr-head "$PR_HEAD_SHA" --stacked-map "$STACKED_MAP"
 
             - name: Upload mutation reports

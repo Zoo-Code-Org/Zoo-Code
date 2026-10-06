@@ -26,6 +26,7 @@ import {
 	parseVitestTestFiles,
 	preferDirectTestFiles,
 	parseStackedMap,
+	resolveCiInvocation,
 	resolveStackedUnitBase,
 	resolveStrykerTempDir,
 	resolveVitestBinary,
@@ -78,6 +79,12 @@ describe("mutation testing workflow", () => {
 		assert.ok(workflow.includes("steps.mutation_report.outputs.artifact-url"))
 		assert.ok(workflow.includes("open the package's mutation.html file"))
 		assert.ok(workflow.includes("Enforce executable-line scope and run advisory mutation testing"))
+		// The gate hands its environment to the Vitest discovery subprocesses, so the API token must
+		// stay in the step that only reads the open pull requests; the gate receives just the map.
+		const gateStep = workflow.slice(workflow.indexOf("Enforce executable-line scope and run advisory mutation testing"))
+		const gateStepBody = gateStep.slice(0, gateStep.indexOf("\n            - name:"))
+		assert.ok(!gateStepBody.includes("GH_TOKEN"))
+		assert.ok(workflow.includes("STACKED_MAP: ${{ steps.stacked_map.outputs.stacked_map }}"))
 		assert.equal(workflow.match(/continue-on-error: true/g)?.length, 1)
 		assert.equal(workflow.match(/Could not write the job summary/g)?.length, 2)
 		const script = fs.readFileSync(path.join(repositoryRoot, "scripts/stryker-diff.mjs"), "utf8")
@@ -194,35 +201,42 @@ describe("pull request revision selection", () => {
 describe("stacked unit base resolution", () => {
 	const createSyntheticStack = () => {
 		const repository = fs.mkdtempSync(path.join(os.tmpdir(), "mutation-stack-"))
-		const run = (...args) => execFileSync("git", args, { cwd: repository, encoding: "utf8" }).trim()
-		const write = (filePath, contents) => {
-			fs.mkdirSync(path.join(repository, path.dirname(filePath)), { recursive: true })
-			fs.writeFileSync(path.join(repository, filePath), contents)
+		// Setup can fail halfway (a missing git config, a failed commit), and the callers only get the
+		// repository path back on success, so cleanup has to happen here or the temp directory leaks.
+		try {
+			const run = (...args) => execFileSync("git", args, { cwd: repository, encoding: "utf8" }).trim()
+			const write = (filePath, contents) => {
+				fs.mkdirSync(path.join(repository, path.dirname(filePath)), { recursive: true })
+				fs.writeFileSync(path.join(repository, filePath), contents)
+			}
+
+			run("init", "--quiet", "--initial-branch", "main")
+			run("config", "user.email", "gate@example.com")
+			run("config", "user.name", "Gate")
+			run("config", "commit.gpgsign", "false")
+
+			write("packages/core/src/unrelated.ts", "export const unrelated = () => 1\n")
+			run("add", ".")
+			run("commit", "--quiet", "-m", "initial")
+			const eventBaseSha = run("rev-parse", "HEAD")
+
+			run("checkout", "--quiet", "-b", "unit-1")
+			write("packages/core/src/unit1.ts", "export const unit1 = () => 1\n")
+			run("add", ".")
+			run("commit", "--quiet", "-m", "unit 1")
+			const parentSha = run("rev-parse", "HEAD")
+
+			// The stacked unit is one commit on top of the parent unit's head.
+			write("packages/core/src/unit2.ts", "export const unit2 = () => 2\n")
+			run("add", ".")
+			run("commit", "--quiet", "-m", "unit 2")
+			const childSha = run("rev-parse", "HEAD")
+
+			return { repository, eventBaseSha, parentSha, childSha, run, write }
+		} catch (error) {
+			fs.rmSync(repository, { recursive: true, force: true })
+			throw error
 		}
-
-		run("init", "--quiet", "--initial-branch", "main")
-		run("config", "user.email", "gate@example.com")
-		run("config", "user.name", "Gate")
-		run("config", "commit.gpgsign", "false")
-
-		write("packages/core/src/unrelated.ts", "export const unrelated = () => 1\n")
-		run("add", ".")
-		run("commit", "--quiet", "-m", "initial")
-		const eventBaseSha = run("rev-parse", "HEAD")
-
-		run("checkout", "--quiet", "-b", "unit-1")
-		write("packages/core/src/unit1.ts", "export const unit1 = () => 1\n")
-		run("add", ".")
-		run("commit", "--quiet", "-m", "unit 1")
-		const parentSha = run("rev-parse", "HEAD")
-
-		// The stacked unit is one commit on top of the parent unit's head.
-		write("packages/core/src/unit2.ts", "export const unit2 = () => 2\n")
-		run("add", ".")
-		run("commit", "--quiet", "-m", "unit 2")
-		const childSha = run("rev-parse", "HEAD")
-
-		return { repository, eventBaseSha, parentSha, childSha, run, write }
 	}
 
 	it("measures a stacked unit against the parent pull request head", () => {
@@ -330,7 +344,42 @@ describe("stacked unit base resolution", () => {
 		)
 		assert.deepEqual(parseStackedMap("[{\"number\": 1, \"headSha\": \"" + "d".repeat(40) + "\"}]garbage"), [
 			{ number: 1, headSha: "d".repeat(40) },
-		])	})
+		])
+	})
+
+	it("the ci command picks the diff head from the commit graph", () => {
+		const { repository, eventBaseSha, parentSha, childSha, run, write } = createSyntheticStack()
+
+		try {
+			run("checkout", "--quiet", "-b", "merge-branch", eventBaseSha)
+			write("packages/core/src/unrelated.ts", "export const unrelated = () => 2\n")
+			run("add", ".")
+			run("commit", "--quiet", "-m", "base advance")
+			const advancedBase = run("rev-parse", "HEAD")
+			run("merge", "--no-ff", "--quiet", "-m", "merge", childSha)
+			const mergeSha = run("rev-parse", "HEAD")
+
+			// Stacked: base is the parent PR head and the diff head is the PR head, not the merge
+			// commit, so the base advance is not charged to this unit.
+			const stacked = resolveCiInvocation(repository, advancedBase, mergeSha, childSha, [{ number: 1, headSha: parentSha }])
+			assert.equal(stacked.baseSha, parentSha)
+			assert.equal(stacked.diffHead, childSha)
+			assert.equal(stacked.stackedOn, 1)
+
+			// Non-stacked: the merge commit stays the diff head and the base stays the event base.
+			const plain = resolveCiInvocation(repository, advancedBase, mergeSha, childSha, [])
+			assert.equal(plain.baseSha, advancedBase)
+			assert.equal(plain.diffHead, mergeSha)
+			assert.equal(plain.stackedOn, null)
+
+			// --pr-head defaults to --head, so a plain pull request keeps the same decision.
+			const sameHead = resolveCiInvocation(repository, advancedBase, mergeSha, mergeSha, [])
+			assert.equal(sameHead.diffHead, mergeSha)
+			assert.equal(sameHead.stackedOn, null)
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
+	})
 })
 
 describe("parseNameStatus", () => {
