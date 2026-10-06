@@ -185,6 +185,21 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	}
 
 	/**
+	 * Cleanup for a failed partial stream: restore the diff document, close the view,
+	 * and - when the restore itself failed - tell the user the editor may still hold
+	 * unapproved content, the same way the parse-failure teardown does. Without the
+	 * report, a failed rollback here is invisible: the stream error that triggered the
+	 * cleanup is a different failure and is reported elsewhere.
+	 */
+	private async cleanupFailedPartialStream(task: Task): Promise<void> {
+		const reverted = await this.revertDiffChangesBeforeReset(task)
+		await this.resetDiffViewAfterWrite(task)
+		if (!reverted) {
+			await this.reportRevertFailure(task)
+		}
+	}
+
+	/**
 	 * Teardown boundary for the handle() parse-failure path, where execute() never
 	 * runs and therefore its finally (resetTaskPartialState) never runs either.
 	 *
@@ -506,9 +521,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				partialStreamState.streamError = error instanceof Error ? error : new Error(String(error))
 				await this.finalizePartialToolAskAfterFailure(task, partialMessage)
 				// The write was never approved: restore the document so a user save cannot
-				// persist the failed streamed content (reset() alone leaves it dirty).
-				await this.revertDiffChangesBeforeReset(task)
-				await this.resetDiffViewAfterWrite(task)
+				// persist the failed streamed content (reset() alone leaves it dirty), and
+				// surface the hazard if that restore itself failed. The stream error is
+				// reported by the authoritative non-partial path in execute(); the rollback
+				// hazard is a different failure and nothing else in this path says so.
+				await this.cleanupFailedPartialStream(task)
 			}
 		}
 	}
