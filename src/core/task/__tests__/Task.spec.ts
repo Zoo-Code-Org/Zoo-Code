@@ -6158,42 +6158,50 @@ describe("Cline", () => {
 			// task directory to exist (uuid v7 is mocked to the fixed id below).
 			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
 			fsReal.mkdirSync(taskDir, { recursive: true })
+			// Declared outside the try so the finally block can restore them.
 			const updateSpy = vi
 				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
 				.mockResolvedValue(undefined)
-			const metadataFailure = new Error("task history stage failed")
-			const historySpy = vi.spyOn(mockProvider, "updateTaskHistory").mockRejectedValueOnce(metadataFailure)
+			const historySpy = vi.spyOn(mockProvider, "updateTaskHistory")
+			try {
+				historySpy.mockRejectedValueOnce(new Error("task history stage failed"))
 
-			const task = new Task({
-				provider: mockProvider,
-				apiConfiguration: mockApiConfig,
-				task: "test task",
-				startTask: false,
-			})
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
 
-			const partialToolAsk = {
-				ts: Date.now() - 1,
-				type: "ask" as const,
-				ask: "tool" as const,
-				text: "partial tool message",
-				partial: true,
+				const partialToolAsk = {
+					ts: Date.now() - 1,
+					type: "ask" as const,
+					ask: "tool" as const,
+					text: "partial tool message",
+					partial: true,
+				}
+
+				task.clineMessages.push(partialToolAsk)
+
+				await expect(task.finalizePartialToolAsk("partial tool message")).resolves.toBeUndefined()
+				await flushMicrotasks()
+
+				expect(partialToolAsk.partial).toBe(false)
+				expect(task.clineMessages[0].isAnswered).toBe(true)
+				// The message array persisted, so the webview update must run even though a
+				// later save stage failed...
+				expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
+				// ...and the later-stage failure is observed instead of silently swallowed.
+				expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to save task metadata:", expect.any(Error))
+			} finally {
+				// The task uuid is mocked to a fixed value, so the record this save writes outlives
+				// the test. Later saves run with merge = true and would fold a stale
+				// ui_messages.json into their own message arrays, so drop it here instead of
+				// leaving it for whichever test cleans up next.
+				fsReal.rmSync(path.join(taskDir, "ui_messages.json"), { force: true })
+				updateSpy.mockRestore()
+				historySpy.mockRestore()
 			}
-
-			task.clineMessages.push(partialToolAsk)
-
-			await expect(task.finalizePartialToolAsk("partial tool message")).resolves.toBeUndefined()
-			await flushMicrotasks()
-
-			expect(partialToolAsk.partial).toBe(false)
-			expect(task.clineMessages[0].isAnswered).toBe(true)
-			// The message array persisted, so the webview update must run even though a
-			// later save stage failed...
-			expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
-			// ...and the later-stage failure is observed instead of silently swallowed.
-			expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to save task metadata:", expect.any(Error))
-
-			updateSpy.mockRestore()
-			historySpy.mockRestore()
 		})
 
 		it("finalizePartialToolAsk skips the webview update when the message write itself fails", async () => {
