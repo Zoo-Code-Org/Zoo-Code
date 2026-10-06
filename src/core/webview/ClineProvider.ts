@@ -3556,9 +3556,13 @@ export class ClineProvider
 		// this view could then send its own credential to another profile's endpoint, and the
 		// settings UI would persist that mix back into the profile. With an overlay the view's own
 		// profile wins outright; without one the previous merge is preserved.
+		// The computed apiProvider goes first so it only applies when the overlay does not set one:
+		// a profile saved without a provider yields an overlay without apiProvider, and that undefined
+		// would otherwise reach createTask, ProfileValidator.isProfileAllowed and the webview's
+		// checkExistKey instead of the previous anthropic fallback.
 		const viewApiConfiguration = this.viewLocalState.apiConfiguration
 		const effectiveApiConfiguration: ProviderSettings = viewApiConfiguration
-			? { ...viewApiConfiguration }
+			? { apiProvider, ...viewApiConfiguration }
 			: { ...providerSettings, ...mergedStateValues.apiConfiguration }
 
 		let organizationAllowList = ORGANIZATION_ALLOW_ALL

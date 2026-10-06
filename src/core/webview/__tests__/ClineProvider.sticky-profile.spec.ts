@@ -1096,7 +1096,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 					id: "ghost-id",
 					apiProvider: providerIdentifiers.openrouter,
 				}),
-			).resolves.not.toThrow()
+			).resolves.toBeUndefined()
 
 			// ... it prunes the stale list entry and repoints the selection.
 			const values = provider.contextProxy.getValues()

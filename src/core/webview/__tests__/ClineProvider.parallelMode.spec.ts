@@ -730,6 +730,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		let viewB: ClineProvider
 		let consoleError: ReturnType<typeof vi.spyOn>
 		let getProfile: ReturnType<typeof vi.spyOn>
+		let providerSettingsSpy: ReturnType<typeof vi.spyOn> | undefined
 
 		beforeAll(() => {
 			consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
@@ -749,8 +750,11 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 
 		afterEach(() => {
+			// Only the per-test spies: a broad restore would also drop the file-level and
+			// block-level console spies, and their absence is what lets in-flight console
+			// output surface as an unhandled rejection at teardown.
 			getProfile.mockRestore()
-			vi.restoreAllMocks()
+			providerSettingsSpy?.mockRestore()
 		})
 
 		type ProfileFixture = ProviderSettingsWithId & { name: string }
@@ -809,7 +813,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			viewB["viewLocalState"].currentApiConfigName = "profile-b"
 			viewB["viewLocalState"].apiConfiguration = pinnedElsewhere
 			// The shared store holds whichever profile the other view activated last.
-			vi.spyOn(viewB.contextProxy, "getProviderSettings").mockReturnValue(activated)
+			providerSettingsSpy = vi.spyOn(viewB.contextProxy, "getProviderSettings").mockReturnValue(activated)
 
 			const state = await viewB.getState({ includeTaskHistory: false })
 
