@@ -14,7 +14,6 @@ import {
 	type ProviderSettingsEntry,
 	type TaskEvent,
 	type TaskStartResponse,
-	type TaskStartStage,
 	type CreateTaskOptions,
 	type TaskApiConversationHistorySequence,
 	type WebviewThemeFixture,
@@ -38,51 +37,9 @@ import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
 import { getCommands } from "../services/command/commands"
 
-// The default bound is per stage, not per start, so one slow stage cannot
-// hide behind the budget of another. Secret storage writes through VS Code
-// secret storage can hang indefinitely under Xvfb without a keyring service.
-const DEFAULT_TASK_START_STAGE_TIMEOUT_MS = 60_000
-
-function readTaskStartStageTimeoutMs(env: NodeJS.ProcessEnv): number {
-	const parsed = Number(env.ROO_CODE_TASK_START_STAGE_TIMEOUT_MS)
-	return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TASK_START_STAGE_TIMEOUT_MS
-}
-
-class TaskStartStageTimeoutError extends Error {
-	constructor(readonly stage: TaskStartStage) {
-		super(`task start stage timed out: ${stage}`)
-	}
-}
-
-// Races the stage against its bound. Losing the race stops the wait only.
-// The operation keeps running, so onAbandon receives it for later cleanup.
-async function withStageTimeout<T>(
-	stage: TaskStartStage,
-	timeoutMs: number,
-	operation: () => T | Thenable<T>,
-	onAbandon?: (running: Promise<T>) => void,
-): Promise<T> {
-	let timer: NodeJS.Timeout | undefined
-	const running = Promise.resolve(operation())
-	try {
-		return await Promise.race([
-			running,
-			new Promise<never>((_, reject) => {
-				timer = setTimeout(() => {
-					onAbandon?.(running)
-					reject(new TaskStartStageTimeoutError(stage))
-				}, timeoutMs)
-			}),
-		])
-	} finally {
-		clearTimeout(timer)
-	}
-}
-
 export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	private readonly outputChannel: vscode.OutputChannel
 	private readonly sidebarProvider: ClineProvider
-	private abandonedStarts = 0
 	private readonly ipc?: IpcServer
 	private readonly log: (...args: unknown[]) => void
 	private logfile?: string
@@ -146,26 +103,22 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 						// Exactly one sanitized, client-scoped response per
 						// correlated start. The reply never echoes the failure.
-						// Each startup stage is bounded so a hung await (for
-						// example secret storage under a missing keyring)
-						// still produces the reply.
+						// Await actual startup, including configuration writes.
+						// The smoke controller owns its timeout and terminates
+						// its isolated host; shared-profile writes are not raced.
 						let response: TaskStartResponse
 						try {
 							const taskId = await this.startNewTask(command.data, {
 								focusSidebar: false,
-								stageTimeoutMs: readTaskStartStageTimeoutMs(process.env),
 							})
 							response = { requestId, success: true, taskId }
-						} catch (error) {
-							const stage: TaskStartStage =
-								error instanceof TaskStartStageTimeoutError ? error.stage : "unknown"
-							this.log("[API] StartNewTask failed", { requestId, stage })
+						} catch {
+							this.log("[API] StartNewTask failed", { requestId })
 							response = {
 								requestId,
 								success: false,
 								errorCode: TASK_START_FAILURE_ERROR_CODE,
 								errorMessage: TASK_START_FAILURE_ERROR_MESSAGE,
-								stage,
 							}
 						}
 						sendResponse(RooCodeEventName.TaskStartResponse, [response])
@@ -265,61 +218,30 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			images?: string[]
 			newTab?: boolean
 		},
-		startOptions?: { focusSidebar?: boolean; stageTimeoutMs?: number },
+		startOptions?: { focusSidebar?: boolean },
 	) {
-		// Stage names for a bounded correlated start. The settings persistence
-		// named in the startup evidence (createTask -> setValues ->
-		// storeSecret) runs inside the taskCreation stage at this layer, so a
-		// taskCreation timeout covers it.
-		// A timed-out stage keeps running. Count it, and reject a new bounded
-		// start until it settles. A late task from the taskCreation stage is
-		// removed, so it cannot run after the failure reply.
-		if (startOptions?.stageTimeoutMs !== undefined && this.abandonedStarts > 0) {
-			throw new Error("an earlier task start is still running")
-		}
-		const boundStage = <T>(
-			stage: TaskStartStage,
-			operation: () => T | Thenable<T>,
-			onLate?: (late: Awaited<T>) => unknown,
-		): Promise<T> =>
-			startOptions?.stageTimeoutMs === undefined
-				? Promise.resolve(operation())
-				: withStageTimeout(stage, startOptions.stageTimeoutMs, operation, (running) => {
-						this.abandonedStarts++
-						void running
-							.then((late) => onLate?.(late as Awaited<T>))
-							.catch(() => {})
-							.finally(() => this.abandonedStarts--)
-					})
-
 		let provider: ClineProvider
 
 		if (newTab) {
-			await boundStage("unknown", () => vscode.commands.executeCommand("workbench.action.files.revert"))
-			await boundStage("unknown", () => vscode.commands.executeCommand("workbench.action.closeAllEditors"))
+			await vscode.commands.executeCommand("workbench.action.files.revert")
+			await vscode.commands.executeCommand("workbench.action.closeAllEditors")
 
-			provider = await boundStage("unknown", () => this.providerFactory.createInNewTab())
+			provider = await this.providerFactory.createInNewTab()
 			this.registerListeners(provider)
 		} else {
 			// IPC callers omit focus: executeCommand cannot be cancelled and a
 			// stalled webview launch would block the whole start.
 			if (startOptions?.focusSidebar ?? true) {
-				await boundStage("unknown", () =>
-					vscode.commands.executeCommand(`${Package.name}.SidebarProvider.focus`),
-				)
+				await vscode.commands.executeCommand(`${Package.name}.SidebarProvider.focus`)
 			}
 
 			provider = this.sidebarProvider
 		}
 
-		await boundStage("eviction", () => provider.evictCurrentTask())
-		await boundStage("settings", () => provider.postStateToWebview())
-		await boundStage("settings", () =>
-			provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" }),
-		)
-		await boundStage("settings", () =>
-			provider.postMessageToWebview({ type: "invoke", invoke: "newChat", text, images }),
-		)
+		await provider.evictCurrentTask()
+		await provider.postStateToWebview()
+		await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
+		await provider.postMessageToWebview({ type: "invoke", invoke: "newChat", text, images })
 
 		// API-driven tasks never stop to ask the user, so the hard stop is
 		// effectively unlimited. The soft repetition tier is disabled too:
@@ -330,11 +252,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			toolRepetitionSoftLimit: 0,
 		}
 
-		const task = await boundStage(
-			"taskCreation",
-			() => provider.createTask(text, images, undefined, options, configuration),
-			(late) => late && provider.removeClineFromStack(),
-		)
+		const task = await provider.createTask(text, images, undefined, options, configuration)
 
 		if (!task) {
 			throw new Error("Failed to create task due to policy restrictions")

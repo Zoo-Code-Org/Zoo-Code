@@ -5,6 +5,7 @@
 	"type": "module",
 	"exports": "./src/index.ts",
 	"scripts": {
+		"test": "node --import tsx --test src/__tests__/*.test.ts",
 		"lint": "eslint src --ext=ts --max-warnings=0",
 		"check-types": "tsc --noEmit",
 		"clean": "rimraf .turbo"
