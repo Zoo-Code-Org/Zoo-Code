@@ -784,6 +784,20 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
 		})
 
+		it("clears this task's stream state when the write is rejected", async () => {
+			// A failed delta earlier in the same task arms the streamFailed guard. If the
+			// rejection exit returns without the teardown, every later write_to_file in this
+			// task loses its diff preview and the TaskAborted listener leaks.
+			const state = writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			state.streamFailed = true
+			state.streamError = new Error("stream failure before the rejected write")
+			mockAskApproval.mockResolvedValue(false)
+
+			await executeWriteFileTool({})
+
+			expect(writeToFileTool["taskPartialStreamState"].get(`${mockCline.taskId}.${mockCline.instanceId}`)).toBeUndefined()
+		})
+
 		it("reports user edits with diff feedback", async () => {
 			const userEditsValue = "- old line\n+ new line"
 			mockCline.diffViewProvider.saveChanges.mockResolvedValue({

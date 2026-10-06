@@ -359,6 +359,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				const didApprove = await askApproval("tool", completeMessage, undefined, isWriteProtected)
 
 				if (!didApprove) {
+					// Rejection is an exit from execute() too. Without the teardown, a
+					// streamFailed flag armed by an earlier failed delta stays set for the whole
+					// task, which suppresses the diff preview of every later write_to_file, and
+					// the TaskAborted listener leaks.
+					super.resetPartialState()
+					this.resetTaskPartialState(task)
 					return
 				}
 
@@ -393,6 +399,10 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 				if (!didApprove) {
 					await task.diffViewProvider.revertChanges()
+					// Same exit contract as the saveDirectly branch above: the per-task stream
+					// state and its abort listener belong to this execute() call.
+					super.resetPartialState()
+					this.resetTaskPartialState(task)
 					return
 				}
 
