@@ -2255,6 +2255,30 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("does not fill a pinned profile's omitted keys from the shared profile", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			// The pinned profile defines only its provider and key.
+			await provider.saveViewState("currentApiConfigName", "pinned-profile")
+			await provider.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "pinned-key",
+			})
+			await provider.contextProxy.setProviderSettings({
+				apiProvider: providerIdentifiers.openai,
+				openAiApiKey: "shared-key",
+				openAiBaseUrl: "https://shared.example",
+			})
+
+			const state = await provider.getState({ includeTaskHistory: false })
+
+			// A view-local profile is a complete snapshot, not a patch: a key the profile
+			// never defined must not leak in from the shared profile.
+			expect(state.apiConfiguration.openRouterApiKey).toBe("pinned-key")
+			expect(state.apiConfiguration).not.toHaveProperty("openAiBaseUrl")
+			expect(state.apiConfiguration).not.toHaveProperty("openAiApiKey")
+			await provider.dispose()
+		})
+
 		it("clears this view's buffered apiConfiguration when activating a different profile", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			// Seed the per-view buffer with profile A's settings, as loadViewState would

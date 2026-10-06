@@ -3575,11 +3575,21 @@ export class ClineProvider
 		const taskSyncEnabled: boolean = false
 
 		// Return the same structure as before.
+		// A view-local profile is a complete snapshot, not a patch over the shared store.
+		// Spreading it on top of providerSettings would let a key the profile never defined
+		// leak in from another profile, which ContextProxy.setProviderSettings deliberately
+		// prevents by clearing omitted keys. Use the view's own settings in place and take
+		// only apiProvider from the shared state when the profile does not carry one.
+		const viewApiConfiguration = mergedStateValues.apiConfiguration
+		const resolvedApiConfiguration = viewApiConfiguration
+			? {
+				...viewApiConfiguration,
+				apiProvider: viewApiConfiguration.apiProvider ?? providerSettings.apiProvider,
+			}
+			: providerSettings
+
 		return {
-			apiConfiguration: {
-				...providerSettings,
-				...mergedStateValues.apiConfiguration,
-			},
+			apiConfiguration: resolvedApiConfiguration,
 			lastShownAnnouncementId: mergedStateValues.lastShownAnnouncementId,
 			customInstructions: mergedStateValues.customInstructions,
 			apiModelId: mergedStateValues.apiModelId,
