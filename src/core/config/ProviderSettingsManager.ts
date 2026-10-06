@@ -524,6 +524,23 @@ export class ProviderSettingsManager {
 	}
 
 	/**
+	 * Remove the API config mapping for a specific mode.
+	 */
+	public async clearModeConfig(mode: Mode) {
+		try {
+			return await this.lock(async () => {
+				const providerProfiles = await this.load()
+				if (providerProfiles.modeApiConfigs && mode in providerProfiles.modeApiConfigs) {
+					delete providerProfiles.modeApiConfigs[mode]
+					await this.store(providerProfiles)
+				}
+			})
+		} catch (error) {
+			throw new Error(`Failed to clear mode config: ${error}`)
+		}
+	}
+
+	/**
 	 * Get the API config ID for a specific mode.
 	 */
 	public async getModeConfigId(mode: Mode) {

@@ -249,6 +249,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				},
 			]),
 			setModeConfig: vi.fn(),
+			clearModeConfig: vi.fn(),
 			getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			activateProfile: vi.fn().mockResolvedValue({
 				name: "test-config",
@@ -693,8 +694,100 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				expect.objectContaining({ openRouterModelId: "openai/gpt-4" }),
 			)
 			// The original activation error is what gets reported, not the rollback error.
-			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Error updating profile model"))
+			const errorLog = logSpy.mock.calls.map(([message]) => message).find((m) => m.includes("Error updating"))
+			expect(errorLog).toContain("boom")
+			expect(errorLog).not.toContain("restore failed")
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.save_api_config")
+		})
+
+		it("clears a mode mapping that did not exist before when an activation write fails", async () => {
+			mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
+			vi.mocked(provider["providerSettingsManager"].getModeConfigId).mockResolvedValue(undefined)
+			vi.mocked(provider["providerSettingsManager"].setModeConfig).mockResolvedValue(undefined)
+			vi.spyOn(provider.contextProxy, "setProviderSettings").mockRejectedValueOnce(new Error("boom"))
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "x/y",
+			})
+
+			expect(provider["providerSettingsManager"].clearModeConfig).toHaveBeenCalledTimes(1)
+		})
+
+		it("does not undo a newer profile switch when its activation write fails late", async () => {
+			mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
+			vi.mocked(provider["providerSettingsManager"].setModeConfig).mockImplementationOnce(async () => {
+				await provider.contextProxy.setValue("currentApiConfigName", "other-config")
+				throw new Error("boom")
+			})
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "x/y",
+			})
+
+			expect(provider.contextProxy.getValues().currentApiConfigName).toBe("other-config")
+			expect(provider["providerSettingsManager"].clearModeConfig).not.toHaveBeenCalled()
+		})
+
+		it("ignores model fields that do not belong to the stored provider", async () => {
+			mockStoredProfile({
+				apiProvider: providerIdentifiers.lmstudio,
+				lmStudioModelId: "model-a",
+				lmStudioDraftModelId: "draft-a",
+			})
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.lmstudio, {
+				lmStudioModelId: "model-b",
+				lmStudioDraftModelId: "draft-evil",
+				openRouterModelId: "x/y",
+			})
+
+			const saved = manager().saveConfig.mock.calls[0][1]
+			expect(saved.lmStudioModelId).toBe("model-b")
+			expect(saved.lmStudioDraftModelId).toBe("draft-a")
+			expect(saved).not.toHaveProperty("openRouterModelId")
+		})
+
+		it("rolls back and does not activate when the mutation times out while saving", async () => {
+			vi.useFakeTimers()
+			try {
+				mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
+				let releaseSave!: () => void
+				const saveGate = new Promise<void>((resolve) => {
+					releaseSave = resolve
+				})
+				manager().saveConfig.mockImplementationOnce(async (profileName, settings) => {
+					await saveGate
+					manager().getProfile.mockResolvedValue({ name: profileName, ...settings })
+					return "test-id"
+				})
+				manager().activateProfile.mockResolvedValue({
+					name: "other-config",
+					id: "other-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "other/model",
+				})
+				const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
+
+				const updating = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+					openRouterModelId: "x/y",
+				})
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				const followUp = provider.activateProviderProfile({ name: "other-config" })
+
+				releaseSave()
+				await Promise.all([updating, followUp])
+
+				expect(manager().saveConfig).toHaveBeenCalledTimes(2)
+				expect(manager().saveConfig).toHaveBeenLastCalledWith("test-config", {
+					id: "test-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4",
+				})
+				expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "test-config")
+				expect(provider.contextProxy.getValues().currentApiConfigName).toBe("other-config")
+			} finally {
+				vi.useRealTimers()
+			}
 		})
 
 		it("accepts reasoning and token-limit fields only as resets", async () => {

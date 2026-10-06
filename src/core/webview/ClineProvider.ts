@@ -55,6 +55,7 @@ import {
 	DEFAULT_MODES,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	getModelId,
+	modelIdKeysByProvider,
 	isRetiredProvider,
 	providerIdentifiers,
 	PROVIDER_SETTINGS_KEYS,
@@ -1948,6 +1949,8 @@ export class ClineProvider
 				modeConfigId: await this.providerSettingsManager.getModeConfigId(mode),
 			}
 
+			if (signal.aborted) return abandon()
+
 			// allSettled so every started write has finished before the queue can advance.
 			const writes = await Promise.allSettled([
 				this.updateGlobalState("listApiConfigMeta", listApiConfigMeta),
@@ -1962,7 +1965,9 @@ export class ClineProvider
 				const logRollbackError = (error: unknown) =>
 					this.log(`Profile rollback failed: ${error instanceof Error ? error.message : String(error)}`)
 				await restore().catch(logRollbackError)
-				if (rollback && previousActivation) {
+				// A newer profile switch that already took over the activation must not be undone.
+				const ownsActivation = this.contextProxy.getValues().currentApiConfigName === name
+				if (rollback && previousActivation && ownsActivation) {
 					const {
 						listApiConfigMeta: prevMeta,
 						currentApiConfigName: prevName,
@@ -1972,7 +1977,9 @@ export class ClineProvider
 						this.contextProxy.setProviderSettings(rollback.previous),
 						this.updateGlobalState("listApiConfigMeta", prevMeta),
 						this.updateGlobalState("currentApiConfigName", prevName),
-						modeConfigId ? this.providerSettingsManager.setModeConfig(mode, modeConfigId) : undefined,
+						modeConfigId
+							? this.providerSettingsManager.setModeConfig(mode, modeConfigId)
+							: this.providerSettingsManager.clearModeConfig(mode),
 					]).then((results) =>
 						results.forEach((result) => result.status === "rejected" && logRollbackError(result.reason)),
 					)
@@ -2030,10 +2037,15 @@ export class ClineProvider
 				}
 
 				// Only model selection and its side-effect resets may be patched (see handleModelChangeSideEffects).
-				const allowedKeys: ReadonlySet<string> = new Set([
-					...PROVIDER_SETTINGS_KEYS.filter((key) => key.endsWith("ModelId")),
-					...RESET_ONLY_KEYS,
-				])
+				// The only model field is the stored provider's own, so e.g. the LM Studio draft model, which the
+				// allow-list does not check, cannot be changed.
+				const providerModelKey: string | undefined =
+					storedProvider === providerIdentifiers.openai
+						? "openAiModelId"
+						: modelIdKeysByProvider[storedProvider as keyof typeof modelIdKeysByProvider]
+				const allowedKeys: ReadonlySet<string> = new Set(
+					providerModelKey ? [providerModelKey, ...RESET_ONLY_KEYS] : RESET_ONLY_KEYS,
+				)
 				const merged: Record<string, unknown> = { ...stored, id }
 				for (const [key, value] of Object.entries(patch)) {
 					// The provider is never patchable, otherwise the expectedProvider guard could be bypassed.
