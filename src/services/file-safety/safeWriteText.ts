@@ -8,10 +8,12 @@ import { execFile } from "child_process"
  */
 export interface SafeWriteTextOptions {
 	/**
-	 * When true, preserve the old-file semantics: rename target -> backup first,
-	 * after commit rename delete the backup; on failure roll the backup back to
-	 * the target path.  When false (default) the atomic rename simply replaces
-	 * the target -- crash-safe window is zero.
+	 * When true, copy the target to a backup file before the commit rename. The
+	 * commit is a single atomic rename, so the target is never removed first and
+	 * nothing restores from the copy: it is deleted after a confirmed commit, and
+	 * kept on disk when the commit could not be confirmed durable so the previous
+	 * content stays recoverable. Costs a full read+write of the old file, so
+	 * callers that do not need that recovery copy should leave this off.
 	 */
 	backup?: boolean
 
@@ -44,14 +46,69 @@ function _tempName(dir: string, prefix: string): string {
 	return path.join(dir, "." + prefix + "_" + Date.now() + "_" + Math.random().toString(36).substring(2) + ".tmp")
 }
 
+/** Sharing errors that clear on their own when the target is held open. */
+const _TRANSIENT_RENAME_CODES = ["EPERM", "EACCES", "EBUSY"]
+// Bounded so a permanently locked target still fails fast: 5 retries back off to
+// 320ms, for a worst case of ~620ms added to a save.
+const _RENAME_RETRY_ATTEMPTS = 5
+const _RENAME_RETRY_BASE_MS = 20
+
+/** Error raised when the staging path cannot be trusted. */
+class UnsafeStagingDirectoryError extends Error {
+	constructor(stagingPath: string, reason: string) {
+		super(`Refusing to stage in ${stagingPath}: ${reason}`)
+		this.name = "UnsafeStagingDirectoryError"
+	}
+}
+
+/**
+ * Raised when the commit rename landed but the parent-directory fsync failed.
+ * The new content is in place; what is unconfirmed is that the directory entry
+ * survives a crash, so callers must not treat the publish as durable.
+ */
+class PublishNotDurableError extends Error {
+	constructor(targetPath: string, reason: string) {
+		super(`Published ${targetPath} but could not confirm it is durable: ${reason}`)
+		this.name = "PublishNotDurableError"
+	}
+}
+
+function _errorCode(error: unknown): string | undefined {
+	return typeof error === "object" && error !== null && "code" in error
+		? (error as { code?: string }).code
+		: undefined
+}
+
 /** Create a private staging sub-directory inside *dir* so that multiple
  * concurrent writes never collide on their temp names. */
 function _stagingDir(dir: string): string {
 	const sd = path.join(dir, ".file-safety-staging")
+	// mkdirSync(recursive) follows an existing path, so a .file-safety-staging
+	// symlink planted by another process would stage - and then publish - outside
+	// the target directory. Anything that is not a real directory owned by this
+	// process is rejected instead of used.
+	try {
+		const existing = fsSync.lstatSync(sd)
+		if (!existing.isDirectory()) {
+			throw new UnsafeStagingDirectoryError(sd, "it exists and is not a directory")
+		}
+	} catch (error: unknown) {
+		if (error instanceof UnsafeStagingDirectoryError) throw error
+		if (_errorCode(error) !== "ENOENT") throw error
+	}
 	// mode:0o700 protects a freshly created staging dir; the best-effort chmod
 	// repairs a pre-existing one (mkdirSync with recursive:true never chmods an
 	// existing directory), so staged temp files are never group/world readable.
 	fsSync.mkdirSync(sd, { recursive: true, mode: 0o700 })
+	// Re-check after the create: the path can be swapped for a symlink between the
+	// check above and mkdirSync.
+	const created = fsSync.lstatSync(sd)
+	if (!created.isDirectory()) {
+		throw new UnsafeStagingDirectoryError(sd, "it was replaced by a non-directory")
+	}
+	if (typeof process.getuid === "function" && created.uid !== process.getuid()) {
+		throw new UnsafeStagingDirectoryError(sd, "it is not owned by this process")
+	}
 	try {
 		fsSync.chmodSync(sd, 0o700)
 	} catch {
@@ -152,10 +209,27 @@ export async function safeWriteText(filePath: string, content: string, options?:
 	// Create the staging directory only when we generate the temp file there;
 	// callers supplying their own tempPath (e.g. safeWriteJson) must not be left
 	// with an empty .file-safety-staging directory behind.
-	const tempPath = options?.tempPath ?? _tempName(_stagingDir(dirPath), "safeWriteText")
+	const stagingDir = options?.tempPath ? null : _stagingDir(dirPath)
+	const tempPath = options?.tempPath ?? _tempName(stagingDir ?? dirPath, "safeWriteText")
+
+	// The staging sub-directory only exists to hold this write's temp file, so it is
+	// removed once the write is over. rmdir fails with ENOTEMPTY while another write
+	// still stages here, which is exactly the concurrency guard wanted.
+	async function _releaseStagingDir(): Promise<void> {
+		if (stagingDir === null) return
+		try {
+			await fs.rmdir(stagingDir)
+		} catch {
+			// non-empty (a concurrent write is still staging) or already gone
+		}
+	}
 
 	let backupPath: string | null = null
 	let backupCreated = false
+	// Set when the commit landed but its durability could not be confirmed. The
+	// content is in place, so there is nothing to roll back, but the caller must
+	// not be told the publish is durable.
+	let durabilityError: unknown = null
 	let daclDumpPath: string | null = null // tracked for cleanup in finally
 	let daclSaved = false // restore step runs only when the save succeeded
 
@@ -168,8 +242,11 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			let targetMode = 0o644 // default for a fresh target
 			try {
 				targetMode = fsSync.statSync(targetPath).mode & 0o777
-			} catch {
-				// target does not exist yet - keep the default
+			} catch (error: unknown) {
+				// Only a genuinely absent target may take the default mode. Any other
+				// stat failure leaves the real mode unknown, and publishing with the
+				// default could widen a restrictive file, so the write does not proceed.
+				if (_errorCode(error) !== "ENOENT") throw error
 			}
 			const fd = fsSync.openSync(tempPath, "w", targetMode)
 			try {
@@ -195,8 +272,10 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			let targetMode: number | null = null
 			try {
 				targetMode = fsSync.statSync(targetPath).mode & 0o777
-			} catch {
-				// target does not exist yet - keep the temp's default mode
+			} catch (error: unknown) {
+				// As above: an unknown target mode must not be replaced by the temp's
+				// own creation mode, which can be wider than the target's.
+				if (_errorCode(error) !== "ENOENT") throw error
 			}
 			const fd = fsSync.openSync(tempPath, "r+")
 			try {
@@ -254,7 +333,22 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				}
 			}
 			// -- Step 4: atomic rename temp -> target ---------------------
-			await fs.rename(tempPath, targetPath)
+			// On Windows the rename can be rejected while another process holds the
+			// target without FILE_SHARE_DELETE. The previous fs.writeFile path tolerated
+			// that, so retry a bounded number of times before failing.
+			for (let attempt = 0; ; attempt++) {
+				try {
+					await fs.rename(tempPath, targetPath)
+					break
+				} catch (error: unknown) {
+					const transient =
+						platform === "win32" &&
+						attempt < _RENAME_RETRY_ATTEMPTS &&
+						_TRANSIENT_RENAME_CODES.includes(_errorCode(error) ?? "")
+					if (!transient) throw error
+					await new Promise((resolve) => setTimeout(resolve, _RENAME_RETRY_BASE_MS * 2 ** attempt))
+				}
+			}
 
 			// -- Step 4b (POSIX): fsync the parent directory so the directory entry
 			// changed by the commit rename is durable, not just the file content.
@@ -266,8 +360,11 @@ export async function safeWriteText(filePath: string, content: string, options?:
 					} finally {
 						fsSync.closeSync(dirFd)
 					}
-				} catch {
-					// best-effort: the content rename already committed
+				} catch (error: unknown) {
+					// The rename committed, so the content is in place and there is nothing to
+					// roll back, but the directory entry is not confirmed durable. Record it so
+					// the call fails and the backup is kept for recovery.
+					durabilityError = error
 				}
 			}
 
@@ -278,7 +375,9 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			}
 
 			// -- Step 6 (backup:true): delete backup on success -----------
-			if (backupCreated && backupPath) {
+			// Kept when durability is unconfirmed, so the previous content is still
+			// recoverable if the un-durable rename is lost on power loss.
+			if (backupCreated && backupPath && durabilityError === null) {
 				try {
 					await fs.unlink(backupPath)
 				} catch {
@@ -315,6 +414,18 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			await fs.unlink(daclDumpPath).catch(() => {})
 		}
 
+		await _releaseStagingDir()
+
 		throw originalError
+	}
+
+	await _releaseStagingDir()
+
+	// Raised outside the rollback handler on purpose: the content is committed, so
+	// this is not a failure to roll back, and the backup must survive for recovery.
+	if (durabilityError !== null) {
+		const reason =
+			durabilityError instanceof Error ? durabilityError.message : String(durabilityError)
+		throw new PublishNotDurableError(targetPath, reason)
 	}
 }
