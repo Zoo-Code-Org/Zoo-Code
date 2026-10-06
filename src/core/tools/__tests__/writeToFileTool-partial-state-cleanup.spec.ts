@@ -19,6 +19,7 @@ interface CleanupTask {
 		revertChanges: MockedFunction<() => Promise<void>>
 	}
 	finalizePartialToolAsk: MockedFunction<() => Promise<void>>
+	say: MockedFunction<(...args: unknown[]) => Promise<void>>
 }
 
 function buildTask(taskId: string, instanceId: string): Task {
@@ -32,6 +33,7 @@ function buildTask(taskId: string, instanceId: string): Task {
 			revertChanges: vi.fn().mockResolvedValue(undefined),
 		},
 		finalizePartialToolAsk: vi.fn().mockResolvedValue(undefined),
+		say: vi.fn().mockResolvedValue(undefined),
 	}
 	return task as unknown as Task
 }
@@ -87,8 +89,41 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 		expect(errorSpy).toHaveBeenCalledWith("Error reverting write_to_file diff view changes:", expect.any(Error))
 	})
 
+	it("reverts while the recovery state exists and reports the hazard when the revert fails", async () => {
+		const task = buildTask("revert-fails-teardown", "inst-5")
+		const t = task as unknown as CleanupTask
+		let stateSizeDuringRevert = -1
+		t.diffViewProvider.revertChanges = vi.fn(async () => {
+			// The recovery state must still be present while the rollback runs.
+			stateSizeDuringRevert = writeToFileTool["taskPartialStreamState"].size
+			throw new Error("revert failed")
+		})
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		// Seed the per-task stream state so this teardown boundary is taken at all.
+		writeToFileTool["getTaskPartialStreamState"](task)
+		expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+		const handled = await writeToFileTool["onParameterParseFailure"](
+			task,
+			// Only handleError is reached when no streaming error was recorded; the
+			// structural double is the existing pattern in this file.
+			{ handleError: vi.fn().mockResolvedValue(undefined) } as unknown as Parameters<typeof writeToFileTool["onParameterParseFailure"]>[1],
+			new Error("parameter parse failed"),
+		)
+
+		// A failed rollback is not a completed teardown: the user is told the editor may
+		// still hold content the task never approved.
+		expect(t.say).toHaveBeenCalledWith("error", expect.stringContaining("unapproved"))
+		expect(stateSizeDuringRevert).toBe(1)
+		// The teardown still finished.
+		expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		expect(t.diffViewProvider.reset).toHaveBeenCalled()
+		expect(handled).toBe(false)
+		errorSpy.mockRestore()
+	})
+
 	it("logs and continues when finalizing the open partial ask fails", async () => {
-		const task = buildTask("finalize-fails", "inst-5")
+		const task = buildTask("finalize-fails", "inst-6")
 		const t = task as unknown as CleanupTask
 		t.finalizePartialToolAsk = vi.fn().mockRejectedValue(new Error("finalize failed"))
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
