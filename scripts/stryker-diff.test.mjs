@@ -26,6 +26,7 @@ import {
 	parseVitestTestFiles,
 	preferDirectTestFiles,
 	parseStackedMap,
+	alignExecutionTree,
 	resolveCiInvocation,
 	resolveStackedUnitBase,
 	resolveStrykerTempDir,
@@ -353,9 +354,10 @@ describe("stacked unit base resolution", () => {
 				{ number: 2, headSha: "c".repeat(40) },
 			],
 		)
-		assert.deepEqual(parseStackedMap("[{\"number\": 1, \"headSha\": \"" + "d".repeat(40) + "\"}]garbage"), [
-			{ number: 1, headSha: "d".repeat(40) },
-		])
+		// Trailing content cannot be consumed as a page, so the whole map is rejected rather than
+		// keeping a partial entry that could select a parent base.
+		assert.deepEqual(parseStackedMap("[{\"number\": 1, \"headSha\": \"" + "d".repeat(40) + "\"}]garbage"), [])
+		assert.deepEqual(parseStackedMap("[{\"number\": 1, \"headSha\": \"" + "d".repeat(40) + "\"}] [{\"number\": 2"), [])
 	})
 
 	it("the ci command picks the diff head from the commit graph", () => {
@@ -401,6 +403,35 @@ describe("stacked unit base resolution", () => {
 			assert.equal(multi.baseSha, advancedBase)
 			assert.equal(multi.stackedOn, null)
 			assert.equal(resolveCiInvocation(repository, advancedBase, multiParentHead, multiParentHead, [{ number: 1, headSha: parentSha }]).stackedOn, null)
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
+	})
+
+	it("aligns the working tree to the diff head so selection and mutation see one tree", () => {
+		const { repository, eventBaseSha, parentSha, childSha, run, write } = createSyntheticStack()
+
+		try {
+			run("checkout", "--quiet", "-b", "merge-branch", eventBaseSha)
+			// The base advance changes a file, so the merge tree differs from the unit tree. The
+			// selectors are derived from the unit tree, so mutation has to run on that same tree.
+			write("packages/core/src/unrelated.ts", "export const unrelated = () => 99\n")
+			run("add", ".")
+			run("commit", "--quiet", "-m", "base advance")
+			const advancedBase = run("rev-parse", "HEAD")
+			run("merge", "--no-ff", "--quiet", "-m", "merge", childSha)
+			const mergeSha = run("rev-parse", "HEAD")
+
+			const invocation = resolveCiInvocation(repository, advancedBase, mergeSha, childSha, [{ number: 1, headSha: parentSha }])
+			assert.equal(invocation.diffHead, childSha)
+			assert.equal(run("rev-parse", "HEAD").toLowerCase(), mergeSha.toLowerCase())
+
+			assert.equal(alignExecutionTree(repository, invocation.diffHead), true)
+			assert.equal(run("rev-parse", "HEAD").toLowerCase(), childSha.toLowerCase())
+			// The tree Stryker would mutate is now the unit tree, not the merge tree.
+			assert.equal(fs.readFileSync(path.join(repository, "packages/core/src/unit2.ts"), "utf8").replace(/\r/g, ""), "export const unit2 = () => 2\n")
+			// Aligning again is a no-op.
+			assert.equal(alignExecutionTree(repository, invocation.diffHead), false)
 		} finally {
 			fs.rmSync(repository, { recursive: true, force: true })
 		}

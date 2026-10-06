@@ -309,6 +309,19 @@ export function resolveCiInvocation(repoRoot, eventBaseSha, mergeCommitSha, prHe
 	return { baseSha: resolved.baseSha, diffHead: resolved.stackedOn ? prHeadSha : mergeCommitSha, stackedOn: resolved.stackedOn }
 }
 
+// Selection, source reads, and Stryker must all see the same tree. The workflow checks out
+// GitHub's merge commit, which also carries whatever main advanced since the parent unit, so for
+// a stacked unit the working tree is moved to the unit head before mutation runs; otherwise the
+// selectors come from one tree and the mutated source comes from another.
+export function alignExecutionTree(repoRoot, diffHeadSha) {
+	validateSha(diffHeadSha, "diff head SHA")
+	const current = git(repoRoot, ["rev-parse", "HEAD"]).trim().toLowerCase()
+	const wanted = String(diffHeadSha).toLowerCase()
+	if (current === wanted) return false
+	git(repoRoot, ["checkout", "--quiet", wanted])
+	return true
+}
+
 export function selectFromGit(repoRoot, baseSha, headSha, options = {}) {
 	validateSha(baseSha, "base SHA")
 	validateSha(headSha, "head SHA")
@@ -837,17 +850,44 @@ function argument(name) {
 // instead of throwing.
 export function parseStackedMap(value) {
 	if (!value) return []
-	const chunks = String(value).match(/\[[^\]]*\]/g) || [String(value)]
+	// gh api --paginate emits one JSON array per page, so the input is a stream of arrays rather
+	// than a single array. Consume the whole stream: if any part of it cannot be parsed, the map
+	// is not trustworthy as a whole and the caller must fall back to the event base instead of
+	// keeping a partial entry that could select a parent base.
+	const text = String(value)
 	const entries = []
-	for (const chunk of chunks) {
+	let index = 0
+	while (index < text.length) {
+		while (index < text.length && /[\s,]/.test(text[index])) index += 1
+		if (index >= text.length) break
+		if (text[index] !== "[") return []
+		let depth = 0
+		let inString = false
+		let end = -1
+		for (let i = index; i < text.length; i++) {
+			const char = text[i]
+			if (inString) {
+				if (char === "\\") { i += 1; continue }
+				if (char === "\"") inString = false
+				continue
+			}
+			if (char === "\"") { inString = true; continue }
+			if (char === "[") depth += 1
+			else if (char === "]") {
+				depth -= 1
+				if (depth === 0) { end = i; break }
+			}
+		}
+		if (depth !== 0 || end < 0) return []
 		let parsed
 		try {
-			parsed = JSON.parse(chunk)
+			parsed = JSON.parse(text.slice(index, end + 1))
 		} catch {
-			continue
+			return []
 		}
-		if (!Array.isArray(parsed)) continue
+		if (!Array.isArray(parsed)) return []
 		entries.push(...parsed.filter((entry) => entry && entry.number && /^[0-9a-f]{40}$/i.test(String(entry.headSha))))
+		index = end + 1
 	}
 	return entries
 }
@@ -867,10 +907,14 @@ function main() {
 	const openPullRequests = parseStackedMap(argument("--stacked-map"))
 	// --pr-head is the pull request head itself. The workflow runs on GitHub's merge commit, whose
 	// first parent is the base tip, so the merge commit cannot identify the stacked unit; its second
-	// parent can. The merge commit stays the diff head.
+	// parent can. A plain pull request keeps the merge commit as the diff head; a stacked unit
+	// uses its own head, and the working tree is aligned to that head below.
 	const prHeadSha = argument("--pr-head") ?? headSha
 	const invocation = resolveCiInvocation(repoRoot, baseSha, headSha, prHeadSha, openPullRequests)
 	if (invocation.stackedOn) console.log(`Stacked unit: measured against the head of parent PR #${invocation.stackedOn}, not the event base.`)
+	if (invocation.stackedOn && alignExecutionTree(repoRoot, invocation.diffHead)) {
+		console.log(`Aligned the working tree to the diff head ${invocation.diffHead.slice(0, 12)} so selection, source reads, and mutation run on the same tree.`)
+	}
 
 	const reportRoot = path.resolve(repoRoot, argument("--reports") ?? "reports/mutation")
 	const manifest = {
