@@ -11,6 +11,7 @@ import * as fs from "fs/promises"
 import { computeVersionToken } from "../../../utils/versionToken"
 import { safeWriteText } from "../../../services/file-safety/safeWriteText"
 import { ObservationRegistry } from "../../../core/task/observationRegistry"
+import { acquireFileLock } from "../../../utils/fileLock"
 import type { Task } from "../../../core/task/Task"
 
 // Mock delay
@@ -40,6 +41,11 @@ vi.mock("../../../utils/versionToken", () => ({
 }))
 
 // Mock utils
+// Mock the advisory lock the guarded write uses to keep its check and publish atomic.
+vi.mock("../../../utils/fileLock", () => ({
+	acquireFileLock: vi.fn(async () => async () => {}),
+}))
+
 vi.mock("../../../utils/fs", () => ({
 	createDirectoriesForFile: vi.fn().mockResolvedValue([]),
 }))
@@ -913,6 +919,25 @@ describe("DiffViewProvider", () => {
 				await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
 
 				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+
+			})
+			it("holds the lock across the guard check and the publish", async () => {
+				const order: string[] = []
+				vi.mocked(acquireFileLock).mockImplementation(async () => {
+					order.push("acquire")
+					return async () => { order.push("release") }
+				})
+				mockTask.observationRegistry.clear()
+				vi.mocked(fs.access).mockImplementation(async () => {
+					order.push("check")
+					throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+				})
+				vi.mocked(safeWriteText).mockImplementation(async () => { order.push("publish") })
+
+				await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
+
+				// A writer that honours the same lock cannot slip between the check and the publish.
+				expect(order).toEqual(["acquire", "check", "publish", "release"])
 			})
 
 			it("rejects an observed write whose version token is stale", async () => {
