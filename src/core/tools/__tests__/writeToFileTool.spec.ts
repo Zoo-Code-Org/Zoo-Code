@@ -728,6 +728,52 @@ describe("writeToFileTool", () => {
 		})
 	})
 
+	describe("per-task stream state isolation", () => {
+		// A second task streaming through the same singleton while mockCline's execute()
+		// runs. Structural double, same pattern as the partial-state-cleanup spec.
+		function buildStreamingTask(taskId: string, instanceId: string) {
+			return {
+				taskId,
+				instanceId,
+				once: vi.fn(),
+				off: vi.fn(),
+				diffViewProvider: {
+					reset: vi.fn().mockResolvedValue(undefined),
+					revertChanges: vi.fn().mockResolvedValue(undefined),
+				},
+				finalizePartialToolAsk: vi.fn().mockResolvedValue(undefined),
+			}
+		}
+
+		it("leaves another task's stream state intact when execute() completes", async () => {
+			const other = buildStreamingTask("task-2", "instance-2")
+			const otherState = writeToFileTool["getTaskPartialStreamState"](other as never)
+			otherState.streamFailed = true
+			otherState.streamError = new Error("other task stream failure")
+
+			await executeWriteFileTool({})
+
+			// The other task is still streaming: its failure state must survive, or its
+			// next delta re-opens the diff view and spawns a duplicate partial ask.
+			const retained = writeToFileTool["taskPartialStreamState"].get("task-2.instance-2")
+			expect(retained).toBeDefined()
+			expect(retained?.streamFailed).toBe(true)
+			expect(retained?.streamError?.message).toBe("other task stream failure")
+			expect(other.off).not.toHaveBeenCalled()
+		})
+
+		it("finalizes the partial ask when the write itself fails", async () => {
+			mockCline.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
+
+			await executeWriteFileTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			// The diff-view branch opened a partial ask for this write; without the
+			// finalize the spinner and Save/Reject stay live after the failure.
+			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(expectedPartialToolMessage)
+		})
+	})
+
 	describe("user interaction", () => {
 		it("reverts changes when user rejects approval", async () => {
 			mockAskApproval.mockResolvedValue(false)
