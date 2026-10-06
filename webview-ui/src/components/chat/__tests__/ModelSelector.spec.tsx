@@ -172,7 +172,15 @@ describe("ModelSelector", () => {
 		expect(screen.getByRole("button", { name: "openrouter/model-0" })).toHaveFocus()
 		await user.keyboard(" ")
 		expect(screen.queryByTestId("popover-content")).not.toBeInTheDocument()
-		expect(onChangeMock).toHaveBeenCalledWith(expect.objectContaining({ openRouterModelId: "openrouter/model-0" }))
+		expect(onChangeMock).toHaveBeenCalledWith({
+			expectedProvider: providerIdentifiers.openrouter,
+			patch: {
+				openRouterModelId: "openrouter/model-0",
+				reasoningEffort: null,
+				modelMaxTokens: null,
+				modelMaxThinkingTokens: null,
+			},
+		})
 	})
 
 	it("blocks model updates when disabled after the model list is rendered", async () => {
@@ -214,9 +222,18 @@ describe("ModelSelector", () => {
 		const anotherModel = screen.getAllByText(/claude-3-5-haiku/i)[0]
 		fireEvent.click(anotherModel)
 
-		expect(onChangeMock).toHaveBeenCalledWith(
-			expect.objectContaining({ apiModelId: expect.stringContaining("claude-3-5-haiku") }),
-		)
+		expect(onChangeMock).toHaveBeenCalledTimes(1)
+		const [selection] = onChangeMock.mock.calls[0]
+		expect(selection).toEqual({
+			expectedProvider: providerIdentifiers.anthropic,
+			patch: {
+				apiModelId: expect.stringContaining("claude-3-5-haiku"),
+				reasoningEffort: null,
+				modelMaxTokens: null,
+				modelMaxThinkingTokens: null,
+			},
+		})
+		expect(selection.patch).not.toHaveProperty("apiProvider")
 	})
 
 	it("resets reasoning/thinking-token overrides and closes the popover after selecting a model", () => {
@@ -239,13 +256,15 @@ describe("ModelSelector", () => {
 
 		fireEvent.click(screen.getAllByText(/claude-3-5-haiku/i)[0])
 
-		expect(onChangeMock).toHaveBeenCalledWith(
-			expect.objectContaining({
-				reasoningEffort: undefined,
-				modelMaxTokens: undefined,
-				modelMaxThinkingTokens: undefined,
-			}),
-		)
+		expect(onChangeMock).toHaveBeenCalledWith({
+			expectedProvider: providerIdentifiers.anthropic,
+			patch: {
+				apiModelId: expect.stringContaining("claude-3-5-haiku"),
+				reasoningEffort: null,
+				modelMaxTokens: null,
+				modelMaxThinkingTokens: null,
+			},
+		})
 		expect(screen.getByTestId("popover-root")).toHaveAttribute("data-open", "false")
 		expect(screen.queryByTestId("popover-content")).not.toBeInTheDocument()
 	})
@@ -316,7 +335,15 @@ describe("ModelSelector", () => {
 
 		fireEvent.click(screen.getByText("openrouter/model-b"))
 
-		expect(onChangeMock).toHaveBeenCalledWith(expect.objectContaining({ openRouterModelId: "openrouter/model-b" }))
+		expect(onChangeMock).toHaveBeenCalledWith({
+			expectedProvider: providerIdentifiers.openrouter,
+			patch: {
+				openRouterModelId: "openrouter/model-b",
+				reasoningEffort: null,
+				modelMaxTokens: null,
+				modelMaxThinkingTokens: null,
+			},
+		})
 	})
 
 	it.each([
@@ -1016,7 +1043,15 @@ describe("ModelSelector", () => {
 
 		fireEvent.click(list.getByText("openrouter/model-a"))
 
-		expect(onChangeMock).toHaveBeenCalledWith(expect.objectContaining({ openRouterModelId: "openrouter/model-a" }))
+		expect(onChangeMock).toHaveBeenCalledWith({
+			expectedProvider: providerIdentifiers.openrouter,
+			patch: {
+				openRouterModelId: "openrouter/model-a",
+				reasoningEffort: null,
+				modelMaxTokens: null,
+				modelMaxThinkingTokens: null,
+			},
+		})
 	})
 
 	it("hides the custom-arn pseudo-model for a Bedrock provider and allows selecting a normal model", () => {
@@ -1051,12 +1086,16 @@ describe("ModelSelector", () => {
 		// so the extension doesn't keep reading the old ARN instead of the newly chosen model.
 		fireEvent.click(list.getByText("anthropic.claude-3-5-haiku-20241022-v1:0"))
 
-		expect(onChangeMock).toHaveBeenCalledWith(
-			expect.objectContaining({
+		expect(onChangeMock).toHaveBeenCalledWith({
+			expectedProvider: providerIdentifiers.bedrock,
+			patch: {
 				apiModelId: "anthropic.claude-3-5-haiku-20241022-v1:0",
-				awsCustomArn: undefined,
-			}),
-		)
+				awsCustomArn: "",
+				reasoningEffort: null,
+				modelMaxTokens: null,
+				modelMaxThinkingTokens: null,
+			},
+		})
 	})
 
 	it("filters static models by the organization allow list when not all models are allowed", () => {

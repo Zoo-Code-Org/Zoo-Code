@@ -3,7 +3,7 @@ import { useEvent } from "react-use"
 import DynamicTextArea from "react-textarea-autosize"
 import { VolumeX, Image, WandSparkles, SendHorizontal, X, ListEnd, Square } from "lucide-react"
 
-import type { ExtensionMessage, ProviderSettings } from "@roo-code/types"
+import type { ExtensionMessage } from "@roo-code/types"
 
 import { mentionRegex, mentionRegexGlobal, commandRegexGlobal, unescapeSpaces } from "@roo/context-mentions"
 import { WebviewMessage } from "@roo/WebviewMessage"
@@ -27,7 +27,7 @@ import { StandardTooltip } from "@src/components/ui"
 import Thumbnails from "../common/Thumbnails"
 import { ModeSelector } from "./ModeSelector"
 import { ApiConfigSelector } from "./ApiConfigSelector"
-import { ModelSelector } from "./ModelSelector"
+import { ModelSelector, type ModelSelection } from "./ModelSelector"
 import { AutoApproveDropdown } from "./AutoApproveDropdown"
 import { MAX_IMAGES_PER_MESSAGE } from "./constants"
 import ContextMenu from "./ContextMenu"
@@ -950,11 +950,11 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 		// Common model selector handler
 		const handleModelChange = useCallback(
-			(value: ProviderSettings) => {
+			(selection: ModelSelection) => {
 				vscode.postMessage({
-					type: "upsertApiConfiguration",
+					type: "updateProfileModel",
 					text: currentApiConfigName,
-					apiConfiguration: value,
+					values: { expectedProvider: selection.expectedProvider, patch: selection.patch },
 				})
 			},
 			[currentApiConfigName],

@@ -1275,21 +1275,29 @@ describe("ChatTextArea", () => {
 			)
 		})
 
-		it("posts upsertApiConfiguration with the current config name when a model is selected", () => {
+		it("posts only the model patch for the current profile and never a full apiConfiguration", () => {
 			render(<ChatTextArea {...defaultProps} />)
 
+			mockPostMessage.mockClear()
 			fireEvent.click(screen.getByTestId("model-selector-trigger"))
 			fireEvent.click(screen.getAllByText(/claude-3-5-haiku/i)[0])
 
-			expect(mockPostMessage).toHaveBeenCalledWith(
-				expect.objectContaining({
-					type: "upsertApiConfiguration",
-					text: "default",
-					apiConfiguration: expect.objectContaining({
+			expect(mockPostMessage).toHaveBeenCalledTimes(1)
+			const message = mockPostMessage.mock.calls[0][0]
+			expect(message).toEqual({
+				type: "updateProfileModel",
+				text: "default",
+				values: {
+					expectedProvider: providerIdentifiers.anthropic,
+					patch: {
 						apiModelId: expect.stringContaining("claude-3-5-haiku"),
-					}),
-				}),
-			)
+						reasoningEffort: null,
+						modelMaxTokens: null,
+						modelMaxThinkingTokens: null,
+					},
+				},
+			})
+			expect(message).not.toHaveProperty("apiConfiguration")
 		})
 	})
 

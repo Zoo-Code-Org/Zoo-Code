@@ -5,6 +5,7 @@ import {
 	type ModelInfo,
 	type ModelRecord,
 	type OrganizationAllowList,
+	type ProviderName,
 	type ProviderSettings,
 	isDynamicProvider,
 	isRetiredProvider,
@@ -22,15 +23,23 @@ import { vscode } from "@/utils/vscode"
 
 import {
 	getProviderModelConfig,
+	handleModelChangeSideEffects,
 	getStaticModelsForProvider,
 	isStaticModelProvider,
 } from "../settings/utils/providerModelConfig"
 import { filterModels } from "../settings/utils/organizationFilters"
 import { SEARCH_THRESHOLD } from "./selectorConstants"
 
+export type ModelSelectionPatch = Record<string, string | number | null>
+
+export interface ModelSelection {
+	expectedProvider: ProviderName
+	patch: ModelSelectionPatch
+}
+
 interface ModelSelectorProps {
 	apiConfiguration: ProviderSettings
-	onChange: (apiConfiguration: ProviderSettings) => void
+	onChange: (selection: ModelSelection) => void
 	disabled?: boolean
 	title: string
 	triggerClassName?: string
@@ -164,23 +173,19 @@ export const ModelSelector = ({
 				return
 			}
 
-			const updated: ProviderSettings = {
-				...apiConfiguration,
-				reasoningEffort: undefined,
-				modelMaxTokens: undefined,
-				modelMaxThinkingTokens: undefined,
+			const patch: ModelSelectionPatch = {}
+			const setField = <K extends keyof ProviderSettings>(field: K, value: ProviderSettings[K]) => {
+				patch[field] = typeof value === "string" || typeof value === "number" ? value : null
 			}
-			if (provider === providerIdentifiers.bedrock && modelId !== "custom-arn") {
-				;(updated as Record<string, unknown>)["awsCustomArn"] = undefined
-			}
-			;(updated as Record<string, unknown>)[modelConfig.field] = modelId
+			handleModelChangeSideEffects(provider, modelId, setField)
+			patch[modelConfig.field] = modelId
 
-			onChange(updated)
+			onChange({ expectedProvider: provider, patch })
 
 			setOpen(false)
 			setSearchValue("")
 		},
-		[apiConfiguration, modelConfig, provider, onChange],
+		[modelConfig, provider, onChange],
 	)
 
 	const renderModelItem = useCallback(
