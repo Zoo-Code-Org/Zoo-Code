@@ -29,6 +29,15 @@ export class ObservationRegistry {
 		this.entries.set(absolutePath, { version, observedAt: Date.now() })
 	}
 
+	/**
+	 * Drop the observation for a file. A read that cannot compute a version token must not
+	 * leave an earlier entry behind, because the write guard would then compare against a
+	 * token that no longer describes the last read.
+	 */
+	forget(absolutePath: string): boolean {
+		return this.entries.delete(absolutePath)
+	}
+
 	get(absolutePath: string): FileObservation | undefined {
 		return this.entries.get(absolutePath)
 	}

@@ -40,6 +40,21 @@ describe("ObservationRegistry", () => {
 		expect(reg.has("/y.ts")).toBe(false)
 	})
 
+	it("forget drops a warm entry so a later read cannot be guarded by a stale token", () => {
+		const reg = new ObservationRegistry()
+		reg.observe("/x.ts", "t1")
+
+		// The warm case: an entry from an earlier read must not survive a read that could not
+		// compute a token for the current on-disk version.
+		expect(reg.forget("/x.ts")).toBe(true)
+		expect(reg.has("/x.ts")).toBe(false)
+		expect(reg.get("/x.ts")).toBeUndefined()
+
+		// The cold case: forgetting an unobserved path is a no-op, not an error.
+		expect(reg.forget("/y.ts")).toBe(false)
+		expect(reg.size).toBe(0)
+	})
+
 	it("size reflects the number of observed entries", () => {
 		const reg = new ObservationRegistry()
 		expect(reg.size).toBe(0)

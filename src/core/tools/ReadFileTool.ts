@@ -222,9 +222,15 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					await task.fileContextTracker.trackFileContext(relPath, "read_tool" as RecordSource)
 
 					// A2 (plan #33 / epic #1375): record the observed on-disk version for the future write guard.
-					// A stat failure leaves the target unobserved and never fails the read.
+					// A stat failure leaves the target unobserved and never fails the read. It must also
+					// drop any earlier entry, otherwise the guard still holds a token from a previous
+					// read that no longer describes this one.
 					const version = await computeVersionToken(fullPath).catch(() => undefined)
-					if (version) task.observationRegistry.observe(fullPath, version)
+					if (version) {
+						task.observationRegistry.observe(fullPath, version)
+					} else {
+						task.observationRegistry.forget(fullPath)
+					}
 
 					updateFileResult(relPath, {
 						nativeContent: `File: ${relPath}\n${result}`,
@@ -808,9 +814,14 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 
 				// A2 (plan #33 / epic #1375): mirror the native path — record the observed
 				// on-disk version so legacy-format reads also feed the future write guard.
-				// A stat failure leaves the target unobserved and never fails the read.
+				// A stat failure leaves the target unobserved and never fails the read, and drops any
+				// entry from an earlier read so the guard cannot compare against a stale token.
 				const version = await computeVersionToken(fullPath).catch(() => undefined)
-				if (version) task.observationRegistry.observe(fullPath, version)
+				if (version) {
+					task.observationRegistry.observe(fullPath, version)
+				} else {
+					task.observationRegistry.forget(fullPath)
+				}
 			} catch (error) {
 				const errorMsg = error instanceof Error ? error.message : String(error)
 				results.push(`File: ${relPath}\nError: ${errorMsg}`)
