@@ -297,10 +297,24 @@ describe("safeWriteText", () => {
 			async () => {
 				const targetPath = "/tmp/test-dir/target.txt"
 				vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+				vi.mocked(fsSync.openSync).mockReturnValue(1)
 				await safeWriteText(targetPath, "data", { platform: "win32" })
 
-				// icacls dump + restore were called (execFile is callback-based mock)
+				// The neighbouring argument test passes backup:true, so this no-backup case is
+				// kept - but it has to check the commands, not just their count.
 				expect(execFile).toHaveBeenCalledTimes(2)
+
+				const saveCall = vi.mocked(execFile).mock.calls[0]
+				expect(saveCall[0]).toBe("icacls")
+				expect(saveCall[1]).toEqual([targetPath, "/save", expect.stringContaining(".acl.tmp"), "/T"])
+
+				const restoreCall = vi.mocked(execFile).mock.calls[1]
+				expect(restoreCall[0]).toBe("icacls")
+				expect(restoreCall[1]).toEqual([
+					expect.stringContaining("/tmp/test-dir"),
+					"/restore",
+					expect.stringContaining(".acl.tmp"),
+				])
 			},
 		)
 

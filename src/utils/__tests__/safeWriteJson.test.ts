@@ -399,9 +399,10 @@ describe("safeWriteJson", () => {
 		expect(vi.mocked(fs.access)).toHaveBeenCalled()
 	})
 
-	// Test for rollback failure scenario (the rollback rename now lives in safeWriteText)
-	test("propagates the publish failure and removes the backup copy", async () => {
-		const initialData = { message: "Initial, orphaned when rollback fails" }
+	// The publish is a single rename: a failed commit must leave the target intact
+	// and must not leak the staged file.
+	test("propagates the publish failure and removes the staged .new_ file", async () => {
+		const initialData = { message: "Initial, must survive a failed publish" }
 		const newData = { message: "New content" }
 
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
@@ -409,19 +410,21 @@ describe("safeWriteJson", () => {
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {}) // Suppress console.error
 
 		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
-		// The backup is a copy, so the only rename is the publish.
+		// The only rename is the publish, so failing it is the failed-publish case.
 		vi.mocked(fs.rename).mockImplementationOnce(async () => {
 			throw new Error("Primary rename failed")
 		})
 
-		// The original error must propagate, not the rollback error
+		// The original error must propagate, not the cleanup error
 		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Primary rename failed")
 
-		// The target was never moved, so it survives the failed publish, and the backup copy is
-		// removed by the failure cleanup.
 		expect(await fileExists(currentTestFilePath)).toBe(true)
+
+		// This is the caller-supplied staged path, so it is the file that leaks when the
+		// caller's cleanup misses it; safeWriteText's own failure test only covers the
+		// temp path it generates itself.
 		const entries = await fs.readdir(tempDir)
-		expect(entries.some((entry) => entry.includes("safeWriteText.bak_"))).toBe(false)
+		expect(entries.some((entry) => entry.includes(".new_"))).toBe(false)
 
 		consoleErrorSpy.mockRestore()
 	})
