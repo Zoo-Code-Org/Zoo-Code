@@ -97,7 +97,6 @@ export async function presentAssistantMessage(cline: Task) {
 	}
 
 	cline.presentAssistantMessageLocked = true
-	cline.presentAssistantMessageHasPendingUpdates = false
 	try {
 		await presentAssistantMessageBlock(cline)
 	} finally {
@@ -108,6 +107,14 @@ export async function presentAssistantMessage(cline: Task) {
 }
 
 async function presentAssistantMessageBlock(cline: Task): Promise<void> {
+	if (cline.abort) {
+		return
+	}
+
+	// Each internal pass consumes the pending update. New updates arriving
+	// during an awaited operation can request another pass.
+	cline.presentAssistantMessageHasPendingUpdates = false
+
 	if (cline.currentStreamingContentIndex >= cline.assistantMessageContent.length) {
 		// This may happen if the last content block was completed before
 		// streaming could finish. If streaming is finished, and we're out of
@@ -117,7 +124,6 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 			cline.userMessageContentReady = true
 		}
 
-		cline.presentAssistantMessageLocked = false
 		return
 	}
 
@@ -134,7 +140,6 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 			`Block content:`,
 			JSON.stringify(cline.assistantMessageContent[cline.currentStreamingContentIndex], null, 2),
 		)
-		cline.presentAssistantMessageLocked = false
 		return
 	}
 
@@ -1086,17 +1091,6 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 		}
 	}
 
-	// Seeing out of bounds is fine, it means that the next too call is being
-	// built up and ready to add to assistantMessageContent to present.
-	// When you see the UI inactive during this, it means that a tool is
-	// breaking without presenting any UI. For example the write_to_file tool
-	// was breaking when relpath was undefined, and for invalid relpath it never
-	// presented UI.
-	// This needs to be placed here, if not then calling
-	// cline.presentAssistantMessage below would fail (sometimes) since it's
-	// locked.
-	cline.presentAssistantMessageLocked = false
-
 	// NOTE: When tool is rejected, iterator stream is interrupted and it waits
 	// for `userMessageContentReady` to be true. Future calls to present will
 	// skip execution since `didRejectTool` and iterate until `contentIndex` is
@@ -1124,7 +1118,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 		if (cline.currentStreamingContentIndex < cline.assistantMessageContent.length) {
 			// There are already more content blocks to stream, so we'll call
 			// this function ourselves.
-			return await presentAssistantMessage(cline)
+			return await presentAssistantMessageBlock(cline)
 		} else {
 			// CRITICAL FIX: If we're out of bounds and the stream is complete, set userMessageContentReady
 			// This handles the case where assistantMessageContent is empty or becomes empty after processing
@@ -1136,7 +1130,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 
 	// Block is partial, but the read stream may have finished.
 	if (cline.presentAssistantMessageHasPendingUpdates) {
-		return await presentAssistantMessage(cline)
+		return await presentAssistantMessageBlock(cline)
 	}
 }
 

@@ -208,6 +208,98 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 		})
 	})
 
+	describe("Presentation lock ownership", () => {
+		it("holds one lock across consecutive blocks and queues overlapping calls", async () => {
+			mockTask.assistantMessageContent = [
+				{ type: "text", content: "first", partial: false },
+				{ type: "text", content: "second", partial: false },
+			]
+			mockTask.didCompleteReadingStream = true
+			const lockChanges: boolean[] = []
+			let locked = false
+			Object.defineProperty(mockTask, "presentAssistantMessageLocked", {
+				configurable: true,
+				get: () => locked,
+				set: (value: boolean) => {
+					locked = value
+					lockChanges.push(value)
+				},
+			})
+			mockTask.say.mockImplementation(async (_type: string, content: string) => {
+				expect(mockTask.presentAssistantMessageLocked).toBe(true)
+				if (content === "second") {
+					await presentAssistantMessage(mockTask)
+					expect(mockTask.presentAssistantMessageHasPendingUpdates).toBe(true)
+				}
+			})
+
+			await presentAssistantMessage(mockTask)
+
+			expect(mockTask.say.mock.calls).toEqual([
+				["text", "first", undefined, false],
+				["text", "second", undefined, false],
+			])
+			expect(mockTask.currentStreamingContentIndex).toBe(2)
+			expect(mockTask.userMessageContentReady).toBe(true)
+			expect(mockTask.presentAssistantMessageHasPendingUpdates).toBe(false)
+			expect(lockChanges).toEqual([true, false])
+		})
+
+		it("consumes a pending update for a partial block without repeating it indefinitely", async () => {
+			mockTask.assistantMessageContent = [{ type: "text", content: "initial", partial: true }]
+			mockTask.say
+				.mockImplementationOnce(async () => {
+					mockTask.assistantMessageContent[0] = { type: "text", content: "updated", partial: true }
+					await presentAssistantMessage(mockTask)
+					expect(mockTask.presentAssistantMessageHasPendingUpdates).toBe(true)
+				})
+				.mockImplementationOnce(async () => {
+					expect(mockTask.presentAssistantMessageLocked).toBe(true)
+					expect(mockTask.presentAssistantMessageHasPendingUpdates).toBe(false)
+				})
+
+			await presentAssistantMessage(mockTask)
+
+			expect(mockTask.say.mock.calls).toEqual([
+				["text", "initial", undefined, true],
+				["text", "updated", undefined, true],
+			])
+			expect(mockTask.currentStreamingContentIndex).toBe(0)
+			expect(mockTask.presentAssistantMessageHasPendingUpdates).toBe(false)
+			expect(mockTask.presentAssistantMessageLocked).toBe(false)
+		})
+
+		it("stops internal continuation when the task aborts between blocks", async () => {
+			mockTask.assistantMessageContent = [
+				{ type: "text", content: "first", partial: false },
+				{ type: "text", content: "second", partial: false },
+			]
+			mockTask.say.mockImplementationOnce(async () => {
+				mockTask.abort = true
+			})
+
+			await presentAssistantMessage(mockTask)
+
+			expect(mockTask.say).toHaveBeenCalledExactlyOnceWith("text", "first", undefined, false)
+			expect(mockTask.currentStreamingContentIndex).toBe(1)
+			expect(mockTask.presentAssistantMessageLocked).toBe(false)
+		})
+
+		it("releases the presentation lock when a later block throws", async () => {
+			mockTask.assistantMessageContent = [
+				{ type: "text", content: "first", partial: false },
+				{ type: "text", content: "second", partial: false },
+			]
+			mockTask.say.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("second block failed"))
+
+			await expect(presentAssistantMessage(mockTask)).rejects.toThrow("second block failed")
+
+			expect(mockTask.say).toHaveBeenCalledTimes(2)
+			expect(mockTask.currentStreamingContentIndex).toBe(1)
+			expect(mockTask.presentAssistantMessageLocked).toBe(false)
+		})
+	})
+
 	describe("Custom tool error recording", () => {
 		it("releases the presentation lock when dispatch throws", async () => {
 			mockTask.assistantMessageContent = [
