@@ -63,6 +63,14 @@ describe("mutation testing workflow", () => {
 		assert.ok(workflow.includes("pull-requests: read"))
 		assert.ok(workflow.includes('PR_HEAD_SHA="$(git rev-parse "$HEAD_SHA^2" 2>/dev/null || git rev-parse "$HEAD_SHA")"'))
 		assert.ok(workflow.includes('--stacked-map "$STACKED_MAP"'))
+		assert.ok(workflow.includes('--pr-head "$PR_HEAD_SHA"'))
+		// The open pull request map must cover every page, otherwise a parent unit beyond the first
+		// page is missing and the gate charges the whole unmerged chain again.
+		assert.ok(workflow.includes("gh api --paginate --slurp"))
+		assert.ok(workflow.includes("[.[] | .[] | {number: .number, headSha: .head.sha}]"))
+		// The fallback has to be a command: these steps run bash with -e, so a bare '[]' is executed
+		// as a program name instead of producing JSON.
+		assert.ok(workflow.includes("printf '[]'"))
 		assert.ok(!workflow.includes("github.event.pull_request.base.sha"))
 		assert.ok(workflow.includes("steps.mutation_report.outputs.artifact-url"))
 		assert.ok(workflow.includes("open the package's mutation.html file"))
