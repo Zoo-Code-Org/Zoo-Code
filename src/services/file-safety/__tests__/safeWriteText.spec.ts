@@ -293,6 +293,12 @@ describe("safeWriteText", () => {
 
 			// write succeeded despite icacls failure (fallback to plain rename)
 			expect(fs.rename).toHaveBeenCalled()
+			// Only the save ran: a failed save must not be followed by a restore attempt.
+			expect(execFile).toHaveBeenCalledTimes(1)
+			// The dump the failed save may have created is still cleaned up, so nothing is left behind.
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl.tmp"))
+			// The write itself is unaffected: plain rename of the staged file onto the target.
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 		})
 
 		it("win32 DACL save args are [targetPath, /save, dumpPath, /T] before backup rename", async () => {
@@ -321,6 +327,26 @@ describe("safeWriteText", () => {
 
 			// dump file was unlinked after restore
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))
+		})
+
+		it("two concurrent writes to the same target use different DACL dumps", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await Promise.all([
+				safeWriteText(targetPath, "a", { platform: "win32" }),
+				safeWriteText(targetPath, "b", { platform: "win32" }),
+			])
+
+			// A shared dump name lets one call unlink or overwrite the file the other is still using,
+			// which silently loses the DACL restore. Each call must own its own dump.
+			const saves = vi.mocked(execFile).mock.calls.filter((call) => (call[1] as string[]).indexOf("/save") >= 0)
+			expect(saves.length).toBe(2)
+			const dumps = saves.map((call) => String((call[1] as string[])[2]))
+			expect(dumps[0]).not.toBe(dumps[1])
+			expect(dumps[0]).toContain("safeWriteText.acl.tmp")
+			expect(dumps[1]).toContain("safeWriteText.acl.tmp")
 		})
 
 		it("win32 DACL: dump is unlinked even when restore fails", async () => {
@@ -670,6 +696,6 @@ describe("safeWriteText", () => {
 			await safeWriteText(targetPath, "hello world", { platform: "win32" })
 
 			// The dump path stays tracked so the finally block removes the file the failed save created.
-			expect(fs.unlink).toHaveBeenCalledWith(targetPath + ".acl.tmp")
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl.tmp"))
 		})
 	})
