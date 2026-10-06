@@ -65,9 +65,15 @@ import type { ClineMessage } from "@roo-code/types"
 
 const originalFile = "const a = 1\nconst b = 2\n"
 
-const toolMessage = (ts: number, payload: unknown, type: "ask" | "say" = "ask", messageId?: string): ClineMessage =>
+const toolMessage = (
+	ts: number,
+	payload: unknown,
+	type: "ask" | "say" = "ask",
+	messageId?: string,
+	isAnswered = true,
+): ClineMessage =>
 	type === "ask"
-		? { ts, type: "ask", ask: "tool", text: JSON.stringify(payload), ...(messageId && { messageId }) }
+		? { ts, type: "ask", ask: "tool", text: JSON.stringify(payload), isAnswered, ...(messageId && { messageId }) }
 		: { ts, type: "say", say: "tool", text: JSON.stringify(payload), ...(messageId && { messageId }) }
 
 function createProvider(clineMessages: ClineMessage[] | undefined) {
@@ -155,6 +161,19 @@ describe("webviewMessageHandler - readOriginalContent", () => {
 		expect(postMessageToWebview).toHaveBeenNthCalledWith(2, {
 			type: "originalContent",
 			originalContentInfo: { ts: 10, messageId: "id-1", taskId: "task-2", content: null },
+		})
+	})
+
+	it("answers null for an unanswered or denied edit approval", async () => {
+		const { provider, postMessageToWebview } = createProvider([
+			toolMessage(10, { tool: "appliedDiff", originalContent: originalFile }, "ask", "id-1", false),
+		])
+
+		await webviewMessageHandler(provider, { type: "readOriginalContent", messageTs: 10, messageId: "id-1" })
+
+		expect(postMessageToWebview).toHaveBeenCalledWith({
+			type: "originalContent",
+			originalContentInfo: { ts: 10, messageId: "id-1", taskId: undefined, content: null },
 		})
 	})
 

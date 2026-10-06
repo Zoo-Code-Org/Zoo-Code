@@ -4,6 +4,8 @@ import type { ClineMessage, ExtensionMessage } from "@roo-code/types"
 // metadata such as `isAnswered` and `partial` is always taken from the current message.
 const cache = new WeakMap<ClineMessage, { source: string; strippedText: string | undefined }>()
 
+const FILE_EDIT_TOOLS = new Set<unknown>(["editedExistingFile", "appliedDiff", "newFileCreated"])
+
 function isToolMessage(message: ClineMessage): boolean {
 	return (message.type === "ask" && message.ask === "tool") || (message.type === "say" && message.say === "tool")
 }
@@ -42,7 +44,8 @@ function stripOriginalContentFromText(text: string): string | undefined {
 }
 
 /**
- * The `originalContent` of a tool message, or null when there is none. `ts` is not unique (two messages can be
+ * The `originalContent` of an approved file-edit tool message, or null when there is none. A pending, denied or
+ * partial approval never discloses it, since the file has not been authorized for the webview yet. `ts` is not unique (two messages can be
  * created in the same millisecond), so `messageId` is preferred; `ts` only serves messages persisted without one.
  */
 export function findOriginalContent(
@@ -53,13 +56,13 @@ export function findOriginalContent(
 		(m) => isToolMessage(m) && (id.messageId !== undefined ? m.messageId === id.messageId : m.ts === id.ts),
 	)
 
-	if (!message?.text) {
+	if (!message?.text || message.partial || (message.type === "ask" && message.isAnswered !== true)) {
 		return null
 	}
 
 	try {
-		const { originalContent } = JSON.parse(message.text) as { originalContent?: unknown }
-		return typeof originalContent === "string" ? originalContent : null
+		const { tool, originalContent } = JSON.parse(message.text) as { tool?: unknown; originalContent?: unknown }
+		return FILE_EDIT_TOOLS.has(tool) && typeof originalContent === "string" ? originalContent : null
 	} catch {
 		return null
 	}

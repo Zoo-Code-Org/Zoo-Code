@@ -15,6 +15,9 @@ const toolAsk = (payload: unknown, extra: Partial<ClineMessage> = {}): ClineMess
 	...extra,
 })
 
+const approvedAsk = (payload: unknown, extra: Partial<ClineMessage> = {}): ClineMessage =>
+	toolAsk(payload, { isAnswered: true, ...extra })
+
 const bigOriginal = "line of the original file\n".repeat(2000)
 
 describe("omitOriginalContent", () => {
@@ -140,8 +143,8 @@ describe("omitOriginalContent", () => {
 describe("findOriginalContent", () => {
 	it("returns the originalContent of the tool message with that ts", () => {
 		const messages = [
-			toolAsk({ tool: "appliedDiff", path: "a.ts", originalContent: bigOriginal }),
-			toolAsk({ tool: "appliedDiff", path: "b.ts", originalContent: "other" }),
+			approvedAsk({ tool: "appliedDiff", path: "a.ts", originalContent: bigOriginal }),
+			approvedAsk({ tool: "appliedDiff", path: "b.ts", originalContent: "other" }),
 		]
 
 		expect(findOriginalContent(messages, { ts: messages[0]!.ts })).toBe(bigOriginal)
@@ -149,8 +152,11 @@ describe("findOriginalContent", () => {
 	})
 
 	it("tells messages created in the same millisecond apart by messageId", () => {
-		const first = toolAsk({ tool: "appliedDiff", path: "a.ts", originalContent: "first" }, { messageId: "id-1" })
-		const second = toolAsk(
+		const first = approvedAsk(
+			{ tool: "appliedDiff", path: "a.ts", originalContent: "first" },
+			{ messageId: "id-1" },
+		)
+		const second = approvedAsk(
 			{ tool: "appliedDiff", path: "b.ts", originalContent: "second" },
 			{ messageId: "id-2", ts: first.ts },
 		)
@@ -195,8 +201,38 @@ describe("findOriginalContent", () => {
 		expect(findOriginalContent(undefined, { ts: 1 })).toBeNull()
 	})
 
+	it("does not disclose the original of a pending or denied approval", () => {
+		const payload = { tool: "appliedDiff", path: "a.ts", originalContent: bigOriginal }
+		const pending = toolAsk(payload)
+		const denied = toolAsk(payload, { isAnswered: false })
+		const all = [pending, denied]
+
+		for (const message of all) {
+			expect(findOriginalContent(all, { ts: message.ts })).toBeNull()
+		}
+	})
+
+	it("does not disclose the original of a partial message", () => {
+		const message = approvedAsk(
+			{ tool: "appliedDiff", path: "a.ts", originalContent: bigOriginal },
+			{ partial: true },
+		)
+
+		expect(findOriginalContent([message], { ts: message.ts })).toBeNull()
+	})
+
+	it("only discloses the original of file-edit tools", () => {
+		const message = approvedAsk({ tool: "readFile", path: ".env", originalContent: "SECRET=1" })
+		const missingTool = approvedAsk({ path: "a.ts", originalContent: "x" })
+		const all = [message, missingTool]
+
+		for (const m of all) {
+			expect(findOriginalContent(all, { ts: m.ts })).toBeNull()
+		}
+	})
+
 	it("returns an empty original as an empty string", () => {
-		const message = toolAsk({ tool: "newFileCreated", content: "x", originalContent: "" })
+		const message = approvedAsk({ tool: "newFileCreated", content: "x", originalContent: "" })
 
 		expect(findOriginalContent([message], { ts: message.ts })).toBe("")
 	})
