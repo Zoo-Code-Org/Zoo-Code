@@ -671,8 +671,6 @@ export class ClineProvider
 				return
 			}
 
-			this.wroteUnderTemporaryViewStateId = false
-
 			delete states[previousViewStateId]
 
 			if (!states[nextViewStateId]) {
@@ -680,6 +678,10 @@ export class ClineProvider
 			}
 
 			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+
+			// Only a successful write clears authorship: a failed attempt leaves the entry
+			// under the temporary name, and a retry must still be able to re-key it.
+			this.wroteUnderTemporaryViewStateId = false
 		})
 
 		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
