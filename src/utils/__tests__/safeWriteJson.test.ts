@@ -106,6 +106,47 @@ describe("safeWriteJson", () => {
 		}
 	}
 
+	// Staging permissions
+	test.skipIf(process.platform === "win32")(
+		"stages the temp file with the existing target's mode instead of the process default",
+		async () => {
+			const target = path.join(tempDir, "private.json")
+			await fs.writeFile(target, JSON.stringify({ initial: 1 }), { mode: 0o600 })
+			await fs.chmod(target, 0o600)
+
+			const streamCalls = vi.mocked(fsSyncActual.createWriteStream)
+			streamCalls.mockClear()
+
+			await safeWriteJson(target, { updated: 2 })
+
+			const staged = streamCalls.mock.calls.find((call) => String(call[0]).includes(".new_"))
+			expect(staged).toBeDefined()
+			// createWriteStream defaults to 0o666 (& ~umask = 0o644). The staged file holds
+			// the whole payload until the commit rename, so beside a 0o600 target it would
+			// be readable by other local users for the duration of the write.
+			expect(Number((staged![1] as { mode?: number } | undefined)?.mode)).toBe(0o600)
+		},
+	)
+
+	test.skipIf(process.platform === "win32")(
+		"stages with the target's own mode when it is the ordinary 0o644",
+		async () => {
+			const target = path.join(tempDir, "public.json")
+			await fs.writeFile(target, JSON.stringify({ initial: 1 }), { mode: 0o644 })
+			await fs.chmod(target, 0o644)
+
+			const streamCalls = vi.mocked(fsSyncActual.createWriteStream)
+			streamCalls.mockClear()
+
+			await safeWriteJson(target, { updated: 2 })
+
+			const staged = streamCalls.mock.calls.find((call) => String(call[0]).includes(".new_"))
+			expect(staged).toBeDefined()
+			// No widening and no narrowing: the staged file mirrors the target it replaces.
+			expect(Number((staged![1] as { mode?: number } | undefined)?.mode)).toBe(0o644)
+		},
+	)
+
 	// Success Scenarios
 	// Note: Since we pre-create the file in beforeEach, this test will overwrite it.
 	// If "creation from non-existence" is critical and locking prevents it, safeWriteJson or locking strategy needs review.

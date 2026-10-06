@@ -103,7 +103,19 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			".new_" + Date.now() + "_" + Math.random().toString(36).substring(2) + ".tmp",
 		)
 
-		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
+			// The staged file holds the entire new content while it exists, so it must not
+		// be created with the process default (0o666 & ~umask, i.e. 0o644) next to a
+		// target that is deliberately narrower - a 0o600 settings file in a shared
+		// directory, for example. Match the existing target's mode; a new target keeps
+		// the ordinary default.
+		let stagingMode: number | undefined
+		try {
+			stagingMode = fsSync.statSync(resolvedTargetPath).mode & 0o777
+		} catch {
+			stagingMode = undefined
+		}
+
+		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint, stagingMode)
 
 		// Step 2: Delegate the atomic commit to safeWriteText with the pre-written
 		// temp path. The publish is a single rename, so the target stays intact on
@@ -155,9 +167,16 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
  * @param prettyPrint Whether to format the JSON with indentation.
  * @returns Promise<void>
  */
-async function _streamDataToFile(targetPath: string, data: any, prettyPrint = false): Promise<void> {
+async function _streamDataToFile(
+	targetPath: string,
+	data: any,
+	prettyPrint = false,
+	mode?: number,
+): Promise<void> {
 	// Stream data to avoid high memory usage for large JSON objects.
-	const fileWriteStream = fsSync.createWriteStream(targetPath, { encoding: "utf8" })
+	// mode is explicit because createWriteStream defaults to 0o666 (& ~umask): the
+	// staged file is readable by others until the commit renames it onto the target.
+	const fileWriteStream = fsSync.createWriteStream(targetPath, { encoding: "utf8", ...(mode !== undefined ? { mode } : {}) })
 
 	// JsonStreamStringify traverses the object and streams tokens directly
 	// The 'spaces' parameter adds indentation during streaming, not via a separate pass
