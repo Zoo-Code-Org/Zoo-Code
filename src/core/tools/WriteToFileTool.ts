@@ -186,6 +186,9 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		const { pushToolResult, handleError, askApproval } = callbacks
 		const relPath = params.path
 		let newContent = params.content
+		// Set when this execute() opens its own partial tool ask (diff-view branch), so
+		// the catch below can finalize it. Undefined on the saveDirectly branch.
+		let pendingPartialAsk: string | undefined
 
 		if (!relPath) {
 			task.consecutiveMistakeCount++
@@ -293,6 +296,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			} else {
 				if (!task.diffViewProvider.isEditing) {
 					const partialMessage = JSON.stringify(sharedMessageProps)
+					pendingPartialAsk = partialMessage
 					await task.ask("tool", partialMessage, true).catch(() => {})
 					await task.diffViewProvider.open(relPath)
 				}
@@ -336,15 +340,27 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			pushToolResult(message)
 
 			await task.diffViewProvider.reset()
-			this.resetPartialState()
+			// BaseTool's reset only clears this instance's lastSeenPartialPath; the
+			// stream state added here is keyed per task. Clearing the whole map from
+			// one task's execute() would drop another task's streamFailed/streamError
+			// while it is still streaming, so tear down only this task's entry.
+			super.resetPartialState()
+			this.resetTaskPartialState(task)
 
 			task.processQueuedMessages()
 
 			return
 		} catch (error) {
+			// The diff-view branch above may have opened a fresh partial ask for this
+			// (retried) write. Finalize it before tearing down, or the spinner and
+			// Save/Reject buttons stay live for a tool call that has already failed.
+			if (pendingPartialAsk !== undefined) {
+				await this.finalizePartialToolAskAfterFailure(task, pendingPartialAsk)
+			}
 			await handleError("writing file", error as Error)
 			await task.diffViewProvider.reset()
-			this.resetPartialState()
+			super.resetPartialState()
+			this.resetTaskPartialState(task)
 			return
 		}
 	}
