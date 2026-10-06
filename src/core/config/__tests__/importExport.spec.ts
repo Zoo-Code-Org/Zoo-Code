@@ -332,6 +332,51 @@ describe("importExport", () => {
 			])
 		})
 
+		it("should not apply imported viewStates to the context proxy", async () => {
+			const fileContent = JSON.stringify({
+				providerProfiles: {
+					currentApiConfigName: "test",
+					apiConfigs: {
+						test: { apiProvider: providerIdentifiers.openai, apiKey: "test-key", id: "test-id" },
+					},
+				},
+				globalSettings: {
+					mode: "code",
+					viewStates: {
+						"stable-sidebar-view": {
+							mode: "architect",
+							currentApiConfigName: "profile-a",
+							updatedAt: 1,
+						},
+					},
+				},
+			})
+
+			;(fs.readFile as Mock).mockResolvedValue(fileContent)
+
+			mockProviderSettingsManager.export.mockResolvedValue({
+				currentApiConfigName: "default",
+				apiConfigs: { default: { apiProvider: providerIdentifiers.anthropic, id: "default-id" } },
+			})
+
+			mockProviderSettingsManager.listConfig.mockResolvedValue([
+				{ name: "test", id: "test-id", apiProvider: providerIdentifiers.openai },
+				{ name: "default", id: "default-id", apiProvider: providerIdentifiers.anthropic },
+			])
+
+			const result = await importSettingsFromPath("/mock/path/settings.json", {
+				providerSettingsManager: mockProviderSettingsManager,
+				contextProxy: mockContextProxy,
+				customModesManager: mockCustomModesManager,
+			})
+
+			expect(result.success).toBe(true)
+			// Per-view selection state is machine-local: importing settings must not
+			// apply another machine's view pins, while other settings round-trip.
+			expect(mockContextProxy.setValues).toHaveBeenCalledWith({ mode: "code" })
+			expect(result).not.toHaveProperty("globalSettings.viewStates")
+		})
+
 		it("should return success: false when file content is invalid", async () => {
 			;(vscode.window.showOpenDialog as Mock).mockResolvedValue([{ fsPath: "/mock/path/settings.json" }])
 
