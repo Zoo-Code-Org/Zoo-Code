@@ -302,9 +302,6 @@ export function resolveStackedUnitBase(repoRoot, eventBaseSha, prHeadSha, openPu
 
 // The ci command decides two things from the commit graph: which base to charge this pull request
 // to, and which commit to diff against. A stacked unit diffs against its own pull request head,
-// because the merge commit also carries whatever main advanced since the parent unit.
-// The ci command decides two things from the commit graph: which base to charge this pull request
-// to, and which commit to diff against. A stacked unit diffs against its own pull request head,
 // because the merge commit also carries whatever main advanced since the parent unit. A plain
 // pull request keeps the merge commit as the diff head.
 export function resolveCiInvocation(repoRoot, eventBaseSha, mergeCommitSha, prHeadSha, openPullRequests = []) {
