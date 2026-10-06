@@ -2330,6 +2330,9 @@ export class ClineProvider
 					await this.persistStickyProviderProfileToCurrentTask(name)
 				} else {
 					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
+					// The stored profile changed without an activation, so a sibling view that cached it in
+					// its view-local overlay would keep serving the previous settings.
+					await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
 				}
 
 				await this.postStateToWebview()
@@ -2778,8 +2781,11 @@ export class ClineProvider
 						// picks up the new token immediately for the current task.
 						await this.upsertProviderProfile(entry.name, updated, true)
 					} else {
-						// Non-active profiles just need the token saved to disk.
+						// Non-active profiles just need the token saved to disk, plus the same overlay
+						// refresh a sibling view pinned to that profile needs to pick the new token up
+						// without a window reload.
 						await this.providerSettingsManager.saveConfig(entry.name, updated)
+						await this.refreshViewLocalStateForUpdatedProfile(entry.name, updated)
 					}
 				}
 			}
@@ -3542,6 +3548,19 @@ export class ClineProvider
 			providerSettings.apiProvider = apiProvider
 		}
 
+		// A view-local apiConfiguration overlay always holds a COMPLETE profile: it is seeded from
+		// providerSettingsManager.getProfile (loadViewState), from the profile refresh / re-pin
+		// paths, or from a full settings object written by this view's own mutation. Spreading the
+		// shared provider settings underneath it would fill every key the pinned profile leaves
+		// unset with the settings of whichever profile the shared store activated last - a task in
+		// this view could then send its own credential to another profile's endpoint, and the
+		// settings UI would persist that mix back into the profile. With an overlay the view's own
+		// profile wins outright; without one the previous merge is preserved.
+		const viewApiConfiguration = this.viewLocalState.apiConfiguration
+		const effectiveApiConfiguration: ProviderSettings = viewApiConfiguration
+			? { ...viewApiConfiguration }
+			: { ...providerSettings, ...mergedStateValues.apiConfiguration }
+
 		let organizationAllowList = ORGANIZATION_ALLOW_ALL
 
 		try {
@@ -3593,10 +3612,7 @@ export class ClineProvider
 
 		// Return the same structure as before.
 		return {
-			apiConfiguration: {
-				...providerSettings,
-				...mergedStateValues.apiConfiguration,
-			},
+			apiConfiguration: effectiveApiConfiguration,
 			lastShownAnnouncementId: mergedStateValues.lastShownAnnouncementId,
 			customInstructions: mergedStateValues.customInstructions,
 			apiModelId: mergedStateValues.apiModelId,
