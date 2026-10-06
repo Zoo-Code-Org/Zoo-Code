@@ -737,6 +737,14 @@ export class ClineProvider
 		// Capture the id this load is for: a newer id registered while an async
 		// profile lookup is in flight must not be overwritten by this stale load.
 		const loadedForViewId = this.viewStateId
+
+		// While the stable id has not been registered yet, the key is this instance's
+		// session-local name. Temporary names restart from 0 on every host start, so an
+		// entry under the same name can belong to a different session. Load only entries
+		// this instance authored.
+		if (loadedForViewId === this.viewId && !this.wroteUnderTemporaryViewStateId) {
+			return
+		}
 		try {
 			const persisted = this.getPersistedViewStates()[loadedForViewId]
 			const loadedState: Partial<ExtensionState> = {}

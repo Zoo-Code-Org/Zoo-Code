@@ -1319,6 +1319,10 @@ describe("ClineProvider", () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			const logSpy = vi.spyOn(provider, "log")
 
+			// Register a stable id so the load is not skipped by the ownership guard:
+			// only entries this instance authored are loaded under a temporary name.
+			await provider["setViewStateId"]("stable-sidebar-view")
+
 			provider["viewLocalState"] = { mode: "architect" }
 			vi.spyOn(provider.contextProxy, "getValue").mockImplementation(() => {
 				throw new Error("load failed")
