@@ -1374,8 +1374,9 @@ describe("ClineProvider", () => {
 		it("restores the previous view id when the registration write fails so a later launch retries", async () => {
 			const contextProxy = new ContextProxy(mockContext)
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", contextProxy)
-			// Seed a pre-launch entry under the temporary id so the re-key has real work to do.
-			mockContext.globalState.update("viewStates", { [provider.viewId]: { mode: "architect", updatedAt: 1 } })
+			// Seed a pre-launch entry under the temporary id through the real write path,
+			// so the re-key has real work to do and records this instance as its author.
+			await provider["savePersistedViewState"]({ mode: "architect", updatedAt: 1 })
 
 			const setValueSpy = vi.spyOn(contextProxy, "setValue").mockRejectedValue(new Error("storage down"))
 
@@ -1455,8 +1456,9 @@ describe("ClineProvider", () => {
 
 		it("should rekey a pre-launch entry under the temporary id to the registered stable id", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
-			// Seed storage directly (bypassing the ContextProxy cache) so only the fresh read sees it.
-			mockContext.globalState.update("viewStates", { [provider.viewId]: { mode: "architect", updatedAt: 1 } })
+			// Seed through the write path so this instance is the author of the entry under
+			// its temporary id; an entry authored by another session must not be adopted.
+			await provider["savePersistedViewState"]({ mode: "architect", updatedAt: 1 })
 			await provider["setViewStateId"]("stable-sidebar-view")
 			expect(mockContext.globalState.get("viewStates")).toEqual({
 				"stable-sidebar-view": { mode: "architect", updatedAt: 1 },
@@ -1466,7 +1468,10 @@ describe("ClineProvider", () => {
 
 		it("should keep the stable entry and drop the temporary entry when both exist", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
-			mockContext.globalState.update("viewStates", {
+			// Author the temporary entry through the write path so this instance owns it,
+			// then add a stable entry that already exists in storage.
+			await provider["savePersistedViewState"]({ mode: "temp-mode", updatedAt: 1 })
+			await provider.contextProxy.setValue("viewStates", {
 				[provider.viewId]: { mode: "temp-mode", updatedAt: 1 },
 				"stable-sidebar-view": { mode: "stable-mode", updatedAt: 5 },
 			})
