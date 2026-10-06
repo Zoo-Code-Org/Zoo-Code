@@ -2420,7 +2420,16 @@ export class ClineProvider
 			await this.contextProxy.setValue("currentApiConfigName", profileToActivate)
 		}
 
-		if ((deletedWasGlobal || viewWasPinnedToDeleted) && survivingSettings) {
+		if (deletedWasGlobal || viewWasPinnedToDeleted) {
+			if (!survivingSettings) {
+				// No settings could be resolved for the survivor. The pin now names a
+				// profile whose configuration is unknown, so drop the overlay instead of
+				// serving the deleted profile's settings under the new name.
+				if (viewWasPinnedToDeleted) {
+					await this._saveViewLocalStateFromMutation({ apiConfiguration: undefined })
+				}
+			} else {
+
 			// The deleted profile was the active one (globally, or for this view), so
 			// the shared provider keys still carry its settings; replace them so
 			// getState() reports the surviving profile's configuration.
@@ -2432,6 +2441,7 @@ export class ClineProvider
 				// replace it with the survivor's so the re-pointed pin serves matching
 				// settings. A view pinned to another profile keeps its own overlay.
 				await this._saveViewLocalStateFromMutation({ apiConfiguration: survivingSettings })
+			}
 			}
 		}
 
@@ -2604,9 +2614,11 @@ export class ClineProvider
 					currentApiConfigName: replacementName,
 				}
 
-				if (replacementSettings) {
-					values.apiConfiguration = replacementSettings
-				}
+				// Assigning even when undefined is what clears the overlay: without a
+				// resolvable replacement the re-pointed pin names a profile whose settings
+				// are unknown, so the deleted profile's configuration must not survive under
+				// the new name.
+				values.apiConfiguration = replacementSettings
 
 				// Direct private access: compile-time safe across sibling instances.
 				await instance._saveViewLocalStateFromMutation(values)

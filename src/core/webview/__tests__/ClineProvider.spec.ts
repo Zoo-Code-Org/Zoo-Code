@@ -2094,6 +2094,51 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("drops the view overlay when the surviving profile's settings cannot be resolved", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const oldProfile: ProviderSettingsEntry = {
+				name: "old-profile",
+				id: "old-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const thirdProfile: ProviderSettingsEntry = {
+				name: "third-profile",
+				id: "third-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			// Three profiles so the deletion still has a surviving profile to activate.
+			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile, thirdProfile])
+			// The global selection names a surviving profile while this view is pinned to
+			// the profile being deleted, so the re-point still happens.
+			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+			// This view is pinned to the profile being deleted and still holds its
+			// settings in the nested overlay.
+			provider["viewLocalState"].currentApiConfigName = "old-profile"
+			provider["viewLocalState"].apiConfiguration = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "deleted-profile-secret",
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn().mockRejectedValue(new Error("profile unreadable")),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+			}
+
+			await provider.deleteProviderProfile(oldProfile)
+
+			// The pin now names a profile whose settings are unknown, so the deleted
+			// profile's configuration must not survive under the new name.
+			expect(provider.getValues().currentApiConfigName).toBe("keeper-profile")
+			expect(provider["viewLocalState"].apiConfiguration).toBeUndefined()
+			await provider.dispose()
+		})
+
 		it("leaves the view buffer untouched when the deleted profile is neither globally active nor view-pinned", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			const oldProfile: ProviderSettingsEntry = {
