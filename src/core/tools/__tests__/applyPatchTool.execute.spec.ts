@@ -559,21 +559,18 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 
 	it("move: a complete source read keeps the destination complete", async () => {
 		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
-		const destKey = path.resolve("/workspace/project", "src/new.ts")
 		const reg = mockTask.observationRegistry
 		reg.observe(sourceKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
-		mockSaveDirectly.mockImplementationOnce(async () => {
-			reg.observe(destKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
-			return { newProblemsMessage: "", userEdits: undefined, finalContent: "new content" }
-		})
-
 		await tool.execute({ patch: movePatch }, mockTask as Task, {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
 		})
 
-		expect(reg.get(destKey)?.complete).toBe(true)
+		// Assert the value the tool actually passed, not the value the double wrote
+		// into the registry: the production contract is the completeness argument of
+		// saveDirectly, and a mock that fills it in would hide a regression.
+		expect(mockSaveDirectly.mock.calls[0][6]).toBe(true)
 		expect(mockHandleError).not.toHaveBeenCalled()
 	})
 
