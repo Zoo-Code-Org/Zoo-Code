@@ -577,6 +577,32 @@ describe("PR review-state workflow", () => {
 		expect(result.setFailed).not.toHaveBeenCalled()
 		expect(result.listPullRequests).toHaveBeenCalled()
 	})
+
+	it("warns and leaves the label state unchanged when a stacked add fails", async () => {
+		const result = await runWorkflow({
+			commitParents: [OLD_SHA],
+			openPrHeads: [{ number: 1436, sha: OLD_SHA }],
+			addLabelsFailOnceName: "stacked",
+		})
+
+		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("could not reconcile the stacked label"))
+		// The failed add must not be recorded as a label the PR actually has.
+		expect(((await result.getPullRequest()).data.labels || []).map((label: { name: string }) => label.name)).not.toContain("stacked")
+		expect(result.setFailed).not.toHaveBeenCalled()
+	})
+
+	it("warns and leaves the label state unchanged when a stale stacked removal fails", async () => {
+		const result = await runWorkflow({
+			labels: ["stacked"],
+			commitParents: [OLD_SHA],
+			removeLabelStatus: 500,
+		})
+
+		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("could not reconcile the stacked label"))
+		// A failed removal leaves the label on the PR; the next run retries it.
+		expect(((await result.getPullRequest()).data.labels || []).map((label: { name: string }) => label.name)).toContain("stacked")
+		expect(result.setFailed).not.toHaveBeenCalled()
+	})
 	it("does not label a merge commit stacked when only one of its parents is an open PR head", async () => {
 		const result = await runWorkflow({
 			commitParents: [OLD_SHA, SHA],
