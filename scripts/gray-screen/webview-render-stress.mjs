@@ -133,6 +133,7 @@ async function main() {
 	})
 	const page = await browser.newPage()
 	let crashed = false
+	let scenarioFailed = false
 	page.on("crash", () => {
 		crashed = true
 		console.error("\n*** PAGE CRASHED (renderer died: this is the 'gray screen') ***")
@@ -359,6 +360,7 @@ async function main() {
 			throw new Error(`unknown scenario ${cfg.scenario}`)
 		}
 	} catch (e) {
+		scenarioFailed = true
 		if (!crashed) console.error("scenario error:", e.message.split("\n")[0])
 	}
 
@@ -373,7 +375,7 @@ async function main() {
 	}
 	await browser.close().catch(() => {})
 	server?.child.kill()
-	process.exit(crashed ? 1 : 0)
+	process.exit(crashed || scenarioFailed ? 1 : 0)
 }
 
 main().catch((e) => {

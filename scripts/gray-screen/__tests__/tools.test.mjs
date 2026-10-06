@@ -107,6 +107,22 @@ describe("analyze-session", () => {
 
 		assert.equal(analyze().status, 0)
 	})
+
+	it("does not let a malformed task use up a --top slot", () => {
+		const write = (id, content) => {
+			const taskDir = path.join(tmp, "tasks", id)
+			fs.mkdirSync(taskDir, { recursive: true })
+			fs.writeFileSync(path.join(taskDir, "ui_messages.json"), content)
+		}
+		write("broken", "{not json" + " ".repeat(10_000))
+		write("readable", JSON.stringify([{ ts: 1, type: "say", say: "text", text: "hi" }]))
+
+		const result = analyze("--top", "1")
+
+		assert.equal(result.status, 0, result.stderr)
+		assert.match(result.stdout, /skipped 1 task/)
+		assert.match(result.stdout, /Top 1 tasks/)
+	})
 })
 
 describe("mock-openai-server", () => {
@@ -137,8 +153,21 @@ describe("mock-openai-server", () => {
 				{ stdio: ["ignore", "pipe", "inherit"] },
 			)
 			await new Promise((resolve, reject) => {
-				child.once("error", reject)
-				child.stdout.on("data", (chunk) => String(chunk).includes("listening") && resolve())
+				const timer = setTimeout(() => done(reject, new Error("mock server did not start in time")), 10_000)
+				const done = (settle, value) => {
+					clearTimeout(timer)
+					child.off("error", onError)
+					child.off("exit", onExit)
+					child.stdout.off("data", onData)
+					settle(value)
+				}
+				const onError = (e) => done(reject, e)
+				const onExit = (code, signal) =>
+					done(reject, new Error(`mock server exited before listening (code ${code}, signal ${signal})`))
+				const onData = (chunk) => String(chunk).includes("listening") && done(resolve)
+				child.once("error", onError)
+				child.once("exit", onExit)
+				child.stdout.on("data", onData)
 			})
 		})
 
