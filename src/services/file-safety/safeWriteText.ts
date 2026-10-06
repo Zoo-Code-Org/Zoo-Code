@@ -215,8 +215,10 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			try {
 				await fs.access(targetPath) // target exists?
 				// Unique per call: two concurrent writes to the same target must not share one dump,
-				// where one call can unlink or overwrite the file the other is still using.
-				daclDumpPath = _tempName(_stagingDir(dirPath), "safeWriteText.acl.tmp")
+				// where one call can unlink or overwrite the file the other is still using. Kept in the
+				// target directory, not the staging dir, so a write that never stages a temp file still
+				// leaves no extra directory behind.
+				daclDumpPath = _tempName(dirPath, "safeWriteText.acl.tmp")
 				const saved = await _saveDaclWindows(targetPath, daclDumpPath, options?.execFileRunner)
 				if (!saved) {
 					// Skip the restore step, but keep daclDumpPath tracked: a failed save can
