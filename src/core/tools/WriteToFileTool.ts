@@ -144,13 +144,19 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 * streamed content; a user save would then persist a write the task never completed
 	 * (denied or failed before approval). Must run BEFORE resetDiffViewAfterWrite(),
 	 * since reset() clears the state revertChanges() relies on. No-op when no diff view
-	 * is open. Failures are logged and swallowed so the remaining cleanup (reset,
-	 * per-task state teardown) always continues.
+	 * is open. Failures are logged and reported through the return value: the caller
+	 * must not treat the teardown as complete when this returns false, because the
+	 * document may still hold the unapproved content, but the remaining cleanup (reset,
+	 * per-task state teardown) still runs so the task is not left half-torn-down.
 	 */
-	private async revertDiffChangesBeforeReset(task: Task): Promise<void> {
-		await task.diffViewProvider.revertChanges().catch((revertError) => {
+	private async revertDiffChangesBeforeReset(task: Task): Promise<boolean> {
+		try {
+			await task.diffViewProvider.revertChanges()
+			return true
+		} catch (revertError) {
 			console.error("Error reverting write_to_file diff view changes:", revertError)
-		})
+			return false
+		}
 	}
 
 	private async finalizePartialToolAskAfterFailure(task: Task, text?: string): Promise<void> {
@@ -179,15 +185,26 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		if (!state) {
 			return false
 		}
-		this.resetTaskPartialState(task)
 		// Streaming may have opened the diff view with unapproved partial content.
 		// execute() never runs on this path, so its error cleanup (revert + reset)
 		// never fires: restore the document here so a user save cannot persist
 		// content the write never completed (the same invariant the denial and
-		// streaming-failure paths maintain). Both helpers no-op when no view is
-		// open.
-		await this.revertDiffChangesBeforeReset(task)
+		// streaming-failure paths maintain). Both helpers no-op when no view is open.
+		// The revert runs BEFORE the per-task state is torn down: when it fails, the
+		// document can still hold that unapproved content, and the recovery state has
+		// to exist while the outcome is decided and reported.
+		const reverted = await this.revertDiffChangesBeforeReset(task)
+		this.resetTaskPartialState(task)
 		await this.resetDiffViewAfterWrite(task)
+		if (!reverted) {
+			// Do not report a completed teardown: the editor may still show content this
+			// task never approved, and saving it would land a write the user never
+			// authorized. The user has to be able to tell that from the UI.
+			await task.say(
+				"error",
+				"write_to_file: the diff editor could not be restored after the failed tool call, so it may still show unapproved content. Do not save that editor.",
+			)
+		}
 		if (!state.streamError) {
 			return false
 		}
