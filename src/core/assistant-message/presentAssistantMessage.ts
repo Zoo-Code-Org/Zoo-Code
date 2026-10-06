@@ -98,7 +98,13 @@ export async function presentAssistantMessage(cline: Task) {
 
 	cline.presentAssistantMessageLocked = true
 	try {
-		await presentAssistantMessageBlock(cline)
+		// Drain updates queued while the lock was held, including one that
+		// arrives after the helper's final check but before this continuation.
+		// The last pending check and the release below run in the same
+		// synchronous step, so no update can be stranded behind the lock.
+		do {
+			await presentAssistantMessageBlock(cline)
+		} while (!cline.abort && cline.presentAssistantMessageHasPendingUpdates)
 	} finally {
 		// Tool handlers and provider-state reads can reject. Never strand the
 		// task behind a dispatch lock after the presenter has unwound.
@@ -1128,10 +1134,8 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 		}
 	}
 
-	// Block is partial, but the read stream may have finished.
-	if (cline.presentAssistantMessageHasPendingUpdates) {
-		return await presentAssistantMessageBlock(cline)
-	}
+	// Pending updates are drained by presentAssistantMessage, which owns the
+	// lock and checks for them immediately before releasing it.
 }
 
 /**

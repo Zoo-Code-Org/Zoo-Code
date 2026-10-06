@@ -209,6 +209,75 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 	})
 
 	describe("Presentation lock ownership", () => {
+		it("drains an update queued during the helper-to-wrapper handoff", async () => {
+			mockTask.assistantMessageContent = [{ type: "text", content: "initial", partial: true }]
+			let queuedCall: Promise<void> | undefined
+			let lockedDuringHandoff = false
+			mockTask.say.mockImplementationOnce(async () => {
+				// The first microtask precedes the helper's await continuation.
+				// The second follows that continuation but precedes the wrapper's.
+				queueMicrotask(() => {
+					queueMicrotask(() => {
+						lockedDuringHandoff = mockTask.presentAssistantMessageLocked
+						mockTask.assistantMessageContent[0] = { type: "text", content: "final", partial: false }
+						mockTask.didCompleteReadingStream = true
+						queuedCall = presentAssistantMessage(mockTask)
+					})
+				})
+			})
+
+			await presentAssistantMessage(mockTask)
+			await queuedCall
+
+			expect(lockedDuringHandoff).toBe(true)
+			expect(mockTask.say.mock.calls).toEqual([
+				["text", "initial", undefined, true],
+				["text", "final", undefined, false],
+			])
+			expect(mockTask.currentStreamingContentIndex).toBe(1)
+			expect(mockTask.userMessageContentReady).toBe(true)
+			expect(mockTask.presentAssistantMessageHasPendingUpdates).toBe(false)
+			expect(mockTask.presentAssistantMessageLocked).toBe(false)
+		})
+
+		it("stops draining an update queued during the handoff once the task aborts", async () => {
+			mockTask.assistantMessageContent = [{ type: "text", content: "initial", partial: true }]
+			let queuedCall: Promise<void> | undefined
+			let pendingDuringHandoff = false
+			let aborted = false
+			let abortChecksAfterAbort = 0
+			Object.defineProperty(mockTask, "abort", {
+				configurable: true,
+				get: () => {
+					// Fail fast instead of hanging if a drain keeps retrying an
+					// aborted pass whose pending update can never be consumed.
+					if (aborted && ++abortChecksAfterAbort > 10) {
+						throw new Error("presenter kept draining after abort")
+					}
+					return aborted
+				},
+			})
+			mockTask.say.mockImplementationOnce(async () => {
+				queueMicrotask(() => {
+					queueMicrotask(() => {
+						mockTask.assistantMessageContent[0] = { type: "text", content: "final", partial: false }
+						mockTask.didCompleteReadingStream = true
+						queuedCall = presentAssistantMessage(mockTask)
+						pendingDuringHandoff = mockTask.presentAssistantMessageHasPendingUpdates
+						aborted = true
+					})
+				})
+			})
+
+			await presentAssistantMessage(mockTask)
+			await queuedCall
+
+			expect(pendingDuringHandoff).toBe(true)
+			expect(mockTask.say).toHaveBeenCalledExactlyOnceWith("text", "initial", undefined, true)
+			expect(mockTask.currentStreamingContentIndex).toBe(0)
+			expect(mockTask.presentAssistantMessageLocked).toBe(false)
+		})
+
 		it("holds one lock across consecutive blocks and queues overlapping calls", async () => {
 			mockTask.assistantMessageContent = [
 				{ type: "text", content: "first", partial: false },
