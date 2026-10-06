@@ -1895,6 +1895,7 @@ export class ClineProvider
 		providerSettings: ProviderSettings,
 		activate: boolean,
 		signal: AbortSignal,
+		rollbackTo?: ProviderSettings,
 	): Promise<string> {
 		// TODO: Do we need to be calling `activateProfile`? It's not
 		// clear to me what the source of truth should be; in some cases
@@ -1903,14 +1904,21 @@ export class ClineProvider
 		// be simpler to unify these two.
 		const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
 
-		if (signal.aborted) return id
+		// A timed-out mutation must leave neither a half-applied profile nor stale activation behind.
+		const abandon = async (): Promise<string> => {
+			if (rollbackTo) {
+				await this.providerSettingsManager.saveConfig(name, rollbackTo)
+			}
+			return id
+		}
+
+		if (signal.aborted) return abandon()
 
 		if (activate) {
 			const { mode } = await this.getState()
 			const listApiConfigMeta = await this.providerSettingsManager.listConfig()
 
-			// A timed-out mutation must not activate its profile after a later switch has run.
-			if (signal.aborted) return id
+			if (signal.aborted) return abandon()
 
 			// These promises do the following:
 			// 1. Adds or updates the list of provider profiles.
@@ -1928,6 +1936,9 @@ export class ClineProvider
 				this.providerSettingsManager.setModeConfig(mode, id),
 				this.contextProxy.setProviderSettings(providerSettings),
 			])
+
+			// The writes above are committed, so there is nothing to roll back; just skip the follow-up work.
+			if (signal.aborted) return id
 
 			// Change the provider for the current task.
 			// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
@@ -1953,7 +1964,7 @@ export class ClineProvider
 			await this.enqueueProviderProfileMutation(async (signal) => {
 				// Mirrors the profile name the webview is shown (see getStateToPostToWebview).
 				const task = this.getCurrentTask()
-				const { currentApiConfigName } = await this.getState()
+				const { currentApiConfigName, organizationAllowList } = await this.getState()
 				const visibleProfileName = task ? task.taskApiConfigName : currentApiConfigName
 
 				if (visibleProfileName !== name) {
@@ -1975,7 +1986,14 @@ export class ClineProvider
 					return
 				}
 
-				const allowedKeys: ReadonlySet<string> = new Set(PROVIDER_SETTINGS_KEYS)
+				// Only model selection and its side-effect resets may be patched (see handleModelChangeSideEffects).
+				const allowedKeys: ReadonlySet<string> = new Set([
+					...PROVIDER_SETTINGS_KEYS.filter((key) => key.endsWith("ModelId")),
+					"awsCustomArn",
+					"reasoningEffort",
+					"modelMaxTokens",
+					"modelMaxThinkingTokens",
+				])
 				const merged: Record<string, unknown> = { ...stored, id }
 				for (const [key, value] of Object.entries(patch)) {
 					// The provider is never patchable, otherwise the expectedProvider guard could be bypassed.
@@ -1988,7 +2006,21 @@ export class ClineProvider
 					merged[key] = value === null ? undefined : value
 				}
 
-				await this.upsertProviderProfileUnlocked(name, merged as ProviderSettings, true, signal)
+				// The webview filters models, but this message can be sent by anything; enforce the allow-list here.
+				if (!ProfileValidator.isProfileAllowed(merged as ProviderSettings, organizationAllowList)) {
+					this.log(`Ignoring model update for profile '${name}': violates the organization allow-list`)
+					vscode.window.showErrorMessage(t("common:errors.violated_organization_allowlist"))
+					return
+				}
+
+				const previous: Record<string, unknown> = { ...stored, id }
+				await this.upsertProviderProfileUnlocked(
+					name,
+					merged as ProviderSettings,
+					true,
+					signal,
+					previous as ProviderSettings,
+				)
 			})
 		} catch (error) {
 			this.log(`Error updating profile model: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`)

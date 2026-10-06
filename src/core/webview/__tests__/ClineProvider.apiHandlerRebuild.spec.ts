@@ -501,6 +501,41 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(saved.openRouterModelId).toBe("x/y")
 		})
 
+		it("ignores patch keys other than model ids and model-selection resets", async () => {
+			mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterBaseUrl: "https://stored" })
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "x/y",
+				openRouterBaseUrl: "https://evil",
+				reasoningEffort: null,
+			})
+
+			const saved = manager().saveConfig.mock.calls[0][1]
+			expect(saved.openRouterBaseUrl).toBe("https://stored")
+			expect(saved.openRouterModelId).toBe("x/y")
+		})
+
+		it("rejects a model outside the organization allow-list without saving", async () => {
+			mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "allowed/model" })
+			vi.spyOn(provider, "getState").mockResolvedValue({
+				...(await provider.getState()),
+				organizationAllowList: {
+					allowAll: false,
+					providers: { [providerIdentifiers.openrouter]: { allowAll: false, models: ["allowed/model"] } },
+				},
+			})
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "blocked/model",
+			})
+			expect(manager().saveConfig).not.toHaveBeenCalled()
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "allowed/model",
+			})
+			expect(manager().saveConfig).toHaveBeenCalledTimes(1)
+		})
+
 		it("drops an update for a profile that is not the visible profile without reading or saving it", async () => {
 			await provider.updateProfileModel("other-config", providerIdentifiers.openrouter, {
 				openRouterModelId: "x/y",
@@ -552,6 +587,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		})
 
 		it("does not activate its profile when it times out while listing profiles and a later switch has run", async () => {
+			mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
 			vi.useFakeTimers()
 			try {
 				let resolveList!: (entries: ProviderSettingsEntry[]) => void
@@ -578,6 +614,13 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 				expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "test-config")
 				expect(provider.contextProxy.getValues().currentApiConfigName).toBe("other-config")
+				// The saved model change is rolled back so the stored profile matches the unchanged active state.
+				expect(manager().saveConfig).toHaveBeenCalledTimes(2)
+				expect(manager().saveConfig).toHaveBeenLastCalledWith("test-config", {
+					id: "test-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4",
+				})
 			} finally {
 				vi.useRealTimers()
 			}
