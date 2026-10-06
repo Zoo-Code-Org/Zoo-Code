@@ -6,6 +6,17 @@ import * as path from "path"
 
 import { safeWriteText, type SafeWriteTextOptions } from "../safeWriteText"
 
+// The two failure classes are module-private (knip ignores __tests__, so a
+// test-only export would be reported as unused), so tests match them by name.
+async function _rejectionName(promise: Promise<unknown>): Promise<string> {
+	try {
+		await promise
+		return "resolved"
+	} catch (error) {
+		return error instanceof Error ? error.name : String(error)
+	}
+}
+
 // Full mock for fs/promises — all methods are vi.fn() stubs
 vi.mock("fs/promises", () => ({
 	mkdir: vi.fn(),
@@ -14,6 +25,7 @@ vi.mock("fs/promises", () => ({
 	unlink: vi.fn(),
 	realpath: vi.fn(),
 	copyFile: vi.fn(),
+	rmdir: vi.fn(),
 }))
 
 // Full mock for fs — all sync methods are vi.fn() stubs. Stats is a bare
@@ -27,6 +39,7 @@ vi.mock("fs", () => ({
 	chmodSync: vi.fn(),
 	fchmodSync: vi.fn(),
 	statSync: vi.fn(),
+	lstatSync: vi.fn(),
 	Stats: class Stats {},
 }))
 
@@ -51,6 +64,27 @@ function _stagingDir(dir: string): string {
 	return path.join(dir, ".file-safety-staging")
 }
 
+// Stats stand-in for the staging directory: a real directory owned by this
+// process, which is what _stagingDir requires before it will stage there.
+function _dirStats(): fsSync.Stats {
+	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats & {
+		uid?: number
+		isDirectory?: () => boolean
+	}
+	s.uid = typeof process.getuid === "function" ? process.getuid() : 0
+	s.isDirectory = () => true
+	return s
+}
+
+// Stats stand-in for a symlink planted at the staging path.
+function _linkStats(): fsSync.Stats {
+	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats & {
+		isDirectory?: () => boolean
+	}
+	s.isDirectory = () => false
+	return s
+}
+
 // Minimal Stats stand-in: the SUT only reads `.mode` from it.
 function _stats(mode: number): fsSync.Stats {
 	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats
@@ -70,6 +104,8 @@ describe("safeWriteText", () => {
 		vi.mocked(fs.unlink).mockResolvedValue(undefined)
 		// Existing-target default: a regular 0o644 file.
 		vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o644))
+		// Staging path default: a real directory owned by this process.
+		vi.mocked(fsSync.lstatSync).mockReturnValue(_dirStats())
 		// Default sync-write behaviour: report that all requested bytes were
 		// written. The Buffer overload passes (fd, buffer, offset, length),
 		// so the fourth argument is the requested length.
@@ -440,6 +476,40 @@ describe("safeWriteText", () => {
 			expect(fs.rename).toHaveBeenCalledWith(customTempPath, targetPath)
 		})
 
+		it("refuses to stage when the target mode is unknown (non-ENOENT stat error)", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			const eacces = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+			vi.mocked(fsSync.statSync).mockImplementation(() => {
+				throw eacces
+			})
+
+			// Falling back to 0o644 here could publish a 0o600 target with a wider mode.
+			await expect(safeWriteText(targetPath, "data", { platform: "linux" })).rejects.toBe(eacces)
+
+			expect(fsSync.openSync).not.toHaveBeenCalled()
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
+
+		it("refuses to publish a caller-supplied temp when the target mode is unknown", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			const customTempPath = "/tmp/custom-temp.tmp"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(2)
+			const eacces = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+			vi.mocked(fsSync.statSync).mockImplementation(() => {
+				throw eacces
+			})
+
+			// The temp carries its own creation mode, which may be wider than the target's.
+			await expect(
+				safeWriteText(targetPath, "data", { tempPath: customTempPath, platform: "linux" }),
+			).rejects.toBe(eacces)
+
+			expect(fsSync.fchmodSync).not.toHaveBeenCalled()
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
+
 		it("keeps the temp's default mode when the target does not exist yet (ENOENT)", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
@@ -581,7 +651,7 @@ describe("safeWriteText", () => {
 			expect(fsSync.closeSync).toHaveBeenCalledWith(2)
 		})
 
-		it("treats a failed parent-directory fsync as best-effort", async () => {
+		it("reports a failed parent-directory fsync instead of resolving as durable", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync)
@@ -590,10 +660,85 @@ describe("safeWriteText", () => {
 					throw new Error("EBADF")
 				})
 
-			// the content rename already committed; a missing directory fsync is not fatal
-			await safeWriteText(targetPath, "data", { platform: "linux" })
+			// The rename committed, so the content is in place, but the caller must not be
+			// told the publish is durable when the directory entry could not be fsynced.
+			expect(await _rejectionName(safeWriteText(targetPath, "data", { platform: "linux" }))).toBe(
+				"PublishNotDurableError",
+			)
 
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+		})
+
+		it("keeps the backup when the commit is not confirmed durable", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync)
+				.mockReturnValueOnce(1)
+				.mockImplementationOnce(() => {
+					throw new Error("EBADF")
+				})
+
+			expect(
+				await _rejectionName(
+					safeWriteText(targetPath, "data", { platform: "linux", backup: true }),
+				),
+			).toBe("PublishNotDurableError")
+
+			// The previous content stays recoverable while durability is unconfirmed.
+			expect(fs.unlink).not.toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
+		})
+
+		it("refuses to stage through a planted .file-safety-staging symlink", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			// lstat reports a non-directory at the staging path. mkdirSync(recursive)
+			// would follow it, staging - and then publishing - outside the target directory.
+			vi.mocked(fsSync.lstatSync).mockReturnValue(_linkStats())
+
+			expect(await _rejectionName(safeWriteText(targetPath, "data", { platform: "linux" }))).toBe(
+				"UnsafeStagingDirectoryError",
+			)
+
+			expect(fsSync.mkdirSync).not.toHaveBeenCalled()
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
+
+		it("removes the staging directory once the write is over", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(targetPath, "data", { platform: "linux" })
+
+			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
+		})
+
+		it("retries a transient Windows sharing failure during the commit rename", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			// No target yet, so the Windows DACL steps are skipped and only the rename is exercised.
+			vi.mocked(fs.access).mockImplementation(async (p: fsSync.PathLike) => {
+				if (p === targetPath) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			})
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const eperm = Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+			vi.mocked(fs.rename).mockRejectedValueOnce(eperm)
+
+			await safeWriteText(targetPath, "data", { platform: "win32" })
+
+			expect(fs.rename).toHaveBeenCalledTimes(2)
+		})
+
+		it("does not retry a rename failure on a platform without sharing violations", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const eperm = Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+			vi.mocked(fs.rename).mockRejectedValue(eperm)
+
+			await expect(safeWriteText(targetPath, "data", { platform: "linux" })).rejects.toBe(eperm)
+
+			expect(fs.rename).toHaveBeenCalledTimes(1)
 		})
 
 		it("propagates realpath errors (EACCES and code-less) instead of the fallback path", async () => {
