@@ -346,6 +346,10 @@
 				"label": "启用破坏性命令防护",
 				"description": "下载并使用适用于此平台的 Destructive Command Guard（DCG）。DCG 允许的命令会自动执行。被 DCG 拦截的命令需要你批准后才能执行。启用后，Zoo 的命令列表将被禁用。关闭此选项时，已下载的可执行文件会保留。"
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "命令白名单",
 			"allowedCommandsDescription": "当\"自动批准命令行操作\"启用时可以自动执行的命令前缀。添加 * 以允许所有命令（谨慎使用）。",
 			"deniedCommands": "拒绝的命令",

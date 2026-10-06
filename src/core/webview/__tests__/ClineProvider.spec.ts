@@ -1487,6 +1487,13 @@ describe("ClineProvider", () => {
 		expect(state.destructiveCommandGuardEnabled).toBe(true)
 	})
 
+	test("getState returns the saved blanket auto-deny setting", async () => {
+		await provider.contextProxy.setValue("alwaysDenyUnapprovedCommands", true)
+
+		const state = await provider.getState()
+
+		expect(state.alwaysDenyUnapprovedCommands).toBe(true)
+	})
 	test("getState returns the saved allowed read files", async () => {
 		await provider.contextProxy.setValue("allowedReadFiles", ["notes.md"])
 
@@ -1598,6 +1605,14 @@ describe("ClineProvider", () => {
 		expect(state.experiments).toEqual({ ...experimentDefault, dynamicThinkingEffort: false })
 	})
 
+	test("getStateToPostToWebview returns the saved blanket auto-deny setting", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("alwaysDenyUnapprovedCommands", true)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.alwaysDenyUnapprovedCommands).toBe(true)
+	})
 	test("language is set to VSCode language", async () => {
 		// Mock VSCode language as Spanish
 		;(vscode.env as any).language = "pt-BR"
