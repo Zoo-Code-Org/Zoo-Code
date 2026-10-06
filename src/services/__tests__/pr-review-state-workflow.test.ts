@@ -524,6 +524,8 @@ describe("PR review-state workflow", () => {
 		})
 		
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["stacked"] }))
+		// The relationship is read from the PR head commit, so the lookup must target it.
+		expect(result.getCommit).toHaveBeenCalledWith(expect.objectContaining({ commit_sha: SHA }))
 				expect(result.warning).not.toHaveBeenCalled()
 	})
 
@@ -629,6 +631,8 @@ describe("PR review-state workflow", () => {
 		// so the label that was added earlier is stale and must be removed.
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
 		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["stacked"] }))
+		// The removal must also clear the label recorded for this PR, not just the remote state.
+		expect(((await result.getPullRequest()).data.labels || []).map((label: { name: string }) => label.name)).not.toContain("stacked")
 	})
 
 	it("reconciles CodeRabbit status comments with the canonical bot identity", async () => {
@@ -693,11 +697,18 @@ describe("PR review-state workflow", () => {
 			.find((label) => label.name === "community-approved")
 		expect(communityApproved).toBeDefined()
 		expect(communityApproved?.description.length).toBeLessThanOrEqual(100)
-		// stacked is a label definition too, so the missing-label path must create it.
+		// stacked is a label definition too, so the missing-label path must create it with the
+		// configured definition, not just a name.
 		const stacked = result.createLabel.mock.calls
-			.map(([args]) => args as { name: string })
+			.map(([args]) => args as { name: string; color: string; description: string })
 			.find((label) => label.name === "stacked")
-		expect(stacked).toBeDefined()
+		expect(stacked).toEqual(
+			expect.objectContaining({
+				name: "stacked",
+				color: "c2c2c2",
+				description: "Head commit sits on another open PR, so its diff is only this unit",
+			}),
+		)
 	})
 
 	it("fails closed when a managed label cannot be created", async () => {
