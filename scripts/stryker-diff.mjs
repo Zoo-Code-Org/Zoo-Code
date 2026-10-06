@@ -819,17 +819,25 @@ function argument(name) {
 	return index === -1 ? undefined : process.argv[index + 1]
 }
 
-// The workflow passes the open pull requests as a JSON array of { number, headSha }. An unparsable
-// map must not change the gate's base, so it degrades to the event base instead of throwing.
+// The workflow passes the open pull requests as JSON of { number, headSha }. gh api --paginate
+// emits one array per page, so the map can be a stream of arrays rather than one document; accept
+// both shapes. An unparsable map must not change the gate's base, so it degrades to the event base
+// instead of throwing.
 export function parseStackedMap(value) {
 	if (!value) return []
-	try {
-		const parsed = JSON.parse(value)
-		if (!Array.isArray(parsed)) return []
-		return parsed.filter((entry) => entry && entry.number && /^[0-9a-f]{40}$/i.test(String(entry.headSha)))
-	} catch {
-		return []
+	const chunks = String(value).match(/\[[^\]]*\]/g) || [String(value)]
+	const entries = []
+	for (const chunk of chunks) {
+		let parsed
+		try {
+			parsed = JSON.parse(chunk)
+		} catch {
+			continue
+		}
+		if (!Array.isArray(parsed)) continue
+		entries.push(...parsed.filter((entry) => entry && entry.number && /^[0-9a-f]{40}$/i.test(String(entry.headSha))))
 	}
+	return entries
 }
 
 function main() {

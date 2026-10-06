@@ -66,8 +66,11 @@ describe("mutation testing workflow", () => {
 		assert.ok(workflow.includes('--pr-head "$PR_HEAD_SHA"'))
 		// The open pull request map must cover every page, otherwise a parent unit beyond the first
 		// page is missing and the gate charges the whole unmerged chain again.
-		assert.ok(workflow.includes("gh api --paginate --slurp"))
-		assert.ok(workflow.includes("[.[] | .[] | {number: .number, headSha: .head.sha}]"))
+		// gh api rejects --slurp together with --jq, so pagination has to keep the per-page filter
+		// and the parser has to accept the resulting stream of page arrays.
+		assert.ok(workflow.includes("gh api --paginate"))
+		assert.ok(!workflow.includes("--slurp"))
+		assert.ok(workflow.includes("[.[] | {number: .number, headSha: .head.sha}]"))
 		// The fallback has to be a command: these steps run bash with -e, so a bare '[]' is executed
 		// as a program name instead of producing JSON.
 		assert.ok(workflow.includes("printf '[]'"))
@@ -313,7 +316,21 @@ describe("stacked unit base resolution", () => {
 		assert.deepEqual(parseStackedMap("[{\"number\": 1, \"headSha\": \"" + "a".repeat(40) + "\"}]"), [
 			{ number: 1, headSha: "a".repeat(40) },
 		])
-	})
+
+		// gh api --paginate emits one array per page, so a parent unit on page 2 arrives as a second
+		// document rather than inside the first array.
+		assert.deepEqual(
+			parseStackedMap(
+				"[{\"number\": 1, \"headSha\": \"" + "b".repeat(40) + "\"}]" + "[{\"number\": 2, \"headSha\": \"" + "c".repeat(40) + "\"}]",
+			),
+			[
+				{ number: 1, headSha: "b".repeat(40) },
+				{ number: 2, headSha: "c".repeat(40) },
+			],
+		)
+		assert.deepEqual(parseStackedMap("[{\"number\": 1, \"headSha\": \"" + "d".repeat(40) + "\"}]garbage"), [
+			{ number: 1, headSha: "d".repeat(40) },
+		])	})
 })
 
 describe("parseNameStatus", () => {

@@ -62,8 +62,7 @@ jobs:
                   # The fallback must itself be a command: these steps run bash with -e, so a bare '[]' is
                   # executed as a program name and an API failure would abort the step instead of measuring
                   # against the event base.
-                  STACKED_MAP="$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" --jq '[.[] | .[] | {number: .number, headSha: .head.sha}]')"
-                  || STACKED_MAP="$(printf '[]')"
+                  STACKED_MAP="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" --jq '[.[] | {number: .number, headSha: .head.sha}]')" || STACKED_MAP="$(printf '[]')"
                   node scripts/stryker-diff.mjs ci --base "$BASE_SHA" --head "$HEAD_SHA" --pr-head "$PR_HEAD_SHA" --stacked-map "$STACKED_MAP"
 
             - name: Upload mutation reports
