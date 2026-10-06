@@ -614,6 +614,18 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["stacked"] }))
 		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
 	})
+	it("removes a stale stacked label from a merge commit whose parent matches an open PR head", async () => {
+		const result = await runWorkflow({
+			labels: ["stacked"],
+			commitParents: [OLD_SHA, SHA],
+			openPrHeads: [{ number: 1436, sha: OLD_SHA }],
+		})
+
+		// Two parents means the head is a merge on the branch, not one commit on top of a unit parent,
+		// so the label that was added earlier is stale and must be removed.
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
+		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["stacked"] }))
+	})
 
 	it("reconciles CodeRabbit status comments with the canonical bot identity", async () => {
 		expect(workflow.on.issue_comment.types).toEqual(["created", "edited"])
@@ -632,6 +644,7 @@ describe("PR review-state workflow", () => {
 				},
 			],
 		})
+
 
 		expect(result.getPullRequest).toHaveBeenCalledTimes(1)
 		// The open-PR map is read once to identify a stacked parent; reconciliation still targets only the comment's PR.
@@ -676,6 +689,11 @@ describe("PR review-state workflow", () => {
 			.find((label) => label.name === "community-approved")
 		expect(communityApproved).toBeDefined()
 		expect(communityApproved?.description.length).toBeLessThanOrEqual(100)
+		// stacked is a label definition too, so the missing-label path must create it.
+		const stacked = result.createLabel.mock.calls
+			.map(([args]) => args as { name: string })
+			.find((label) => label.name === "stacked")
+		expect(stacked).toBeDefined()
 	})
 
 	it("fails closed when a managed label cannot be created", async () => {
