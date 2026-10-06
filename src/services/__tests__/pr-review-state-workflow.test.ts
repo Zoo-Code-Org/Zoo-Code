@@ -545,10 +545,14 @@ describe("PR review-state workflow", () => {
 	})
 
 	it("advises instead of failing when the stacked parent cannot be read", async () => {
-		const result = await runWorkflow({ getCommitErrorStatus: 500 })
+		const result = await runWorkflow({ labels: ["stacked"], getCommitErrorStatus: 500 })
 
 		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("could not reconcile the stacked label"))
 		expect(result.setFailed).not.toHaveBeenCalled()
+		// A lookup failure is advisory: the label already on the PR must not be decided from
+		// an unreadable parent, so it stays as it is.
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
+		expect(((await result.getPullRequest()).data.labels || []).map((label: { name: string }) => label.name)).toContain("stacked")
 	})
 
 
