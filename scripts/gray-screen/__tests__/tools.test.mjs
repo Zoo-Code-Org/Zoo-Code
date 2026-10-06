@@ -171,7 +171,7 @@ describe("mock-openai-server", () => {
 			base = `http://127.0.0.1:${port}`
 			child = spawn(
 				process.execPath,
-				[script("mock-openai-server.mjs"), "--scenario", "rapid", "--port", String(port), "--max-requests", "1"],
+				[script("mock-openai-server.mjs"), "--scenario", "rapid", "--port", String(port), "--max-requests", "1", "--max-body-mb", "1", "--chunk-ms", "20"],
 				{ stdio: ["ignore", "pipe", "inherit"] },
 			)
 			await new Promise((resolve, reject) => {
@@ -216,6 +216,32 @@ describe("mock-openai-server", () => {
 
 			assert.equal(body.object, "chat.completion")
 			assert.match(body.choices[0].message.content, /Summary/)
+		})
+
+		it("rejects a request body over --max-body-mb", async () => {
+			const response = await complete({ messages: [{ role: "user", content: "x".repeat(2 * 1048576) }] }).catch(() => null)
+
+			assert.ok(response === null || response.status === 413)
+			assert.equal((await fetch(`${base}/v1/models`)).status, 200)
+		})
+
+		it("does not advance the scripted turn when the client cancels a stream", async () => {
+			const request = { stream: true, messages: [{ role: "user", content: "go" }], tools: [{ type: "function", function: { name: "x" } }] }
+			const controller = new AbortController()
+			const cancelled = await fetch(`${base}/v1/chat/completions`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify(request),
+				signal: controller.signal,
+			})
+			await cancelled.body.getReader().read()
+			controller.abort()
+			await new Promise((resolve) => setTimeout(resolve, 100))
+
+			const retry = await (await complete(request)).text()
+
+			assert.match(retry, /"tool_calls"/)
+			assert.doesNotMatch(retry, /attempt_completion/)
 		})
 
 		it("streams a scripted tool call, then attempt_completion once --max-requests is exceeded", async () => {

@@ -33,7 +33,7 @@
 // Zoo Code settings: provider "OpenAI Compatible", base URL http://127.0.0.1:<port>/v1, any API key, model id "mock",
 // context window 1000000 (avoid condensing); auto-approve read/write/execute with allowed command "*".
 import http from "node:http"
-import { validateRelativeDir } from "./lib.mjs"
+import { integerFlag, validateRelativeDir } from "./lib.mjs"
 
 const args = Object.fromEntries(
 	process.argv.slice(2).reduce((acc, cur, i, all) => {
@@ -58,6 +58,8 @@ const cfg = {
 	cmdLines: Number(args["cmd-lines"] ?? 400),
 	cmdSleep: Number(args["cmd-sleep"] ?? 0.005),
 	mermaidEvery: Number(args["mermaid-every"] ?? (args["scenario"] === "rapid" ? 0 : 10)),
+	host: args["host"] ?? "127.0.0.1",
+	maxBodyBytes: integerFlag("max-body-mb", args["max-body-mb"] ?? 256, 1) * 1048576,
 	dir: (args["dir"] ?? ".mock-session").replace(/\/+$/, ""),
 }
 
@@ -327,9 +329,11 @@ function sseChunk(res, id, delta, finishReason = null) {
 	res.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: "mock", choices: [{ index: 0, delta, finish_reason: finishReason }] })}\n\n`)
 }
 
+const clientGone = (res) => res.destroyed || res.writableEnded
+
 async function streamText(res, id, text, field, chunkMs = cfg.chunkMs) {
 	const r = rng(text.length)
-	for (let i = 0; i < text.length; ) {
+	for (let i = 0; i < text.length && !clientGone(res); ) {
 		const size = cfg.chunkMin + Math.floor(r() * (cfg.chunkMax - cfg.chunkMin + 1))
 		sseChunk(res, id, { [field]: text.slice(i, i + size) })
 		i += size
@@ -360,11 +364,13 @@ async function handleCompletion(req, res, body) {
 		return
 	}
 
-	const n = ++requestCount
+	// The scripted turn is only committed once the reply was delivered, so a cancelled request followed by a retry replays the same turn.
+	const n = requestCount + 1
 	const plan = planFor(n)
 	console.log(`[mock] turn #${n} tool=${plan.tool.name} messages=${messages.length} bodyBytes=${JSON.stringify(body).length}`)
 
 	if (body.stream !== true) {
+		requestCount = n
 		res.writeHead(200, { "content-type": "application/json" })
 		res.end(JSON.stringify({ id, object: "chat.completion", created: Math.floor(Date.now() / 1000), model: "mock", choices: [{ index: 0, message: { role: "assistant", content: markdownFor(n, Math.floor((n - 1) / CYCLE.length), plan), tool_calls: [{ id: `call_${n}`, type: "function", function: { name: plan.tool.name, arguments: JSON.stringify(plan.tool.args) } }] }, finish_reason: "tool_calls" }], usage: { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130 } }))
 		return
@@ -378,10 +384,12 @@ async function handleCompletion(req, res, body) {
 
 	const argsJson = JSON.stringify(plan.tool.args)
 	sseChunk(res, id, { tool_calls: [{ index: 0, id: `call_${n}`, type: "function", function: { name: plan.tool.name, arguments: "" } }] })
-	for (let i = 0; i < argsJson.length; i += cfg.toolChunk) {
+	for (let i = 0; i < argsJson.length && !clientGone(res); i += cfg.toolChunk) {
 		sseChunk(res, id, { tool_calls: [{ index: 0, function: { arguments: argsJson.slice(i, i + cfg.toolChunk) } }] })
 		if (cfg.chunkMs > 0) await sleep(Math.max(1, cfg.chunkMs / 3))
 	}
+	if (clientGone(res)) return
+	requestCount = n
 	sseChunk(res, id, {}, "tool_calls")
 	const promptTokens = 1000 + messages.length * 400
 	res.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: "mock", choices: [], usage: { prompt_tokens: promptTokens, completion_tokens: 400, total_tokens: promptTokens + 400 } })}\n\n`)
@@ -398,8 +406,22 @@ const server = http.createServer((req, res) => {
 	}
 	if (req.method === "POST" && url.pathname.endsWith("/chat/completions")) {
 		const chunks = []
-		req.on("data", (c) => chunks.push(c))
+		let size = 0
+		let tooLarge = false
+		req.on("data", (c) => {
+			if (tooLarge) return
+			size += c.length
+			if (size > cfg.maxBodyBytes) {
+				tooLarge = true
+				chunks.length = 0
+				res.writeHead(413, { connection: "close" }).end("request body too large")
+				req.destroy()
+				return
+			}
+			chunks.push(c)
+		})
 		req.on("end", () => {
+			if (tooLarge) return
 			let body = {}
 			try {
 				body = JSON.parse(Buffer.concat(chunks).toString("utf8"))
@@ -414,6 +436,7 @@ const server = http.createServer((req, res) => {
 	res.writeHead(404).end()
 })
 
-server.listen(cfg.port, "0.0.0.0", () => {
-	console.log(`[mock] OpenAI-compatible server listening on 0.0.0.0:${cfg.port} -> use http://127.0.0.1:${cfg.port}/v1 (scenario=${cfg.scenario}, maxRequests=${cfg.maxRequests}, sandbox=${cfg.dir}/)`)
+server.requestTimeout = 120_000
+server.listen(cfg.port, cfg.host, () => {
+	console.log(`[mock] OpenAI-compatible server listening on ${cfg.host}:${cfg.port} -> use http://127.0.0.1:${cfg.port}/v1 (scenario=${cfg.scenario}, maxRequests=${cfg.maxRequests}, sandbox=${cfg.dir}/)`)
 })
