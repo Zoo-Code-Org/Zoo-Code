@@ -528,9 +528,15 @@ describe("VsCodeLmHandler", () => {
 
 			it("keeps an invoke block for an unknown tool as literal text", async () => {
 				const block = '<invoke name="not_our_tool"><parameter name="a">1</parameter></invoke>'
-				const chunks = await collect([block])
+				const wrapped = `<function_calls>${block}</function_calls>`
+				const chunks = await collect([wrapped])
 
-				expect(chunks.filter((chunk) => chunk.type === "text")).toEqual([{ type: "text", text: block }])
+				expect(
+					chunks
+						.filter((chunk) => chunk.type === "text")
+						.map((chunk) => chunk.text)
+						.join(""),
+				).toBe(wrapped)
 				expect(chunks.some((chunk) => chunk.type === "tool_call")).toBe(false)
 			})
 
