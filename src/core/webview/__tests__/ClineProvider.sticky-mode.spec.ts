@@ -1099,6 +1099,11 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Verify that the API configuration was also restored
 			expect(state.currentApiConfigName).toBe("architect-config")
 			expect(state.apiConfiguration.apiProvider).toBe("openai")
+			// The restored mode lives only in this view's buffer, so the restore must not
+			// re-bind the shared mode slot. Before the fix this wrote architect-config onto
+			// the "code" slot, because getState().mode still reported code.
+			expect(await provider.providerSettingsManager.getModeConfigId("code")).toBe(codeConfigId)
+			expect(await provider.providerSettingsManager.getModeConfigId("architect")).toBe(architectConfigId)
 		})
 
 		it("should handle mode deletion between sessions", async () => {

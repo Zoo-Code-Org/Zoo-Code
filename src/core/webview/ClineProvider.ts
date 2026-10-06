@@ -1633,7 +1633,13 @@ export class ClineProvider
 							const hasActualSettings = !!fullProfile.apiProvider
 
 							if (hasActualSettings) {
-								await this.activateProviderProfile({ name: profile.name })
+								// The restored mode lives only in this view's buffer, so the shared
+								// mode slot must not be written: activateProviderProfile reads mode
+								// through getState(), which does not see the view-local overlay, and
+								// would bind this profile to whichever mode the shared store still
+								// reports. The profile was read from the mode slot, so re-persisting
+								// it here is redundant as well as wrong.
+								await this.activateProviderProfile({ name: profile.name }, { persistModeConfig: false })
 							} else {
 								// The task will continue with the current/default configuration.
 							}
