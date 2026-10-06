@@ -13,6 +13,7 @@ vi.mock("fs/promises", () => ({
 	rename: vi.fn(),
 	unlink: vi.fn(),
 	realpath: vi.fn(),
+	copyFile: vi.fn(),
 }))
 
 // Full mock for fs — all sync methods are vi.fn() stubs. Stats is a bare
@@ -175,13 +176,13 @@ describe("safeWriteText", () => {
 			await safeWriteText(targetPath, "data", { backup: true, platform: "linux" })
 
 			// the commit rename (temp -> target) still happened
-			expect(fs.rename).toHaveBeenNthCalledWith(2, expect.stringContaining("safeWriteText_"), targetPath)
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 
 			// the failing cleanup was the post-commit backup unlink
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
 
 			// no rollback rename: the committed target is not restored from the backup
-			expect(fs.rename).toHaveBeenCalledTimes(2)
+			expect(fs.rename).toHaveBeenCalledTimes(1)
 
 			// the staging temp was already committed by the rename; nothing
 			// temp-shaped is unlinked afterwards
@@ -192,7 +193,7 @@ describe("safeWriteText", () => {
 	// ── Test 4: backup:true keeps old safeWriteJson semantics incl. rollback ──
 
 	describe("backup:true", () => {
-		it("renames target -> backup before commit, deletes backup on success", async () => {
+		it("copies target -> backup before commit, deletes backup on success", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
@@ -203,31 +204,27 @@ describe("safeWriteText", () => {
 			expect(fs.access).toHaveBeenCalledWith(targetPath)
 
 			// first rename: target -> backup
-			expect(fs.rename).toHaveBeenNthCalledWith(1, targetPath, expect.stringContaining("safeWriteText.bak_"))
+			expect(fs.copyFile).toHaveBeenCalledWith(targetPath, expect.stringContaining("safeWriteText.bak_"))
 
 			// second rename: temp -> target (realpath mock returns targetPath)
-			expect(fs.rename).toHaveBeenNthCalledWith(2, expect.stringContaining("safeWriteText_"), targetPath)
+			expect(fs.rename).toHaveBeenCalledTimes(1)
 
 			// backup was deleted on success
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
 		})
 
-		it("rollback: on failure after rename target->backup, restores backup to target", async () => {
+		it("a failed publish leaves the target in place and removes the backup copy", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
-			// first rename (target->backup) succeeds, second fails
-			let callCount = 0
-			vi.mocked(fs.rename).mockImplementation(async () => {
-				callCount++
-				if (callCount === 1) return // target -> backup
-				throw new Error("ENOSPC") // temp -> target fails
-			})
+			// the only rename is the publish, and it fails
+			vi.mocked(fs.rename).mockRejectedValue(new Error("ENOSPC"))
 
 			await expect(safeWriteText(targetPath, "new data", { backup: true })).rejects.toThrow("ENOSPC")
 
-			// rollback rename is the 3rd call (after target->backup and temp->target failure)
-			expect(fs.rename).toHaveBeenNthCalledWith(3, expect.stringContaining("safeWriteText.bak_"), targetPath)
+			// no rollback rename exists: the target was never moved, so cleanup removes the copy
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
+			expect(fs.rename).toHaveBeenCalledTimes(1)
 
 			// temp was cleaned up on failure
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
@@ -612,3 +609,67 @@ describe("safeWriteText", () => {
 		})
 	})
 })
+
+	describe("failure paths inside the staging write", () => {
+		it("propagates a writeSync failure, closes the descriptor, and never publishes the staged file", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			const writeError = new Error("ENOSPC: no space left on device")
+			vi.mocked(fsSync.writeSync).mockImplementationOnce(() => {
+				throw writeError
+			})
+
+			await expect(safeWriteText(targetPath, "hello world", { platform: "linux" })).rejects.toBe(writeError)
+
+			// The descriptor opened for the staging file must still be closed.
+			expect(fsSync.closeSync).toHaveBeenCalledWith(1)
+			// Nothing may be renamed into the target position after a partial write.
+			expect(fs.rename).not.toHaveBeenCalled()
+			// The truncated staging file is removed on failure.
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
+		})
+
+		it("propagates an fsync failure, closes the descriptor, and never publishes the staged file", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			const fsyncError = new Error("EBADF: fsync failed")
+			vi.mocked(fsSync.fsyncSync).mockImplementationOnce(() => {
+				throw fsyncError
+			})
+
+			await expect(safeWriteText(targetPath, "hello world", { platform: "linux" })).rejects.toBe(fsyncError)
+
+			expect(fsSync.closeSync).toHaveBeenCalledWith(1)
+			expect(fs.rename).not.toHaveBeenCalled()
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
+		})
+
+		it("backup:true copies the target instead of moving it, so a failed publish leaves the target in place", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const publishError = new Error("EXDEV: cross-device rename not permitted")
+			vi.mocked(fs.rename).mockRejectedValueOnce(publishError)
+
+			await expect(safeWriteText(targetPath, "hello world", { platform: "linux", backup: true })).rejects.toBe(publishError)
+
+			// The backup is a copy, so the target was never renamed away and there is nothing to roll back.
+			expect(fs.copyFile).toHaveBeenCalled()
+			expect(fs.rename).toHaveBeenCalledTimes(1)
+			// Both the backup copy and the staging temp are removed on failure.
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		})
+
+		it("removes the DACL dump when the save fails after creating it", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// execFile callback form: report a failure after the dump file was created.
+			vi.mocked(execFile).mockImplementationOnce(((_cmd: string, _args: string[], _opts: unknown, cb: (e: Error | null) => void) => {
+				cb(new Error("icacl dump failed"))
+				return fakeChild
+			}) as unknown as typeof execFile)
+
+			await safeWriteText(targetPath, "hello world", { platform: "win32" })
+
+			// The dump path stays tracked so the finally block removes the file the failed save created.
+			expect(fs.unlink).toHaveBeenCalledWith(targetPath + ".acl.tmp")
+		})
+	})
