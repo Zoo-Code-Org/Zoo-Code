@@ -273,6 +273,42 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		})
 	})
 
+	describe("observation refresh after a publish", () => {
+		it("records the published token so a later write needs no re-read", async () => {
+			const task = createMockTask()
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v-created")
+
+			await guardedWrite(task, "created.txt", "hello", "create")
+
+			// The created file was never read, so without this the registry stays empty
+			// and the next write fails with "File not read yet".
+			expect(task.observationRegistry.get(abs("created.txt"))?.version).toBe("v-created")
+
+			mockedFsAccess.mockResolvedValue(undefined)
+			mockedComputeVersionToken.mockResolvedValue("v-created")
+			await guardedWrite(task, "created.txt", "again", "update")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
+			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("created.txt"), "again")
+		})
+
+		it("replaces the read-time token after a successful update", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1")
+			mockedFsAccess.mockResolvedValue(undefined)
+			// First call: the CAS check. Second call: the token of what was just written.
+			mockedComputeVersionToken.mockResolvedValueOnce("v1").mockResolvedValueOnce("v2")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "doc.txt", "patched", "edit")
+
+			// Leaving v1 here makes the next edit fail with "Stale version" even though
+			// nothing else touched the file.
+			expect(reg.get(abs("doc.txt"))?.version).toBe("v2")
+		})
+	})
+
 	describe("concurrency: per-path FIFO chain", () => {
 		it("two concurrent updates on one path - exactly one publishes, the other fails stale", async () => {
 			const reg = new ObservationRegistry()
@@ -477,10 +513,12 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 				order.push("publish")
 			})
 
-			await replaceIfVersion(abs("x.txt"), "v1", "new")
+			const published = await replaceIfVersion(abs("x.txt"), "v1", "new")
 
-			// A writer that honors the same lock cannot slip between the check and the publish.
-			expect(order).toEqual(["acquire", "check", "publish", "release"])
+			// A writer that honors the same lock cannot slip between the check and the publish,
+			// and the token handed back is recomputed before the lock is released.
+			expect(order).toEqual(["acquire", "check", "publish", "check", "release"])
+			expect(published).toBe("v1")
 		})
 
 		it("releases the lock when the guard rejects as stale", async () => {

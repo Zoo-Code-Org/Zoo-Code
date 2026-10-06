@@ -54,7 +54,7 @@ class GuardRejectedError extends Error {
  * Settled entries are evicted (below), so a long-lived extension does not
  * accumulate a map entry per distinct written path.
  */
-const pendingChains = new Map<string, Promise<void>>()
+const pendingChains = new Map<string, Promise<unknown>>()
 
 /**
  * Enqueue a write operation on the per-path FIFO chain.
@@ -64,7 +64,7 @@ const pendingChains = new Map<string, Promise<void>>()
  * deleted once it settles — but only while it is still the current tail for
  * the path, so a replacement enqueued in the meantime keeps ownership.
  */
-function enqueue(pathKey: string, fn: () => Promise<void>): Promise<void> {
+function enqueue<T>(pathKey: string, fn: () => Promise<T>): Promise<T> {
 	const prev = pendingChains.get(pathKey) ?? Promise.resolve()
 	const next = prev.then(fn, fn)
 	pendingChains.set(pathKey, next)
@@ -101,10 +101,10 @@ function errorCode(error: unknown): string | undefined {
  * Without the lock the version token can change between the check and the rename, so
  * a write that looked valid on the check can overwrite a newer file.
  */
-async function withWriteLock(absolutePath: string, run: () => Promise<void>): Promise<void> {
+async function withWriteLock<T>(absolutePath: string, run: () => Promise<T>): Promise<T> {
 	const release = await acquireFileLock(absolutePath)
 	try {
-		await run()
+		return await run()
 	} finally {
 		await release()
 	}
@@ -127,8 +127,8 @@ async function fileIsAbsent(absolutePath: string): Promise<boolean> {
  * write was issued for a file that was never read, so the caller must read
  * the file first, then retry.
  */
-export async function createIfAbsent(absolutePath: string, content: string): Promise<void> {
-	await withWriteLock(absolutePath, async () => {
+export async function createIfAbsent(absolutePath: string, content: string): Promise<string> {
+	return withWriteLock(absolutePath, async () => {
 		try {
 			await fs.access(absolutePath)
 		} catch (error: unknown) {
@@ -139,7 +139,10 @@ export async function createIfAbsent(absolutePath: string, content: string): Pro
 			// Absent under the lock: no other lock-honoring writer can create it between
 			// this check and the publish.
 			await safeWriteText(absolutePath, content)
-			return
+			// Recomputed under the same lock: the caller records this as the new
+			// observation, so a later write is compared against what this publish
+			// actually wrote rather than against no observation at all.
+			return computeVersionToken(absolutePath)
 		}
 
 		throw new GuardRejectedError(
@@ -159,8 +162,12 @@ export async function createIfAbsent(absolutePath: string, content: string): Pro
  * a mismatch the write is rejected stale with a re-read-then-retry
  * remediation suffix.
  */
-export async function replaceIfVersion(absolutePath: string, expectedVersion: string, content: string): Promise<void> {
-	await withWriteLock(absolutePath, async () => {
+export async function replaceIfVersion(
+	absolutePath: string,
+	expectedVersion: string,
+	content: string,
+): Promise<string> {
+	return withWriteLock(absolutePath, async () => {
 		let currentVersion: string
 		try {
 			currentVersion = await computeVersionToken(absolutePath)
@@ -185,7 +192,9 @@ export async function replaceIfVersion(absolutePath: string, expectedVersion: st
 			// The check and the publish run under the same lock, so the token cannot
 			// change between them for any writer that honors it.
 			await safeWriteText(absolutePath, content)
-			return
+			// The publish moved the token; hand the new one back so the caller can
+			// record it instead of leaving the read-time token in the registry.
+			return computeVersionToken(absolutePath)
 		}
 
 		throw new GuardRejectedError(
@@ -246,8 +255,14 @@ export async function guardedWrite(
 ): Promise<void> {
 	const absolutePath = resolveAbsolutePath(task, relPathOrAbsolute)
 
+	// Snapshot the observation when the write is issued, not when its link runs.
+	// A refresh after a publish must not retroactively validate a second write that
+	// was issued against the pre-publish state: two concurrent writes to one path
+	// still have exactly one winner.
+	const obs = task.observationRegistry.get(absolutePath)
+
 	return enqueue(absolutePath, async () => {
-		const obs = task.observationRegistry.get(absolutePath)
+		let publishedVersion: string
 
 		if (obs === undefined) {
 			// Edit-style writes require a prior read: no observation, no write.
@@ -256,23 +271,24 @@ export async function guardedWrite(
 			}
 			// Never read: only an absent target may be created. (The edit guard
 			// above rejects before reaching this line.)
-			await createIfAbsent(absolutePath, content)
-			return
-		}
-
-		if (kind === "edit") {
-			await replaceIfVersion(absolutePath, obs.version, content)
-			return
-		}
-
-		// kind is "create" or "update": a "create" on a file that vanished
-		// after the read recreates it; otherwise the version recorded at read
-		// time must still match the on-disk token.
-		if (kind === "create" && (await fileIsAbsent(absolutePath))) {
-			await createIfAbsent(absolutePath, content)
+			publishedVersion = await createIfAbsent(absolutePath, content)
+		} else if (kind === "edit") {
+			publishedVersion = await replaceIfVersion(absolutePath, obs.version, content)
+		} else if (kind === "create" && (await fileIsAbsent(absolutePath))) {
+			// kind is "create" or "update": a "create" on a file that vanished
+			// after the read recreates it.
+			publishedVersion = await createIfAbsent(absolutePath, content)
 		} else {
-			await replaceIfVersion(absolutePath, obs.version, content)
+			// Otherwise the version recorded at read time must still match the
+			// on-disk token.
+			publishedVersion = await replaceIfVersion(absolutePath, obs.version, content)
 		}
+
+		// The file on disk is now what this write published. Record that token: a
+		// later guarded write must compare against it rather than the read-time (or,
+		// for a created file, missing) token, which is what the result message
+		// "you do not need to re-read the file" promises.
+		task.observationRegistry.observe(absolutePath, publishedVersion)
 	})
 }
 
