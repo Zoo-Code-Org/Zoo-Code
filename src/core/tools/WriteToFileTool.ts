@@ -185,6 +185,21 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	}
 
 	/**
+	 * Cleanup for a failed partial stream: restore the diff document, close the view,
+	 * and - when the restore itself failed - tell the user the editor may still hold
+	 * unapproved content, the same way the parse-failure teardown does. Without the
+	 * report, a failed rollback here is invisible: the stream error that triggered the
+	 * cleanup is a different failure and is reported elsewhere.
+	 */
+	private async cleanupFailedPartialStream(task: Task): Promise<void> {
+		const reverted = await this.revertDiffChangesBeforeReset(task)
+		await this.resetDiffViewAfterWrite(task)
+		if (!reverted) {
+			await this.reportRevertFailure(task)
+		}
+	}
+
+	/**
 	 * Teardown boundary for the handle() parse-failure path, where execute() never
 	 * runs and therefore its finally (resetTaskPartialState) never runs either.
 	 *
@@ -251,8 +266,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			// before execute() saw the malformed payload. Finalize it so the UI spinner
 			// does not stay stuck, mirroring the rooignore and execute-error cleanups.
 			await this.finalizePartialToolAskAfterFailure(task)
-			await this.revertDiffChangesBeforeReset(task)
-			await this.resetDiffViewAfterWrite(task)
+			await this.cleanupFailedPartialStream(task)
 			this.resetTaskPartialState(task)
 			return
 		}
@@ -264,8 +278,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			// Same partial-ask cleanup as the missing-`path` branch above: a partial `tool`
 			// ask created during streaming would otherwise stay open (partial: true).
 			await this.finalizePartialToolAskAfterFailure(task)
-			await this.revertDiffChangesBeforeReset(task)
-			await this.resetDiffViewAfterWrite(task)
+			await this.cleanupFailedPartialStream(task)
 			this.resetTaskPartialState(task)
 			return
 		}
@@ -285,8 +298,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			await this.finalizePartialToolAskAfterFailure(task)
 			// The write was denied before approval: restore the document so a user save
 			// cannot persist the streamed content.
-			await this.revertDiffChangesBeforeReset(task)
-			await this.resetDiffViewAfterWrite(task)
+			await this.cleanupFailedPartialStream(task)
 			this.resetTaskPartialState(task)
 			return
 		}
@@ -452,10 +464,16 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				// restore it so a user save cannot persist it. After approval the content
 				// is the user's accepted edit -- keep it in the editor (dirty) so they can
 				// save it manually.
+				let reverted = true
 				if (!writeApproved) {
-					await this.revertDiffChangesBeforeReset(task)
+					reverted = await this.revertDiffChangesBeforeReset(task)
 				}
 				await this.resetDiffViewAfterWrite(task)
+				if (!reverted) {
+					// The restore failed, so the editor still holds content this task never approved.
+					// The error the user sees on this path is the write failure, not this one.
+					await this.reportRevertFailure(task)
+				}
 			}
 			return
 		} finally {
@@ -549,9 +567,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				partialStreamState.streamError = error instanceof Error ? error : new Error(String(error))
 				await this.finalizePartialToolAskAfterFailure(task, partialMessage)
 				// The write was never approved: restore the document so a user save cannot
-				// persist the failed streamed content (reset() alone leaves it dirty).
-				await this.revertDiffChangesBeforeReset(task)
-				await this.resetDiffViewAfterWrite(task)
+				// persist the failed streamed content (reset() alone leaves it dirty), and
+				// surface the hazard if that restore itself failed. The stream error is
+				// reported by the authoritative non-partial path in execute(); the rollback
+				// hazard is a different failure and nothing else in this path says so.
+				await this.cleanupFailedPartialStream(task)
 			}
 		}
 	}
