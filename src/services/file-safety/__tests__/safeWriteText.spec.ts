@@ -733,6 +733,24 @@ describe("safeWriteText", () => {
 			expect(fs.rename).not.toHaveBeenCalled()
 		})
 
+		it.skipIf(process.platform === "win32")("refuses to stage in a .file-safety-staging directory owned by another uid", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			// A staging directory that exists but belongs to a different uid: the writer must
+			// not place temp files where another user could observe or pre-create them.
+			const foreign = _dirStats() as fsSync.Stats & { uid?: number }
+			foreign.uid = (process.getuid?.() ?? 0) + 1
+			vi.mocked(fsSync.lstatSync).mockReturnValue(foreign)
+
+			expect(await _rejectionName(safeWriteText(targetPath, "data", { platform: "linux" }))).toBe(
+				"UnsafeStagingDirectoryError",
+			)
+
+			// Nothing is staged and nothing is published from the foreign directory.
+			expect(fsSync.openSync).not.toHaveBeenCalled()
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
+
 		it("removes the staging directory once the write is over", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
