@@ -478,6 +478,23 @@ describe("ClineProvider - Sticky Mode", () => {
 				} as Partial<Task>,
 			)
 
+			// Seed the history item so the pre-write abort guard is the only thing that
+			// stops the write. Without a seeded item the write is skipped for a different
+			// reason and the test would pass even if the guard were removed.
+			await seedTaskHistory([
+				{
+					id: "test-task-id",
+					ts: Date.now(),
+					task: "Test task",
+					number: 1,
+					tokensIn: 0,
+					tokensOut: 0,
+					cacheWrites: 0,
+					cacheReads: 0,
+					totalCost: 0,
+				},
+			])
+
 			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
 				return Promise.resolve([])
 			})
@@ -725,6 +742,30 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(mockTask.emit).toHaveBeenCalledWith("taskModeSwitched", mockTask.taskId, "architect")
 			expect(mockTask["_taskMode"]).toBe("architect")
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
+		})
+	})
+	describe("persisted view state keys", () => {
+		it("does not resolve a view id that names an Object.prototype key through the chain", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			mockContext.globalState.get = vi.fn().mockImplementation((key: string) => {
+				if (key === "viewStates") return { "stable-test-view": { mode: "architect" } }
+				return undefined
+			})
+
+			const states = provider["getPersistedViewStates"]({ fresh: true })
+			expect(Object.getPrototypeOf(states)).toBeNull()
+			// A view id such as "constructor" must read as an absent entry, not as the
+			// inherited Object function, otherwise the rekey deletes the temporary entry
+			// and never writes it under the stable key.
+			expect(states["constructor"]).toBeUndefined()
+			expect(states["stable-test-view"]).toEqual({ mode: "architect" })
+
+			// Registering such an id must not make an inherited member look like a
+			// persisted entry: the lookup still reports an absent entry, so the rekey keeps the
+			// temporary entry instead of deleting it.
+			await provider["setViewStateId"]("constructor")
+			expect(provider["getPersistedViewStates"]({ fresh: true })["constructor"]).toBeUndefined()
 		})
 	})
 

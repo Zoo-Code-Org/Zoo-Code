@@ -547,10 +547,13 @@ export class ClineProvider
 			: this.contextProxy.getValue("viewStates")
 
 		if (!viewStates || typeof viewStates !== "object" || Array.isArray(viewStates)) {
-			return {}
+			return Object.create(null)
 		}
 
-		return { ...viewStates }
+		// Copy onto a null prototype. A view id that names an Object.prototype key
+		// ("constructor", "toString", "valueOf", ...) must not resolve through the
+		// prototype chain and be mistaken for a persisted entry.
+		return Object.assign(Object.create(null), viewStates)
 	}
 
 	/**
@@ -672,8 +675,10 @@ export class ClineProvider
 		if (
 			!normalizedViewStateId ||
 			normalizedViewStateId === this.viewStateId ||
-			// Reject "__proto__": writing states["__proto__"] would go through the
-			// Object.prototype setter and be silently dropped by the later spread.
+			// Reject "__proto__" and any other prototype-chain key. The map is copied
+			// onto a null prototype, so these names can no longer resolve through the
+			// chain, but they are still rejected as ids so a caller cannot store an
+			// entry under a name that looks like an inherited member.
 			normalizedViewStateId === "__proto__"
 		) {
 			return
