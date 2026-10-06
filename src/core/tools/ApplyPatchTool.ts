@@ -110,7 +110,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						// Nothing to carry when the model never observed the file: this read returned the
 						// whole content, so it is a complete observation. Carry only when a prior observation
 						// exists and still describes the version that was read.
-						const complete = prior === undefined ? true : prior.complete === true && prior.version === preReadToken
+						const complete = prior === undefined ? false : prior.complete === true && prior.version === preReadToken
 						task.observationRegistry.observe(absolutePath, preReadToken, complete)
 					}
 				}
