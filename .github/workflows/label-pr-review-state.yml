@@ -251,10 +251,12 @@ jobs:
               }
             }
 
-            // A stacked unit's head commit has exactly one parent, and that parent is another open
-            // PR's head. Reviewers filter on this label to tell a unit apart from a standalone PR.
-            // It is orthogonal to the review-state labels, so it is reconciled separately and never
-            // removed by reconcileLabels.
+            // A stacked unit is detected from the commit graph: its head commit has exactly one
+            // parent, and that parent is another open PR's head. The label describes that detected
+            // relationship only -- it does not claim the PR targets the branch below it, which is
+            // how GitHub describes a focused stacked diff. Reviewers filter on this label to tell a
+            // unit apart from a standalone PR. It is orthogonal to the review-state labels, so it is
+            // reconciled separately and never removed by reconcileLabels.
             const stackedLabel = 'stacked';
 
             async function buildOpenPrHeads() {
@@ -269,6 +271,11 @@ jobs:
             }
 
             async function reconcileStackedLabel(pr, openPrHeads) {
+              if (openPrHeads === null) {
+                // The map could not be read this run; leave the label as it is rather than
+                // deciding from an empty map.
+                return;
+              }
               if (isReadOnlyRun && isForkPR(pr)) {
                 core.info(`PR #${pr.number}: fork PR on a read-only run — skipping the stacked label`);
                 return;
@@ -585,7 +592,17 @@ jobs:
 
             // Only read the open-PR map when there is a PR to reconcile, so an
             // unassociated workflow run still resolves to zero API reads.
-            const openPrHeads = prs.length > 0 ? await buildOpenPrHeads() : new Map();
+            // A failed open-PR list call must not stop review-state reconciliation. The map is left
+            // unset so reconcileStackedLabel skips label mutation for this run: an empty map would
+            // look like "no open parents" and remove valid stacked labels.
+            let openPrHeads = null;
+            if (prs.length > 0) {
+              try {
+                openPrHeads = await buildOpenPrHeads();
+              } catch (error) {
+                core.warning(`Could not read the open pull request map: ${error.message}; skipping the stacked label for this run`);
+              }
+            }
 
             for (const pr of prs) {
               let failurePhase = 'ci-pending';

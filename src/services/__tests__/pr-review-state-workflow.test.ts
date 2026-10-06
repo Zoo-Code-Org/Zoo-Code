@@ -71,6 +71,7 @@ interface HarnessOptions {
 	commitParents?: string[]
 	getCommitErrorStatus?: number
 	openPrHeads?: Array<{ number: number; sha: string }>
+	openPrHeadsError?: boolean
 	permissionErrorStatus?: number
 	requiredContexts?: string[]
 	requiredIntegrationId?: number | null
@@ -267,6 +268,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		return { data: { permission } }
 	})
 	const listPullRequests = vi.fn(async ({ state }: { state?: string }) => {
+		if (state === "open" && options.openPrHeadsError) throw Object.assign(new Error("Bad credentials"), { status: 401 })
 		if (state === "open" && options.prState === "closed") return []
 		if (eventName === "workflow_run" && options.workflowRunAssociated === false) {
 			if (options.workflowRunFallback === "none" || options.workflowRunFallback === undefined) return []
@@ -547,6 +549,34 @@ describe("PR review-state workflow", () => {
 
 		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("could not reconcile the stacked label"))
 		expect(result.setFailed).not.toHaveBeenCalled()
+	})
+
+
+	it("keeps reconciling review state when the open-PR map lookup fails", async () => {
+		const result = await runWorkflow({
+			openPrHeadsError: true,
+			labels: ["stacked", "awaiting-maintainer"],
+			reviewState: "APPROVED",
+		})
+
+		// The map is unavailable, so the stacked label is left untouched instead of being decided from
+		// an empty map; the rest of the run still reconciles.
+		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("Could not read the open pull request map"))
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
+		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["stacked"] }))
+		expect(result.setFailed).not.toHaveBeenCalled()
+		expect(result.listPullRequests).toHaveBeenCalled()
+	})
+	it("does not label a merge commit stacked when only one of its parents is an open PR head", async () => {
+		const result = await runWorkflow({
+			commitParents: [OLD_SHA, SHA],
+			openPrHeads: [{ number: 1436, sha: OLD_SHA }],
+		})
+
+		// A unit is one commit on top of its parent. A head with two parents is a merge on the branch
+		// itself, so the relationship is not a stacked unit even though one parent matches.
+		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["stacked"] }))
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
 	})
 
 	it("reconciles CodeRabbit status comments with the canonical bot identity", async () => {
