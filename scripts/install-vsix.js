@@ -5,9 +5,6 @@ const readline = require("readline")
 // detect "yes" flags
 const autoYes = process.argv.includes("-y")
 
-// detect nightly flag
-const isNightly = process.argv.includes("--nightly")
-
 // detect editor command from args or default to "code"
 const editorArg = process.argv.find((arg) => arg.startsWith("--editor="))
 const defaultEditor = editorArg ? editorArg.split("=")[1] : "code"
@@ -27,29 +24,13 @@ const askQuestion = (question) => {
 
 async function main() {
 	try {
-		let name, version, publisher
-
-		if (isNightly) {
-			// For nightly, read the nightly-specific package.json and get publisher from src
-			const nightlyPackageJson = JSON.parse(
-				fs.readFileSync("./apps/vscode-nightly/package.nightly.json", "utf-8"),
-			)
-			const srcPackageJson = JSON.parse(fs.readFileSync("./src/package.json", "utf-8"))
-			name = nightlyPackageJson.name
-			version = nightlyPackageJson.version
-			publisher = srcPackageJson.publisher
-		} else {
-			const packageJson = JSON.parse(fs.readFileSync("./src/package.json", "utf-8"))
-			name = packageJson.name
-			version = packageJson.version
-			publisher = packageJson.publisher
-		}
+		const packageJson = JSON.parse(fs.readFileSync("./src/package.json", "utf-8"))
+		const { name, version, publisher } = packageJson
 
 		const vsixFileName = `./bin/${name}-${version}.vsix`
 		const extensionId = `${publisher}.${name}`
-		const buildType = isNightly ? "Nightly" : "Regular"
 
-		console.log(`\n🚀 Roo Code VSIX Installer (${buildType})`)
+		console.log("\n🚀 Roo Code VSIX Installer")
 		console.log("========================")
 		console.log("\nThis script will:")
 		console.log("1. Uninstall any existing version of the Roo Code extension")

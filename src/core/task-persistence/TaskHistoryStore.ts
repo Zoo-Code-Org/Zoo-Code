@@ -4,71 +4,24 @@ import * as path from "path"
 import crypto from "crypto"
 
 import deepEqual from "fast-deep-equal"
-import type { HistoryItem } from "@roo-code/types"
+import { historyItemSchema, type HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
-import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
+import { LOCK_STALE_MS, withFileLock } from "../../utils/fileLock"
+import { safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
+import { assertValidTransition, settleRejectedCreateSubtaskAction, type HistoryItemStatus } from "./taskLifecycle"
+import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
 
-/** Valid status values for a task's HistoryItem. */
-export type HistoryItemStatus = NonNullable<HistoryItem["status"]>
-
-export class DeltaRejectedError extends Error {
-	constructor(
-		public readonly taskId: string,
-		public readonly diskStatus: HistoryItemStatus,
-		public readonly attemptedStatus: HistoryItemStatus,
-	) {
-		super(`Delta rejected for task ${taskId}: disk status ${diskStatus} rejects transition to ${attemptedStatus}`)
-		this.name = "DeltaRejectedError"
-	}
-}
-
-const VALID_TRANSITIONS: Record<HistoryItemStatus, HistoryItemStatus[]> = {
-	active: ["delegated", "completed", "interrupted"],
-	delegated: ["active"],
-	interrupted: ["completed"],
-	completed: [],
-}
-
-/**
- * Asserts that a task status transition is valid, throwing if not.
- *
- * @throws {Error} When the transition is not allowed by the state machine.
- */
-export function assertValidTransition(from: HistoryItemStatus | undefined, to: HistoryItemStatus): void {
-	const fromStatus: HistoryItemStatus = from ?? "active"
-	const validTargets = VALID_TRANSITIONS[fromStatus]
-	if (!validTargets.includes(to)) {
-		throw new Error(`Invalid task status transition: ${fromStatus} → ${to}`)
-	}
-}
+export { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
+export { DeltaRejectedError } from "./taskStoreConcurrency"
 
 /**
  * Build a `safeWriteJson` merge callback that applies only `delta` to the
  * current disk state, preserving fields written by another process.
  */
 function mergeWithDisk(delta: Partial<HistoryItem>): (existing: unknown, incoming: unknown) => unknown {
-	return (existing, incoming) => {
-		if (!existing || typeof existing !== "object" || !("id" in existing)) {
-			return incoming
-		}
-		const disk = existing as HistoryItem
-		if (delta.status !== undefined) {
-			const diskStatus: HistoryItemStatus = disk.status ?? "active"
-			if (delta.status !== diskStatus) {
-				const validTargets = VALID_TRANSITIONS[diskStatus]
-				if (!validTargets?.includes(delta.status as HistoryItemStatus)) {
-					throw new DeltaRejectedError(disk.id, diskStatus, delta.status as HistoryItemStatus)
-				}
-			}
-		}
-		const merged = { ...disk, ...delta }
-		if (delta.childIds && disk.childIds) {
-			merged.childIds = [...new Set([...disk.childIds, ...delta.childIds])]
-		}
-		return merged
-	}
+	return (existing, incoming) => mergeHistoryDelta(existing, incoming as HistoryItem, delta)
 }
 
 /**
@@ -311,6 +264,13 @@ export class TaskHistoryStore {
 
 	/**
 	 * Delete a single task's history item.
+	 *
+	 * Deletion is best-effort: the unlink runs under the same per-file
+	 * advisory lock as `safeWriteJson`, so a locked read-modify-write (for
+	 * example the settlement in `clearPendingActionIfMatching`) cannot
+	 * interleave with it. A lock or unlink failure is swallowed because the
+	 * file may already be deleted; the in-memory eviction and the write
+	 * through still complete.
 	 */
 	async delete(taskId: string): Promise<void> {
 		return this.withLock(async () => {
@@ -320,7 +280,7 @@ export class TaskHistoryStore {
 			// Remove per-task file (best-effort)
 			try {
 				const filePath = await this.getTaskFilePath(taskId)
-				await fs.unlink(filePath)
+				await withFileLock(filePath, (absoluteFilePath) => fs.unlink(absoluteFilePath))
 			} catch {
 				// File may already be deleted
 			}
@@ -334,6 +294,10 @@ export class TaskHistoryStore {
 
 	/**
 	 * Delete multiple tasks' history items in a batch.
+	 *
+	 * Every item follows the `delete` semantics and is attempted even when an
+	 * earlier unlink fails. The single write-through runs once after the
+	 * whole batch.
 	 */
 	async deleteMany(taskIds: string[]): Promise<void> {
 		return this.withLock(async () => {
@@ -341,9 +305,10 @@ export class TaskHistoryStore {
 				this.cache.delete(taskId)
 				this.taskFileMtimes.delete(taskId)
 
+				// Remove per-task file (best-effort)
 				try {
 					const filePath = await this.getTaskFilePath(taskId)
-					await fs.unlink(filePath)
+					await withFileLock(filePath, (absoluteFilePath) => fs.unlink(absoluteFilePath))
 				} catch {
 					// File may already be deleted
 				}
@@ -882,9 +847,7 @@ export class TaskHistoryStore {
 	 * Return only the fields in `incoming` that differ from `cached`.
 	 */
 	private computeDelta(cached: HistoryItem, incoming: Partial<HistoryItem>): Partial<HistoryItem> {
-		return Object.fromEntries(
-			Object.entries(incoming).filter(([k, v]) => !deepEqual(v, (cached as Record<string, unknown>)[k])),
-		) as Partial<HistoryItem>
+		return computeHistoryDelta(cached, incoming)
 	}
 
 	private buildDelta(id: string, cached: HistoryItem, incoming: Partial<HistoryItem>): Partial<HistoryItem> {
@@ -1107,6 +1070,93 @@ export class TaskHistoryStore {
 				await this.onWrite(all)
 			}
 			return all
+		})
+	}
+
+	/**
+	 * Disk-authoritative compare-and-clear for a rejected `create_subtask`
+	 * pending action (#1714). The comparison runs inside the per-file
+	 * advisory lock's merge callback, so the decision reads the persisted
+	 * record rather than this store's possibly stale cache. Settlement goes
+	 * through the shared `settleRejectedCreateSubtaskAction` reducer, so a
+	 * completed record is never mutated and a missing, different-kind, or
+	 * replacement pending action is preserved unchanged. The authoritative
+	 * record is written back, the store cache is refreshed with it, and it
+	 * is returned to the caller.
+	 *
+	 * Deletion by another host is authoritative (#1726): when no persisted
+	 * record exists, the merge callback removes the stale cache entry and
+	 * throws instead of writing the cached record back to disk. A persisted
+	 * record must also match the canonical task-history schema and carry the
+	 * requested task ID; malformed or mismatched records drop the stale
+	 * cache entry and fail settlement closed without rewriting the record.
+	 *
+	 * @throws If the task ID is not present in the cache, no persisted record remains on disk,
+	 * or the persisted record is invalid or belongs to a different task ID.
+	 */
+	public async clearPendingActionIfMatching(taskId: string, expectedActionId: string): Promise<HistoryItem> {
+		return this.withLock(async () => {
+			const cached = this.cache.get(taskId)
+			if (!cached) {
+				throw new Error(`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} not found in cache`)
+			}
+			const filePath = await this.getTaskFilePath(taskId)
+			let authoritative: HistoryItem = cached
+			let missingDiskRecord = false
+			try {
+				await safeWriteJson(filePath, cached, {
+					merge: (existing) => {
+						if (existing === null || existing === undefined) {
+							// Writing the cached record back would recreate a task
+							// another host deleted, so drop the stale entry first.
+							// A throwing merge writes nothing, so the deleted
+							// record stays deleted.
+							missingDiskRecord = true
+							this.cache.delete(taskId)
+							this.taskFileMtimes.delete(taskId)
+							throw new Error(
+								`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} not found in cache`,
+							)
+						}
+						// Validate the locked disk record with the canonical
+						// task-history schema (#1726). Settlement must not
+						// rewrite malformed data and must not clear the action
+						// on a record persisted under a different task ID, so
+						// both cases drop the stale cache entry and fail
+						// closed without touching the disk record.
+						const parsed = historyItemSchema.safeParse(existing)
+						if (!parsed.success) {
+							this.cache.delete(taskId)
+							this.taskFileMtimes.delete(taskId)
+							throw new Error(
+								`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} has an invalid disk record`,
+							)
+						}
+						if (parsed.data.id !== taskId) {
+							this.cache.delete(taskId)
+							this.taskFileMtimes.delete(taskId)
+							throw new Error(
+								`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} has a disk record with mismatched id ${parsed.data.id}`,
+							)
+						}
+						const disk = existing as HistoryItem
+						authoritative = settleRejectedCreateSubtaskAction(disk, expectedActionId)
+						return authoritative
+					},
+				})
+			} catch (error) {
+				if (missingDiskRecord) {
+					throw new Error(
+						`[TaskHistoryStore] clearPendingActionIfMatching: task ${taskId} not found in cache`,
+					)
+				}
+				throw error
+			}
+			this.cache.set(taskId, authoritative)
+			if (this.onWrite) {
+				await this.onWrite(this.getAll())
+			}
+			return authoritative
 		})
 	}
 

@@ -346,6 +346,10 @@
 				"label": "Aktifkan perlindungan perintah destruktif",
 				"description": "Unduh dan gunakan Destructive Command Guard (DCG) untuk platform ini. Perintah yang diizinkan DCG dijalankan secara otomatis. Perintah yang diblokir DCG memerlukan persetujuanmu. Daftar perintah Zoo dinonaktifkan selama opsi ini aktif. File executable yang diunduh tetap disimpan jika kamu menonaktifkannya."
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "Perintah Auto-Execute yang Diizinkan",
 			"allowedCommandsDescription": "Prefix perintah yang dapat di-auto-execute ketika \"Selalu setujui operasi eksekusi\" diaktifkan. Tambahkan * untuk mengizinkan semua perintah (gunakan dengan hati-hati).",
 			"deniedCommands": "Perintah yang ditolak",
@@ -460,6 +464,8 @@
 		"headerName": "Nama header",
 		"headerValue": "Nilai header",
 		"noCustomHeaders": "Tidak ada header kustom yang didefinisikan. Klik tombol + untuk menambahkan satu.",
+		"extraBody": "Body Tambahan",
+		"extraBodyDescription": "Objek JSON opsional yang digabungkan ke body permintaan API. Field yang dikelola Zoo Code seperti model, messages, tools, dan stream tidak dapat ditimpa. Jangan sertakan rahasia.",
 		"unboundApiKey": "Unbound API Key",
 		"getUnboundApiKey": "Dapatkan Unbound API Key",
 		"requestyApiKey": "Requesty API Key",
@@ -1036,6 +1042,11 @@
 		"modelId": "Kamu harus menyediakan model ID yang valid.",
 		"modelSelector": "Kamu harus menyediakan model selector yang valid.",
 		"openAi": "Kamu harus menyediakan base URL, API key, dan model ID yang valid.",
+		"openAiExtraBody": {
+			"invalidJson": "Body Tambahan harus berisi JSON yang valid.",
+			"objectRequired": "Body Tambahan harus berupa objek JSON.",
+			"reservedKeys": "Body Tambahan tidak dapat menimpa field yang dikelola Zoo Code: {{keys}}."
+		},
 		"arn": {
 			"invalidFormat": "Format ARN tidak valid. Silakan periksa persyaratan format.",
 			"regionMismatch": "Peringatan: Region di ARN kamu ({{arnRegion}}) tidak cocok dengan region yang kamu pilih ({{region}}). Ini dapat menyebabkan masalah akses. Provider akan menggunakan region dari ARN."
