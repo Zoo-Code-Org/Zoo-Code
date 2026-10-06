@@ -249,13 +249,11 @@ describe("writeToFileTool", () => {
 			},
 			nativeArgs: {
 				// The missing-parameter tests inject `undefined` where
-				// NativeToolArgs["write_to_file"] declares `string`, so the casts are required to
-				// model a malformed payload.
-				path: (Object.prototype.hasOwnProperty.call(params, "path") ? params.path : testFilePath) as any,
-				content: (Object.prototype.hasOwnProperty.call(params, "content")
-					? params.content
-					: testContent) as any,
-			},
+				// NativeToolArgs["write_to_file"] declares `string`, so one assertion through
+				// unknown is what models the malformed payload - no `any` needed.
+				path: Object.prototype.hasOwnProperty.call(params, "path") ? params.path : testFilePath,
+				content: Object.prototype.hasOwnProperty.call(params, "content") ? params.content : testContent,
+			} as unknown as ToolUse<"write_to_file">["nativeArgs"],
 			partial: isPartial,
 		}
 
