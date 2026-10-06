@@ -2317,6 +2317,35 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("refreshes this view's buffer when a pinned profile is saved without activation", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			// Seed the per-view buffer as loadViewState would after a restart with a
+			// pinned profile: the pin and a full copy of its settings.
+			await provider.saveViewState("currentApiConfigName", "pinned-profile")
+			await provider.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.zooGateway,
+				zooSessionToken: "old-token",
+			})
+
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("pinned-id")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "pinned-profile", id: "pinned-id", apiProvider: providerIdentifiers.zooGateway },
+			])
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			// A token refresh saves the pinned profile without activating it.
+			await provider.upsertProviderProfile(
+				"pinned-profile",
+				{ apiProvider: providerIdentifiers.zooGateway, zooSessionToken: "new-token" },
+				false,
+			)
+
+			// The buffer must not keep serving the token captured before the save.
+			const state = await provider.getState({ includeTaskHistory: false })
+			expect(state.apiConfiguration.zooSessionToken).toBe("new-token")
+			await provider.dispose()
+		})
+
 		it("clears this view's buffered apiConfiguration when directly activating a profile", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			// Seed the per-view buffer with profile A's settings, as loadViewState would
@@ -7115,12 +7144,15 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 					}),
 					true,
 				)
-				expect(saveConfig).toHaveBeenCalledWith(
+				// The non-active profile now goes through upsertProviderProfile so the views
+				// pinned to it are refreshed, not just the file on disk.
+				expect(upsertSpy).toHaveBeenCalledWith(
 					"Backup Zoo",
 					expect.objectContaining({
 						zooSessionToken: "new-token",
 						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
 					}),
+					false,
 				)
 			})
 

@@ -2330,6 +2330,15 @@ export class ClineProvider
 					await this.persistStickyProviderProfileToCurrentTask(name)
 				} else {
 					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
+
+					// A save that does not activate still changes the profile's settings, and
+					// every view pinned to it buffers a full copy of them. Refresh those views
+					// (and this one when it is the pinned view) or their getState() keeps
+					// serving the settings captured before the save under the same name.
+					if (this.pinnedProfileName === name) {
+						await this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
+					}
+					await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
 				}
 
 				await this.postStateToWebview()
@@ -2750,8 +2759,10 @@ export class ClineProvider
 						// picks up the new token immediately for the current task.
 						await this.upsertProviderProfile(entry.name, updated, true)
 					} else {
-						// Non-active profiles just need the token saved to disk.
-						await this.providerSettingsManager.saveConfig(entry.name, updated)
+						// Non-active profiles need the token saved to disk and the views pinned
+						// to them refreshed: a direct saveConfig leaves a pinned view serving the
+						// old token until it reloads.
+						await this.upsertProviderProfile(entry.name, updated, false)
 					}
 				}
 			}
