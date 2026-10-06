@@ -46,7 +46,7 @@
 	},
 	"__tests__/new-task-delegation.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 9
+			"count": 8
 		}
 	},
 	"activate/CodeActionProvider.ts": {
@@ -1036,7 +1036,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 198
+			"count": 196
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
