@@ -11,6 +11,28 @@ export const formatResponse = {
 			message: "The user denied this operation.",
 		}),
 
+	/**
+	 * Structured result for an automatic (policy) denial of a command — a
+	 * denylist match, a blanket auto-deny, or a Destructive Command Guard
+	 * block under blanket mode. Distinct from `toolDenied` (a real user
+	 * rejection): the reason names the offending part of the chain, states
+	 * that nothing in it executed, and — deliberately — never suggests asking
+	 * the user, which would invite `ask_followup_question` and stall a
+	 * hands-free session. Hardcoded English like the rest of this module:
+	 * model-facing strings are not i18n'd.
+	 */
+	toolAutoDenied: (detail: { reason: string; offendingCommand?: string; ruleId?: string }) =>
+		JSON.stringify({
+			status: "denied",
+			type: "auto_deny",
+			reason: detail.reason,
+			offending_command: detail.offendingCommand,
+			rule_id: detail.ruleId,
+			note: "The command chain was rejected in its entirety; none of the chained commands were executed.",
+			suggestion:
+				"Re-run the remaining commands as separate execute_command calls using approved commands only, or choose an approved alternative.",
+		}),
+
 	toolDeniedWithFeedback: (feedback?: string) =>
 		JSON.stringify({
 			status: "denied",

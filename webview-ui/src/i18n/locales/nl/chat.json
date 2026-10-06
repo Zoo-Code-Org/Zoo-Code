@@ -317,9 +317,9 @@
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Wat is nieuw:",
-			"highlight1": "✨ Nieuwe SOTA-modellen toegevoegd: Gebruik GPT-6 Sol, GPT-6 Luna en Claude Opus 5.5 bij ondersteunde providers.",
-			"highlight2": "🧭 Betrouwbaardere taken en subtaken: Houd gedelegeerde modi geïsoleerd, behoud links naar subtaken na herhaald stoppen en bescherm orchestrator-instellingen wanneer slash-opdrachten van modus wisselen.",
-			"highlight3": "🛠️ Betrouwbaarder gedrag van terminal, providers en codezoekfunctie: Verbeter de terminal op Windows en in niet-Engelstalige omgevingen, versterk providerreacties en annulering en laat de codezoekfunctie consistenter de juiste workspace gebruiken."
+			"highlight1": "✨ Ondersteuning voor nieuwe modellen: Gebruik GPT-6.1 Sol, profiteer van de gecorrigeerde uitvoerlimiet van Claude Opus 5.5 en selecteer DeepSeek V4.1 Flash op OpenCode Go.",
+			"highlight2": "🧭 Betrouwbaar afbreken en onderbreken van taken: Bewaar de eerste afbreekreden, reset de afbreekstatus van de stream bij elk verzoek en voorkom dat onderbroken taken afgewezen subtaken opnieuw uitvoeren.",
+			"highlight3": "🛠️ Betrouwbare tools, prompts en UI-streaming: Houd gestreamde toolargumenten intact, handhaaf het MCP-toolbeleid, voorkom verzonnen regelnummers en maak chatupdates vloeiender."
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",
