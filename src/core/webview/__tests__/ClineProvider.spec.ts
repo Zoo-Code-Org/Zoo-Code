@@ -1724,6 +1724,7 @@ describe("ClineProvider", () => {
 		const state = await provider.getStateToPostToWebview()
 
 		expect(state.experiments).toEqual({ ...experimentDefault, dynamicThinkingEffort: false })
+	})
 
 	test("getStateToPostToWebview returns the saved blanket auto-deny setting", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
