@@ -347,6 +347,13 @@ export class ClineProvider
 	private viewStateId: string
 
 	/**
+	 * Whether this instance wrote an entry under its own session-local temporary id.
+	 * Temporary ids restart from 0 on every extension host start, so an entry under the
+	 * same name can belong to a different session. Only re-key entries this instance wrote.
+	 */
+	private wroteUnderTemporaryViewStateId = false
+
+	/**
 	 * Local state buffer for this specific view instance.
 	 * Used to isolate mode, apiConfiguration, and other fields from the shared ContextProxy singleton
 	 * when running in parallel (multi-tab) mode.
@@ -595,6 +602,9 @@ export class ClineProvider
 			} else {
 				next.updatedAt = values.updatedAt ?? Date.now()
 				states[viewStateId] = next
+				if (viewStateId === this.viewId) {
+					this.wroteUnderTemporaryViewStateId = true
+				}
 			}
 
 			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
@@ -639,18 +649,29 @@ export class ClineProvider
 	 * to that webview's storage and is left alone. When the stable entry already exists
 	 * it wins and the temporary entry is dropped, because temporary ids are session
 	 * counters that can collide across window reloads. Runs through the serialized write
-	 * queue like every other viewStates mutation.
+	 * queue like every other viewStates mutation. An entry this instance never wrote is
+	 * left alone, so a stale entry that happens to carry the same session-local name is
+	 * not adopted.
 	 */
 	private async rekeyPersistedViewStateEntry(nextViewStateId: string): Promise<void> {
 		const previousViewStateId = this.viewId
 
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			// An entry under this name can belong to a different session, because temporary
+			// ids restart from 0 on every extension host start. Only re-key entries this
+			// instance wrote, otherwise a stale entry from another session is adopted.
+			if (!this.wroteUnderTemporaryViewStateId) {
+				return
+			}
+
 			const states = this.getPersistedViewStates({ fresh: true })
 			const previous = states[previousViewStateId]
 
 			if (!previous) {
 				return
 			}
+
+			this.wroteUnderTemporaryViewStateId = false
 
 			delete states[previousViewStateId]
 

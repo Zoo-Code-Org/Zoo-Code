@@ -767,6 +767,24 @@ describe("ClineProvider - Sticky Mode", () => {
 			await provider["setViewStateId"]("constructor")
 			expect(provider["getPersistedViewStates"]({ fresh: true })["constructor"]).toBeUndefined()
 		})
+
+		it("does not adopt an entry under the temporary name that this instance never wrote", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Temporary ids restart from 0 on every host start, so the same name can
+			// belong to a different session. An entry this instance never wrote must not
+			// be adopted as this view's state.
+			mockContext.globalState.get = vi.fn().mockImplementation((key: string) => {
+				if (key === "viewStates") return { [provider.viewId]: { mode: "architect" } }
+				return undefined
+			})
+
+			await provider["setViewStateId"]("stable-test-view")
+
+			const states = provider["getPersistedViewStates"]({ fresh: true })
+			expect(states[provider.viewId]).toEqual({ mode: "architect" })
+			expect(states["stable-test-view"]).toBeUndefined()
+		})
 	})
 
 	describe("createTaskWithHistoryItem", () => {
