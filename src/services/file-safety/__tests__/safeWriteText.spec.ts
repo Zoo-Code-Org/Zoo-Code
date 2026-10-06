@@ -634,11 +634,12 @@ describe("safeWriteText", () => {
 			expect(fs.rename).not.toHaveBeenCalled()
 		})
 	})
-})
 
 	describe("failure paths inside the staging write", () => {
 		it("propagates a writeSync failure, closes the descriptor, and never publishes the staged file", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
 			const writeError = new Error("ENOSPC: no space left on device")
 			vi.mocked(fsSync.writeSync).mockImplementationOnce(() => {
 				throw writeError
@@ -656,6 +657,8 @@ describe("safeWriteText", () => {
 
 		it("propagates an fsync failure, closes the descriptor, and never publishes the staged file", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
 			const fsyncError = new Error("EBADF: fsync failed")
 			vi.mocked(fsSync.fsyncSync).mockImplementationOnce(() => {
 				throw fsyncError
@@ -670,6 +673,7 @@ describe("safeWriteText", () => {
 
 		it("backup:true copies the target instead of moving it, so a failed publish leaves the target in place", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 			const publishError = new Error("EXDEV: cross-device rename not permitted")
 			vi.mocked(fs.rename).mockRejectedValueOnce(publishError)
@@ -686,6 +690,7 @@ describe("safeWriteText", () => {
 
 		it("removes the DACL dump when the save fails after creating it", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 			// execFile callback form: report a failure after the dump file was created.
 			vi.mocked(execFile).mockImplementationOnce(((_cmd: string, _args: string[], _opts: unknown, cb: (e: Error | null) => void) => {
@@ -699,3 +704,4 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl.tmp"))
 		})
 	})
+})
