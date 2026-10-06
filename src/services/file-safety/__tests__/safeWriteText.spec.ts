@@ -672,7 +672,7 @@ describe("safeWriteText", () => {
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 		})
 
-		it("rolls the backup back to the target when the hook fails after the backup rename (backup:true)", async () => {
+		it("runs the hook before the backup rename, so a rejection leaves the target in place (backup:true)", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
@@ -688,13 +688,44 @@ describe("safeWriteText", () => {
 				}),
 			).rejects.toBe(guard)
 
-			// rename 1: target -> backup (step 3); rename 2: backup -> target
-			// (rollback in the catch) -- the commit rename never happened
-			expect(fs.rename).toHaveBeenCalledTimes(2)
-			expect(fs.rename).toHaveBeenNthCalledWith(1, targetPath, expect.stringContaining("safeWriteText.bak_"))
-			expect(fs.rename).toHaveBeenNthCalledWith(2, expect.stringContaining("safeWriteText.bak_"), targetPath)
+			// No rename at all: the hook runs before the target is moved aside, so a
+			// rejection never creates the moved-aside state that needed a rollback.
+			expect(fs.rename).not.toHaveBeenCalled()
 			// the staged temp was discarded
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		})
+
+		it("with backup:true the hook observes the target, not the post-backup absence", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// Simulate the on-disk truth: once the target has been renamed to the backup
+			// path, accessing it reports ENOENT.
+			let movedAside = false
+			vi.mocked(fs.rename).mockImplementation(async (from) => {
+				if (String(from) === targetPath) movedAside = true
+				return undefined
+			})
+			vi.mocked(fs.access).mockImplementation(async (p) => {
+				if (String(p) === targetPath && movedAside) {
+					throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+				}
+				return undefined
+			})
+
+			await safeWriteText(targetPath, "data", {
+				backup: true,
+				platform: "linux",
+				// A version-check hook reads the target - exactly what a replaceIfVersion
+				// guard does. After the backup rename it would see ENOENT and fail every
+				// write, and an absence-check hook would pass vacuously.
+				verifyBeforeCommit: async () => {
+					await fs.access(targetPath)
+				},
+			})
+
+			// The backup rename did happen - after the hook ran.
+			expect(movedAside).toBe(true)
 		})
 	})
 })

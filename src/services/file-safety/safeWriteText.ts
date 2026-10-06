@@ -129,7 +129,8 @@ async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRu
  * 2. fsync the temp file, then close it.
  * 3. win32 only: if target exists save its DACL dump BEFORE backup rename.
  * 4. Optionally rename target -> backup (when backup:true).
- * 5. Optionally run the pre-commit verification hook (verifyBeforeCommit);
+ * 5. Optionally run the pre-commit verification hook (verifyBeforeCommit) before
+ *    the target is moved aside, so it observes the state the rename replaces;
  *    a rejection aborts the publish (no commit rename) and propagates.
  * 6. Atomic rename temp -> target.
  * 7. win32 only: restore DACL onto the directory AFTER commit rename.
@@ -244,7 +245,19 @@ export async function safeWriteText(filePath: string, content: string, options?:
 		}
 
 		try {
-			// -- Step 3 (backup:true): rename target -> backup --------------
+			// -- Step 3a (A4a): pre-commit verification --------------------------
+			// Runs before the target is moved aside, so a conditional publication
+			// (guardedWrite's createIfAbsent / replaceIfVersion) validates against the state
+			// the commit rename will actually replace. Running it after the backup rename
+			// would make the target look absent: a version check would fail with ENOENT and
+			// an absence check would pass vacuously. A rejection skips the commit rename and
+			// discards the staged temp; no backup has been taken yet, so there is nothing to
+			// roll back.
+			if (options?.verifyBeforeCommit) {
+				await options.verifyBeforeCommit()
+			}
+
+			// -- Step 3b (backup:true): rename target -> backup --------------
 			if (options?.backup) {
 				try {
 					await fs.access(targetPath)
@@ -258,18 +271,6 @@ export async function safeWriteText(filePath: string, content: string, options?:
 							: undefined
 					if (code !== "ENOENT") throw err
 				}
-			}
-
-			// -- Step 3b (A4a): pre-commit verification --------------------------
-			// Run at the last moment before the commit rename so a conditional
-			// publication (guardedWrite's createIfAbsent / replaceIfVersion)
-			// re-validates the target state against what the rename will replace.
-			// A rejection skips the commit rename: the catch below rolls the
-			// backup (if any) back to the target and discards the staged temp.
-			// NOTE: with backup:true the target was already moved aside by step 3,
-			// so the hook observes the post-backup state.
-			if (options?.verifyBeforeCommit) {
-				await options.verifyBeforeCommit()
 			}
 
 			// -- Step 4: atomic rename temp -> target ---------------------
