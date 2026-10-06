@@ -347,9 +347,9 @@
 		"support": "Hãy ủng hộ Zoo Code bằng cách tặng sao cho chúng tôi trên <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Có gì mới:",
-			"highlight1": "✨ Đã thêm các model SOTA mới: Dùng GPT-6 Sol, GPT-6 Luna và Claude Opus 5.5 trên các provider được hỗ trợ.",
-			"highlight2": "🧭 Task và subtask đáng tin cậy hơn: Giữ các mode được ủy quyền tách biệt, duy trì liên kết subtask sau nhiều lần Stop và bảo vệ cài đặt orchestrator khi slash command chuyển mode.",
-			"highlight3": "🛠️ Terminal, provider và tìm kiếm code đáng tin cậy hơn: Cải thiện hoạt động terminal trên Windows và môi trường không dùng tiếng Anh, tăng độ ổn định của phản hồi và thao tác hủy từ provider, đồng thời giúp tìm kiếm code sử dụng đúng workspace nhất quán hơn."
+			"highlight1": "✨ Hỗ trợ model mới: Dùng GPT-6.1 Sol, tận dụng giới hạn đầu ra đã sửa của Claude Opus 5.5 và chọn DeepSeek V4.1 Flash trên OpenCode Go.",
+			"highlight2": "🧭 Hủy và gián đoạn task đáng tin cậy: Giữ nguyên lý do hủy đầu tiên, đặt lại trạng thái hủy stream cho từng request và ngăn task bị gián đoạn chạy lại các subtask đã bị từ chối.",
+			"highlight3": "🛠️ Tool, Prompt và truyền luồng UI đáng tin cậy: Giữ nguyên vẹn tham số tool được truyền theo luồng, thực thi chính sách tool MCP, ngăn số dòng bịa đặt và giúp cập nhật chat mượt mà hơn."
 		},
 		"cloudAgents": {
 			"heading": "Mới trên Cloud:",

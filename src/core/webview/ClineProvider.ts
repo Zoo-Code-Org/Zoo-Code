@@ -47,6 +47,7 @@ import {
 	DEFAULT_WRITE_DELAY_MS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
 	DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED,
+	DEFAULT_ALWAYS_DENY_UNAPPROVED_COMMANDS,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
@@ -90,8 +91,8 @@ import { McpHub } from "../../services/mcp/McpHub"
 import { McpServerManager } from "../../services/mcp/McpServerManager"
 import { MarketplaceManager } from "../../services/marketplace"
 import { ShadowCheckpointService } from "../../services/checkpoints/ShadowCheckpointService"
-import type { CodeIndexManager } from "../../services/code-index/manager"
 import { CodeIndexManagerRegistry } from "../../services/code-index/code-index-manager-registry"
+import type { CodeIndexWorkspaceScope } from "../../services/code-index/code-index-workspace-scope"
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
 
@@ -111,7 +112,7 @@ import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/provi
 import { ContextProxy } from "../config/ContextProxy"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
-import { Task } from "../task/Task"
+import { PendingActionSettlementError, Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
 import type { ClineMessage, TodoItem } from "@roo-code/types"
@@ -125,6 +126,7 @@ import {
 	completeDelegatedChild,
 	delegateTaskToChild,
 	interruptDelegatedChild,
+	LifecycleTransitionError,
 } from "../task-persistence"
 import { readTaskMessages } from "../task-persistence/taskMessages"
 import { getNonce } from "./getNonce"
@@ -175,10 +177,16 @@ function scheduleTask(
 	task: Task,
 	source: string,
 	run: () => Promise<void> = () => task.run(),
+	onError?: (error: unknown) => void | Promise<void>,
 ): void {
-	void scheduler
-		.schedule(task, run)
-		.catch((error) => console.error(`[${source}] taskScheduler.schedule failed:`, error))
+	void scheduler.schedule(task, run).catch(async (error) => {
+		console.error(`[${source}] taskScheduler.schedule failed:`, error)
+		try {
+			await onError?.(error)
+		} catch (cleanupError) {
+			console.error(`[${source}] task failure cleanup failed:`, cleanupError)
+		}
+	})
 }
 
 type GetStateOptions = {
@@ -316,7 +324,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "sep-2026-v3.84.0-models-task-tool-reliability" // v3.84.0 new models, task reliability, and terminal/provider/code-search fixes
+	public readonly latestAnnouncementId = "oct-2026-v3.86.0-models-aborts-tool-streaming" // v3.86.0 models, aborts, and tool/UI streaming fixes
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -607,6 +615,33 @@ export class ClineProvider
 			// Make sure no reference kept, once promises end it will be
 			// garbage collected.
 			task = undefined
+		}
+	}
+
+	private async cleanupFailedHistoryTask(task: Task, error: unknown): Promise<void> {
+		if (!(error instanceof PendingActionSettlementError)) {
+			return
+		}
+
+		if (this.taskRegistry.getById(task.taskId) !== task) {
+			return
+		}
+
+		this.taskRegistry.remove(task.taskId)
+		task.emit(RooCodeEventName.TaskUnfocused)
+
+		const cleanupFunctions = this.taskEventListeners.get(task)
+		if (cleanupFunctions) {
+			cleanupFunctions.forEach((cleanup) => cleanup())
+			this.taskEventListeners.delete(task)
+		}
+
+		try {
+			await task.dispose()
+		} catch (error) {
+			this.log(
+				`[cleanupFailedHistoryTask] dispose() failed for ${task.taskId}.${task.instanceId}: ${error instanceof Error ? error.message : String(error)}`,
+			)
 		}
 	}
 
@@ -1361,7 +1396,9 @@ export class ClineProvider
 			)
 
 			if (options?.startTask !== false) {
-				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem")
+				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", undefined, (error) =>
+					this.cleanupFailedHistoryTask(task, error),
+				)
 			}
 		} else {
 			await this.addClineToStack(task)
@@ -1371,7 +1408,9 @@ export class ClineProvider
 			)
 
 			if (options?.startTask !== false) {
-				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem")
+				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem", undefined, (error) =>
+					this.cleanupFailedHistoryTask(task, error),
+				)
 			}
 		}
 
@@ -1490,7 +1529,7 @@ export class ClineProvider
 			console.error("[ClineProvider:Vite] Failed to read Vite port file:", err)
 		}
 
-		const localServerUrl = `localhost:${localPort}`
+		const localServerUrl = `127.0.0.1:${localPort}`
 
 		// Check if local dev server is running.
 		try {
@@ -1529,7 +1568,7 @@ export class ClineProvider
 
 		const reactRefresh = /*html*/ `
 			<script nonce="${nonce}" type="module">
-				import RefreshRuntime from "http://localhost:${localPort}/@react-refresh"
+				import RefreshRuntime from "http://127.0.0.1:${localPort}/@react-refresh"
 				RefreshRuntime.injectIntoGlobalHook(window)
 				window.$RefreshReg$ = () => {}
 				window.$RefreshSig$ = () => (type) => type
@@ -2562,6 +2601,7 @@ export class ClineProvider
 			allowedWriteFiles,
 			alwaysAllowExecute,
 			destructiveCommandGuardEnabled,
+			alwaysDenyUnapprovedCommands,
 			allowedCommands,
 			deniedCommands,
 			alwaysAllowMcp,
@@ -2722,6 +2762,7 @@ export class ClineProvider
 			allowedWriteFiles: allowedWriteFiles ?? [],
 			alwaysAllowExecute: alwaysAllowExecute ?? false,
 			destructiveCommandGuardEnabled,
+			alwaysDenyUnapprovedCommands: alwaysDenyUnapprovedCommands ?? false,
 			alwaysAllowMcp: alwaysAllowMcp ?? false,
 			alwaysAllowModeSwitch: alwaysAllowModeSwitch ?? false,
 			alwaysAllowSubtasks: alwaysAllowSubtasks ?? false,
@@ -2962,6 +3003,8 @@ export class ClineProvider
 			alwaysAllowExecute: stateValues.alwaysAllowExecute ?? false,
 			destructiveCommandGuardEnabled:
 				stateValues.destructiveCommandGuardEnabled ?? DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED,
+			alwaysDenyUnapprovedCommands:
+				stateValues.alwaysDenyUnapprovedCommands ?? DEFAULT_ALWAYS_DENY_UNAPPROVED_COMMANDS,
 			alwaysAllowMcp: stateValues.alwaysAllowMcp ?? false,
 			alwaysAllowModeSwitch: stateValues.alwaysAllowModeSwitch ?? false,
 			alwaysAllowSubtasks: stateValues.alwaysAllowSubtasks ?? false,
@@ -3219,12 +3262,8 @@ export class ClineProvider
 		return true
 	}
 
-	/**
-	 * Gets the CodeIndexManager for the current active workspace
-	 * @returns CodeIndexManager instance for the current workspace or the default one
-	 */
-	public getCurrentWorkspaceCodeIndexManager(): CodeIndexManager | undefined {
-		return CodeIndexManagerRegistry.getOrCreate(this.context)
+	public getCurrentWorkspaceCodeIndexScope(): CodeIndexWorkspaceScope | undefined {
+		return CodeIndexManagerRegistry.getOrCreateScope(this.context)
 	}
 
 	/**
@@ -3932,6 +3971,31 @@ export class ClineProvider
 					(err as Error)?.message ?? String(err)
 				}`,
 			)
+			// The authoritative parent record rejected this delegation (#1714).
+			// Settle the matching pending create_subtask action durably through
+			// the disk-authoritative compare-and-clear so a retry cannot replay
+			// a rejected action and a replacement action from another host is
+			// never cleared, then propagate the original error.
+			let settlementFailed = false
+			if (pendingActionId && err instanceof LifecycleTransitionError) {
+				try {
+					const authoritative = await this.taskHistoryStore.clearPendingActionIfMatching(
+						parentTaskId,
+						pendingActionId,
+					)
+					settlementFailed =
+						authoritative.pendingAction?.kind === "create_subtask" &&
+						authoritative.pendingAction.actionId === pendingActionId
+					this.recentTasksCache = undefined
+				} catch (settlementError) {
+					settlementFailed = true
+					this.log(
+						`[delegateParentAndOpenChild] Failed to settle pending action ${pendingActionId} for parent ${parentTaskId}: ${
+							(settlementError as Error)?.message ?? String(settlementError)
+						}`,
+					)
+				}
+			}
 			try {
 				// Only pop the stack if the child we just created is still on top.
 				// A concurrent delegation could have pushed another child since we created ours.
@@ -3955,8 +4019,14 @@ export class ClineProvider
 				)
 			}
 			try {
-				const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
-				await this.createTaskWithHistoryItem(parentHistory)
+				// A failed settlement write leaves the rejected pending action in
+				// durable storage. Restoring the stored parent would replay it in
+				// this process, so leave the parent unrestored. Restart recovery also
+				// settles interrupted create-subtask actions before allowing replay.
+				if (!settlementFailed) {
+					const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
+					await this.createTaskWithHistoryItem(parentHistory)
+				}
 			} catch (rollbackError) {
 				this.log(
 					`[delegateParentAndOpenChild] Failed to restore parent ${parentTaskId} during rollback: ${

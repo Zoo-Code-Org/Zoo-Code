@@ -1,5 +1,50 @@
 # Zoo Code Changelog
 
+## [3.86.0]
+
+- ✨ **New model support:** Use GPT-6.1 Sol, get the corrected Claude Opus 5.5 output budget, and select DeepSeek V4.1 Flash on OpenCode Go.
+- 🧭 **Reliable task aborts and interruptions:** Preserve the first abort reason, reset stream-abort state for each request, and stop interrupted tasks from replaying rejected subtasks.
+- 🛠️ **Dependable tools, prompts, and UI streaming:** Keep streamed tool arguments intact, enforce MCP tool policy, prevent invented line numbers, and smooth chat updates.
+
+### Model Support
+
+- Add GPT-6.1 Sol support for OpenAI (#1863 by @WebMad, PR #1864 by @WebMad)
+- Correct the Claude Opus 5.5 output budget (#1853 by @jaszhix, PR #1854 by @jaszhix)
+- Add DeepSeek V4.1 Flash metadata for OpenCode Go (#1648 by @carloslato, PR #1659 by @PierrunoYT)
+
+### Task Reliability
+
+- Preserve the first abort reason when a task stops (#1802 by @edelauna, PR #1811 by @edelauna)
+- Reset stream-abort state for each API request (#1801 by @edelauna, PR #1812 by @edelauna)
+- Prevent interrupted tasks from replaying rejected subtasks (#1714 by @huankimtran, PR #1726 by @edelauna)
+
+### Tools, Prompts, and Streaming
+
+- Preserve streamed native tool-call arguments across partial chunks (#695 by @awschmeder, PR #700 by @awschmeder)
+- Truncate VS Code LM tool results safely within the context window (PR #1606 by @simurg79)
+- Validate native MCP tool calls through the shared tool-policy layer (#1646 by @DaubnerF, PR #1724 by @DaubnerF)
+- Prevent invented line numbers in `apply_diff` prompts (PR #641 by @faitno)
+- Warn against including line numbers in `search_replace`, `edit_file`, and `read_file` inputs (#716 by @edelauna, PR #1685 by @myk1yt)
+- Batch repeated tool preambles in the chat UI (#1656 by @petersjostrom, PR #1658 by @PierrunoYT)
+- Avoid flushing throttled UI state for partial say messages (#1851 by @daewoongoh, PR #1852 by @daewoongoh)
+- Keep markdown-sourced open-file requests inside the workspace (PR #1762 by @easonLiangWorldedtech)
+- Use `127.0.0.1` for the development server to avoid IPv6 localhost resolution issues (#1588 by @hnbdr, PR #1589 by @hnbdr)
+
+### Code Index and Maintenance
+
+- Introduce workspace scopes behind the code-index registry (PR #1766 by @WebMad)
+- Add code-index feature scopes and centralize status subscriptions (PR #1768 by @WebMad)
+- Centralize code-index workspace scopes and enablement (PR #1778 by @WebMad)
+- Use immutable code-index configuration snapshots (#1788 by @WebMad, PR #1815 by @WebMad)
+- Separate code-index service factories and embedder validation (#1816 by @WebMad, PR #1818 by @WebMad)
+- Extract code-index scan execution without changing behavior (#1819 by @WebMad, PR #1834 by @WebMad)
+- Extract code-index single-file preparation (PR #1836 by @WebMad)
+- Update `lru-cache` to 11.5.3 (PR #1583 by @app/renovate)
+- Update Mocha to 11.8.0 (PR #1585 by @app/renovate)
+- Document P1 persisted ownership and the run-state kernel target architecture (PR #1706 by @app/zoomote)
+- Add a community-approved label for community code approvals (#1872 by @edelauna, PR #1873 by @app/zoomote)
+- Merge the **previous v3.84.0 release preparation** after its publication; this is prior-release housekeeping, not a v3.86.0 feature (PR #1810 by @taltas)
+
 ## [3.84.0]
 
 - ✨ **New SOTA models added:** Use GPT-6 Sol, GPT-6 Luna, and Claude Opus 5.5 across supported providers.

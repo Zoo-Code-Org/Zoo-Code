@@ -368,9 +368,9 @@
 		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "✨ 新增 SOTA 模型：在支援的供應商中使用 GPT-6 Sol、GPT-6 Luna 和 Claude Opus 5.5。",
-			"highlight2": "🧭 更可靠的工作與子工作：隔離委派模式，在重複停止後保留子工作連結，並在斜線命令切換模式時保護協調器設定。",
-			"highlight3": "🛠️ 更可靠的終端機、供應商和程式碼搜尋行為：改善 Windows 和非英語環境中的終端機行為，強化供應商回應與取消處理，並讓程式碼搜尋更穩定地使用正確的工作區。"
+			"highlight1": "✨ 支援新模型：使用 GPT-6.1 Sol、修正後的 Claude Opus 5.5 輸出 Token 上限，並在 OpenCode Go 選用 DeepSeek V4.1 Flash。",
+			"highlight2": "🧭 更可靠的工作中止與中斷：保留首次中止原因，針對每次請求重設串流中止狀態，並防止中斷的工作重新執行遭拒的子工作。",
+			"highlight3": "🛠️ 更可靠的工具、Prompt 與介面串流更新：完整保留串流傳送的工具參數、落實 MCP 工具政策、防止虛構行號，並讓聊天更新更流暢。"
 		},
 		"cloudAgents": {
 			"heading": "雲端的新功能：",

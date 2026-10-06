@@ -2,6 +2,7 @@ import { makeExtensionContext, makeUri } from "../../../test-utils/vscode"
 import { CodeIndexManager } from "../manager"
 import { CodeIndexWorkspaceScope } from "../code-index-workspace-scope"
 import { CodeIndexStateManager } from "../state-manager"
+import { WorkspaceIndexingEnablementManager } from "../workspace-indexing-enablement-manager"
 
 vi.mock("../state-manager")
 
@@ -13,6 +14,19 @@ vi.mock("../manager", () => ({
 
 describe("CodeIndexWorkspaceScope", () => {
 	beforeEach(() => vi.clearAllMocks())
+
+	it("owns a guarded workspace indexing manager and recreates it after disposal", () => {
+		const scope = new CodeIndexWorkspaceScope("/workspace", makeUri("/workspace"), makeExtensionContext())
+		expect(() => scope.workspaceIndexingEnablementManager).toThrow("not initialized")
+		scope.init()
+		const indexing = scope.workspaceIndexingEnablementManager
+		expect(indexing).toBeInstanceOf(WorkspaceIndexingEnablementManager)
+		expect(indexing["manager"]).toBe(scope.codeIndexManager)
+		scope.dispose()
+		expect(() => scope.workspaceIndexingEnablementManager).toThrow("not initialized")
+		scope.init()
+		expect(scope.workspaceIndexingEnablementManager).not.toBe(indexing)
+	})
 
 	it("guards generic values and preserves defined falsy values", () => {
 		const scope = new CodeIndexWorkspaceScope("/workspace", makeUri("/workspace"), makeExtensionContext())

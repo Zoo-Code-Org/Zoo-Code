@@ -79,6 +79,8 @@ describe("LmStudioHandler Native Tools", () => {
 						}),
 					]),
 				}),
+				// RequestOptions carries the forwarded task abortSignal (undefined when no metadata.signal).
+				{},
 			)
 			// parallel_tool_calls should be true by default when not explicitly set
 			const callArgs = mockCreate.mock.calls[0][0]
@@ -101,6 +103,8 @@ describe("LmStudioHandler Native Tools", () => {
 				expect.objectContaining({
 					tool_choice: "auto",
 				}),
+				// RequestOptions carries the forwarded task abortSignal (undefined when no metadata.signal).
+				{},
 			)
 		})
 
@@ -202,6 +206,8 @@ describe("LmStudioHandler Native Tools", () => {
 				expect.objectContaining({
 					parallel_tool_calls: true,
 				}),
+				// RequestOptions carries the forwarded task abortSignal (undefined when no metadata.signal).
+				{},
 			)
 		})
 

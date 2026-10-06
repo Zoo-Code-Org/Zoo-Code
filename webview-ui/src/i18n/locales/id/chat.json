@@ -375,9 +375,9 @@
 		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Yang Baru:",
-			"highlight1": "✨ Model SOTA baru ditambahkan: Gunakan GPT-6 Sol, GPT-6 Luna, dan Claude Opus 5.5 melalui provider yang didukung.",
-			"highlight2": "🧭 Task dan subtask yang lebih andal: Jaga mode yang didelegasikan tetap terisolasi, pertahankan tautan subtask setelah Stop berulang, dan lindungi pengaturan orchestrator saat slash command mengganti mode.",
-			"highlight3": "🛠️ Perilaku terminal, provider, dan pencarian kode yang lebih andal: Tingkatkan terminal di Windows dan lingkungan non-Inggris, perkuat respons serta pembatalan provider, dan pastikan pencarian kode lebih konsisten menggunakan workspace yang tepat."
+			"highlight1": "✨ Dukungan model baru: Gunakan GPT-6.1 Sol, manfaatkan batas output Claude Opus 5.5 yang telah diperbaiki, dan pilih DeepSeek V4.1 Flash di OpenCode Go.",
+			"highlight2": "🧭 Pembatalan dan interupsi task yang andal: Pertahankan alasan pembatalan pertama, reset status pembatalan stream pada setiap request, dan cegah task yang terinterupsi menjalankan ulang subtask yang ditolak.",
+			"highlight3": "🛠️ Tools, prompts, dan streaming UI yang andal: Jaga argumen tool yang diterima melalui stream tetap utuh, terapkan kebijakan tool MCP, cegah nomor baris rekaan, dan buat pembaruan chat lebih lancar."
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",

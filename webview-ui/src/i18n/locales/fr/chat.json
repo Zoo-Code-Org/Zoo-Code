@@ -346,9 +346,9 @@
 		"support": "Soutiens Zoo Code en nous donnant une étoile sur <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Nouveautés :",
-			"highlight1": "✨ Nouveaux modèles SOTA ajoutés : Utilise GPT-6 Sol, GPT-6 Luna et Claude Opus 5.5 avec les providers compatibles.",
-			"highlight2": "🧭 Tâches et sous-tâches plus fiables : Garde les modes délégués isolés, préserve les liens des sous-tâches après des arrêts répétés et protège les réglages de l'orchestrateur quand les commandes slash changent de mode.",
-			"highlight3": "🛠️ Comportement plus fiable du terminal, des providers et de la recherche de code : Améliore le terminal sous Windows et dans les environnements non anglophones, renforce les réponses et l'annulation des providers et assure-toi que la recherche de code utilise plus systématiquement le bon workspace."
+			"highlight1": "✨ Prise en charge de nouveaux modèles : Utilise GPT-6.1 Sol, profite de la limite de sortie corrigée de Claude Opus 5.5 et sélectionne DeepSeek V4.1 Flash sur OpenCode Go.",
+			"highlight2": "🧭 Arrêts et interruptions de tâches fiables : Conserve la première raison de l'arrêt, réinitialise l'état d'arrêt du flux à chaque requête et empêche les tâches interrompues de relancer les sous-tâches rejetées.",
+			"highlight3": "🛠️ Outils, prompts et streaming de l'interface fiables : Préserve les arguments d'outils reçus en streaming, applique la politique des outils MCP, évite les numéros de ligne inventés et fluidifie les mises à jour du chat."
 		},
 		"cloudAgents": {
 			"heading": "Nouveautés dans le Cloud :",
