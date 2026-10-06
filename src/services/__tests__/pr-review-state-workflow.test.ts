@@ -556,12 +556,22 @@ describe("PR review-state workflow", () => {
 		const result = await runWorkflow({
 			openPrHeadsError: true,
 			labels: ["stacked", "awaiting-maintainer"],
-			reviewState: "APPROVED",
+			permissions: { maintainer: "write" },
+			reviews: [
+				{
+					login: "maintainer",
+					type: "User",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
 		})
 
 		// The map is unavailable, so the stacked label is left untouched instead of being decided from
 		// an empty map; the rest of the run still reconciles.
 		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("Could not read the open pull request map"))
+		// Review-state reconciliation still ran for this PR despite the failed lookup.
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
 		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
 		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["stacked"] }))
 		expect(result.setFailed).not.toHaveBeenCalled()
