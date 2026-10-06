@@ -8,19 +8,50 @@ on:
 
 permissions:
     contents: read
-    # The gate only reads open pull request heads to recognise a stacked unit.
-    pull-requests: read
 
 concurrency:
     group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
     cancel-in-progress: true
 
 jobs:
+    # The open pull request map is read in a job that never checks out or runs pull-request
+    # code, so the token cannot reach anything the contributor controls. Only the filtered map
+    # crosses into the job that runs the gate.
+    stacked_map:
+        name: Resolve the stacked parent
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        permissions:
+            contents: read
+            pull-requests: read
+        outputs:
+            stacked_map: ${{ steps.read_map.outputs.stacked_map }}
+        steps:
+            - name: Read the open pull request heads
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  # The fallback must itself be a command: this step runs bash with -e, so a bare '[]'
+                  # is executed as a program name and an API failure would abort the job instead of
+                  # measuring against the event base.
+                  # --jq runs once per page, so a paginated call emits one JSON array per page; the
+                  # gate reads that stream, not a single array.
+                  STACKED_MAP="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" --jq '[.[] | {number: .number, headSha: .head.sha}]')" || STACKED_MAP="$(printf '[]')"
+                  {
+                      echo "stacked_map<<EOF"
+                      echo "$STACKED_MAP"
+                      echo "EOF"
+                  } >> "$GITHUB_OUTPUT" || echo "::warning title=Stacked unit base::Could not publish the stacked map"
+
     mutation-diff:
         name: mutation-diff
+        needs: stacked_map
         if: github.event_name == 'merge_group' || github.event.pull_request.draft == false
         runs-on: ubuntu-latest
         timeout-minutes: 30
+        env:
+            # Only the filtered map crosses into this job; the token stays in the job that read it.
+            STACKED_MAP: ${{ needs.stacked_map.outputs.stacked_map }}
         steps:
             - name: Record merge-queue enforcement
               if: github.event_name == 'merge_group'
@@ -48,31 +79,10 @@ jobs:
               if: github.event_name == 'pull_request'
               run: pnpm test:mutation-ci
 
-            - name: Resolve the stacked parent from the open pull requests
-              if: github.event_name == 'pull_request'
-              id: stacked_map
-              env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              run: |
-                  # The fallback must itself be a command: this step runs bash with -e, so a bare '[]' is
-                  # executed as a program name and an API failure would abort the job instead of measuring
-                  # against the event base.
-                  # --jq runs once per page, so a paginated call emits one JSON array per page; the gate
-                  # reads that stream, not a single array.
-                  STACKED_MAP="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" --jq '[.[] | {number: .number, headSha: .head.sha}]')" || STACKED_MAP="$(printf '[]')"
-                  {
-                      echo "stacked_map<<EOF"
-                      echo "$STACKED_MAP"
-                      echo "EOF"
-                  } >> "$GITHUB_OUTPUT" || echo "::warning title=Stacked unit base::Could not publish the stacked map"
-
             - name: Enforce executable-line scope and run advisory mutation testing
               if: github.event_name == 'pull_request'
               env:
                   HEAD_SHA: ${{ github.sha }}
-                  # The gate passes its environment to the Vitest discovery subprocesses, so the API token
-                  # stays in the previous step and only the filtered map crosses here.
-                  STACKED_MAP: ${{ steps.stacked_map.outputs.stacked_map }}
               run: |
                   BASE_SHA="$(git rev-parse "$HEAD_SHA^1")"
                   # The merge commit's second parent is the pull request head. When that head's own

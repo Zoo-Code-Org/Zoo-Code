@@ -79,12 +79,17 @@ describe("mutation testing workflow", () => {
 		assert.ok(workflow.includes("steps.mutation_report.outputs.artifact-url"))
 		assert.ok(workflow.includes("open the package's mutation.html file"))
 		assert.ok(workflow.includes("Enforce executable-line scope and run advisory mutation testing"))
-		// The gate hands its environment to the Vitest discovery subprocesses, so the API token must
-		// stay in the step that only reads the open pull requests; the gate receives just the map.
-		const gateStep = workflow.slice(workflow.indexOf("Enforce executable-line scope and run advisory mutation testing"))
-		const gateStepBody = gateStep.slice(0, gateStep.indexOf("\n            - name:"))
-		assert.ok(!gateStepBody.includes("GH_TOKEN"))
-		assert.ok(workflow.includes("STACKED_MAP: ${{ steps.stacked_map.outputs.stacked_map }}"))
+		// The gate hands its environment to the Vitest discovery subprocesses, so the token has to stay
+		// in a job that never checks out or runs pull-request code; only the filtered map crosses over.
+		const gateJob = workflow.slice(workflow.indexOf("    mutation-diff:"))
+		assert.ok(!gateJob.includes("GH_TOKEN"))
+		assert.ok(workflow.includes("STACKED_MAP: ${{ needs.stacked_map.outputs.stacked_map }}"))
+		const mapJob = workflow.slice(workflow.indexOf("    stacked_map:"), workflow.indexOf("    mutation-diff:"))
+		assert.ok(mapJob.includes("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}"))
+		assert.ok(!mapJob.includes("actions/checkout"))
+		assert.ok(!mapJob.includes("setup-node-pnpm"))
+		assert.ok(!mapJob.includes("pnpm test:mutation-ci"))
+		assert.ok(workflow.includes("needs: stacked_map"))
 		assert.equal(workflow.match(/continue-on-error: true/g)?.length, 1)
 		assert.equal(workflow.match(/Could not write the job summary/g)?.length, 2)
 		const script = fs.readFileSync(path.join(repositoryRoot, "scripts/stryker-diff.mjs"), "utf8")
@@ -1130,6 +1135,17 @@ describe("failure output", () => {
 
 		assert.equal(new Set(summary.match(/Package\dMutator\d+/g)).size, 6 * MAX_MUTANTS)
 		assert.ok(Buffer.byteLength(summary) < 1024 * 1024)
+	})
+
+	it("names the parent pull request when the unit was measured against a stacked base", () => {
+		const rows = [{ id: "extension", changedLines: 12, valid: 3, killed: 3, timeout: 0, survived: 0, noCoverage: 0, blocking: [], result: "Pass" }]
+		const summary = formatSummary(rows, [], { stackedOn: 1914 })
+		assert.ok(summary.includes("Stacked unit: measured against the head of parent PR #1914, not the event base."))
+
+		// A plain pull request has no stacked base, so the notice must not appear.
+		const plain = formatSummary(rows, [], { stackedOn: null })
+		assert.ok(!plain.includes("Stacked unit"))
+		assert.ok(plain.includes("## Changed-code mutation testing"))
 	})
 })
 
