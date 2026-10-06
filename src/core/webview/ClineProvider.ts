@@ -194,6 +194,13 @@ type GetStateOptions = {
 	includeTaskHistory?: boolean
 }
 
+const RESET_ONLY_KEYS: readonly string[] = [
+	"awsCustomArn",
+	"reasoningEffort",
+	"modelMaxTokens",
+	"modelMaxThinkingTokens",
+]
+
 export class ClineProvider
 	extends EventEmitter<TaskProviderEvents>
 	implements vscode.WebviewViewProvider, TelemetryPropertiesProvider, TaskProviderLike
@@ -1935,6 +1942,12 @@ export class ClineProvider
 			// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
 			// We should probably switch to that and verify that it works.
 			// I left the original implementation in just to be safe.
+			const previousActivation = rollback && {
+				listApiConfigMeta: this.contextProxy.getValues().listApiConfigMeta,
+				currentApiConfigName: this.contextProxy.getValues().currentApiConfigName,
+				modeConfigId: await this.providerSettingsManager.getModeConfigId(mode),
+			}
+
 			// allSettled so every started write has finished before the queue can advance.
 			const writes = await Promise.allSettled([
 				this.updateGlobalState("listApiConfigMeta", listApiConfigMeta),
@@ -1945,9 +1958,24 @@ export class ClineProvider
 			const failed = writes.find((write): write is PromiseRejectedResult => write.status === "rejected")
 
 			if (failed) {
-				await restore()
-				if (rollback) {
-					await this.contextProxy.setProviderSettings(rollback.previous)
+				// Each rollback step runs even if the other fails, and neither may mask the original error.
+				const logRollbackError = (error: unknown) =>
+					this.log(`Profile rollback failed: ${error instanceof Error ? error.message : String(error)}`)
+				await restore().catch(logRollbackError)
+				if (rollback && previousActivation) {
+					const {
+						listApiConfigMeta: prevMeta,
+						currentApiConfigName: prevName,
+						modeConfigId,
+					} = previousActivation
+					await Promise.allSettled([
+						this.contextProxy.setProviderSettings(rollback.previous),
+						this.updateGlobalState("listApiConfigMeta", prevMeta),
+						this.updateGlobalState("currentApiConfigName", prevName),
+						modeConfigId ? this.providerSettingsManager.setModeConfig(mode, modeConfigId) : undefined,
+					]).then((results) =>
+						results.forEach((result) => result.status === "rejected" && logRollbackError(result.reason)),
+					)
 				}
 				throw failed.reason
 			}
@@ -2004,10 +2032,7 @@ export class ClineProvider
 				// Only model selection and its side-effect resets may be patched (see handleModelChangeSideEffects).
 				const allowedKeys: ReadonlySet<string> = new Set([
 					...PROVIDER_SETTINGS_KEYS.filter((key) => key.endsWith("ModelId")),
-					"awsCustomArn",
-					"reasoningEffort",
-					"modelMaxTokens",
-					"modelMaxThinkingTokens",
+					...RESET_ONLY_KEYS,
 				])
 				const merged: Record<string, unknown> = { ...stored, id }
 				for (const [key, value] of Object.entries(patch)) {
@@ -2018,8 +2043,9 @@ export class ClineProvider
 					if (value !== null && typeof value !== "string" && typeof value !== "number") {
 						continue
 					}
-					// The allow-list does not cover the ARN Bedrock calls, so it may only be reset, never set.
-					if (key === "awsCustomArn" && value !== null && value !== "") {
+					// These are only ever cleared when the model changes. Setting them would bypass the
+					// allow-list (the Bedrock ARN) or accept unvalidated token limits and reasoning effort.
+					if (RESET_ONLY_KEYS.includes(key) && value !== null && !(key === "awsCustomArn" && value === "")) {
 						continue
 					}
 					merged[key] = value === null ? undefined : value

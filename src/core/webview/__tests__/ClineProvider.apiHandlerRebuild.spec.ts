@@ -672,6 +672,78 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.save_api_config")
 		})
 
+		it("still restores the context settings and logs when restoring the saved profile also fails", async () => {
+			mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
+			manager()
+				.saveConfig.mockImplementationOnce(async (profileName, settings) => {
+					manager().getProfile.mockResolvedValue({ name: profileName, ...settings })
+					return "test-id"
+				})
+				.mockRejectedValueOnce(new Error("restore failed"))
+			vi.mocked(provider["providerSettingsManager"].setModeConfig).mockRejectedValueOnce(new Error("boom"))
+			const logSpy = vi.spyOn(provider, "log")
+			const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "x/y",
+			})
+
+			expect(logSpy).toHaveBeenCalledWith("Profile rollback failed: restore failed")
+			expect(setProviderSettingsSpy).toHaveBeenLastCalledWith(
+				expect.objectContaining({ openRouterModelId: "openai/gpt-4" }),
+			)
+			// The original activation error is what gets reported, not the rollback error.
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Error updating profile model"))
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.save_api_config")
+		})
+
+		it("accepts reasoning and token-limit fields only as resets", async () => {
+			mockStoredProfile({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+				reasoningEffort: "high",
+				modelMaxTokens: 1000,
+				modelMaxThinkingTokens: 500,
+			})
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "x/y",
+				reasoningEffort: "low",
+				modelMaxTokens: 999999999,
+				modelMaxThinkingTokens: -1,
+			})
+			const kept = manager().saveConfig.mock.calls[0][1]
+			expect(kept).toMatchObject({ reasoningEffort: "high", modelMaxTokens: 1000, modelMaxThinkingTokens: 500 })
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "x/z",
+				reasoningEffort: null,
+				modelMaxTokens: null,
+				modelMaxThinkingTokens: null,
+			})
+			const cleared = manager().saveConfig.mock.calls[1][1]
+			expect(cleared.reasoningEffort).toBeUndefined()
+			expect(cleared.modelMaxTokens).toBeUndefined()
+			expect(cleared.modelMaxThinkingTokens).toBeUndefined()
+		})
+
+		it("restores the activation state when an activation write fails", async () => {
+			mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
+			vi.mocked(provider["providerSettingsManager"].getModeConfigId).mockResolvedValue("prev-mode-id")
+			vi.mocked(provider["providerSettingsManager"].setModeConfig)
+				.mockRejectedValueOnce(new Error("boom"))
+				.mockResolvedValue(undefined)
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "x/y",
+			})
+
+			expect(provider["providerSettingsManager"].setModeConfig).toHaveBeenLastCalledWith(
+				expect.anything(),
+				"prev-mode-id",
+			)
+		})
+
 		it("only allows awsCustomArn to be reset, never set", async () => {
 			mockStoredProfile({
 				apiProvider: providerIdentifiers.bedrock,
