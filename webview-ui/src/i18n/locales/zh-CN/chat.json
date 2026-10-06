@@ -345,9 +345,9 @@
 		"support": "请在 <githubLink>GitHub</githubLink> 上为 Zoo Code 点星支持我们。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "更安全的文件访问 — 使用独立的读取和写入允许列表，控制 Zoo Code 可以访问的路径。",
-			"highlight2": "更多模型选择 — GLM 5.3 现已通过 Z.ai 提供，Gemini provider 也新增了 Gemini 3.5 Flash Lite 和 Gemini 3.1 Flash Lite。",
-			"highlight3": "更可靠的日常工作流 — 改进增强了任务恢复与历史记录、provider 流式传输与工具使用、设置导入，以及不同 IDE 主题下的可读性。"
+			"highlight1": "✨ 支持新模型：使用 GPT-6.1 Sol，享受修正后的 Claude Opus 5.5 输出 Token 上限，并在 OpenCode Go 上选择 DeepSeek V4.1 Flash。",
+			"highlight2": "🧭 更可靠的任务中止与中断：保留首次中止原因，为每次请求重置流中止状态，并阻止中断的任务重新执行已拒绝的子任务。",
+			"highlight3": "🛠️ 更可靠的工具、Prompt 和界面流式更新：完整保留流式传输的工具参数，执行 MCP 工具策略，防止编造行号，让聊天更新更流畅。"
 		},
 		"cloudAgents": {
 			"heading": "云端新功能：",

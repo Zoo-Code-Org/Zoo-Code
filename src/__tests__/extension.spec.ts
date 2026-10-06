@@ -1,7 +1,6 @@
 // npx vitest run __tests__/extension.spec.ts
 
 import type * as vscode from "vscode"
-import type { AuthState } from "@roo-code/types"
 
 vi.mock("vscode", () => ({
 	window: {
@@ -13,7 +12,7 @@ vi.mock("vscode", () => ({
 		tabGroups: {
 			onDidChangeTabs: vi.fn(),
 		},
-		onDidChangeActiveTextEditor: vi.fn(),
+		onDidChangeActiveTextEditor: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 	},
 	workspace: {
 		registerTextDocumentContentProvider: vi.fn(),
@@ -140,9 +139,10 @@ vi.mock("../services/mcp/McpServerManager", () => ({
 	},
 }))
 
-vi.mock("../services/code-index/manager", () => ({
-	CodeIndexManager: {
-		getInstance: vi.fn().mockReturnValue(null),
+vi.mock("../services/code-index/code-index-manager-registry", () => ({
+	CodeIndexManagerRegistry: {
+		getOrCreate: vi.fn().mockReturnValue(null),
+		disposeAll: vi.fn(),
 	},
 }))
 
@@ -189,7 +189,7 @@ vi.mock("../core/webview/ClineProvider", async () => {
 		resolveWebviewView: vi.fn(),
 		postMessageToWebview: vi.fn(),
 		postStateToWebview: vi.fn(),
-		postStateToWebviewWithoutClineMessages: vi.fn(),
+		postStateToWebviewWithoutClineMessages: vi.fn().mockResolvedValue(undefined),
 		getState: vi.fn().mockResolvedValue({}),
 		initializeCloudProfileSyncWhenReady: vi.fn().mockResolvedValue(undefined),
 		providerSettingsManager: {},
@@ -205,6 +205,7 @@ vi.mock("../core/webview/ClineProvider", async () => {
 			{
 				// Static method used by extension.ts
 				getVisibleInstance: vi.fn().mockReturnValue(mockInstance),
+				getAllInstances: vi.fn().mockReturnValue([]),
 				sideBarId: "zoo-code.SidebarProvider",
 			},
 		),
@@ -215,15 +216,13 @@ vi.mock("../core/webview/ClineProvider", async () => {
 vi.mock("../api/providers/fetchers/modelCache", () => ({
 	flushModels: vi.fn(),
 	getModels: vi.fn().mockResolvedValue([]),
-	initializeModelCacheRefresh: vi.fn(),
+	initializeModelCacheRefresh: vi.fn().mockResolvedValue(undefined),
 	refreshModels: vi.fn().mockResolvedValue({}),
 }))
 
 describe("extension.ts", () => {
 	let mockContext: vscode.ExtensionContext
-	let authStateChangedHandler:
-		| ((data: { state: AuthState; previousState: AuthState }) => void | Promise<void>)
-		| undefined
+	let settingsUpdatedHandler: ((data: Record<string, never>) => void | Promise<void>) | undefined
 
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -237,8 +236,143 @@ describe("extension.ts", () => {
 			subscriptions: [],
 		} as unknown as vscode.ExtensionContext
 
-		authStateChangedHandler = undefined
+		settingsUpdatedHandler = undefined
 	})
+
+	test("initializes the code index scope and registers it for extension cleanup", async () => {
+		vi.resetModules()
+		const { CodeIndexScope } = await import("../services/code-index/code-index-scope")
+		const init = vi.spyOn(CodeIndexScope.prototype, "init")
+		const dispose = vi.spyOn(CodeIndexScope.prototype, "dispose")
+		try {
+			const { activate } = await import("../extension")
+			await activate(mockContext)
+
+			const scopes = mockContext.subscriptions.filter((entry) => entry instanceof CodeIndexScope)
+			expect(scopes).toHaveLength(1)
+			expect(init).toHaveBeenCalledExactlyOnceWith()
+			expect(init.mock.contexts[0]).toBe(scopes[0])
+			expect(dispose).not.toHaveBeenCalled()
+			scopes[0].dispose()
+			expect(dispose).toHaveBeenCalledExactlyOnceWith()
+		} finally {
+			init.mockRestore()
+			dispose.mockRestore()
+		}
+	})
+
+	test("publishes indexing status to matching providers and logs delivery failures", async () => {
+		vi.resetModules()
+		const { CodeIndexScope } = await import("../services/code-index/code-index-scope")
+		const { ClineProvider } = await import("../core/webview/ClineProvider")
+		const log = vi.spyOn(console, "error").mockImplementation(() => {})
+		const provider = ClineProvider.getVisibleInstance()!
+		Object.defineProperty(provider, "workspacePath", { configurable: true, value: "/workspace" })
+		const getAll = vi.mocked(ClineProvider.getAllInstances)
+		const post = vi.mocked(provider.postMessageToWebview)
+		getAll.mockReturnValue([provider, provider])
+		post.mockRejectedValueOnce(new Error("delivery failed")).mockResolvedValue(undefined)
+		try {
+			const { activate } = await import("../extension")
+			await activate(mockContext)
+			const scope = mockContext.subscriptions.find((entry) => entry instanceof CodeIndexScope)!
+			const status = {
+				systemStatus: "Standby" as const,
+				message: "Ready",
+				processedItems: 0,
+				totalItems: 0,
+				currentItemUnit: "blocks",
+				workspacePath: "/workspace",
+				workspaceEnabled: true,
+				autoEnableDefault: true,
+			}
+			scope["statusManager"]!["publishStatus"](status)
+			await Promise.resolve()
+			expect(post).toHaveBeenCalledTimes(2)
+			expect(post).toHaveBeenCalledWith({ type: "indexingStatusUpdate", values: status })
+			expect(log).toHaveBeenCalledWith(
+				"[CodeIndexStatusManager] Failed to publish indexing status:",
+				expect.objectContaining({ message: "delivery failed" }),
+			)
+			scope.dispose()
+		} finally {
+			log.mockRestore()
+			getAll.mockReturnValue([])
+			post.mockReset()
+			Reflect.deleteProperty(provider, "workspacePath")
+		}
+	})
+
+	test.each([
+		{ workspacePath: "/other-workspace", receivesStatus: false },
+		{ workspacePath: "/workspace", receivesStatus: true },
+		{ workspacePath: undefined, receivesStatus: true },
+		{ workspacePath: "", receivesStatus: true },
+	])(
+		"routes status for provider workspace=$workspacePath with receivesStatus=$receivesStatus",
+		async ({ workspacePath, receivesStatus }) => {
+			vi.resetModules()
+			const { CodeIndexScope } = await import("../services/code-index/code-index-scope")
+			const { ClineProvider } = await import("../core/webview/ClineProvider")
+			const provider = ClineProvider.getVisibleInstance()!
+			Object.defineProperty(provider, "workspacePath", { configurable: true, value: workspacePath })
+			const getAll = vi.mocked(ClineProvider.getAllInstances)
+			getAll.mockReturnValue([provider])
+			try {
+				const { activate } = await import("../extension")
+				await activate(mockContext)
+				const scope = mockContext.subscriptions.find((entry) => entry instanceof CodeIndexScope)!
+				const status = {
+					systemStatus: "Indexing" as const,
+					message: "Processing confidential.ts",
+					processedItems: 1,
+					totalItems: 2,
+					currentItemUnit: "files",
+					workspacePath: "/workspace",
+					workspaceEnabled: true,
+					autoEnableDefault: true,
+				}
+				scope["statusManager"]!["publishStatus"](status)
+				await Promise.resolve()
+				if (receivesStatus) {
+					expect(provider.postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+						type: "indexingStatusUpdate",
+						values: status,
+					})
+				} else {
+					expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+				}
+				scope.dispose()
+			} finally {
+				getAll.mockReturnValue([])
+				Reflect.deleteProperty(provider, "workspacePath")
+			}
+		},
+	)
+
+	test.each([new Error("scope initialization failed"), "scope initialization failed"])(
+		"continues activation and logs code index scope initialization failure: %s",
+		async (error) => {
+			vi.resetModules()
+			const { CodeIndexScope } = await import("../services/code-index/code-index-scope")
+			const init = vi.spyOn(CodeIndexScope.prototype, "init").mockImplementationOnce(() => {
+				throw error
+			})
+			try {
+				const { activate } = await import("../extension")
+				await expect(activate(mockContext)).resolves.toBeDefined()
+
+				const vscode = await import("vscode")
+				const channel = vi.mocked(vscode.window.createOutputChannel).mock.results.at(-1)?.value
+				expect(channel?.appendLine).toHaveBeenCalledWith(
+					"[CodeIndexScope] Failed to initialize: scope initialization failed",
+				)
+				expect(mockContext.subscriptions.filter((entry) => entry instanceof CodeIndexScope)).toHaveLength(1)
+			} finally {
+				init.mockRestore()
+			}
+		},
+	)
 
 	test("does not call dotenv.config when optional .env does not exist", async () => {
 		vi.resetModules()
@@ -270,19 +404,17 @@ describe("extension.ts", () => {
 		expect(dotenv.config).toHaveBeenCalledTimes(1)
 	})
 
-	describe("cloud auth state handling", () => {
+	describe("cloud organization settings handling", () => {
 		beforeEach(() => {
 			vi.resetModules()
 		})
 
-		test("auth state changes still post webview state without Roo model cache side effects", async () => {
+		test("settings updates refresh webview state and contain failures", async () => {
 			const { CloudService } = await import("@roo-code/cloud")
 			const { ClineProvider } = await import("../core/webview/ClineProvider")
 
 			vi.mocked(CloudService.createInstance).mockImplementation(async (_context, _logger, handlers) => {
-				if (handlers?.["auth-state-changed"]) {
-					authStateChangedHandler = handlers["auth-state-changed"]
-				}
+				settingsUpdatedHandler = handlers?.["settings-updated"]
 				return {
 					off: vi.fn(),
 					on: vi.fn(),
@@ -304,13 +436,33 @@ describe("extension.ts", () => {
 				}
 			).getVisibleInstance()
 			provider.postStateToWebviewWithoutClineMessages.mockClear()
+			const refreshError = new Error("state refresh failed")
+			provider.postStateToWebviewWithoutClineMessages.mockRejectedValueOnce(refreshError)
 
-			await authStateChangedHandler!({
-				state: "active-session" as AuthState,
-				previousState: "logged-out" as AuthState,
-			})
+			settingsUpdatedHandler!({})
+			await Promise.resolve()
 
 			expect(provider.postStateToWebviewWithoutClineMessages).toHaveBeenCalledTimes(1)
+			const vscode = await import("vscode")
+			const channel = vi.mocked(vscode.window.createOutputChannel).mock.results.at(-1)?.value
+			expect(channel?.appendLine).toHaveBeenCalledWith(
+				"[CloudService] Failed to refresh state after settings update: state refresh failed",
+			)
+		})
+
+		test("activation continues when model cache refresh initialization fails", async () => {
+			const { initializeModelCacheRefresh } = await import("../api/providers/fetchers/modelCache")
+			vi.mocked(initializeModelCacheRefresh).mockRejectedValueOnce(new Error("cache startup failed"))
+
+			const { activate } = await import("../extension")
+			await expect(activate(mockContext)).resolves.toBeDefined()
+			await Promise.resolve()
+
+			const vscode = await import("vscode")
+			const channel = vi.mocked(vscode.window.createOutputChannel).mock.results.at(-1)?.value
+			expect(channel?.appendLine).toHaveBeenCalledWith(
+				"[ModelCache] Background refresh initialization failed: cache startup failed",
+			)
 		})
 
 		test("activation continues when CloudService initialization fails", async () => {
@@ -448,6 +600,7 @@ describe("extension.ts", () => {
 			const { TelemetryService } = await import("@roo-code/telemetry")
 			const { Terminal } = await import("../integrations/terminal/Terminal")
 			const { TerminalRegistry } = await import("../integrations/terminal/TerminalRegistry")
+			const { CodeIndexManagerRegistry } = await import("../services/code-index/code-index-manager-registry")
 
 			vi.mocked(TelemetryService.instance.shutdown).mockRejectedValue(new Error("shutdown failed"))
 			const setTerminalProfileSpy = vi.spyOn(Terminal, "setTerminalProfile")
@@ -459,6 +612,7 @@ describe("extension.ts", () => {
 
 			expect(setTerminalProfileSpy).toHaveBeenCalledWith(undefined)
 			expect(TerminalRegistry.cleanup).toHaveBeenCalledTimes(1)
+			expect(CodeIndexManagerRegistry.disposeAll).toHaveBeenCalledTimes(1)
 
 			setTerminalProfileSpy.mockRestore()
 		})
@@ -471,6 +625,7 @@ describe("extension.ts", () => {
 			const { TelemetryService } = await import("@roo-code/telemetry")
 			const { Terminal } = await import("../integrations/terminal/Terminal")
 			const { TerminalRegistry } = await import("../integrations/terminal/TerminalRegistry")
+			const { CodeIndexManagerRegistry } = await import("../services/code-index/code-index-manager-registry")
 
 			const setTerminalProfileSpy = vi.spyOn(Terminal, "setTerminalProfile")
 
@@ -494,9 +649,9 @@ describe("extension.ts", () => {
 			expect(mockTelemetryServiceInstance.shutdown).not.toHaveBeenCalled()
 			expect(setTerminalProfileSpy).toHaveBeenCalledWith(undefined)
 			expect(TerminalRegistry.cleanup).toHaveBeenCalledTimes(1)
+			expect(CodeIndexManagerRegistry.disposeAll).toHaveBeenCalledTimes(1)
 
 			instanceGetterSpy.mockRestore()
-
 			setTerminalProfileSpy.mockRestore()
 		})
 	})

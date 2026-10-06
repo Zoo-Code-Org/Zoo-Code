@@ -47,11 +47,11 @@ Zoo Code parteix de la base creada per Roo Code i continua ampliant-la amb:
 - **Fluxos de terminal i edició més fiables** — correccions per a la finalització prematura del terminal, les condicions de cursa en l'estat de les tasques, la gestió del context, l'edició de diff i l'ús d'eines específiques de cada proveïdor.
 - **Més control sobre el teu espai de treball** — gestió de regles, restriccions MCP per mode, controls de rutes multiarrel, opcions de raonament dels models i accions per revisar els canvis en completar una tasca.
 
-## Novetats a la v3.80.0
+## Novetats a la v3.86.0
 
-- **Accés als fitxers més segur** — utilitza llistes de permisos de lectura i escriptura separades per controlar a quines rutes pot accedir Zoo Code.
-- **Més models per triar** — GLM 5.3 ja està disponible mitjançant Z.ai, i Gemini 3.5 Flash Lite i Gemini 3.1 Flash Lite s'han afegit al proveïdor Gemini.
-- **Fluxos de treball quotidians més fiables** — les millores reforcen la recuperació i l'historial de tasques, l'streaming i l'ús d'eines dels proveïdors, la importació de configuració i la llegibilitat en diferents temes de l'IDE.
+- ✨ **Compatibilitat amb nous models:** Utilitza GPT-6.1 Sol, aprofita el límit de sortida corregit de Claude Opus 5.5 i selecciona DeepSeek V4.1 Flash a OpenCode Go.
+- 🧭 **Aturades i interrupcions de tasques fiables:** Conserva el primer motiu de l'aturada, reinicia l'estat d'interrupció del flux per a cada sol·licitud i evita que les tasques interrompudes tornin a executar subtasques rebutjades.
+- 🛠️ **Eines, prompts i transmissió de la interfície fiables:** Mantén intactes els arguments de les eines transmesos en flux, aplica la política d'eines MCP, evita números de línia inventats i fes més fluides les actualitzacions del xat.
 
 ## Què pot fer Zoo Code per TU?
 

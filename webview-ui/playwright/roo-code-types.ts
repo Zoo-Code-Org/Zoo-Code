@@ -15,6 +15,8 @@ export const CODEBASE_INDEX_DEFAULTS = {
 	SEARCH_SCORE_STEP: 0.05,
 } as const
 
+export { providerIdentifiers } from "../../packages/types/src/provider-identifiers"
+
 export const TelemetryEventName = {
 	MODE_SWITCH: "Mode Switched",
 	MODE_SELECTOR_OPENED: "Mode Selector Opened",

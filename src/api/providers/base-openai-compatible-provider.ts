@@ -1,7 +1,7 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import type { ModelInfo } from "@roo-code/types"
+import { type ModelInfo, openAiModelInfoSaneDefaults } from "@roo-code/types"
 
 import { type ApiHandlerOptions, getModelMaxOutputTokens } from "../../shared/api"
 import { TagMatcher } from "../../utils/tag-matcher"
@@ -141,15 +141,15 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 			const delta = chunk.choices?.[0]?.delta
 			const finishReason = chunk.choices?.[0]?.finish_reason
 
+			const reasoningText = extractReasoningFromDelta(delta)
+			if (reasoningText) {
+				yield { type: "reasoning", text: reasoningText }
+			}
+
 			if (delta?.content) {
 				for (const processedChunk of matcher.update(delta.content)) {
 					yield processedChunk
 				}
-			}
-
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
 			}
 
 			// Emit raw tool call chunks - NativeToolCallParser handles state management
@@ -243,11 +243,27 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 	}
 
 	override getModel() {
-		const id =
-			this.options.apiModelId && this.options.apiModelId in this.providerModels
-				? (this.options.apiModelId as ModelName)
-				: this.defaultProviderModelId
+		const requestedId = this.options.apiModelId
 
-		return { id, info: this.providerModels[id] }
+		// A known model: use its predefined metadata.
+		if (requestedId && requestedId in this.providerModels) {
+			const id = requestedId as ModelName
+			return { id, info: this.providerModels[id] }
+		}
+
+		// A user-supplied custom model that isn't in our static list (e.g. a newly
+		// released Fireworks model). Honor the exact id the user configured instead
+		// of silently falling back to the provider default, which would send the
+		// wrong model to the API and can surface as a confusing "model not found"
+		// error. Provide sane default metadata so the rest of the pipeline works.
+		if (requestedId) {
+			return {
+				id: requestedId as ModelName,
+				info: { ...openAiModelInfoSaneDefaults },
+			}
+		}
+
+		// No model configured: use the provider default.
+		return { id: this.defaultProviderModelId, info: this.providerModels[this.defaultProviderModelId] }
 	}
 }

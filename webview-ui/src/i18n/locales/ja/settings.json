@@ -346,6 +346,10 @@
 				"label": "破壊的コマンドガードを有効にする",
 				"description": "このプラットフォーム用の Destructive Command Guard（DCG）をダウンロードして使用します。DCG が許可したコマンドは自動的に実行されます。DCG がブロックしたコマンドの実行には承認が必要です。有効な間は Zoo のコマンドリストが無効になります。無効にしても、ダウンロードした実行ファイルは保持されます。"
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "許可された自動実行コマンド",
 			"allowedCommandsDescription": "「実行操作を常に承認」が有効な場合に自動実行できるコマンドプレフィックス。すべてのコマンドを許可するには * を追加します（注意して使用してください）。",
 			"deniedCommands": "拒否されたコマンド",
@@ -460,6 +464,8 @@
 		"headerName": "ヘッダー名",
 		"headerValue": "ヘッダー値",
 		"noCustomHeaders": "カスタムヘッダーが定義されていません。+ ボタンをクリックして追加してください。",
+		"extraBody": "追加ボディ",
+		"extraBodyDescription": "APIリクエストボディにマージされる任意のJSONオブジェクトです。model、messages、tools、streamなど、Zoo Codeが管理するフィールドは上書きできません。機密情報を含めないでください。",
 		"unboundApiKey": "Unbound API キー",
 		"getUnboundApiKey": "Unbound APIキーを取得",
 		"requestyApiKey": "Requesty APIキー",
@@ -1036,6 +1042,11 @@
 		"modelId": "有効なモデルIDを入力してください。",
 		"modelSelector": "有効なモデルセレクターを入力してください。",
 		"openAi": "有効なベースURL、APIキー、モデルIDを入力してください。",
+		"openAiExtraBody": {
+			"invalidJson": "追加ボディには有効なJSONを指定してください。",
+			"objectRequired": "追加ボディはJSONオブジェクトである必要があります。",
+			"reservedKeys": "追加ボディではZoo Codeが管理するフィールドを上書きできません：{{keys}}。"
+		},
 		"arn": {
 			"invalidFormat": "ARNの形式が無効です。フォーマット要件を確認してください。",
 			"regionMismatch": "警告：ARN内のリージョン（{{arnRegion}}）が選択したリージョン（{{region}}）と一致しません。これによりアクセスの問題が発生する可能性があります。プロバイダーはARNのリージョンを使用します。"

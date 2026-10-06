@@ -346,6 +346,10 @@
 				"label": "Bật bảo vệ khỏi lệnh phá hoại",
 				"description": "Tải xuống và sử dụng Destructive Command Guard (DCG) cho nền tảng này. Các lệnh được DCG cho phép sẽ tự động chạy. Các lệnh bị DCG chặn cần bạn phê duyệt. Danh sách lệnh của Zoo sẽ bị vô hiệu hóa khi tùy chọn này được bật. Tệp thực thi đã tải xuống vẫn được giữ lại nếu bạn tắt tùy chọn."
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "Các lệnh tự động thực thi được phép",
 			"allowedCommandsDescription": "Tiền tố lệnh có thể được tự động thực thi khi \"Luôn phê duyệt các hoạt động thực thi\" được bật. Thêm * để cho phép tất cả các lệnh (sử dụng cẩn thận).",
 			"deniedCommands": "Lệnh bị từ chối",
@@ -460,6 +464,8 @@
 		"headerName": "Tên tiêu đề",
 		"headerValue": "Giá trị tiêu đề",
 		"noCustomHeaders": "Chưa có tiêu đề tùy chỉnh nào được định nghĩa. Nhấp vào nút + để thêm.",
+		"extraBody": "Nội dung bổ sung",
+		"extraBodyDescription": "Đối tượng JSON tùy chọn được hợp nhất vào phần thân yêu cầu API. Không thể ghi đè các trường do Zoo Code quản lý như model, messages, tools và stream. Không bao gồm thông tin bí mật.",
 		"unboundApiKey": "Khóa API Unbound",
 		"getUnboundApiKey": "Lấy khóa API Unbound",
 		"requestyApiKey": "Khóa API Requesty",
@@ -1036,6 +1042,11 @@
 		"modelId": "Bạn phải cung cấp ID mô hình hợp lệ.",
 		"modelSelector": "Bạn phải cung cấp bộ chọn mô hình hợp lệ.",
 		"openAi": "Bạn phải cung cấp URL cơ sở, khóa API và ID mô hình hợp lệ.",
+		"openAiExtraBody": {
+			"invalidJson": "Nội dung bổ sung phải chứa JSON hợp lệ.",
+			"objectRequired": "Nội dung bổ sung phải là một đối tượng JSON.",
+			"reservedKeys": "Nội dung bổ sung không thể ghi đè các trường do Zoo Code quản lý: {{keys}}."
+		},
 		"arn": {
 			"invalidFormat": "Định dạng ARN không hợp lệ. Vui lòng kiểm tra yêu cầu về định dạng.",
 			"regionMismatch": "Cảnh báo: Vùng trong ARN của bạn ({{arnRegion}}) không khớp với vùng bạn đã chọn ({{region}}). Điều này có thể gây ra vấn đề truy cập. Nhà cung cấp sẽ sử dụng vùng từ ARN."

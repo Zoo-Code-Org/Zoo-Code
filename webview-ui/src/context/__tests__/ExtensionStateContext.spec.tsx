@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import { render, screen, act } from "@/utils/test-utils"
 import React from "react"
 
@@ -11,9 +12,15 @@ import {
 	type RouterModels,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
+	DEFAULT_WRITE_DELAY_MS,
 } from "@roo-code/types"
 
-import { ExtensionStateContextProvider, useExtensionState, mergeExtensionState } from "../ExtensionStateContext"
+import {
+	ExtensionStateContextProvider,
+	useExtensionState,
+	mergeExtensionState,
+	createInitialExtensionState,
+} from "../ExtensionStateContext"
 
 const TestComponent = () => {
 	const { allowedCommands, setAllowedCommands, soundEnabled, showRooIgnoredFiles, setShowRooIgnoredFiles } =
@@ -64,7 +71,9 @@ const ApiConfigTestComponent = () => {
 			<div data-testid="api-configuration">{JSON.stringify(apiConfiguration)}</div>
 			<button
 				data-testid="update-api-config-button"
-				onClick={() => setApiConfiguration({ apiModelId: "new-model", apiProvider: "anthropic" })}>
+				onClick={() =>
+					setApiConfiguration({ apiModelId: "new-model", apiProvider: providerIdentifiers.anthropic })
+				}>
 				Update API Config
 			</button>
 			<button data-testid="partial-update-button" onClick={() => setApiConfiguration({ modelTemperature: 0.7 })}>
@@ -212,6 +221,16 @@ describe("ExtensionStateContext", () => {
 		expect(JSON.parse(screen.getByTestId("show-rooignored-files").textContent!)).toBe(true)
 	})
 
+	it("initializes the write delay to the pre-hydration default", () => {
+		// The initializer itself (not a merge fixture) must carry the shared
+		// default: a regression that dropped it from createInitialExtensionState
+		// would otherwise stay hidden because the merge tests supply the key
+		// manually.
+		const state = createInitialExtensionState()
+
+		expect(state.writeDelayMs).toBe(DEFAULT_WRITE_DELAY_MS)
+	})
+
 	it("initializes shadowed context fields from initialState", () => {
 		const routerModels = {} as RouterModels
 		const marketplaceItems: MarketplaceItem[] = [
@@ -353,7 +372,7 @@ describe("ExtensionStateContext", () => {
 		expect(updatedConfig).toEqual(
 			expect.objectContaining({
 				apiModelId: "new-model",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 			}),
 		)
 	})
@@ -376,7 +395,7 @@ describe("ExtensionStateContext", () => {
 		expect(initialConfig).toEqual(
 			expect.objectContaining({
 				apiModelId: "new-model",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 			}),
 		)
 
@@ -391,7 +410,7 @@ describe("ExtensionStateContext", () => {
 		expect(updatedConfig).toEqual(
 			expect.objectContaining({
 				apiModelId: "new-model", // Should retain this from previous update
-				apiProvider: "anthropic", // Should retain this from previous update
+				apiProvider: providerIdentifiers.anthropic, // Should retain this from previous update
 				modelTemperature: 0.7, // Should add this from partial update
 			}),
 		)
@@ -407,13 +426,15 @@ describe("mergeExtensionState", () => {
 			taskHistory: [],
 			shouldShowAnnouncement: false,
 			enableCheckpoints: true,
-			writeDelayMs: 1000,
+			// Matches the shared DEFAULT_WRITE_DELAY_MS (pre-hydration placeholder
+			// must not disagree with the extension's own fallback).
+			writeDelayMs: 0,
 			mode: "default",
 			experiments: {} as Record<ExperimentId, boolean>,
 			customModes: [],
 			maxOpenTabsContext: 20,
 			maxWorkspaceFiles: 100,
-			apiConfiguration: { providerId: "openrouter" } as ProviderSettings,
+			apiConfiguration: { providerId: providerIdentifiers.openrouter } as ProviderSettings,
 			telemetrySetting: "unset",
 			showRooIgnoredFiles: true,
 			enableSubfolderRules: false,
@@ -477,7 +498,9 @@ describe("mergeExtensionState", () => {
 			taskHistory: [],
 			shouldShowAnnouncement: false,
 			enableCheckpoints: true,
-			writeDelayMs: 1000,
+			// Matches the shared DEFAULT_WRITE_DELAY_MS (pre-hydration placeholder
+			// must not disagree with the extension's own fallback).
+			writeDelayMs: 0,
 			mode: "default",
 			experiments: {} as Record<ExperimentId, boolean>,
 			customModes: [],

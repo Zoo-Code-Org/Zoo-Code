@@ -9,7 +9,9 @@ import { customToolRegistry } from "@roo-code/core"
 import { t } from "../../i18n"
 
 import { defaultModeSlug, getModeBySlug } from "../../shared/modes"
-import type { ToolParamName, ToolResponse, ToolUse, McpToolUse } from "../../shared/tools"
+import type { AutoApprovalContext, ToolParamName, ToolResponse, ToolUse, McpToolUse } from "../../shared/tools"
+
+import { buildAutoDenyReason } from "../auto-approval"
 
 import { AskIgnoredError } from "../task/AskIgnoredError"
 import { Task } from "../task/Task"
@@ -36,6 +38,7 @@ import { skillTool } from "../tools/SkillTool"
 import { generateImageTool } from "../tools/GenerateImageTool"
 import { applyDiffTool as applyDiffToolClass } from "../tools/ApplyDiffTool"
 import { isValidToolName, validateToolUse } from "../tools/validateToolUse"
+import { buildToolRequirements } from "../prompts/tools/effective-tool-policy"
 import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
 
 import { formatResponse } from "../prompts/responses"
@@ -213,16 +216,40 @@ export async function presentAssistantMessage(cline: Task) {
 				partialMessage?: string,
 				progressStatus?: ToolProgressStatus,
 				isProtected?: boolean,
+				autoApprovalContext?: AutoApprovalContext,
 			) => {
-				const { response, text, images } = await cline.ask(
+				const { response, text, images, autoDenyDetail } = await cline.ask(
 					type,
 					partialMessage,
 					false,
 					progressStatus,
 					isProtected || false,
+					autoApprovalContext,
 				)
 
 				if (response !== "yesButtonClicked") {
+					// Automatic (policy) denial: scoped to this tool call, so no
+					// `didRejectTool` (remaining tool calls in the turn proceed)
+					// and no `user_feedback` say (the reason is system-generated).
+					if (autoDenyDetail) {
+						// `guard_unavailable` marks a guard-state inconsistency, not a
+						// policy denial: the command never ran and a re-issue re-reads
+						// the guard setting, so the payload must stay a retryable error
+						// instead of carrying policy-denial advice.
+						if (autoDenyDetail.kind === "guard_unavailable") {
+							pushToolResult(formatResponse.toolError(buildAutoDenyReason(autoDenyDetail)))
+						} else {
+							pushToolResult(
+								formatResponse.toolAutoDenied({
+									reason: buildAutoDenyReason(autoDenyDetail),
+									offendingCommand: autoDenyDetail.command,
+									ruleId: autoDenyDetail.dcgRuleId,
+								}),
+							)
+						}
+						return false
+					}
+
 					if (text) {
 						await cline.say("user_feedback", text, images)
 						pushToolResult(formatResponse.toolResult(formatResponse.toolDeniedWithFeedback(text), images))
@@ -289,6 +316,67 @@ export async function presentAssistantMessage(cline: Task) {
 				},
 			}
 
+			// Consult the shared policy layer before executing — ONLY for complete
+			// (non-partial) blocks. Validating partial blocks would surface validation
+			// errors repeatedly during streaming, pushing multiple tool_results for the
+			// same tool_use_id and making the stream appear frozen.
+			if (!mcpBlock.partial) {
+				const state = await cline.providerRef.deref()?.getState()
+				const { customModes, experiments: stateExperiments, disabledTools } = state ?? {}
+				// Read the task-local mode, not the shared provider mode.
+				// A delegated child task may run in a different mode than its parent.
+				const taskMode = await cline.getTaskMode()
+
+				const modelInfo = cline.api.getModel()
+				// Resolve aliases in includedTools before validation
+				// e.g., "write_file" should resolve to "write_to_file"
+				const rawIncludedTools = modelInfo.info.includedTools
+				const { resolveToolAlias } = await import("../prompts/tools/filter-tools-for-mode")
+				const includedTools = rawIncludedTools?.map((tool) => resolveToolAlias(tool))
+
+				try {
+					// Validate under the canonical "use_mcp_tool" name: the requirements map
+					// is keyed by canonical/alias names, so the dynamic mcp_* name would never
+					// key-match a disabledTools or excludedTools entry naming use_mcp_tool.
+					// Build requirements through the shared policy module so every suppressed
+					// entry reaches the validator, which checks them before the
+					// always-available class. See `buildToolRequirements` in
+					// effective-tool-policy.ts.
+					const toolRequirements = buildToolRequirements(disabledTools, modelInfo.info)
+
+					validateToolUse(
+						"use_mcp_tool",
+						taskMode,
+						customModes ?? [],
+						toolRequirements,
+						syntheticToolUse.params,
+						stateExperiments,
+						includedTools,
+					)
+				} catch (error) {
+					cline.consecutiveMistakeCount++
+					// For validation errors, send a tool_result with the error (required for
+					// native tool calling) but do NOT set didAlreadyUseTool = true — the tool
+					// was never executed, and interrupting the stream here would make the
+					// extension appear to hang.
+					const errorContent = formatResponse.toolError(error.message)
+					if (toolCallId) {
+						cline.pushToolResultToUserContent({
+							type: "tool_result",
+							tool_use_id: sanitizeToolUseId(toolCallId),
+							content: errorContent,
+							is_error: true,
+						})
+					}
+
+					// The validator's message names the canonical tool, never the
+					// model-controlled dynamic name, so this key is safe.
+					cline.recordToolError("use_mcp_tool", error.message)
+
+					break
+				}
+			}
+
 			await useMcpToolTool.handle(cline, syntheticToolUse, {
 				askApproval,
 				handleError,
@@ -342,9 +430,12 @@ export async function presentAssistantMessage(cline: Task) {
 				break
 			}
 
-			// Fetch state early so it's available for toolDescription and validation
+			// Shared provider state supplies global settings; mode is owned by the task.
 			const state = await cline.providerRef.deref()?.getState()
-			const { mode, customModes, experiments: stateExperiments, disabledTools } = state ?? {}
+			const { customModes, experiments: stateExperiments, disabledTools } = state ?? {}
+			// Read the task-local mode, not the shared provider mode.
+			// A delegated child task may run in a different mode than its parent.
+			const taskMode = await cline.getTaskMode()
 
 			const toolDescription = (): string => {
 				switch (block.name) {
@@ -518,19 +609,52 @@ export async function presentAssistantMessage(cline: Task) {
 				partialMessage?: string,
 				progressStatus?: ToolProgressStatus,
 				isProtected?: boolean,
+				autoApprovalContext?: AutoApprovalContext,
 			) => {
-				const { response, text, images } = await cline.ask(
+				const { response, text, images, queuedMessageId, autoDenyDetail } = await cline.ask(
 					type,
 					partialMessage,
 					false,
 					progressStatus,
 					isProtected || false,
+					autoApprovalContext,
 				)
 
 				if (response !== "yesButtonClicked") {
+					// Automatic (policy) denial: scoped to this tool call, so no
+					// `didRejectTool` (remaining tool calls in the turn proceed)
+					// and no `user_feedback` say (the reason is system-generated).
+					// Automatic denials never carry queued feedback — a queued
+					// message forces a real ask.
+					if (autoDenyDetail) {
+						// `guard_unavailable` marks a guard-state inconsistency, not a
+						// policy denial: the command never ran and a re-issue re-reads
+						// the guard setting, so the payload must stay a retryable error
+						// instead of carrying policy-denial advice.
+						if (autoDenyDetail.kind === "guard_unavailable") {
+							pushToolResult(formatResponse.toolError(buildAutoDenyReason(autoDenyDetail)))
+						} else {
+							pushToolResult(
+								formatResponse.toolAutoDenied({
+									reason: buildAutoDenyReason(autoDenyDetail),
+									offendingCommand: autoDenyDetail.command,
+									ruleId: autoDenyDetail.dcgRuleId,
+								}),
+							)
+						}
+						return false
+					}
+
 					// Handle both messageResponse and noButtonClicked with text.
-					if (text) {
-						await cline.say("user_feedback", text, images)
+					if (queuedMessageId) {
+						const persisted = await cline.persistQueuedFeedbackAndAcknowledge(queuedMessageId, text, images)
+						if (!persisted) {
+							throw new Error(`Failed to persist queued approval feedback ${queuedMessageId}`)
+						}
+					} else if (text || images?.length) {
+						await cline.say("user_feedback", text ?? "", images)
+					}
+					if (text || images?.length) {
 						pushToolResult(formatResponse.toolResult(formatResponse.toolDeniedWithFeedback(text), images))
 					} else {
 						pushToolResult(formatResponse.toolDenied())
@@ -542,9 +666,16 @@ export async function presentAssistantMessage(cline: Task) {
 				// Store approval feedback to be merged into tool result (GitHub #10465)
 				// Don't push it as a separate tool_result here - that would create duplicates.
 				// The tool will call pushToolResult, which will merge the feedback into the actual result.
-				if (text) {
-					await cline.say("user_feedback", text, images)
-					approvalFeedback = { text, images }
+				if (queuedMessageId) {
+					const persisted = await cline.persistQueuedFeedbackAndAcknowledge(queuedMessageId, text, images)
+					if (!persisted) {
+						throw new Error(`Failed to persist queued approval feedback ${queuedMessageId}`)
+					}
+				} else if (text || images?.length) {
+					await cline.say("user_feedback", text ?? "", images)
+				}
+				if (text || images?.length) {
+					approvalFeedback = { text: text ?? "", images }
 				}
 
 				return true
@@ -590,20 +721,15 @@ export async function presentAssistantMessage(cline: Task) {
 				const isCustomTool = Boolean(stateExperiments?.customTools && customToolRegistry.has(block.name))
 
 				try {
-					const toolRequirements =
-						disabledTools?.reduce(
-							(acc: Record<string, boolean>, tool: string) => {
-								acc[tool] = false
-								const resolvedToolName = resolveToolAlias(tool)
-								acc[resolvedToolName] = false
-								return acc
-							},
-							{} as Record<string, boolean>,
-						) ?? {}
+					// Build requirements through the shared policy module so every suppressed
+					// entry — disabled tools, and an excluded or disabled protocol tool — reaches
+					// the validator, which checks them before the always-available class. See
+					// `buildToolRequirements` in effective-tool-policy.ts.
+					const toolRequirements = buildToolRequirements(disabledTools, modelInfo?.info)
 
 					validateToolUse(
 						block.name as ToolName,
-						mode ?? defaultModeSlug,
+						taskMode,
 						customModes ?? [],
 						toolRequirements,
 						block.params,
@@ -848,6 +974,7 @@ export async function presentAssistantMessage(cline: Task) {
 						pushToolResult,
 						askFinishSubTaskApproval,
 						toolDescription,
+						toolCallId: block.id,
 					}
 					await attemptCompletionTool.handle(
 						cline,
@@ -909,7 +1036,7 @@ export async function presentAssistantMessage(cline: Task) {
 							}
 
 							const result = await customTool.execute(customToolArgs, {
-								mode: mode ?? defaultModeSlug,
+								mode: taskMode,
 								task: cline,
 							})
 

@@ -1,13 +1,25 @@
-import { safeWriteJson } from "../../utils/safeWriteJson"
 import * as path from "path"
-import * as fs from "fs/promises"
 
 import type { ClineMessage } from "@roo-code/types"
 
-import { fileExistsAtPath } from "../../utils/fs"
-
+import { safeWriteJson } from "../../utils/safeWriteJson"
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { getTaskDirectoryPath } from "../../utils/storage"
+import { ensureMessageIdentifiers, mergeClineMessageSnapshots } from "./mergeMessageSnapshots"
+import { getErrorCode, readFileWithMissingRetry } from "./readFileWithMissingRetry"
+
+export type TaskMessagesReadErrorKind = "not_found" | "invalid" | "io_error"
+
+export class TaskMessagesReadError extends Error {
+	constructor(
+		public readonly kind: TaskMessagesReadErrorKind,
+		message: string,
+		public readonly originalError?: unknown,
+	) {
+		super(message)
+		this.name = "TaskMessagesReadError"
+	}
+}
 
 export type ReadTaskMessagesOptions = {
 	taskId: string
@@ -20,37 +32,60 @@ export async function readTaskMessages({
 }: ReadTaskMessagesOptions): Promise<ClineMessage[]> {
 	const taskDir = await getTaskDirectoryPath(globalStoragePath, taskId)
 	const filePath = path.join(taskDir, GlobalFileNames.uiMessages)
-	const fileExists = await fileExistsAtPath(filePath)
 
-	if (fileExists) {
-		try {
-			const parsedData = JSON.parse(await fs.readFile(filePath, "utf8"))
-			if (!Array.isArray(parsedData)) {
-				console.warn(
-					`[readTaskMessages] Parsed data is not an array (got ${typeof parsedData}), returning empty. TaskId: ${taskId}, Path: ${filePath}`,
-				)
-				return []
-			}
-			return parsedData
-		} catch (error) {
-			console.warn(
-				`[readTaskMessages] Failed to parse ${filePath} for task ${taskId}, returning empty: ${error instanceof Error ? error.message : String(error)}`,
-			)
-			return []
-		}
+	let fileContent: string
+	try {
+		fileContent = await readFileWithMissingRetry(filePath)
+	} catch (error) {
+		const kind = getErrorCode(error) === "ENOENT" ? "not_found" : "io_error"
+		throw new TaskMessagesReadError(kind, `Failed to read task messages for ${taskId} at ${filePath}`, error)
 	}
 
-	return []
+	let parsedData: unknown
+	try {
+		parsedData = JSON.parse(fileContent)
+	} catch (error) {
+		throw new TaskMessagesReadError("invalid", `Failed to parse task messages for ${taskId} at ${filePath}`, error)
+	}
+
+	if (!Array.isArray(parsedData)) {
+		throw new TaskMessagesReadError(
+			"invalid",
+			`Task messages for ${taskId} at ${filePath} must be an array, got ${typeof parsedData}`,
+		)
+	}
+
+	return parsedData
 }
 
 export type SaveTaskMessagesOptions = {
 	messages: ClineMessage[]
 	taskId: string
 	globalStoragePath: string
+	merge?: boolean
 }
 
-export async function saveTaskMessages({ messages, taskId, globalStoragePath }: SaveTaskMessagesOptions) {
+export async function saveTaskMessages({
+	messages,
+	taskId,
+	globalStoragePath,
+	merge = false,
+}: SaveTaskMessagesOptions): Promise<ClineMessage[]> {
+	ensureMessageIdentifiers(messages)
 	const taskDir = await getTaskDirectoryPath(globalStoragePath, taskId)
 	const filePath = path.join(taskDir, GlobalFileNames.uiMessages)
-	await safeWriteJson(filePath, messages)
+	let savedMessages = messages
+	await safeWriteJson(
+		filePath,
+		messages,
+		merge
+			? {
+					merge: (existing, incoming) => {
+						savedMessages = mergeClineMessageSnapshots(existing, incoming) as ClineMessage[]
+						return savedMessages
+					},
+				}
+			: undefined,
+	)
+	return savedMessages
 }
