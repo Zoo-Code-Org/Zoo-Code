@@ -166,6 +166,25 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	}
 
 	/**
+	 * Surface a failed rollback to the user. The hazard has to be visible in the chat,
+	 * not only in the console: the editor may still hold content the task never
+	 * approved and a save of it would land an unauthorized write. A failing say must
+	 * not abort the teardown - a retained streaming error still has to reach the user
+	 * through handleError - so its failure is logged only, matching the other cleanup
+	 * helpers in this file.
+	 */
+	private async reportRevertFailure(task: Task): Promise<void> {
+		await task
+			.say(
+				"error",
+				"write_to_file: the diff editor could not be restored after the failed tool call, so it may still show unapproved content. Do not save that editor.",
+			)
+			.catch((sayError) => {
+				console.error("Error reporting write_to_file rollback failure:", sayError)
+			})
+	}
+
+	/**
 	 * Teardown boundary for the handle() parse-failure path, where execute() never
 	 * runs and therefore its finally (resetTaskPartialState) never runs either.
 	 *
@@ -200,10 +219,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			// Do not report a completed teardown: the editor may still show content this
 			// task never approved, and saving it would land a write the user never
 			// authorized. The user has to be able to tell that from the UI.
-			await task.say(
-				"error",
-				"write_to_file: the diff editor could not be restored after the failed tool call, so it may still show unapproved content. Do not save that editor.",
-			)
+			await this.reportRevertFailure(task)
 		}
 		if (!state.streamError) {
 			return false
