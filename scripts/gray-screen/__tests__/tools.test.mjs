@@ -108,6 +108,15 @@ describe("analyze-session", () => {
 		assert.equal(analyze().status, 0)
 	})
 
+	it("rejects a non-numeric --top", () => {
+		for (const top of ["abc", "0", "1.5"]) {
+			const result = analyze("--top", top)
+
+			assert.notEqual(result.status, 0, `--top ${top}`)
+			assert.match(result.stderr, /--top must be an integer >= 1/)
+		}
+	})
+
 	it("does not let a malformed task use up a --top slot", () => {
 		const write = (id, content) => {
 			const taskDir = path.join(tmp, "tasks", id)

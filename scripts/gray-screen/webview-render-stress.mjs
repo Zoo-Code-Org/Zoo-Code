@@ -28,7 +28,7 @@ import http from "node:http"
 import { createRequire } from "node:module"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { resolveBuildDir, resolveServedFile } from "./lib.mjs"
+import { integerFlag, resolveBuildDir, resolveServedFile } from "./lib.mjs"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const webviewDir = path.join(root, "webview-ui")
@@ -41,21 +41,31 @@ const args = Object.fromEntries(
 		return acc
 	}, []),
 )
-const cfg = {
-	scenario: args["scenario"] ?? "session",
-	start: Number(args["start"] ?? 5000),
-	pushes: Number(args["pushes"] ?? 300),
-	grow: Number(args["grow"] ?? 4),
-	chunks: Number(args["chunks"] ?? 20),
-	rate: Number(args["rate"] ?? 200),
-	seconds: Number(args["seconds"] ?? 60),
-	heapMb: Number(args["heap-mb"] ?? (args["scenario"] === "md" ? 4096 : 1024)),
-	textBytes: Number(args["text-bytes"] ?? (args["scenario"] === "md" ? 15000 : 800)),
-	turns: Number(args["turns"] ?? 40),
-	chunkMs: Number(args["chunk-ms"] ?? 15),
-	mermaidEvery: Number(args["mermaid-every"] ?? 10),
-	url: args["url"],
-	headed: args["headed"] === "true",
+const SCENARIOS = ["session", "command", "md"]
+const int = (name, fallback, min) => integerFlag(name, args[name] ?? fallback, min)
+let cfg
+try {
+	const scenario = args["scenario"] ?? "session"
+	if (!SCENARIOS.includes(scenario)) throw new Error(`Invalid --scenario "${scenario}": use ${SCENARIOS.join(", ")}.`)
+	cfg = {
+		scenario,
+		start: int("start", 5000, 0),
+		pushes: int("pushes", 300, 0),
+		grow: int("grow", 4, 0),
+		chunks: int("chunks", 20, 1),
+		rate: int("rate", 200, 1),
+		seconds: int("seconds", 60, 1),
+		heapMb: int("heap-mb", scenario === "md" ? 4096 : 1024, 64),
+		textBytes: int("text-bytes", scenario === "md" ? 15000 : 800, 1),
+		turns: int("turns", 40, 1),
+		chunkMs: int("chunk-ms", 15, 0),
+		mermaidEvery: int("mermaid-every", 10, 0),
+		url: args["url"],
+		headed: args["headed"] === "true",
+	}
+} catch (e) {
+	console.error(e.message)
+	process.exit(1)
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))

@@ -9,6 +9,7 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { integerFlag } from "./lib.mjs"
 
 const args = Object.fromEntries(
 	process.argv.slice(2).reduce((acc, cur, i, all) => {
@@ -18,7 +19,13 @@ const args = Object.fromEntries(
 )
 const storage =
 	args["storage"] ?? path.join(os.homedir(), ".vscode-server", "data", "User", "globalStorage", "codemate.zoo-code")
-const top = Number(args["top"] ?? 15)
+let top
+try {
+	top = integerFlag("top", args["top"] ?? 15, 1)
+} catch (e) {
+	console.error(e.message)
+	process.exit(1)
+}
 const includeGenerated = args["include-generated"] === "true"
 const tasksDir = path.join(storage, "tasks")
 
