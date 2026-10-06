@@ -750,6 +750,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 		afterEach(() => {
 			getProfile.mockRestore()
+			vi.restoreAllMocks()
 		})
 
 		type ProfileFixture = ProviderSettingsWithId & { name: string }
@@ -759,6 +760,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			name: "profile-a",
 			apiProvider: providerIdentifiers.openai,
 			apiKey: "activated-key",
+			openAiBaseUrl: "https://activated.example",
 		}
 
 		const pinnedElsewhere: ProfileFixture = {
@@ -801,6 +803,31 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			expect(getProfile).not.toHaveBeenCalled()
 			expect(viewB["viewLocalState"].apiConfiguration).toBeUndefined()
+		})
+
+		it("does not fill a pinned view's configuration from the shared provider settings", async () => {
+			viewB["viewLocalState"].currentApiConfigName = "profile-b"
+			viewB["viewLocalState"].apiConfiguration = pinnedElsewhere
+			// The shared store holds whichever profile the other view activated last.
+			vi.spyOn(viewB.contextProxy, "getProviderSettings").mockReturnValue(activated)
+
+			const state = await viewB.getState({ includeTaskHistory: false })
+
+			// Merging the shared settings under a complete overlay would hand profile-b's key
+			// profile-a's endpoint, and the settings UI would persist that mix back.
+			expect(state.apiConfiguration).toEqual(pinnedElsewhere)
+			expect(state.apiConfiguration.openAiBaseUrl).toBeUndefined()
+		})
+
+		it("refreshes a sibling overlay when the profile is saved without activation", async () => {
+			viewB["viewLocalState"].currentApiConfigName = "profile-a"
+			const saved: ProfileFixture = { ...activated, zooSessionToken: "fresh-token" }
+
+			await viewA.upsertProviderProfile("profile-a", saved, false)
+
+			// A sign-in refresh writes the token to disk without activating; the pinned view must
+			// not keep authenticating with the token cached in its overlay.
+			expect(viewB["viewLocalState"].apiConfiguration).toEqual(saved)
 		})
 	})
 
