@@ -4535,9 +4535,10 @@ describe("ClineProvider", () => {
 			expect(getModeBySlug).toHaveBeenCalledWith("non-existent-mode", expect.any(Array))
 
 			// Verify fallback to default mode, view-locally: history restore no longer
-			// writes the shared global mode
+			// writes the shared global mode. Reject any write to the shared "mode" key,
+			// whatever value it carries - a write of "ask" would satisfy a value-specific check.
 			expect(provider["viewLocalState"].mode).toBe("code")
-			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", "code")
+			expect(mockContext.globalState.update.mock.calls.filter((call) => call[0] === "mode")).toHaveLength(0)
 			expect(logSpy).toHaveBeenCalledWith(
 				"Mode 'non-existent-mode' from history no longer exists. Falling back to default mode 'code'.",
 			)
@@ -4609,9 +4610,9 @@ describe("ClineProvider", () => {
 			expect(mockCustomModesManager.getCustomModes).toHaveBeenCalled()
 			expect(getModeBySlug).toHaveBeenCalledWith("custom-mode", expect.any(Array))
 
-			// Verify mode was preserved view-locally (no shared global mode write)
+			// Verify mode was preserved view-locally: no write to the shared "mode" key at all.
 			expect(provider["viewLocalState"].mode).toBe("custom-mode")
-			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", "custom-mode")
+			expect(mockContext.globalState.update.mock.calls.filter((call) => call[0] === "mode")).toHaveLength(0)
 			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("no longer exists"))
 
 			// Verify history item mode was not changed
@@ -4658,9 +4659,9 @@ describe("ClineProvider", () => {
 			// Initialize with history item
 			await provider.createTaskWithHistoryItem(historyItem)
 
-			// Verify mode was preserved view-locally (no shared global mode write)
+			// Verify mode was preserved view-locally: no write to the shared "mode" key at all.
 			expect(provider["viewLocalState"].mode).toBe("architect")
-			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", "architect")
+			expect(mockContext.globalState.update.mock.calls.filter((call) => call[0] === "mode")).toHaveLength(0)
 
 			// Verify history item mode was not changed
 			expect(historyItem.mode).toBe("architect")
