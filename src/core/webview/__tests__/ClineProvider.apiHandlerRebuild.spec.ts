@@ -3,7 +3,7 @@
 import * as vscode from "vscode"
 
 import { TelemetryService } from "@roo-code/telemetry"
-import { getModelId, RooCodeEventName, type ProviderSettings } from "@roo-code/types"
+import { getModelId, RooCodeEventName, type ProviderSettings, type ProviderSettingsEntry } from "@roo-code/types"
 
 import { ContextProxy } from "../../config/ContextProxy"
 import type { Mode } from "../../../shared/modes"
@@ -549,6 +549,38 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				openRouterModelId: "x/z",
 			})
 			expect(manager().saveConfig).not.toHaveBeenCalled()
+		})
+
+		it("does not activate its profile when it times out while listing profiles and a later switch has run", async () => {
+			vi.useFakeTimers()
+			try {
+				let resolveList!: (entries: ProviderSettingsEntry[]) => void
+				const listing = new Promise<ProviderSettingsEntry[]>((resolve) => {
+					resolveList = resolve
+				})
+				vi.mocked(provider["providerSettingsManager"].listConfig).mockImplementationOnce(() => listing)
+				manager().activateProfile.mockResolvedValue({
+					name: "other-config",
+					id: "other-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "other/model",
+				})
+				const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
+
+				const updating = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+					openRouterModelId: "x/y",
+				})
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				const switching = provider.activateProviderProfile({ name: "other-config" })
+
+				resolveList([])
+				await Promise.all([updating, switching])
+
+				expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "test-config")
+				expect(provider.contextProxy.getValues().currentApiConfigName).toBe("other-config")
+			} finally {
+				vi.useRealTimers()
+			}
 		})
 
 		it("does not save and does not throw when the profile cannot be loaded", async () => {

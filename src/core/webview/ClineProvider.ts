@@ -1907,6 +1907,10 @@ export class ClineProvider
 
 		if (activate) {
 			const { mode } = await this.getState()
+			const listApiConfigMeta = await this.providerSettingsManager.listConfig()
+
+			// A timed-out mutation must not activate its profile after a later switch has run.
+			if (signal.aborted) return id
 
 			// These promises do the following:
 			// 1. Adds or updates the list of provider profiles.
@@ -1919,7 +1923,7 @@ export class ClineProvider
 			// We should probably switch to that and verify that it works.
 			// I left the original implementation in just to be safe.
 			await Promise.all([
-				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+				this.updateGlobalState("listApiConfigMeta", listApiConfigMeta),
 				this.updateGlobalState("currentApiConfigName", name),
 				this.providerSettingsManager.setModeConfig(mode, id),
 				this.contextProxy.setProviderSettings(providerSettings),
