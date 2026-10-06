@@ -1895,7 +1895,7 @@ export class ClineProvider
 		providerSettings: ProviderSettings,
 		activate: boolean,
 		signal: AbortSignal,
-		rollbackTo?: ProviderSettings,
+		rollback?: { previous: ProviderSettings; isStillApplied: () => Promise<boolean> },
 	): Promise<string> {
 		// TODO: Do we need to be calling `activateProfile`? It's not
 		// clear to me what the source of truth should be; in some cases
@@ -1905,10 +1905,15 @@ export class ClineProvider
 		const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
 
 		// A timed-out mutation must leave neither a half-applied profile nor stale activation behind.
-		const abandon = async (): Promise<string> => {
-			if (rollbackTo) {
-				await this.providerSettingsManager.saveConfig(name, rollbackTo)
+		// The restore is skipped when a newer mutation has since changed the saved values, so a late
+		// rollback can never overwrite it.
+		const restore = async (): Promise<void> => {
+			if (rollback && (await rollback.isStillApplied())) {
+				await this.providerSettingsManager.saveConfig(name, rollback.previous)
 			}
+		}
+		const abandon = async (): Promise<string> => {
+			await restore()
 			return id
 		}
 
@@ -1930,12 +1935,22 @@ export class ClineProvider
 			// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
 			// We should probably switch to that and verify that it works.
 			// I left the original implementation in just to be safe.
-			await Promise.all([
+			// allSettled so every started write has finished before the queue can advance.
+			const writes = await Promise.allSettled([
 				this.updateGlobalState("listApiConfigMeta", listApiConfigMeta),
 				this.updateGlobalState("currentApiConfigName", name),
 				this.providerSettingsManager.setModeConfig(mode, id),
 				this.contextProxy.setProviderSettings(providerSettings),
 			])
+			const failed = writes.find((write): write is PromiseRejectedResult => write.status === "rejected")
+
+			if (failed) {
+				await restore()
+				if (rollback) {
+					await this.contextProxy.setProviderSettings(rollback.previous)
+				}
+				throw failed.reason
+			}
 
 			// The writes above are committed, so there is nothing to roll back; just skip the follow-up work.
 			if (signal.aborted) return id
@@ -2003,6 +2018,10 @@ export class ClineProvider
 					if (value !== null && typeof value !== "string" && typeof value !== "number") {
 						continue
 					}
+					// The allow-list does not cover the ARN Bedrock calls, so it may only be reset, never set.
+					if (key === "awsCustomArn" && value !== null && value !== "") {
+						continue
+					}
 					merged[key] = value === null ? undefined : value
 				}
 
@@ -2014,13 +2033,14 @@ export class ClineProvider
 				}
 
 				const previous: Record<string, unknown> = { ...stored, id }
-				await this.upsertProviderProfileUnlocked(
-					name,
-					merged as ProviderSettings,
-					true,
-					signal,
-					previous as ProviderSettings,
-				)
+				const isStillApplied = async (): Promise<boolean> => {
+					const current: Record<string, unknown> = await this.providerSettingsManager.getProfile({ name })
+					return Object.keys(merged).every((key) => key === "id" || current[key] === merged[key])
+				}
+				await this.upsertProviderProfileUnlocked(name, merged as ProviderSettings, true, signal, {
+					previous: previous as ProviderSettings,
+					isStillApplied,
+				})
 			})
 		} catch (error) {
 			this.log(`Error updating profile model: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`)

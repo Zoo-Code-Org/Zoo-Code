@@ -586,10 +586,14 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(manager().saveConfig).not.toHaveBeenCalled()
 		})
 
-		it("does not activate its profile when it times out while listing profiles and a later switch has run", async () => {
-			mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
-			vi.useFakeTimers()
-			try {
+		describe("when the mutation times out while listing profiles", () => {
+			const runTimedOutUpdate = async (newerModel?: string) => {
+				mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
+				// Like the real store, getProfile reflects what saveConfig last wrote.
+				manager().saveConfig.mockImplementation(async (profileName, settings) => {
+					manager().getProfile.mockResolvedValue({ name: profileName, ...settings })
+					return "test-id"
+				})
 				let resolveList!: (entries: ProviderSettingsEntry[]) => void
 				const listing = new Promise<ProviderSettingsEntry[]>((resolve) => {
 					resolveList = resolve
@@ -609,21 +613,83 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
 				const switching = provider.activateProviderProfile({ name: "other-config" })
 
+				if (newerModel) {
+					// A newer selection lands while the timed-out update is still waiting on the listing.
+					manager().getProfile.mockResolvedValue({
+						name: "test-config",
+						id: "test-id",
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: newerModel,
+					})
+				}
+
 				resolveList([])
 				await Promise.all([updating, switching])
+				return setValueSpy
+			}
+
+			beforeEach(() => vi.useFakeTimers())
+			afterEach(() => vi.useRealTimers())
+
+			it("does not activate its profile and rolls back the saved model", async () => {
+				const setValueSpy = await runTimedOutUpdate()
 
 				expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "test-config")
 				expect(provider.contextProxy.getValues().currentApiConfigName).toBe("other-config")
-				// The saved model change is rolled back so the stored profile matches the unchanged active state.
 				expect(manager().saveConfig).toHaveBeenCalledTimes(2)
 				expect(manager().saveConfig).toHaveBeenLastCalledWith("test-config", {
 					id: "test-id",
 					apiProvider: providerIdentifiers.openrouter,
 					openRouterModelId: "openai/gpt-4",
 				})
-			} finally {
-				vi.useRealTimers()
-			}
+			})
+
+			it("does not roll back over a newer selection saved in the meantime", async () => {
+				await runTimedOutUpdate("newer/model")
+
+				expect(manager().saveConfig).toHaveBeenCalledTimes(1)
+			})
+		})
+
+		it("rolls back the saved model when an activation write fails", async () => {
+			mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
+			manager().saveConfig.mockImplementation(async (profileName, settings) => {
+				manager().getProfile.mockResolvedValue({ name: profileName, ...settings })
+				return "test-id"
+			})
+			vi.mocked(provider["providerSettingsManager"].setModeConfig).mockRejectedValueOnce(new Error("boom"))
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "x/y",
+			})
+
+			expect(manager().saveConfig).toHaveBeenCalledTimes(2)
+			expect(manager().saveConfig).toHaveBeenLastCalledWith("test-config", {
+				id: "test-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			})
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.save_api_config")
+		})
+
+		it("only allows awsCustomArn to be reset, never set", async () => {
+			mockStoredProfile({
+				apiProvider: providerIdentifiers.bedrock,
+				apiModelId: "allowed-model",
+				awsCustomArn: "arn:stored",
+			})
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.bedrock, {
+				apiModelId: "allowed-model",
+				awsCustomArn: "arn:attacker",
+			})
+			expect(manager().saveConfig.mock.calls[0][1].awsCustomArn).toBe("arn:stored")
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.bedrock, {
+				apiModelId: "other-model",
+				awsCustomArn: "",
+			})
+			expect(manager().saveConfig.mock.calls[1][1].awsCustomArn).toBe("")
 		})
 
 		it("does not save and does not throw when the profile cannot be loaded", async () => {
