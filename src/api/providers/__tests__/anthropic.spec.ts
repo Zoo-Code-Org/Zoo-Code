@@ -481,6 +481,30 @@ describe("AnthropicHandler", () => {
 			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
 		})
 
+		it("should use adaptive thinking for Claude Opus 5.5 when reasoning is enabled", async () => {
+			const opusHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-5-5",
+				enableReasoningEffort: true,
+			})
+
+			const stream = opusHandler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			await collectStream(stream)
+
+			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.temperature).toBeUndefined()
+			expect(requestBody?.max_tokens).toBe(128_000)
+			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
+		})
+
 		it("should send the custom model ID as-is and use adaptive thinking for a custom Sonnet-5-family model", async () => {
 			const customHandler = new AnthropicHandler({
 				apiKey: "test-api-key",
@@ -712,6 +736,27 @@ describe("AnthropicHandler", () => {
 			expect(model.maxTokens).toBe(8192)
 			expect(model.info.supportsReasoningBinary).toBe(true)
 			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+			expect(model.reasoningBudget).toBeUndefined()
+		})
+
+		it("should handle Claude Opus 5.5 model correctly", () => {
+			const handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-5-5",
+			})
+			const model = handler.getModel()
+			expect(model.id).toBe("claude-opus-5-5")
+			expect(model.info.maxTokens).toBe(128000)
+			expect(model.info.contextWindow).toBe(1000000)
+			expect(model.info.inputPrice).toBe(4.0)
+			expect(model.info.outputPrice).toBe(20.0)
+			expect(model.info.cacheWritesPrice).toBe(5.0)
+			expect(model.info.cacheReadsPrice).toBe(0.2)
+			expect(model.maxTokens).toBe(128000)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBeUndefined()
 			expect(model.info.supportsPromptCache).toBe(true)
 			expect(model.info.supportsTemperature).toBe(false)
 			expect(model.reasoningBudget).toBeUndefined()
