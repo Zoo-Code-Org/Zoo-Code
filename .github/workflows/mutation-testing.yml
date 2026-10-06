@@ -28,6 +28,7 @@ jobs:
             stacked_map: ${{ steps.read_map.outputs.stacked_map }}
         steps:
             - name: Read the open pull request heads
+              id: read_map
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
@@ -37,11 +38,14 @@ jobs:
                   # --jq runs once per page, so a paginated call emits one JSON array per page; the
                   # gate reads that stream, not a single array.
                   STACKED_MAP="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" --jq '[.[] | {number: .number, headSha: .head.sha}]')" || STACKED_MAP="$(printf '[]')"
-                  {
-                      echo "stacked_map<<EOF"
-                      echo "$STACKED_MAP"
-                      echo "EOF"
-                  } >> "$GITHUB_OUTPUT" || echo "::warning title=Stacked unit base::Could not publish the stacked map"
+                  # Publish the whole value as one record from a validated string, and let a failed
+                  # write abort the job: a truncated or skipped output would leave the gate measuring
+                  # against the event base while still reporting success.
+                  case "$STACKED_MAP" in
+                      "["*) ;;
+                      *) echo "::error title=Stacked unit base::The stacked map is not a JSON array" >&2; exit 1 ;;
+                  esac
+                  printf 'stacked_map<<EOF\n%s\nEOF\n' "$STACKED_MAP" >> "$GITHUB_OUTPUT"
 
     mutation-diff:
         name: mutation-diff

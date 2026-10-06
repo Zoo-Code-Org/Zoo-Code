@@ -90,6 +90,12 @@ describe("mutation testing workflow", () => {
 		assert.ok(!mapJob.includes("setup-node-pnpm"))
 		assert.ok(!mapJob.includes("pnpm test:mutation-ci"))
 		assert.ok(workflow.includes("needs: stacked_map"))
+		// The job output is only real if the step it reads from carries that id; without it the map is
+		// always an empty string and the gate silently falls back to the event base.
+		assert.ok(mapJob.includes("id: read_map"))
+		// Publish as one record from a validated value, and do not continue past a failed write.
+		assert.ok(mapJob.includes("printf 'stacked_map<<EOF"))
+		assert.ok(!mapJob.includes("Could not publish the stacked map"))
 		assert.equal(workflow.match(/continue-on-error: true/g)?.length, 1)
 		assert.equal(workflow.match(/Could not write the job summary/g)?.length, 2)
 		const script = fs.readFileSync(path.join(repositoryRoot, "scripts/stryker-diff.mjs"), "utf8")
