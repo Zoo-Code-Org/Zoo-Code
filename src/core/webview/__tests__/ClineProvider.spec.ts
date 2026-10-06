@@ -6570,9 +6570,37 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 					value: 0,
 				})
 
-				// Invalid timestamps may still trigger confirmation dialog
+				const overwriteSpy = vi.spyOn(mockCline, "overwriteClineMessages")
 
-				// This is expected behavior as the system tries to process the message
+				// A negative timestamp is still a number, so the handler proceeds and asks the webview
+				// to confirm the delete. No checkpoint can exist before it, so hasCheckpoint is false.
+				await messageHandler({
+					type: "deleteMessage",
+
+					value: -1000,
+				})
+
+				expect(mockPostMessage).toHaveBeenCalledWith({
+					type: "showDeleteMessageDialog",
+					messageTs: -1000,
+					hasCheckpoint: false,
+				})
+
+				mockPostMessage.mockClear()
+
+				// 0 is falsy, so it is rejected as an invalid timestamp: an error is shown and no
+				// confirmation dialog is opened.
+				await messageHandler({
+					type: "deleteMessage",
+
+					value: 0,
+				})
+
+				expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+					expect.stringContaining("invalid_timestamp_for_deletion"),
+				)
+				expect(mockPostMessage).not.toHaveBeenCalled()
+				expect(overwriteSpy).not.toHaveBeenCalled()
 			})
 		})
 
