@@ -4538,7 +4538,9 @@ describe("ClineProvider", () => {
 			// writes the shared global mode. Reject any write to the shared "mode" key,
 			// whatever value it carries - a write of "ask" would satisfy a value-specific check.
 			expect(provider["viewLocalState"].mode).toBe("code")
-			expect(mockContext.globalState.update.mock.calls.filter((call) => call[0] === "mode")).toHaveLength(0)
+			expect(
+				vi.mocked(mockContext.globalState.update).mock.calls.filter((call) => call[0] === "mode"),
+			).toHaveLength(0)
 			expect(logSpy).toHaveBeenCalledWith(
 				"Mode 'non-existent-mode' from history no longer exists. Falling back to default mode 'code'.",
 			)
@@ -4612,7 +4614,9 @@ describe("ClineProvider", () => {
 
 			// Verify mode was preserved view-locally: no write to the shared "mode" key at all.
 			expect(provider["viewLocalState"].mode).toBe("custom-mode")
-			expect(mockContext.globalState.update.mock.calls.filter((call) => call[0] === "mode")).toHaveLength(0)
+			expect(
+				vi.mocked(mockContext.globalState.update).mock.calls.filter((call) => call[0] === "mode"),
+			).toHaveLength(0)
 			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("no longer exists"))
 
 			// Verify history item mode was not changed
@@ -4661,7 +4665,9 @@ describe("ClineProvider", () => {
 
 			// Verify mode was preserved view-locally: no write to the shared "mode" key at all.
 			expect(provider["viewLocalState"].mode).toBe("architect")
-			expect(mockContext.globalState.update.mock.calls.filter((call) => call[0] === "mode")).toHaveLength(0)
+			expect(
+				vi.mocked(mockContext.globalState.update).mock.calls.filter((call) => call[0] === "mode"),
+			).toHaveLength(0)
 
 			// Verify history item mode was not changed
 			expect(historyItem.mode).toBe("architect")
