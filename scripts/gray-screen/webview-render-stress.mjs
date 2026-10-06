@@ -28,41 +28,17 @@ import http from "node:http"
 import { createRequire } from "node:module"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { integerFlag, resolveBuildDir, resolveServedFile } from "./lib.mjs"
+import { parseStressArgs, resolveBuildDir, resolveServedFile, stressConfig } from "./lib.mjs"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const webviewDir = path.join(root, "webview-ui")
 const require = createRequire(path.join(webviewDir, "package.json"))
 const { chromium } = require("@playwright/test")
 
-const args = Object.fromEntries(
-	process.argv.slice(2).reduce((acc, cur, i, all) => {
-		if (cur.startsWith("--")) acc.push([cur.slice(2), all[i + 1]?.startsWith("--") || all[i + 1] === undefined ? "true" : all[i + 1]])
-		return acc
-	}, []),
-)
-const SCENARIOS = ["session", "command", "md"]
-const int = (name, fallback, min) => integerFlag(name, args[name] ?? fallback, min)
+const args = parseStressArgs(process.argv.slice(2))
 let cfg
 try {
-	const scenario = args["scenario"] ?? "session"
-	if (!SCENARIOS.includes(scenario)) throw new Error(`Invalid --scenario "${scenario}": use ${SCENARIOS.join(", ")}.`)
-	cfg = {
-		scenario,
-		start: int("start", 5000, 0),
-		pushes: int("pushes", 300, 0),
-		grow: int("grow", 4, 0),
-		chunks: int("chunks", 20, 1),
-		rate: int("rate", 200, 1),
-		seconds: int("seconds", 60, 1),
-		heapMb: int("heap-mb", scenario === "md" ? 4096 : 1024, 64),
-		textBytes: int("text-bytes", scenario === "md" ? 15000 : 800, 1),
-		turns: int("turns", 40, 1),
-		chunkMs: int("chunk-ms", 15, 0),
-		mermaidEvery: int("mermaid-every", 10, 0),
-		url: args["url"],
-		headed: args["headed"] === "true",
-	}
+	cfg = stressConfig(args)
 } catch (e) {
 	console.error(e.message)
 	process.exit(1)

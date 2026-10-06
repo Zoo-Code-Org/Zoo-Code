@@ -22,6 +22,48 @@ export function integerFlag(name, value, min) {
 	return number
 }
 
+/** `--flag value` pairs for the stress harness; a flag without a value (or followed by another flag) is `"true"`. */
+export function parseStressArgs(argv) {
+	const entries = []
+
+	argv.forEach((cur, i) => {
+		if (!cur.startsWith("--")) return
+		const value = argv[i + 1]
+		entries.push([cur.slice(2), value === undefined || value.startsWith("--") ? "true" : value])
+	})
+
+	return Object.fromEntries(entries)
+}
+
+export const STRESS_SCENARIOS = ["session", "command", "md"]
+
+/** Validated webview-render-stress options; throws on an unknown scenario or an invalid number. */
+export function stressConfig(args) {
+	const scenario = args["scenario"] ?? "session"
+	if (!STRESS_SCENARIOS.includes(scenario)) {
+		throw new Error(`Invalid --scenario "${scenario}": use ${STRESS_SCENARIOS.join(", ")}.`)
+	}
+
+	const int = (name, fallback, min) => integerFlag(name, args[name] ?? fallback, min)
+
+	return {
+		scenario,
+		start: int("start", 5000, 0),
+		pushes: int("pushes", 300, 0),
+		grow: int("grow", 4, 0),
+		chunks: int("chunks", 20, 1),
+		rate: int("rate", 200, 1),
+		seconds: int("seconds", 60, 1),
+		heapMb: int("heap-mb", scenario === "md" ? 4096 : 1024, 64),
+		textBytes: int("text-bytes", scenario === "md" ? 15000 : 800, 1),
+		turns: int("turns", 40, 1),
+		chunkMs: int("chunk-ms", 15, 0),
+		mermaidEvery: int("mermaid-every", 10, 0),
+		url: args["url"],
+		headed: args["headed"] === "true",
+	}
+}
+
 /** A plain relative path that is safe to interpolate into shell commands and to resolve under a workspace. */
 export function validateRelativeDir(dir) {
 	const segments = dir.split("/")

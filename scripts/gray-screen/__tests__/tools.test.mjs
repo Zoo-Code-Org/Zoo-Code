@@ -108,6 +108,19 @@ describe("analyze-session", () => {
 		assert.equal(analyze().status, 0)
 	})
 
+	it("never prints the task description from history_item.json", () => {
+		const taskDir = path.join(tmp, "tasks", "private-task")
+		fs.mkdirSync(taskDir, { recursive: true })
+		fs.writeFileSync(path.join(taskDir, "ui_messages.json"), JSON.stringify([{ ts: 1, type: "say", say: "text", text: "x" }]))
+		fs.writeFileSync(path.join(taskDir, "history_item.json"), JSON.stringify({ task: "Jane Doe api key sk-SECRET" }))
+
+		const result = analyze()
+
+		assert.equal(result.status, 0, result.stderr)
+		assert.match(result.stdout, /\[private-\]/)
+		assert.doesNotMatch(result.stdout, /Jane|SECRET/)
+	})
+
 	it("rejects a non-numeric --top", () => {
 		for (const top of ["abc", "0", "1.5"]) {
 			const result = analyze("--top", top)

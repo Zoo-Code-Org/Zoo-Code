@@ -127,9 +127,8 @@ for (const r of results) {
 	const fieldTotal = Object.values(r.fields).reduce((a, b) => a + b.bytes, 0) || 1
 	const [topKey, topVal] = Object.entries(r.fields).sort((a, b) => b[1].bytes - a[1].bytes)[0] ?? ["-", { bytes: 0 }]
 	const text = r.latin1Bytes + r.twoByteBytes || 1
-	const meta = taskMeta(r.taskId)
 	console.log(
-		`${mb(r.fileBytes).padStart(7)}  ${String(r.count).padStart(5)}  ${mb(toolBytes).padStart(9)}  ${String(editCount).padStart(9)}  ${`${topKey} ${(100 * topVal.bytes / fieldTotal).toFixed(0)}%`.padEnd(30)}  ${(100 * r.twoByteBytes / text).toFixed(0).padStart(5)}%  ${mb(r.imageBytes).padStart(5)}  ${`${r.maxRun} (${mb(r.maxRunBytes)})`.padEnd(20)}  ${(meta.task ?? "").slice(0, 28).replace(/\s+/g, " ")} [${r.taskId.slice(0, 8)}]`,
+		`${mb(r.fileBytes).padStart(7)}  ${String(r.count).padStart(5)}  ${mb(toolBytes).padStart(9)}  ${String(editCount).padStart(9)}  ${`${topKey} ${(100 * topVal.bytes / fieldTotal).toFixed(0)}%`.padEnd(30)}  ${(100 * r.twoByteBytes / text).toFixed(0).padStart(5)}%  ${mb(r.imageBytes).padStart(5)}  ${`${r.maxRun} (${mb(r.maxRunBytes)})`.padEnd(20)}  [${r.taskId.slice(0, 8)}]`,
 	)
 }
 

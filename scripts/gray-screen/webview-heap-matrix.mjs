@@ -266,10 +266,14 @@ const pageDriverAsync = async ({ toolMb, hz, seconds, batchable, twoByte }) => {
 	return { posts: received, sent, backlog: sent - received }
 }
 
-const browser = await chromium.launch({ headless: true, args: [`--js-flags=--max-old-space-size=${heapMb}`] })
 const rows = []
+let browser
+try {
+browser = await chromium.launch({ headless: true, args: [`--js-flags=--max-old-space-size=${heapMb}`] })
 for (const exp of EXPERIMENTS.filter((e) => !only || only.includes(e.name))) {
 	const page = await browser.newPage()
+	let sampler
+	try {
 	let crashed = false
 	let crashAt = null
 	page.on("crash", () => {
@@ -295,7 +299,7 @@ for (const exp of EXPERIMENTS.filter((e) => !only || only.includes(e.name))) {
 		peak = 0
 		samplingFrom = Date.now()
 	})
-	const sampler = setInterval(async () => {
+	sampler = setInterval(async () => {
 		if (crashed) return
 		try {
 			const h = await heap()
@@ -318,10 +322,15 @@ for (const exp of EXPERIMENTS.filter((e) => !only || only.includes(e.name))) {
 	}
 	rows.push({ name: exp.name, mode: exp.mode, toolMb: exp.toolMb, twoByte: !!exp.twoByte, ballastMb: exp.ballastMb ?? 0, rate: exp.mode === "both" ? `${exp.hz}t+${exp.chunkHz}c` : exp.hz, hydratePeakMB: hydratePeak, baseMB: baseMb, peakMB: peak, afterGC: floorMb, crashAfterSec: crashed ? (samplingFrom === null ? "during-hydration" : ((crashAt - samplingFrom) / 1000).toFixed(1)) : "-", to1GBsec: tTo1G ?? "-", posts: result.posts ?? "-", sent: result.sent ?? "-", backlog: result.backlog ?? "-", result: result.error ?? "ok" })
 	console.log(JSON.stringify(rows.at(-1)))
-	await page.close().catch(() => {})
+	} finally {
+		clearInterval(sampler)
+		await page.close().catch(() => {})
+	}
 }
-await browser.close()
-httpServer.close()
+} finally {
+	await browser?.close().catch(() => {})
+	httpServer.close()
+}
 
 console.log("\nname".padEnd(28) + "mode".padEnd(8) + "toolMB".padEnd(8) + "rate".padEnd(10) + "hydrPk".padEnd(8) + "baseMB".padEnd(8) + "peakMB".padEnd(9) + "afterGC".padEnd(9) + "to1GB(s)".padEnd(10) + "posts".padEnd(7) + "sent".padEnd(6) + "backlog".padEnd(9) + "crashAfter(s)".padEnd(15) + "result")
 for (const r of rows) {

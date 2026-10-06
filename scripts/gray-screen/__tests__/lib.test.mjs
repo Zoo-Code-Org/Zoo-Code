@@ -7,8 +7,10 @@ import { afterEach, beforeEach, describe, it } from "node:test"
 import {
 	integerFlag,
 	parseFlagArgs,
+	parseStressArgs,
 	resolveBuildDir,
 	resolveServedFile,
+	stressConfig,
 	validateRelativeDir,
 	writeTaskAtomically,
 } from "../lib.mjs"
@@ -39,6 +41,29 @@ describe("parseFlagArgs / integerFlag", () => {
 		for (const bad of ["0", "-3", "1.5", "abc", "", "NaN"]) {
 			assert.throws(() => integerFlag("messages", bad, 1), /--messages must be an integer >= 1/)
 		}
+	})
+})
+
+describe("stressConfig", () => {
+	const config = (...argv) => stressConfig(parseStressArgs(argv))
+
+	it("defaults to the session scenario and accepts the documented ones", () => {
+		assert.equal(config().scenario, "session")
+		assert.equal(config().heapMb, 1024)
+		assert.equal(config("--scenario", "md").heapMb, 4096)
+		assert.equal(config("--scenario", "command", "--rate", "50").rate, 50)
+		assert.equal(config("--headed").headed, true)
+	})
+
+	it("rejects an unsupported scenario", () => {
+		assert.throws(() => config("--scenario", "bogus"), /Invalid --scenario "bogus"/)
+	})
+
+	it("rejects invalid numbers, including a flag without a value", () => {
+		assert.throws(() => config("--pushes", "abc"), /--pushes must be an integer/)
+		assert.throws(() => config("--seconds", "1x"), /--seconds/)
+		assert.throws(() => config("--rate", "0"), /--rate/)
+		assert.throws(() => config("--pushes", "--headed"), /--pushes/)
 	})
 })
 
