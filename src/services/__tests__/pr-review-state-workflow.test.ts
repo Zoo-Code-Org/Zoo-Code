@@ -44,6 +44,7 @@ interface HarnessOptions {
 	addLabelsFailOnceName?: string
 	labelLookupStatus?: number
 	createLabelStatus?: number
+	createLabelFailOnceName?: string
 	listCommentsErrorStatus?: number
 	createCommentErrorStatus?: number
 	updateCommentErrorStatus?: number
@@ -249,7 +250,12 @@ async function runWorkflow(options: HarnessOptions = {}) {
 			return { data: args }
 		},
 	)
-	const createLabel = vi.fn(async (_args: unknown) => {
+	let createdOnce = false
+	const createLabel = vi.fn(async (args: unknown) => {
+		if (options.createLabelFailOnceName && (args as { name: string }).name === options.createLabelFailOnceName && !createdOnce) {
+			createdOnce = true
+			throw Object.assign(new Error("Create label failed once"), { status: 500 })
+		}
 		if (options.createLabelStatus) {
 			throw Object.assign(new Error("Create label failed"), { status: options.createLabelStatus })
 		}
@@ -715,6 +721,29 @@ describe("PR review-state workflow", () => {
 		await expect(runWorkflow({ labelLookupStatus: 404, createLabelStatus: 500 })).rejects.toThrow(
 			"Create label failed",
 		)
+	})
+
+	it("keeps reconciling when only the stacked label cannot be created", async () => {
+		const result = await runWorkflow({
+			labelLookupStatus: 404,
+			createLabelFailOnceName: "stacked",
+			labels: ["awaiting-maintainer"],
+			permissions: { maintainer: "write" },
+			reviews: [
+				{
+					login: "maintainer",
+					type: "User",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		// stacked is only a reviewer filter, so its provisioning failure is advisory while every other
+		// managed label still fails closed.
+		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("Could not create the stacked label"))
+		expect(result.setFailed).not.toHaveBeenCalled()
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
 	})
 
 	it("propagates non-404 label lookup failures", async () => {

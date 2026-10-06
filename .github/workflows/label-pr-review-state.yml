@@ -177,12 +177,24 @@ jobs:
               return pr.head?.repo?.full_name && pr.head.repo.full_name !== pr.base?.repo?.full_name;
             }
 
+            const stackedLabel = 'stacked';
             if (!isReadOnlyRun) {
               for (const label of labelDefinitions) {
                 try {
                   await github.rest.issues.getLabel({ owner, repo, name: label.name });
                 } catch (error) {
                   if (error.status !== 404) throw error;
+                  if (label.name === stackedLabel) {
+                    // stacked is only a reviewer filter, so a failed provisioning must not stop
+                    // reconciliation for every PR. Every other managed label still fails closed,
+                    // because reconciliation cannot work without it.
+                    try {
+                      await github.rest.issues.createLabel({ owner, repo, ...label });
+                    } catch (createError) {
+                      core.warning(`Could not create the ${stackedLabel} label: ${createError.message}; continuing without it`);
+                    }
+                    continue;
+                  }
                   await github.rest.issues.createLabel({ owner, repo, ...label });
                 }
               }
@@ -257,7 +269,6 @@ jobs:
             // how GitHub describes a focused stacked diff. Reviewers filter on this label to tell a
             // unit apart from a standalone PR. It is orthogonal to the review-state labels, so it is
             // reconciled separately and never removed by reconcileLabels.
-            const stackedLabel = 'stacked';
 
             async function buildOpenPrHeads() {
               const candidates = await github.paginate(github.rest.pulls.list, {
