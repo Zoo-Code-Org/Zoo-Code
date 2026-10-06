@@ -50,8 +50,16 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	const absoluteFilePath = path.resolve(filePath)
 	let releaseLock = async () => {} // Initialized to a no-op
 
+	// Resolve the publish target (the symlink referent when the path is a symlink)
+	// BEFORE the lock is taken. The lock, the merge read, the staged file and the
+	// commit rename must all key off this one canonical path: if the lock is keyed on
+	// the caller's alias while the publish lands on the referent, two writers reaching
+	// the same file through different names (the link and its referent) serialize on
+	// different locks and silently lose each other's merged updates.
+	const canonicalPath = await resolvePublishTarget(absoluteFilePath)
+
 	// For directory creation
-	const dirPath = path.dirname(absoluteFilePath)
+	const dirPath = path.dirname(canonicalPath)
 
 	// Ensure directory structure exists with improved reliability
 	try {
@@ -70,7 +78,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// remains a no-op, so the finally block in the main file operations
 	// try-catch-finally won't try to release an unacquired lock if this
 	// path is taken.
-	releaseLock = await acquireFileLock(absoluteFilePath)
+	releaseLock = await acquireFileLock(canonicalPath)
 
 	// Variables to hold the actual path of the temp file if it is created.
 	let actualTempNewFilePath: string | null = null
@@ -82,7 +90,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		if (options?.merge) {
 			let existing: unknown = null
 			try {
-				existing = JSON.parse(await fs.readFile(absoluteFilePath, "utf8"))
+				existing = JSON.parse(await fs.readFile(canonicalPath, "utf8"))
 			} catch (error: unknown) {
 				const code =
 					error && typeof error === "object" && "code" in error ? (error as { code: string }).code : undefined
@@ -93,13 +101,10 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			data = options.merge(existing, data)
 		}
 
-		// Step 1: Write data to a new temporary file via JSON streaming.
-		// Stage it beside the *resolved* target (the symlink referent when the path is
-		// a symlink): safeWriteText commits by renaming onto that referent, and a
-		// rename across filesystems would fail with EXDEV.
-		const resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
+		// Stage it beside the canonical target: safeWriteText commits by renaming onto
+		// that referent, and a rename across filesystems would fail with EXDEV.
 		actualTempNewFilePath = path.join(
-			path.dirname(resolvedTargetPath),
+			path.dirname(canonicalPath),
 			".new_" + Date.now() + "_" + Math.random().toString(36).substring(2) + ".tmp",
 		)
 
@@ -114,7 +119,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// creation mode.
 		let stagingMode: number | undefined
 		try {
-			stagingMode = (fsSync.statSync(resolvedTargetPath).mode & 0o777) | 0o600
+			stagingMode = (fsSync.statSync(canonicalPath).mode & 0o777) | 0o600
 		} catch (statError: unknown) {
 			const statCode =
 				typeof statError === "object" && statError !== null && "code" in statError
@@ -136,7 +141,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			tempPath: actualTempNewFilePath,
 		}
 
-		await safeWriteText(absoluteFilePath, "", textOptions)
+		await safeWriteText(canonicalPath, "", textOptions)
 
 		// If we reach here, the new file is successfully in place.
 		actualTempNewFilePath = null

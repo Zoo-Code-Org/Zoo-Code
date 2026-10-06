@@ -199,6 +199,49 @@ describe("safeWriteJson", () => {
 		},
 	)
 
+	test.skipIf(process.platform === "win32")(
+		"serializes a writer that reaches the file through a symlink with one that uses the referent",
+		async () => {
+			const referent = path.join(tempDir, "state.json")
+			await fsSyncActual.promises.writeFile(referent, JSON.stringify({ a: 1 }), "utf8")
+			const alias = path.join(tempDir, "alias.json")
+			await fs.symlink(referent, alias)
+
+			const merge = (existing: unknown, incoming: unknown) => ({
+				...((existing ?? {}) as Record<string, unknown>),
+				...((incoming ?? {}) as Record<string, unknown>),
+			})
+
+			// Hold the first writer's commit rename until the second writer has taken its
+			// lock and read the target. Keyed on the caller's alias the two writers take
+			// different lock files (.alias.json.lock vs state.json.lock), so the second
+			// read-modify-write starts from the pre-write state and its update is lost.
+			let proceed: () => void = () => {}
+			const proceedGate = new Promise<void>((resolve) => {
+				proceed = resolve
+			})
+			let reachedRename: () => void = () => {}
+			const reachedFirstRename = new Promise<void>((resolve) => {
+				reachedRename = resolve
+			})
+			vi.mocked(fs.rename).mockImplementationOnce(async (oldPath, newPath) => {
+				reachedRename()
+				await proceedGate
+				return fsPromisesActuals.rename!(oldPath, newPath)
+			})
+
+			const throughAlias = safeWriteJson(alias, { b: 2 }, { merge })
+			await reachedFirstRename
+			const throughReferent = safeWriteJson(referent, { c: 3 }, { merge })
+			// Let the second writer reach its lock attempt / read before the first commits.
+			await new Promise((resolve) => setTimeout(resolve, 150))
+			proceed()
+			await Promise.all([throughAlias, throughReferent])
+
+			expect(JSON.parse(await fsSyncActual.promises.readFile(referent, "utf8"))).toEqual({ a: 1, b: 2, c: 3 })
+		},
+	)
+
 	// Success Scenarios
 	// Note: Since we pre-create the file in beforeEach, this test will overwrite it.
 	// If "creation from non-existence" is critical and locking prevents it, safeWriteJson or locking strategy needs review.
