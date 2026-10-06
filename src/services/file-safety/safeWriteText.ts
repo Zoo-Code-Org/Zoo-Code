@@ -155,8 +155,9 @@ export async function safeWriteText(filePath: string, content: string, options?:
 	const tempPath = options?.tempPath ?? _tempName(_stagingDir(dirPath), "safeWriteText")
 
 	let backupPath: string | null = null
-	let releaseBackupOnSuccess = false
+	let backupCreated = false
 	let daclDumpPath: string | null = null // tracked for cleanup in finally
+	let daclSaved = false // restore step runs only when the save succeeded
 
 	try {
 		// -- Step 1: write content to staging temp file -------------------
@@ -216,7 +217,11 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				daclDumpPath = targetPath + ".acl.tmp"
 				const saved = await _saveDaclWindows(targetPath, daclDumpPath, options?.execFileRunner)
 				if (!saved) {
-					daclDumpPath = null // skip DACL handling entirely
+					// Skip the restore step, but keep daclDumpPath tracked: a failed save can
+					// still have created the dump file, and the finally block must remove it.
+					daclSaved = false
+				} else {
+					daclSaved = true
 				}
 			} catch {
 				// target does not exist or access failed — no DACL handling
@@ -225,13 +230,17 @@ export async function safeWriteText(filePath: string, content: string, options?:
 		}
 
 		try {
-			// -- Step 3 (backup:true): rename target -> backup --------------
+			// -- Step 3 (backup:true): copy the target to a backup ----------------
+			// The target must stay at its canonical path until the single atomic rename
+			// below publishes the staged file. Renaming the target away first would leave
+			// the path missing if that publish rename failed, so the backup is a copy and
+			// there is nothing to roll back.
 			if (options?.backup) {
 				try {
 					await fs.access(targetPath)
 					backupPath = _tempName(dirPath, "safeWriteText.bak")
-					await fs.rename(targetPath, backupPath)
-					releaseBackupOnSuccess = true
+					await fs.copyFile(targetPath, backupPath)
+					backupCreated = true
 				} catch (err: unknown) {
 					const code =
 						typeof err === "object" && err !== null && "code" in err
@@ -240,7 +249,6 @@ export async function safeWriteText(filePath: string, content: string, options?:
 					if (code !== "ENOENT") throw err
 				}
 			}
-
 			// -- Step 4: atomic rename temp -> target ---------------------
 			await fs.rename(tempPath, targetPath)
 
@@ -260,13 +268,13 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			}
 
 			// -- Step 5 (win32): restore DACL AFTER commit rename ---------
-			if (platform === "win32" && daclDumpPath !== null) {
+			if (platform === "win32" && daclSaved) {
 				const restoredDir = path.dirname(targetPath)
 				await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
 			}
 
 			// -- Step 6 (backup:true): delete backup on success -----------
-			if (releaseBackupOnSuccess && backupPath) {
+			if (backupCreated && backupPath) {
 				try {
 					await fs.unlink(backupPath)
 				} catch {
@@ -283,11 +291,12 @@ export async function safeWriteText(filePath: string, content: string, options?:
 		// tempPath is now the committed file; no cleanup needed.
 	} catch (originalError: unknown) {
 		// -- Rollback / cleanup on failure ----------------------------------
-		if (backupPath && releaseBackupOnSuccess) {
+		if (backupCreated && backupPath) {
+			// The target was never moved, so rollback is just removing the backup copy.
 			try {
-				await fs.rename(backupPath, targetPath)
+				await fs.unlink(backupPath)
 			} catch {
-				// rollback failed — do not mask original error
+				// cleanup failure is non-fatal
 			}
 		}
 
