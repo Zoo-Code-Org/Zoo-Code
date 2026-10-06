@@ -147,6 +147,58 @@ describe("safeWriteJson", () => {
 		},
 	)
 
+	test.skipIf(process.platform === "win32")(
+		"keeps the staged file owner-writable when the target is read-only",
+		async () => {
+			const target = path.join(tempDir, "readonly.json")
+			await fs.writeFile(target, JSON.stringify({ initial: 1 }))
+			await fs.chmod(target, 0o400)
+
+			const streamCalls = vi.mocked(fsSyncActual.createWriteStream)
+			streamCalls.mockClear()
+
+			// Mirroring the target mode verbatim would stage a 0o400 file, and safeWriteText
+			// reopens the staged file with "r+" (before applying the target mode with
+			// fchmod), so the write would fail with EACCES for an ordinary user.
+			await safeWriteJson(target, { updated: 2 })
+
+			const staged = streamCalls.mock.calls.find((call) => String(call[0]).includes(".new_"))
+			expect(staged).toBeDefined()
+			expect(Number((staged![1] as { mode?: number } | undefined)?.mode)).toBe(0o600)
+
+			const written = JSON.parse(await fs.readFile(target, "utf8"))
+			expect(written).toEqual({ updated: 2 })
+			await fs.chmod(target, 0o600)
+		},
+	)
+
+	test(
+		"surfaces a stat failure other than ENOENT instead of staging with the default mode",
+		async () => {
+			const target = path.join(tempDir, "stat-fails.json")
+			await fs.writeFile(target, JSON.stringify({ initial: 1 }))
+
+			const streamCalls = vi.mocked(fsSyncActual.createWriteStream)
+			streamCalls.mockClear()
+			const statSpy = vi.spyOn(fsSyncActual, "statSync").mockImplementation(() => {
+				throw Object.assign(new Error("EIO"), { code: "EIO" })
+			})
+
+			try {
+				await expect(safeWriteJson(target, { updated: 2 })).rejects.toThrow(/EIO/)
+				// The stat failure has to surface BEFORE anything is staged: a staged file
+				// created with the wide default mode would sit beside a restrictive target
+				// for the duration of the write. Asserting no stream call (not just no
+				// leftover) is what pins the order - safeWriteText would also reject this
+				// EIO later, which alone would pass without any staging-mode check.
+				expect(streamCalls).not.toHaveBeenCalled()
+				expect((await fs.readdir(tempDir)).filter((entry) => entry.includes(".new_"))).toEqual([])
+			} finally {
+				statSpy.mockRestore()
+			}
+		},
+	)
+
 	// Success Scenarios
 	// Note: Since we pre-create the file in beforeEach, this test will overwrite it.
 	// If "creation from non-existence" is critical and locking prevents it, safeWriteJson or locking strategy needs review.

@@ -103,15 +103,26 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			".new_" + Date.now() + "_" + Math.random().toString(36).substring(2) + ".tmp",
 		)
 
-			// The staged file holds the entire new content while it exists, so it must not
+		// The staged file holds the entire new content while it exists, so it must not
 		// be created with the process default (0o666 & ~umask, i.e. 0o644) next to a
 		// target that is deliberately narrower - a 0o600 settings file in a shared
-		// directory, for example. Match the existing target's mode; a new target keeps
-		// the ordinary default.
+		// directory, for example. Mirror the existing target's mode, but always keep the
+		// owner read/write bits: safeWriteText reopens the staged file with "r+" before it
+		// applies the target mode with fchmod, so a read-only mirror (0o400/0o444) would
+		// fail that open with EACCES. A target that does not exist yet keeps the ordinary
+		// default; any other stat failure is surfaced instead of silently widening the
+		// creation mode.
 		let stagingMode: number | undefined
 		try {
-			stagingMode = fsSync.statSync(resolvedTargetPath).mode & 0o777
-		} catch {
+			stagingMode = (fsSync.statSync(resolvedTargetPath).mode & 0o777) | 0o600
+		} catch (statError: unknown) {
+			const statCode =
+				typeof statError === "object" && statError !== null && "code" in statError
+					? (statError as { code?: string }).code
+					: undefined
+			if (statCode !== "ENOENT") {
+				throw statError
+			}
 			stagingMode = undefined
 		}
 
