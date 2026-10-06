@@ -13,6 +13,7 @@ vi.mock("fs/promises", () => ({
 	rename: vi.fn(),
 	unlink: vi.fn(),
 	realpath: vi.fn(),
+	rmdir: vi.fn(),
 }))
 
 // Full mock for fs — all sync methods are vi.fn() stubs. Stats is a bare
@@ -398,6 +399,18 @@ describe("safeWriteText", () => {
 
 			// a caller-supplied tempPath must not create the staging directory
 			expect(fsSync.mkdirSync).not.toHaveBeenCalled()
+		})
+
+		it("removes the staging directory after the commit lands", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(targetPath, "data", { platform: "linux" })
+
+			// The directory only exists to hold this write's temp file, so a successful publish
+			// must not leave it behind in the user's workspace.
+			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
 		})
 
 		it("applies the existing target's mode to a caller-supplied tempPath before publishing", async () => {

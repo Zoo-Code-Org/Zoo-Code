@@ -1540,8 +1540,8 @@ describe("ReadFileTool", () => {
 				// Verify the tool called observe exactly once with a valid token.
 				expect(observeSpy).toHaveBeenCalledTimes(1)
 				const [calledPath, calledVersion] = observeSpy.mock.calls[0]
-				expect(calledPath).toContain("existing.ts")
-				expect(calledVersion).toMatch(/^\d+:\d+:\d+:\d+:\d+$/)
+				expect(calledPath).toBe(path.resolve("/test/workspace", "existing.ts"))
+				expect(calledVersion).toBe("1:2:300:4000000000:5000000000")
 
 				// Verify get() returns the same data using the spy-captured key.
 				const obs = reg.get(calledPath)

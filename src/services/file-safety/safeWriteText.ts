@@ -152,7 +152,8 @@ export async function safeWriteText(filePath: string, content: string, options?:
 	// Create the staging directory only when we generate the temp file there;
 	// callers supplying their own tempPath (e.g. safeWriteJson) must not be left
 	// with an empty .file-safety-staging directory behind.
-	const tempPath = options?.tempPath ?? _tempName(_stagingDir(dirPath), "safeWriteText")
+	const stagingDir = options?.tempPath ? null : _stagingDir(dirPath)
+	const tempPath = options?.tempPath ?? _tempName(stagingDir ?? dirPath, "safeWriteText")
 
 	let backupPath: string | null = null
 	let releaseBackupOnSuccess = false
@@ -271,6 +272,18 @@ export async function safeWriteText(filePath: string, content: string, options?:
 					await fs.unlink(backupPath)
 				} catch {
 					// non-fatal — orphaned backup is acceptable
+				}
+			}
+
+			// The staging sub-directory only exists to hold this write's temp file. Once the
+			// commit lands it is empty clutter in the user's workspace, so remove it when nothing
+			// else is in it; a concurrent write still holding a temp file makes rmdir fail and is
+			// left alone.
+			if (stagingDir !== null) {
+				try {
+					await fs.rmdir(stagingDir)
+				} catch {
+					// best-effort: a concurrent write may still hold a temp file here
 				}
 			}
 		} finally {
