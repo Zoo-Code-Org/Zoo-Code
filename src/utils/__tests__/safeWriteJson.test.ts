@@ -162,23 +162,21 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual({ initial: "content" })
 	})
 
-	test("should handle failure when copying the target to the backup (filePath exists)", async () => {
-		const initialData = { message: "Initial content, should remain" }
-		const newData = { message: "New content, should not be written" }
+	test("does not copy the target before the commit: the rename is already atomic", async () => {
+		const initialData = { message: "Initial content" }
+		const newData = { message: "New content" }
 
-		// Overwrite the pre-created file with specific initial data
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
-		// fs.copyFile is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
-		vi.mocked(fs.copyFile).mockImplementationOnce(async () => {
-			throw new Error("Copy to backup failed")
-		})
+		await safeWriteJson(currentTestFilePath, newData)
 
-		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Copy to backup failed")
+		// A backup copy would be a full extra read+write of the old file on every
+		// persistence step, and nothing restores from it: the commit is one rename,
+		// so the target is intact until it lands.
+		expect(fs.copyFile).not.toHaveBeenCalled()
 
-		// Verify the original file still exists with initial content
 		const content = await readFileContent(currentTestFilePath)
-		expect(content).toEqual(initialData)
+		expect(content).toEqual(newData)
 	})
 
 	test("a failed publish leaves the target in place because the backup is a copy", async () => {
@@ -300,34 +298,9 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual(newData)
 	})
 
-	// Test for best-effort backup deletion (the backup lifecycle now lives in safeWriteText)
-	test("does not fail the write when backup deletion fails (orphaned backup is acceptable)", async () => {
-		const initialData = { message: "Initial" }
-		const newData = { message: "New" }
-
-		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
-
-		// fs.unlink is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
-		vi.mocked(fs.unlink).mockImplementation(async (filePath: any) => {
-			if (filePath.toString().includes("safeWriteText.bak_")) {
-				throw new Error("Backup deletion failed")
-			}
-			return fsPromisesActuals.unlink!(filePath)
-		})
-
-		// The write must still succeed: backup cleanup is best-effort inside
-		// safeWriteText and never masks the committed content.
-		await safeWriteJson(currentTestFilePath, newData)
-
-		const content = await readFileContent(currentTestFilePath)
-		expect(content).toEqual(newData)
-
-		// The orphaned backup is still on disk because its deletion failed.
-		const entries = await fs.readdir(tempDir)
-		expect(entries.some((entry) => entry.includes("safeWriteText.bak_"))).toBe(true)
-
-		vi.mocked(fs.unlink).mockRestore()
-	})
+	// Removed with the backup option: safeWriteJson no longer takes a backup copy,
+	// so there is no orphaned backup to tolerate here. The equivalent coverage of
+	// best-effort backup cleanup lives in safeWriteText.spec.ts.
 
 	// The expected error message might need to change if the mock behaves differently.
 	test("should handle failure when renaming tempNewFilePath to filePath (filePath initially exists)", async () => {

@@ -105,31 +105,27 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
 
-		// Step 2: Delegate backup + commit + rollback to safeWriteText with the
-		// pre-written temp path. backup:true keeps the old safeWriteJson
-		// semantics (target -> backup before commit, rollback on failure) and
-		// keeps the target in place until safeWriteText captures its Windows
-		// DACL (safeWriteText dumps the DACL before its own backup rename and
-		// restores it onto the directory after the commit rename).
+		// Step 2: Delegate the atomic commit to safeWriteText with the pre-written
+		// temp path. The publish is a single rename, so the target stays intact on
+		// failure and no backup copy is needed. safeWriteText still captures the
+		// Windows DACL before the commit rename and restores it afterwards.
 		const textOptions: SafeWriteTextOptions = {
 			tempPath: actualTempNewFilePath,
-			backup: true,
 		}
 
 		await safeWriteText(absoluteFilePath, "", textOptions)
 
-		// If we reach here, the new file is successfully in place and any
-		// backup has already been handled by safeWriteText.
+		// If we reach here, the new file is successfully in place.
 		actualTempNewFilePath = null
 	} catch (originalError) {
 		console.error(`Operation failed for ${absoluteFilePath}: [Original Error Caught]`, originalError)
 
 		const newFileToCleanupWithinCatch = actualTempNewFilePath
 
-		// A failed safeWriteText already rolled the backup (if any) back to
-		// the target path. Clean up the .new file if it still exists
-		// (safeWriteText also cleans up its tempPath on failure; this is a
-		// safety net in case its cleanup missed it).
+		// A failed safeWriteText leaves the target untouched (the commit rename never
+		// landed). Clean up the .new file if it still exists (safeWriteText also
+		// cleans up its tempPath on failure; this is a safety net in case its
+		// cleanup missed it).
 		if (newFileToCleanupWithinCatch) {
 			try {
 				await fs.unlink(newFileToCleanupWithinCatch)
