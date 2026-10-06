@@ -612,6 +612,80 @@ describe("writeToFileTool", () => {
 		})
 	})
 
+	describe("per-task stream state isolation", () => {
+		// A second task streaming through the same singleton while mockCline runs.
+		// Structural double, same pattern as the partial-state-cleanup spec.
+		function buildStreamingTask(taskId: string, instanceId: string) {
+			return {
+				taskId,
+				instanceId,
+				once: vi.fn(),
+				off: vi.fn(),
+				diffViewProvider: {
+					reset: vi.fn().mockResolvedValue(undefined),
+					revertChanges: vi.fn().mockResolvedValue(undefined),
+				},
+				finalizePartialToolAsk: vi.fn().mockResolvedValue(undefined),
+			}
+		}
+
+		it("leaves another task's stream state intact when execute() completes", async () => {
+			const other = buildStreamingTask("task-2", "instance-2")
+			const otherState = writeToFileTool["getTaskPartialStreamState"](other as never)
+			otherState.streamFailed = true
+			otherState.streamError = new Error("other task stream failure")
+
+			await executeWriteFileTool({})
+
+			// The other task is still streaming: its failure state must survive, or its
+			// next delta re-opens the diff view and spawns a duplicate partial ask.
+			const retained = writeToFileTool["taskPartialStreamState"].get("task-2.instance-2")
+			expect(retained).toBeDefined()
+			expect(retained?.streamFailed).toBe(true)
+			expect(retained?.streamError?.message).toBe("other task stream failure")
+			expect(other.off).not.toHaveBeenCalled()
+		})
+
+		it("finalizes the partial ask when the write itself fails", async () => {
+			mockCline.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
+
+			await executeWriteFileTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			// The diff-view branch opened a partial ask for this write; without the
+			// finalize the spinner and Save/Reject stay live after the failure.
+			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(expectedPartialToolMessage)
+		})
+
+		it("releases this task's stream state when the completed block fails to parse", async () => {
+			// A streaming delta had failed, so the guard is set; the final block then
+			// arrives without nativeArgs, so execute() never runs.
+			const state = writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			state.streamFailed = true
+			const other = buildStreamingTask("task-2", "instance-2")
+			writeToFileTool["getTaskPartialStreamState"](other as never).streamFailed = true
+
+			const block = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: {},
+				partial: false,
+			} as ToolUse<"write_to_file">
+			await writeToFileTool.handle(mockCline, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockHandleError).toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
+			// Otherwise the retained streamFailed suppresses the diff preview of every
+			// later write_to_file in this task.
+			expect(writeToFileTool["taskPartialStreamState"].has(`${mockCline.taskId}.${mockCline.instanceId}`)).toBe(false)
+			// ...and the cleanup must stay scoped: the other task is still streaming.
+			expect(writeToFileTool["taskPartialStreamState"].get("task-2.instance-2")?.streamFailed).toBe(true)
+		})
+	})
+
 	describe("user interaction", () => {
 		it("reverts changes when user rejects approval", async () => {
 			mockAskApproval.mockResolvedValue(false)

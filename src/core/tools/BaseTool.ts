@@ -99,6 +99,13 @@ export abstract class BaseTool<TName extends ToolName> {
 	}
 
 	/**
+	 * Release the state this tool holds for one task on paths that never reach
+	 * execute(). No-op for tools without per-task state; the scope is a single task
+	 * because tool instances are singletons shared by concurrent tasks.
+	 */
+	protected clearTaskStreamState(_task: Task): void {}
+
+	/**
 	 * Main entry point for tool execution.
 	 *
 	 * Handles the complete flow:
@@ -158,6 +165,12 @@ export abstract class BaseTool<TName extends ToolName> {
 			console.error(`Error parsing parameters:`, error)
 			const errorMessage = `Failed to parse ${this.name} parameters: ${error instanceof Error ? error.message : String(error)}`
 			await callbacks.handleError(`parsing ${this.name} args`, new Error(errorMessage))
+			// execute() never runs on this path, so a tool that keeps per-task streaming
+			// state must still release THIS task's state; a completed block that failed
+			// finalization would otherwise leave a failure flag suppressing later previews
+			// for the same task. Per-task only: a global teardown would clobber another
+			// task that is still streaming through this singleton.
+			this.clearTaskStreamState(task)
 			// Note: handleError already emits a tool_result via formatResponse.toolError in the caller.
 			// Do NOT call pushToolResult here to avoid duplicate tool_result payloads.
 			return
