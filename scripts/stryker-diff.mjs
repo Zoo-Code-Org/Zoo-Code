@@ -290,6 +290,9 @@ export function resolveStackedUnitBase(repoRoot, eventBaseSha, prHeadSha, openPu
 	validateSha(eventBaseSha, "base SHA")
 	validateSha(prHeadSha, "pull request head SHA")
 	const parents = git(repoRoot, ["rev-list", "--parents", "-n", "1", prHeadSha]).trim().split(/\s+/).slice(1)
+	// A unit is one commit on top of its parent. A head with more than one parent is a merge on the
+	// unit branch itself, so its diff is not a single unit delta and the event base is kept even when
+	// one of those parents is an open pull request head.
 	if (parents.length !== 1) return { baseSha: eventBaseSha, stackedOn: null }
 	const parentSha = parents[0].toLowerCase()
 	const parent = openPullRequests.find((pr) => String(pr.headSha).toLowerCase() === parentSha)

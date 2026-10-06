@@ -387,6 +387,20 @@ describe("stacked unit base resolution", () => {
 			const sameHead = resolveCiInvocation(repository, advancedBase, mergeSha, mergeSha, [])
 			assert.equal(sameHead.diffHead, mergeSha)
 			assert.equal(sameHead.stackedOn, null)
+
+			// A unit branch that is itself a merge commit is not a single unit delta, so the fallback
+			// stays the event base even when one of its parents is an open pull request head.
+			run("checkout", "--quiet", "-b", "unit-3", advancedBase)
+			write("packages/core/src/unit3.ts", "export const unit3 = () => 3\n")
+			run("add", ".")
+			run("commit", "--quiet", "-m", "unit 3")
+			run("merge", "--no-ff", "--quiet", "-m", "unit merge", parentSha)
+			const multiParentHead = run("rev-parse", "HEAD")
+			assert.equal(run("rev-list", "--parents", "-n", "1", multiParentHead).trim().split(/\s+/).slice(1).length, 2)
+			const multi = resolveStackedUnitBase(repository, advancedBase, multiParentHead, [{ number: 1, headSha: parentSha }])
+			assert.equal(multi.baseSha, advancedBase)
+			assert.equal(multi.stackedOn, null)
+			assert.equal(resolveCiInvocation(repository, advancedBase, multiParentHead, multiParentHead, [{ number: 1, headSha: parentSha }]).stackedOn, null)
 		} finally {
 			fs.rmSync(repository, { recursive: true, force: true })
 		}
