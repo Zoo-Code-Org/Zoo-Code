@@ -1270,9 +1270,7 @@ describe("ChatTextArea", () => {
 
 			mockPostMessage.mockClear()
 			fireEvent.click(trigger)
-			expect(mockPostMessage).not.toHaveBeenCalledWith(
-				expect.objectContaining({ type: "upsertApiConfiguration" }),
-			)
+			expect(mockPostMessage).not.toHaveBeenCalled()
 		})
 
 		it("posts only the model patch for the current profile and never a full apiConfiguration", () => {

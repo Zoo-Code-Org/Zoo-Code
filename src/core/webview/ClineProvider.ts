@@ -57,6 +57,7 @@ import {
 	getModelId,
 	isRetiredProvider,
 	providerIdentifiers,
+	PROVIDER_SETTINGS_KEYS,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
@@ -1876,49 +1877,9 @@ export class ClineProvider
 		activate: boolean = true,
 	): Promise<string | undefined> {
 		try {
-			return await this.enqueueProviderProfileMutation(async (signal) => {
-				// TODO: Do we need to be calling `activateProfile`? It's not
-				// clear to me what the source of truth should be; in some cases
-				// we rely on the `ContextProxy`'s data store and in other cases
-				// we rely on the `ProviderSettingsManager`'s data store. It might
-				// be simpler to unify these two.
-				const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
-
-				if (signal.aborted) return id
-
-				if (activate) {
-					const { mode } = await this.getState()
-
-					// These promises do the following:
-					// 1. Adds or updates the list of provider profiles.
-					// 2. Sets the current provider profile.
-					// 3. Sets the current mode's provider profile.
-					// 4. Copies the provider settings to the context.
-					//
-					// Note: 1, 2, and 4 can be done in one `ContextProxy` call:
-					// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
-					// We should probably switch to that and verify that it works.
-					// I left the original implementation in just to be safe.
-					await Promise.all([
-						this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
-						this.updateGlobalState("currentApiConfigName", name),
-						this.providerSettingsManager.setModeConfig(mode, id),
-						this.contextProxy.setProviderSettings(providerSettings),
-					])
-
-					// Change the provider for the current task.
-					// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
-					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
-
-					// Keep the current task's sticky provider profile in sync with the newly-activated profile.
-					await this.persistStickyProviderProfileToCurrentTask(name)
-				} else {
-					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
-				}
-
-				await this.postStateToWebview()
-				return id
-			})
+			return await this.enqueueProviderProfileMutation((signal) =>
+				this.upsertProviderProfileUnlocked(name, providerSettings, activate, signal),
+			)
 		} catch (error) {
 			this.log(
 				`Error create new api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
@@ -1926,6 +1887,108 @@ export class ClineProvider
 
 			vscode.window.showErrorMessage(t("common:errors.create_api_config"))
 			return undefined
+		}
+	}
+
+	private async upsertProviderProfileUnlocked(
+		name: string,
+		providerSettings: ProviderSettings,
+		activate: boolean,
+		signal: AbortSignal,
+	): Promise<string> {
+		// TODO: Do we need to be calling `activateProfile`? It's not
+		// clear to me what the source of truth should be; in some cases
+		// we rely on the `ContextProxy`'s data store and in other cases
+		// we rely on the `ProviderSettingsManager`'s data store. It might
+		// be simpler to unify these two.
+		const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
+
+		if (signal.aborted) return id
+
+		if (activate) {
+			const { mode } = await this.getState()
+
+			// These promises do the following:
+			// 1. Adds or updates the list of provider profiles.
+			// 2. Sets the current provider profile.
+			// 3. Sets the current mode's provider profile.
+			// 4. Copies the provider settings to the context.
+			//
+			// Note: 1, 2, and 4 can be done in one `ContextProxy` call:
+			// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
+			// We should probably switch to that and verify that it works.
+			// I left the original implementation in just to be safe.
+			await Promise.all([
+				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+				this.updateGlobalState("currentApiConfigName", name),
+				this.providerSettingsManager.setModeConfig(mode, id),
+				this.contextProxy.setProviderSettings(providerSettings),
+			])
+
+			// Change the provider for the current task.
+			// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
+			this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+
+			// Keep the current task's sticky provider profile in sync with the newly-activated profile.
+			await this.persistStickyProviderProfileToCurrentTask(name)
+		} else {
+			await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
+		}
+
+		await this.postStateToWebview()
+		return id
+	}
+
+	/**
+	 * Applies a model selection to a stored profile. Everything runs inside one queued
+	 * mutation so a selection made against a profile that has since been switched away
+	 * from is dropped instead of saved and reactivated. A `null` patch value clears the field.
+	 */
+	async updateProfileModel(name: string, expectedProvider: string, patch: object): Promise<void> {
+		try {
+			await this.enqueueProviderProfileMutation(async (signal) => {
+				// Mirrors the profile name the webview is shown (see getStateToPostToWebview).
+				const task = this.getCurrentTask()
+				const { currentApiConfigName } = await this.getState()
+				const visibleProfileName = task ? task.taskApiConfigName : currentApiConfigName
+
+				if (visibleProfileName !== name) {
+					this.log(`Ignoring model update for profile '${name}': active profile is '${visibleProfileName}'`)
+					return
+				}
+
+				const { name: _name, id, ...stored } = await this.providerSettingsManager.getProfile({ name })
+
+				if (signal.aborted) return
+
+				// A profile without an explicit provider is treated as OpenRouter, matching the chat ModelSelector.
+				const storedProvider = stored.apiProvider ?? providerIdentifiers.openrouter
+
+				if (storedProvider !== expectedProvider) {
+					this.log(
+						`Ignoring model update for profile '${name}': provider is '${storedProvider}', expected '${expectedProvider}'`,
+					)
+					return
+				}
+
+				const allowedKeys: ReadonlySet<string> = new Set(PROVIDER_SETTINGS_KEYS)
+				const merged: Record<string, unknown> = { ...stored, id }
+				for (const [key, value] of Object.entries(patch)) {
+					// The provider is never patchable, otherwise the expectedProvider guard could be bypassed.
+					if (key === "apiProvider" || !allowedKeys.has(key)) {
+						continue
+					}
+					if (value !== null && typeof value !== "string" && typeof value !== "number") {
+						continue
+					}
+					merged[key] = value === null ? undefined : value
+				}
+
+				await this.upsertProviderProfileUnlocked(name, merged as ProviderSettings, true, signal)
+			})
+		} catch (error) {
+			this.log(`Error updating profile model: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`)
+			vscode.window.showErrorMessage(t("common:errors.save_api_config"))
 		}
 	}
 

@@ -30,8 +30,6 @@ import {
 	RouterModelsMessageType,
 	VsCodeLmModelsMessageType,
 	isTelemetryOptedIn,
-	PROVIDER_SETTINGS_KEYS,
-	type ProviderSettings,
 } from "@roo-code/types"
 import { customToolRegistry } from "@roo-code/core"
 import { CloudService } from "@roo-code/cloud"
@@ -2288,47 +2286,13 @@ export const webviewMessageHandler = async (
 		case "updateProfileModel": {
 			// values: { expectedProvider, patch }. A `null` patch value clears the field, since
 			// `undefined` is dropped when the webview serializes the message.
-			const expectedProvider = message.values?.expectedProvider
+			const expectedProvider: unknown = message.values?.expectedProvider
 			const patch: unknown = message.values?.patch
-			if (!message.text || !expectedProvider || typeof patch !== "object" || patch === null) {
+			if (!message.text || typeof expectedProvider !== "string" || typeof patch !== "object" || patch === null) {
 				break
 			}
 
-			try {
-				const { name, id, ...stored } = await provider.providerSettingsManager.getProfile({
-					name: message.text,
-				})
-
-				// A profile without an explicit provider is treated as OpenRouter, matching the chat ModelSelector.
-				const storedProvider = stored.apiProvider ?? providerIdentifiers.openrouter
-
-				if (storedProvider !== expectedProvider) {
-					provider.log(
-						`Ignoring model update for profile '${name}': provider is '${storedProvider}', expected '${expectedProvider}'`,
-					)
-					break
-				}
-
-				const allowedKeys: ReadonlySet<string> = new Set(PROVIDER_SETTINGS_KEYS)
-				const merged: Record<string, unknown> = { ...stored, id }
-				for (const [key, value] of Object.entries(patch)) {
-					// The provider is never patchable, otherwise the expectedProvider guard could be bypassed.
-					if (key === "apiProvider" || !allowedKeys.has(key)) {
-						continue
-					}
-					if (value !== null && typeof value !== "string" && typeof value !== "number") {
-						continue
-					}
-					merged[key] = value === null ? undefined : value
-				}
-
-				await provider.upsertProviderProfile(name, merged as ProviderSettings)
-			} catch (error) {
-				provider.log(
-					`Error updating profile model: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
-				)
-				vscode.window.showErrorMessage(t("common:errors.save_api_config"))
-			}
+			await provider.updateProfileModel(message.text, expectedProvider, patch)
 			break
 		}
 		case "renameApiConfiguration":

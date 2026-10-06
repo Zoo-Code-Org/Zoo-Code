@@ -3,7 +3,7 @@
 import * as vscode from "vscode"
 
 import { TelemetryService } from "@roo-code/telemetry"
-import { getModelId, RooCodeEventName } from "@roo-code/types"
+import { getModelId, RooCodeEventName, type ProviderSettings } from "@roo-code/types"
 
 import { ContextProxy } from "../../config/ContextProxy"
 import type { Mode } from "../../../shared/modes"
@@ -128,6 +128,11 @@ vi.mock("../../task/Task", () => ({
 		})
 		return mockTask
 	}),
+}))
+
+vi.mock("../../../i18n", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../../i18n")>()),
+	t: (key: string) => key,
 }))
 
 vi.mock("@roo-code/cloud", () => ({
@@ -416,6 +421,147 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 			// Should not call buildApiHandler when there's no task
 			expect(buildApiHandlerMock).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("updateProfileModel", () => {
+		const manager = () => {
+			const settingsManager = provider["providerSettingsManager"]
+			return {
+				getProfile: vi.mocked(settingsManager.getProfile),
+				saveConfig: vi.mocked(settingsManager.saveConfig),
+				activateProfile: vi.mocked(settingsManager.activateProfile),
+			}
+		}
+
+		beforeEach(async () => {
+			await provider.contextProxy.setValue("currentApiConfigName", "test-config")
+		})
+
+		const mockStoredProfile = (profile: ProviderSettings & { name?: string }) =>
+			manager().getProfile.mockResolvedValue({ name: "test-config", id: "test-id", ...profile })
+
+		it("merges the patch onto the stored profile, clearing null fields", async () => {
+			mockStoredProfile({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+				openRouterApiKey: "stored-key",
+				reasoningEffort: "high",
+			})
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "x/y",
+				reasoningEffort: null,
+			})
+
+			expect(manager().getProfile).toHaveBeenCalledWith({ name: "test-config" })
+			expect(manager().saveConfig).toHaveBeenCalledTimes(1)
+			expect(manager().saveConfig).toHaveBeenCalledWith("test-config", {
+				id: "test-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "x/y",
+				openRouterApiKey: "stored-key",
+				reasoningEffort: undefined,
+			})
+		})
+
+		it("rejects the update when the stored provider differs from the expected provider", async () => {
+			await provider.updateProfileModel("test-config", providerIdentifiers.anthropic, { apiModelId: "x" })
+
+			expect(manager().saveConfig).not.toHaveBeenCalled()
+		})
+
+		it("treats a profile without apiProvider as OpenRouter", async () => {
+			mockStoredProfile({})
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "x/y",
+			})
+
+			expect(manager().saveConfig).toHaveBeenCalledWith(
+				"test-config",
+				expect.objectContaining({ openRouterModelId: "x/y" }),
+			)
+		})
+
+		it("ignores non-setting keys, apiProvider, own __proto__ keys and non-primitive values", async () => {
+			mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterApiKey: "stored-key" })
+			const patch = JSON.parse(
+				'{"openRouterModelId":"x/y","notASetting":"evil","apiProvider":"anthropic","__proto__":{"polluted":true},"openRouterApiKey":{"nested":1}}',
+			)
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, patch)
+
+			const saved = manager().saveConfig.mock.calls[0][1]
+			expect(saved).not.toHaveProperty("notASetting")
+			expect(saved).not.toHaveProperty("polluted")
+			expect(Object.getPrototypeOf(saved)).toBe(Object.prototype)
+			expect(saved.apiProvider).toBe(providerIdentifiers.openrouter)
+			expect(saved.openRouterApiKey).toBe("stored-key")
+			expect(saved.openRouterModelId).toBe("x/y")
+		})
+
+		it("drops an update for a profile that is not the visible profile without reading or saving it", async () => {
+			await provider.updateProfileModel("other-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "x/y",
+			})
+
+			expect(manager().getProfile).not.toHaveBeenCalled()
+			expect(manager().saveConfig).not.toHaveBeenCalled()
+		})
+
+		it("drops a stale update that was queued behind a profile switch", async () => {
+			manager().activateProfile.mockResolvedValue({
+				name: "other-config",
+				id: "other-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "other/model",
+			})
+
+			// The webview still shows "test-config" when the model is picked, before the switch lands.
+			const switching = provider.activateProviderProfile({ name: "other-config" })
+			const updating = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "x/y",
+			})
+			await Promise.all([switching, updating])
+
+			expect(manager().saveConfig).not.toHaveBeenCalled()
+			expect(provider.contextProxy.getValues().currentApiConfigName).toBe("other-config")
+		})
+
+		it("uses the task's sticky profile name as the visible profile when a task is active", async () => {
+			const mockTask = new Task({ ...defaultTaskOptions })
+			Object.defineProperty(mockTask, "taskApiConfigName", { value: "sticky-config" })
+			await provider.addClineToStack(mockTask)
+			mockStoredProfile({ name: "sticky-config", apiProvider: providerIdentifiers.openrouter })
+
+			await provider.updateProfileModel("sticky-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "x/y",
+			})
+			expect(manager().saveConfig).toHaveBeenCalledWith(
+				"sticky-config",
+				expect.objectContaining({ openRouterModelId: "x/y" }),
+			)
+
+			manager().saveConfig.mockClear()
+			// The global profile name is not what the webview is shown while a task is active.
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "x/z",
+			})
+			expect(manager().saveConfig).not.toHaveBeenCalled()
+		})
+
+		it("does not save and does not throw when the profile cannot be loaded", async () => {
+			manager().getProfile.mockRejectedValue(new Error("not found"))
+
+			await expect(
+				provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+					openRouterModelId: "x/y",
+				}),
+			).resolves.toBeUndefined()
+
+			expect(manager().saveConfig).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.save_api_config")
 		})
 	})
 
