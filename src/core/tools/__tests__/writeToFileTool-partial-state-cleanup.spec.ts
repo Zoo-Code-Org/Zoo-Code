@@ -122,6 +122,55 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 		errorSpy.mockRestore()
 	})
 
+	it("reports the rollback hazard AND the retained streaming error, and returns true", async () => {
+		const task = buildTask("revert-fails-with-stream-error", "inst-7")
+		const t = task as unknown as CleanupTask
+		t.diffViewProvider.revertChanges = vi.fn().mockRejectedValue(new Error("revert failed"))
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		const state = writeToFileTool["getTaskPartialStreamState"](task)
+		const streamError = new Error("filesystem failure while streaming")
+		state.streamFailed = true
+		state.streamError = streamError
+		const handleError = vi.fn().mockResolvedValue(undefined)
+
+		const handled = await writeToFileTool["onParameterParseFailure"](
+			task,
+			{ handleError } as unknown as Parameters<typeof writeToFileTool["onParameterParseFailure"]>[1],
+			new Error("parameter parse failed"),
+		)
+
+		// Both reports happen: the rollback hazard and the error the user can act on.
+		expect(t.say).toHaveBeenCalledWith("error", expect.stringContaining("unapproved"))
+		expect(handleError).toHaveBeenCalledWith("writing file", streamError)
+		expect(handled).toBe(true)
+		errorSpy.mockRestore()
+	})
+
+	it("still reports the streaming error when the rollback warning itself fails", async () => {
+		const task = buildTask("rollback-warning-fails", "inst-8")
+		const t = task as unknown as CleanupTask
+		t.diffViewProvider.revertChanges = vi.fn().mockRejectedValue(new Error("revert failed"))
+		t.say = vi.fn().mockRejectedValue(new Error("say failed"))
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		const state = writeToFileTool["getTaskPartialStreamState"](task)
+		const streamError = new Error("filesystem failure while streaming")
+		state.streamFailed = true
+		state.streamError = streamError
+		const handleError = vi.fn().mockResolvedValue(undefined)
+
+		const handled = await writeToFileTool["onParameterParseFailure"](
+			task,
+			{ handleError } as unknown as Parameters<typeof writeToFileTool["onParameterParseFailure"]>[1],
+			new Error("parameter parse failed"),
+		)
+
+		// A failing report must not abort the teardown: the streaming error still lands.
+		expect(errorSpy).toHaveBeenCalledWith("Error reporting write_to_file rollback failure:", expect.any(Error))
+		expect(handleError).toHaveBeenCalledWith("writing file", streamError)
+		expect(handled).toBe(true)
+		errorSpy.mockRestore()
+	})
+
 	it("logs and continues when finalizing the open partial ask fails", async () => {
 		const task = buildTask("finalize-fails", "inst-5")
 		const t = task as unknown as CleanupTask
