@@ -2550,20 +2550,28 @@ export class ClineProvider
 	}
 
 	/**
-	 * Refresh the view-local apiConfiguration buffer of the other live views
-	 * pinned to the given profile. An upsert/activation rewrites the profile's
-	 * settings in the shared store and the store-backed manager, but a view
-	 * whose buffer loaded the profile earlier keeps shadowing the stale
-	 * settings in its getState() until its own next mutation. The originating
-	 * view refreshes its buffer at the mutation site itself.
+	 * Refresh the view-local apiConfiguration buffer of the other live views after a
+	 * profile upsert/activation. Both cases come from the same shape: the shared store
+	 * holds exactly one "current profile" settings blob, while each view pins its own
+	 * profile name.
+	 *
+	 * - Pinned to THIS profile: the upsert rewrote the profile's settings in the
+	 *   store-backed manager, so a buffer that loaded them earlier keeps shadowing the
+	 *   stale settings in getState(). Push the new settings into it.
+	 * - Pinned to ANOTHER profile: activation wrote the activated profile's settings into
+	 *   the shared blob, and this refresh does not touch that other profile. Without a
+	 *   reload, that view's getState() reports its pinned profile's NAME next to the
+	 *   activated profile's SETTINGS. Reload the pinned profile from the manager so the
+	 *   name and the settings stay consistent.
+	 *
+	 * A view with no pin follows the shared store and needs nothing. The originating view
+	 * refreshes its own buffer at the mutation site.
 	 */
 	private async refreshViewLocalStateForUpdatedProfile(
 		name: string,
 		providerSettings: ProviderSettings,
 	): Promise<void> {
-		const affected = ClineProvider.getAllInstances().filter(
-			(instance) => instance !== this && instance.pinnedProfileName === name,
-		)
+		const affected = ClineProvider.getAllInstances().filter((instance) => instance !== this)
 
 		if (affected.length === 0) {
 			return
@@ -2571,8 +2579,28 @@ export class ClineProvider
 
 		await Promise.all(
 			affected.map(async (instance) => {
+				const pinned = instance.pinnedProfileName
+
+				if (pinned === undefined) {
+					return
+				}
+
+				let settings: ProviderSettings = providerSettings
+
+				if (pinned !== name) {
+					try {
+						settings = await this.providerSettingsManager.getProfile({ name: pinned })
+					} catch (error) {
+						// The pin can name a profile the manager no longer holds (deleted out of band).
+						// Leaving that view's buffer alone is no worse than before this fix; the
+						// deletion re-pin path owns recovery for a removed profile.
+						console.error(`Failed to reload pinned profile "${pinned}" for a sibling view:`, error)
+						return
+					}
+				}
+
 				// Direct private access: compile-time safe across sibling instances.
-				await instance._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
+				await instance._saveViewLocalStateFromMutation({ apiConfiguration: settings })
 				await instance.postStateToWebview()
 			}),
 		)

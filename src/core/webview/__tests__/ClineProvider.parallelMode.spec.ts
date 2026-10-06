@@ -719,6 +719,91 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 	})
 
+	describe("sibling view consistency after a profile activation", () => {
+		const makeProvider = () =>
+			new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+
+		// One pair for the whole block: each ClineProvider spins up background managers, and
+		// creating a pair per test leaves their console output in flight when the worker tears
+		// the environment down (vitest reports it as an unhandled rejection).
+		let viewA: ClineProvider
+		let viewB: ClineProvider
+		let consoleError: ReturnType<typeof vi.spyOn>
+		let getProfile: ReturnType<typeof vi.spyOn>
+
+		beforeAll(() => {
+			consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+			viewA = makeProvider()
+			viewB = makeProvider()
+		})
+
+		afterAll(async () => {
+			await viewA.dispose()
+			await viewB.dispose()
+			consoleError.mockRestore()
+		})
+
+		beforeEach(() => {
+			viewB["viewLocalState"] = {}
+			getProfile = vi.spyOn(viewA.providerSettingsManager, "getProfile").mockResolvedValue(pinnedElsewhere)
+		})
+
+		afterEach(() => {
+			getProfile.mockRestore()
+		})
+
+		type ProfileFixture = ProviderSettingsWithId & { name: string }
+
+		const activated: ProfileFixture = {
+			id: "profile-a-id",
+			name: "profile-a",
+			apiProvider: providerIdentifiers.openai,
+			apiKey: "activated-key",
+		}
+
+		const pinnedElsewhere: ProfileFixture = {
+			id: "profile-b-id",
+			name: "profile-b",
+			apiProvider: providerIdentifiers.anthropic,
+			apiKey: "pinned-b-key",
+		}
+
+		it("reloads the pinned profile for a view pinned to a different profile", async () => {
+			// Exactly the buffer B is left in after activating "profile-b": the activation pins the
+			// name and clears the apiConfiguration overlay, so getState() reads settings from the
+			// shared store.
+			viewB["viewLocalState"].currentApiConfigName = "profile-b"
+
+			const getProfile = vi
+				.spyOn(viewA.providerSettingsManager, "getProfile")
+				.mockResolvedValue(pinnedElsewhere)
+
+			await viewA["refreshViewLocalStateForUpdatedProfile"]("profile-a", activated)
+
+			// Without the reload, B reports the name "profile-b" next to profile-a's settings.
+			expect(getProfile).toHaveBeenCalledWith({ name: "profile-b" })
+			expect(viewB["viewLocalState"].apiConfiguration).toEqual(pinnedElsewhere)
+			expect(viewB["viewLocalState"].currentApiConfigName).toBe("profile-b")
+		})
+
+		it("pushes the updated settings into a view pinned to the activated profile", async () => {
+			viewB["viewLocalState"].currentApiConfigName = "profile-a"
+
+			await viewA["refreshViewLocalStateForUpdatedProfile"]("profile-a", activated)
+
+			// The activated profile's settings are already in hand; no reload needed.
+			expect(getProfile).not.toHaveBeenCalled()
+			expect(viewB["viewLocalState"].apiConfiguration).toEqual(activated)
+		})
+
+		it("leaves an unpinned view following the shared store", async () => {
+			await viewA["refreshViewLocalStateForUpdatedProfile"]("profile-a", activated)
+
+			expect(getProfile).not.toHaveBeenCalled()
+			expect(viewB["viewLocalState"].apiConfiguration).toBeUndefined()
+		})
+	})
+
 	describe("durable editor view state retention (#1065)", () => {
 		it("should preserve persisted viewStates entry when an editor provider is disposed during teardown", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
