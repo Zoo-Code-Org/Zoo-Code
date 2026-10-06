@@ -47,11 +47,11 @@ O Zoo Code aproveita a base criada pelo Roo Code e continua ampliando-a com:
 - **Workflows de terminal e edição mais confiáveis** — correções para encerramento prematuro do terminal, race conditions no estado das tarefas, gerenciamento de contexto, edição de diff e uso de ferramentas específicas de cada provider.
 - **Mais controle sobre seu workspace** — gerenciamento de regras, restrições de MCP por modo, controles de caminhos multi-root, opções de reasoning dos modelos e ações para revisar alterações ao concluir uma tarefa.
 
-## Novidades na v3.80.0
+## Novidades na v3.86.0
 
-- **Acesso a arquivos mais seguro** — use listas de permissões separadas para leitura e gravação a fim de controlar quais caminhos o Zoo Code pode acessar.
-- **Mais opções de modelos** — o GLM 5.3 agora está disponível pela Z.ai, e o Gemini 3.5 Flash Lite e o Gemini 3.1 Flash Lite foram adicionados ao provider Gemini.
-- **Workflows cotidianos mais confiáveis** — as melhorias reforçam a recuperação e o histórico de tarefas, o streaming e o uso de ferramentas dos providers, a importação de configurações e a legibilidade em diferentes temas da IDE.
+- ✨ **Suporte a novos modelos:** Use GPT-6.1 Sol, aproveite o limite de saída corrigido do Claude Opus 5.5 e selecione DeepSeek V4.1 Flash no OpenCode Go.
+- 🧭 **Cancelamentos e interrupções de tarefas confiáveis:** Preserve o primeiro motivo do cancelamento, redefina o estado de cancelamento do stream a cada requisição e impeça tarefas interrompidas de executar novamente subtarefas rejeitadas.
+- 🛠️ **Ferramentas, prompts e streaming da interface confiáveis:** Mantenha intactos os argumentos das ferramentas recebidos por streaming, aplique a política de ferramentas MCP, evite números de linha inventados e torne as atualizações do chat mais fluidas.
 
 ## O que o Zoo Code pode fazer por VOCÊ?
 

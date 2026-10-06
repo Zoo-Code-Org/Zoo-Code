@@ -46,11 +46,11 @@ Zoo Code phát triển trên nền tảng do Roo Code tạo ra và tiếp tục 
 - **Workflow terminal và chỉnh sửa đáng tin cậy hơn** — sửa lỗi terminal hoàn tất quá sớm, xung đột trạng thái tác vụ, quản lý ngữ cảnh, chỉnh sửa diff và sử dụng công cụ riêng của từng provider.
 - **Kiểm soát workspace tốt hơn** — quản lý quy tắc, giới hạn MCP theo từng chế độ, kiểm soát đường dẫn multi-root, tùy chọn reasoning của model và thao tác xem lại thay đổi khi hoàn tất.
 
-## Điểm mới trong v3.80.0
+## Điểm mới trong v3.86.0
 
-- **Truy cập file an toàn hơn** — sử dụng allowlist Đọc và Ghi riêng biệt để kiểm soát các path mà Zoo Code có thể truy cập.
-- **Nhiều lựa chọn model hơn** — GLM 5.3 hiện có qua Z.ai, đồng thời Gemini 3.5 Flash Lite và Gemini 3.1 Flash Lite đã được thêm vào provider Gemini.
-- **Workflow hằng ngày đáng tin cậy hơn** — các cải tiến tăng cường khôi phục và lịch sử task, streaming và sử dụng tool của provider, nhập cài đặt và khả năng đọc trên các theme IDE.
+- ✨ **Hỗ trợ model mới:** Dùng GPT-6.1 Sol, tận dụng giới hạn đầu ra đã sửa của Claude Opus 5.5 và chọn DeepSeek V4.1 Flash trên OpenCode Go.
+- 🧭 **Hủy và gián đoạn task đáng tin cậy:** Giữ nguyên lý do hủy đầu tiên, đặt lại trạng thái hủy stream cho từng request và ngăn task bị gián đoạn chạy lại các subtask đã bị từ chối.
+- 🛠️ **Tool, Prompt và truyền luồng UI đáng tin cậy:** Giữ nguyên vẹn tham số tool được truyền theo luồng, thực thi chính sách tool MCP, ngăn số dòng bịa đặt và giúp cập nhật chat mượt mà hơn.
 
 ## Zoo Code có thể làm gì cho BẠN?
 

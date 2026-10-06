@@ -344,9 +344,9 @@
 		"support": "Soutiens Zoo Code en nous donnant une étoile sur <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Nouveautés :",
-			"highlight1": "Accès aux fichiers plus sûr — utilise des listes d'autorisation distinctes pour la lecture et l'écriture afin de contrôler les chemins auxquels Zoo Code peut accéder.",
-			"highlight2": "Plus de modèles au choix — GLM 5.3 est désormais disponible via Z.ai, et Gemini 3.5 Flash Lite ainsi que Gemini 3.1 Flash Lite ont été ajoutés au provider Gemini.",
-			"highlight3": "Des workflows quotidiens plus fiables — les améliorations renforcent la récupération et l'historique des tâches, le streaming et l'utilisation des outils par les providers, l'import des paramètres et la lisibilité dans les différents thèmes d'IDE."
+			"highlight1": "✨ Prise en charge de nouveaux modèles : Utilise GPT-6.1 Sol, profite de la limite de sortie corrigée de Claude Opus 5.5 et sélectionne DeepSeek V4.1 Flash sur OpenCode Go.",
+			"highlight2": "🧭 Arrêts et interruptions de tâches fiables : Conserve la première raison de l'arrêt, réinitialise l'état d'arrêt du flux à chaque requête et empêche les tâches interrompues de relancer les sous-tâches rejetées.",
+			"highlight3": "🛠️ Outils, prompts et streaming de l'interface fiables : Préserve les arguments d'outils reçus en streaming, applique la politique des outils MCP, évite les numéros de ligne inventés et fluidifie les mises à jour du chat."
 		},
 		"cloudAgents": {
 			"heading": "Nouveautés dans le Cloud :",

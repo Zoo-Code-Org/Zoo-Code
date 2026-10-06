@@ -1,6 +1,6 @@
 services:
     visual:
-        image: mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948
+        image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
         ipc: host
         user: "${UID:-1000}:${GID:-1000}"
         working_dir: /work

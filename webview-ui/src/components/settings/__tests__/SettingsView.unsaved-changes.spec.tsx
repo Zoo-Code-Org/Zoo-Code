@@ -1,3 +1,4 @@
+import { providerIdentifiers, openAiModelInfoSaneDefaults, type ProviderSettings } from "@roo-code/types"
 import { screen, fireEvent, waitFor } from "@testing-library/react"
 
 import { renderWithExtensionState } from "@/utils/test-utils"
@@ -258,7 +259,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		uriScheme: "vscode",
 		settingsImportedAt: undefined,
 		apiConfiguration: {
-			apiProvider: "openai",
+			apiProvider: providerIdentifiers.openai,
 			apiModelId: "", // Empty string initially
 		},
 		alwaysAllowReadOnly: false,
@@ -267,8 +268,10 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		deniedCommands: [],
 		allowedMaxRequests: undefined,
 		allowedMaxCost: undefined,
-		language: "en",
+		language: "en" as const,
 		alwaysAllowExecute: false,
+		alwaysDenyUnapprovedCommands: false,
+		destructiveCommandGuardEnabled: false,
 		alwaysAllowMcp: false,
 		alwaysAllowModeSwitch: false,
 		alwaysAllowSubtasks: false,
@@ -286,7 +289,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		ttsEnabled: false,
 		ttsSpeed: 1.0,
 		soundVolume: 0.5,
-		telemetrySetting: "unset",
+		telemetrySetting: "unset" as const,
 		terminalOutputLineLimit: 500,
 		terminalOutputCharacterLimit: 50000,
 		terminalShellIntegrationTimeout: 3000,
@@ -457,7 +460,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		const stateWithUndefined = {
 			...defaultExtensionState,
 			apiConfiguration: {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				apiModelId: undefined,
 			},
 		}
@@ -496,7 +499,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		const stateWithNull = {
 			...defaultExtensionState,
 			apiConfiguration: {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				apiModelId: null,
 			},
 		}
@@ -606,7 +609,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 
 	it("buffers and saves the complete NanoGPT provider configuration from cached state", async () => {
 		const liveApiConfiguration = {
-			apiProvider: "nanogpt" as const,
+			apiProvider: providerIdentifiers.nanogpt,
 			nanoGptApiKey: "original-key",
 			nanoGptModelId: "openai/original",
 			nanoGptRoutingPreference: "auto" as const,
@@ -660,7 +663,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		fireEvent.change(screen.getByTestId("cached-nanogpt-routing"), { target: { value: "tools" } })
 
 		expect(liveApiConfiguration).toEqual({
-			apiProvider: "nanogpt",
+			apiProvider: providerIdentifiers.nanogpt,
 			nanoGptApiKey: "original-key",
 			nanoGptModelId: "openai/original",
 			nanoGptRoutingPreference: "auto",
@@ -673,10 +676,61 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 			type: "upsertApiConfiguration",
 			text: "default",
 			apiConfiguration: {
-				apiProvider: "nanogpt",
+				apiProvider: providerIdentifiers.nanogpt,
 				nanoGptApiKey: "unsaved-key",
 				nanoGptModelId: "openai/next",
 				nanoGptRoutingPreference: "tools",
+			},
+		})
+	})
+
+	it("keeps OpenAI-compatible reasoning edits cached until Save despite a live state refresh", async () => {
+		const configuration: ProviderSettings = {
+			apiProvider: providerIdentifiers.openai,
+			openAiModelId: "custom-model",
+			enableReasoningEffort: false,
+			reasoningEffort: "low",
+			openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, reasoningEffort: "low" },
+		}
+		vi.mocked(useExtensionState, { partial: true }).mockReturnValue({
+			...defaultExtensionState,
+			apiConfiguration: configuration,
+		})
+		vi.mocked(ApiOptions).mockImplementation(({ apiConfiguration, setApiConfigurationField }) => (
+			<button
+				data-testid="select-compatible-max"
+				onClick={() => {
+					setApiConfigurationField("enableReasoningEffort", true)
+					setApiConfigurationField("openAiCustomModelInfo", {
+						...(apiConfiguration.openAiCustomModelInfo ?? openAiModelInfoSaneDefaults),
+						reasoningEffort: "max",
+					})
+				}}>
+				{apiConfiguration.openAiCustomModelInfo?.reasoningEffort}
+			</button>
+		))
+		const view = renderWithExtensionState(<SettingsView onDone={vi.fn()} />, { queryClient })
+		fireEvent.click(await screen.findByTestId("select-compatible-max"))
+
+		vi.mocked(useExtensionState, { partial: true }).mockReturnValue({
+			...defaultExtensionState,
+			apiConfiguration: { ...configuration },
+		})
+		view.rerender(<SettingsView onDone={vi.fn()} />)
+
+		expect(screen.getByTestId("select-compatible-max")).toHaveTextContent("max")
+		expect(configuration.enableReasoningEffort).toBe(false)
+		expect(configuration.openAiCustomModelInfo?.reasoningEffort).toBe("low")
+		expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(postMessage).toHaveBeenCalledWith({
+			type: "upsertApiConfiguration",
+			text: "default",
+			apiConfiguration: {
+				...configuration,
+				enableReasoningEffort: true,
+				openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, reasoningEffort: "max" },
 			},
 		})
 	})
@@ -686,7 +740,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			apiConfiguration: {
-				apiProvider: "nanogpt",
+				apiProvider: providerIdentifiers.nanogpt,
 				nanoGptApiKey: "saved-key",
 				nanoGptModelId: "openai/saved",
 				nanoGptRoutingPreference: "cheap",
