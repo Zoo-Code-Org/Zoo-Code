@@ -18,11 +18,15 @@ The provider endpoint and model are fixed: `https://api.solheim.ai/v1`, `qwen3.8
 groups; delegation, follow-ups, writes, shell and MCP are disabled. The driver opens an empty temporary
 workspace with isolated VS Code storage and an allowlisted host environment. The provider credential is
 supplied over IPC, not inherited by the child or passed on its command line. Temporary extension storage
-can contain the configured credential while the session runs; it is removed at teardown and never uploaded.
+can contain the configured credential while the session runs. It is removed when no child remains alive;
+if termination fails, storage cleanup is skipped and `gates.childExited` reports that separately from the
+original smoke failure. Storage is never uploaded.
 This is process/environment isolation, not a sandbox for malicious extension code—CI runs trusted main only.
 
 Activation and completion each have a 120-second limit; task-start acknowledgment has a 35-second limit,
-with 30-second per-stage bounds in the extension. The live CI step has an eight-minute outer timeout.
+in the controller. The extension awaits startup and configuration persistence without racing shared-profile
+writes against a timer. If the controller times out, it tears down its isolated VS Code process rather than
+trying to roll back shared settings or remove a possibly unrelated task. The live CI step has an eight-minute outer timeout.
 Teardown escalates through close, terminate, and kill within independent five-second windows. A non-empty
 completion and actual output-token usage must belong to the accepted task. Activation alone cannot pass.
 The driver never approves dialogs or tool execution; it closes the task during teardown.

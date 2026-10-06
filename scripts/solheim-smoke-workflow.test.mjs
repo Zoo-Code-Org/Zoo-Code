@@ -56,6 +56,7 @@ describe("Project A provider smoke workflow", () => {
 	it("bounds runtime and serializes the single provider instance", () => {
 		assert.match(workflow, /cancel-in-progress: false/)
 		assert.match(workflow, /timeout-minutes: 8/)
+		assert.match(workflow, /^ {8}timeout-minutes: 25$/m)
 	})
 	it("uploads only the verdict and video, never host logs or storage", () => {
 		const paths = workflow.split("path: |\n")[1]?.split("                  if-no-files-found:")[0]

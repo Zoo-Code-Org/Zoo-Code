@@ -64,7 +64,6 @@ export function buildChildEnvironment(
 		XDG_CONFIG_HOME: path.join(isolatedHome, ".config"),
 		XDG_CACHE_HOME: path.join(isolatedHome, ".cache"),
 		ROO_CODE_IPC_SOCKET_PATH: socketPath,
-		ROO_CODE_TASK_START_STAGE_TIMEOUT_MS: "30000",
 	}
 }
 

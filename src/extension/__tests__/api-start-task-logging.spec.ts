@@ -51,18 +51,6 @@ const buildStartCommand = (overrides?: { requestId?: string; text?: string }) =>
 	},
 })
 
-function withStageTimeoutOverride(ms: string): () => void {
-	const previous = process.env.ROO_CODE_TASK_START_STAGE_TIMEOUT_MS
-	process.env.ROO_CODE_TASK_START_STAGE_TIMEOUT_MS = ms
-	return () => {
-		if (previous === undefined) {
-			delete process.env.ROO_CODE_TASK_START_STAGE_TIMEOUT_MS
-		} else {
-			process.env.ROO_CODE_TASK_START_STAGE_TIMEOUT_MS = previous
-		}
-	}
-}
-
 function buildApi(createTaskImpl?: () => Promise<{ taskId: string }>, postStateToWebviewImpl?: () => Promise<void>) {
 	const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
 	const provider = {
@@ -98,6 +86,7 @@ describe("API StartNewTask IPC", () => {
 	afterEach(() => {
 		commandHandlers.length = 0
 		sentMessages.length = 0
+		vi.useRealTimers()
 		vi.restoreAllMocks()
 	})
 
@@ -139,14 +128,15 @@ describe("API StartNewTask IPC", () => {
 		await handler!("client-1", buildStartCommand({ requestId: "req-1" }))
 
 		expect(sentMessages).toHaveLength(1)
+		expect(sentMessages[0]?.clientId).toBe("client-1")
 		const events = sentTaskEvents()
 		expect(events[0]?.data.eventName).toBe(RooCodeEventName.TaskStartResponse)
 
-		const parsed = taskStartResponseSchema.safeParse(events[0]?.data.payload[0])
-		expect(parsed.success).toBe(true)
-		if (parsed.success) {
-			expect(parsed.data).toEqual({ requestId: "req-1", success: true, taskId: "task-1" })
-		}
+		expect(taskStartResponseSchema.parse(events[0]?.data.payload[0])).toEqual({
+			requestId: "req-1",
+			success: true,
+			taskId: "task-1",
+		})
 	})
 
 	it("answers a failed correlated start with exactly one fixed safe failure response", async () => {
@@ -159,16 +149,17 @@ describe("API StartNewTask IPC", () => {
 		await handler!("client-1", buildStartCommand({ requestId: "req-2" }))
 
 		expect(sentMessages).toHaveLength(1)
+		expect(sentMessages[0]?.clientId).toBe("client-1")
 		const events = sentTaskEvents()
 		expect(events[0]?.data.eventName).toBe(RooCodeEventName.TaskStartResponse)
 
-		const parsed = taskStartResponseSchema.safeParse(events[0]?.data.payload[0])
-		expect(parsed.success).toBe(true)
-		if (parsed.success && !parsed.data.success) {
-			expect(parsed.data.errorCode).toBe(TASK_START_FAILURE_ERROR_CODE)
-			expect(parsed.data.errorMessage).toBe(TASK_START_FAILURE_ERROR_MESSAGE)
-			expect(parsed.data.stage).toBe("unknown")
-		}
+		const parsed = taskStartResponseSchema.parse(events[0]?.data.payload[0])
+		expect(parsed).toEqual({
+			requestId: "req-2",
+			success: false,
+			errorCode: TASK_START_FAILURE_ERROR_CODE,
+			errorMessage: TASK_START_FAILURE_ERROR_MESSAGE,
+		})
 
 		const sent = JSON.stringify(sentMessages)
 		expect(sent).not.toContain("opaque-solheim-secret-0123456789abcdef")
@@ -176,113 +167,60 @@ describe("API StartNewTask IPC", () => {
 		expect(sent).not.toContain("review the pull request diff")
 	})
 
-	it("bounds a hung task creation stage and answers with exactly one sanitized stage failure", async () => {
-		const restore = withStageTimeoutOverride("100")
-		try {
-			const { collectLogs } = buildApi(() => new Promise(() => {}))
-
-			const handler = commandHandlers.at(-1)
-			await handler!("client-1", buildStartCommand({ requestId: "req-timeout-task" }))
-
-			expect(sentMessages).toHaveLength(1)
-			const events = sentTaskEvents()
-			expect(events[0]?.data.eventName).toBe(RooCodeEventName.TaskStartResponse)
-
-			const parsed = taskStartResponseSchema.safeParse(events[0]?.data.payload[0])
-			expect(parsed.success).toBe(true)
-			if (parsed.success && !parsed.data.success) {
-				expect(parsed.data).toEqual({
-					requestId: "req-timeout-task",
-					success: false,
-					errorCode: TASK_START_FAILURE_ERROR_CODE,
-					errorMessage: TASK_START_FAILURE_ERROR_MESSAGE,
-					stage: "taskCreation",
-				})
-			}
-
-			const logged = collectLogs()
-			expect(logged).toContain("taskCreation")
-			expect(logged).toContain("req-timeout-task")
-			expect(logged).not.toContain("opaque-solheim-secret-0123456789abcdef")
-		} finally {
-			restore()
-		}
+	it("does not race pending configuration/startup against a timeout", async () => {
+		vi.useFakeTimers()
+		let finishCreation!: (task: { taskId: string }) => void
+		const { provider } = buildApi(
+			() =>
+				new Promise((resolve) => {
+					finishCreation = resolve
+				}),
+		)
+		const running = commandHandlers.at(-1)!("client-1", buildStartCommand({ requestId: "req-pending" }))
+		await vi.advanceTimersByTimeAsync(60_000)
+		expect(provider.createTask).toHaveBeenCalledTimes(1)
+		expect(sentMessages).toHaveLength(0)
+		expect(provider.removeClineFromStack).not.toHaveBeenCalled()
+		finishCreation({ taskId: "finished-task" })
+		await running
+		expect(taskStartResponseSchema.parse(sentTaskEvents()[0]?.data.payload[0])).toEqual({
+			requestId: "req-pending",
+			success: true,
+			taskId: "finished-task",
+		})
 	})
 
-	it("removes a late task and refuses a retry until the timed-out creation settles", async () => {
-		const restore = withStageTimeoutOverride("50")
-		try {
-			let finishCreation: (task: { taskId: string }) => void = () => {}
-			const { provider } = buildApi(
-				() =>
-					new Promise((resolve) => {
-						finishCreation = resolve
-					}),
-			)
-			const handler = commandHandlers.at(-1)!
-
-			await handler("client-1", buildStartCommand({ requestId: "req-first" }))
-			await handler("client-1", buildStartCommand({ requestId: "req-retry" }))
-
-			expect(provider.createTask).toHaveBeenCalledTimes(1)
-			const retry = taskStartResponseSchema.parse(sentTaskEvents()[1]?.data.payload[0])
-			expect(retry.success).toBe(false)
-
-			finishCreation({ taskId: "late-task" })
-			await vi.waitFor(() => expect(provider.removeClineFromStack).toHaveBeenCalledTimes(1))
-
-			await handler("client-1", buildStartCommand({ requestId: "req-after" }))
-			expect(provider.createTask).toHaveBeenCalledTimes(2)
-		} finally {
-			restore()
-		}
-	})
-
-	it("bounds a hung settings stage and names it in the failure response", async () => {
-		const restore = withStageTimeoutOverride("100")
-		try {
-			buildApi(undefined, () => new Promise(() => {}))
-
-			const handler = commandHandlers.at(-1)
-			await handler!("client-1", buildStartCommand({ requestId: "req-timeout-settings" }))
-
-			expect(sentMessages).toHaveLength(1)
-			const parsed = taskStartResponseSchema.safeParse(sentTaskEvents()[0]?.data.payload[0])
-			expect(parsed.success).toBe(true)
-			if (parsed.success && !parsed.data.success) {
-				expect(parsed.data.stage).toBe("settings")
-			}
-		} finally {
-			restore()
-		}
-	})
-
-	it("still answers with one success response when every stage is fast under a small bound", async () => {
-		const restore = withStageTimeoutOverride("100")
-		try {
-			buildApi()
-
-			const handler = commandHandlers.at(-1)
-			await handler!("client-1", buildStartCommand({ requestId: "req-fast" }))
-
-			expect(sentMessages).toHaveLength(1)
-			const parsed = taskStartResponseSchema.safeParse(sentTaskEvents()[0]?.data.payload[0])
-			expect(parsed.success).toBe(true)
-			if (parsed.success) {
-				expect(parsed.data).toEqual({ requestId: "req-fast", success: true, taskId: "task-1" })
-			}
-		} finally {
-			restore()
-		}
+	it("reports a delayed startup rejection only after it settles, without late task removal", async () => {
+		vi.useFakeTimers()
+		let rejectCreation!: (error: Error) => void
+		const { provider } = buildApi(
+			() =>
+				new Promise((_resolve, reject) => {
+					rejectCreation = reject
+				}),
+		)
+		const running = commandHandlers.at(-1)!("client-1", buildStartCommand({ requestId: "req-reject" }))
+		await vi.advanceTimersByTimeAsync(60_000)
+		expect(sentMessages).toHaveLength(0)
+		rejectCreation(new Error("private startup error"))
+		await running
+		expect(taskStartResponseSchema.parse(sentTaskEvents()[0]?.data.payload[0])).toEqual({
+			requestId: "req-reject",
+			success: false,
+			errorCode: TASK_START_FAILURE_ERROR_CODE,
+			errorMessage: TASK_START_FAILURE_ERROR_MESSAGE,
+		})
+		expect(provider.removeClineFromStack).not.toHaveBeenCalled()
 	})
 
 	it("sends no start response for legacy IPC starts without requestId", async () => {
-		buildApi()
+		const { executeCommand } = buildApi()
 
 		const handler = commandHandlers.at(-1)
 		await handler!("client-1", buildStartCommand())
 
 		expect(sentMessages).toHaveLength(0)
+		expect(executeCommand).not.toHaveBeenCalledWith(`${Package.name}.SidebarProvider.focus`)
 	})
 
 	it("keeps the sidebar focus for direct API callers that do not opt out", async () => {
