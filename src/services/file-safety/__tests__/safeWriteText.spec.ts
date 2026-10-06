@@ -175,6 +175,22 @@ describe("safeWriteText", () => {
 			// the temp file was fully closed before the commit rename
 			expect(vi.mocked(fsSync.closeSync).mock.calls[0][0]).toBe(1)
 			expect(fs.rename).toHaveBeenCalled()
+
+			// Cross-mock invocation ORDER, not just call counts: a count-only assertion still
+			// passes if the implementation fsyncs after the commit rename, which is the exact
+			// durability regression this suite exists to catch.
+			const firstCallOf = (mock: { mock: { invocationCallOrder: number[] } }) => mock.mock.invocationCallOrder[0]
+			const renameOrder = firstCallOf(vi.mocked(fs.rename))
+			expect(firstCallOf(vi.mocked(fsSync.openSync))).toBeLessThan(renameOrder)
+			expect(firstCallOf(vi.mocked(fsSync.writeSync))).toBeLessThan(renameOrder)
+			expect(firstCallOf(vi.mocked(fsSync.fsyncSync))).toBeLessThan(renameOrder)
+			expect(firstCallOf(vi.mocked(fsSync.closeSync))).toBeLessThan(renameOrder)
+			// the staged file is fsynced before it is closed
+			expect(vi.mocked(fsSync.fsyncSync).mock.invocationCallOrder[0]).toBeLessThan(
+				vi.mocked(fsSync.closeSync).mock.invocationCallOrder[0],
+			)
+			// the parent-directory fsync is the second fsync and lands AFTER the rename
+			expect(vi.mocked(fsSync.fsyncSync).mock.invocationCallOrder[1]).toBeGreaterThan(renameOrder)
 		})
 	})
 
