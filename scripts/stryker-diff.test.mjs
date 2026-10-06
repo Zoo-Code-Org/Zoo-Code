@@ -211,7 +211,7 @@ describe("stacked unit base resolution", () => {
 		run("commit", "--quiet", "-m", "unit 2")
 		const childSha = run("rev-parse", "HEAD")
 
-		return { repository, eventBaseSha, parentSha, childSha }
+		return { repository, eventBaseSha, parentSha, childSha, run, write }
 	}
 
 	it("measures a stacked unit against the parent pull request head", () => {
@@ -226,6 +226,52 @@ describe("stacked unit base resolution", () => {
 			assert.deepEqual(
 				manifest.packages.flatMap((entry) => entry.files.map((file) => file.path)),
 				["packages/core/src/unit2.ts"],
+			)
+		} finally {
+			fs.rmSync(repository, { recursive: true, force: true })
+		}
+	})
+
+	it("preserves the resolved stacked base when selection runs on the merge commit", () => {
+		const { repository, eventBaseSha, parentSha, childSha, run, write } = createSyntheticStack()
+
+		try {
+			// GitHub runs the gate on its own merge commit: first parent is the base tip, second
+			// parent is the pull request head.
+			run("checkout", "--quiet", "-b", "merge-branch", eventBaseSha)
+			write("packages/core/src/unrelated.ts", "export const unrelated = () => 2\n")
+			run("add", ".")
+			run("commit", "--quiet", "-m", "base advance")
+			const advancedBase = run("rev-parse", "HEAD")
+			run("merge", "--no-ff", "--quiet", "-m", "merge", childSha)
+			const mergeSha = run("rev-parse", "HEAD")
+
+			const resolved = resolveStackedUnitBase(repository, advancedBase, childSha, [{ number: 1, headSha: parentSha }])
+			assert.equal(resolved.baseSha, parentSha)
+			assert.equal(resolved.stackedOn, 1)
+
+			// Without preserving the resolved base, selection re-derives it from the merge commit and
+			// charges the whole unmerged chain to this unit.
+			const charged = selectFromGit(repository, resolved.baseSha, mergeSha)
+			assert.deepEqual(
+				charged.packages.flatMap((entry) => entry.files.map((file) => file.path)),
+				["packages/core/src/unit1.ts", "packages/core/src/unit2.ts"],
+			)
+
+			// With the base preserved, the unit is measured against its own head: the merge commit also
+			// carries the base advance, which is not this unit's delta.
+			const unit = selectFromGit(repository, resolved.baseSha, childSha, { preserveBase: true })
+			assert.deepEqual(
+				unit.packages.flatMap((entry) => entry.files.map((file) => file.path)),
+				["packages/core/src/unit2.ts"],
+			)
+
+			// A non-stacked pull request still measures against the merge commit, so the base actually
+			// merged into is used and the base advance is not charged to the pull request.
+			const plain = selectFromGit(repository, advancedBase, mergeSha, { preserveBase: true })
+			assert.deepEqual(
+				plain.packages.flatMap((entry) => entry.files.map((file) => file.path)),
+				["packages/core/src/unit1.ts", "packages/core/src/unit2.ts"],
 			)
 		} finally {
 			fs.rmSync(repository, { recursive: true, force: true })

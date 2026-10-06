@@ -297,10 +297,12 @@ export function resolveStackedUnitBase(repoRoot, eventBaseSha, prHeadSha, openPu
 	return { baseSha: parentSha, stackedOn: parent.number }
 }
 
-export function selectFromGit(repoRoot, baseSha, headSha) {
+export function selectFromGit(repoRoot, baseSha, headSha, options = {}) {
 	validateSha(baseSha, "base SHA")
 	validateSha(headSha, "head SHA")
-	baseSha = resolvePullRequestBase(repoRoot, baseSha, headSha)
+	// A stacked base was resolved from the pull request head, not from the merge commit, so it must
+	// survive: re-deriving it from the merge commit would charge the whole unmerged chain to this unit.
+	if (!options.preserveBase) baseSha = resolvePullRequestBase(repoRoot, baseSha, headSha)
 	const mergeBase = git(repoRoot, ["merge-base", baseSha, headSha]).trim()
 	const nameStatus = git(repoRoot, ["diff", "--name-status", "-z", "--find-renames", `${mergeBase}...${headSha}`])
 	const entries = parseNameStatus(nameStatus)
@@ -834,7 +836,7 @@ function main() {
 	const command = process.argv[2]
 	if (command !== "ci")
 		throw new Error(
-			"Usage: node scripts/stryker-diff.mjs ci --base <sha> --head <sha> [--reports <path>] [--stacked-map <json>]",
+			"Usage: node scripts/stryker-diff.mjs ci --base <sha> --head <sha> [--pr-head <sha>] [--reports <path>] [--stacked-map <json>]",
 		)
 
 	const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
@@ -843,11 +845,21 @@ function main() {
 	if (!baseSha || !headSha) throw new Error("--base and --head are required")
 
 	const openPullRequests = parseStackedMap(argument("--stacked-map"))
-	const resolved = resolveStackedUnitBase(repoRoot, baseSha, headSha, openPullRequests)
+	// --pr-head is the pull request head itself. The workflow runs on GitHub's merge commit, whose
+	// first parent is the base tip, so the merge commit cannot identify the stacked unit; its second
+	// parent can. The merge commit stays the diff head.
+	const prHeadSha = argument("--pr-head") ?? headSha
+	const resolved = resolveStackedUnitBase(repoRoot, baseSha, prHeadSha, openPullRequests)
 	if (resolved.stackedOn) console.log(`Stacked unit: measured against the head of parent PR #${resolved.stackedOn}, not the event base.`)
 
 	const reportRoot = path.resolve(repoRoot, argument("--reports") ?? "reports/mutation")
-	const manifest = { ...selectFromGit(repoRoot, resolved.baseSha, headSha), stackedOn: resolved.stackedOn }
+	// A stacked unit is measured against its own head, not the merge commit: the merge commit also
+	// carries whatever main advanced since the parent unit, and those lines are not this unit's.
+	const diffHead = resolved.stackedOn ? prHeadSha : headSha
+	const manifest = {
+		...selectFromGit(repoRoot, resolved.baseSha, diffHead, { preserveBase: Boolean(resolved.stackedOn) }),
+		stackedOn: resolved.stackedOn,
+	}
 	if (manifest.packages.length === 0) {
 		appendSummary([], manifest.advisories, manifest)
 		console.log("No changed executable lines in mutation-tested packages; mutation testing is not applicable.")
