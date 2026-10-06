@@ -248,7 +248,18 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				// default could widen a restrictive file, so the write does not proceed.
 				if (_errorCode(error) !== "ENOENT") throw error
 			}
-			const fd = fsSync.openSync(tempPath, "w", targetMode)
+			let fd: number
+			try {
+				fd = fsSync.openSync(tempPath, "w", targetMode)
+			} catch (error: unknown) {
+				// Every write to one directory shares the staging dir, and a write that finishes
+				// removes it when empty. A concurrent writer can therefore remove it between
+				// _stagingDir() and this open. Re-create it and try once; any other errno, or
+				// a second ENOENT, is a real failure.
+				if (_errorCode(error) !== "ENOENT" || stagingDir === null) throw error
+				_stagingDir(dirPath)
+				fd = fsSync.openSync(tempPath, "w", targetMode)
+			}
 			try {
 				// Loop until every byte is written: writeSync can report a short
 				// (partial) write, and publishing a truncated staging file would
