@@ -249,12 +249,18 @@ export async function safeWriteText(filePath: string, content: string, options?:
 					await fs.access(targetPath)
 					backupPath = _tempName(dirPath, "safeWriteText.bak")
 					try {
+						// Create the destination BEFORE any content exists at it, with the mode fixed
+						// at open time. fs.copyFile picks the destination mode itself (the platform
+						// creation mask subject to umask on some platforms, the source's mode - or its
+						// read-only attribute - on others), so letting it create the file would either
+						// leave a restrictive target's bytes briefly readable to others, or leave the
+						// copy unwritable so the fsync open below fails with EACCES. open() ignores its
+						// mode argument for an existing file, so this 0o600 survives the copy on POSIX;
+						// the chmod afterwards is what clears a copied read-only attribute on Windows
+						// and keeps a backup of a permissive file private.
+						const seedFd = fsSync.openSync(backupPath, "wx", 0o600)
+						fsSync.closeSync(seedFd)
 						await fs.copyFile(targetPath, backupPath)
-						// copyFile creates the destination with the source's mode, so a read-only
-						// target yields a read-only copy and opening it "r+" would fail with EACCES -
-						// failing the whole write before the commit. Narrowing the copy to owner
-						// read/write also keeps a backup of a permissive file from being world
-						// readable in the user's directory.
 						await fs.chmod(backupPath, 0o600)
 						// "r+" not "r": fsync on a read-only handle is EPERM on Windows, and this is
 						// the same flag the staged temp file is opened with above.
