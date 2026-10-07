@@ -8,9 +8,11 @@ import { execFile } from "child_process"
  */
 export interface SafeWriteTextOptions {
 	/**
-	 * When true, preserve the old-file semantics: rename target -> backup first,
-	 * after commit rename delete the backup; on failure roll the backup back to
-	 * the target path.  When false (default) the atomic rename simply replaces
+	 * When true, preserve the old-file semantics: copy the target to a backup and
+	 * fsync the copy before the commit, delete the backup after a successful commit,
+	 * and drop the backup on failure. The target is never moved, so a failed write
+	 * leaves the pre-write content at the target path instead of rolling anything
+	 * back.  When false (default) the atomic rename simply replaces
 	 * the target -- crash-safe window is zero.
 	 */
 	backup?: boolean
@@ -110,12 +112,12 @@ async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRu
  * 1. Write content to a temp file in a private per-write staging subdir
  *    (same volume -> atomic rename guaranteed).
  * 2. fsync the temp file, then close it.
- * 3. win32 only: if target exists save its DACL dump BEFORE backup rename.
- * 4. Optionally rename target -> backup (when backup:true).
+ * 3. win32 only: if target exists save its DACL dump BEFORE the backup copy.
+ * 4. Optionally copy target -> backup (when backup:true) and fsync the copy.
  * 5. Atomic rename temp -> target.
  * 6. win32 only: restore DACL onto the directory AFTER commit rename.
  * 7. On success: delete backup (if any) and unlink DACL dump.
- * 8. On failure: rollback backup to target path; clean up temp + dump.
+ * 8. On failure: drop the backup copy; clean up temp + dump.
  */
 
 /**
@@ -241,12 +243,27 @@ export async function safeWriteText(filePath: string, content: string, options?:
 		}
 
 		try {
-			// -- Step 3 (backup:true): rename target -> backup --------------
+			// -- Step 3 (backup:true): durable copy target -> backup ----
 			if (options?.backup) {
 				try {
 					await fs.access(targetPath)
 					backupPath = _tempName(dirPath, "safeWriteText.bak")
-					await fs.rename(targetPath, backupPath)
+					try {
+						await fs.copyFile(targetPath, backupPath)
+						// "r+" not "r": fsync on a read-only handle is EPERM on Windows, and this is
+						// the same flag the staged temp file is opened with above.
+						const backupFd = fsSync.openSync(backupPath, "r+")
+						try {
+							_fsyncFile(backupFd)
+						} finally {
+							fsSync.closeSync(backupFd)
+						}
+					} catch (backupError: unknown) {
+						// A half-written backup is worse than none: it looks like a restore source.
+						await fs.unlink(backupPath).catch(() => {})
+						backupPath = null
+						throw backupError
+					}
 					releaseBackupOnSuccess = true
 				} catch (err: unknown) {
 					const code =
@@ -312,11 +329,14 @@ export async function safeWriteText(filePath: string, content: string, options?:
 	} catch (originalError: unknown) {
 		// -- Rollback / cleanup on failure ----------------------------------
 		if (backupPath && releaseBackupOnSuccess) {
-			try {
-				await fs.rename(backupPath, targetPath)
-			} catch {
-				// rollback failed — do not mask original error
-			}
+			// Nothing to restore: the backup is a copy, so the target still holds whatever
+			// the commit left there - before the commit that is the pre-write content, and
+			// after it the published content. Either way the copy has served its purpose
+			// and must not be left beside the target where no caller can find it. The old
+			// design renamed the target away and back, which could itself fail and leave
+			// persisted state missing at its expected path.
+			await fs.unlink(backupPath).catch(() => {})
+			backupPath = null
 		}
 
 		// Always clean up the staging temp file on failure.

@@ -10,6 +10,7 @@ import { safeWriteText, type SafeWriteTextOptions } from "../safeWriteText"
 vi.mock("fs/promises", () => ({
 	mkdir: vi.fn(),
 	access: vi.fn(),
+	copyFile: vi.fn(),
 	rename: vi.fn(),
 	unlink: vi.fn(),
 	realpath: vi.fn(),
@@ -175,14 +176,17 @@ describe("safeWriteText", () => {
 
 			await safeWriteText(targetPath, "data", { backup: true, platform: "linux" })
 
-			// the commit rename (temp -> target) still happened
-			expect(fs.rename).toHaveBeenNthCalledWith(2, expect.stringContaining("safeWriteText_"), targetPath)
+			// the commit rename (temp -> target) still happened, and it is the only rename:
+			// the backup is a copy, so the target was never moved out of the way.
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+			expect(fs.rename).toHaveBeenCalledTimes(1)
 
 			// the failing cleanup was the post-commit backup unlink
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
 
-			// no rollback rename: the committed target is not restored from the backup
-			expect(fs.rename).toHaveBeenCalledTimes(2)
+			// no rollback rename: the backup is a copy, so nothing is renamed back over
+			// the committed target.
+			expect(fs.rename).toHaveBeenCalledTimes(1)
 
 			// the staging temp was already committed by the rename; nothing
 			// temp-shaped is unlinked afterwards
@@ -190,10 +194,10 @@ describe("safeWriteText", () => {
 		})
 	})
 
-	// ── Test 4: backup:true keeps old safeWriteJson semantics incl. rollback ──
+	// ── Test 4: backup:true keeps old safeWriteJson semantics, copy-based ──
 
 	describe("backup:true", () => {
-		it("renames target -> backup before commit, deletes backup on success", async () => {
+		it("copies target -> backup before commit without moving the target, and deletes the copy on success", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
@@ -203,34 +207,33 @@ describe("safeWriteText", () => {
 			// target was accessed (exists check)
 			expect(fs.access).toHaveBeenCalledWith(targetPath)
 
-			// first rename: target -> backup
-			expect(fs.rename).toHaveBeenNthCalledWith(1, targetPath, expect.stringContaining("safeWriteText.bak_"))
+			// The backup is a copy: the target never leaves its path, so a reader sees the
+			// pre-write content for the whole attempt and there is nothing to roll back.
+			expect(fs.copyFile).toHaveBeenCalledWith(targetPath, expect.stringContaining("safeWriteText.bak_"))
 
-			// second rename: temp -> target (realpath mock returns targetPath)
-			expect(fs.rename).toHaveBeenNthCalledWith(2, expect.stringContaining("safeWriteText_"), targetPath)
+			// The only rename is the commit: temp -> target.
+			expect(fs.rename).toHaveBeenCalledTimes(1)
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 
-			// backup was deleted on success
+			// backup copy was deleted on success
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
 		})
 
-		it("rollback: on failure after rename target->backup, restores backup to target", async () => {
+		it("a failed commit leaves the pre-write content at the target and drops the backup copy", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
-			// first rename (target->backup) succeeds, second fails
-			let callCount = 0
-			vi.mocked(fs.rename).mockImplementation(async () => {
-				callCount++
-				if (callCount === 1) return // target -> backup
-				throw new Error("ENOSPC") // temp -> target fails
-			})
+			// The commit rename is the only rename in this flow, and it fails.
+			vi.mocked(fs.rename).mockRejectedValue(new Error("ENOSPC"))
 
 			await expect(safeWriteText(targetPath, "new data", { backup: true })).rejects.toThrow("ENOSPC")
 
-			// rollback rename is the 3rd call (after target->backup and temp->target failure)
-			expect(fs.rename).toHaveBeenNthCalledWith(3, expect.stringContaining("safeWriteText.bak_"), targetPath)
-
-			// temp was cleaned up on failure
+			// The backup was a copy of the target, taken before the commit.
+			expect(fs.copyFile).toHaveBeenCalledWith(targetPath, expect.stringContaining("safeWriteText.bak_"))
+			// No restore: the target was never moved, so no rename can put the copy back.
+			expect(fs.rename).toHaveBeenCalledTimes(1)
+			// The copy is dropped and the staging temp is released.
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
 		})
 
