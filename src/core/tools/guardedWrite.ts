@@ -286,6 +286,90 @@ function resolveAbsolutePath(task: Task, relPathOrAbsolute: string): string {
 }
 
 /**
+ * Reject a target that is not inside the task's workspace, before anything is
+ * queued or touched. path.resolve keeps an absolute input unchanged and collapses
+ * ".." segments, so a model-supplied string forwarded verbatim can name any path
+ * on the machine. The rooignore rules, protected-path rules and the user-approval
+ * flow live in the tool layer; this is the containment line inside the publish
+ * helper itself, so a caller that forgets them cannot publish outside the
+ * workspace by accident.
+ */
+function isInside(root: string, target: string): boolean {
+	const relative = path.relative(root, target)
+	return !(
+		relative === "" || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)
+	)
+}
+
+function assertInsideWorkspace(task: Task, absolutePath: string, displayPath: string): void {
+	if (!isInside(path.resolve(task.cwd), absolutePath)) {
+		throw new GuardRejectedError(
+			`Path resolves outside the workspace -- write inside the workspace, then retry.`,
+			displayPath,
+		)
+	}
+}
+
+/**
+ * The lexical check above cannot see a symlink whose referent leaves the
+ * workspace, and the publish resolves through that link. Resolve both sides the
+ * same way and compare again. Only a missing path is walked up to the nearest
+ * existing ancestor (a create has no target yet); any other realpath failure is
+ * treated as "cannot be authorized" and rejected, and a workspace that cannot be
+ * resolved at all falls back to the lexical decision already made.
+ */
+async function assertCanonicalInsideWorkspace(task: Task, absolutePath: string, displayPath: string): Promise<void> {
+	let workspaceRoot: string
+	try {
+		workspaceRoot = await fs.realpath(path.resolve(task.cwd))
+	} catch {
+		return
+	}
+	const target = await realpathNearest(absolutePath, displayPath)
+	if (!isInside(workspaceRoot, target)) {
+		throw new GuardRejectedError(
+			`Path resolves through a link to outside the workspace -- write a real file inside the workspace, then retry.`,
+			displayPath,
+		)
+	}
+}
+
+async function realpathNearest(target: string, displayPath: string): Promise<string> {
+	const lexical = path.resolve(target)
+	try {
+		return await fs.realpath(lexical)
+	} catch (error: unknown) {
+		if (errorCode(error) !== "ENOENT") {
+			throw new GuardRejectedError(
+				"Path could not be resolved, so it cannot be checked against the workspace -- retry with a path inside the workspace.",
+				displayPath,
+			)
+		}
+		const missing: string[] = []
+		let ancestor = lexical
+		while (true) {
+			const parent = path.dirname(ancestor)
+			if (parent === ancestor) {
+				return lexical
+			}
+			missing.push(path.basename(ancestor))
+			ancestor = parent
+			try {
+				const real = await fs.realpath(ancestor)
+				return path.join(real, ...missing.reverse())
+			} catch (innerError: unknown) {
+				if (errorCode(innerError) !== "ENOENT") {
+					throw new GuardRejectedError(
+						"Path could not be resolved, so it cannot be checked against the workspace -- retry with a path inside the workspace.",
+						displayPath,
+					)
+				}
+			}
+		}
+	}
+}
+
+/**
  * Guarded write entry point.
  *
  * 1. Resolves the absolute path against task.cwd.
@@ -318,13 +402,18 @@ export async function guardedWrite(
 	// Model-facing path: the caller's own spelling, not the resolved absolute
 	// path. The guard key stays absolute, but a rejection must not put a
 	// user-specific absolute path into the model's context.
+	const displayPath = relPathOrAbsolute
+
+	// Containment is decided before the link is queued: a write that would land
+	// outside the workspace must not take a slot on the FIFO chain, take the file
+	// lock, or touch the filesystem at all.
+	assertInsideWorkspace(task, absolutePath, displayPath)
+	await assertCanonicalInsideWorkspace(task, absolutePath, displayPath)
 
 	return enqueue(absolutePath, async () => {
 		// Cancellation is checked when the link is dequeued, not when it was enqueued:
 		// a write queued before an abort can still reach its turn on the chain after the
 		// task is gone, and the caller has already reported the write to the model.
-		const displayPath = relPathOrAbsolute
-
 		if (task.abort) {
 			throw new GuardRejectedError(
 				"Task was cancelled before this write ran -- the queued publish is not performed.",

@@ -27,6 +27,7 @@ import type { Task } from "../../task/Task"
 vi.mock("fs/promises", () => ({
 	access: vi.fn(),
 	stat: vi.fn(),
+	realpath: vi.fn(),
 }))
 
 vi.mock("../../../utils/versionToken", () => ({
@@ -45,6 +46,7 @@ vi.mock("../../../utils/fileLock", () => ({
 const mockedWithFileLock = vi.mocked(withFileLock)
 const mockedResolveLockKey = vi.mocked(resolveLockKey)
 const mockedFsAccess = vi.mocked(fs.access)
+const mockedFsRealpath = vi.mocked(fs.realpath)
 const mockedComputeVersionToken = vi.mocked(computeVersionToken)
 const mockedSafeWriteText = vi.mocked(safeWriteText)
 
@@ -81,6 +83,11 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 	beforeEach(() => {
 		vi.resetAllMocks()
 		mockedWithFileLock.mockImplementation((filePath, operation) => operation(path.resolve(filePath)))
+		// The canonical containment check resolves the workspace first. The fixture
+		// workspace is not a real directory, so the default is "cannot resolve" and the
+		// check falls back to the lexical decision; the containment tests below override
+		// this to exercise the canonical path.
+		mockedFsRealpath.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
 		resetChain()
 	})
 
@@ -204,6 +211,68 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 					" and was not read before this write -- read the file first, then retry.",
 			)
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("workspace containment", () => {
+		it("rejects an absolute path outside the workspace before any lock or publish", async () => {
+			const task = createMockTask()
+
+			await expect(guardedWrite(task, "/elsewhere/outside.txt", "data", "create")).rejects.toThrow(
+				"Path resolves outside the workspace",
+			)
+
+			// Nothing is queued, locked, or touched: the decision is made on the path
+			// alone, before the FIFO chain or the filesystem is involved.
+			expect(mockedWithFileLock).not.toHaveBeenCalled()
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+			expect(mockedFsAccess).not.toHaveBeenCalled()
+		})
+
+		it("rejects a relative path that escapes the workspace through dot-dot", async () => {
+			const task = createMockTask()
+
+			await expect(guardedWrite(task, "../outside.txt", "data", "create")).rejects.toThrow(
+				"Path resolves outside the workspace",
+			)
+
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("rejects a target whose resolved path leaves the workspace", async () => {
+			// The lexical check cannot see a link that lands outside. With the workspace
+			// resolvable, the canonical comparison is what rejects the write.
+			mockedFsRealpath.mockImplementation(async (p: string) => {
+				const s = String(p)
+				if (s === path.resolve(WORKSPACE)) {
+					return "/real/workspace"
+				}
+				return "/real/outside/secret.txt"
+			})
+			const task = createMockTask()
+
+			await expect(guardedWrite(task, "planted.txt", "data", "create")).rejects.toThrow(
+				"resolves through a link to outside the workspace",
+			)
+
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("publishes when the resolved path stays inside the workspace", async () => {
+			mockedFsRealpath.mockImplementation(async (p: string) => {
+				const s = String(p)
+				if (s === path.resolve(WORKSPACE)) {
+					return "/real/workspace"
+				}
+				return "/real/workspace/nested/in.txt"
+			})
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask()
+
+			await guardedWrite(task, "nested/in.txt", "data", "create")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("nested/in.txt"), "data")
 		})
 	})
 
