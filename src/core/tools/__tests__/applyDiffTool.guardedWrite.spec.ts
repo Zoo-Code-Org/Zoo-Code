@@ -70,6 +70,16 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 	let mockHandleError: MockedFunction<(...args: unknown[]) => Promise<void>>
 	let mockPushToolResult: MockedFunction<(...args: unknown[]) => void>
 
+	afterEach(async () => {
+		// clearAllMocks drops call records but not queued once-values, so stats queued by
+		// one test would otherwise be handed to the next test's reads. Restore the default.
+		const stat = vi.mocked((await import("fs/promises")).default.stat)
+		stat.mockReset()
+		stat.mockResolvedValue(
+			{ dev: 1n, ino: 2n, size: 22n, mtimeNs: 100n, ctimeNs: 100n } as unknown as BigIntStats,
+		)
+	})
+
 	beforeEach(() => {
 		vi.clearAllMocks()
 
@@ -242,5 +252,42 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		}) as unknown as void
 
 		expect(mockTask.observationRegistry.get(path.resolve(mockTask.cwd, "src/thing.ts"))).toBeUndefined()
+		// Exactly the two bracketing stats: no queued value left over for the next test.
+		expect(stat).toHaveBeenCalledTimes(2)
+	})
+
+	it("keeps a complete model observation complete when the tool read matches its version", async () => {
+		// The model read the file in full first. The tool's own read of the same version
+		// must not downgrade that earned completeness to a partial observation.
+		const key = path.resolve(mockTask.cwd, "src/thing.ts")
+		mockTask.observationRegistry.observe(key, "1:2:22:100:100", true)
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		}) as unknown as void
+
+		const observation = mockTask.observationRegistry.get(key)
+		expect(observation?.version).toBe("1:2:22:100:100")
+		expect(observation?.complete).toBe(true)
+	})
+
+	it("does not refresh an observation the model earned on an older version", async () => {
+		// Refreshing a stale observation to the current version would authorize content the
+		// model built from the older read. The observation is left as the model earned it,
+		// so the save's compare-and-swap fails and the model is told to re-read.
+		const key = path.resolve(mockTask.cwd, "src/thing.ts")
+		mockTask.observationRegistry.observe(key, "1:2:9:9:9", true)
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		}) as unknown as void
+
+		const observation = mockTask.observationRegistry.get(key)
+		expect(observation?.version).toBe("1:2:9:9:9")
+		expect(observation?.complete).toBe(true)
 	})
 })
