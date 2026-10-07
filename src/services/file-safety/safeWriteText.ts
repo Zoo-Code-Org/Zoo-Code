@@ -5,10 +5,12 @@ import { execFile } from "child_process"
 
 export interface SafeWriteTextOptions {
 	/**
-	 * When true, preserve the old-file semantics: rename target -> backup first,
-	 * after commit rename delete the backup; on failure roll the backup back to
-	 * the target path.  When false (default) the atomic rename simply replaces
-	 * the target -- crash-safe window is zero.
+	 * When true, keep the old-file semantics without ever removing the target: the
+	 * previous content is copied to a hidden backup path and flushed before the
+	 * commit rename, the commit rename atomically replaces the target, and on success
+	 * the backup copy is deleted. A failure before the commit leaves the target
+	 * untouched (there is nothing to roll back) and removes the backup copy. When
+	 * false (default) the atomic rename simply replaces the target.
 	 */
 	backup?: boolean
 
@@ -34,12 +36,6 @@ export interface SafeWriteTextOptions {
 	tempPath?: string
 }
 
-/**
- * A publish that failed and whose rollback also failed: the content survives only
- * at the backup path, not at the canonical target. The publish failure stays the
- * cause, and the rollback failure plus the backup location travel with the error so
- * the caller can tell what it is looking at.
- */
 /**
  * A caller-supplied staging path that is not a file this write may publish: it
  * sits outside the target's directory (so the commit rename would cross
@@ -258,6 +254,20 @@ export async function safeWriteText(
 				`Staging file must be a regular file, not ${stagingStat.isSymbolicLink() ? "a symlink" : "another file type"}`,
 				supplied,
 			)
+		}
+		// A staging path that is the target would be unlinked by the failure handler
+		// while it still holds the only copy of the content, so a failed write would
+		// delete the file it was meant to protect. Compare identities, not spellings:
+		// an alias of the target is the same hazard.
+		const targetStat = await fs.lstat(targetPath).catch(() => null)
+		if (
+			targetStat &&
+			typeof stagingStat.ino === "number" &&
+			typeof targetStat.ino === "number" &&
+			stagingStat.ino === targetStat.ino &&
+			stagingStat.dev === targetStat.dev
+		) {
+			throw new StagingPathError("Staging file must not be the target itself", supplied)
 		}
 		// The caller's own path is used as given; only the check is canonical.
 		tempPath = options.tempPath

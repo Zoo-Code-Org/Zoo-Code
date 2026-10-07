@@ -1076,6 +1076,25 @@ describe("caller-supplied staging path", () => {
 		expect(fsSync.openSync).not.toHaveBeenCalled()
 		expect(fs.rename).not.toHaveBeenCalled()
 	})
+
+	it("rejects a staging path that is the target itself", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		// Same inode and device for the supplied staging path and the target: the
+		// failure handler would unlink the only copy of the content, so a failed
+		// write would delete the file it was meant to protect.
+		const stats = _fileStats(false)
+		stats.ino = 42
+		stats.dev = 7
+		vi.mocked(fs.lstat).mockResolvedValue(stats)
+
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: targetPath, platform: "linux" }),
+		).rejects.toThrow(StagingPathError)
+		expect(fsSync.openSync).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+		expect(fs.unlink).not.toHaveBeenCalled()
+	})
 })
 
 describe("cleanup when a backed-up write fails before commit", () => {
