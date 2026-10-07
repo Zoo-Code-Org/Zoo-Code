@@ -25,6 +25,7 @@ vi.mock("fs", () => ({
 	fsyncSync: vi.fn(),
 	chmodSync: vi.fn(),
 	fchmodSync: vi.fn(),
+	rmdirSync: vi.fn(),
 	statSync: vi.fn(),
 	Stats: class Stats {},
 }))
@@ -539,6 +540,65 @@ describe("safeWriteText", () => {
 			await safeWriteText(targetPath, "fresh", { platform: "linux" })
 
 			expect(fsSync.openSync).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), "w", 0o644)
+		})
+
+		// The staging sub-directory must not outlive the write: a hidden directory left
+		// in every directory Zoo writes to shows up in the explorer, watchers and indexers.
+		it("removes the staging directory it created once the write commits", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o644))
+
+			await safeWriteText(targetPath, "content", { platform: "linux" })
+
+			expect(fsSync.rmdirSync).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
+		})
+
+		// A caller that staged its own temp file never had a staging directory created,
+		// so there is nothing of ours to remove - and removing a directory we did not
+		// create could delete one a concurrent writer is still using.
+		it("leaves no staging directory to remove when the caller supplied the tempPath", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o644))
+
+			await safeWriteText(targetPath, "", { tempPath: "/tmp/test-dir/.staged.json", platform: "linux" })
+
+			expect(fsSync.mkdirSync).not.toHaveBeenCalledWith(
+				expect.stringContaining(".file-safety-staging"),
+				expect.anything(),
+			)
+			expect(fsSync.rmdirSync).not.toHaveBeenCalled()
+		})
+
+		// openSync applies the process umask to the requested mode, so the mode has to be
+		// set on the descriptor: a 0o664 target must not be published as 0o644.
+		it("sets the staged mode with fchmodSync so the process umask cannot narrow it", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(7)
+			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o664))
+
+			await safeWriteText(targetPath, "content", { platform: "linux" })
+
+			expect(fsSync.openSync).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), "w", 0o664)
+			expect(fsSync.fchmodSync).toHaveBeenCalledWith(7, 0o664)
+		})
+
+		// The failure path unlinks the staged temp, which empties the staging directory:
+		// it must be removed there too, or a failed write leaves the hidden directory.
+		it("removes the staging directory when the commit fails", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o644))
+			vi.mocked(fs.rename).mockRejectedValueOnce(Object.assign(new Error("EXDEV"), { code: "EXDEV" }))
+
+			await expect(safeWriteText(targetPath, "content", { platform: "linux" })).rejects.toThrow("EXDEV")
+
+			expect(fsSync.rmdirSync).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
 		})
 
 		it("loops on short writes until the full content is durable before fsync", async () => {

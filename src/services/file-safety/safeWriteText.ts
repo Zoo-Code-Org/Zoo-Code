@@ -38,18 +38,17 @@ export interface SafeWriteTextOptions {
 
 	/**
 	 * Pre-commit verification hook (A4a guarded write, epic #1375).  Invoked
-	 * at the last moment before the commit rename (after any backup rename
-	 * has moved the target aside) so a caller can re-check the target's
-	 * state and reject publication when it changed since the caller's
-	 * earlier verification.  When the hook rejects, no commit rename is
-	 * performed: the backup (if any) is rolled back to the target and the
-	 * staged temp file is discarded, and the hook's rejection is propagated
-	 * to the caller.
+	 * immediately before the commit rename and BEFORE any backup rename moves the
+	 * target aside, so a caller can re-check the target's state and reject
+	 * publication when it changed since the caller's earlier verification.  When the
+	 * hook rejects, no commit rename is performed and no backup has been taken yet,
+	 * so there is nothing to roll back: the staged temp file is discarded and the
+	 * hook's rejection is propagated to the caller.
 	 *
-	 * Scope: the hook closes the check-to-rename window for writers that the
-	 * caller serializes (guardedWrite's per-path FIFO chain); external
-	 * processes may still publish in the residual window between the hook
-	 * and the rename (documented in guardedWrite).
+	 * Scope: the hook narrows - it does not close - the check-to-rename window for
+	 * writers that the caller serializes (guardedWrite's per-path FIFO chain); an
+	 * external process can still publish between the hook and the rename
+	 * (documented in guardedWrite).
 	 */
 	verifyBeforeCommit?: () => Promise<void>
 }
@@ -76,6 +75,19 @@ function _stagingDir(dir: string): string {
 		// created with the requested mode
 	}
 	return sd
+}
+
+/** Remove the staging sub-directory when nothing is staged in it any more.
+ * rmdirSync fails on a non-empty directory (a concurrent write is still using it)
+ * and on a directory that is already gone, so the last write to finish cleans up
+ * and the others leave it to that writer - no shared bookkeeping is needed, and a
+ * persistent hidden directory is never left in the user's workspace. */
+function _removeStagingDirIfEmpty(dir: string): void {
+	try {
+		fsSync.rmdirSync(dir)
+	} catch {
+		// non-empty (a concurrent write is still staging there) or already removed
+	}
 }
 
 /**
@@ -128,14 +140,17 @@ async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRu
  *    (same volume -> atomic rename guaranteed).
  * 2. fsync the temp file, then close it.
  * 3. win32 only: if target exists save its DACL dump BEFORE backup rename.
- * 4. Optionally rename target -> backup (when backup:true).
- * 5. Optionally run the pre-commit verification hook (verifyBeforeCommit) before
+ * 4. Optionally run the pre-commit verification hook (verifyBeforeCommit) before
  *    the target is moved aside, so it observes the state the rename replaces;
- *    a rejection aborts the publish (no commit rename) and propagates.
+ *    a rejection aborts the publish (no commit rename, no backup taken yet) and
+ *    propagates.
+ * 5. Optionally rename target -> backup (when backup:true).
  * 6. Atomic rename temp -> target.
  * 7. win32 only: restore DACL onto the directory AFTER commit rename.
- * 8. On success: delete backup (if any) and unlink DACL dump.
- * 9. On failure: rollback backup to target path; clean up temp + dump.
+ * 8. On success: delete backup (if any) and unlink DACL dump; remove the staging
+ *    sub-directory when it is empty.
+ * 9. On failure: rollback backup to target path; clean up temp + dump, and remove
+ *    the staging sub-directory when it is empty.
  */
 
 /**
@@ -172,7 +187,14 @@ export async function safeWriteText(filePath: string, content: string, options?:
 	// Create the staging directory only when we generate the temp file there;
 	// callers supplying their own tempPath (e.g. safeWriteJson) must not be left
 	// with an empty .file-safety-staging directory behind.
-	const tempPath = options?.tempPath ?? _tempName(_stagingDir(dirPath), "safeWriteText")
+	let stagingDirPath: string | null = null
+	let tempPath: string
+	if (options?.tempPath) {
+		tempPath = options.tempPath
+	} else {
+		stagingDirPath = _stagingDir(dirPath)
+		tempPath = _tempName(stagingDirPath, "safeWriteText")
+	}
 
 	let backupPath: string | null = null
 	let releaseBackupOnSuccess = false
@@ -192,6 +214,11 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			}
 			const fd = fsSync.openSync(tempPath, "w", targetMode)
 			try {
+				// openSync applies the process umask to the requested mode, so a 0o664
+				// or 0o666 target would be staged as 0o644 under the common umask 022 and
+				// lose group write through the rename. Set the mode on the fd instead, the
+				// same way the caller-staged branch below does.
+				fsSync.fchmodSync(fd, targetMode)
 				// Loop until every byte is written: writeSync can report a short
 				// (partial) write, and publishing a truncated staging file would
 				// commit corrupt content.
@@ -312,7 +339,11 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			}
 		}
 
-		// tempPath is now the committed file; no cleanup needed.
+		// tempPath is now the committed file; no cleanup needed. Remove the staging
+		// directory when this write was the last one using it.
+		if (stagingDirPath !== null) {
+			_removeStagingDirIfEmpty(stagingDirPath)
+		}
 	} catch (originalError: unknown) {
 		// -- Rollback / cleanup on failure ----------------------------------
 		if (backupPath && releaseBackupOnSuccess) {
@@ -328,6 +359,12 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			await fs.unlink(tempPath).catch(() => {})
 		} catch {
 			// cleanup failure is non-fatal
+		}
+
+		// The temp is gone, so the staging directory is ours to remove when no other
+		// write is staging in it; a non-empty rmdir leaves it for that writer.
+		if (stagingDirPath !== null) {
+			_removeStagingDirIfEmpty(stagingDirPath)
 		}
 
 		if (daclDumpPath !== null) {
