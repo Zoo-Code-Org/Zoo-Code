@@ -247,7 +247,19 @@ export class DiffViewProvider {
 		// diff evicts them (VS Code reuses the group's single preview slot).
 		this.snapshotPreviewTabs = this.captureUnrelatedPreviewTabs(absolutePath)
 
-		this.activeDiffEditor = await this.openDiffEditor()
+		try {
+			this.activeDiffEditor = await this.openDiffEditor()
+		} catch (error) {
+			// open() has already created the parent directories and, for a new file, written
+			// an empty placeholder. With no active diff editor there is nothing for
+			// revertChanges() to undo, so the unapproved file (and the directories made for
+			// it) would stay on disk: undo that part of the open here.
+			await this.undoPartialOpen(absolutePath)
+			this.isEditing = false
+			this.createdDirs = []
+			this.placeholderVersion = undefined
+			throw error
+		}
 		this.fadedOverlayController = new DecorationController("fadedOverlay", this.activeDiffEditor)
 		this.activeLineController = new DecorationController("activeLine", this.activeDiffEditor)
 		// Apply faded overlay to all lines initially.
@@ -321,6 +333,49 @@ export class DiffViewProvider {
 				}
 			}
 		})
+	}
+
+	/**
+	 * Undo the on-disk side effects of an open() that failed before the diff editor was
+	 * created. open() creates the parent directories and writes an empty placeholder
+	 * for a new file; if the diff editor never opens, revertChanges() has no diff
+	 * editor to revert and the unapproved file would stay on disk. The placeholder is
+	 * removed only while it is still the exact file this open() wrote (same version
+	 * token), under the same resolved-path advisory lock every other writer to this
+	 * path uses; the directories this call created then go, innermost first, stopping
+	 * at the first directory another writer populated in the meantime.
+	 */
+	private async undoPartialOpen(absolutePath: string): Promise<void> {
+		if (this.editType !== "create") {
+			return
+		}
+		const placeholderVersion = this.placeholderVersion
+		try {
+			await withFileLock(await resolveLockKey(absolutePath), async () => {
+				if (placeholderVersion) {
+					const stats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+					if (!stats || versionTokenOfStat(stats) !== placeholderVersion) {
+						// Another writer owns the path now: leave their file alone.
+						return
+					}
+					try {
+						await fs.unlink(absolutePath)
+					} catch {
+						// The placeholder vanished or the unlink failed; keep the directories.
+						return
+					}
+				}
+				for (let i = this.createdDirs.length - 1; i >= 0; i--) {
+					try {
+						await fs.rmdir(this.createdDirs[i])
+					} catch {
+						break
+					}
+				}
+			})
+		} catch {
+			// Best-effort: the open() failure is the outcome the caller sees.
+		}
 	}
 
 	async update(accumulatedContent: string, isFinal: boolean) {
