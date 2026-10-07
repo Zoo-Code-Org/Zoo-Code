@@ -37,8 +37,9 @@ export interface SafeWriteJsonOptions {
 	 * Restrict the write to a directory. The publish target is resolved through
 	 * symlinks before this check runs, so a caller that picked the path from a
 	 * known scope (a workspace, a project settings directory) can refuse a write
-	 * that a planted symlink would land somewhere else. The check runs before the
-	 * advisory lock is taken and before anything is staged.
+	 * that a planted symlink would land somewhere else. The check runs under the
+	 * target's advisory lock, once the publish target has been resolved, and before
+	 * anything is staged or written.
 	 */
 	confineTo?: string
 }
