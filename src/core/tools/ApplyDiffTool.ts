@@ -5,6 +5,7 @@ import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { getReadablePath } from "../../utils/path"
+import { versionTokenOfStat } from "../../utils/versionToken"
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
 import { fileExistsAtPath } from "../../utils/fs"
@@ -68,7 +69,27 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				return
 			}
 
+			// The diff below is built from this exact read, so the save that follows must be
+			// authorized against the version captured here - not against whatever version the
+			// preview happens to stat afterwards. Same contract as ApplyPatchTool's hunk read:
+			// stat around the read and observe only when the file did not change underneath it.
+			const preReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 			const originalContent: string = await fs.readFile(absolutePath, "utf-8")
+			const postReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+			if (preReadStats && postReadStats) {
+				const preReadToken = versionTokenOfStat(preReadStats)
+				if (preReadToken === versionTokenOfStat(postReadStats)) {
+					// A tool read is not a model read: when the model already observed the file,
+					// keep the completeness it earned and only on the version it was earned on;
+					// with no prior observation this stays a partial observation of the version
+					// the diff was computed against.
+					const prior = task.observationRegistry.get(absolutePath)
+					const complete =
+						prior === undefined ? false : prior.complete === true && prior.version === preReadToken
+					task.observationRegistry.observe(absolutePath, preReadToken, complete)
+				}
+			}
+
 
 			// Apply the diff to the original content
 			const diffResult = (await task.diffStrategy?.applyDiff(
