@@ -150,14 +150,6 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// the target when the resolution itself rejects.
 	let resolvedTargetPath: string | undefined
 
-	try {
-		await fs.mkdir(dirPath, { recursive: true })
-		await fs.access(dirPath)
-	} catch (dirError: any) {
-		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
-		throw dirError
-	}
-
 	// Lock key: the symlink referent when the path is an existing symlink, so a
 	// symlink alias and its referent share one lock. The key must be computable
 	// while a peer writer is mid-commit (backup mode copies the target aside and only
@@ -166,6 +158,8 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	const lockKey = await resolveLockKey(absoluteFilePath)
 
 	// Confinement, if the caller declared a scope, is checked BEFORE the lock is
+	// Also before the parent-directory creation below: an out-of-scope target with a
+	// missing parent would otherwise get a directory created outside confineTo.
 	// taken: proper-lockfile creates ${lockKey}.lock beside the key, so a
 	// repository-planted link out of the scope (a project that ships
 	// .roo/mcp.json -> ~/.ssh/config) would otherwise create a lock directory
@@ -178,7 +172,16 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(lockKey), scopeRoot)
 	}
 
-	// Acquire the lock before any file operations. If acquisition fails it throws
+	try {
+		await fs.mkdir(dirPath, { recursive: true })
+		await fs.access(dirPath)
+	} catch (dirError: any) {
+		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
+		throw dirError
+	}
+
+
+
 	// immediately, and releaseLock stays a no-op so the finally block does not try
 	// to release an unacquired lock.
 	releaseLock = await acquireFileLock(lockKey)

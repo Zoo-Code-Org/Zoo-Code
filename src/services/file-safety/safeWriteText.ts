@@ -376,13 +376,25 @@ export async function safeWriteText(
 		// committed-but-imperfect publish, and a caller whose callback throws (a UI sink,
 		// a logger that is mid-restart) must not turn that into a failed save.
 		const warn = (message: string) => {
+			const report = (label: string, error: unknown) => {
+				console.warn(
+					`safeWriteText: onWarning callback ${label}: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
 			try {
 				const sink = options?.onWarning ?? ((m: string) => console.warn(m))
-				sink(message)
+				const result: unknown = sink(message)
+				// A sink may be async - TypeScript accepts a value-returning callback where
+				// a void one is expected. Awaiting it would let warning delivery delay a
+				// write that has already committed (and hang it if the sink never settles),
+				// while leaving the promise unhandled turns a rejection into an unhandled
+				// rejection, which under Node's default mode can end the process after a
+				// successful write. Attach a handler without awaiting.
+				if (result instanceof Promise) {
+					result.catch((error: unknown) => report("rejected", error))
+				}
 			} catch (error: unknown) {
-				console.warn(
-					`safeWriteText: onWarning callback failed: ${error instanceof Error ? error.message : String(error)}`,
-				)
+				report("failed", error)
 			}
 		}
 		if (platform === "win32") {
