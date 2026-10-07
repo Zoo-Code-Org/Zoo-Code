@@ -45,29 +45,6 @@ export interface SafeWriteTextOptions {
 }
 
 /**
- * A publish that failed and whose rollback also failed: the content survives only
- * at the backup path, not at the canonical target. The publish failure stays the
- * cause, and the rollback failure plus the backup location travel with the error so
- * the caller can tell what it is looking at.
- */
-export class RollbackFailureError extends Error {
-	readonly publishError: unknown
-	readonly rollbackError: unknown
-	readonly backupPath: string
-
-	constructor(publishError: unknown, rollbackError: unknown, backupPath: string) {
-		super(
-			`Publish failed (${publishError instanceof Error ? publishError.message : String(publishError)}) and the backup could not be restored to its original path -- the content is preserved at the backup location reported on this error.`,
-			{ cause: publishError },
-		)
-		this.name = "RollbackFailureError"
-		this.publishError = publishError
-		this.rollbackError = rollbackError
-		this.backupPath = backupPath
-	}
-}
-
-/**
  * A caller-supplied staging path that is not a file this write may publish: it
  * sits outside the target's directory (so the commit rename would cross
  * filesystems) or is not a regular file. Rejecting it before any write keeps the
@@ -91,14 +68,22 @@ export class StagingPathError extends Error {
  */
 export class PostCommitDurabilityError extends Error {
 	readonly targetPath: string
+	/**
+	 * The old-content copy retained for recovery on this path, or null when backup
+	 * mode was off or the target did not exist before the write. The name is a hidden
+	 * random path, so without this field no caller could find the copy the catch block
+	 * deliberately keeps.
+	 */
+	readonly backupPath: string | null
 
-	constructor(targetPath: string, cause: unknown) {
+	constructor(targetPath: string, cause: unknown, backupPath: string | null = null) {
 		super(
 			"The rename committed but the parent directory could not be fsynced -- the content is at the target path reported on this error, and the directory entry may not be durable.",
 			{ cause },
 		)
 		this.name = "PostCommitDurabilityError"
 		this.targetPath = targetPath
+		this.backupPath = backupPath
 	}
 }
 // -- helpers ---------------------------------------------------------------
@@ -151,7 +136,11 @@ async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunne
 
 /** Restore a DACL dump onto *dirPath* on Windows.
  * Returns whether icacls succeeded; the caller reports a failure. */
-async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<boolean> {
+async function _restoreDaclWindows(
+	dirPath: string,
+	dumpPath: string,
+	execFileRunner?: typeof execFile,
+): Promise<boolean> {
 	const runner = execFileRunner ?? execFile
 	try {
 		await new Promise<void>((resolve, reject) => {
@@ -198,7 +187,11 @@ export async function resolvePublishTarget(absoluteFilePath: string): Promise<st
  * default on ENOENT; any other failure is propagated, otherwise a restrictive
  * target (0o600) would be published with the default 0o644 through the rename.
  */
-function errorCode(error: unknown): string | undefined {
+/**
+ * The errno-style code of a filesystem error, or undefined for anything that is not one. Exported
+ * because safeWriteJson asks the same question of the same errors; a second copy of this test drifts.
+ */
+export function errorCode(error: unknown): string | undefined {
 	return typeof error === "object" && error !== null && "code" in error
 		? String((error as { code: unknown }).code)
 		: undefined
@@ -214,8 +207,34 @@ function errorCode(error: unknown): string | undefined {
 
 async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
 	const dirPath = path.dirname(absoluteFilePath)
-	const canonicalDir = await fs.realpath(dirPath).catch(() => dirPath)
-	return path.join(canonicalDir, path.basename(absoluteFilePath))
+	// Walk up to the nearest ancestor that EXISTS, canonicalize that, and re-join the
+	// components that are not there yet. Falling back to the unresolved spelling of the
+	// whole parent - what a single realpath(...).catch(() => dirPath) used to do - makes
+	// the key depend on whether the directory happens to exist: a writer whose parent is
+	// already there canonicalizes through a symlinked ancestor (or a short name) while a
+	// writer racing to create the same directory gets the literal spelling, so the two
+	// take different locks for one file and a read-modify-write loses one side.
+	// A realpath failure that is not "not there yet" says nothing about the canonical
+	// form, so it is propagated rather than papered over with a key that may be wrong.
+	let cursor = dirPath
+	const missing: string[] = []
+	for (;;) {
+		const canonical = await fs.realpath(cursor).catch((error: unknown) => {
+			if (errorCode(error) === "ENOENT") return undefined
+			throw error
+		})
+		if (canonical !== undefined) {
+			return path.join(canonical, ...missing.reverse(), path.basename(absoluteFilePath))
+		}
+		missing.push(path.basename(cursor))
+		const parent = path.dirname(cursor)
+		if (parent === cursor) {
+			// Every component up to the root is missing: there is nothing to canonicalize
+			// against, and the literal path is the only key left.
+			return path.join(dirPath, path.basename(absoluteFilePath))
+		}
+		cursor = parent
+	}
 }
 
 /**
@@ -323,9 +342,9 @@ export async function safeWriteText(
 
 	let backupPath: string | null = null
 	let releaseBackupOnSuccess = false
-	// Set once the commit rename has published the new content. After that point the
-	// backup is no longer a safe restore source: rolling it back would overwrite
-	// content the caller can already observe at the target path.
+	// Whether the commit rename ran. A failure after it is a durability problem
+	// with the published file, not a pre-commit failure, and the backup is then
+	// the only known-good copy of the previous content.
 	let committed = false
 	// Non-null only when the win32 step-2 block saved a successful DACL dump:
 	// it gates the step-5 restore and is tracked for the cleanup unlinks.
@@ -428,6 +447,10 @@ export async function safeWriteText(
 			let accessError: unknown = null
 			try {
 				await fs.access(targetPath) // target exists?
+			} catch (error: unknown) {
+				accessError = error
+			}
+			if (accessError === null) {
 				const dumpPath = _tempName(dirPath, "safeWriteText.acl")
 				const saved = await _saveDaclWindows(targetPath, dumpPath, options?.execFileRunner)
 				if (saved) {
@@ -444,13 +467,17 @@ export async function safeWriteText(
 					// proceeds - a missing or failing icacls must not leave the user unable to save -
 					// but the replacement is no longer ACL-identical and that has to be visible
 					// instead of silent.
-					warn(`Could not save the DACL of ${targetPath}; the replacement may inherit different access rights.`)
+					warn(
+						`Could not save the DACL of ${targetPath}; the replacement may inherit different access rights.`,
+					)
 				}
 			} else if (errorCode(accessError) !== "ENOENT") {
 				// Not "absent": the target is there but could not be checked (EACCES, ...), so
 				// DACL preservation was skipped for a reason the caller cannot infer from the
 				// successful write alone.
-				warn(`Could not check ${targetPath} for DACL preservation (${errorCode(accessError) ?? "unknown error"}); the replacement may inherit different access rights.`)
+				warn(
+					`Could not check ${targetPath} for DACL preservation (${errorCode(accessError) ?? "unknown error"}); the replacement may inherit different access rights.`,
+				)
 			}
 		}
 		try {
@@ -520,7 +547,10 @@ export async function safeWriteText(
 					// so the failure is surfaced as its own error: the caller can
 					// still find the content at the target, it just cannot rely on
 					// the directory entry having reached the disk.
-					throw new PostCommitDurabilityError(targetPath, error)
+					// The catch block keeps the backup on this path, so hand the caller the
+					// path of the copy it is keeping - it is a hidden random name and is
+					// otherwise unrecoverable.
+					throw new PostCommitDurabilityError(targetPath, error, releaseBackupOnSuccess ? backupPath : null)
 				}
 			}
 
@@ -538,7 +568,9 @@ export async function safeWriteText(
 					// temp directory restore fails with "Not all privileges or groups referenced
 					// are assigned to the caller"), so the change of access rights is reported
 					// rather than thrown.
-					warn(`safeWriteText: content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`)
+					warn(
+						`Content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`,
+					)
 				}
 			}
 
@@ -567,22 +599,19 @@ export async function safeWriteText(
 			await fs.rmdir(stagingDir).catch(() => {})
 		}
 	} catch (originalError: unknown) {
-		// Only a pre-commit failure can restore the backup. Once the commit rename
-		// published, a later failure (for example the post-commit directory fsync)
-		// must not overwrite the published content with the old file.
+		// The backup is never restored: it is a copy, and the target already holds
+		// either the pre-write content (before the commit) or the published content.
+		// Only a pre-commit failure may discard the backup. After the commit the target
+		// holds the NEW content, and when the failure is a post-commit durability error the
+		// backup is the only copy known to hold the previous content - deleting it here
+		// would destroy the recovery copy the contract promises.
 		if (backupPath && releaseBackupOnSuccess && !committed) {
-			try {
-				await fs.rename(backupPath, targetPath)
-			} catch (rollbackError: unknown) {
-				// The content survives only at the backup path now, and the canonical
-				// target is gone. Reporting just the publish failure would leave the
-				// caller with data it cannot find at the expected path, so the
-				// partial-failure state travels with the error. The staged temp file
-				// and this write's staging directory are released first: a rollback
-				// failure is already a hard enough state to reason about without also
-				// leaking the staging file.
-				rollbackFailure = { error: rollbackError, backupPath }
-			}
+			// Nothing to restore: the backup is a copy, so the target still holds whatever
+			// the commit left there. Before the commit that is the pre-write content, and
+			// the copy beside it is redundant; it must not be left where no caller can
+			// find it.
+			await fs.unlink(backupPath).catch(() => {})
+			backupPath = null
 		}
 		try {
 			await fs.unlink(tempPath).catch(() => {})
