@@ -83,6 +83,25 @@ describe("ClineProvider.deleteTaskWithId - partial batch failures", () => {
 		}
 	})
 
+	it("still cleans up the deleted tasks when the webview state post rejects", async () => {
+		const partial = new TaskHistoryDeleteError(["task-2"], "unlink failed: EPERM")
+		const { provider, storageDir, taskDirs } = await makeFixture(vi.fn().mockRejectedValue(partial))
+		const stateError = new Error("webview is gone")
+		provider.postStateToWebview = vi.fn().mockRejectedValue(stateError)
+
+		try {
+			// The batch error is what the caller must see, not the state-post failure.
+			await expect(ClineProvider.prototype.deleteTaskWithId.call(provider, "task-1")).rejects.toBe(partial)
+
+			// task-1 is gone from the store, so its artifacts must be gone too: cleaning
+			// after the post would strand them whenever the post rejects.
+			expect(await exists(taskDirs["task-1"])).toBe(false)
+			expect(await exists(taskDirs["task-2"])).toBe(true)
+		} finally {
+			await fs.rm(storageDir, { recursive: true, force: true }).catch(() => {})
+		}
+	})
+
 	it("leaves every artifact in place when no task was deleted", async () => {
 		const allFailed = new TaskHistoryDeleteError(["task-1", "task-2"], "lock acquisition failed")
 		const { provider, storageDir, taskDirs } = await makeFixture(vi.fn().mockRejectedValue(allFailed))
