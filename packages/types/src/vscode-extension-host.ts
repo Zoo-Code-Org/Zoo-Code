@@ -473,6 +473,7 @@ export interface WebviewMessage {
 		| "getListApiConfiguration"
 		| "customInstructions"
 		| "webviewDidLaunch"
+		| "webviewDidFocus"
 		| "newTask"
 		| "askResponse"
 		| "terminalOperation"

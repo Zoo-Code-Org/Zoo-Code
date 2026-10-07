@@ -76,6 +76,38 @@ describe("ChatTextArea", () => {
 		})
 	})
 
+	it.each([false, true])("only autofocuses the mounted input when this document has focus=%s", (hasFocus) => {
+		const documentFocus = vi.spyOn(document, "hasFocus").mockReturnValue(hasFocus)
+		const focusedElements: HTMLElement[] = []
+		const originalFocus = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "focus")
+		if (!originalFocus) {
+			throw new Error("Expected the test setup to define HTMLElement.focus")
+		}
+		// The shared setup replaces focus with an accessor, so restore its descriptor after the test.
+		Object.defineProperty(HTMLElement.prototype, "focus", {
+			configurable: true,
+			get: () =>
+				function (this: HTMLElement) {
+					focusedElements.push(this)
+				},
+		})
+		const outsideInput = document.createElement("input")
+		document.body.append(outsideInput)
+		outsideInput.focus()
+		try {
+			render(<ChatTextArea {...defaultProps} />)
+			expect(focusedElements[0]).toBe(outsideInput)
+			expect(focusedElements).toHaveLength(hasFocus ? 2 : 1)
+			if (hasFocus) {
+				expect(focusedElements[1]).toBeInstanceOf(HTMLTextAreaElement)
+			}
+		} finally {
+			documentFocus.mockRestore()
+			Object.defineProperty(HTMLElement.prototype, "focus", originalFocus)
+			outsideInput.remove()
+		}
+	})
+
 	describe("enhance prompt button", () => {
 		it("should be enabled even when sendingDisabled is true (for message queueing)", () => {
 			;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
