@@ -616,6 +616,11 @@ export class DiffViewProvider {
 				error instanceof GuardRejectedError &&
 				saveTask &&
 				encodedContent &&
+				// An edit with no pre-open observation was rejected for AUTHORIZATION, not for a
+				// moved token. Adopting the match would report success and record a partial
+				// observation for a file the model never read, which would then authorize a
+				// later edit publish - exactly what the unobserved-edit guard exists to prevent.
+				!(writeKind === "edit" && this.preOpenObservation === null) &&
 				// Only the autosave shape: a clean buffer means its content is what autosave
 				// already put on disk. A dirty buffer means the disk content came from
 				// someone else, so the discard cleanup below is still the right outcome.

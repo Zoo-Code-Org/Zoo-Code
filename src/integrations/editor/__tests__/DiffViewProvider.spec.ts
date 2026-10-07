@@ -2339,6 +2339,39 @@ describe("DiffViewProvider", () => {
 			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
 		})
 
+		it("does not adopt an autosaved match for an edit that was never authorized", async () => {
+			// Same autosave shape, different verdict: with no observation from before open()
+			// the guard rejects for AUTHORIZATION. Adopting the byte match would report a
+			// modified result and record a partial observation for a file the model never
+			// read, which would then authorize a later targeted publish.
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider.editType = "modify"
+			diffViewProvider["preOpenObservation"] = null
+			mockTask.observationRegistry.clear()
+			vi.mocked(computeVersionToken).mockResolvedValue("moved")
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("new content")
+
+			await expect(diffViewProvider.saveChanges(false, 0, "edit")).rejects.toThrow(/File not read yet/)
+
+			// No adoption read, and no observation granted.
+			expect(fs.readFile).not.toHaveBeenCalled()
+			expect(mockTask.observationRegistry.get(`${mockCwd}/test.ts`)).toBeUndefined()
+		})
+
 		it("still rejects when the disk content does not match what the save intended", async () => {
 			// Same autosave shape, different bytes: the guard verdict stands.
 			const cleanEditor = {
