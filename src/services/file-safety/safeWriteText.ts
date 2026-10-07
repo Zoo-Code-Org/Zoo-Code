@@ -40,23 +40,6 @@ export interface SafeWriteTextOptions {
  * cause, and the rollback failure plus the backup location travel with the error so
  * the caller can tell what it is looking at.
  */
-export class RollbackFailureError extends Error {
-	readonly publishError: unknown
-	readonly rollbackError: unknown
-	readonly backupPath: string
-
-	constructor(publishError: unknown, rollbackError: unknown, backupPath: string) {
-		super(
-			`Publish failed (${publishError instanceof Error ? publishError.message : String(publishError)}) and the backup could not be restored to its original path -- the content is preserved at the backup location reported on this error.`,
-			{ cause: publishError },
-		)
-		this.name = "RollbackFailureError"
-		this.publishError = publishError
-		this.rollbackError = rollbackError
-		this.backupPath = backupPath
-	}
-}
-
 /**
  * A caller-supplied staging path that is not a file this write may publish: it
  * sits outside the target's directory (so the commit rename would cross
@@ -292,12 +275,6 @@ export async function safeWriteText(
 	// Non-null only when the win32 step-2 block saved a successful DACL dump:
 	// it gates the step-5 restore and is tracked for the cleanup unlinks.
 	let daclDumpPath: string | null = null
-	// Set when the rollback itself fails, so cleanup runs before the error that
-	// reports the partial state is thrown.
-	// Held as a pair so the reported error still names the path the content survived at;
-	// declaring it as `unknown` alone would lose the string narrowing at the throw site.
-	let rollbackFailure: { error: unknown; backupPath: string } | null = null
-
 	try {
 		// -- Step 1: write content to staging temp file -------------------
 		if (!options?.tempPath) {
@@ -365,7 +342,7 @@ export async function safeWriteText(
 			}
 		}
 
-		// -- Step 2 (win32): save DACL BEFORE backup rename ---------------
+		// -- Step 2 (win32): save DACL BEFORE the backup copy -----------
 		const platform = options?.platform ?? process.platform
 		if (platform === "win32") {
 			try {
@@ -389,12 +366,25 @@ export async function safeWriteText(
 		}
 
 		try {
-			// -- Step 3 (backup:true): rename target -> backup --------------
+			// -- Step 3 (backup:true): durable copy target -> backup ----
 			if (options?.backup) {
 				try {
 					await fs.access(targetPath)
 					backupPath = _tempName(dirPath, "safeWriteText.bak")
-					await fs.rename(targetPath, backupPath)
+					// Copy, never move. Renaming the target away leaves the canonical path absent for
+					// the whole commit window: readers see a missing file, and a concurrent
+					// writer can create a new target that a later rollback would destroy. A copy
+					// keeps the target present, so the step 4 rename is the only change to the
+					// canonical path. The copy is flushed so the retained content survives a crash.
+					await fs.copyFile(targetPath, backupPath)
+					// "r+" not "r": fsync on a read-only handle is EPERM on Windows, and the same
+					// flag the staged temp file uses above.
+					const backupFd = fsSync.openSync(backupPath, "r+")
+					try {
+						_fsyncFile(backupFd)
+					} finally {
+						fsSync.closeSync(backupFd)
+					}
 					releaseBackupOnSuccess = true
 				} catch (err: unknown) {
 					if (errorCode(err) !== "ENOENT") throw err
@@ -464,38 +454,12 @@ export async function safeWriteText(
 		// published, a later failure (for example the post-commit directory fsync)
 		// must not overwrite the published content with the old file.
 		if (backupPath && releaseBackupOnSuccess && !committed) {
-			// A concurrent writer can publish to the target after this write moved it aside: the
-			// backup rename is not covered by a per-target lock, because safeWriteJson already
-			// holds that lock when it calls in here. Restoring over such a publish would
-			// destroy it silently, so the restore runs only while the target is still absent.
-			// Otherwise the previous content stays recoverable at backupPath and the skipped
-			// restore travels with the error instead of papering over the other write.
-			let targetReappeared = false
-			try {
-				await fs.access(targetPath)
-				targetReappeared = true
-			} catch {
-				targetReappeared = false
-			}
-			if (targetReappeared) {
-				rollbackFailure = {
-					error: new Error("rollback skipped: the target was re-created after this write moved it aside, so the concurrent publish is preserved"),
-					backupPath,
-				}
-			} else {
-				try {
-					await fs.rename(backupPath, targetPath)
-				} catch (rollbackError: unknown) {
-					// The content survives only at the backup path now, and the canonical
-					// target is gone. Reporting just the publish failure would leave the
-					// caller with data it cannot find at the expected path, so the
-					// partial-failure state travels with the error. The staged temp file
-					// and this write's staging directory are released first: a rollback
-					// failure is already a hard enough state to reason about without also
-					// leaking the staging file.
-					rollbackFailure = { error: rollbackError, backupPath }
-				}
-			}
+			// Nothing to restore: the backup is a copy, so the target still holds the
+			// pre-write content for the whole attempt and the failed commit left it in
+			// place. Drop the copy and report the original error - there is no rename that
+			// could clobber a publish another writer made during the attempt.
+			await fs.unlink(backupPath).catch(() => {})
+			backupPath = null
 		}
 		try {
 			await fs.unlink(tempPath).catch(() => {})
@@ -512,10 +476,6 @@ export async function safeWriteText(
 
 		if (daclDumpPath !== null) {
 			await fs.unlink(daclDumpPath).catch(() => {})
-		}
-
-		if (rollbackFailure) {
-			throw new RollbackFailureError(originalError, rollbackFailure.error, rollbackFailure.backupPath)
 		}
 
 		throw originalError
