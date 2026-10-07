@@ -376,7 +376,19 @@ export async function safeWriteText(
 
 		// -- Step 2 (win32): save DACL BEFORE the backup copy -----------
 		const platform = options?.platform ?? process.platform
-		const warn = options?.onWarning ?? ((message: string) => console.warn(message))
+		// Warning delivery must never abort the write: the notices below describe a
+		// committed-but-imperfect publish, and a caller whose callback throws (a UI sink,
+		// a logger that is mid-restart) must not turn that into a failed save.
+		const warn = (message: string) => {
+			try {
+				const sink = options?.onWarning ?? ((m: string) => console.warn(m))
+				sink(message)
+			} catch (error: unknown) {
+				console.warn(
+					`safeWriteText: onWarning callback failed: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+		}
 		if (platform === "win32") {
 			let accessError: unknown = null
 			try {
