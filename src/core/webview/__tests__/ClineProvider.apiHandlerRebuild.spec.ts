@@ -537,6 +537,18 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(manager().saveConfig).toHaveBeenCalledTimes(1)
 		})
 
+		it("rejects a model update when the authenticated organization policy is unavailable", async () => {
+			mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "allowed/model" })
+			provider["getOrganizationAllowListForProfileMutation"] = vi.fn().mockReturnValue(undefined)
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "blocked/model",
+			})
+
+			expect(manager().saveConfig).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.violated_organization_allowlist")
+		})
+
 		it("drops an update for a profile that is not the visible profile without reading or saving it", async () => {
 			await provider.updateProfileModel("other-config", providerIdentifiers.openrouter, {
 				openRouterModelId: "x/y",
@@ -659,6 +671,27 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				return "test-id"
 			})
 			vi.mocked(provider["providerSettingsManager"].setModeConfig).mockRejectedValueOnce(new Error("boom"))
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "x/y",
+			})
+
+			expect(manager().saveConfig).toHaveBeenCalledTimes(2)
+			expect(manager().saveConfig).toHaveBeenLastCalledWith("test-config", {
+				id: "test-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			})
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.save_api_config")
+		})
+
+		it("rolls back the saved model when activation preparation fails", async () => {
+			mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
+			manager().saveConfig.mockImplementation(async (profileName, settings) => {
+				manager().getProfile.mockResolvedValue({ name: profileName, ...settings })
+				return "test-id"
+			})
+			vi.mocked(provider["providerSettingsManager"].listConfig).mockRejectedValueOnce(new Error("listing failed"))
 
 			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
 				openRouterModelId: "x/y",

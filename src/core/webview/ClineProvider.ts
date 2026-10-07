@@ -294,9 +294,10 @@ export class ClineProvider
 			},
 		)
 
-		// Advance from the timeout-bounded result. Each fn checks its AbortSignal before
-		// writing state, so advancing the queue on timeout cannot produce stale overwrites.
-		this.providerProfileMutationQueue = callerResult.then(
+		// Keep later mutations behind the actual operation. A timeout is reported to the
+		// caller promptly, but an already-started write must finish before another
+		// mutation can begin and potentially be overwritten by the late write.
+		this.providerProfileMutationQueue = run.then(
 			() => undefined,
 			() => undefined,
 		)
@@ -1924,84 +1925,115 @@ export class ClineProvider
 			await restore()
 			return id
 		}
+		const logRollbackError = (error: unknown) =>
+			this.log(`Profile rollback failed: ${error instanceof Error ? error.message : String(error)}`)
 
-		if (signal.aborted) return abandon()
-
-		if (activate) {
-			const { mode } = await this.getState()
-			const listApiConfigMeta = await this.providerSettingsManager.listConfig()
-
+		try {
 			if (signal.aborted) return abandon()
 
-			// These promises do the following:
-			// 1. Adds or updates the list of provider profiles.
-			// 2. Sets the current provider profile.
-			// 3. Sets the current mode's provider profile.
-			// 4. Copies the provider settings to the context.
-			//
-			// Note: 1, 2, and 4 can be done in one `ContextProxy` call:
-			// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
-			// We should probably switch to that and verify that it works.
-			// I left the original implementation in just to be safe.
-			const previousActivation = rollback && {
-				listApiConfigMeta: this.contextProxy.getValues().listApiConfigMeta,
-				currentApiConfigName: this.contextProxy.getValues().currentApiConfigName,
-				modeConfigId: await this.providerSettingsManager.getModeConfigId(mode),
-			}
+			if (activate) {
+				const { mode } = await this.getState()
+				const listApiConfigMeta = await this.providerSettingsManager.listConfig()
 
-			if (signal.aborted) return abandon()
+				if (signal.aborted) return abandon()
 
-			// allSettled so every started write has finished before the queue can advance.
-			const writes = await Promise.allSettled([
-				this.updateGlobalState("listApiConfigMeta", listApiConfigMeta),
-				this.updateGlobalState("currentApiConfigName", name),
-				this.providerSettingsManager.setModeConfig(mode, id),
-				this.contextProxy.setProviderSettings(providerSettings),
-			])
-			const failed = writes.find((write): write is PromiseRejectedResult => write.status === "rejected")
-
-			if (failed) {
-				// Each rollback step runs even if the other fails, and neither may mask the original error.
-				const logRollbackError = (error: unknown) =>
-					this.log(`Profile rollback failed: ${error instanceof Error ? error.message : String(error)}`)
-				await restore().catch(logRollbackError)
-				// A newer profile switch that already took over the activation must not be undone.
-				const ownsActivation = this.contextProxy.getValues().currentApiConfigName === name
-				if (rollback && previousActivation && ownsActivation) {
-					const {
-						listApiConfigMeta: prevMeta,
-						currentApiConfigName: prevName,
-						modeConfigId,
-					} = previousActivation
-					await Promise.allSettled([
-						this.contextProxy.setProviderSettings(rollback.previous),
-						this.updateGlobalState("listApiConfigMeta", prevMeta),
-						this.updateGlobalState("currentApiConfigName", prevName),
-						modeConfigId
-							? this.providerSettingsManager.setModeConfig(mode, modeConfigId)
-							: this.providerSettingsManager.clearModeConfig(mode),
-					]).then((results) =>
-						results.forEach((result) => result.status === "rejected" && logRollbackError(result.reason)),
-					)
+				// These promises do the following:
+				// 1. Adds or updates the list of provider profiles.
+				// 2. Sets the current provider profile.
+				// 3. Sets the current mode's provider profile.
+				// 4. Copies the provider settings to the context.
+				//
+				// Note: 1, 2, and 4 can be done in one `ContextProxy` call:
+				// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
+				// We should probably switch to that and verify that it works.
+				// I left the original implementation in just to be safe.
+				const previousActivation = rollback && {
+					listApiConfigMeta: this.contextProxy.getValues().listApiConfigMeta,
+					currentApiConfigName: this.contextProxy.getValues().currentApiConfigName,
+					modeConfigId: await this.providerSettingsManager.getModeConfigId(mode),
 				}
-				throw failed.reason
+
+				if (signal.aborted) return abandon()
+
+				// allSettled so every started write has finished before the queue can advance.
+				const writes = await Promise.allSettled([
+					this.updateGlobalState("listApiConfigMeta", listApiConfigMeta),
+					this.updateGlobalState("currentApiConfigName", name),
+					this.providerSettingsManager.setModeConfig(mode, id),
+					this.contextProxy.setProviderSettings(providerSettings),
+				])
+				const failed = writes.find((write): write is PromiseRejectedResult => write.status === "rejected")
+
+				if (failed) {
+					// Each rollback step runs even if the other fails, and neither may mask the original error.
+					await restore().catch(logRollbackError)
+					// A newer profile switch that already took over the activation must not be undone.
+					const ownsActivation = this.contextProxy.getValues().currentApiConfigName === name
+					if (rollback && previousActivation && ownsActivation) {
+						const {
+							listApiConfigMeta: prevMeta,
+							currentApiConfigName: prevName,
+							modeConfigId,
+						} = previousActivation
+						await Promise.allSettled([
+							this.contextProxy.setProviderSettings(rollback.previous),
+							this.updateGlobalState("listApiConfigMeta", prevMeta),
+							this.updateGlobalState("currentApiConfigName", prevName),
+							modeConfigId
+								? this.providerSettingsManager.setModeConfig(mode, modeConfigId)
+								: this.providerSettingsManager.clearModeConfig(mode),
+						]).then((results) =>
+							results.forEach(
+								(result) => result.status === "rejected" && logRollbackError(result.reason),
+							),
+						)
+					}
+					throw failed.reason
+				}
+
+				// The writes above are committed, so there is nothing to roll back; just skip the follow-up work.
+				if (signal.aborted) return id
+
+				// Change the provider for the current task.
+				// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
+				this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+
+				// Keep the current task's sticky provider profile in sync with the newly-activated profile.
+				await this.persistStickyProviderProfileToCurrentTask(name)
+			} else {
+				await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
 			}
 
-			// The writes above are committed, so there is nothing to roll back; just skip the follow-up work.
-			if (signal.aborted) return id
+			await this.postStateToWebview()
+			return id
+		} catch (error) {
+			// Saving succeeds before the activation preparation reads. Restore it when any
+			// later read or write fails so storage cannot diverge from the active context.
+			await restore().catch(logRollbackError)
+			throw error
+		}
+	}
 
-			// Change the provider for the current task.
-			// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
-			this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
-
-			// Keep the current task's sticky provider profile in sync with the newly-activated profile.
-			await this.persistStickyProviderProfileToCurrentTask(name)
-		} else {
-			await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
+	private getOrganizationAllowListForProfileMutation() {
+		if (!CloudService.hasInstance()) {
+			return ORGANIZATION_ALLOW_ALL
 		}
 
-		await this.postStateToWebview()
-		return id
+		try {
+			const cloudService = CloudService.instance
+			// An unauthenticated user has no organization policy to enforce. Once
+			// authenticated, absence of cached settings is not evidence of an
+			// unrestricted policy, so callers must reject the mutation.
+			if (!cloudService.isAuthenticated()) {
+				return ORGANIZATION_ALLOW_ALL
+			}
+			return cloudService.getOrganizationSettings()?.allowList
+		} catch (error) {
+			this.log(
+				`Unable to read organization allow-list for model update: ${error instanceof Error ? error.message : String(error)}`,
+			)
+			return undefined
+		}
 	}
 
 	/**
@@ -2014,7 +2046,8 @@ export class ClineProvider
 			await this.enqueueProviderProfileMutation(async (signal) => {
 				// Mirrors the profile name the webview is shown (see getStateToPostToWebview).
 				const task = this.getCurrentTask()
-				const { currentApiConfigName, organizationAllowList } = await this.getState()
+				const { currentApiConfigName, organizationAllowList: stateOrganizationAllowList } =
+					await this.getState()
 				const visibleProfileName = task ? task.taskApiConfigName : currentApiConfigName
 
 				if (visibleProfileName !== name) {
@@ -2063,7 +2096,20 @@ export class ClineProvider
 					merged[key] = value === null ? undefined : value
 				}
 
+				const authoritativeOrganizationAllowList = this.getOrganizationAllowListForProfileMutation()
 				// The webview filters models, but this message can be sent by anything; enforce the allow-list here.
+				// Authenticated users without cached organization settings are denied rather than
+				// treating an unavailable policy as an unrestricted one.
+				if (!authoritativeOrganizationAllowList) {
+					this.log(`Ignoring model update for profile '${name}': organization allow-list is unavailable`)
+					vscode.window.showErrorMessage(t("common:errors.violated_organization_allowlist"))
+					return
+				}
+				// Preserve a restrictive policy already present in state. This avoids a
+				// transiently stale permissive cache widening the set of accepted models.
+				const organizationAllowList = stateOrganizationAllowList.allowAll
+					? authoritativeOrganizationAllowList
+					: stateOrganizationAllowList
 				if (!ProfileValidator.isProfileAllowed(merged as ProviderSettings, organizationAllowList)) {
 					this.log(`Ignoring model update for profile '${name}': violates the organization allow-list`)
 					vscode.window.showErrorMessage(t("common:errors.violated_organization_allowlist"))
