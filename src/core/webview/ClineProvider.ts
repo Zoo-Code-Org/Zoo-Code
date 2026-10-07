@@ -2418,12 +2418,24 @@ export class ClineProvider
 					// surface the batch failure to the caller.
 					const failed = new Set(error.taskIds)
 					this.recentTasksCache = undefined
-					await this.postStateToWebview()
+					// Artifacts first: deleteMany already dropped the successful ids from the store,
+					// so a webview post that rejects must not strand their checkpoint repositories
+					// and task directories. The caller needs the batch error, not a state-post
+					// failure, so the post is best-effort here.
 					await removeTaskArtifacts(
 						allIdsToDelete.filter((taskId: string) => !failed.has(taskId)),
 						this.contextProxy.globalStorageUri.fsPath,
 						this.cwd,
 					)
+					try {
+						await this.postStateToWebview()
+					} catch (stateError) {
+						console.error(
+							`[deleteTaskWithId] failed to post state after a partial task delete: ${
+								stateError instanceof Error ? stateError.message : String(stateError)
+							}`,
+						)
+					}
 				}
 				throw error
 			}
