@@ -7,6 +7,8 @@ import type { MockedFunction } from "vitest"
 
 import { fileExistsAtPath } from "../../../utils/fs"
 import type { Task } from "../../task/Task"
+import { isPathOutsideWorkspace } from "../../../utils/pathUtils"
+import { canonicalizeForApproval } from "../guardedWrite"
 import { ApplyDiffTool } from "../ApplyDiffTool"
 import { ObservationRegistry } from "../../task/observationRegistry"
 
@@ -36,6 +38,20 @@ vi.mock("../../prompts/responses", () => ({
 		createPrettyPatch: vi.fn(() => "mock-diff"),
 	},
 }))
+
+// The outside-workspace approval plumbing is what the last two tests exercise: whether a path is
+// outside every workspace root, and the canonical identity of an approved target, are both host and
+// editor state, so they are doubled here and the assertions are about what the tool hands to the
+// guarded save path.
+vi.mock("../../../utils/pathUtils", async () => {
+	const actual = await vi.importActual("../../../utils/pathUtils")
+	return { ...actual, isPathOutsideWorkspace: vi.fn(() => false) }
+})
+
+vi.mock("../guardedWrite", async () => {
+	const actual = await vi.importActual("../guardedWrite")
+	return { ...actual, canonicalizeForApproval: vi.fn(async () => "/canonical/outside/thing.ts") }
+})
 
 vi.mock("../../diff/stats", () => ({
 	sanitizeUnifiedDiff: vi.fn((diff: string) => diff),
@@ -75,9 +91,12 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		// one test would otherwise be handed to the next test's reads. Restore the default.
 		const stat = vi.mocked((await import("fs/promises")).default.stat)
 		stat.mockReset()
-		stat.mockResolvedValue(
-			{ dev: 1n, ino: 2n, size: 22n, mtimeNs: 100n, ctimeNs: 100n } as unknown as BigIntStats,
-		)
+		stat.mockResolvedValue({ dev: 1n, ino: 2n, size: 22n, mtimeNs: 100n, ctimeNs: 100n } as unknown as BigIntStats)
+		// The role-aware stat mock above also drives readFile, so its implementation is reset here too:
+		// a leaked implementation would decide which stat call the NEXT test sees as pre-read.
+		const readFile = vi.mocked((await import("fs/promises")).default.readFile)
+		readFile.mockReset()
+		readFile.mockResolvedValue("original file content\n")
 	})
 
 	beforeEach(() => {
@@ -168,6 +187,10 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			true,
 			1000,
 			"edit",
+			// No completeness claim of its own, and an in-workspace target needs no approval flag.
+			undefined,
+			false,
+			undefined,
 		)
 		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
 		expect(mockTask.didEditFile).toBe(true)
@@ -212,7 +235,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			pushToolResult: mockPushToolResult,
 		})
 
-		expect(mockSaveChanges).toHaveBeenCalledWith(true, 1000, "edit")
+		expect(mockSaveChanges).toHaveBeenCalledWith(true, 1000, "edit", false, undefined)
 		expect(mockSaveDirectly).not.toHaveBeenCalled()
 		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
 		expect(mockHandleError).not.toHaveBeenCalled()
@@ -230,9 +253,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		})
 
 		const observation = mockTask.observationRegistry.get(path.resolve(mockTask.cwd, "src/thing.ts"))
-		expect(observation?.version).toBe(
-			"1:2:22:100:100",
-		)
+		expect(observation?.version).toBe("1:2:22:100:100")
 		// A tool read is not a model read, so completeness stays unearned.
 		expect(observation?.complete).toBe(false)
 	})
@@ -241,9 +262,19 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		// Only the fields versionTokenOfStat reads; a full BigIntStats cannot be built
 		// against the mocked fs, so the double assertion is the narrowest option.
 		const stat = vi.mocked((await import("fs/promises")).default.stat)
-		stat
-			.mockResolvedValueOnce({ dev: 1n, ino: 2n, size: 22n, mtimeNs: 100n, ctimeNs: 100n } as unknown as BigIntStats)
-			.mockResolvedValueOnce({ dev: 1n, ino: 2n, size: 30n, mtimeNs: 200n, ctimeNs: 100n } as unknown as BigIntStats)
+		stat.mockResolvedValueOnce({
+			dev: 1n,
+			ino: 2n,
+			size: 22n,
+			mtimeNs: 100n,
+			ctimeNs: 100n,
+		} as unknown as BigIntStats).mockResolvedValueOnce({
+			dev: 1n,
+			ino: 2n,
+			size: 30n,
+			mtimeNs: 200n,
+			ctimeNs: 100n,
+		} as unknown as BigIntStats)
 
 		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
 			askApproval: mockAskApproval,
@@ -289,5 +320,132 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		const observation = mockTask.observationRegistry.get(key)
 		expect(observation?.version).toBe("1:2:9:9:9")
 		expect(observation?.complete).toBe(true)
+	})
+
+	it("still performs the diff read when the pre-read stat fails, and records no observation", async () => {
+		// A stat failure is not a tool failure: the read still happens, the diff still
+		// applies, and the save still goes through the guard (which fails closed without
+		// an observation). What must not happen is an observation recorded for a version
+		// the tool could not bracket.
+		const fsMock = await import("fs/promises")
+		const stat = vi.mocked(fsMock.default.stat)
+		const readFile = vi.mocked(fsMock.default.readFile)
+		// Pin WHICH of the two bracketing stats fails. Both run against the same path, so a
+		// once-value cannot express the role: verified by flipping the injected failure to the
+		// post-read stat, which leaves this test green while testing a different scenario. The
+		// pre-read stat is the one that runs before the read, so the failure is keyed to that
+		// interleaving rather than to a call index.
+		let readStarted = false
+		readFile.mockImplementation(async () => {
+			readStarted = true
+			return "original file content\n"
+		})
+		const statRoles: string[] = []
+		stat.mockImplementation(async () => {
+			if (!readStarted) {
+				statRoles.push("pre:threw")
+				throw Object.assign(new Error("EACCES"), { code: "EACCES" })
+			}
+			statRoles.push("post:ok")
+			return { dev: 1n, ino: 2n, size: 22n, mtimeNs: 100n, ctimeNs: 100n } as unknown as BigIntStats
+		})
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockTask.observationRegistry.get(path.resolve(mockTask.cwd, "src/thing.ts"))).toBeUndefined()
+		// Both bracketing stats ran, and the one that failed was the PRE-read one. The
+		// roles are recorded from the interleaving with the read, so flipping which call throws
+		// makes this assertion fail - the outcome assertions alone cannot tell the two apart.
+		expect(statRoles).toEqual(["pre:threw", "post:ok"])
+		// The read itself is unaffected: the diff was computed and the save attempted.
+		expect(mockTask.diffStrategy?.applyDiff).toHaveBeenCalled()
+		expect(mockSaveDirectly).toHaveBeenCalledWith(
+			"src/thing.ts",
+			"modified file content\n",
+			false,
+			true,
+			1000,
+			"edit",
+			undefined,
+			false,
+			undefined,
+		)
+		expect(mockHandleError).not.toHaveBeenCalled()
+		// Both bracketing stats were still attempted - the failure is not swallowed into
+		// skipping the second one.
+		expect(stat).toHaveBeenCalledTimes(2)
+	})
+
+	it("records no observation when the post-read stat fails", async () => {
+		// The file changed or vanished between the read and the second stat; with no
+		// post-read token the tool cannot prove the version it read, so the read
+		// authorizes nothing and the save falls back to the re-read remediation.
+		const stat = vi.mocked((await import("fs/promises")).default.stat)
+		stat.mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }))
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockTask.observationRegistry.get(path.resolve(mockTask.cwd, "src/thing.ts"))).toBeUndefined()
+		expect(mockSaveDirectly).toHaveBeenCalled()
+		expect(mockHandleError).not.toHaveBeenCalled()
+		expect(stat).toHaveBeenCalledTimes(2)
+	})
+
+	it("carries the outside-workspace approval and its canonical identity to the guarded save", async () => {
+		// guardedWrite refuses a target outside every workspace root unless the tool layer says the
+		// user approved this one, and it binds the publish to the identity that was approved.
+		// apply_diff asks for approval on both save paths, so an approved write has to reach the guard
+		// with both - otherwise the tool's own guard rejects what the user just approved.
+		vi.mocked(isPathOutsideWorkspace).mockReturnValue(true)
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockAskApproval).toHaveBeenCalled()
+		// The identity is captured from the resolved target, not the caller's spelling.
+		expect(canonicalizeForApproval).toHaveBeenCalledWith(expect.stringContaining("thing.ts"), "src/thing.ts")
+		expect(mockSaveDirectly).toHaveBeenCalledWith(
+			"src/thing.ts",
+			"modified file content\n",
+			false,
+			true,
+			1000,
+			"edit",
+			undefined,
+			true,
+			"/canonical/outside/thing.ts",
+		)
+		expect(mockHandleError).not.toHaveBeenCalled()
+	})
+
+	it("carries the approval through the diff-view save path too", async () => {
+		// The other save path is the one taken when the focus-disruption experiment is off; it needs
+		// the same two arguments or an approved write fails on half the configurations.
+		vi.mocked(isPathOutsideWorkspace).mockReturnValue(true)
+		mockTask.providerRef = {
+			deref: () => ({
+				getState: vi.fn().mockResolvedValue({ diagnosticsEnabled: true, writeDelayMs: 1000, experiments: {} }),
+			}),
+		} as unknown as Task["providerRef"]
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockSaveChanges).toHaveBeenCalledWith(true, 1000, "edit", true, "/canonical/outside/thing.ts")
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
 	})
 })
