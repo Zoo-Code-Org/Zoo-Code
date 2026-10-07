@@ -418,16 +418,27 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
 		})
 
-		it("narrows the backup copy to owner read/write before opening it for fsync", async () => {
+		it("creates the backup privately before its content exists, then fsyncs it", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 
 			await safeWriteText(targetPath, "new data", { backup: true })
 
-			// copyFile creates the destination with the source's mode. A read-only target
-			// (0o400/0o444) would otherwise make the r+ open below fail with EACCES and fail
-			// the whole write before the commit - safeWriteJson always asks for a backup.
+			// The destination must exist with a private mode before copyFile writes anything
+			// into it: copyFile chooses the destination mode itself, so a restrictive target
+			// could otherwise leave a group/world-readable copy that a later chmod cannot
+			// undo. "wx" also means a pre-existing path is never silently reused.
+			const seedOpen = vi.mocked(fsSync.openSync).mock.calls.find(function (call) {
+				return String(call[0]).includes("safeWriteText.bak_") && call[1] === "wx"
+			})
+			expect(seedOpen).toBeDefined()
+			expect(seedOpen?.[2]).toBe(0o600)
+			const seedOrder = vi.mocked(fsSync.openSync).mock.invocationCallOrder[vi.mocked(fsSync.openSync).mock.calls.indexOf(seedOpen!)]
+			expect(seedOrder).toBeLessThan(vi.mocked(fs.copyFile).mock.invocationCallOrder[0])
+
+			// The chmod keeps a copied read-only attribute (Windows) from breaking the fsync
+			// open, and keeps a backup of a permissive file private.
 			expect(fs.copyFile).toHaveBeenCalledWith(targetPath, expect.stringContaining("safeWriteText.bak_"))
 			expect(fs.chmod).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"), 0o600)
 			expect(vi.mocked(fs.chmod).mock.invocationCallOrder[0]).toBeGreaterThan(
@@ -436,9 +447,9 @@ describe("safeWriteText", () => {
 
 			// The copy is then opened for fsync with the writable flag.
 			const backupOpen = vi.mocked(fsSync.openSync).mock.calls.find(function (call) {
-				return String(call[0]).includes("safeWriteText.bak_")
+				return String(call[0]).includes("safeWriteText.bak_") && call[1] === "r+"
 			})
-			expect(backupOpen?.[1]).toBe("r+")
+			expect(backupOpen).toBeDefined()
 		})
 
 		it("a failed backup flush is reported and leaves no partial backup behind", async () => {
