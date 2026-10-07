@@ -157,14 +157,14 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	const lockKey = await resolveLockKey(absoluteFilePath)
 
 	// Confinement, if the caller declared a scope, is checked BEFORE the lock is
-	// Also before the parent-directory creation below: an out-of-scope target with a
-	// missing parent would otherwise get a directory created outside confineTo.
-	// taken: proper-lockfile creates ${lockKey}.lock beside the lock key, and the key
-	// is the symlink referent, so a repository-planted link out of the scope would
-	// otherwise create a lock directory outside the scope (and an unwritable referent
-	// directory would surface a lock-acquisition error after retries instead of
-	// ConfinedPathEscapeError). Repeated on the resolved publish target inside the
-	// lock, since a peer writer may move the referent in between.
+	// taken and before the parent-directory creation below: an out-of-scope target
+	// with a missing parent would otherwise get a directory created outside
+	// confineTo, and proper-lockfile creates ${lockKey}.lock beside the lock key -
+	// a key that is the symlink referent, so a repository-planted link out of the
+	// scope would otherwise create a lock file outside the scope (and an unwritable
+	// referent directory would surface a lock-acquisition error after retries
+	// instead of ConfinedPathEscapeError). Repeated on the resolved publish target
+	// inside the lock, since a peer writer may move the referent in between.
 	if (options?.confineTo) {
 		const scopeRoot = await _resolveScopeRoot(options.confineTo)
 		_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(lockKey), scopeRoot)
