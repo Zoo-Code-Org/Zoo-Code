@@ -1967,6 +1967,11 @@ describe("ReadFileTool", () => {
 				// started past line 1, so it cannot claim a full read.
 				expect(pushed).not.toContain("The file was read in full")
 				expect(pushed).toContain("The view starts at line 2, so lines 1-1 were not shown")
+				// The content must not inherit the source indentation: the template literal's
+				// leading tabs would reach the model as part of the first line of the view.
+				// This branch uses the same single tab as the truncated branch above.
+				expect(pushed).toContain("\n\t2 | b")
+				expect(pushed).not.toContain("\n\t\t2 | b")
 			})
 
 
