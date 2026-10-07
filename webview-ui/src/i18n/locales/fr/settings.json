@@ -534,6 +534,8 @@
 		"openAiApiKey": "Clé API OpenAI",
 		"apiKey": "Clé API",
 		"openAiBaseUrl": "URL de base",
+		"openAiStrictToolSchemas": "Schémas d'outils stricts (strict: true)",
+		"openAiStrictToolSchemasDescription": "Envoie strict: true avec les schémas d'outils pour activer le respect strict du schéma. Désactivez pour utiliser l'appel d'outils non strict.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nom du déploiement Azure",
 		"azureOpenAiDeploymentNameDescription": "Saisissez le nom du déploiement défini dans Azure AI Studio, et non le nom du modèle sous-jacent.",
