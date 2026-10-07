@@ -3794,8 +3794,25 @@ export class ClineProvider
 	}
 
 	public async setValue<K extends keyof RooCodeSettings>(key: K, value: RooCodeSettings[K]) {
+		const previousValue = this.contextProxy.getValue(key)
 		await this.contextProxy.setValue(key, value)
-		await this._saveViewLocalStateFromMutation({ [key]: value })
+		try {
+			await this._saveViewLocalStateFromMutation({ [key]: value })
+		} catch (error) {
+			// The per-view pin could not be persisted. Roll the shared value back so the two
+			// stores cannot disagree: a fresh shared setting on top of a stale pin (or vice
+			// versa) is exactly what getValues() would hand to the next consumer.
+			try {
+				await this.contextProxy.setValue(key, previousValue)
+			} catch (rollbackError) {
+				this.log(
+					`[ClineProvider#setValue] Failed to restore the shared value for "${key}" after a per-view write failed: ${
+						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+					}`,
+				)
+			}
+			throw error
+		}
 	}
 
 	public getValue<K extends keyof RooCodeSettings>(key: K) {
@@ -3821,8 +3838,29 @@ export class ClineProvider
 			}
 		}
 
+		// Snapshot the shared values this call is about to change so a failed per-view
+		// persist can put them back (see setValue).
+		const previousValues: Partial<RooCodeSettings> = {}
+		for (const key of Object.keys(sanitizedValues) as Array<keyof RooCodeSettings>) {
+			Object.assign(previousValues, { [key]: this.contextProxy.getValue(key) })
+		}
+
 		await this.contextProxy.setValues(sanitizedValues)
-		await this._saveViewLocalStateFromMutation(sanitizedValues)
+
+		try {
+			await this._saveViewLocalStateFromMutation(sanitizedValues)
+		} catch (error) {
+			try {
+				await this.contextProxy.setValues(previousValues)
+			} catch (rollbackError) {
+				this.log(
+					`[ClineProvider#setValues] Failed to restore the shared settings after a per-view write failed: ${
+						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+					}`,
+				)
+			}
+			throw error
+		}
 	}
 
 	/**
