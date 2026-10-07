@@ -5,10 +5,12 @@ import { execFile } from "child_process"
 
 export interface SafeWriteTextOptions {
 	/**
-	 * When true, preserve the old-file semantics: rename target -> backup first,
-	 * after commit rename delete the backup; on failure roll the backup back to
-	 * the target path.  When false (default) the atomic rename simply replaces
-	 * the target -- crash-safe window is zero.
+	 * When true, keep the old-file semantics without ever removing the target: the
+	 * previous content is copied to a hidden backup path and flushed before the
+	 * commit rename, the commit rename atomically replaces the target, and on success
+	 * the backup copy is deleted. A failure before the commit leaves the target
+	 * untouched (there is nothing to roll back) and removes the backup copy. When
+	 * false (default) the atomic rename simply replaces the target.
 	 */
 	backup?: boolean
 
@@ -34,12 +36,6 @@ export interface SafeWriteTextOptions {
 	tempPath?: string
 }
 
-/**
- * A publish that failed and whose rollback also failed: the content survives only
- * at the backup path, not at the canonical target. The publish failure stays the
- * cause, and the rollback failure plus the backup location travel with the error so
- * the caller can tell what it is looking at.
- */
 /**
  * A caller-supplied staging path that is not a file this write may publish: it
  * sits outside the target's directory (so the commit rename would cross
@@ -123,8 +119,8 @@ async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunne
 }
 
 /** Restore a DACL dump onto *dirPath* on Windows.
- * Best-effort: content is already committed, so failure is non-fatal. */
-async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<void> {
+ * Returns whether icacls succeeded; the caller reports a failure. */
+async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<boolean> {
 	const runner = execFileRunner ?? execFile
 	try {
 		await new Promise<void>((resolve, reject) => {
@@ -132,8 +128,9 @@ async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRu
 				err ? reject(err) : resolve(),
 			)
 		})
+		return true
 	} catch {
-		// best-effort; content already committed
+		return false
 	}
 }
 
@@ -194,7 +191,8 @@ async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
  * Lock key for a publish target: the symlink referent when the path is an
  * existing symlink, the path itself otherwise. Unlike resolvePublishTarget this
  * tolerates a dangling link, because the lock key has to be computable while a
- * peer writer is mid-commit (backup mode renames the referent away and back).
+ * peer writer is mid-commit (a publish renames the staged file onto the referent,
+ * and backup mode keeps a copy beside it).
  * The walk is bounded so a two-link cycle terminates, and every key it returns is
  * canonicalized through canonicalDirKey.
  */
@@ -258,6 +256,20 @@ export async function safeWriteText(
 				`Staging file must be a regular file, not ${stagingStat.isSymbolicLink() ? "a symlink" : "another file type"}`,
 				supplied,
 			)
+		}
+		// A staging path that is the target would be unlinked by the failure handler
+		// while it still holds the only copy of the content, so a failed write would
+		// delete the file it was meant to protect. Compare identities, not spellings:
+		// an alias of the target is the same hazard.
+		const targetStat = await fs.lstat(targetPath).catch(() => null)
+		if (
+			targetStat &&
+			typeof stagingStat.ino === "number" &&
+			typeof targetStat.ino === "number" &&
+			stagingStat.ino === targetStat.ino &&
+			stagingStat.dev === targetStat.dev
+		) {
+			throw new StagingPathError("Staging file must not be the target itself", supplied)
 		}
 		// The caller's own path is used as given; only the check is canonical.
 		tempPath = options.tempPath
@@ -430,7 +442,16 @@ export async function safeWriteText(
 			// and on every failed save.
 			if (daclDumpPath !== null) {
 				const restoredDir = path.dirname(targetPath)
-				await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
+				const restored = await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
+				if (!restored) {
+					// The content is committed, but the published file may carry a different DACL
+					// from the one that was saved. Failing the write here would break every
+					// publish on machines where icacls cannot reapply the saved ACEs (a plain
+					// temp directory restore fails with "Not all privileges or groups referenced
+					// are assigned to the caller"), so the change of access rights is reported
+					// rather than thrown.
+					console.warn(`safeWriteText: content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`)
+				}
 			}
 
 			// -- Step 6 (backup:true): delete backup on success -----------
