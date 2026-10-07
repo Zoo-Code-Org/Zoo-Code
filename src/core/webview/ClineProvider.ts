@@ -4204,11 +4204,15 @@ export class ClineProvider
 	 *   name and the settings stay consistent.
 	 *
 	 * A view with no pin follows the shared store and needs nothing. The originating view
-	 * refreshes its own buffer at the mutation site.
+	 * refreshes its own buffer at the mutation site - but only when it ACTIVATED the
+	 * profile, because activation clears its overlay. A save that does not activate leaves
+	 * the acting view's own overlay untouched, so those callers pass includeSelf and this
+	 * view refreshes too when its pin names the profile that was just saved.
 	 */
 	private async refreshViewLocalStateForUpdatedProfile(
 		name: string,
 		providerSettings: ProviderSettings,
+		includeSelf = false,
 	): Promise<void> {
 		const affected = ClineProvider.getAllInstances().filter(
 			// Direct private access: compile-time safe across sibling instances. A sibling that has

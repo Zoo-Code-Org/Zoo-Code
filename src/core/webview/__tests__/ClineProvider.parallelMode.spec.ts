@@ -852,6 +852,47 @@ new ClineProvider(
 			// not keep authenticating with the token cached in its overlay.
 			expect(viewB["viewLocalState"].apiConfiguration).toEqual(saved)
 		})
+
+		it("refreshes the acting view's own overlay when it saves the pinned profile without activating", async () => {
+			viewA["viewLocalState"] = {
+				currentApiConfigName: "profile-a",
+				apiConfiguration: { ...activated, zooSessionToken: "stale-token" },
+			}
+			const saved: ProfileFixture = { ...activated, zooSessionToken: "fresh-token" }
+
+			await viewA.upsertProviderProfile("profile-a", saved, false)
+
+			// A non-activating save clears nobody's overlay, so without the includeSelf
+			// refresh this view keeps serving the token it just replaced on disk.
+			expect(viewA["viewLocalState"].apiConfiguration).toEqual(saved)
+			viewA["viewLocalState"] = {}
+		})
+
+		it("leaves the acting view's own pin alone when it saves a different profile", async () => {
+			viewA["viewLocalState"] = { currentApiConfigName: "profile-b", apiConfiguration: pinnedElsewhere }
+			const saved: ProfileFixture = { ...activated, zooSessionToken: "fresh-token" }
+
+			await viewA.upsertProviderProfile("profile-a", saved, false)
+
+			// profile-b is not the profile that changed, so its pinned settings must survive
+			// rather than be overwritten with profile-a's.
+			expect(viewA["viewLocalState"].apiConfiguration).toEqual(pinnedElsewhere)
+			viewA["viewLocalState"] = {}
+		})
+
+		it("still clears the acting view's overlay on the activation path", async () => {
+			viewA["viewLocalState"] = {
+				currentApiConfigName: "profile-a",
+				apiConfiguration: { ...activated, apiKey: "stale-key" },
+			}
+
+			await viewA.upsertProviderProfile("profile-a", activated, true)
+
+			// Activation writes the shared store and clears the overlay; includeSelf must not
+			// turn that clear back into a refresh.
+			expect(viewA["viewLocalState"].apiConfiguration).toBeUndefined()
+			viewA["viewLocalState"] = {}
+		})
 	})
 
 	describe("durable editor view state retention (#1065)", () => {
