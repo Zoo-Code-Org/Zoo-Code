@@ -15,6 +15,7 @@ import {
 import { defaultModeSlug } from "../../../shared/modes"
 import { ContextProxy } from "../../config/ContextProxy"
 import { ClineProvider } from "../ClineProvider"
+import { WebviewFocusTracker } from "../WebviewFocusTracker"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import type { Task } from "../../task/Task"
@@ -675,7 +676,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 	describe("persisted view state pruning edge cases", () => {
 		it("should drop the entry without updatedAt first when the cap is exceeded", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			// An entry written before updatedAt existed ranks below every timestamped entry
 			// (updatedAt ?? 0) and is the first to fall off the cap.
 			const states = {
@@ -701,7 +708,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 
 		it("should keep the earliest inserted entries when updatedAt values tie", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			// Equal timestamps preserve insertion order (stable sort), so the first 50
 			// registered views survive and the last 5 fall off the cap.
 			const states = Object.fromEntries(
@@ -721,7 +734,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 	describe("sibling view consistency after a profile activation", () => {
 		const makeProvider = () =>
-			new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 
 		// One pair for the whole block: each ClineProvider spins up background managers, and
 		// creating a pair per test leaves their console output in flight when the worker tears
@@ -837,7 +856,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 	describe("durable editor view state retention (#1065)", () => {
 		it("should preserve persisted viewStates entry when an editor provider is disposed during teardown", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 
 			await provider["setViewStateId"]("tab-to-preserve")
 			await provider.saveViewState("mode", "architect")
@@ -855,7 +880,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 	describe("shared setting and per-view pin are updated atomically", () => {
 		it("restores the shared value when the per-view pin cannot be persisted", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			await provider["setViewStateId"]("tab-atomic")
 			await provider.setValue("mode", "code")
 			expect(provider.getValue("mode")).toBe("code")
@@ -878,7 +909,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 
 		it("restores every shared value a batch had written when its pin write fails", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			await provider["setViewStateId"]("tab-batch")
 			await provider.setValue("mode", "code")
 			await provider.setValue("currentApiConfigName", "default")
