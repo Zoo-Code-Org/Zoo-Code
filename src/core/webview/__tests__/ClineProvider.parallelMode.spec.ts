@@ -877,6 +877,9 @@ new ClineProvider(
 			// profile-b is not the profile that changed, so its pinned settings must survive
 			// rather than be overwritten with profile-a's.
 			expect(viewA["viewLocalState"].apiConfiguration).toEqual(pinnedElsewhere)
+			// The pin itself must survive too: a config object that still matches would hide
+			// a view that had been re-pointed at the profile that changed.
+			expect(viewA["viewLocalState"].currentApiConfigName).toBe("profile-b")
 			viewA["viewLocalState"] = {}
 		})
 
