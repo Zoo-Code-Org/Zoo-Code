@@ -79,6 +79,34 @@ export interface TaskHistoryStoreOptions {
 	onWrite?: (items: HistoryItem[]) => Promise<void>
 }
 
+/**
+ * A deletion that did not happen.
+ *
+ * The item is kept in the cache, the mtime map and the persisted state, so the store still
+ * agrees with the disk and the next reconciliation does not resurrect a task the caller was
+ * told was gone. The caller learns the delete failed instead of seeing a success that the
+ * on-disk state contradicts.
+ */
+export class TaskHistoryDeleteError extends Error {
+	constructor(
+		readonly taskIds: string[],
+		readonly reason: string,
+		cause?: unknown,
+	) {
+		super(
+			`Task history for ${taskIds.join(", ")} could not be deleted (${reason}); the affected items were kept.`,
+			{ cause },
+		)
+		this.name = "TaskHistoryDeleteError"
+	}
+}
+
+function errorCode(error: unknown): string | undefined {
+	return typeof error === "object" && error !== null && "code" in error
+		? String((error as { code?: unknown }).code)
+		: undefined
+}
+
 export class TaskHistoryStore {
 	private readonly globalStoragePath: string
 	private readonly onWrite?: (items: HistoryItem[]) => Promise<void>
@@ -264,30 +292,24 @@ export class TaskHistoryStore {
 	}
 
 	/**
-	 * Delete a single task's history item.
+	 * Delete one task’s history item.
 	 *
-	 * Deletion is best-effort: the unlink runs under the same per-file
-	 * advisory lock as `safeWriteJson`, so a locked read-modify-write (for
-	 * example the settlement in `clearPendingActionIfMatching`) cannot
-	 * interleave with it. A lock or unlink failure is swallowed because the
-	 * file may already be deleted; the in-memory eviction and the write
-	 * through still complete.
+	 * The unlink runs under the same per-file advisory lock as `safeWriteJson`, so a locked
+	 * read-modify-write (for example the settlement in `clearPendingActionIfMatching`) cannot
+	 * interleave with it. Eviction and the write-through happen only once the file is actually
+	 * gone (unlinked, or confirmed absent with ENOENT). A lock failure or a non-ENOENT unlink
+	 * failure leaves the item in place and is reported as a TaskHistoryDeleteError: a store that
+	 * dropped the item while the file survived would report a deletion that the next
+	 * reconciliation immediately contradicts.
 	 */
 	async delete(taskId: string): Promise<void> {
 		return this.withLock(async () => {
+			const outcome = await this.removeTaskFile(taskId)
+			if (!outcome.deleted) {
+				throw new TaskHistoryDeleteError([taskId], outcome.reason ?? "unknown error", outcome.cause)
+			}
 			this.cache.delete(taskId)
 			this.taskFileMtimes.delete(taskId)
-
-			// Remove per-task file (best-effort)
-			try {
-				const filePath = await this.getTaskFilePath(taskId)
-				// Lock the resolved publish target, not the path as spelled: proper-lockfile
-				// keys the lock by the path it is given, so an alias and its referent would
-				// take two locks for one file. The unlink still removes the named path.
-				await withFileLock(await this.lockKeyFor(filePath), () => fs.unlink(filePath))
-			} catch {
-				// File may already be deleted
-			}
 
 			// Call onWrite callback inside the lock for serialized write-through
 			if (this.onWrite) {
@@ -297,34 +319,63 @@ export class TaskHistoryStore {
 	}
 
 	/**
-	 * Delete multiple tasks' history items in a batch.
+	 * Delete multiple tasks’ history items in a batch.
 	 *
-	 * Every item follows the `delete` semantics and is attempted even when an
-	 * earlier unlink fails. The single write-through runs once after the
-	 * whole batch.
+	 * Every item follows the `delete` semantics and is attempted even when an earlier one fails.
+	 * The single write-through runs once, after the batch, and only if at least one item was
+	 * actually removed. Failed ids are reported together in one TaskHistoryDeleteError and stay
+	 * in the store.
 	 */
 	async deleteMany(taskIds: string[]): Promise<void> {
 		return this.withLock(async () => {
+			const failures: { taskId: string; reason: string; cause?: unknown }[] = []
+			let deletedAny = false
 			for (const taskId of taskIds) {
+				const outcome = await this.removeTaskFile(taskId)
+				if (!outcome.deleted) {
+					failures.push({ taskId, reason: outcome.reason ?? "unknown error", cause: outcome.cause })
+					continue
+				}
 				this.cache.delete(taskId)
 				this.taskFileMtimes.delete(taskId)
-
-				// Remove per-task file (best-effort)
-				try {
-					const filePath = await this.getTaskFilePath(taskId)
-					// Same lock key as delete(): the resolved referent, while the unlink
-					// still removes the path the caller named.
-					await withFileLock(await this.lockKeyFor(filePath), () => fs.unlink(filePath))
-				} catch {
-					// File may already be deleted
-				}
+				deletedAny = true
 			}
 
 			// Call onWrite callback inside the lock for serialized write-through
-			if (this.onWrite) {
+			if (this.onWrite && deletedAny) {
 				await this.onWrite(this.getAll())
 			}
+
+			if (failures.length > 0) {
+				throw new TaskHistoryDeleteError(
+					failures.map((f) => f.taskId),
+					failures.map((f) => f.taskId + ": " + f.reason).join("; "),
+					failures[0].cause,
+				)
+			}
 		})
+	}
+
+	/**
+	 * Remove the per-task file under the shared lock and report whether the file is gone.
+	 *
+	 * ENOENT counts as gone (there was nothing to delete); a lock timeout or any other unlink
+	 * error means the file is still there, and the caller must not treat the item as deleted.
+	 */
+	private async removeTaskFile(taskId: string): Promise<{ deleted: boolean; reason?: string; cause?: unknown }> {
+		const filePath = await this.getTaskFilePath(taskId)
+		try {
+			// Lock the resolved publish target, not the path as spelled: proper-lockfile keys the
+			// lock by the path it is given, so an alias and its referent would take two locks for
+			// one file. The unlink still removes the named path.
+			await withFileLock(await this.lockKeyFor(filePath), () => fs.unlink(filePath))
+			return { deleted: true }
+		} catch (error: unknown) {
+			if (errorCode(error) === "ENOENT") {
+				return { deleted: true }
+			}
+			return { deleted: false, reason: errorCode(error) ?? "unknown error", cause: error }
+		}
 	}
 
 	// ────────────────────────────── Reconciliation ──────────────────────────────
