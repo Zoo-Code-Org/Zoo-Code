@@ -1479,6 +1479,7 @@ describe("DiffViewProvider", () => {
 
 			await diffViewProvider.saveChanges(false, 0, "edit")
 			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.txt`, Buffer.from("new content"))
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.txt`, Buffer.from("new content"))
 		})
 
 		it("publishes the accepted content in the document's own encoding", async () => {
