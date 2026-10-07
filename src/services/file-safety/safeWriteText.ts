@@ -28,6 +28,14 @@ export interface SafeWriteTextOptions {
 	execFileRunner?: typeof execFile
 
 	/**
+	 * Sink for non-fatal safety notices. A Windows DACL that could not be captured means the
+	 * committed file may inherit different access rights: the write still proceeds (a missing or
+	 * failing icacls must not block saving), but the caller is told instead of the change being
+	 * silent. Defaults to console.warn.
+	 */
+	onWarning?: (message: string) => void
+
+	/**
 	 * Pre-written temp path to use for the commit phase.  When provided,
 	 * safeWriteText skips creating its own staging file and uses this path
 	 * instead (it still fsyncs before rename).  Useful when a caller has
@@ -368,9 +376,15 @@ export async function safeWriteText(
 
 		// -- Step 2 (win32): save DACL BEFORE the backup copy -----------
 		const platform = options?.platform ?? process.platform
+		const warn = options?.onWarning ?? ((message: string) => console.warn(message))
 		if (platform === "win32") {
+			let accessError: unknown = null
 			try {
 				await fs.access(targetPath) // target exists?
+			} catch (error: unknown) {
+				accessError = error
+			}
+			if (accessError === null) {
 				const dumpPath = _tempName(dirPath, "safeWriteText.acl")
 				const saved = await _saveDaclWindows(targetPath, dumpPath, options?.execFileRunner)
 				if (saved) {
@@ -382,13 +396,20 @@ export async function safeWriteText(
 					// remove it now (best-effort) so no partial dump survives and
 					// no later step can restore from it.
 					await fs.unlink(dumpPath).catch(() => {})
+					// The target exists and its DACL could not be captured, so the commit rename
+					// replaces it with a file that inherits different access rights. The write still
+					// proceeds - a missing or failing icacls must not leave the user unable to save -
+					// but the replacement is no longer ACL-identical and that has to be visible
+					// instead of silent.
+					warn(`Could not save the DACL of ${targetPath}; the replacement may inherit different access rights.`)
 				}
-			} catch {
-				// target does not exist or access failed — no DACL handling
-				daclDumpPath = null
+			} else if (errorCode(accessError) !== "ENOENT") {
+				// Not "absent": the target is there but could not be checked (EACCES, ...), so
+				// DACL preservation was skipped for a reason the caller cannot infer from the
+				// successful write alone.
+				warn(`Could not check ${targetPath} for DACL preservation (${errorCode(accessError) ?? "unknown error"}); the replacement may inherit different access rights.`)
 			}
 		}
-
 		try {
 			// -- Step 3 (backup:true): durable copy target -> backup ----
 			if (options?.backup) {
