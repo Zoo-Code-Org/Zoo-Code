@@ -242,7 +242,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		it("rejects a target whose resolved path leaves the workspace", async () => {
 			// The lexical check cannot see a link that lands outside. With the workspace
 			// resolvable, the canonical comparison is what rejects the write.
-			mockedFsRealpath.mockImplementation(async (p: string) => {
+			mockedFsRealpath.mockImplementation(async (p) => {
 				const s = String(p)
 				if (s === path.resolve(WORKSPACE)) {
 					return "/real/workspace"
@@ -259,7 +259,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		})
 
 		it("publishes when the resolved path stays inside the workspace", async () => {
-			mockedFsRealpath.mockImplementation(async (p: string) => {
+			mockedFsRealpath.mockImplementation(async (p) => {
 				const s = String(p)
 				if (s === path.resolve(WORKSPACE)) {
 					return "/real/workspace"
