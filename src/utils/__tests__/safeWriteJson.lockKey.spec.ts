@@ -96,10 +96,11 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// The lock key is the key every other writer to this file uses, so the caller
 		// queued behind the peer instead of failing before the lock.
 		expect(mockedAcquireFileLock).toHaveBeenCalledWith(referent)
-		// The trailing lstat is safeWriteText's staging-path check on the temp file
-		// this write created: it runs after the key was resolved and the lock taken,
-		// so it does not change which lock the caller queued behind.
-		expect(order).toEqual(["resolve-failed", "lstat", "resolve", "resolve", "lock", "resolve", "resolve", "lstat"])
+		// The two trailing lstat calls are safeWriteText's staging-path checks: the
+		// regular-file check on the temp file this write created, and the identity check
+		// that the staging path is not the target. Both run after the key was resolved
+		// and the lock was taken, so neither changes which lock the caller queued behind.
+		expect(order).toEqual(["resolve-failed", "lstat", "resolve", "resolve", "lock", "resolve", "resolve", "lstat", "lstat"])
 		expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ id: "task-1" })
 	})
 
