@@ -365,6 +365,10 @@ describe("safeWriteText", () => {
 			expect(fs.copyFile).toHaveBeenCalledWith(targetPath, expect.stringContaining("safeWriteText.bak_"))
 			expect(fs.rename).toHaveBeenCalledTimes(1)
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+
+			// The durability failure is reported, not swallowed - and the backup copy is not
+			// left beside the target where no caller could find it.
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
 		})
 	})
 
