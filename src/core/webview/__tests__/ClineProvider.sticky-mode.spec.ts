@@ -495,19 +495,23 @@ describe("ClineProvider - Sticky Mode", () => {
 
 		it("restores the view's own mode pin when a task listener throws after the durable write", async () => {
 			// A listener that throws after the durable write is the failure under test.
+			// Only the TaskModeSwitched emit may throw: addClineToStack emits other events
+			// during setup, and a listener failure is what the rollback covers. Kept as an
+			// untyped Mock<Procedure> so the object literal still overlaps Partial<Task>.
+			const emit = vi.fn()
+			emit.mockImplementation((event: string) => {
+				if (event === "taskModeSwitched") {
+					throw new Error("listener failed")
+				}
+			})
+
 			const mockTask = Object.assign(
 				{} as Task,
 				{
 					taskId: "test-task-id",
 					taskMode: "code",
 					_taskMode: "code",
-				// Only the TaskModeSwitched emit may throw: addClineToStack emits other
-				// events during setup, and a listener failure is what the rollback covers.
-				emit: vi.fn((event: string) => {
-					if (event === "taskModeSwitched") {
-						throw new Error("listener failed")
-					}
-				}),
+					emit,
 					saveClineMessages: vi.fn(),
 					clineMessages: [],
 					apiConversationHistory: [],
@@ -557,19 +561,23 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 
 		it("leaves no mode pin behind when a view without a pin fails the same way", async () => {
+			// Only the TaskModeSwitched emit may throw: addClineToStack emits other events
+			// during setup, and a listener failure is what the rollback covers. Kept as an
+			// untyped Mock<Procedure> so the object literal still overlaps Partial<Task>.
+			const emit = vi.fn()
+			emit.mockImplementation((event: string) => {
+				if (event === "taskModeSwitched") {
+					throw new Error("listener failed")
+				}
+			})
+
 			const mockTask = Object.assign(
 				{} as Task,
 				{
 					taskId: "test-task-id",
 					taskMode: "code",
 					_taskMode: "code",
-				// Only the TaskModeSwitched emit may throw: addClineToStack emits other
-				// events during setup, and a listener failure is what the rollback covers.
-				emit: vi.fn((event: string) => {
-					if (event === "taskModeSwitched") {
-						throw new Error("listener failed")
-					}
-				}),
+					emit,
 					saveClineMessages: vi.fn(),
 					clineMessages: [],
 					apiConversationHistory: [],
