@@ -11,6 +11,7 @@ import { computeVersionToken, versionTokenOfStat } from "../../../utils/versionT
 import type { BigIntStats } from "fs"
 import { safeWriteText } from "../../../services/file-safety/safeWriteText"
 import { withFileLock } from "../../../utils/fileLock"
+import { createDirectoriesForFile } from "../../../utils/fs"
 import { ObservationRegistry } from "../../../core/task/observationRegistry"
 import type { Task } from "../../../core/task/Task"
 
@@ -1547,6 +1548,31 @@ describe("DiffViewProvider", () => {
 			expect(vi.mocked(fs.stat)).toHaveBeenCalledTimes(2)
 			expect(mockTask.observationRegistry.get(`${mockCwd}/t3-create.ts`)?.version).toBe(placeholderToken)
 			expect(diffViewProvider["placeholderVersion"]).toBe(placeholderToken)
+		})
+
+		it("open() removes the placeholder and its new directories when the diff editor never opens", async () => {
+			// open() creates the parent directories and writes the empty placeholder before
+			// it opens the diff. If the diff never opens there is no active diff editor for
+			// revertChanges() to undo, so an unapproved empty file (and the directories made
+			// for it) would stay on disk.
+			const createdDirs = [`${mockCwd}/t3-partial`, `${mockCwd}/t3-partial/nested`]
+			vi.mocked(createDirectoriesForFile).mockResolvedValueOnce(createdDirs)
+			vi.mocked(vscode.window.showTextDocument).mockRejectedValue(new Error("Cannot open file"))
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockReturnValue({ dispose: vi.fn() })
+			vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("")
+			diffViewProvider.editType = "create"
+
+			await expect(diffViewProvider.open("t3-partial/nested/new.ts")).rejects.toThrow(/Failed to/)
+
+			// The placeholder this open() wrote is removed, and the directories it created
+			// go with it, innermost first.
+			expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith(`${mockCwd}/t3-partial/nested/new.ts`)
+			expect(vi.mocked(fs.rmdir)).toHaveBeenNthCalledWith(1, `${mockCwd}/t3-partial/nested`)
+			expect(vi.mocked(fs.rmdir)).toHaveBeenNthCalledWith(2, `${mockCwd}/t3-partial`)
+			expect(diffViewProvider["createdDirs"]).toEqual([])
+			expect(diffViewProvider["placeholderVersion"]).toBeUndefined()
 		})
 
 		it("open() on a create with a collected task writes the placeholder but tracks nothing", async () => {
