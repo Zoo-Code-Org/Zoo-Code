@@ -376,7 +376,19 @@ export async function safeWriteText(
 
 		// -- Step 2 (win32): save DACL BEFORE the backup copy -----------
 		const platform = options?.platform ?? process.platform
-		const warn = options?.onWarning ?? ((message: string) => console.warn(message))
+		// Warning delivery must never abort the write: the notices below describe a
+		// committed-but-imperfect publish, and a caller whose callback throws (a UI sink,
+		// a logger that is mid-restart) must not turn that into a failed save.
+		const warn = (message: string) => {
+			try {
+				const sink = options?.onWarning ?? ((m: string) => console.warn(m))
+				sink(message)
+			} catch (error: unknown) {
+				console.warn(
+					`safeWriteText: onWarning callback failed: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+		}
 		if (platform === "win32") {
 			let accessError: unknown = null
 			try {
@@ -495,7 +507,7 @@ export async function safeWriteText(
 					// temp directory restore fails with "Not all privileges or groups referenced
 					// are assigned to the caller"), so the change of access rights is reported
 					// rather than thrown.
-					console.warn(`safeWriteText: content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`)
+					warn(`safeWriteText: content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`)
 				}
 			}
 

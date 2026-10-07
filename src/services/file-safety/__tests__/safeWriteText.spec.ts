@@ -591,6 +591,28 @@ describe("safeWriteText", () => {
 		expect(warnings.filter((m) => m.includes("Could not check"))).toHaveLength(1)
 	})
 
+	// Warning delivery is advisory: it must not be able to fail the save it is reporting on.
+	it("win32: a throwing onWarning does not abort the write", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+			if (typeof cb === "function") cb(new Error("icacls error"), "", "")
+			return fakeChild
+		})
+	
+		await expect(
+			safeWriteText(targetPath, "data", {
+				platform: "win32",
+				onWarning: () => {
+					throw new Error("callback down")
+				},
+			}),
+		).resolves.toBeUndefined()
+	
+		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
+	})
+
 		it("win32 DACL: a partial dump left by a failed save is removed and never restored", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
