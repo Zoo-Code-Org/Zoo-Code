@@ -554,6 +554,43 @@ describe("safeWriteText", () => {
 			expect(execFile).toHaveBeenCalledTimes(1)
 		})
 
+	it("win32: reports that access rights may change when the DACL cannot be saved", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+			if (typeof cb === "function") cb(new Error("icacls error"), "", "")
+			return fakeChild
+		})
+		const warnings: string[] = []
+
+		await safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) })
+
+		// The write still commits - a failing icacls must not leave the user unable to save -
+		// but the caller is told the replacement may not carry the old ACL.
+		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
+		expect(warnings.filter((m) => m.includes("different access rights"))).toHaveLength(1)
+	})
+
+	it("win32: reports when the target cannot be checked for DACL preservation", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		// The target exists but is not readable: that is not "absent", and skipping DACL
+		// preservation has to be visible.
+		vi.mocked(fs.access).mockImplementation(async (p) => {
+			if (String(p) === targetPath) {
+				throw Object.assign(new Error("EACCES"), { code: "EACCES" })
+			}
+		})
+		const warnings: string[] = []
+
+		await safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) })
+
+		expect(execFile).not.toHaveBeenCalled()
+		expect(warnings.filter((m) => m.includes("Could not check"))).toHaveLength(1)
+	})
+
 		it("win32 DACL: a partial dump left by a failed save is removed and never restored", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
