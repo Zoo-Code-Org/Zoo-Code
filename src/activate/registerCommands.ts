@@ -325,9 +325,6 @@ export const openClineInNewTab = async ({
 
 // The unserialized tab-creation body. Only openClineInNewTab may call it,
 // after it has stored the shared in-flight promise.
-
-// The unserialized tab-creation body. Only openClineInNewTab may call it,
-// after it has stored the shared in-flight promise.
 const createTabPanelUnlocked = async ({
 	context,
 	outputChannel,
