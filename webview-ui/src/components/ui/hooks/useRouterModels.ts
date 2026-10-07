@@ -14,7 +14,7 @@ type UseRouterModelsOptions = {
 	enabled?: boolean // gate fetching entirely
 }
 
-export const fetchRouterModels = async (provider?: string) =>
+export const fetchRouterModels = async (provider?: string, signal?: AbortSignal) =>
 	new Promise<RouterModels>((resolve, reject) => {
 		const cleanup = () => {
 			if (typeof window !== "undefined") {
@@ -22,10 +22,23 @@ export const fetchRouterModels = async (provider?: string) =>
 			}
 		}
 
+		if (signal?.aborted) {
+			reject(new Error("Router models request aborted"))
+			return
+		}
+
 		const timeout = setTimeout(() => {
 			cleanup()
 			reject(new Error("Router models request timed out"))
 		}, 10000)
+
+		const abortHandler = () => {
+			clearTimeout(timeout)
+			cleanup()
+			reject(new Error("Router models request aborted"))
+		}
+
+		signal?.addEventListener("abort", abortHandler, { once: true })
 
 		const handler = (event: MessageEvent) => {
 			const message: ExtensionMessage = event.data
@@ -40,6 +53,7 @@ export const fetchRouterModels = async (provider?: string) =>
 				}
 
 				clearTimeout(timeout)
+				signal?.removeEventListener("abort", abortHandler)
 				cleanup()
 
 				if (message.routerModels) {
@@ -62,7 +76,7 @@ export const useRouterModels = (opts: UseRouterModelsOptions = {}) => {
 	const provider = opts.provider || undefined
 	return useQuery({
 		queryKey: [RouterModelsMessageType.routerModels, provider || allRouterModelsProvider],
-		queryFn: () => fetchRouterModels(provider),
+		queryFn: ({ signal }) => fetchRouterModels(provider, signal),
 		enabled: opts.enabled !== false,
 	})
 }

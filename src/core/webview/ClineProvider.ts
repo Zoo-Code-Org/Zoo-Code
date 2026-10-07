@@ -55,9 +55,17 @@ import {
 	DEFAULT_MODES,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	getModelId,
+	modelIdKeysByProvider,
 	isRetiredProvider,
 	providerIdentifiers,
 } from "@roo-code/types"
+
+const RESET_ONLY_KEYS: readonly string[] = [
+	"awsCustomArn",
+	"reasoningEffort",
+	"modelMaxTokens",
+	"modelMaxThinkingTokens",
+]
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
 import { TaskScheduler } from "../task/TaskScheduler"
@@ -1927,6 +1935,130 @@ export class ClineProvider
 
 			vscode.window.showErrorMessage(t("common:errors.create_api_config"))
 			return undefined
+		}
+	}
+
+	private getOrganizationAllowListForProfileMutation() {
+		if (!CloudService.hasInstance()) {
+			return ORGANIZATION_ALLOW_ALL
+		}
+
+		try {
+			const cloudService = CloudService.instance
+			if (!cloudService.isAuthenticated()) {
+				return ORGANIZATION_ALLOW_ALL
+			}
+			return cloudService.getOrganizationSettings()?.allowList
+		} catch (error) {
+			this.log(
+				`Unable to read organization allow-list for model update: ${error instanceof Error ? error.message : String(error)}`,
+			)
+			return undefined
+		}
+	}
+
+	/**
+	 * Applies a model selection to a stored profile. Everything runs inside one queued
+	 * mutation so a selection made against a profile that has since been switched away
+	 * from is dropped instead of saved and reactivated.
+	 */
+	async updateProfileModel(name: string, expectedProvider: string, patch: Record<string, unknown>): Promise<void> {
+		try {
+			await this.enqueueProviderProfileMutation(async (signal) => {
+				// Mirrors the profile name the webview is shown (see getStateToPostToWebview).
+				const task = this.getCurrentTask()
+				const { currentApiConfigName, organizationAllowList: stateOrganizationAllowList } =
+					await this.getState()
+				const visibleProfileName = task ? task.taskApiConfigName : currentApiConfigName
+
+				if (visibleProfileName !== name) {
+					this.log(`Ignoring model update for profile '${name}': active profile is '${visibleProfileName}'`)
+					return
+				}
+
+				const { name: _name, id, ...stored } = await this.providerSettingsManager.getProfile({ name })
+
+				if (signal.aborted) return
+
+				// A profile without an explicit provider is treated as OpenRouter, matching the chat ModelSelector.
+				const storedProvider = stored.apiProvider ?? providerIdentifiers.openrouter
+
+				if (storedProvider !== expectedProvider) {
+					this.log(
+						`Ignoring model update for profile '${name}': provider is '${storedProvider}', expected '${expectedProvider}'`,
+					)
+					return
+				}
+
+				// Only model selection and its side-effect resets may be patched (see handleModelChangeSideEffects).
+				const providerModelKey: string | undefined =
+					storedProvider === providerIdentifiers.openai
+						? "openAiModelId"
+						: modelIdKeysByProvider[storedProvider as keyof typeof modelIdKeysByProvider]
+				const allowedKeys: ReadonlySet<string> = new Set(
+					providerModelKey ? [providerModelKey, ...RESET_ONLY_KEYS] : RESET_ONLY_KEYS,
+				)
+				const merged: Record<string, unknown> = { ...stored, id }
+				for (const [key, value] of Object.entries(patch)) {
+					// The provider is never patchable.
+					if (key === "apiProvider" || !allowedKeys.has(key)) {
+						continue
+					}
+					if (value !== null && typeof value !== "string" && typeof value !== "number") {
+						continue
+					}
+					if (RESET_ONLY_KEYS.includes(key) && value !== null && !(key === "awsCustomArn" && value === "")) {
+						continue
+					}
+					merged[key] = value === null ? undefined : value
+				}
+
+				const authoritativeOrganizationAllowList = this.getOrganizationAllowListForProfileMutation()
+				if (!authoritativeOrganizationAllowList) {
+					this.log(`Ignoring model update for profile '${name}': organization allow-list is unavailable`)
+					vscode.window.showErrorMessage(t("common:errors.violated_organization_allowlist"))
+					return
+				}
+				if (
+					!ProfileValidator.isProfileAllowed(merged as ProviderSettings, authoritativeOrganizationAllowList)
+				) {
+					this.log(
+						`Ignoring model update for profile '${name}': violates authoritative organization allow-list`,
+					)
+					vscode.window.showErrorMessage(t("common:errors.violated_organization_allowlist"))
+					return
+				}
+				if (
+					!stateOrganizationAllowList.allowAll &&
+					!ProfileValidator.isProfileAllowed(merged as ProviderSettings, stateOrganizationAllowList)
+				) {
+					this.log(`Ignoring model update for profile '${name}': violates state organization allow-list`)
+					vscode.window.showErrorMessage(t("common:errors.violated_organization_allowlist"))
+					return
+				}
+
+				const savedId = await this.providerSettingsManager.saveConfig(name, merged as ProviderSettings)
+
+				if (signal.aborted) return
+
+				const { mode } = await this.getState()
+
+				await Promise.all([
+					this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+					this.updateGlobalState("currentApiConfigName", name),
+					this.providerSettingsManager.setModeConfig(mode, savedId),
+					this.contextProxy.setProviderSettings(merged as ProviderSettings),
+				])
+
+				if (signal.aborted) return
+
+				this.updateTaskApiHandlerIfNeeded(merged as ProviderSettings, { forceRebuild: true })
+				await this.persistStickyProviderProfileToCurrentTask(name)
+				await this.postStateToWebview()
+			})
+		} catch (error) {
+			this.log(`Error updating profile model: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`)
+			vscode.window.showErrorMessage(t("common:errors.save_api_config"))
 		}
 	}
 
