@@ -7,8 +7,12 @@
  *
  * Pure in-memory — zero I/O, no dependencies. The observations ARE consulted:
  * guardedWrite reads this registry before publishing (src/core/tools/guardedWrite.ts)
- * and compares the recorded version token against the token recomputed from disk, so
- * a stale read or an out-of-band replacement is rejected instead of published over.
+ * and compares the recorded version token against the token recomputed from disk, so a
+ * stale read or an out-of-band replacement that the check detects is rejected instead of
+ * published over. Detection is best effort against a non-cooperating process: the token is
+ * recomputed before the publish, so a replacement that lands after that check and before
+ * the rename is not observable from here and can still win. Closing that last window needs
+ * a cross-process lock or an atomic create, not a token comparison.
  */
 
 export interface FileObservation {
