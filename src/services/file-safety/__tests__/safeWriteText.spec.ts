@@ -67,6 +67,17 @@ function _fileStats(isLink: boolean): fsSync.Stats {
 	return s
 }
 
+// fs.BigIntStats is a type-only export (fs.BigIntStats is undefined at runtime), so the stand-in is
+// a Stats object carrying bigint ino/dev - exactly what fs.lstat(path, { bigint: true }) hands
+// back at runtime.
+function _fileStatsWithIdentity(ino: bigint, dev: bigint): fsSync.BigIntStats {
+	// Double assertion: the runtime value is the Stats stand-in, the type is the bigint variant.
+	const s = _fileStats(false) as unknown as fsSync.BigIntStats
+	s.ino = ino
+	s.dev = dev
+	return s
+}
+
 function mockDefaults(): void {
 	vi.resetAllMocks()
 	// After resetAllMocks, vi.fn() returns undefined — restore promise defaults.
@@ -1110,9 +1121,7 @@ describe("caller-supplied staging path", () => {
 		// Same inode and device for the supplied staging path and the target: the
 		// failure handler would unlink the only copy of the content, so a failed
 		// write would delete the file it was meant to protect.
-		const stats = _fileStats(false)
-		stats.ino = 42
-		stats.dev = 7
+		const stats = _fileStatsWithIdentity(42n, 7n)
 		vi.mocked(fs.lstat).mockResolvedValue(stats)
 
 		await expect(
@@ -1130,9 +1139,7 @@ describe("caller-supplied staging path", () => {
 		// A hard-linked staging file shares the target's inode, so the identity comparison is the only thing
 		// between this write and a rename onto the very file the guard protects. An EACCES from the target
 		// lstat must not be mistaken for "there is no target".
-		const stagingStats = _fileStats(false)
-		stagingStats.ino = 42
-		stagingStats.dev = 7
+		const stagingStats = _fileStatsWithIdentity(42n, 7n)
 		vi.mocked(fs.lstat).mockImplementation(async (p) => {
 			if (String(p) === targetPath) {
 				throw Object.assign(new Error("EACCES"), { code: "EACCES" })
