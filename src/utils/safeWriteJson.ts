@@ -131,10 +131,11 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		const newFileToCleanupWithinCatch = actualTempNewFilePath
 
-		// A failed safeWriteText already rolled the backup (if any) back to
-		// the target path. Clean up the .new file if it still exists
-		// (safeWriteText also cleans up its tempPath on failure; this is a
-		// safety net in case its cleanup missed it).
+		// A failed safeWriteText leaves the target exactly where it was: its backup is a
+		// copy, so undoing a failure removes that copy rather than moving anything back
+		// over the target path. Clean up the .new file if it still exists (safeWriteText
+		// also removes its own tempPath on failure; this is a safety net in case its
+		// cleanup missed it).
 		if (newFileToCleanupWithinCatch) {
 			try {
 				await fs.unlink(newFileToCleanupWithinCatch)

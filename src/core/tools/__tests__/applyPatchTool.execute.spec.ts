@@ -278,7 +278,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		})
 
 		expect(mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts"))).toBe(false)
-		expect(mockHandleError).toHaveBeenCalled()
+		expect(mockHandleError).toHaveBeenCalledWith("apply patch", guardError)
 	})
 
 	it("add: publishes the new file through the guarded saveDirectly with create kind", async () => {

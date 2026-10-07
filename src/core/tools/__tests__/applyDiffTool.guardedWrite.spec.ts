@@ -1,14 +1,23 @@
 // npx vitest run core/tools/__tests__/applyDiffTool.guardedWrite.spec.ts
 
+import path from "path"
 import type { MockedFunction } from "vitest"
 
 import { fileExistsAtPath } from "../../../utils/fs"
+import { ObservationRegistry } from "../../task/observationRegistry"
 import type { Task } from "../../task/Task"
 import { ApplyDiffTool } from "../ApplyDiffTool"
 
 vi.mock("fs/promises", () => ({
 	default: {
 		readFile: vi.fn().mockResolvedValue("original file content\n"),
+		stat: vi.fn().mockResolvedValue({
+			dev: 7n,
+			ino: 4242n,
+			size: 1234n,
+			mtimeNs: 1700000000123456789n,
+			ctimeNs: 1700000000789999999n,
+		}),
 	},
 }))
 
@@ -49,6 +58,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		| "diffViewProvider"
 		| "providerRef"
 		| "fileContextTracker"
+		| "observationRegistry"
 	>
 	let mockSaveDirectly: MockedFunction<(...args: unknown[]) => Promise<unknown>>
 	let mockAskApproval: MockedFunction<(...args: unknown[]) => Promise<boolean>>
@@ -110,6 +120,9 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			fileContextTracker: {
 				trackFileContext: vi.fn().mockResolvedValue(undefined),
 			} as unknown as Task["fileContextTracker"],
+			// Real registry: the point of these tests is which version token ends up
+			// recorded, so a stub would only restate the call.
+			observationRegistry: new ObservationRegistry(),
 		}
 
 		mockAskApproval = vi.fn().mockResolvedValue(true)
@@ -153,5 +166,42 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(vi.mocked(mockTask.diffViewProvider.reset)).toHaveBeenCalled()
 		expect(mockTask.didEditFile).toBe(false)
 		expect(mockPushToolResult).not.toHaveBeenCalledWith("Saved file")
+	})
+	it("records the version the diff was computed against so the guarded edit is authorized", async () => {
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		// The focus-disruption save has no diff view to observe the file, so the tool read
+		// itself must leave an observation for the version the hunks were computed against -
+		// otherwise saveDirectly("edit") rejects with "File not read yet".
+		const observed = mockTask.observationRegistry.get(path.resolve("/workspace/project", "src/thing.ts"))
+		expect(observed?.version).toBe("7:4242:1234:1700000000123456789:1700000000789999999")
+		expect(mockSaveDirectly).toHaveBeenCalledWith(
+			"src/thing.ts",
+			"modified file content\n",
+			false,
+			true,
+			1000,
+			"edit",
+		)
+	})
+
+	it("does not observe when the file changes underneath the read", async () => {
+		const statMock = vi.mocked((await import("fs/promises")).default.stat)
+		statMock.mockResolvedValueOnce({ dev: 7n, ino: 4242n, size: 1234n, mtimeNs: 1n, ctimeNs: 2n })
+		statMock.mockResolvedValueOnce({ dev: 7n, ino: 4242n, size: 9999n, mtimeNs: 3n, ctimeNs: 4n })
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		// A read that straddled a write proves nothing about the current version, so no
+		// observation may be recorded and the guarded publish keeps its remediation.
+		expect(mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts"))).toBe(false)
 	})
 })
