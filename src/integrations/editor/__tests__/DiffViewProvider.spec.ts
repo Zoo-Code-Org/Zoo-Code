@@ -1401,6 +1401,72 @@ describe("DiffViewProvider", () => {
 			expect(result.newProblemsMessage).toBe("")
 		})
 
+		const openPreview = async () => {
+			// Enough of the editor double for open() to find the diff editor again.
+			const editor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.txt`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 1,
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			}
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor as unknown as vscode.TextEditor)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.window).visibleTextEditors = [editor as unknown as vscode.TextEditor]
+			// openDiffEditor resolves from the document-open event, so fire it.
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => {
+					callback({ uri: { fsPath: `${mockCwd}/test.txt`, scheme: "file" } } as unknown as vscode.TextDocument)
+				}, 0)
+				return { dispose: vi.fn() }
+			})
+			// fs/promises is mocked; open() only reads these BigIntStats fields when it
+			// stat-matches the preview read.
+			vi.mocked(fs.stat).mockResolvedValue({
+				dev: 1n,
+				ino: 2n,
+				size: 5n,
+				mtimeNs: 100n,
+				ctimeNs: 100n,
+			} as unknown as BigIntStats)
+			;(diffViewProvider as unknown as { editType: string }).editType = "modify"
+			await diffViewProvider.open("test.txt")
+			;(diffViewProvider as unknown as { newContent?: string }).newContent = "new content"
+		}
+
+		it("does not let the preview's own observation authorize a targeted edit", async () => {
+			// The tool read never observed this path, so the only entry the save could
+			// point at is the one open() records for the preview. Authorizing from that
+			// entry publishes the tool's content over anything that changed between the
+			// read and the preview, so the save must fall back to the unobserved-edit
+			// guard and be rejected with the re-read remediation.
+			mockTask.observationRegistry.clear()
+			await openPreview()
+			// The preview did record an observation - that is the entry under test.
+			expect(mockTask.observationRegistry.has(`${mockCwd}/test.txt`)).toBe(true)
+
+			await expect(diffViewProvider.saveChanges(false, 0, "edit")).rejects.toThrow(
+				/File not read yet/,
+			)
+			expect(safeWriteText).not.toHaveBeenCalled()
+			// The preview's authorization was withdrawn rather than left behind.
+			expect(mockTask.observationRegistry.has(`${mockCwd}/test.txt`)).toBe(false)
+		})
+
+		it("still publishes a targeted edit authorized by a pre-preview observation", async () => {
+			// The same preview must not break the legitimate case: the model read the
+			// file (partially) and nothing changed before the preview, so the restored
+			// pre-open observation authorizes the targeted edit.
+			mockTask.observationRegistry.observe(`${mockCwd}/test.txt`, "v1", false)
+			await openPreview()
+
+			await diffViewProvider.saveChanges(false, 0, "edit")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.txt`, Buffer.from("new content"))
+		})
+
 		it("publishes the accepted content in the document's own encoding", async () => {
 			// A utf8bom document: getText() returns the text without the BOM, so the
 			// publish must go through VS Code's codec for the document's own
