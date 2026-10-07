@@ -1,14 +1,26 @@
 // npx vitest run core/tools/__tests__/applyDiffTool.guardedWrite.spec.ts
 
+import path from "path"
+
 import type { MockedFunction } from "vitest"
 
 import { fileExistsAtPath } from "../../../utils/fs"
 import type { Task } from "../../task/Task"
 import { ApplyDiffTool } from "../ApplyDiffTool"
+import { ObservationRegistry } from "../../task/observationRegistry"
 
 vi.mock("fs/promises", () => ({
 	default: {
 		readFile: vi.fn().mockResolvedValue("original file content\n"),
+		// The tool stats around its read to authorize the save against the version it
+		// actually read; one shared stats object means the file did not change.
+		stat: vi.fn().mockResolvedValue({
+			dev: 1n,
+			ino: 2n,
+			size: 22n,
+			mtimeNs: 100n,
+			ctimeNs: 100n,
+		}),
 	},
 }))
 
@@ -117,6 +129,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 					}),
 				}),
 			} as unknown as Task["providerRef"],
+			observationRegistry: new ObservationRegistry(),
 			fileContextTracker: {
 				trackFileContext: vi.fn().mockResolvedValue(undefined),
 			} as unknown as Task["fileContextTracker"],
@@ -191,5 +204,39 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(mockSaveDirectly).not.toHaveBeenCalled()
 		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
 		expect(mockHandleError).not.toHaveBeenCalled()
+	})
+
+	it("authorizes the save against the version its own read was built on", async () => {
+		// The model never read this file, so the only authorization available at save
+		// time is the one the tool earns from its own hunk read. Without it the guarded
+		// save falls back to the preview's version token, which can describe a version
+		// the diff was never computed against.
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		}) as unknown as void
+
+		const observation = mockTask.observationRegistry.get(path.resolve(mockTask.cwd, "src/thing.ts"))
+		expect(observation?.version).toBe(
+			"1:2:22:100:100",
+		)
+		// A tool read is not a model read, so completeness stays unearned.
+		expect(observation?.complete).toBe(false)
+	})
+
+	it("does not authorize a read that changed underneath it", async () => {
+		const stat = vi.mocked((await import("fs/promises")).default.stat)
+		stat
+			.mockResolvedValueOnce({ dev: 1n, ino: 2n, size: 22n, mtimeNs: 100n, ctimeNs: 100n })
+			.mockResolvedValueOnce({ dev: 1n, ino: 2n, size: 30n, mtimeNs: 200n, ctimeNs: 100n })
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		}) as unknown as void
+
+		expect(mockTask.observationRegistry.get(path.resolve(mockTask.cwd, "src/thing.ts"))).toBeUndefined()
 	})
 })
