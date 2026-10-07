@@ -151,9 +151,11 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	let resolvedTargetPath: string | undefined
 
 	// Lock key: the symlink referent when the path is an existing symlink, so a
-	// symlink alias and its referent share one lock. The key must be computable
-	// while a peer writer is mid-commit (backup mode renames the referent away and
-	// back), so the walk tolerates a dangling link instead of rejecting it here.
+	// symlink alias and its referent share one lock. The key must be computable even
+	// when the link does not resolve yet - a create writes through a dangling link,
+	// and a peer writer can be caught between creating its staging file and the
+	// commit rename - so the walk tolerates a dangling link instead of rejecting it
+	// here.
 	const lockKey = await resolveLockKey(absoluteFilePath)
 
 	// Confinement, if the caller declared a scope, is checked before ANY filesystem
@@ -230,11 +232,11 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
 
-		// Step 2: Delegate backup + commit + rollback to safeWriteText with the
-		// pre-written temp path. backup:true keeps the old safeWriteJson
-		// semantics (target -> backup before commit, rollback on failure) and
-		// keeps the target in place until safeWriteText captures its Windows
-		// DACL (safeWriteText dumps the DACL before its own backup rename and
+		// Step 2: Delegate backup + commit to safeWriteText with the pre-written
+		// temp path. backup:true keeps the old safeWriteJson semantics: a COPY of the
+		// target is taken before the commit rename and the target itself is never
+		// moved, which also keeps it in place until safeWriteText captures its Windows
+		// DACL (safeWriteText dumps the DACL before taking the backup copy and
 		// restores it onto the directory after the commit rename).
 		const textOptions: SafeWriteTextOptions = {
 			tempPath: actualTempNewFilePath,
@@ -254,9 +256,10 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		const newFileToCleanupWithinCatch = actualTempNewFilePath
 
-		// A failed safeWriteText already rolled the backup (if any) back to
-		// the target path. Clean up the .new file if it still exists
-		// (safeWriteText also cleans up its tempPath on failure; this is a
+		// A failed safeWriteText left the target alone: the commit rename is its last
+		// step, so the target still holds the pre-write bytes, and the backup copy it
+		// took is removed by safeWriteText itself. Clean up the .new file if it still
+		// exists (safeWriteText also cleans up its tempPath on failure; this is a
 		// safety net in case its cleanup missed it).
 		if (newFileToCleanupWithinCatch) {
 			try {
