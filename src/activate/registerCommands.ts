@@ -339,6 +339,12 @@ const createTabPanelUnlocked = async ({
 			await existingProvider.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
 			return existingProvider
 		}
+
+		// The tracked panel has no live provider (closed or disposed out from under us).
+		// Drop the stale reference before creating a replacement: an await below that
+		// rejects would otherwise leave tabPanel pointing at the dead panel, and focusInput
+		// would take the tab branch and post nothing even though a sidebar exists.
+		tabPanel = undefined
 	}
 
 	// (This example uses webviewProvider activation event which is necessary to
