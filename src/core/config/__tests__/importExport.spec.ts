@@ -1558,7 +1558,7 @@ describe("importExport", () => {
 			expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
 				providerProfiles: mockProviderProfiles,
 				globalSettings: mockGlobalSettings,
-			})
+			}, { refuseSymlinkTarget: true })
 		})
 
 		it("should include globalSettings when allowedMaxRequests is null", async () => {
@@ -1590,7 +1590,7 @@ describe("importExport", () => {
 			expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
 				providerProfiles: mockProviderProfiles,
 				globalSettings: mockGlobalSettings,
-			})
+			}, { refuseSymlinkTarget: true })
 		})
 
 		it("should handle errors during the export process", async () => {
@@ -1713,7 +1713,7 @@ describe("importExport", () => {
 				expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
 					providerProfiles: mockProviderProfiles,
 					globalSettings: mockGlobalSettings,
-				})
+				}, { refuseSymlinkTarget: true })
 			})
 
 			it("should export model dimension for OpenAI Compatible provider", async () => {
@@ -1866,7 +1866,7 @@ describe("importExport", () => {
 				expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
 					providerProfiles: mockProviderProfiles,
 					globalSettings: mockGlobalSettings, // Should remain unchanged
-				})
+				}, { refuseSymlinkTarget: true })
 			})
 
 			it("should maintain backward compatibility with existing exports", async () => {
@@ -1909,7 +1909,7 @@ describe("importExport", () => {
 				expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
 					providerProfiles: mockProviderProfiles,
 					globalSettings: mockGlobalSettings, // Should remain unchanged
-				})
+				}, { refuseSymlinkTarget: true })
 			})
 
 			it("should handle missing current provider gracefully", async () => {
@@ -1954,7 +1954,7 @@ describe("importExport", () => {
 				expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
 					providerProfiles: mockProviderProfiles,
 					globalSettings: mockGlobalSettings, // Should remain unchanged
-				})
+				}, { refuseSymlinkTarget: true })
 			})
 		})
 
@@ -2191,7 +2191,7 @@ describe("importExport", () => {
 			expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/test-settings.json", {
 				providerProfiles: mockProviderProfiles,
 				globalSettings: mockGlobalSettings,
-			})
+			}, { refuseSymlinkTarget: true })
 
 			// Step 5: Get the exported data for import test
 			const exportedData = (safeWriteJson as Mock).mock.calls[0][1]
