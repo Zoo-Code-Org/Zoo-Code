@@ -150,30 +150,31 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// the target when the resolution itself rejects.
 	let resolvedTargetPath: string | undefined
 
-	try {
-		await fs.mkdir(dirPath, { recursive: true })
-		await fs.access(dirPath)
-	} catch (dirError: any) {
-		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
-		throw dirError
-	}
-
 	// Lock key: the symlink referent when the path is an existing symlink, so a
 	// symlink alias and its referent share one lock. The key must be computable
 	// while a peer writer is mid-commit (backup mode renames the referent away and
 	// back), so the walk tolerates a dangling link instead of rejecting it here.
 	const lockKey = await resolveLockKey(absoluteFilePath)
 
-	// Confinement, if the caller declared a scope, is checked BEFORE the lock is
-	// taken: proper-lockfile creates ${lockKey}.lock beside the lock key, and the key
-	// is the symlink referent, so a repository-planted link out of the scope would
-	// otherwise create a lock directory outside the scope (and an unwritable referent
-	// directory would surface a lock-acquisition error after retries instead of
+	// Confinement, if the caller declared a scope, is checked before ANY filesystem
+	// side effect of this call: the directory creation below would otherwise create a
+	// parent directory outside confineTo for an out-of-scope target, and
+	// proper-lockfile would create ${lockKey}.lock beside the lock key (a
+	// repository-planted link out of the scope would also make an unwritable referent
+	// directory surface a lock-acquisition error after retries instead of
 	// ConfinedPathEscapeError). Repeated on the resolved publish target inside the
 	// lock, since a peer writer may move the referent in between.
 	if (options?.confineTo) {
 		const scopeRoot = await _resolveScopeRoot(options.confineTo)
 		_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(lockKey), scopeRoot)
+	}
+
+	try {
+		await fs.mkdir(dirPath, { recursive: true })
+		await fs.access(dirPath)
+	} catch (dirError: any) {
+		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
+		throw dirError
 	}
 
 	// Acquire the lock before any file operations. If acquisition fails it throws
