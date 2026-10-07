@@ -852,4 +852,50 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			})
 		})
 	})
+
+	describe("shared setting and per-view pin are updated atomically", () => {
+		it("restores the shared value when the per-view pin cannot be persisted", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			await provider["setViewStateId"]("tab-atomic")
+			await provider.setValue("mode", "code")
+			expect(provider.getValue("mode")).toBe("code")
+
+			// The per-view pin write (the viewStates entry) fails; by then the shared write
+			// has already landed.
+			vi.mocked(mockContext.globalState.update).mockImplementation(async (key: string) => {
+				if (key === "viewStates") {
+					throw new Error("pin persist failed")
+				}
+				return Promise.resolve()
+			})
+
+			await expect(provider.setValue("mode", "architect")).rejects.toThrow("pin persist failed")
+
+			// Compensation: the shared value is back where it was and the view-local buffer
+			// never moved, so the two stores still agree.
+			expect(provider.getValue("mode")).toBe("code")
+			expect(provider["viewLocalState"].mode).toBe("code")
+		})
+
+		it("restores every shared value a batch had written when its pin write fails", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			await provider["setViewStateId"]("tab-batch")
+			await provider.setValue("mode", "code")
+			await provider.setValue("currentApiConfigName", "default")
+
+			vi.mocked(mockContext.globalState.update).mockImplementation(async (key: string) => {
+				if (key === "viewStates") {
+					throw new Error("pin persist failed")
+				}
+				return Promise.resolve()
+			})
+
+			await expect(
+				provider.setValues({ mode: "architect", currentApiConfigName: "profile-b" } as RooCodeSettings),
+			).rejects.toThrow("pin persist failed")
+
+			expect(provider.getValue("mode")).toBe("code")
+			expect(provider.getValue("currentApiConfigName")).toBe("default")
+		})
+	})
 })
