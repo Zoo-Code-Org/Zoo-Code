@@ -614,6 +614,8 @@
 		"openAiApiKey": "OpenAI API Key",
 		"apiKey": "API Key",
 		"openAiBaseUrl": "Base URL",
+		"openAiStrictToolSchemas": "Strict tool schemas (strict: true)",
+		"openAiStrictToolSchemasDescription": "Send strict: true with tool schemas to enable strict schema adherence. Disable to use non-strict tool calling.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure deployment name",
 		"azureOpenAiDeploymentNameDescription": "Enter the deployment name from Azure AI Studio, not the underlying model name.",

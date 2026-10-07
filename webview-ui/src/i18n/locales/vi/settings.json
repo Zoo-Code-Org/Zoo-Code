@@ -534,6 +534,8 @@
 		"openAiApiKey": "Khóa API OpenAI",
 		"apiKey": "Khóa API",
 		"openAiBaseUrl": "URL cơ sở",
+		"openAiStrictToolSchemas": "Sơ đồ công cụ nghiêm ngặt (strict: true)",
+		"openAiStrictToolSchemasDescription": "Gửi strict: true cùng sơ đồ công cụ để bật sự tuân thủ sơ đồ nghiêm ngặt. Tắt để sử dụng gọi công cụ không nghiêm ngặt.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Tên triển khai Azure",
 		"azureOpenAiDeploymentNameDescription": "Nhập tên triển khai trong Azure AI Studio, không phải tên mô hình cơ sở.",
