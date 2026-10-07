@@ -2331,9 +2331,10 @@ export class ClineProvider
 					await this.persistStickyProviderProfileToCurrentTask(name)
 				} else {
 					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
-					// The stored profile changed without an activation, so a sibling view that cached it in
-					// its view-local overlay would keep serving the previous settings.
-					await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
+					// The stored profile changed without an activation. Neither this view nor a sibling
+					// had its overlay cleared, so every view pinned to the saved profile - including
+					// the acting one - has to be refreshed.
+					await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings, true)
 				}
 
 				await this.postStateToWebview()
@@ -2569,13 +2570,17 @@ export class ClineProvider
 	 *   name and the settings stay consistent.
 	 *
 	 * A view with no pin follows the shared store and needs nothing. The originating view
-	 * refreshes its own buffer at the mutation site.
+	 * refreshes its own buffer at the mutation site - but only when it ACTIVATED the
+	 * profile, because activation clears its overlay. A save that does not activate leaves
+	 * the acting view's own overlay untouched, so those callers pass includeSelf and this
+	 * view refreshes too when its pin names the profile that was just saved.
 	 */
 	private async refreshViewLocalStateForUpdatedProfile(
 		name: string,
 		providerSettings: ProviderSettings,
+		includeSelf = false,
 	): Promise<void> {
-		const affected = ClineProvider.getAllInstances().filter((instance) => instance !== this)
+		const affected = ClineProvider.getAllInstances().filter((instance) => instance !== this || includeSelf)
 
 		if (affected.length === 0) {
 			return
@@ -2586,6 +2591,14 @@ export class ClineProvider
 				const pinned = instance.pinnedProfileName
 
 				if (pinned === undefined) {
+					return
+				}
+
+				// The acting view is affected only by the profile it just saved. The reload
+				// below exists for SIBLING views, whose shared blob can change underneath
+				// them; refreshing an unrelated pin here would overwrite settings that did
+				// not change with whatever this call happens to carry.
+				if (instance === this && pinned !== name) {
 					return
 				}
 
@@ -2783,10 +2796,10 @@ export class ClineProvider
 						await this.upsertProviderProfile(entry.name, updated, true)
 					} else {
 						// Non-active profiles just need the token saved to disk, plus the same overlay
-						// refresh a sibling view pinned to that profile needs to pick the new token up
-						// without a window reload.
+						// refresh a view pinned to that profile needs to pick the new token up without
+						// a window reload - including this view, whose own pin may name it.
 						await this.providerSettingsManager.saveConfig(entry.name, updated)
-						await this.refreshViewLocalStateForUpdatedProfile(entry.name, updated)
+						await this.refreshViewLocalStateForUpdatedProfile(entry.name, updated, true)
 					}
 				}
 			}
