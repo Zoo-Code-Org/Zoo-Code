@@ -599,32 +599,40 @@ describe("safeWriteJson", () => {
 			lock: lockMock,
 		}))
 
-		// Re-import safeWriteJson so it picks up the mocked proper-lockfile.
-		const { safeWriteJson: mockedSafeWriteJson } = await import("../safeWriteJson")
+		try {
+			// Re-import safeWriteJson so it picks up the mocked proper-lockfile.
+			const { safeWriteJson: mockedSafeWriteJson } = await import("../safeWriteJson")
 
-		const mergeFn = vi.fn((existing: unknown, incoming: unknown) => ({
-			...(existing as Record<string, unknown>),
-			...(incoming as Record<string, unknown>),
-		}))
+			const mergeFn = vi.fn((existing: unknown, incoming: unknown) => ({
+				...(existing as Record<string, unknown>),
+				...(incoming as Record<string, unknown>),
+			}))
 
-		// Capture the compromise + release-failure logs.
-		const consoleErrorSpy = vi.spyOn(console, "error")
-		await mockedSafeWriteJson(callerPath, { added: true }, { merge: mergeFn })
+			// Capture the compromise + release-failure logs.
+			const consoleErrorSpy = vi.spyOn(console, "error")
+			await mockedSafeWriteJson(callerPath, { added: true }, { merge: mergeFn })
 
-		// The lock was keyed by the resolved referent — every alias shares it.
-		expect(lockMock).toHaveBeenCalledTimes(1)
-		expect(String(lockMockFn.mock.calls[0][0])).toBe(referentPath)
-		// The merge read the referent's content through that single lock.
-		expect(mergeFn).toHaveBeenCalledWith({ seed: 1 }, { added: true })
-		expect(await readFileContent(referentPath)).toEqual({ seed: 1, added: true })
-		// The compromise callback and the failed release were logged, not thrown.
-		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("was compromised"), expect.any(Error))
-		expect(consoleErrorSpy).toHaveBeenCalledWith(
-			expect.stringContaining("Failed to release lock"),
-			expect.any(Error),
-		)
+			// The lock was keyed by the resolved referent — every alias shares it.
+			expect(lockMock).toHaveBeenCalledTimes(1)
+			expect(String(lockMockFn.mock.calls[0][0])).toBe(referentPath)
+			// The merge read the referent's content through that single lock.
+			expect(mergeFn).toHaveBeenCalledWith({ seed: 1 }, { added: true })
+			expect(await readFileContent(referentPath)).toEqual({ seed: 1, added: true })
+			// The compromise callback and the failed release were logged, not thrown.
+			expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("was compromised"), expect.any(Error))
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to release lock"),
+				expect.any(Error),
+			)
 
-		vi.unmock("proper-lockfile") // Ensure the mock is removed after this test
+		} finally {
+			// vi.unmock is hoisted, so it cannot undo the vi.doMock above at runtime; doUnmock
+			// does. resetModules keeps a later test from re-importing this module with the
+			// throwing release mock still attached - which is what would happen whenever an
+			// assertion above failed before the cleanup line.
+			vi.doUnmock("proper-lockfile")
+			vi.resetModules()
+		}
 	})
 
 	// CWE-732 regression: safeWriteJson stages the temp itself and passes it

@@ -111,11 +111,12 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
 
 		// Step 2: Delegate backup + commit + rollback to safeWriteText with the
-		// pre-written temp path. backup:true keeps the old safeWriteJson
-		// semantics (target -> backup before commit, rollback on failure) and
-		// keeps the target in place until safeWriteText captures its Windows
-		// DACL (safeWriteText dumps the DACL before its own backup rename and
-		// restores it onto the directory after the commit rename).
+		// pre-written temp path. backup:true keeps the old safeWriteJson semantics (a
+		// copy of the target is taken before the commit, and a failure removes that
+		// copy - the target itself is never moved) and keeps the target in place until
+		// safeWriteText captures its Windows DACL (safeWriteText dumps the DACL before
+		// making the backup copy and restores it onto the directory after the commit
+		// rename).
 		const textOptions: SafeWriteTextOptions = {
 			tempPath: actualTempNewFilePath,
 			backup: true,
