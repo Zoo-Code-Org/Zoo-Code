@@ -49,6 +49,16 @@ export class ObservationRegistry {
 		return this.entries.has(absolutePath)
 	}
 
+	/**
+	 * Drop the observation for one path. A caller that must revoke an
+	 * authorization it did not earn - a preview that observed a version the model
+	 * never read - needs this instead of clear(), which would also discard the
+	 * observations other reads of the same task still rely on.
+	 */
+	forget(absolutePath: string): boolean {
+		return this.entries.delete(absolutePath)
+	}
+
 	clear(): void {
 		this.entries.clear()
 	}
