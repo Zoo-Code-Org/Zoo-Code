@@ -95,6 +95,15 @@ export class DiffViewProvider {
 	 * never unlinked.
 	 */
 	private placeholderVersion: string | undefined = undefined
+	/**
+	 * The observation this path had BEFORE open() recorded the preview's own
+	 * version token: null when there was none, undefined when this provider never
+	 * opened a preview. open() observes the current on-disk version, so a file that
+	 * changed between the tool's read and this preview leaves the preview token as
+	 * the only entry - and a targeted save would then CAS against a version the
+	 * caller never read, publishing stale content over the intervening change.
+	 */
+	private preOpenObservation: { version: string; complete: boolean } | null | undefined = undefined
 
 	constructor(
 		private cwd: string,
@@ -108,6 +117,13 @@ export class DiffViewProvider {
 		const fileExists = this.editType === "modify"
 		const absolutePath = path.resolve(this.cwd, relPath)
 		this.isEditing = true
+
+		// Snapshot the authorization as it stands before this preview touches the
+		// registry; saveChanges(..., "edit") restores it below.
+		const priorObservation = this.taskRef.deref()?.observationRegistry.get(absolutePath)
+		this.preOpenObservation = priorObservation
+			? { version: priorObservation.version, complete: priorObservation.complete }
+			: null
 
 		// Capture the current scroll position before we close the tab so we can
 		// restore it after saving/reverting.
@@ -513,6 +529,22 @@ export class DiffViewProvider {
 			encodedContent = await vscode.workspace.encode(editedContent, {
 				encoding: updatedDocument.encoding,
 			})
+			// The preview must not authorize the save it made unverifiable. Restore
+			// the observation that existed before open() so the compare-and-swap runs
+			// against the version the caller's content was built on; when there was
+			// none, drop the preview's entry so the unobserved-edit guard rejects the
+			// write and the caller gets the re-read remediation instead.
+			if (writeKind === "edit" && this.preOpenObservation !== undefined) {
+				if (this.preOpenObservation) {
+					saveTask.observationRegistry.observe(
+						absolutePath,
+						this.preOpenObservation.version,
+						this.preOpenObservation.complete,
+					)
+				} else {
+					saveTask.observationRegistry.forget(absolutePath)
+				}
+			}
 			await guardedWrite(saveTask, this.relPath, encodedContent, writeKind)
 		} catch (error) {
 			// Autosave can publish the modified side of the diff before the user
@@ -1485,6 +1517,7 @@ export class DiffViewProvider {
 		this.userTouchedDiffEditor = false
 		this.snapshotPreviewTabs = []
 		this.placeholderVersion = undefined
+		this.preOpenObservation = undefined
 	}
 
 	/**
