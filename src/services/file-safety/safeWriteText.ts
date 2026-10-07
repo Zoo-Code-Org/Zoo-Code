@@ -119,8 +119,8 @@ async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunne
 }
 
 /** Restore a DACL dump onto *dirPath* on Windows.
- * Best-effort: content is already committed, so failure is non-fatal. */
-async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<void> {
+ * Returns whether icacls succeeded; the caller reports a failure. */
+async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<boolean> {
 	const runner = execFileRunner ?? execFile
 	try {
 		await new Promise<void>((resolve, reject) => {
@@ -128,8 +128,9 @@ async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRu
 				err ? reject(err) : resolve(),
 			)
 		})
+		return true
 	} catch {
-		// best-effort; content already committed
+		return false
 	}
 }
 
@@ -190,7 +191,8 @@ async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
  * Lock key for a publish target: the symlink referent when the path is an
  * existing symlink, the path itself otherwise. Unlike resolvePublishTarget this
  * tolerates a dangling link, because the lock key has to be computable while a
- * peer writer is mid-commit (backup mode renames the referent away and back).
+ * peer writer is mid-commit (a publish renames the staged file onto the referent,
+ * and backup mode keeps a copy beside it).
  * The walk is bounded so a two-link cycle terminates, and every key it returns is
  * canonicalized through canonicalDirKey.
  */
@@ -440,7 +442,16 @@ export async function safeWriteText(
 			// and on every failed save.
 			if (daclDumpPath !== null) {
 				const restoredDir = path.dirname(targetPath)
-				await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
+				const restored = await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
+				if (!restored) {
+					// The content is committed, but the published file may carry a different DACL
+					// from the one that was saved. Failing the write here would break every
+					// publish on machines where icacls cannot reapply the saved ACEs (a plain
+					// temp directory restore fails with "Not all privileges or groups referenced
+					// are assigned to the caller"), so the change of access rights is reported
+					// rather than thrown.
+					console.warn(`safeWriteText: content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`)
+				}
 			}
 
 			// -- Step 6 (backup:true): delete backup on success -----------

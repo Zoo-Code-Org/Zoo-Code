@@ -368,7 +368,7 @@ describe("safeWriteText", () => {
 		})
 	})
 
-	// ── Test 4: backup:true keeps old safeWriteJson semantics incl. rollback ──
+	// ── Test 4: backup:true keeps old safeWriteJson semantics, copy-based ──
 
 	describe("backup:true", () => {
 		it("copies target -> backup before commit without moving the target, deletes the copy on success", async () => {
@@ -597,10 +597,11 @@ describe("safeWriteText", () => {
 			expect(commitRename).toBeLessThan(restoreCall)
 		})
 
-		it("win32 DACL: dump is unlinked even when restore fails", async () => {
+		it("win32 DACL: a failed restore is reported and the dump is still unlinked", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
 			// icacls save succeeds, restore fails
 			let callCount = 0
@@ -614,9 +615,14 @@ describe("safeWriteText", () => {
 
 			await safeWriteText(targetPath, "data", { platform: "win32" })
 
-			// write succeeded despite restore failure (best-effort)
+			// The content did commit: failing here would break every publish on a machine
+			// where icacls cannot reapply the saved ACEs.
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 			expect(fs.rename).toHaveBeenCalledTimes(1)
+
+			// The changed access rights are reported instead of being swallowed.
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("could not be restored"))
+			warnSpy.mockRestore()
 
 			// dump file was still unlinked in finally
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))

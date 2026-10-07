@@ -22,6 +22,9 @@ describe("safeWriteText against a real filesystem", () => {
 		const targetPath = path.join(dir, "target.txt")
 		await fs.writeFile(targetPath, "old bytes")
 
+		// No platform override: the real platform's own durability and ACL steps run.
+		// A failed icacls restore in a throwaway temp directory is reported, not thrown,
+		// so the publish still lands.
 		await safeWriteText(targetPath, "new bytes", { backup: true })
 
 		expect(await fs.readFile(targetPath, "utf8")).toBe("new bytes")
