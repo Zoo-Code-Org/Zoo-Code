@@ -711,6 +711,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			})
 
 			expect(provider["providerSettingsManager"].clearModeConfig).toHaveBeenCalledTimes(1)
+			expect(provider["providerSettingsManager"].clearModeConfig).toHaveBeenCalledWith("code")
 		})
 
 		it("does not undo a newer profile switch when its activation write fails late", async () => {
