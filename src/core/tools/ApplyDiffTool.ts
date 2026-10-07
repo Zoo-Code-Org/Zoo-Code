@@ -79,14 +79,20 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 			if (preReadStats && postReadStats) {
 				const preReadToken = versionTokenOfStat(preReadStats)
 				if (preReadToken === versionTokenOfStat(postReadStats)) {
-					// A tool read is not a model read: when the model already observed the file,
-					// keep the completeness it earned and only on the version it was earned on;
-					// with no prior observation this stays a partial observation of the version
-					// the diff was computed against.
+					// A tool read is not a model read. With no prior observation this stays a
+					// partial observation of the version the diff was computed against - the only
+					// authorization the save can have, since apply_diff computes its hunks from
+					// this read. When the model already observed the file, keep the completeness it
+					// earned, but only on the version it was earned on: refreshing an OLDER
+					// observation to the current version would let content the model built from a
+					// stale read pass the compare-and-swap, so an out-of-date observation is left
+					// alone and the save fails with the re-read remediation.
 					const prior = task.observationRegistry.get(absolutePath)
-					const complete =
-						prior === undefined ? false : prior.complete === true && prior.version === preReadToken
-					task.observationRegistry.observe(absolutePath, preReadToken, complete)
+					if (prior === undefined) {
+						task.observationRegistry.observe(absolutePath, preReadToken, false)
+					} else if (prior.version === preReadToken) {
+						task.observationRegistry.observe(absolutePath, preReadToken, prior.complete === true)
+					}
 				}
 			}
 
