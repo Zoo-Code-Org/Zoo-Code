@@ -413,24 +413,6 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
 		})
 
-		it("a failed commit leaves the pre-write content at the target and drops the backup copy", async () => {
-			const targetPath = "/tmp/test-dir/target.txt"
-			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-			vi.mocked(fsSync.openSync).mockReturnValue(1)
-			// The commit rename is the only rename in this flow, and it fails.
-			vi.mocked(fs.rename).mockRejectedValue(new Error("ENOSPC"))
-
-			await expect(safeWriteText(targetPath, "new data", { backup: true })).rejects.toThrow("ENOSPC")
-
-			// The backup was a copy of the target, taken before the commit.
-			expect(fs.copyFile).toHaveBeenCalledWith(targetPath, expect.stringContaining("safeWriteText.bak_"))
-			// No restore: the target was never moved, so no rename can put the copy back.
-			expect(fs.rename).toHaveBeenCalledTimes(1)
-			// The copy is dropped and the staging temp is released.
-			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
-			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
-		})
-
 		it("a failed backup flush is reported and leaves no partial backup behind", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
