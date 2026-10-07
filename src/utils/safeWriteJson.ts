@@ -118,6 +118,25 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			options?.trace?.({ stage: "recover", detail: recovery.restoredFrom ?? "cleaned-leftovers" })
 		}
 
+		// Confinement, if the caller declared a scope. Both sides are canonicalized the
+		// same way: the publish target is resolved through symlinks, and a target that
+		// does not exist yet still carries the alias components of the path it was
+		// given. This runs before the merge read and before anything is staged, so a
+		// rejected write leaves nothing behind.
+		if (options?.confineTo) {
+			const scopeRoot = await _resolveScopeRoot(options.confineTo)
+			const resolvedTarget = await _resolveScopeRoot(resolvedTargetPath)
+			const relative = path.relative(scopeRoot, resolvedTarget)
+			if (
+				relative === "" ||
+				relative === ".." ||
+				relative.startsWith(".." + path.sep) ||
+				path.isAbsolute(relative)
+			) {
+				throw new ConfinedPathEscapeError(absoluteFilePath, resolvedTargetPath, scopeRoot)
+			}
+		}
+
 		// If a merge callback was provided, read the current file under the lock
 		// and let the caller merge before we write. Must be inside try/finally
 		// so a throwing merge still releases the lock.

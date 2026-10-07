@@ -5,10 +5,12 @@ import { execFile } from "child_process"
 
 export interface SafeWriteTextOptions {
 	/**
-	 * When true, preserve the old-file semantics: rename target -> backup first,
-	 * after commit rename delete the backup; on failure roll the backup back to
-	 * the target path.  When false (default) the atomic rename simply replaces
-	 * the target -- crash-safe window is zero.
+	 * When true, keep the old-file semantics without ever removing the target: the
+	 * previous content is copied to a hidden backup path and flushed before the
+	 * commit rename, the commit rename atomically replaces the target, and on success
+	 * the backup copy is deleted. A failure before the commit leaves the target
+	 * untouched (there is nothing to roll back) and removes the backup copy. When
+	 * false (default) the atomic rename simply replaces the target.
 	 */
 	backup?: boolean
 
@@ -26,35 +28,20 @@ export interface SafeWriteTextOptions {
 	execFileRunner?: typeof execFile
 
 	/**
+	 * Sink for non-fatal safety notices. A Windows DACL that could not be captured means the
+	 * committed file may inherit different access rights: the write still proceeds (a missing or
+	 * failing icacls must not block saving), but the caller is told instead of the change being
+	 * silent. Defaults to console.warn.
+	 */
+	onWarning?: (message: string) => void
+
+	/**
 	 * Pre-written temp path to use for the commit phase.  When provided,
 	 * safeWriteText skips creating its own staging file and uses this path
 	 * instead (it still fsyncs before rename).  Useful when a caller has
 	 * already written data to a temp file via a custom stream.
 	 */
 	tempPath?: string
-}
-
-/**
- * A publish that failed and whose rollback also failed: the content survives only
- * at the backup path, not at the canonical target. The publish failure stays the
- * cause, and the rollback failure plus the backup location travel with the error so
- * the caller can tell what it is looking at.
- */
-export class RollbackFailureError extends Error {
-	readonly publishError: unknown
-	readonly rollbackError: unknown
-	readonly backupPath: string
-
-	constructor(publishError: unknown, rollbackError: unknown, backupPath: string) {
-		super(
-			`Publish failed (${publishError instanceof Error ? publishError.message : String(publishError)}) and the backup could not be restored to its original path -- the content is preserved at the backup location reported on this error.`,
-			{ cause: publishError },
-		)
-		this.name = "RollbackFailureError"
-		this.publishError = publishError
-		this.rollbackError = rollbackError
-		this.backupPath = backupPath
-	}
 }
 
 /**
@@ -140,8 +127,8 @@ async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunne
 }
 
 /** Restore a DACL dump onto *dirPath* on Windows.
- * Best-effort: content is already committed, so failure is non-fatal. */
-async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<void> {
+ * Returns whether icacls succeeded; the caller reports a failure. */
+async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<boolean> {
 	const runner = execFileRunner ?? execFile
 	try {
 		await new Promise<void>((resolve, reject) => {
@@ -149,8 +136,9 @@ async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRu
 				err ? reject(err) : resolve(),
 			)
 		})
+		return true
 	} catch {
-		// best-effort; content already committed
+		return false
 	}
 }
 
@@ -211,7 +199,8 @@ async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
  * Lock key for a publish target: the symlink referent when the path is an
  * existing symlink, the path itself otherwise. Unlike resolvePublishTarget this
  * tolerates a dangling link, because the lock key has to be computable while a
- * peer writer is mid-commit (backup mode renames the referent away and back).
+ * peer writer is mid-commit (a publish renames the staged file onto the referent,
+ * and backup mode keeps a copy beside it).
  * The walk is bounded so a two-link cycle terminates, and every key it returns is
  * canonicalized through canonicalDirKey.
  */
@@ -269,12 +258,38 @@ export async function safeWriteText(
 				supplied,
 			)
 		}
-		const stagingStat = await fs.lstat(supplied)
+		// BigInt stats: on NTFS/ReFS the file identity can exceed Number.MAX_SAFE_INTEGER, and
+		// a rounded number makes two different files look identical (rejecting a valid staging
+		// file) or hides a real alias.
+		const stagingStat = await fs.lstat(supplied, { bigint: true })
 		if (stagingStat.isSymbolicLink() || !stagingStat.isFile()) {
 			throw new StagingPathError(
 				`Staging file must be a regular file, not ${stagingStat.isSymbolicLink() ? "a symlink" : "another file type"}`,
 				supplied,
 			)
+		}
+		// A staging path that is the target would be unlinked by the failure handler
+		// while it still holds the only copy of the content, so a failed write would
+		// delete the file it was meant to protect. Compare identities, not spellings:
+		// an alias of the target is the same hazard.
+		// Only a missing target may be skipped: an EACCES/ELOOP/ENOTDIR here means the
+		// identity comparison could not be made, and treating that as "no target" would let a
+		// staging alias reach the commit and let cleanup delete the file it was meant to
+		// protect.
+		const targetStat = await fs.lstat(targetPath, { bigint: true }).catch((error: unknown) => {
+			if (errorCode(error) !== "ENOENT") {
+				throw new StagingPathError("Staging file could not be compared with the target", supplied)
+			}
+			return null
+		})
+		if (
+			targetStat &&
+			typeof stagingStat.ino === "bigint" &&
+			typeof targetStat.ino === "bigint" &&
+			stagingStat.ino === targetStat.ino &&
+			stagingStat.dev === targetStat.dev
+		) {
+			throw new StagingPathError("Staging file must not be the target itself", supplied)
 		}
 		// The caller's own path is used as given; only the check is canonical.
 		tempPath = options.tempPath
@@ -292,12 +307,6 @@ export async function safeWriteText(
 	// Non-null only when the win32 step-2 block saved a successful DACL dump:
 	// it gates the step-5 restore and is tracked for the cleanup unlinks.
 	let daclDumpPath: string | null = null
-	// Set when the rollback itself fails, so cleanup runs before the error that
-	// reports the partial state is thrown.
-	// Held as a pair so the reported error still names the path the content survived at;
-	// declaring it as `unknown` alone would lose the string narrowing at the throw site.
-	let rollbackFailure: { error: unknown; backupPath: string } | null = null
-
 	try {
 		// -- Step 1: write content to staging temp file -------------------
 		if (!options?.tempPath) {
@@ -365,11 +374,17 @@ export async function safeWriteText(
 			}
 		}
 
-		// -- Step 2 (win32): save DACL BEFORE backup rename ---------------
+		// -- Step 2 (win32): save DACL BEFORE the backup copy -----------
 		const platform = options?.platform ?? process.platform
+		const warn = options?.onWarning ?? ((message: string) => console.warn(message))
 		if (platform === "win32") {
+			let accessError: unknown = null
 			try {
 				await fs.access(targetPath) // target exists?
+			} catch (error: unknown) {
+				accessError = error
+			}
+			if (accessError === null) {
 				const dumpPath = _tempName(dirPath, "safeWriteText.acl")
 				const saved = await _saveDaclWindows(targetPath, dumpPath, options?.execFileRunner)
 				if (saved) {
@@ -381,20 +396,60 @@ export async function safeWriteText(
 					// remove it now (best-effort) so no partial dump survives and
 					// no later step can restore from it.
 					await fs.unlink(dumpPath).catch(() => {})
+					// The target exists and its DACL could not be captured, so the commit rename
+					// replaces it with a file that inherits different access rights. The write still
+					// proceeds - a missing or failing icacls must not leave the user unable to save -
+					// but the replacement is no longer ACL-identical and that has to be visible
+					// instead of silent.
+					warn(`Could not save the DACL of ${targetPath}; the replacement may inherit different access rights.`)
 				}
-			} catch {
-				// target does not exist or access failed — no DACL handling
-				daclDumpPath = null
+			} else if (errorCode(accessError) !== "ENOENT") {
+				// Not "absent": the target is there but could not be checked (EACCES, ...), so
+				// DACL preservation was skipped for a reason the caller cannot infer from the
+				// successful write alone.
+				warn(`Could not check ${targetPath} for DACL preservation (${errorCode(accessError) ?? "unknown error"}); the replacement may inherit different access rights.`)
 			}
 		}
-
 		try {
-			// -- Step 3 (backup:true): rename target -> backup --------------
+			// -- Step 3 (backup:true): durable copy target -> backup ----
 			if (options?.backup) {
 				try {
 					await fs.access(targetPath)
 					backupPath = _tempName(dirPath, "safeWriteText.bak")
-					await fs.rename(targetPath, backupPath)
+					// Copy, never move. Renaming the target away leaves the canonical path absent for
+					// the whole commit window: readers see a missing file, and a concurrent
+					// writer can create a new target that a later rollback would destroy. A copy
+					// keeps the target present, so the step 4 rename is the only change to the
+					// canonical path. The copy is flushed so the retained content survives a crash.
+					try {
+						// Create the destination BEFORE any content exists at it, with the mode fixed
+						// at open time. fs.copyFile picks the destination mode itself (the platform
+						// creation mask subject to umask on some platforms, the source's mode - or its
+						// read-only attribute - on others), so letting it create the file would either
+						// leave a restrictive target's bytes briefly readable to others, or leave the
+						// copy unwritable so the fsync open below fails with EACCES. open() ignores its
+						// mode argument for an existing file, so this 0o600 survives the copy on POSIX;
+						// the chmod afterwards is what clears a copied read-only attribute on Windows
+						// and keeps a backup of a permissive file private.
+						const seedFd = fsSync.openSync(backupPath, "wx", 0o600)
+						fsSync.closeSync(seedFd)
+						await fs.copyFile(targetPath, backupPath)
+						await fs.chmod(backupPath, 0o600)
+						// "r+" not "r": fsync on a read-only handle is EPERM on Windows, and the same
+						// flag the staged temp file uses above.
+						const backupFd = fsSync.openSync(backupPath, "r+")
+						try {
+							_fsyncFile(backupFd)
+						} finally {
+							fsSync.closeSync(backupFd)
+						}
+					} catch (backupError: unknown) {
+						// A partial backup must not outlive this attempt: it is not a complete copy
+						// of anything, and once the write fails nothing else removes it.
+						await fs.unlink(backupPath).catch(() => {})
+						backupPath = null
+						throw backupError
+					}
 					releaseBackupOnSuccess = true
 				} catch (err: unknown) {
 					if (errorCode(err) !== "ENOENT") throw err
@@ -432,7 +487,16 @@ export async function safeWriteText(
 			// and on every failed save.
 			if (daclDumpPath !== null) {
 				const restoredDir = path.dirname(targetPath)
-				await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
+				const restored = await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
+				if (!restored) {
+					// The content is committed, but the published file may carry a different DACL
+					// from the one that was saved. Failing the write here would break every
+					// publish on machines where icacls cannot reapply the saved ACEs (a plain
+					// temp directory restore fails with "Not all privileges or groups referenced
+					// are assigned to the caller"), so the change of access rights is reported
+					// rather than thrown.
+					console.warn(`safeWriteText: content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`)
+				}
 			}
 
 			// -- Step 6 (backup:true): delete backup on success -----------
@@ -463,19 +527,13 @@ export async function safeWriteText(
 		// Only a pre-commit failure can restore the backup. Once the commit rename
 		// published, a later failure (for example the post-commit directory fsync)
 		// must not overwrite the published content with the old file.
-		if (backupPath && releaseBackupOnSuccess && !committed) {
-			try {
-				await fs.rename(backupPath, targetPath)
-			} catch (rollbackError: unknown) {
-				// The content survives only at the backup path now, and the canonical
-				// target is gone. Reporting just the publish failure would leave the
-				// caller with data it cannot find at the expected path, so the
-				// partial-failure state travels with the error. The staged temp file
-				// and this write's staging directory are released first: a rollback
-				// failure is already a hard enough state to reason about without also
-				// leaking the staging file.
-				rollbackFailure = { error: rollbackError, backupPath }
-			}
+		if (backupPath && releaseBackupOnSuccess) {
+			// Nothing to restore: the backup is a copy, so the target still holds whatever
+			// the commit left there - before the commit that is the pre-write content, and
+			// after it the published content. Either way the copy has served its purpose
+			// and must not be left beside the target where no caller can find it.
+			await fs.unlink(backupPath).catch(() => {})
+			backupPath = null
 		}
 		try {
 			await fs.unlink(tempPath).catch(() => {})
@@ -492,10 +550,6 @@ export async function safeWriteText(
 
 		if (daclDumpPath !== null) {
 			await fs.unlink(daclDumpPath).catch(() => {})
-		}
-
-		if (rollbackFailure) {
-			throw new RollbackFailureError(originalError, rollbackFailure.error, rollbackFailure.backupPath)
 		}
 
 		throw originalError

@@ -3,8 +3,7 @@ import { Writable } from "stream"
 import * as path from "path"
 import * as os from "os"
 
-import { safeWriteJson } from "../safeWriteJson"
-import { RollbackFailureError } from "../../services/file-safety/safeWriteText"
+import { ConfinedPathEscapeError, safeWriteJson } from "../safeWriteJson"
 import * as lockfile from "proper-lockfile"
 
 // Capture actual implementations before the vi.mock factory runs,
@@ -487,16 +486,15 @@ describe("safeWriteJson", () => {
 			},
 		})
 
-		expect(failure).toBeInstanceOf(RollbackFailureError)
-		expect(failure?.cause).toBeInstanceOf(Error)
-		expect(failure?.rollbackError).toBeInstanceOf(Error)
-		expect(failure?.backupPath).toContain("safeWriteText.bak_")
+		// Exactly one rename was attempted, and it was the commit.
+		expect(renameCallCount).toBe(1)
 
-		// The rollback failed inside safeWriteText, so the target is gone and
-		// the backup is orphaned on disk.
-		expect(await fileExists(currentTestFilePath)).toBe(false)
+		// The target never left its path, so the previous content is still what a
+		// reader sees, and no orphaned backup copy is left behind either.
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual(initialData)
 		const entries = await fs.readdir(tempDir)
-		expect(entries.some((entry) => entry.includes("safeWriteText.bak_"))).toBe(true)
+		expect(entries.some((entry) => entry.includes("safeWriteText.bak_"))).toBe(false)
 
 		consoleErrorSpy.mockRestore()
 	})
