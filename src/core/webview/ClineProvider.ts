@@ -2157,12 +2157,22 @@ export class ClineProvider
 		// restored mode would otherwise shadow the fresh switch for consumers.
 		// If the durable write fails, roll the shared write back so getValues()
 		// cannot mix a fresh shared mode with the stale pre-switch buffer.
-		const previousMode = this.getValue("mode")
+		// Two independent values are at stake: the shared ContextProxy mode and this
+		// view's own pin (viewLocalState.mode). setValue writes BOTH, so each must be
+		// restored from its own pre-switch value - replaying the shared value through
+		// setValue would overwrite a pin that held a different mode (a view pinned to
+		// architect while the shared mode was code would end the rollback pinned to
+		// code). previousViewMode is undefined when the view has no pin.
+		const previousSharedMode = this.getValue("mode")
+		const previousViewMode = this.viewLocalState.mode
 		try {
 			await this.setValue("mode", newMode)
 		} catch (error) {
 			try {
-				await this.contextProxy.setValue("mode", previousMode)
+				// Shared value only: the failed write never reached the view-local
+				// mutation step, so the pin still holds its own value and must not be
+				// touched here.
+				await this.contextProxy.setValue("mode", previousSharedMode)
 			} catch (rollbackError) {
 				this.log(
 					`[handleModeSwitch] Failed to roll back shared mode after persistence failure: ${
@@ -2214,7 +2224,12 @@ export class ClineProvider
 					}
 				}
 				try {
-					await this.setValue("mode", previousMode)
+					// Restore the shared value through the proxy only, then restore the pin
+					// from its own pre-switch value. When the view had no pin, the forward
+					// setValue created one; clearing it (mode: undefined) is what returns this
+					// view to its pre-switch state instead of leaving the shared mode pinned.
+					await this.contextProxy.setValue("mode", previousSharedMode)
+					await this._saveViewLocalStateFromMutation({ mode: previousViewMode })
 				} catch (rollbackError) {
 					this.log(
 						`[handleModeSwitch] Failed to roll back shared mode after the emit failed: ${

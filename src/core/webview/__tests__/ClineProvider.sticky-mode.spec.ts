@@ -493,6 +493,123 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(provider.getValues().mode).toBe("architect")
 		})
 
+		it("restores the view's own mode pin when a task listener throws after the durable write", async () => {
+			// A listener that throws after the durable write is the failure under test.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+				// Only the TaskModeSwitched emit may throw: addClineToStack emits other
+				// events during setup, and a listener failure is what the rollback covers.
+				emit: vi.fn((event: string) => {
+					if (event === "taskModeSwitched") {
+						throw new Error("listener failed")
+					}
+				}),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
+				return Promise.resolve([])
+			})
+			await provider.addClineToStack(mockTask)
+			await provider.contextProxy.setValue("mode", "code")
+			// The view is pinned to architect while the shared mode is code. The forward
+			// write moves both to ask, so the rollback has two different values to put back.
+			await provider.saveViewState("mode", "architect")
+			expect(provider.getValue("mode")).toBe("code")
+			expect(provider["viewLocalState"].mode).toBe("architect")
+
+			await expect(provider["handleModeSwitchUnlocked"]("ask", mockTask)).rejects.toThrow("listener failed")
+
+			// The shared value returns to code...
+			expect(provider.getValue("mode")).toBe("code")
+			// ...and the pin returns to ITS OWN pre-switch value, not to the shared one.
+			// A rollback that replayed the shared value through setValue would leave this
+			// view pinned to code and a task started here would run in the wrong mode.
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(provider.getValues().mode).toBe("architect")
+			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]] ?? {}
+			// Either no entry was ever written for this view or the entry has no mode key;
+			// what must not happen is a persisted pin holding the restored shared mode.
+			expect(persisted.mode).toBe("architect")
+			// The task-history compensation is still the pre-switch mode.
+			expect(updateTaskHistorySpy).toHaveBeenCalled()
+			expect((updateTaskHistorySpy.mock.calls.at(-1)?.[0] as HistoryItem).mode).toBe("code")
+		})
+
+		it("leaves no mode pin behind when a view without a pin fails the same way", async () => {
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+				// Only the TaskModeSwitched emit may throw: addClineToStack emits other
+				// events during setup, and a listener failure is what the rollback covers.
+				emit: vi.fn((event: string) => {
+					if (event === "taskModeSwitched") {
+						throw new Error("listener failed")
+					}
+				}),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
+				return Promise.resolve([])
+			})
+			await provider.addClineToStack(mockTask)
+			await provider.contextProxy.setValue("mode", "code")
+			// No saveViewState: this view has no pin, so the forward write creates one.
+			expect(provider["viewLocalState"].mode).toBeUndefined()
+
+			await expect(provider["handleModeSwitchUnlocked"]("ask", mockTask)).rejects.toThrow("listener failed")
+
+			expect(provider.getValue("mode")).toBe("code")
+			// The pin the failed switch created must be cleared again rather than left
+			// holding the restored shared mode.
+			expect(provider["viewLocalState"].mode).toBeUndefined()
+			expect(provider.getValues().mode).toBe("code")
+			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]] ?? {}
+			// Either no entry was written for this view or the entry carries no mode key; what
+			// must not happen is a persisted pin holding the restored shared mode.
+			expect(persisted.mode).toBeUndefined()
+		})
+
 		it("bails out before any task write when the mutation signal is already aborted", async () => {
 			// A minimal typed double keeps the test focused on the mode-switch contract.
 			// The literal is asserted as Partial<Task> so its private members (_taskMode,
