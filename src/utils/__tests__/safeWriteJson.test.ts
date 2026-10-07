@@ -709,6 +709,76 @@ describe("safeWriteJson", () => {
 		},
 	)
 
+	// Ordering matters for the security guarantee: proper-lockfile creates
+	// ${lockKey}.lock beside the lock key, and the key is the symlink referent. If
+	// confinement were checked only after the lock, an out-of-scope link would first
+	// create a lock directory outside the scope (and, when that directory is not
+	// writable, surface a lock-acquisition error after retries instead of
+	// ConfinedPathEscapeError). A lock mock that throws proves the check runs first.
+	test.skipIf(process.platform === "win32")(
+		"rejects an out-of-scope symlink before the advisory lock is taken",
+		async () => {
+			vi.resetModules()
+
+			const projectDir = path.join(tempDir, "order-project")
+			await fs.mkdir(projectDir)
+			const outside = path.join(tempDir, "order-outside.json")
+			await fsSyncActual.promises.writeFile(outside, JSON.stringify({ secret: "original" }), "utf8")
+			const projectConfig = path.join(projectDir, "mcp.json")
+			await fs.symlink(outside, projectConfig)
+
+			const realLockfile = await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")
+			const lockMockFn = vi.fn(async () => {
+				throw new Error("lock taken for an out-of-scope target (test)")
+			})
+			vi.doMock("proper-lockfile", () => ({ ...realLockfile, lock: lockMockFn }))
+			const { safeWriteJson: lockedSafeWriteJson } = await import("../safeWriteJson")
+
+			try {
+				await expect(
+					lockedSafeWriteJson(projectConfig, { mcpServers: {} }, { confineTo: projectDir }),
+				).rejects.toThrow(/resolves outside the confined directory/)
+				expect(lockMockFn).not.toHaveBeenCalled()
+				const entries = await fs.readdir(tempDir)
+				expect(entries.filter((entry) => entry.endsWith(".lock"))).toEqual([])
+				expect(JSON.parse(await fsSyncActual.promises.readFile(outside, "utf8"))).toEqual({
+					secret: "original",
+				})
+			} finally {
+				vi.doUnmock("proper-lockfile")
+				vi.resetModules()
+			}
+		},
+	)
+
+	// Same ordering assertion without a symlink, so it also runs on Windows where
+	// real symlinks are unavailable in this CI lane.
+	test("rejects an out-of-scope target before the advisory lock is taken", async () => {
+		vi.resetModules()
+		const projectDir = path.join(tempDir, "order-project-plain")
+		await fs.mkdir(projectDir)
+		const outside = path.join(tempDir, "order-outside-plain.json")
+
+		const realLockfile = await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")
+		const lockMockFn = vi.fn(async () => {
+			throw new Error("lock taken for an out-of-scope target (test)")
+		})
+		vi.doMock("proper-lockfile", () => ({ ...realLockfile, lock: lockMockFn }))
+		const { safeWriteJson: lockedSafeWriteJson } = await import("../safeWriteJson")
+
+		try {
+			await expect(lockedSafeWriteJson(outside, { mcpServers: {} }, { confineTo: projectDir })).rejects.toThrow(
+				/resolves outside the confined directory/,
+			)
+			expect(lockMockFn).not.toHaveBeenCalled()
+			const entries = await fs.readdir(tempDir)
+			expect(entries.filter((entry) => entry.endsWith(".lock") || entry.includes(".new_"))).toEqual([])
+		} finally {
+			vi.doUnmock("proper-lockfile")
+			vi.resetModules()
+		}
+	})
+
 	test.skipIf(process.platform === "win32")(
 		"confines a write whose symlink referent stays inside the confined directory",
 		async () => {

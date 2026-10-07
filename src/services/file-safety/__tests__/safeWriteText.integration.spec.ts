@@ -31,9 +31,10 @@ describe("safeWriteText against a real filesystem", () => {
 		expect(await fs.readdir(dir)).toEqual(["target.txt"])
 	})
 
-	it("leaves the target bytes untouched when the commit cannot replace it", async () => {
-		// A regular file cannot be renamed over a directory, so the backup copy and
-		// the commit both fail on a real filesystem with no mocking at all.
+	it("leaves the target bytes untouched when the backup copy of a directory target fails", async () => {
+		// A directory target makes the backup COPY fail first (a directory cannot be
+		// copied), so this covers the backup step, not the commit rename: the inner
+		// catch unlinks the partial backup and rethrows before the rename runs.
 		const targetPath = path.join(dir, "target-dir")
 		await fs.mkdir(targetPath)
 		const inside = path.join(targetPath, "payload.txt")
@@ -43,6 +44,24 @@ describe("safeWriteText against a real filesystem", () => {
 
 		// The directory and its content are exactly as they were, and no backup copy
 		// or staging directory was left behind next to them.
+		expect(await fs.readFile(inside, "utf8")).toBe("original bytes")
+		expect(await fs.readdir(dir)).toEqual(["target-dir"])
+	})
+
+	it("leaves the target untouched when the commit rename itself cannot replace it", async () => {
+		// backup:false makes the commit rename the first operation that touches the
+		// target: a regular file cannot be renamed over a directory, so the failure
+		// under test is the commit, and the cleanup is the temp unlink plus the
+		// staging-directory removal.
+		const targetPath = path.join(dir, "target-dir")
+		await fs.mkdir(targetPath)
+		const inside = path.join(targetPath, "payload.txt")
+		await fs.writeFile(inside, "original bytes")
+
+		await expect(safeWriteText(targetPath, "new data", { backup: false })).rejects.toThrow()
+
+		// The directory and its content are exactly as they were, and neither the
+		// staged temp nor the staging directory was left behind.
 		expect(await fs.readFile(inside, "utf8")).toBe("original bytes")
 		expect(await fs.readdir(dir)).toEqual(["target-dir"])
 	})
