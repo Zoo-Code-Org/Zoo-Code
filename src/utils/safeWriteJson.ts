@@ -32,6 +32,78 @@ export interface SafeWriteJsonOptions {
 	 * cannot be parsed.
 	 */
 	merge?: (existing: unknown, incoming: unknown) => unknown
+
+	/**
+	 * Restrict the write to a directory. The publish target is resolved through
+	 * symlinks before this check runs, so a caller that picked the path from a
+	 * known scope (a workspace, a project settings directory) can refuse a write
+	 * that a planted symlink would land somewhere else. The check runs before the
+	 * advisory lock is taken and before anything is staged.
+	 */
+	confineTo?: string
+}
+
+/**
+ * Thrown when a write declared with `confineTo` resolves outside that directory.
+ */
+export class ConfinedPathEscapeError extends Error {
+	constructor(
+		readonly requestedPath: string,
+		readonly resolvedPath: string,
+		readonly confineTo: string,
+	) {
+		super(
+			`Refusing to write ${resolvedPath}: it resolves outside the confined directory ${confineTo} (requested ${requestedPath}).`,
+		)
+		this.name = "ConfinedPathEscapeError"
+	}
+}
+
+/**
+ * Canonicalize the directory a write is confined to. The publish target is fully
+ * resolved through symlinks, so the scope has to be resolved the same way or a
+ * scope path that itself runs through a symlink (macOS /var -> /private/var is the
+ * common case) would compare lexically against a resolved target and reject every
+ * legitimate in-scope write. When the scope does not exist yet, the nearest
+ * existing ancestor is resolved and the remainder re-appended.
+ */
+async function _resolveScopeRoot(confineTo: string): Promise<string> {
+	const lexical = path.resolve(confineTo)
+	try {
+		return await fs.realpath(lexical)
+	} catch (error: unknown) {
+		// Only a missing path means "walk up and re-join". EACCES or ELOOP means the
+		// scope cannot be canonicalized at all, and continuing would build a partly
+		// lexical root that can disagree with the canonical target - the failure has to
+		// surface rather than decide the scope from a guess.
+		if (_scopeErrorCode(error) !== "ENOENT") {
+			throw error
+		}
+		const missing: string[] = []
+		let ancestor = lexical
+		while (true) {
+			const parent = path.dirname(ancestor)
+			if (parent === ancestor) {
+				return lexical
+			}
+			missing.push(path.basename(ancestor))
+			ancestor = parent
+			try {
+				const real = await fs.realpath(ancestor)
+				return path.join(real, ...missing.reverse())
+			} catch (innerError: unknown) {
+				if (_scopeErrorCode(innerError) !== "ENOENT") {
+					throw innerError
+				}
+			}
+		}
+	}
+}
+
+function _scopeErrorCode(error: unknown): string | undefined {
+	return typeof error === "object" && error !== null && "code" in error
+		? (error as { code?: string }).code
+		: undefined
 }
 
 /**
@@ -88,6 +160,25 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// must stay inside the protected block, otherwise a rejection here leaves the
 		// advisory lock held until the stale timeout for every other writer.
 		resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
+
+		// Confinement, if the caller declared a scope. Both sides are canonicalized the
+		// same way: the publish target is resolved through symlinks, and a target that
+		// does not exist yet still carries the alias components of the path it was
+		// given. This runs before the merge read and before anything is staged, so a
+		// rejected write leaves nothing behind.
+		if (options?.confineTo) {
+			const scopeRoot = await _resolveScopeRoot(options.confineTo)
+			const resolvedTarget = await _resolveScopeRoot(resolvedTargetPath)
+			const relative = path.relative(scopeRoot, resolvedTarget)
+			if (
+				relative === "" ||
+				relative === ".." ||
+				relative.startsWith(".." + path.sep) ||
+				path.isAbsolute(relative)
+			) {
+				throw new ConfinedPathEscapeError(absoluteFilePath, resolvedTargetPath, scopeRoot)
+			}
+		}
 
 		// If a merge callback was provided, read the current file under the lock
 		// and let the caller merge before we write. Must be inside try/finally

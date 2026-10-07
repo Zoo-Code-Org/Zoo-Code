@@ -31,6 +31,10 @@ vi.mock("fs/promises", () => ({
 	rename: vi.fn().mockResolvedValue(undefined),
 	unlink: vi.fn().mockResolvedValue(undefined),
 	rmdir: vi.fn().mockResolvedValue(undefined),
+	// guardedWrite resolves the workspace root (and the nearest existing ancestor of the
+	// target) before publishing. The double returns the path unchanged so the containment
+	// check sees the same spelling the rest of the test uses.
+	realpath: vi.fn(async (p: string) => p),
 }))
 
 // Mock safeWriteText (used by saveDirectly)
@@ -69,6 +73,16 @@ vi.mock("path", () => ({
 	basename: vi.fn((path) => path.split("/").pop()),
 	dirname: vi.fn((path) => path.split("/").slice(0, -1).join("/") || "/"),
 	join: (...args: string[]) => args.join("/"),
+	sep: "/",
+	// guardedWrite's workspace containment compares paths lexically, so the double needs
+	// a POSIX relative() that matches the resolve()/join() doubles above.
+	relative: (from: string, to: string) => {
+		const f = from.split("/").filter(Boolean)
+		const t = to.split("/").filter(Boolean)
+		let i = 0
+		while (i < f.length && i < t.length && f[i] === t[i]) i++
+		return [...Array.from({ length: f.length - i }, () => ".."), ...t.slice(i)].join("/")
+	},
 }))
 
 // Mock vscode
