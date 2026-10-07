@@ -398,10 +398,21 @@ describe("safeWriteText", () => {
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 			// first rename (target->backup) succeeds, second fails
+			// After this write renames the target to its backup the target really is absent,
+			// so the rollback's re-appearance check sees no concurrent publish.
+			let targetOnDisk = true
+			vi.mocked(fs.access).mockImplementation(async (p: unknown) => {
+				if (!targetOnDisk && String(p) === targetPath) {
+					throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+				}
+			})
 			let callCount = 0
 			vi.mocked(fs.rename).mockImplementation(async () => {
 				callCount++
-				if (callCount === 1) return // target -> backup
+				if (callCount === 1) {
+					targetOnDisk = false // target -> backup
+					return
+				}
 				if (callCount === 2) throw new Error("ENOSPC") // temp -> target fails
 				return // the rollback rename succeeds
 			})
@@ -421,10 +432,21 @@ describe("safeWriteText", () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// After this write renames the target to its backup the target really is absent,
+			// so the rollback's re-appearance check sees no concurrent publish.
+			let targetOnDisk = true
+			vi.mocked(fs.access).mockImplementation(async (p: unknown) => {
+				if (!targetOnDisk && String(p) === targetPath) {
+					throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+				}
+			})
 			let callCount = 0
 			vi.mocked(fs.rename).mockImplementation(async () => {
 				callCount++
-				if (callCount === 1) return // target -> backup
+				if (callCount === 1) {
+					targetOnDisk = false // target -> backup
+					return
+				}
 				if (callCount === 2) throw new Error("ENOSPC") // temp -> target fails
 				throw new Error("EACCES") // the rollback rename fails too
 			})
@@ -444,6 +466,49 @@ describe("safeWriteText", () => {
 			expect((failure?.rollbackError as Error).message).toBe("EACCES")
 			expect(failure?.backupPath).toContain("safeWriteText.bak_")
 			// The backup is what the caller can still recover, so it must stay on disk.
+			expect(fs.unlink).not.toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
+		})
+
+		it("keeps a concurrent publish instead of restoring the backup over it", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// This write moves the target aside, fails to commit, and then finds the target
+			// back on disk: another writer published there in the window. Restoring the
+			// backup would destroy that publish, so the rollback must be skipped.
+			let targetOnDisk = true
+			vi.mocked(fs.access).mockImplementation(async (p: unknown) => {
+				if (String(p) === targetPath && !targetOnDisk) {
+					throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+				}
+			})
+			let callCount = 0
+			vi.mocked(fs.rename).mockImplementation(async () => {
+				callCount++
+				if (callCount === 1) {
+					targetOnDisk = false // this write moves the target aside
+					return
+				}
+				// The commit fails, and in that window a different writer publishes.
+				targetOnDisk = true
+				throw new Error("ENOSPC") // temp -> target fails
+			})
+
+			let failure: RollbackFailureError | undefined
+			await safeWriteText(targetPath, "new data", { backup: true, platform: "linux" }).catch((e: unknown) => {
+				if (e instanceof RollbackFailureError) {
+					failure = e
+					return
+				}
+				throw e
+			})
+
+			expect(failure).toBeInstanceOf(RollbackFailureError)
+			expect((failure?.rollbackError as Error).message).toContain("rollback skipped")
+			expect(failure?.backupPath).toContain("safeWriteText.bak_")
+			// Only the backup rename and the failed commit: no backup -> target restore.
+			expect(fs.rename).toHaveBeenCalledTimes(2)
+			// The previous content stays recoverable at the backup path.
 			expect(fs.unlink).not.toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
 		})
 
@@ -1076,10 +1141,21 @@ describe("cleanup before a rollback failure is reported", () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		// After this write renames the target to its backup the target really is absent,
+		// so the rollback's re-appearance check sees no concurrent publish.
+		let targetOnDisk = true
+		vi.mocked(fs.access).mockImplementation(async (p: unknown) => {
+			if (!targetOnDisk && String(p) === targetPath) {
+				throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+			}
+		})
 		let callCount = 0
 		vi.mocked(fs.rename).mockImplementation(async () => {
 			callCount++
-			if (callCount === 1) return // target -> backup
+			if (callCount === 1) {
+				targetOnDisk = false // target -> backup
+				return
+			}
 			if (callCount === 2) throw new Error("ENOSPC") // temp -> target fails
 			throw new Error("EACCES") // the rollback rename fails too
 		})

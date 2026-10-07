@@ -464,17 +464,37 @@ export async function safeWriteText(
 		// published, a later failure (for example the post-commit directory fsync)
 		// must not overwrite the published content with the old file.
 		if (backupPath && releaseBackupOnSuccess && !committed) {
+			// A concurrent writer can publish to the target after this write moved it aside: the
+			// backup rename is not covered by a per-target lock, because safeWriteJson already
+			// holds that lock when it calls in here. Restoring over such a publish would
+			// destroy it silently, so the restore runs only while the target is still absent.
+			// Otherwise the previous content stays recoverable at backupPath and the skipped
+			// restore travels with the error instead of papering over the other write.
+			let targetReappeared = false
 			try {
-				await fs.rename(backupPath, targetPath)
-			} catch (rollbackError: unknown) {
-				// The content survives only at the backup path now, and the canonical
-				// target is gone. Reporting just the publish failure would leave the
-				// caller with data it cannot find at the expected path, so the
-				// partial-failure state travels with the error. The staged temp file
-				// and this write's staging directory are released first: a rollback
-				// failure is already a hard enough state to reason about without also
-				// leaking the staging file.
-				rollbackFailure = { error: rollbackError, backupPath }
+				await fs.access(targetPath)
+				targetReappeared = true
+			} catch {
+				targetReappeared = false
+			}
+			if (targetReappeared) {
+				rollbackFailure = {
+					error: new Error("rollback skipped: the target was re-created after this write moved it aside, so the concurrent publish is preserved"),
+					backupPath,
+				}
+			} else {
+				try {
+					await fs.rename(backupPath, targetPath)
+				} catch (rollbackError: unknown) {
+					// The content survives only at the backup path now, and the canonical
+					// target is gone. Reporting just the publish failure would leave the
+					// caller with data it cannot find at the expected path, so the
+					// partial-failure state travels with the error. The staged temp file
+					// and this write's staging directory are released first: a rollback
+					// failure is already a hard enough state to reason about without also
+					// leaking the staging file.
+					rollbackFailure = { error: rollbackError, backupPath }
+				}
 			}
 		}
 		try {
