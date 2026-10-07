@@ -751,4 +751,17 @@ describe("safeWriteJson", () => {
 		expect(await readFileContent(referentPath)).toEqual({ seed: "untouched" })
 	})
 
+	test("resolves the publish target only once during a guarded publication", async () => {
+		const target = path.join(tempDir, "single-resolve.json")
+		// The caller resolves once for the lock key; safeWriteText must not resolve again,
+		// or a link installed after the caller's re-check would be followed there.
+		const realpath = vi.spyOn(fs, "realpath").mockImplementation(async (p) => String(p))
+
+		await safeWriteJson(target, { written: true }, { refuseSymlinkTarget: true })
+
+		expect(realpath).toHaveBeenCalledTimes(1)
+		vi.restoreAllMocks()
+		expect(await readFileContent(target)).toEqual({ written: true })
+	})
+
 })

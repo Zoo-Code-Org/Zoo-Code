@@ -37,6 +37,15 @@ export interface SafeWriteTextOptions {
 	tempPath?: string
 
 	/**
+	 * Set when the caller has already resolved the publish target and guarded the
+	 * symlink window itself (safeWriteJson resolves, locks, and re-checks the final
+	 * component). safeWriteText then uses filePath as-is: resolving a second time would
+	 * re-open the window the caller just closed, because a link installed after the
+	 * caller's check would be followed here and the content committed to its referent.
+	 */
+	targetPathIsResolved?: boolean
+
+	/**
 	 * Pre-commit verification hook (A4a guarded write, epic #1375).  Invoked
 	 * immediately before the commit rename and BEFORE any backup rename moves the
 	 * target aside, so a caller can re-check the target's state and reject
@@ -176,8 +185,9 @@ export async function resolvePublishTarget(absoluteFilePath: string): Promise<st
 export async function safeWriteText(filePath: string, content: string, options?: SafeWriteTextOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 
-	// Resolve the symlink referent (see resolvePublishTarget).
-	const targetPath = await resolvePublishTarget(absoluteFilePath)
+	// Resolve the symlink referent (see resolvePublishTarget) - unless the caller
+	// already resolved it and closed the substitution window itself.
+	const targetPath = options?.targetPathIsResolved ? absoluteFilePath : await resolvePublishTarget(absoluteFilePath)
 	const dirPath = path.dirname(targetPath)
 
 	// Ensure parent directory exists (mirrors safeWriteJson behaviour).

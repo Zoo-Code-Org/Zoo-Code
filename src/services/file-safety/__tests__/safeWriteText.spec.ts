@@ -494,6 +494,23 @@ describe("safeWriteText", () => {
 			expect(fsSync.fchmodSync).toHaveBeenCalledWith(2, 0o600)
 		})
 
+		it("uses the supplied path as-is when the caller already resolved the publish target", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			// A second resolution would follow a link installed after the caller's own
+			// re-check, so with the flag set realpath must not run at all.
+			vi.mocked(fs.realpath).mockResolvedValue("/elsewhere/referent.txt")
+			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o644))
+			vi.mocked(fsSync.openSync).mockReturnValue(2)
+
+			await safeWriteText(targetPath, "data", { platform: "linux", targetPathIsResolved: true })
+
+			expect(fs.realpath).not.toHaveBeenCalled()
+			expect(fs.rename).toHaveBeenCalledWith(
+				expect.stringContaining("safeWriteText_"),
+				path.resolve(targetPath),
+			)
+		})
+
 		it("opens the temp before applying a read-only target's mode (0o444 does not block the open)", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)

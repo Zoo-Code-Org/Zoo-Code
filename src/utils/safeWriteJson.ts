@@ -171,6 +171,11 @@ if (options?.refuseSymlinkTarget) {
 		const textOptions: SafeWriteTextOptions = {
 			tempPath: actualTempNewFilePath,
 			backup: true,
+			// This call already resolved the target (and re-checked the final component
+			// under the lock). safeWriteText must not resolve it a second time: a link
+			// installed in that window would be followed there and the payload committed
+			// to the attacker's referent.
+			targetPathIsResolved: true,
 		}
 
 		if (options?.refuseSymlinkTarget) {
