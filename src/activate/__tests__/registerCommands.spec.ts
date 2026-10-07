@@ -1,6 +1,8 @@
 import type { Mock } from "vitest"
 import * as vscode from "vscode"
 import { TelemetryService } from "@roo-code/telemetry"
+import { WebviewFocusTracker } from "../../core/webview/WebviewFocusTracker"
+import { makeExtensionContext } from "../../test-utils/vscode"
 
 import { ContextProxy } from "../../core/config/ContextProxy"
 import { ClineProvider } from "../../core/webview/ClineProvider"
@@ -142,6 +144,7 @@ describe("registerCommands handlers", () => {
 		postMessageToWebview: Mock
 		evictCurrentTask: Mock
 		refreshWorkspace: Mock
+		webviewFocusTracker: WebviewFocusTracker
 	}
 	let handlers: Record<string, (...args: unknown[]) => unknown>
 
@@ -160,9 +163,7 @@ describe("registerCommands handlers", () => {
 			dispose: vi.fn(),
 		}
 
-		mockContext = {
-			subscriptions: [],
-		} as unknown as vscode.ExtensionContext
+		mockContext = makeExtensionContext()
 
 		mockVisibleProvider = {
 			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
@@ -172,6 +173,7 @@ describe("registerCommands handlers", () => {
 			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
 			evictCurrentTask: vi.fn().mockResolvedValue(undefined),
 			refreshWorkspace: vi.fn().mockResolvedValue(undefined),
+			webviewFocusTracker: new WebviewFocusTracker(),
 		}
 		;(ClineProvider.getVisibleInstance as Mock).mockReturnValue(mockVisibleProvider)
 		;(vscode.commands.registerCommand as Mock).mockImplementation(
@@ -204,6 +206,53 @@ describe("registerCommands handlers", () => {
 
 	// The sidebar title-bar handlers target the registered provider (the
 	// sidebar click origin) directly, not the visible-instance heuristic.
+	it("passes the shared focus tracker to the newTask handler", async () => {
+		const { handleNewTask } = await import("../handleTask")
+		const params = { prompt: "new task" }
+		await handlers["zoo-code.newTask"](params)
+		expect(handleNewTask).toHaveBeenCalledWith(params, mockProvider.webviewFocusTracker)
+	})
+
+	it.each(["popoutButtonClicked", "openInNewTab"])(
+		"%s opens an editor chat using the registered provider's focus tracker",
+		async (command) => {
+			const panel: vscode.WebviewPanel = {
+				viewType: "zoo-code.TabPanelProvider",
+				title: "Zoo Code",
+				webview: {
+					options: {},
+					html: "",
+					cspSource: "test-webview",
+					postMessage: vi.fn().mockResolvedValue(true),
+					onDidReceiveMessage: vi.fn(),
+					asWebviewUri: vi.fn((uri) => uri),
+				},
+				options: {},
+				viewColumn: vscode.ViewColumn.Two,
+				active: true,
+				visible: true,
+				onDidChangeViewState: vi.fn(),
+				onDidDispose: vi.fn(),
+				reveal: vi.fn(),
+				dispose: vi.fn(),
+			}
+			vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel)
+
+			const result = await handlers[`zoo-code.${command}`]()
+
+			expect(ClineProvider).toHaveBeenCalledExactlyOnceWith(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				await ContextProxy.getInstance(mockContext),
+				mockProvider.webviewFocusTracker,
+				undefined,
+			)
+			const tabProvider = vi.mocked(ClineProvider).mock.results[0].value
+			expect(result).toBe(tabProvider)
+			expect(tabProvider.resolveWebviewView).toHaveBeenCalledExactlyOnceWith(panel)
+		},
+	)
 	it("settingsButtonClicked posts both settingsButtonClicked and didBecomeVisible actions on the registered provider", () => {
 		handlers["zoo-code.settingsButtonClicked"]()
 
@@ -601,7 +650,16 @@ describe("openClineInNewTab", () => {
 	})
 
 	it("creates a webview panel with title 'Zoo Code'", async () => {
-		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+		const webviewFocusTracker = new WebviewFocusTracker()
+		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel, webviewFocusTracker })
+		expect(ClineProvider).toHaveBeenCalledWith(
+			mockContext,
+			mockOutputChannel,
+			"editor",
+			await ContextProxy.getInstance(mockContext),
+			webviewFocusTracker,
+			undefined,
+		)
 
 		// No tab was tracked, so the reuse path (and its instance lookup)
 		// must not run.

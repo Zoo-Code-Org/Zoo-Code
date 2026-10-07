@@ -7,6 +7,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { Package } from "../shared/package"
 import { getCommand } from "../utils/commands"
 import { ClineProvider } from "../core/webview/ClineProvider"
+import type { WebviewFocusTracker } from "../core/webview/WebviewFocusTracker"
 import { ContextProxy } from "../core/config/ContextProxy"
 import { focusPanel } from "../utils/focusPanel"
 import { handleNewTask } from "./handleTask"
@@ -160,9 +161,10 @@ const getCommandsMap = ({
 	popoutButtonClicked: () => {
 		TelemetryService.instance.captureTitleButtonClicked("popout")
 
-		return openClineInNewTab({ context, outputChannel })
+		return openClineInNewTab({ context, outputChannel, webviewFocusTracker: provider.webviewFocusTracker })
 	},
-	openInNewTab: () => openClineInNewTab({ context, outputChannel }),
+	openInNewTab: () =>
+		openClineInNewTab({ context, outputChannel, webviewFocusTracker: provider.webviewFocusTracker }),
 	settingsButtonClicked: () => {
 		TelemetryService.instance.captureTitleButtonClicked("settings")
 
@@ -209,7 +211,7 @@ const getCommandsMap = ({
 		}
 		postActions(outputChannel, tabProvider, ["marketplaceButtonClicked"], "marketplaceButtonClickedInTab")
 	},
-	newTask: handleNewTask,
+	newTask: (params: { prompt?: string } | null | undefined) => handleNewTask(params, provider.webviewFocusTracker),
 	setCustomStoragePath: async () => {
 		const { promptForCustomStoragePath } = await import("../utils/storage")
 		await promptForCustomStoragePath()
@@ -281,7 +283,13 @@ const getCommandsMap = ({
 	},
 })
 
-export const openClineInNewTab = async ({ context, outputChannel }: Omit<RegisterCommandOptions, "provider">) => {
+type OpenClineInNewTabOptions = {
+	context: vscode.ExtensionContext
+	outputChannel: vscode.OutputChannel
+	webviewFocusTracker: WebviewFocusTracker
+}
+
+export const openClineInNewTab = async ({ context, outputChannel, webviewFocusTracker }: OpenClineInNewTabOptions) => {
 	// Serialize overlapping "Open in editor" calls: a double-click starts
 	// before the first call tracks its new panel, so without a shared
 	// in-flight creation both calls would race to create two tab panels.
@@ -294,7 +302,7 @@ export const openClineInNewTab = async ({ context, outputChannel }: Omit<Registe
 		return pendingTabPanelCreation
 	}
 
-	const creation = createTabPanelUnlocked({ context, outputChannel })
+	const creation = createTabPanelUnlocked({ context, outputChannel, webviewFocusTracker })
 	pendingTabPanelCreation = creation
 
 	try {
@@ -317,7 +325,7 @@ export const openClineInNewTab = async ({ context, outputChannel }: Omit<Registe
 
 // The unserialized tab-creation body. Only openClineInNewTab may call it,
 // after it has stored the shared in-flight promise.
-const createTabPanelUnlocked = async ({ context, outputChannel }: Omit<RegisterCommandOptions, "provider">) => {
+const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTracker }: OpenClineInNewTabOptions) => {
 	// Reuse the tracked tab instead of opening a second one: a repeated
 	// "Open in editor" click reveals the existing tab's panel.
 	if (tabPanel) {
@@ -345,7 +353,14 @@ const createTabPanelUnlocked = async ({ context, outputChannel }: Omit<RegisterC
 		mdmService = undefined
 	}
 
-	const tabProvider = new ClineProvider(context, outputChannel, "editor", contextProxy, mdmService)
+	const tabProvider = new ClineProvider(
+		context,
+		outputChannel,
+		"editor",
+		contextProxy,
+		webviewFocusTracker,
+		mdmService,
+	)
 	const lastCol = Math.max(...vscode.window.visibleTextEditors.map((editor) => editor.viewColumn || 0))
 
 	// Check if there are any visible text editors, otherwise open a new group
