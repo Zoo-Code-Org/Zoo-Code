@@ -1,6 +1,7 @@
 // npx vitest run core/tools/__tests__/applyDiffTool.guardedWrite.spec.ts
 
 import path from "path"
+import type { BigIntStats } from "fs"
 
 import type { MockedFunction } from "vitest"
 
@@ -58,6 +59,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		| "didEditFile"
 		| "api"
 		| "diffStrategy"
+		| "observationRegistry"
 		| "diffViewProvider"
 		| "providerRef"
 		| "fileContextTracker"
@@ -226,10 +228,12 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 	})
 
 	it("does not authorize a read that changed underneath it", async () => {
+		// Only the fields versionTokenOfStat reads; a full BigIntStats cannot be built
+		// against the mocked fs, so the double assertion is the narrowest option.
 		const stat = vi.mocked((await import("fs/promises")).default.stat)
 		stat
-			.mockResolvedValueOnce({ dev: 1n, ino: 2n, size: 22n, mtimeNs: 100n, ctimeNs: 100n })
-			.mockResolvedValueOnce({ dev: 1n, ino: 2n, size: 30n, mtimeNs: 200n, ctimeNs: 100n })
+			.mockResolvedValueOnce({ dev: 1n, ino: 2n, size: 22n, mtimeNs: 100n, ctimeNs: 100n } as unknown as BigIntStats)
+			.mockResolvedValueOnce({ dev: 1n, ino: 2n, size: 30n, mtimeNs: 200n, ctimeNs: 100n } as unknown as BigIntStats)
 
 		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
 			askApproval: mockAskApproval,
