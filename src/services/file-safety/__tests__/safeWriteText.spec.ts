@@ -163,6 +163,27 @@ describe("safeWriteText", () => {
 			expect(fs.rename).toHaveBeenCalledTimes(1)
 		})
 
+		it("a staging-file fsync failure aborts the publish and leaves the target untouched", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// The durability step itself fails: the staged bytes never reached the disk, so
+			// publishing them would put content at the target that a crash can lose.
+			vi.mocked(fsSync.fsyncSync).mockImplementationOnce(() => {
+				throw new Error("EIO")
+			})
+
+			await expect(safeWriteText(targetPath, "new data", { platform: "linux" })).rejects.toThrow("EIO")
+
+			// No commit: the rename that publishes the staged file never ran, so the target
+			// still holds whatever it held before the call.
+			expect(fs.rename).not.toHaveBeenCalled()
+
+			// The fd is closed and the staged temp released.
+			expect(fsSync.closeSync).toHaveBeenCalledWith(1)
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		})
+
 		it("a post-commit backup cleanup failure is non-fatal: the target stays committed and no temp is left behind", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
