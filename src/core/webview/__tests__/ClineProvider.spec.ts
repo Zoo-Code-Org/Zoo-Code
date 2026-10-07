@@ -4791,7 +4791,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should report the activated profile's settings over a stale view-local buffer in getState", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const freshSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "fresh-key" }
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
@@ -4905,7 +4911,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should report the fresh profile's settings over a stale view-local buffer in getState after upserting and activating a profile", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const profile: ProviderSettingsEntry = {
 				name: "fresh-profile",
 				id: "fresh-id",
@@ -5232,7 +5244,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should refresh the view-local apiConfiguration when deleting the active profile", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const oldProfile: ProviderSettingsEntry = {
 				name: "old-profile",
 				id: "old-id",
@@ -8084,7 +8102,13 @@ describe("ClineProvider", () => {
 	})
 
 	it("should re-pin the view to a valid global selection when the first listed profile has no name", async () => {
-		const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
 		// @ts-ignore - Replace providerSettingsManager with a test double: the view's pinned config no
 		// longer exists, the shared global selection is still valid, and the only listed profile is a
 		// legacy entry without a name.
