@@ -710,4 +710,45 @@ describe("safeWriteJson", () => {
 		expect(await readFileContent(target)).toEqual({ written: true })
 	})
 
+	test("rejects when the destination is swapped for a link after the initial refusal check", async () => {
+		const referentPath = path.join(tempDir, "swap-referent.json")
+		const linkPath = path.join(tempDir, "swap-link.json")
+		await fsPromisesActuals.writeFile!(referentPath, JSON.stringify({ seed: "untouched" }))
+		await fsPromisesActuals.writeFile!(linkPath, JSON.stringify({ own: true }))
+		const asLink = { isSymbolicLink: () => true } as unknown as fsSyncActual.Stats
+		const asFile = { isSymbolicLink: () => false } as unknown as fsSyncActual.Stats
+		// The first lstat (the refusal) sees a regular file; the re-check after
+		// resolvePublishTarget sees the link a local writer installed in between.
+		vi.spyOn(fs, "lstat").mockResolvedValueOnce(asFile).mockResolvedValueOnce(asLink)
+
+		await expect(
+			safeWriteJson(linkPath, { leaked: true }, { refuseSymlinkTarget: true }),
+		).rejects.toThrow(/after resolution/)
+
+		vi.restoreAllMocks()
+		expect(await readFileContent(referentPath)).toEqual({ seed: "untouched" })
+	})
+
+	test("rejects when the destination becomes a link before the commit is staged", async () => {
+		const referentPath = path.join(tempDir, "late-referent.json")
+		const linkPath = path.join(tempDir, "late-link.json")
+		await fsPromisesActuals.writeFile!(referentPath, JSON.stringify({ seed: "untouched" }))
+		await fsPromisesActuals.writeFile!(linkPath, JSON.stringify({ own: true }))
+		const asLink = { isSymbolicLink: () => true } as unknown as fsSyncActual.Stats
+		const asFile = { isSymbolicLink: () => false } as unknown as fsSyncActual.Stats
+		// The swap happens after resolution and while the write is already under the
+		// lock: the in-lock re-check must stop the commit rename.
+		vi.spyOn(fs, "lstat")
+			.mockResolvedValueOnce(asFile)
+			.mockResolvedValueOnce(asFile)
+			.mockResolvedValueOnce(asLink)
+
+		await expect(
+			safeWriteJson(linkPath, { leaked: true }, { refuseSymlinkTarget: true }),
+		).rejects.toThrow(/before publication/)
+
+		vi.restoreAllMocks()
+		expect(await readFileContent(referentPath)).toEqual({ seed: "untouched" })
+	})
+
 })

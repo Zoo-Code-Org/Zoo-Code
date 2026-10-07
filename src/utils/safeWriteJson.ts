@@ -106,6 +106,23 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// the given path on ENOENT), preserving the previous create-from-absent flow.
 	const resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
 
+// The refusal above and this resolution are separate syscalls, so a local writer
+// could replace the final component with a link in between; resolvedTargetPath
+// would then describe a destination the caller never chose. Re-check the component
+// the caller named - once here and again under the lock before publishing - so the
+// refusal stays effective through publication.
+const assertFinalComponentNotReplaced = async (stage: string): Promise<void> => {
+	const nowStat = await fs.lstat(absoluteFilePath).catch(() => undefined)
+	if (nowStat?.isSymbolicLink()) {
+		throw new Error(
+			`safeWriteJson: refusing to write through the symlink now at ${absoluteFilePath} (${stage}); the payload would land at ${resolvedTargetPath}, a destination the caller never chose.`,
+		)
+	}
+}
+if (options?.refuseSymlinkTarget) {
+	await assertFinalComponentNotReplaced("after resolution")
+}
+
 	// Acquire the lock before any file operations. `acquireFileLock` owns the
 	// shared advisory lock protocol, so callers that lock the same path with it
 	// (for example task-history deletion) serialize with this write. It locks the
@@ -156,6 +173,11 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			backup: true,
 		}
 
+		if (options?.refuseSymlinkTarget) {
+			// Last chance to notice the destination was swapped for a link: everything the
+			// caller asked for is staged and the commit rename follows the resolved path.
+			await assertFinalComponentNotReplaced("before publication")
+		}
 		await safeWriteText(resolvedTargetPath, "", textOptions)
 
 		// If we reach here, the new file is successfully in place and any

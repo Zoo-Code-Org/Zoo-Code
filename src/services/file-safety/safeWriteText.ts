@@ -207,8 +207,10 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			// not be published wider than the file it replaces (a 0o600 target
 			// must not become 0o644 through the atomic rename).
 			let targetMode = 0o644 // default for a fresh target
+			let targetExists = false
 			try {
 				targetMode = fsSync.statSync(targetPath).mode & 0o777
+				targetExists = true
 			} catch {
 				// target does not exist yet - keep the default
 			}
@@ -217,8 +219,13 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				// openSync applies the process umask to the requested mode, so a 0o664
 				// or 0o666 target would be staged as 0o644 under the common umask 022 and
 				// lose group write through the rename. Set the mode on the fd instead, the
-				// same way the caller-staged branch below does.
-				fsSync.fchmodSync(fd, targetMode)
+				// same way the caller-staged branch below does - but only when a target
+				// actually existed to preserve. For a new target the creation mask must win:
+				// forcing the 0o644 default back on with fchmod would undo a restrictive
+				// umask (0o600 under umask 077) and publish a group/world-readable file.
+				if (targetExists) {
+					fsSync.fchmodSync(fd, targetMode)
+				}
 				// Loop until every byte is written: writeSync can report a short
 				// (partial) write, and publishing a truncated staging file would
 				// commit corrupt content.

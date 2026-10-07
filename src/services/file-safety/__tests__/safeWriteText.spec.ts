@@ -457,6 +457,43 @@ describe("safeWriteText", () => {
 			expect(fs.rename).toHaveBeenCalledWith(customTempPath, targetPath)
 		})
 
+		it("leaves the creation mask in charge when the target does not exist yet", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+			vi.mocked(fsSync.statSync).mockImplementation(() => {
+				throw enoent
+			})
+			vi.mocked(fsSync.openSync).mockReturnValue(2)
+
+			await safeWriteText(targetPath, "data", { platform: "linux" })
+
+			// openSync already applied the process umask to the requested mode. Forcing the
+			// 0o644 default back on with fchmod would undo a restrictive umask (0o600 under
+			// umask 077) and publish a group/world-readable file for a target that never
+			// existed, so the mask has to stay in charge.
+			expect(fsSync.fchmodSync).not.toHaveBeenCalled()
+			expect(fsSync.openSync).toHaveBeenCalledWith(
+				expect.stringContaining("safeWriteText_"),
+				"w",
+				0o644,
+			)
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+		})
+
+		it("preserves an existing target's mode on the self-staged path", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o600))
+			vi.mocked(fsSync.openSync).mockReturnValue(2)
+
+			await safeWriteText(targetPath, "data", { platform: "linux" })
+
+			// The preservation rule still applies when a target exists: a 0o600 file must
+			// not become 0o644 through the atomic rename.
+			expect(fsSync.fchmodSync).toHaveBeenCalledWith(2, 0o600)
+		})
+
 		it("opens the temp before applying a read-only target's mode (0o444 does not block the open)", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
