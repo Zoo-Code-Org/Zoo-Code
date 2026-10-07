@@ -32,6 +32,9 @@ vi.mock("fs/promises", () => ({
 // Mock safeWriteText (used by saveDirectly)
 vi.mock("../../../services/file-safety/safeWriteText", () => ({
 	safeWriteText: vi.fn().mockResolvedValue(undefined),
+	// guardedWrite locks the canonical publish target, so the module mock has to
+	// expose the resolver too; identity keeps this spec's path handling unchanged.
+	resolvePublishTarget: vi.fn(async (p: string) => p),
 }))
 
 // Mock the S1 version token (used by the S4 guarded write); the real
