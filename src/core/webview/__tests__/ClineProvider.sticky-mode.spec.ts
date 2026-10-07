@@ -494,6 +494,360 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(provider.getValues().mode).toBe("architect")
 		})
 
+		it("restores the view's own mode pin when a task listener throws after the durable write", async () => {
+			// A listener that throws after the durable write is the failure under test.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+				// Only the TaskModeSwitched emit may throw: addClineToStack emits other
+				// events during setup, and a listener failure is what the rollback covers.
+				emit: vi.fn((event: string) => {
+					if (event === "taskModeSwitched") {
+						throw new Error("listener failed")
+					}
+				}),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
+				return Promise.resolve([])
+			})
+			await provider.addClineToStack(mockTask)
+			await provider.contextProxy.setValue("mode", "code")
+			// The view is pinned to architect while the shared mode is code. The forward
+			// write moves both to ask, so the rollback has two different values to put back.
+			await provider.saveViewState("mode", "architect")
+			expect(provider.getValue("mode")).toBe("code")
+			expect(provider["viewLocalState"].mode).toBe("architect")
+
+			await expect(provider["handleModeSwitchUnlocked"]("ask", mockTask)).rejects.toThrow("listener failed")
+
+			// The shared value returns to code...
+			expect(provider.getValue("mode")).toBe("code")
+			// ...and the pin returns to ITS OWN pre-switch value, not to the shared one.
+			// A rollback that replayed the shared value through setValue would leave this
+			// view pinned to code and a task started here would run in the wrong mode.
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(provider.getValues().mode).toBe("architect")
+			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]] ?? {}
+			// Either no entry was ever written for this view or the entry has no mode key;
+			// what must not happen is a persisted pin holding the restored shared mode.
+			expect(persisted.mode).toBe("architect")
+			// The task-history compensation is still the pre-switch mode.
+			expect(updateTaskHistorySpy).toHaveBeenCalled()
+			expect((updateTaskHistorySpy.mock.calls.at(-1)?.[0] as HistoryItem).mode).toBe("code")
+		})
+
+		it("leaves no mode pin behind when a view without a pin fails the same way", async () => {
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+				// Only the TaskModeSwitched emit may throw: addClineToStack emits other
+				// events during setup, and a listener failure is what the rollback covers.
+				emit: vi.fn((event: string) => {
+					if (event === "taskModeSwitched") {
+						throw new Error("listener failed")
+					}
+				}),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
+				return Promise.resolve([])
+			})
+			await provider.addClineToStack(mockTask)
+			await provider.contextProxy.setValue("mode", "code")
+			// No saveViewState: this view has no pin, so the forward write creates one.
+			expect(provider["viewLocalState"].mode).toBeUndefined()
+
+			await expect(provider["handleModeSwitchUnlocked"]("ask", mockTask)).rejects.toThrow("listener failed")
+
+			expect(provider.getValue("mode")).toBe("code")
+			// The pin the failed switch created must be cleared again rather than left
+			// holding the restored shared mode.
+			expect(provider["viewLocalState"].mode).toBeUndefined()
+			expect(provider.getValues().mode).toBe("code")
+			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]] ?? {}
+			// Either no entry was written for this view or the entry carries no mode key; what
+			// must not happen is a persisted pin holding the restored shared mode.
+			expect(persisted.mode).toBeUndefined()
+		})
+
+		it("bails out before any task write when the mutation signal is already aborted", async () => {
+			// A minimal typed double keeps the test focused on the mode-switch contract.
+			// The literal is asserted as Partial<Task> so its private members (_taskMode,
+			// saveClineMessages) stay out of the Object.assign intersection type, which
+			// would otherwise collapse to never.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: undefined as string | undefined,
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
+				return Promise.resolve([])
+			})
+			await provider.addClineToStack(mockTask)
+
+			const abortedController = new AbortController()
+			abortedController.abort()
+			await provider["handleModeSwitchUnlocked"]("architect", mockTask, abortedController.signal)
+
+			expect(mockTask.emit).not.toHaveBeenCalledWith("taskModeSwitched", mockTask.taskId, "architect")
+			expect(updateTaskHistorySpy).not.toHaveBeenCalled()
+			expect(mockTask["_taskMode"]).toBeUndefined()
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", "architect")
+		})
+
+		it("rolls back the landed history write and leaves no partial mode state when the signal aborts in flight", async () => {
+			// A minimal typed double keeps the test focused on the mode-switch contract.
+			// The literal is asserted as Partial<Task> so its private members (_taskMode,
+			// saveClineMessages) stay out of the Object.assign intersection type, which
+			// would otherwise collapse to never.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+
+			// The history write settles only after the abort lands: the first call is
+			// controlled, the rollback call resolves immediately.
+			let releaseUpdate!: (value: HistoryItem[]) => void
+			const updateTaskHistorySpy = vi
+				.spyOn(provider, "updateTaskHistory")
+				.mockImplementationOnce(
+					() =>
+						new Promise<HistoryItem[]>((resolve) => {
+							releaseUpdate = resolve
+						}),
+				)
+				.mockResolvedValueOnce([])
+			await provider.addClineToStack(mockTask)
+
+			const controller = new AbortController()
+			const switchPromise = provider["handleModeSwitchUnlocked"]("architect", mockTask, controller.signal)
+
+			await vi.waitFor(() => {
+				expect(updateTaskHistorySpy).toHaveBeenCalledTimes(1)
+			})
+			controller.abort()
+			releaseUpdate([])
+			await switchPromise
+
+			// The persisted new mode is rolled back to the pre-switch item.
+			expect(updateTaskHistorySpy).toHaveBeenCalledTimes(2)
+			expect(updateTaskHistorySpy).toHaveBeenNthCalledWith(
+				1,
+				expect.objectContaining({ id: "test-task-id", mode: "architect" }),
+			)
+			expect(updateTaskHistorySpy).toHaveBeenNthCalledWith(2, historyItem)
+			// No partial mode state: the task keeps its previous mode, nothing was
+			// emitted, and the durable provider mode write never happened.
+			expect(mockTask["_taskMode"]).toBe("code")
+			expect(mockTask.emit).not.toHaveBeenCalledWith("taskModeSwitched", mockTask.taskId, "architect")
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", "architect")
+		})
+
+		it("keeps the cancellation result when the abort rollback write itself fails", async () => {
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+
+			// The first write settles after the abort lands; the rollback write rejects:
+			// the failure is logged with its own message and the cancelled switch still
+			// resolves (it must not surface as the switch's persistence error).
+			let releaseUpdate!: (value: HistoryItem[]) => void
+			const updateTaskHistorySpy = vi
+				.spyOn(provider, "updateTaskHistory")
+				.mockImplementationOnce(
+					() =>
+						new Promise<HistoryItem[]>((resolve) => {
+							releaseUpdate = resolve
+						}),
+				)
+				.mockRejectedValueOnce(new Error("rollback write failed"))
+			await provider.addClineToStack(mockTask)
+
+			const controller = new AbortController()
+			const switchPromise = provider["handleModeSwitchUnlocked"]("architect", mockTask, controller.signal)
+
+			await vi.waitFor(() => {
+				expect(updateTaskHistorySpy).toHaveBeenCalledTimes(1)
+			})
+			controller.abort()
+			releaseUpdate([])
+			await expect(switchPromise).resolves.toBeUndefined()
+
+			expect(updateTaskHistorySpy).toHaveBeenCalledTimes(2)
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to roll back mode switch"),
+			)
+		})
+
+		it("preserves fields persisted during the pending window when rolling back the mode", async () => {
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+
+			const preSwitchItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			// While the history write is in flight the running task persists other fields
+			// of the same item; the store now returns that updated item.
+			const updatedItem: HistoryItem = {
+				...preSwitchItem,
+				mode: "architect",
+				tokensIn: 42,
+				totalCost: 0.5,
+			}
+			const storeGet = vi
+				.spyOn(provider.taskHistoryStore, "get")
+				.mockReturnValueOnce(preSwitchItem)
+				.mockReturnValue(updatedItem)
+
+			let releaseUpdate!: (value: HistoryItem[]) => void
+			const updateTaskHistorySpy = vi
+				.spyOn(provider, "updateTaskHistory")
+				.mockImplementationOnce(
+					() =>
+						new Promise<HistoryItem[]>((resolve) => {
+							releaseUpdate = resolve
+						}),
+				)
+				.mockResolvedValueOnce([])
+			await provider.addClineToStack(mockTask)
+
+			const controller = new AbortController()
+			const switchPromise = provider["handleModeSwitchUnlocked"]("architect", mockTask, controller.signal)
+
+			await vi.waitFor(() => {
+				expect(updateTaskHistorySpy).toHaveBeenCalledTimes(1)
+			})
+			controller.abort()
+			releaseUpdate([])
+			await expect(switchPromise).resolves.toBeUndefined()
+
+			// The rollback restores only the mode: the fields persisted during the
+			// pending window (tokensIn, totalCost) survive the rollback write.
+			expect(updateTaskHistorySpy).toHaveBeenCalledTimes(2)
+			expect(storeGet).toHaveBeenCalledTimes(2)
+			expect(updateTaskHistorySpy).toHaveBeenNthCalledWith(
+				2,
+				expect.objectContaining({ id: "test-task-id", mode: "code", tokensIn: 42, totalCost: 0.5 }),
+			)
+		})
+
 		it("proceeds normally when no cancellation state exists", async () => {
 			// A minimal typed double keeps the test focused on the mode-switch contract.
 			// The literal is asserted as Partial<Task> so its private members (_taskMode,
