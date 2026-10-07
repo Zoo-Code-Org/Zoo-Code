@@ -250,7 +250,10 @@ export async function safeWriteText(
 				supplied,
 			)
 		}
-		const stagingStat = await fs.lstat(supplied)
+		// BigInt stats: on NTFS/ReFS the file identity can exceed Number.MAX_SAFE_INTEGER, and
+		// a rounded number makes two different files look identical (rejecting a valid staging
+		// file) or hides a real alias.
+		const stagingStat = await fs.lstat(supplied, { bigint: true })
 		if (stagingStat.isSymbolicLink() || !stagingStat.isFile()) {
 			throw new StagingPathError(
 				`Staging file must be a regular file, not ${stagingStat.isSymbolicLink() ? "a symlink" : "another file type"}`,
@@ -265,7 +268,7 @@ export async function safeWriteText(
 		// identity comparison could not be made, and treating that as "no target" would let a
 		// staging alias reach the commit and let cleanup delete the file it was meant to
 		// protect.
-		const targetStat = await fs.lstat(targetPath).catch((error: unknown) => {
+		const targetStat = await fs.lstat(targetPath, { bigint: true }).catch((error: unknown) => {
 			if (errorCode(error) !== "ENOENT") {
 				throw new StagingPathError("Staging file could not be compared with the target", supplied)
 			}
@@ -273,8 +276,8 @@ export async function safeWriteText(
 		})
 		if (
 			targetStat &&
-			typeof stagingStat.ino === "number" &&
-			typeof targetStat.ino === "number" &&
+			typeof stagingStat.ino === "bigint" &&
+			typeof targetStat.ino === "bigint" &&
 			stagingStat.ino === targetStat.ino &&
 			stagingStat.dev === targetStat.dev
 		) {
