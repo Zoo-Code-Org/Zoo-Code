@@ -25,6 +25,12 @@ vi.mock("fs/promises", () => ({
 	rmdir: vi.fn().mockResolvedValue(undefined),
 	access: vi.fn().mockResolvedValue(undefined),
 	rm: vi.fn().mockResolvedValue(undefined),
+	// The delete paths compute the lock key a writer would use, which walks the publish
+	// target through lstat/readlink/realpath. Without these the walk dies on a missing
+	// export and the deletion is reported as failed.
+	lstat: vi.fn().mockRejectedValue(Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" })),
+	readlink: vi.fn().mockRejectedValue(Object.assign(new Error("ENOENT: not a symlink"), { code: "ENOENT" })),
+	realpath: vi.fn(async (p: string) => p),
 }))
 
 vi.mock("axios", () => ({
