@@ -2117,11 +2117,21 @@ export class ClineProvider
 				// new mode while the provider state is still on the old one. Until then this
 				// is the compensation for the history write that just landed.
 				undoHistoryWrite = async () => {
+					if (!taskHistoryItem) {
+						// No history item existed before the switch, so no history write landed:
+						// there is nothing to undo.
+						return
+					}
+					const previousMode = taskHistoryItem.mode
 					// Restore only the field this switch changed: re-read the item so fields
 					// the running task persisted during the pending window (tokens, cost,
 					// status, apiConfigName) survive the rollback.
 					const latest = this.getTaskHistoryItem(task.taskId) ?? taskHistoryItem
-					await this.updateTaskHistory({ ...latest, mode: taskHistoryItem.mode })
+					if (!latest) {
+						// The item was removed while the write was in flight; nothing to restore.
+						return
+					}
+					await this.updateTaskHistory({ ...latest, mode: previousMode })
 				}
 			} catch (error) {
 				// If persistence fails, log the error but don't update the in-memory state.
