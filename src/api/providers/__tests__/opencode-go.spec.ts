@@ -738,6 +738,39 @@ describe("OpencodeGoHandler", () => {
 			expect(controller.signal.aborted).toBe(false)
 		})
 
+		it("detaches the bridged abort listener when request preparation throws", async () => {
+			// The OpenAI-format body is built after the abort bridge is registered, and the
+			// conversions can throw synchronously (a malformed tool payload, for example).
+			// A bridge left on a task-scoped signal accumulates one listener per failed
+			// request, so the failed preparation must detach it too.
+			class FailingPreparationHandler extends OpencodeGoHandler {
+				protected override convertToolsForOpenAI(_tools: unknown): never {
+					throw new Error("malformed tool payload")
+				}
+			}
+
+			const handler = new FailingPreparationHandler(mockOptions)
+			const controller = new AbortController()
+			const removeListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+			const addEventListenerSpy = vi.spyOn(controller.signal, "addEventListener")
+
+			const stream = handler.createMessage(
+				"sys",
+				[{ role: "user", content: "hi" }],
+				makeCreateMessageMetadata({
+					abortSignal: controller.signal,
+					tools: [{ type: "function", function: { name: "probe" } }],
+				}),
+			)
+
+			await expect(collectStream(stream)).rejects.toThrow("malformed tool payload")
+
+			const abortAddCalls = addEventListenerSpy.mock.calls.filter(([event]) => event === "abort")
+			const addedListener = abortAddCalls[abortAddCalls.length - 1]?.[1]
+			expect(typeof addedListener).toBe("function")
+			expect(removeListenerSpy).toHaveBeenCalledWith("abort", addedListener)
+		})
+
 		it("detaches the bridged abort listener from the Anthropic-format path", async () => {
 			// The Anthropic branch (streamAnthropicMessage) has its own finally
 			// block that removes the bridged listener; assert explicit removal

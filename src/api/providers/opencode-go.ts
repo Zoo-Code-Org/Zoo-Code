@@ -281,32 +281,42 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			return
 		}
 
-		// preserveReasoning models (GLM/DeepSeek/MiMo/MiniMax/Qwen) require
-		// reasoning_content to be carried across tool-call continuations.
-		const preserveReasoning = info.preserveReasoning === true
-		const convertedMessages = preserveReasoning
-			? convertToR1Format(messages, { mergeToolResultText: true })
-			: convertToOpenAiMessages(messages)
+		// The request body is built inside a span that detaches the abort bridge. The
+		// OpenAI-format conversions can throw synchronously (a malformed tool payload,
+		// for example), and a bridge left on a task-scoped signal accumulates one listener
+		// per failed request.
+		let body: OpenAI.Chat.ChatCompletionCreateParams
+		try {
+			// preserveReasoning models (GLM/DeepSeek/MiMo/MiniMax/Qwen) require
+			// reasoning_content to be carried across tool-call continuations.
+			const preserveReasoning = info.preserveReasoning === true
+			const convertedMessages = preserveReasoning
+				? convertToR1Format(messages, { mergeToolResultText: true })
+				: convertToOpenAiMessages(messages)
 
-		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-			{ role: "system", content: systemPrompt },
-			...convertedMessages,
-		]
+			const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+				{ role: "system", content: systemPrompt },
+				...convertedMessages,
+			]
 
-		const body: OpenAI.Chat.ChatCompletionCreateParams = {
-			model: modelId,
-			messages: openAiMessages,
-			temperature: this.supportsTemperature(modelId) ? temperature : undefined,
-			max_completion_tokens:
-				this.options.includeMaxTokens === true ? this.options.modelMaxTokens || maxTokens : maxTokens,
-			stream: true,
-			stream_options: { include_usage: true },
-			tools: this.convertToolsForOpenAI(metadata?.tools),
-			tool_choice: metadata?.tool_choice,
-			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
-			...(reasoningEffort && {
-				reasoning_effort: reasoningEffort as OpenAI.Chat.ChatCompletionCreateParams["reasoning_effort"],
-			}),
+			body = {
+				model: modelId,
+				messages: openAiMessages,
+				temperature: this.supportsTemperature(modelId) ? temperature : undefined,
+				max_completion_tokens:
+					this.options.includeMaxTokens === true ? this.options.modelMaxTokens || maxTokens : maxTokens,
+				stream: true,
+				stream_options: { include_usage: true },
+				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tool_choice: metadata?.tool_choice,
+				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+				...(reasoningEffort && {
+					reasoning_effort: reasoningEffort as OpenAI.Chat.ChatCompletionCreateParams["reasoning_effort"],
+				}),
+			}
+		} catch (error) {
+			externalAbortSignal?.removeEventListener("abort", abortListener)
+			throw error
 		}
 
 		try {
