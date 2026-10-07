@@ -3,7 +3,7 @@ import { Writable } from "stream"
 import * as path from "path"
 import * as os from "os"
 
-import { safeWriteJson } from "../safeWriteJson"
+import { ConfinedPathEscapeError, safeWriteJson } from "../safeWriteJson"
 import * as lockfile from "proper-lockfile"
 
 // Capture actual implementations before the vi.mock factory runs,
@@ -665,6 +665,93 @@ describe("safeWriteJson", () => {
 	// via tempPath, so safeWriteText must apply the existing target's mode to
 	// the staged temp before the atomic rename — otherwise a 0o600 target is
 	// published as 0o644. POSIX-only assertion (Windows ignores POSIX modes).
+	test("rejects a confined write whose target is outside the confined directory", async () => {
+		const scope = path.join(tempDir, "project")
+		await fs.mkdir(scope)
+		const outside = path.join(tempDir, "elsewhere.json")
+
+		// No symlink needed: the check runs on the resolved publish target, so an
+		// out-of-scope path is rejected on every platform, and it is rejected before the
+		// lock is taken and before anything is staged.
+		await expect(safeWriteJson(outside, { mcpServers: {} }, { confineTo: scope })).rejects.toThrow(
+			ConfinedPathEscapeError,
+		)
+
+		const left = await fs.readdir(tempDir)
+		expect(left).not.toContain("elsewhere.json")
+		expect(left.filter((entry) => entry.includes(".new_") || entry.endsWith(".lock"))).toEqual([])
+	})
+
+	test.skipIf(process.platform === "win32")(
+		"rejects a confined write whose symlink resolves outside the confined directory",
+		async () => {
+			const projectDir = path.join(tempDir, "project")
+			await fs.mkdir(projectDir)
+			const outside = path.join(tempDir, "outside.json")
+			await fsSyncActual.promises.writeFile(outside, JSON.stringify({ secret: "original" }), "utf8")
+			// A repository that plants its project settings file as a link to somewhere else
+			// must not receive the settings write at the linked path. The caller picked
+			// projectDir/mcp.json from the workspace, so it declares that scope.
+			const projectConfig = path.join(projectDir, "mcp.json")
+			await fs.symlink(outside, projectConfig)
+
+			await expect(
+				safeWriteJson(projectConfig, { mcpServers: {} }, { confineTo: projectDir }),
+			).rejects.toThrow(ConfinedPathEscapeError)
+
+			// The linked file is untouched and nothing was staged beside it.
+			expect(JSON.parse(await fsSyncActual.promises.readFile(outside, "utf8"))).toEqual({ secret: "original" })
+			const entries = await fs.readdir(tempDir)
+			expect(entries).toContain("outside.json")
+			expect(
+				entries.filter((entry) => entry.includes(".new_") || entry.includes("safeWriteText") || entry.endsWith(".lock")),
+			).toEqual([])
+		},
+	)
+
+	test.skipIf(process.platform === "win32")(
+		"confines a write whose symlink referent stays inside the confined directory",
+		async () => {
+			const projectDir = path.join(tempDir, "project-in")
+			await fs.mkdir(projectDir)
+			const referent = path.join(projectDir, "real-mcp.json")
+			await fsSyncActual.promises.writeFile(referent, JSON.stringify({ mcpServers: {} }), "utf8")
+			const alias = path.join(projectDir, "mcp.json")
+			await fs.symlink(referent, alias)
+
+			// Confining is about the scope, not about forbidding links: a link that stays
+			// inside the project still publishes to its referent.
+			await safeWriteJson(alias, { mcpServers: { local: { url: "http://localhost" } } }, { confineTo: projectDir })
+
+			expect(JSON.parse(await fsSyncActual.promises.readFile(referent, "utf8"))).toEqual({
+				mcpServers: { local: { url: "http://localhost" } },
+			})
+		},
+	)
+
+	test.skipIf(process.platform === "win32")(
+		"confines a scope path that itself runs through a symlink and does not exist yet",
+		async () => {
+			const real = path.join(tempDir, "real-project")
+			await fs.mkdir(real)
+			const alias = path.join(tempDir, "alias-project")
+			await fs.symlink(real, alias)
+			// The scope is declared through the alias, and the directory it names does not
+			// exist yet. Resolving it lexically would compare an unresolved scope against a
+			// fully resolved target and reject a write that is in fact inside the project -
+			// the macOS /var -> /private/var shape. The nearest existing ancestor is resolved
+			// and the remainder re-joined instead.
+			const nested = path.join(alias, "nested")
+			const target = path.join(nested, "mcp.json")
+
+			await safeWriteJson(target, { mcpServers: {} }, { confineTo: nested })
+
+			expect(
+				JSON.parse(await fsSyncActual.promises.readFile(path.join(real, "nested", "mcp.json"), "utf8")),
+			).toEqual({ mcpServers: {} })
+		},
+	)
+
 	test.skipIf(process.platform === "win32")(
 		"preserves a restrictive 0o600 target mode through the atomic publish",
 		async () => {
