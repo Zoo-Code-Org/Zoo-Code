@@ -20,6 +20,8 @@ function makeProvider(deleteMany: ReturnType<typeof vi.fn>) {
 		getCurrentTask: vi.fn().mockReturnValue(undefined),
 		removeClineFromStack: vi.fn().mockResolvedValue(undefined),
 		postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		// removeTaskArtifacts is private on the class; bracket notation is how this suite stands in for
+		// it without widening the class surface for tests.
 		removeTaskArtifacts: vi.fn().mockResolvedValue(undefined),
 		deleteTaskFromState: vi.fn().mockResolvedValue(undefined),
 		contextProxy: { globalStorageUri: { fsPath: "/tmp/global" } },
@@ -40,8 +42,8 @@ describe("ClineProvider.deleteTaskWithId - partial batch failures", () => {
 		// and its artifacts must be removed even though the batch as a whole failed.
 		expect((provider as unknown as { recentTasksCache?: string[] }).recentTasksCache).toBeUndefined()
 		expect(provider.postStateToWebview).toHaveBeenCalledTimes(1)
-		expect(provider.removeTaskArtifacts).toHaveBeenCalledTimes(1)
-		expect(provider.removeTaskArtifacts).toHaveBeenCalledWith(["task-1"])
+		expect(provider["removeTaskArtifacts"]).toHaveBeenCalledTimes(1)
+		expect(provider["removeTaskArtifacts"]).toHaveBeenCalledWith(["task-1"])
 	})
 
 	it("removes every artifact and posts state once when the batch succeeds", async () => {
@@ -50,7 +52,7 @@ describe("ClineProvider.deleteTaskWithId - partial batch failures", () => {
 
 		await ClineProvider.prototype.deleteTaskWithId.call(provider, "task-1")
 
-		expect(provider.removeTaskArtifacts).toHaveBeenCalledWith(["task-1", "task-2"])
+		expect(provider["removeTaskArtifacts"]).toHaveBeenCalledWith(["task-1", "task-2"])
 		expect(provider.postStateToWebview).toHaveBeenCalledTimes(1)
 	})
 
@@ -62,6 +64,6 @@ describe("ClineProvider.deleteTaskWithId - partial batch failures", () => {
 		await expect(ClineProvider.prototype.deleteTaskWithId.call(provider, "task-1")).rejects.toBe(allFailed)
 
 		// Nothing was removed, so nothing may be cleaned up as if it had been.
-		expect(provider.removeTaskArtifacts).toHaveBeenCalledWith([])
+		expect(provider["removeTaskArtifacts"]).toHaveBeenCalledWith([])
 	})
 })
