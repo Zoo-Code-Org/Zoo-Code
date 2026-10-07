@@ -431,6 +431,30 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
 		})
 
+		it("a failed backup flush is reported and leaves no partial backup behind", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// The copy lands, but the fsync of the copy fails: the retained content is not
+			// known to be durable, so the write must not proceed on a half-written backup.
+			// The staged temp is fsynced earlier with a different handle, so target the
+			// backup's fd specifically.
+			vi.mocked(fsSync.openSync).mockImplementation((p: unknown) => (String(p).includes("safeWriteText.bak_") ? 7 : 1))
+			vi.mocked(fsSync.fsyncSync).mockImplementation((fd: unknown) => {
+				if (fd === 7) {
+					throw new Error("EIO")
+				}
+			})
+
+			await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).rejects.toThrow("EIO")
+
+			// Nothing was published, and the incomplete copy is removed rather than left
+			// next to the target looking like a usable backup.
+			expect(fs.rename).not.toHaveBeenCalled()
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		})
+
 		it("backup:true when target does not exist: no backup created, just commit", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
