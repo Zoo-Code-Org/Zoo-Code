@@ -30,6 +30,18 @@ export interface SafeWriteJsonOptions {
 	 * cannot be parsed.
 	 */
 	merge?: (existing: unknown, incoming: unknown) => unknown
+
+	/**
+	 * Refuse to publish through a symlink at the target path.
+	 *
+	 * By default a symlink target is resolved and the write lands on its referent,
+	 * which is what keeps every alias of one file behind a single advisory lock.
+	 * That is the wrong default for a payload whose destination the user chose -
+	 * settings exports carry API credentials - where following a link they never
+	 * pointed at would write secrets into a file they did not pick. When this is
+	 * set, a symlink at the final path component is an error instead.
+	 */
+	refuseSymlinkTarget?: boolean
 }
 
 /**
@@ -60,6 +72,29 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	} catch (dirError: any) {
 		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
 		throw dirError
+	}
+
+	// A credential-bearing payload must not be redirected through a link the user
+	// never chose: check the final path component before anything is resolved,
+	// staged, or locked.
+	if (options?.refuseSymlinkTarget) {
+		let targetStat: fsSync.Stats | undefined
+		try {
+			targetStat = await fs.lstat(absoluteFilePath)
+		} catch (error: unknown) {
+			const code = error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined
+			// Only a missing target means there is no link to refuse. Anything else -
+			// a permission error on the parent directory, for example - is not evidence
+			// that the destination is safe to publish into.
+			if (code !== "ENOENT") {
+				throw error
+			}
+		}
+		if (targetStat?.isSymbolicLink()) {
+			throw new Error(
+				`safeWriteJson: refusing to write through the symlink at ${absoluteFilePath}; the payload would land on its referent instead of the destination the user chose.`,
+			)
+		}
 	}
 
 	// Resolve the publish target BEFORE acquiring the lock: proper-lockfile keys

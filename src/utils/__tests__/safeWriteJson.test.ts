@@ -679,4 +679,35 @@ describe("safeWriteJson", () => {
 			expect(await readFileContent(currentTestFilePath)).toEqual({ after: true })
 		},
 	)
+	// A settings export carries API credentials, so it must not be redirected through
+	// a link the user never chose. (Real symlinks are unavailable in this CI lane, so
+	// the link is simulated by mocking fs.lstat.)
+	test("refuses to publish through a symlink when refuseSymlinkTarget is set", async () => {
+		const referentPath = path.join(tempDir, "refuse-referent.json")
+		const linkPath = path.join(tempDir, "refuse-link.json")
+		await fsPromisesActuals.writeFile!(referentPath, JSON.stringify({ seed: "untouched" }))
+
+		vi.spyOn(fs, "lstat").mockResolvedValue({
+			isSymbolicLink: () => true,
+			// The guard reads only isSymbolicLink(), and a real Stats cannot be
+			// produced for a simulated link in this CI lane, so the double is
+			// asserted through unknown rather than stubbing every Stats field.
+		} as unknown as fsSyncActual.Stats)
+
+		await expect(
+			safeWriteJson(linkPath, { leaked: true }, { refuseSymlinkTarget: true }),
+		).rejects.toThrow(/refusing to write through the symlink/)
+
+		vi.restoreAllMocks()
+		// Nothing was resolved, staged, locked, or committed: the referent still holds
+		// the content it had before the refused write.
+		expect(await readFileContent(referentPath)).toEqual({ seed: "untouched" })
+	})
+
+	test("still writes a regular file when refuseSymlinkTarget is set", async () => {
+		const target = path.join(tempDir, "refuse-regular.json")
+		await safeWriteJson(target, { written: true }, { refuseSymlinkTarget: true })
+		expect(await readFileContent(target)).toEqual({ written: true })
+	})
+
 })
