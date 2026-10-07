@@ -18,7 +18,7 @@
 import * as fs from "fs/promises"
 import * as path from "path"
 
-import { safeWriteText } from "../../services/file-safety/safeWriteText"
+import { resolvePublishTarget, safeWriteText } from "../../services/file-safety/safeWriteText"
 import { computeVersionToken } from "../../utils/versionToken"
 import { acquireFileLock } from "../../utils/fileLock"
 import type { Task } from "../task/Task"
@@ -102,7 +102,13 @@ function errorCode(error: unknown): string | undefined {
  * a write that looked valid on the check can overwrite a newer file.
  */
 async function withWriteLock<T>(absolutePath: string, run: () => Promise<T>): Promise<T> {
-	const release = await acquireFileLock(absolutePath)
+	// Lock the canonical publish target, not the caller's spelling of the path.
+	// safeWriteJson resolves its publish target before locking, and acquireFileLock
+	// runs with realpath:false, so an alias and its referent would otherwise take two
+	// different lock files: a guarded write through the alias would not serialize with
+	// a safeWriteJson publish through the referent and could overwrite it.
+	const lockPath = await resolvePublishTarget(absolutePath)
+	const release = await acquireFileLock(lockPath)
 	try {
 		return await run()
 	} finally {

@@ -14,7 +14,7 @@ import * as path from "path"
 import { describe, expect, it, beforeEach, vi } from "vitest"
 
 import { createIfAbsent, guardedWrite, replaceIfVersion, resetChain } from "../guardedWrite"
-import { safeWriteText } from "../../../services/file-safety/safeWriteText"
+import { resolvePublishTarget, safeWriteText } from "../../../services/file-safety/safeWriteText"
 import { computeVersionToken } from "../../../utils/versionToken"
 import { acquireFileLock } from "../../../utils/fileLock"
 import { ObservationRegistry } from "../../task/observationRegistry"
@@ -37,11 +37,13 @@ vi.mock("../../../utils/fileLock", () => ({
 
 vi.mock("../../../services/file-safety/safeWriteText", () => ({
 	safeWriteText: vi.fn(),
+	resolvePublishTarget: vi.fn(async (p: string) => p),
 }))
 
 const mockedFsAccess = vi.mocked(fs.access)
 const mockedComputeVersionToken = vi.mocked(computeVersionToken)
 const mockedSafeWriteText = vi.mocked(safeWriteText)
+const mockedResolvePublishTarget = vi.mocked(resolvePublishTarget)
 let releaseMock: () => Promise<void> = async () => {}
 const mockedAcquireFileLock = vi.mocked(acquireFileLock)
 
@@ -519,6 +521,25 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			// and the token handed back is recomputed before the lock is released.
 			expect(order).toEqual(["acquire", "check", "publish", "check", "release"])
 			expect(published).toBe("v1")
+		})
+
+		it("locks the canonical publish target so a safeWriteJson writer serializes with it", async () => {
+			// safeWriteJson resolves its publish target before locking, and acquireFileLock runs
+			// with realpath:false. If the guarded write locked the caller's spelling instead,
+			// the alias and the referent would take two different lock files and a guarded
+			// write could race past a safeWriteJson publish of the same file.
+			const alias = abs("alias.txt")
+			const referent = abs("target.txt")
+			mockedResolvePublishTarget.mockResolvedValueOnce(referent)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+
+			await replaceIfVersion(alias, "v1", "new")
+
+			expect(mockedAcquireFileLock).toHaveBeenCalledWith(referent)
+			expect(mockedAcquireFileLock).not.toHaveBeenCalledWith(alias)
+			// The publish still goes through the path the caller (and safeWriteText's own
+			// resolution) owns, so the observation key and symlink semantics are unchanged.
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(alias, "new")
 		})
 
 		it("releases the lock when the guard rejects as stale", async () => {
