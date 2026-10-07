@@ -261,7 +261,15 @@ export async function safeWriteText(
 		// while it still holds the only copy of the content, so a failed write would
 		// delete the file it was meant to protect. Compare identities, not spellings:
 		// an alias of the target is the same hazard.
-		const targetStat = await fs.lstat(targetPath).catch(() => null)
+		// Only a missing target may be skipped. An EACCES/ELOOP/ENOTDIR here means the identity
+		// comparison could not be made; treating that as "no target" would let a staging alias
+		// reach the commit rename and let cleanup delete the file the guard protects.
+		const targetStat = await fs.lstat(targetPath).catch((error: unknown) => {
+			if (errorCode(error) !== "ENOENT") {
+				throw new StagingPathError("Staging file could not be compared with the target", supplied)
+			}
+			return null
+		})
 		if (
 			targetStat &&
 			typeof stagingStat.ino === "number" &&
