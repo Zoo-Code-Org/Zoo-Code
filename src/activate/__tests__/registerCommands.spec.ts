@@ -994,15 +994,15 @@ describe("openClineInNewTab", () => {
 	it("serializes concurrent opens so overlapping calls create one panel and share one provider", async () => {
 		const [first, second] = await Promise.all([
 			openClineInNewTab({
-			context: mockContext,
-			outputChannel: mockOutputChannel,
-			webviewFocusTracker: new WebviewFocusTracker(),
-		}),
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			}),
 			openClineInNewTab({
-			context: mockContext,
-			outputChannel: mockOutputChannel,
-			webviewFocusTracker: new WebviewFocusTracker(),
-		}),
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			}),
 		])
 
 		// Overlapping "Open in editor" calls must share the in-flight

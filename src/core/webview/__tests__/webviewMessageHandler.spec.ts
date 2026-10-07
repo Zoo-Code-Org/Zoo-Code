@@ -379,6 +379,10 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 	})
 
 	it("logs and continues launch when view-state registration fails", async () => {
+		// Earlier tests in this suite already ran the full webviewDidLaunch flow on the
+		// shared module-level double, so isViewLaunched is already true. Reset it, or the
+		// assertion below would pass even if the failed registration aborted launch.
+		mockClineProvider.isViewLaunched = false
 		double.setViewStateId = vi.fn().mockRejectedValue(new Error("storage down"))
 		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
 		await new Promise((resolve) => setImmediate(resolve))
