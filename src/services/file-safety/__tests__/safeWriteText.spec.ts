@@ -1122,7 +1122,30 @@ describe("caller-supplied staging path", () => {
 		expect(fs.rename).not.toHaveBeenCalled()
 		expect(fs.unlink).not.toHaveBeenCalled()
 	})
-})
+
+
+	it("rejects when the target identity cannot be compared for a reason other than a missing target", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		// A hard-linked staging file shares the target's inode, so the identity comparison is the only thing
+		// between this write and a rename onto the very file the guard protects. An EACCES from the target
+		// lstat must not be mistaken for "there is no target".
+		const stagingStats = _fileStats(false)
+		stagingStats.ino = 42
+		stagingStats.dev = 7
+		vi.mocked(fs.lstat).mockImplementation(async (p) => {
+			if (String(p) === targetPath) {
+				throw Object.assign(new Error("EACCES"), { code: "EACCES" })
+			}
+			return stagingStats
+		})
+
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: "/tmp/test-dir/hardlink.txt", platform: "linux" }),
+		).rejects.toThrow("Staging file could not be compared with the target")
+		expect(fsSync.openSync).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+	})})
 
 describe("cleanup when a backed-up write fails before commit", () => {
 	beforeEach(() => mockDefaults())
