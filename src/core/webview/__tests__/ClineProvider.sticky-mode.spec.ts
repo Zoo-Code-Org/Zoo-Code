@@ -1314,13 +1314,75 @@ describe("ClineProvider - Sticky Mode", () => {
 
 			// Since the error is thrown before updating the task's _taskMode,
 			// neither the task mode nor global state are updated
+			// The switch is a compensating transaction: the durable write landed and was then
+			// undone, so the last "mode" write puts the previous value back and the task
+			// never moved.
 			const modeCalls = vi.mocked(mockContext.globalState.update).mock.calls.filter((call) => call[0] === "mode")
-			expect(modeCalls.length).toBe(0)
-
-			// The task's mode should NOT have been updated since the error occurred first
+			expect(modeCalls.length).toBeGreaterThanOrEqual(2)
+			expect(modeCalls[0][1]).toBe("architect")
+			expect(modeCalls[modeCalls.length - 1][1]).not.toBe("architect")
 			expect(mockTask._taskMode).toBe("code")
 
 			consoleErrorSpy.mockRestore()
+		})
+
+		it("rolls the task-history write back when the durable mode write fails", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// A minimal typed double (no `as any`): the private _taskMode is read through
+			// bracket notation below.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			await provider.addClineToStack(mockTask)
+			await seedTaskHistory([
+				{
+					id: mockTask.taskId,
+					ts: Date.now(),
+					task: "Test task",
+					mode: "code",
+					number: 1,
+					tokensIn: 0,
+					tokensOut: 0,
+					cacheWrites: 0,
+					cacheReads: 0,
+					totalCost: 0,
+				},
+			])
+
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			// The durable (shared + per-view) mode write fails.
+			const setValueSpy = vi.spyOn(provider, "setValue").mockRejectedValueOnce(new Error("persist failed"))
+
+			await expect(provider.handleModeSwitch("architect")).rejects.toThrow("persist failed")
+
+			// The history write that had already landed is undone with the previous mode...
+			expect(setValueSpy).toHaveBeenCalledWith("mode", "architect")
+			expect(updateTaskHistorySpy).toHaveBeenCalledTimes(2)
+			expect(updateTaskHistorySpy).toHaveBeenNthCalledWith(
+				1,
+				expect.objectContaining({ id: "test-task-id", mode: "architect" }),
+			)
+			expect(updateTaskHistorySpy).toHaveBeenNthCalledWith(
+				2,
+				expect.objectContaining({ id: "test-task-id", mode: "code" }),
+			)
+			// ...and the task never observed the switch.
+			expect(mockTask["_taskMode"]).toBe("code")
+			expect(mockTask.emit).not.toHaveBeenCalledWith("taskModeSwitched", "test-task-id", "architect")
+
+			setValueSpy.mockRestore()
+			updateTaskHistorySpy.mockRestore()
 		})
 
 		it("should handle updateTaskHistory failures", async () => {

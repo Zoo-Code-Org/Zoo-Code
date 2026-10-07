@@ -2075,6 +2075,10 @@ export class ClineProvider
 			return
 		}
 
+		// Set once the task-history write has landed and cleared once the durable mode
+		// write settles, so the durable-write failure path can undo the task-side write.
+		let undoHistoryWrite: (() => Promise<void>) | null = null
+
 		if (task) {
 			TelemetryService.instance.captureModeSwitch(task.taskId, newMode)
 
@@ -2107,10 +2111,17 @@ export class ClineProvider
 					return
 				}
 
-				task.emit(RooCodeEventName.TaskModeSwitched, task.taskId, newMode)
-
-				// Only update the task's mode after successful persistence.
-				;(task as any)._taskMode = newMode
+				// TaskModeSwitched and the in-memory mode are applied only after the durable
+				// mode write below succeeds, so a failed switch cannot leave the task on the
+				// new mode while the provider state is still on the old one. Until then this
+				// is the compensation for the history write that just landed.
+				undoHistoryWrite = async () => {
+					// Restore only the field this switch changed: re-read the item so fields
+					// the running task persisted during the pending window (tokens, cost,
+					// status, apiConfigName) survive the rollback.
+					const latest = this.getTaskHistoryItem(task.taskId) ?? taskHistoryItem
+					await this.updateTaskHistory({ ...latest, mode: taskHistoryItem.mode })
+				}
 			} catch (error) {
 				// If persistence fails, log the error but don't update the in-memory state.
 				this.log(
@@ -2148,10 +2159,60 @@ export class ClineProvider
 					}`,
 				)
 			}
+			// The task-history write landed before the durable mode write, so undo it as
+			// well: leaving the history on the new mode while the shared/per-view mode is
+			// restored is exactly the inconsistency this switch must not produce.
+			if (undoHistoryWrite) {
+				try {
+					await undoHistoryWrite()
+				} catch (rollbackError) {
+					this.log(
+						`[handleModeSwitch] Failed to roll back task-history mode after persistence failure: ${
+							rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+						}`,
+					)
+				}
+			}
 			this.log(
 				`[handleModeSwitch] Failed to persist mode "${newMode}": ${error instanceof Error ? error.message : String(error)}`,
 			)
 			throw error
+		}
+
+		// Both durable writes succeeded: this is the point of no return for the task
+		// side. Emitting and updating _taskMode here (rather than before the durable
+		// write) keeps listeners and in-memory task state from observing a switch that
+		// the persisted provider state contradicts.
+		if (task) {
+			try {
+				task.emit(RooCodeEventName.TaskModeSwitched, task.taskId, newMode)
+				;(task as any)._taskMode = newMode
+			} catch (error) {
+				// A listener that threw (or the in-memory write failing) must not leave the
+				// durable mode on the new value while the task is still on the old one: undo
+				// the task-history write and the durable mode write, then surface the failure.
+				if (undoHistoryWrite) {
+					try {
+						await undoHistoryWrite()
+					} catch (rollbackError) {
+						this.log(
+							`[handleModeSwitch] Failed to roll back task-history mode after the emit failed: ${
+								rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+							}`,
+						)
+					}
+				}
+				try {
+					await this.setValue("mode", previousMode)
+				} catch (rollbackError) {
+					this.log(
+						`[handleModeSwitch] Failed to roll back shared mode after the emit failed: ${
+							rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+						}`,
+					)
+				}
+				throw error
+			}
 		}
 
 		this.emit(RooCodeEventName.ModeChanged, newMode)
