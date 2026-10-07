@@ -1129,6 +1129,15 @@ describe("caller-supplied staging path", () => {
 		).rejects.toThrow(StagingPathError)
 		expect(fsSync.openSync).not.toHaveBeenCalled()
 		expect(fs.rename).not.toHaveBeenCalled()
+		// The comparison is only sound when both stats are read as bigint: on NTFS/ReFS the file
+		// identifiers exceed Number.MAX_SAFE_INTEGER.
+		// Filter on the options, not the spelling: path.resolve prefixes a drive letter on Windows,
+		// so the two identity reads are the calls that asked for options at all.
+		const identityLookups = vi.mocked(fs.lstat).mock.calls.filter((c) => c[1] !== undefined)
+		expect(identityLookups.length).toBeGreaterThanOrEqual(2)
+		for (const c of identityLookups) {
+			expect(c[1]).toEqual({ bigint: true })
+		}
 		expect(fs.unlink).not.toHaveBeenCalled()
 	})
 
@@ -1152,6 +1161,13 @@ describe("caller-supplied staging path", () => {
 		).rejects.toThrow("Staging file could not be compared with the target")
 		expect(fsSync.openSync).not.toHaveBeenCalled()
 		expect(fs.rename).not.toHaveBeenCalled()
+		// Both identity reads must ask for bigint stats, or the comparison silently falls
+		// back to rounded numbers on NTFS/ReFS.
+		const identityLookups = vi.mocked(fs.lstat).mock.calls.filter((c) => c[1] !== undefined)
+		expect(identityLookups).toHaveLength(2)
+		for (const c of identityLookups) {
+			expect(c[1]).toEqual({ bigint: true })
+		}
 	})})
 
 describe("cleanup when a backed-up write fails before commit", () => {
