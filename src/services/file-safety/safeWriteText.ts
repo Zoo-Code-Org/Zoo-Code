@@ -376,14 +376,22 @@ export async function safeWriteText(
 					// writer can create a new target that a later rollback would destroy. A copy
 					// keeps the target present, so the step 4 rename is the only change to the
 					// canonical path. The copy is flushed so the retained content survives a crash.
-					await fs.copyFile(targetPath, backupPath)
-					// "r+" not "r": fsync on a read-only handle is EPERM on Windows, and the same
-					// flag the staged temp file uses above.
-					const backupFd = fsSync.openSync(backupPath, "r+")
 					try {
-						_fsyncFile(backupFd)
-					} finally {
-						fsSync.closeSync(backupFd)
+						await fs.copyFile(targetPath, backupPath)
+						// "r+" not "r": fsync on a read-only handle is EPERM on Windows, and the same
+						// flag the staged temp file uses above.
+						const backupFd = fsSync.openSync(backupPath, "r+")
+						try {
+							_fsyncFile(backupFd)
+						} finally {
+							fsSync.closeSync(backupFd)
+						}
+					} catch (backupError: unknown) {
+						// A partial backup must not outlive this attempt: it is not a complete copy
+						// of anything, and once the write fails nothing else removes it.
+						await fs.unlink(backupPath).catch(() => {})
+						backupPath = null
+						throw backupError
 					}
 					releaseBackupOnSuccess = true
 				} catch (err: unknown) {
