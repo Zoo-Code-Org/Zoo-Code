@@ -35,6 +35,14 @@ export const commandIds = [
 	"popoutButtonClicked",
 	"settingsButtonClicked",
 
+	// Editor-tab (popped-out) surface variants of the title-bar buttons. The
+	// shared ids above target the sidebar click origin, so the tab surface
+	// needs its own ids (see registerCommands.ts getTabProvider).
+	"plusButtonClickedInTab",
+	"settingsButtonClickedInTab",
+	"marketplaceButtonClickedInTab",
+	"historyButtonClickedInTab",
+
 	"openInNewTab",
 
 	"newTask",
