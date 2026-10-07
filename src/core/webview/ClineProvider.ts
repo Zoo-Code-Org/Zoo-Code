@@ -194,6 +194,44 @@ type GetStateOptions = {
 	includeTaskHistory?: boolean
 }
 
+/**
+ * Remove the artifacts that belong to deleted tasks: the shadow-checkpoint repository
+ * branch and the task directory. Both are best-effort per task, matching the
+ * pre-existing behaviour, so one stubborn task does not strand the others.
+ *
+ * A free function rather than a private method: deleteTaskWithId is also invoked against
+ * partially-built receivers (the delegation specs call the prototype method with a stub
+ * `this`), where a method lookup on the receiver would fail.
+ */
+async function removeTaskArtifacts(
+	taskIds: string[],
+	globalStorageDir: string,
+	workspaceDir: string,
+): Promise<void> {
+	const { getTaskDirectoryPath } = await import("../../utils/storage")
+
+	for (const taskId of taskIds) {
+		try {
+			await ShadowCheckpointService.deleteTask({ taskId, globalStorageDir, workspaceDir })
+		} catch (error) {
+			console.error(
+				`[deleteTaskWithId${taskId}] failed to delete associated shadow repository or branch: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+
+		// Delete the task directory
+		try {
+			const dirPath = await getTaskDirectoryPath(globalStorageDir, taskId)
+			await fs.rm(dirPath, { recursive: true, force: true })
+			console.log(`[deleteTaskWithId${taskId}] removed task directory`)
+		} catch (error) {
+			console.error(
+				`[deleteTaskWithId${taskId}] failed to remove task directory: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+	}
+}
+
 export class ClineProvider
 	extends EventEmitter<TaskProviderEvents>
 	implements vscode.WebviewViewProvider, TelemetryPropertiesProvider, TaskProviderLike
@@ -2381,13 +2419,17 @@ export class ClineProvider
 					const failed = new Set(error.taskIds)
 					this.recentTasksCache = undefined
 					await this.postStateToWebview()
-					await this.removeTaskArtifacts(allIdsToDelete.filter((taskId: string) => !failed.has(taskId)))
+					await removeTaskArtifacts(
+						allIdsToDelete.filter((taskId: string) => !failed.has(taskId)),
+						this.contextProxy.globalStorageUri.fsPath,
+						this.cwd,
+					)
 				}
 				throw error
 			}
 			this.recentTasksCache = undefined
 
-			await this.removeTaskArtifacts(allIdsToDelete)
+			await removeTaskArtifacts(allIdsToDelete, this.contextProxy.globalStorageUri.fsPath, this.cwd)
 			await this.postStateToWebview()
 		} catch (error) {
 			// If task is not found, just remove it from state
@@ -2396,39 +2438,6 @@ export class ClineProvider
 				return
 			}
 			throw error
-		}
-	}
-
-	/**
-	 * Remove the artifacts that belong to deleted tasks: the shadow-checkpoint
-	 * repository/branch and the task directory. Both are best-effort per task, matching
-	 * the pre-existing behaviour, so one stubborn task does not strand the others.
-	 */
-	private async removeTaskArtifacts(taskIds: string[]): Promise<void> {
-		const globalStorageDir = this.contextProxy.globalStorageUri.fsPath
-		const workspaceDir = this.cwd
-		const { getTaskDirectoryPath } = await import("../../utils/storage")
-		const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
-
-		for (const taskId of taskIds) {
-			try {
-				await ShadowCheckpointService.deleteTask({ taskId, globalStorageDir, workspaceDir })
-			} catch (error) {
-				console.error(
-					`[deleteTaskWithId${taskId}] failed to delete associated shadow repository or branch: ${error instanceof Error ? error.message : String(error)}`,
-				)
-			}
-
-			// Delete the task directory
-			try {
-				const dirPath = await getTaskDirectoryPath(globalStoragePath, taskId)
-				await fs.rm(dirPath, { recursive: true, force: true })
-				console.log(`[deleteTaskWithId${taskId}] removed task directory`)
-			} catch (error) {
-				console.error(
-					`[deleteTaskWithId${taskId}] failed to remove task directory: ${error instanceof Error ? error.message : String(error)}`,
-				)
-			}
 		}
 	}
 
