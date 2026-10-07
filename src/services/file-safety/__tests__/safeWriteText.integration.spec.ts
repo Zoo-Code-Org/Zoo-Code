@@ -46,4 +46,21 @@ describe("safeWriteText against a real filesystem", () => {
 		expect(await fs.readFile(inside, "utf8")).toBe("original bytes")
 		expect(await fs.readdir(dir)).toEqual(["target-dir"])
 	})
+
+	it("cleans up the staging file when the commit rename itself fails", async () => {
+		// With backup:false the backup step is skipped, so this is the only shape of
+		// this scenario that reaches Step 4: the rename of the staging FILE over the
+		// target DIRECTORY fails (EISDIR / ENOTDIR / EPERM depending on platform), and
+		// the cleanup must remove the staging file. The backup:true case above bails
+		// out in the backup step and never exercises the commit-failure path.
+		const targetPath = path.join(dir, "target-dir")
+		await fs.mkdir(targetPath)
+		const inside = path.join(targetPath, "payload.txt")
+		await fs.writeFile(inside, "original bytes")
+
+		await expect(safeWriteText(targetPath, "new data", { backup: false })).rejects.toThrow()
+
+		expect(await fs.readFile(inside, "utf8")).toBe("original bytes")
+		expect(await fs.readdir(dir)).toEqual(["target-dir"])
+	})
 })

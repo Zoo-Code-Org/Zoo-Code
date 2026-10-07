@@ -379,7 +379,7 @@ describe("safeWriteJson", () => {
 
 		// Clean up
 		await fs.unlink(lockTestFilePath).catch(() => {}) // Ignore errors if file doesn't exist
-		vi.unmock("proper-lockfile") // Ensure the mock is removed after this test
+		vi.doUnmock("proper-lockfile") // Non-hoisted counterpart of the vi.doMock above
 	})
 	test("should release lock even if an error occurs mid-operation", async () => {
 		const data = { message: "test lock release on error" }
@@ -651,11 +651,12 @@ describe("safeWriteJson", () => {
 				expect.any(Error),
 			)
 		} finally {
-			// Cleanup must run even when an assertion fails: a leaked mock
-			// registration or console spy changes later tests, and vi.unmock
-			// alone does not reset a module that already imported the mock.
+			// Cleanup must run even when an assertion fails: a leaked mock registration
+			// or console spy changes later tests. vi.doUnmock is the non-hoisted counterpart
+			// of the vi.doMock above; vi.unmock is hoisted to the top of the file, so it would
+			// not undo this registration from here.
 			realpathSpy.mockRestore()
-			vi.unmock("proper-lockfile")
+			vi.doUnmock("proper-lockfile")
 			vi.resetModules()
 			consoleErrorSpy.mockRestore()
 		}
