@@ -150,6 +150,10 @@ export async function createIfAbsent(
 	// Re-checked under the lock: a link that waited on the FIFO chain can outlive
 	// the task that queued it.
 	isCancelled?: () => boolean,
+	// Re-checked under the lock, immediately before the publish: the path was authorized
+	// when it was queued, but a symlink can be swapped in while the link waited on the
+	// FIFO chain or on this lock.
+	verifyTarget?: () => Promise<void>,
 ): Promise<string | undefined> {
 	// Lock the key every other writer to this file uses: the resolved publish
 	// target, so a symlink alias and its referent share one lock.
@@ -164,6 +168,7 @@ export async function createIfAbsent(
 			}
 			// Immediately before publication starts.
 			cancelledBeforePublish(absolutePath, displayPath, isCancelled)
+			await verifyTarget?.()
 			await safeWriteText(absolutePath, content)
 			// Read the new token under the same lock, otherwise a peer lock-using
 			// writer can publish in the gap and the caller records that writer's
@@ -207,6 +212,10 @@ export async function replaceIfVersion(
 	// the task that queued it.
 	displayPath: string,
 	isCancelled?: () => boolean,
+	// Re-checked under the lock, immediately before the publish: the path was authorized
+	// when it was queued, but a symlink can be swapped in while the link waited on the
+	// FIFO chain or on this lock.
+	verifyTarget?: () => Promise<void>,
 ): Promise<string | undefined> {
 	// Lock the key every other writer to this file uses: the resolved publish
 	// target, so a symlink alias and its referent share one lock.
@@ -240,6 +249,7 @@ export async function replaceIfVersion(
 		if (currentVersion === expectedVersion) {
 			// Immediately before publication starts.
 			cancelledBeforePublish(absolutePath, displayPath, isCancelled)
+			await verifyTarget?.()
 			await safeWriteText(absolutePath, content)
 			// Read the new token under the same lock, otherwise a peer lock-using
 			// writer can publish in the gap and the caller records that writer's
@@ -322,8 +332,19 @@ async function assertCanonicalInsideWorkspace(task: Task, absolutePath: string, 
 	let workspaceRoot: string
 	try {
 		workspaceRoot = await fs.realpath(path.resolve(task.cwd))
-	} catch {
-		return
+	} catch (error: unknown) {
+		if (errorCode(error) === "ENOENT") {
+			// The workspace itself is not on disk (a deleted workspace, or a fixture cwd in
+			// tests): there is no root to contain the write in, and the publish would fail on
+			// the missing directory anyway. Anything else - EACCES, ELOOP - means the root
+			// exists but cannot be resolved, and a symlink inside the workspace would then
+			// never be checked, so this fails closed rather than falling back to lexical only.
+			return
+		}
+		throw new GuardRejectedError(
+			"Workspace could not be resolved, so this write cannot be checked against it -- retry with a path inside the workspace.",
+			displayPath,
+		)
 	}
 	const target = await realpathNearest(absolutePath, displayPath)
 	if (!isInside(workspaceRoot, target)) {
@@ -408,7 +429,10 @@ export async function guardedWrite(
 	// outside the workspace must not take a slot on the FIFO chain, take the file
 	// lock, or touch the filesystem at all.
 	assertInsideWorkspace(task, absolutePath, displayPath)
-	await assertCanonicalInsideWorkspace(task, absolutePath, displayPath)
+	// Bound to the task and the caller's spelling so the guard can re-run the same
+	// decision under the lock, immediately before the publish.
+	const verifyTarget = () => assertCanonicalInsideWorkspace(task, absolutePath, displayPath)
+	await verifyTarget()
 
 	return enqueue(absolutePath, async () => {
 		// Cancellation is checked when the link is dequeued, not when it was enqueued:
@@ -442,6 +466,7 @@ export async function guardedWrite(
 					content,
 					displayPath,
 					() => task.abort,
+					verifyTarget,
 				)
 				staysPartial = obs.complete === false
 			}
@@ -466,10 +491,10 @@ export async function guardedWrite(
 
 			if (obs === undefined) {
 				// Never read: only an absent target may be created.
-				publishedToken = await createIfAbsent(absolutePath, content, displayPath, () => task.abort)
+				publishedToken = await createIfAbsent(absolutePath, content, displayPath, () => task.abort, verifyTarget)
 			} else if (absent) {
 				// A "create" on a file that vanished after the read recreates it.
-				publishedToken = await createIfAbsent(absolutePath, content, displayPath, () => task.abort)
+				publishedToken = await createIfAbsent(absolutePath, content, displayPath, () => task.abort, verifyTarget)
 			} else {
 				// The version recorded at read time must still match the on-disk
 				// token.
@@ -479,6 +504,7 @@ export async function guardedWrite(
 					content,
 					displayPath,
 					() => task.abort,
+					verifyTarget,
 				)
 			}
 		}

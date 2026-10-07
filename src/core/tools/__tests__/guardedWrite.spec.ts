@@ -258,6 +258,43 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
 
+
+		it("fails closed when the workspace itself cannot be resolved", async () => {
+			// EACCES/ELOOP on the workspace means a symlink inside it would never be resolved, so
+			// the containment decision cannot be made at all: the write is refused rather than
+			// falling back to the lexical-only check.
+			mockedFsRealpath.mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }))
+			const task = createMockTask()
+
+			await expect(guardedWrite(task, "inside.txt", "data", "create")).rejects.toThrow(
+				"Workspace could not be resolved",
+			)
+
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("re-checks containment under the lock, after the wait on the FIFO chain", async () => {
+			// The path was inside the workspace when it was queued; a link is swapped in while the
+			// write waits. The publish must not follow the new link.
+			let targetLookups = 0
+			mockedFsRealpath.mockImplementation(async (p) => {
+				const s = String(p)
+				if (s === path.resolve(WORKSPACE)) {
+					return "/real/workspace"
+				}
+				targetLookups++
+				return targetLookups === 1 ? "/real/workspace/in.txt" : "/real/outside/secret.txt"
+			})
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			const task = createMockTask()
+
+			await expect(guardedWrite(task, "in.txt", "data", "create")).rejects.toThrow(
+				"resolves through a link to outside the workspace",
+			)
+
+			expect(targetLookups).toBeGreaterThan(1)
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
 		it("publishes when the resolved path stays inside the workspace", async () => {
 			mockedFsRealpath.mockImplementation(async (p) => {
 				const s = String(p)
