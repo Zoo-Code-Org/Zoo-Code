@@ -281,6 +281,38 @@ describe("safeWriteText", () => {
 		})
 	})
 
+	it("win32: a rejecting async onWarning does not abort the write or leak an unhandled rejection", async () => {
+		// TypeScript accepts an async sink where a void callback is expected, so the
+		// wrapper has to attach a handler to the returned promise: an unhandled
+		// rejection can end the process under Node's default mode, after a write that
+		// already succeeded.
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+			if (typeof cb === "function") cb(new Error("icacls error"), "", "")
+			return fakeChild
+		})
+		const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+		await expect(
+			safeWriteText(targetPath, "data", {
+				platform: "win32",
+				onWarning: async () => {
+					throw new Error("async sink down")
+				},
+			}),
+		).resolves.toBeUndefined()
+
+		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
+		// The rejection is reported through the fallback sink rather than surfacing as an
+		// unhandled rejection.
+		expect(consoleWarn).toHaveBeenCalledWith(
+			expect.stringContaining("onWarning callback rejected"),
+		)
+		consoleWarn.mockRestore()
+	})
+
 	// ── Test 2: fsync ordering ───────────────────────────────────────────────
 
 	describe("fsync ordering", () => {
