@@ -1836,7 +1836,13 @@ const provider = new ClineProvider(
 
 		it("restores the previous view id when the registration write fails so a later launch retries", async () => {
 			const contextProxy = new ContextProxy(mockContext)
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", contextProxy)
+const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				contextProxy,
+				new WebviewFocusTracker(),
+			)
 			// Seed a pre-launch entry under the temporary id so the re-key has real work to do.
 			mockContext.globalState.update("viewStates", { [provider.viewId]: { mode: "architect", updatedAt: 1 } })
 
@@ -3506,7 +3512,13 @@ const provider = new ClineProvider(
 		it("should report a non-retired apiProvider from state instead of the anthropic fallback", async () => {
 			const contextProxy = new ContextProxy(mockContext)
 			await contextProxy.setValues({ apiProvider: providerIdentifiers.openrouter })
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", contextProxy)
+const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				contextProxy,
+				new WebviewFocusTracker(),
+			)
 
 			const state = await provider.getState()
 
@@ -3528,7 +3540,13 @@ const provider = new ClineProvider(
 				setValues: (values: Record<string, unknown>) => Promise<void>
 			}
 			await contextProxyAccess.setValues({ apiProvider: "bogus-provider" })
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", contextProxy)
+const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				contextProxy,
+				new WebviewFocusTracker(),
+			)
 
 			const state = await provider.getState()
 
