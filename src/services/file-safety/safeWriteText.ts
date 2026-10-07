@@ -482,11 +482,11 @@ export async function safeWriteText(
 		// Only a pre-commit failure can restore the backup. Once the commit rename
 		// published, a later failure (for example the post-commit directory fsync)
 		// must not overwrite the published content with the old file.
-		if (backupPath && releaseBackupOnSuccess && !committed) {
-			// Nothing to restore: the backup is a copy, so the target still holds the
-			// pre-write content for the whole attempt and the failed commit left it in
-			// place. Drop the copy and report the original error - there is no rename that
-			// could clobber a publish another writer made during the attempt.
+		if (backupPath && releaseBackupOnSuccess) {
+			// Nothing to restore: the backup is a copy, so the target still holds whatever
+			// the commit left there - before the commit that is the pre-write content, and
+			// after it the published content. Either way the copy has served its purpose
+			// and must not be left beside the target where no caller can find it.
 			await fs.unlink(backupPath).catch(() => {})
 			backupPath = null
 		}
