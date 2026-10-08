@@ -657,3 +657,47 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		})
 	})
 })
+
+describe("commit-time verifier (S4a, epic #1375)", () => {
+	beforeEach(() => {
+		vi.resetAllMocks()
+		resetChain()
+		mockedSafeWriteText.mockImplementation((async (p: string, _c: string, options: { preCommitVerify?: (target: string) => Promise<void> }) => {
+			// Run the verifier the way safeWriteText does: after staging, immediately before the
+			// commit rename. Without this the callback would never execute and the assertions below
+			// would pass against a verifier that was never called.
+			await options.preCommitVerify?.(p)
+			return undefined
+		}) as never)
+	})
+
+	it("propagates a non-ENOENT access error from the create verifier instead of publishing", async () => {
+		const ioError = Object.assign(new Error("EACCES"), { code: "EACCES" })
+		mockedFsAccess.mockRejectedValueOnce({ code: "ENOENT" })
+		mockedFsAccess.mockRejectedValueOnce(ioError)
+		const task = createMockTask()
+
+		await expect(guardedWrite(task, "new-file.txt", "hello", "create")).rejects.toBe(ioError)
+	})
+
+	it("rejects when the file appears at commit time on the create path", async () => {
+		mockedFsAccess.mockRejectedValueOnce({ code: "ENOENT" })
+		mockedFsAccess.mockResolvedValue(undefined)
+		const task = createMockTask()
+
+		await expect(guardedWrite(task, "new-file.txt", "hello", "create")).rejects.toThrow(/File appeared at/)
+	})
+
+	it("converts a commit-time ENOENT on the observed update path into the re-read remediation", async () => {
+		const reg = new ObservationRegistry()
+		reg.observe(abs("doc.txt"), "v1")
+		const task = createMockTask({ observationRegistry: reg })
+		mockedFsAccess.mockResolvedValue(undefined)
+		// The guard's read-time check runs first, then the commit-time verifier re-computes the
+		// token: the first call is the guard, the second is the verifier finding the file gone.
+		mockedComputeVersionToken.mockResolvedValueOnce("v1")
+		mockedComputeVersionToken.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+		await expect(guardedWrite(task, "doc.txt", "new content", "update")).rejects.toThrow(/no longer exists; re-read the file, then retry/)
+	})
+})
