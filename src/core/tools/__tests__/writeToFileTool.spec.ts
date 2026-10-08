@@ -610,6 +610,48 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({}, { isPartial: true })
 			expect(mockCline.ask).toHaveBeenCalledTimes(1)
 		})
+		it("reports the captured streaming failure once instead of the incidental parse error", async () => {
+			// A streaming delta hit a fatal filesystem error and the finalized block then
+			// arrives without nativeArgs: execute() never runs, so its authoritative retry of
+			// the same filesystem operation never happens either. The captured error is the one
+			// the user can act on, and it must surface exactly once.
+			const state = writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			state.streamFailed = true
+			const streamFailure = new Error("EACCES: stream open failed")
+			state.streamError = streamFailure
+
+			const block = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: {},
+				partial: false,
+			} as ToolUse<"write_to_file">
+			await writeToFileTool.handle(mockCline, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockHandleError).toHaveBeenCalledTimes(1)
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", streamFailure)
+			expect(mockHandleError).not.toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			// The stream may have left a diff view open with content that was never approved.
+			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+		})
+
+		it("releases the per-task stream state when execute() returns early on a denied path", async () => {
+			// The rooignore branch returns before execute()'s success/catch cleanup; without
+			// this the abort listener and the streamFailed guard outlive the call and suppress
+			// the diff preview of every later write_to_file in this task.
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never).streamFailed = true
+
+			await executeWriteFileTool({}, { accessAllowed: false })
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+		})
 	})
 
 	describe("per-task stream state isolation", () => {

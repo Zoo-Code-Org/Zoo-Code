@@ -160,22 +160,38 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	}
 
 	/**
-	 * Teardown boundary for the handle() parse-failure path, where execute() never
-	 * runs and therefore its finally (resetTaskPartialState) never runs either.
+	 * Teardown for the handle() parse-failure path, where execute() never runs and its
+	 * cleanup never runs either.
 	 *
-	 * Tears down the per-task stream state: otherwise the abort listener leaks for
-	 * the task's lifetime, and when a streaming delta had failed, the streamFailed
-	 * guard would suppress the diff preview of every later write_to_file in this
-	 * task. Restores the diff document: streaming may have opened it with
-	 * unapproved partial content, and execute()'s error cleanup (revert + reset)
-	 * never fires on this path, so a user save could persist the content without
-	 * the teardown here. When a streaming delta already hit a fatal filesystem
-	 * error, that error is what the user can act on, so report it with the same
-	 * "writing file" context execute()'s catch uses, and suppress the incidental
-	 * parse error.
+	 * Releases the per-task stream state: otherwise the abort listener leaks for the task's
+	 * lifetime, and a failed streaming delta leaves the streamFailed guard suppressing the
+	 * diff preview of every later write_to_file in this task. Restores the diff document:
+	 * streaming may have opened it with unapproved partial content, and execute()'s error
+	 * cleanup (revert + reset) never fires here, so a user save could persist it. When a
+	 * streaming delta already hit a fatal filesystem error, THAT is the failure the user can
+	 * act on, so it is reported with the same "writing file" context execute()'s catch uses,
+	 * and true is returned to suppress the incidental parse error - the failure surfaces
+	 * exactly once.
 	 */
-	protected override clearTaskStreamState(task: Task): void {
+	protected override async releaseStreamStateOnParseFailure(
+		task: Task,
+		callbacks: ToolCallbacks,
+	): Promise<boolean> {
+		const state = this.taskPartialStreamState.get(this.getPartialStreamFailureKey(task))
+		if (!state) {
+			return false
+		}
+
 		this.resetTaskPartialState(task)
+		await this.revertDiffChangesBeforeReset(task)
+		await this.resetDiffViewAfterWrite(task)
+
+		if (!state.streamError) {
+			return false
+		}
+
+		await callbacks.handleError("writing file", state.streamError)
+		return true
 	}
 
 	override resetPartialState(): void {
@@ -197,6 +213,10 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		if (!relPath) {
 			task.consecutiveMistakeCount++
 			task.recordToolError("write_to_file")
+			// No execute() cleanup on this early return: release THIS task's stream state
+			// (and only this task's) so the abort listener and the streamFailed guard do not
+			// outlive the call.
+			this.resetTaskPartialState(task)
 			pushToolResult(await task.sayAndCreateMissingParamError("write_to_file", "path"))
 			await task.diffViewProvider.reset()
 			return
@@ -205,6 +225,10 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		if (newContent === undefined) {
 			task.consecutiveMistakeCount++
 			task.recordToolError("write_to_file")
+			// No execute() cleanup on this early return: release THIS task's stream state
+			// (and only this task's) so the abort listener and the streamFailed guard do not
+			// outlive the call.
+			this.resetTaskPartialState(task)
 			pushToolResult(await task.sayAndCreateMissingParamError("write_to_file", "content"))
 			await task.diffViewProvider.reset()
 			return
@@ -214,6 +238,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 		if (!accessAllowed) {
 			await task.say("rooignore_error", relPath)
+			this.resetTaskPartialState(task)
 			pushToolResult(formatResponse.rooIgnoreError(relPath))
 			return
 		}
