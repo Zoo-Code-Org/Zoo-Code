@@ -336,7 +336,7 @@ async function disposeFailedTabCreation(
 	provider: ClineProvider,
 	panel: vscode.WebviewPanel | undefined,
 	outputChannel: vscode.OutputChannel,
-	): Promise<void> {
+): Promise<void> {
 	const describe = (e: unknown) => (e instanceof Error ? e.message : String(e))
 	const cleanupFailures: string[] = []
 	try {

@@ -767,25 +767,31 @@ describe("openClineInNewTab", () => {
 			return previousExecute?.(command)
 		})
 
-		await expect(
-			openClineInNewTab({
-				context: mockContext,
-				outputChannel: mockOutputChannel,
-				webviewFocusTracker: new WebviewFocusTracker(),
-			}),
-		).rejects.toThrow("lock failed")
+		try {
+			await expect(
+				openClineInNewTab({
+					context: mockContext,
+					outputChannel: mockOutputChannel,
+					webviewFocusTracker: new WebviewFocusTracker(),
+				}),
+			).rejects.toThrow("lock failed")
 
-		// Restore the shared command mock: this file's beforeEach only clears call history,
-		// so a lingering implementation would fail every later tab creation.
-		executeCommandMock.mockRestore()
-
-		// Nothing half-built may stay behind: the provider is disposed (it registers in
-		// ClineProvider.activeInstances with its listeners), the panel is disposed, and the
-		// tracked tab ref no longer points at the orphan panel.
-		const created = vi.mocked(ClineProvider).mock.results[0].value
-		expect(created.dispose).toHaveBeenCalledTimes(1)
-		expect(panel.dispose).toHaveBeenCalledTimes(1)
-		expect(getPanel()).toBeUndefined()
+			// Nothing half-built may stay behind: the provider is disposed (it registers in
+			// ClineProvider.activeInstances with its listeners), the panel is disposed, and the
+			// tracked tab ref no longer points at the orphan panel.
+			const created = vi.mocked(ClineProvider).mock.results[0].value
+			expect(created.dispose).toHaveBeenCalledTimes(1)
+			expect(panel.dispose).toHaveBeenCalledTimes(1)
+			expect(getPanel()).toBeUndefined()
+		} finally {
+			// Restore the saved implementation rather than mockRestore(): this file's beforeEach
+			// only clears call history, and mockRestore() on a bare vi.fn() leaves executeCommand
+			// with no implementation at all, so every later tab creation in this file breaks.
+			// In a finally so a failing assertion cannot leak the override.
+			// The saved default can be undefined (a bare vi.fn()), which is behaviourally
+			// the same as a no-op implementation - mockImplementation needs a function.
+			executeCommandMock.mockImplementation(previousExecute ?? (async () => undefined))
+		}
 	})
 
 	it("reports incomplete cleanup when the tab-creation rollback itself fails", async () => {
@@ -813,27 +819,34 @@ describe("openClineInNewTab", () => {
 		})
 
 		// The original failure is still what the caller sees...
-		await expect(
-			openClineInNewTab({
-				context: mockContext,
-				outputChannel: mockOutputChannel,
-				webviewFocusTracker: new WebviewFocusTracker(),
-			}),
-		).rejects.toThrow("lock failed")
+		try {
+			await expect(
+				openClineInNewTab({
+					context: mockContext,
+					outputChannel: mockOutputChannel,
+					webviewFocusTracker: new WebviewFocusTracker(),
+				}),
+			).rejects.toThrow("lock failed")
 
-		// Restore the shared command mock: this file's beforeEach only clears call history,
-		// so a lingering implementation would fail every later tab creation.
-		executeCommandMock.mockRestore()
-		// ...both cleanup steps were attempted, and the incomplete result is surfaced
-		// rather than swallowed behind the original error.
-		const created = vi.mocked(ClineProvider).mock.results[0].value
-		expect(created.dispose).toHaveBeenCalledTimes(1)
-		expect(panel.dispose).toHaveBeenCalledTimes(1)
-		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
-			expect.stringContaining(
-				"cleanup was incomplete (provider: dispose hung; panel: panel gone)",
-			),
-		)
+			// ...both cleanup steps were attempted, and the incomplete result is surfaced
+			// rather than swallowed behind the original error.
+			const created = vi.mocked(ClineProvider).mock.results[0].value
+			expect(created.dispose).toHaveBeenCalledTimes(1)
+			expect(panel.dispose).toHaveBeenCalledTimes(1)
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining(
+					"cleanup was incomplete (provider: dispose hung; panel: panel gone)",
+				),
+			)
+		} finally {
+			// Restore the saved implementation rather than mockRestore(): this file's beforeEach
+			// only clears call history, and mockRestore() on a bare vi.fn() leaves executeCommand
+			// with no implementation at all, so every later tab creation in this file breaks.
+			// In a finally so a failing assertion cannot leak the override.
+			// The saved default can be undefined (a bare vi.fn()), which is behaviourally
+			// the same as a no-op implementation - mockImplementation needs a function.
+			executeCommandMock.mockImplementation(previousExecute ?? (async () => undefined))
+		}
 	})
 
 	it("re-points the tracked tab ref at the panel that becomes active", async () => {
