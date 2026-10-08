@@ -976,6 +976,48 @@ describe("Cline", () => {
 		})
 	})
 
+	describe("observation registry lifecycle (S4a, epic #1375)", () => {
+		it("gives each Task its own observation registry", () => {
+			const firstTask = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "first observation task",
+				startTask: false,
+			})
+			const secondTask = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "second observation task",
+				startTask: false,
+			})
+
+			// The guarded-write contract assumes an observation in one task never validates
+			// a write issued by another task.
+			expect(firstTask.observationRegistry).not.toBe(secondTask.observationRegistry)
+			firstTask.observationRegistry.observe("/workspace/a.ts", "v-a")
+			expect(firstTask.observationRegistry.get("/workspace/a.ts")?.version).toBe("v-a")
+			expect(secondTask.observationRegistry.get("/workspace/a.ts")).toBeUndefined()
+		})
+
+		it("clears the observation registry when the task is disposed", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "disposed observation task",
+				startTask: false,
+			})
+			task.observationRegistry.observe("/workspace/a.ts", "v-a")
+			task.observationRegistry.observe("/workspace/b.ts", "v-b")
+
+			await task.dispose()
+
+			// A disposed task cannot serve another guarded write, so its observed paths
+			// (version token + timestamp each) must not stay reachable for the host lifetime.
+			expect(task.observationRegistry.get("/workspace/a.ts")).toBeUndefined()
+			expect(task.observationRegistry.get("/workspace/b.ts")).toBeUndefined()
+		})
+	})
+
 	describe("constructor", () => {
 		it.each([{ apiConfigName: "parent-local-profile" }, { apiConfigName: undefined }])(
 			"uses an explicit delegated-child context without shared state or startup persistence",

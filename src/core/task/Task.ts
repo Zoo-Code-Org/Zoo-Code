@@ -1369,6 +1369,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	/** Cancels the current persistence generation before creating the next assistant-turn boundary. */
 	private resetAssistantMessagePersistence(): void {
 		this.cancelAssistantMessagePersistence()
+
 		this.assistantMessagePersistencePromise = new Promise<AssistantMessagePersistenceResult>((resolve) => {
 			this.resolveAssistantMessagePersistence = resolve
 		})
@@ -3326,6 +3327,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async disposeOnce(): Promise<void> {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
 		this.cancelAssistantMessagePersistence()
+
+		// Drop the per-task file observations. The registry holds an entry per absolute
+		// path the task read or wrote (version token + timestamp); nothing can consume them
+		// after disposal, and a long-lived extension host would otherwise keep every path a
+		// finished task touched alive.
+		this.observationRegistry.clear()
 
 		// Stop the idle telemetry check and report any unflushed activity as a
 		// shutdown installment, so a task torn down mid-work (panel closed, task
