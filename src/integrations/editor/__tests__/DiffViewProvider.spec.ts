@@ -11,6 +11,7 @@ import { computeVersionToken, versionTokenOfStat } from "../../../utils/versionT
 import type { BigIntStats } from "fs"
 import { safeWriteText } from "../../../services/file-safety/safeWriteText"
 import { withFileLock } from "../../../utils/fileLock"
+import { createDirectoriesForFile } from "../../../utils/fs"
 import { ObservationRegistry } from "../../../core/task/observationRegistry"
 import type { Task } from "../../../core/task/Task"
 
@@ -1153,6 +1154,22 @@ describe("DiffViewProvider", () => {
 				await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
 
 				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			})
+
+			it("leaves no directories behind when the guard rejects the write", async () => {
+				// A rejected guard must not touch the filesystem at all. Creating the parent
+				// directories before the guard runs would leave empty directories behind - and
+				// for an outside-workspace target, outside the workspace. safeWriteText creates
+				// missing parents itself at publish time.
+				mockTask.observationRegistry.clear()
+				vi.mocked(createDirectoriesForFile).mockClear()
+
+				await expect(
+					diffViewProvider.saveDirectly("nested/dir/test.ts", "new content", true, false, 0),
+				).rejects.toThrow("File already exists at nested/dir/test.ts")
+
+				expect(createDirectoriesForFile).not.toHaveBeenCalled()
+				expect(safeWriteText).not.toHaveBeenCalled()
 			})
 
 			it("rejects an observed write whose version token is stale", async () => {

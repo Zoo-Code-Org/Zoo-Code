@@ -69,19 +69,6 @@ export class ConfinedPathEscapeError extends Error {
  * legitimate in-scope write. When the scope does not exist yet, the nearest
  * existing ancestor is resolved and the remainder re-appended.
  */
-/**
- * Whether `candidate` sits outside `scopeRoot`. The scope root itself counts as
- * outside: a file write cannot land on the directory that declares the scope.
- */
-function _escapesScope(scopeRoot: string, candidate: string): boolean {
-	const relative = path.relative(scopeRoot, candidate)
-	return (
-		relative === "" ||
-		relative === ".." ||
-		relative.startsWith(".." + path.sep) ||
-		path.isAbsolute(relative)
-	)
-}
 async function _resolveScopeRoot(confineTo: string): Promise<string> {
 	const lexical = path.resolve(confineTo)
 	try {
