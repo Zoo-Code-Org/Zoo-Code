@@ -78,6 +78,39 @@ export class PostCommitDurabilityError extends Error {
 		this.targetPath = targetPath
 	}
 }
+
+/**
+ * The backup copy could not be created AND the partial copy could not be removed.
+ * The write failed either way, but the leftover is a copy of the previous content that
+ * is still on disk: its path travels on the error so the caller can remove it, instead
+ * of the cleanup silently discarding the only reference to it.
+ */
+export class OrphanedBackupError extends Error {
+	readonly orphanedBackupPath: string
+	readonly originalError: unknown
+	readonly cleanupError: unknown
+	constructor(backupPath: string, targetPath: string, cause: unknown, cleanupError: unknown) {
+		super(_orphanedBackupMessage(targetPath, backupPath, cause, cleanupError), { cause })
+		this.name = "OrphanedBackupError"
+		this.orphanedBackupPath = backupPath
+		this.originalError = cause
+		this.cleanupError = cleanupError
+	}
+}
+
+function _orphanedBackupMessage(
+	targetPath: string,
+	backupPath: string,
+	cause: unknown,
+	cleanupError: unknown,
+): string {
+	const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+	return (
+		`safeWriteText: could not create the backup of ${targetPath} (${reason(cause)}), and the ` +
+		`partial copy at ${backupPath} could not be removed (${reason(cleanupError)}). The copy is ` +
+		`still on disk and must be deleted.`
+	)
+}
 // -- helpers ---------------------------------------------------------------
 
 /** Generate a unique temp file name in the given directory. */
@@ -469,9 +502,25 @@ export async function safeWriteText(
 						}
 					} catch (backupError: unknown) {
 						// A partial backup must not outlive this attempt: it is not a complete copy
-						// of anything, and once the write fails nothing else removes it.
-						await fs.unlink(backupPath).catch(() => {})
+						// of anything, and once the write fails nothing else removes it. The unlink is
+						// retried once (Windows reports EPERM for a file whose handle has not been
+						// released yet); if it still fails the path is carried on the thrown error
+						// instead of being dropped where no caller can act on it.
+						const orphanPath = backupPath
+						let backupCleanupError: unknown = null
+						for (let attempt = 0; attempt < 2; attempt++) {
+							try {
+								await fs.unlink(orphanPath)
+								backupCleanupError = null
+								break
+							} catch (cleanupError: unknown) {
+								backupCleanupError = errorCode(cleanupError) === "ENOENT" ? null : cleanupError
+							}
+						}
 						backupPath = null
+						if (backupCleanupError !== null) {
+							throw new OrphanedBackupError(orphanPath, targetPath, backupError, backupCleanupError)
+						}
 						throw backupError
 					}
 					releaseBackupOnSuccess = true
