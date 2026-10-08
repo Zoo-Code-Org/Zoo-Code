@@ -1618,16 +1618,46 @@ export class ClineProvider
 			CloudService.instance.off("settings-updated", this.handleCloudSettingsUpdate)
 		}
 
-		this._workspaceTracker?.dispose()
-		this._workspaceTracker = undefined
-		await this.mcpHub?.unregisterClient()
+		while (this.disposables.length) {
+			const x = this.disposables.pop()
+
+			if (x) {
+				x.dispose()
+			}
+		}
+
+		// Each teardown step gets its own guard: a rejecting step must not strand the steps after
+		// it, and the unregistration below must run no matter what - _disposed is already set, so
+		// a half-disposed provider would never get another chance to finish here.
+		const cleanupFailures: string[] = []
+		const attemptCleanup = async (label: string, step: () => unknown) => {
+			try {
+				await step()
+			} catch (error: unknown) {
+				cleanupFailures.push(`${label}: ${error instanceof Error ? error.message : String(error)}`)
+			}
+		}
+
+		await attemptCleanup("workspace tracker", () => {
+			this._workspaceTracker?.dispose()
+			this._workspaceTracker = undefined
+		})
+		await attemptCleanup("mcpHub", () => this.mcpHub?.unregisterClient())
 		this.mcpHub = undefined
-		await this.skillsManager?.dispose()
+		await attemptCleanup("skills manager", () => this.skillsManager?.dispose())
 		this.skillsManager = undefined
-		await this.marketplaceManager?.cleanup()
-		this.customModesManager?.dispose()
-		this.taskHistoryStore.dispose()
-		this.log("Disposed all disposables")
+		await attemptCleanup("marketplace manager", () => this.marketplaceManager?.cleanup())
+		await attemptCleanup("custom modes manager", () => this.customModesManager?.dispose())
+		await attemptCleanup("task history store", () => this.taskHistoryStore.dispose())
+
+		if (cleanupFailures.length > 0) {
+			this.log(
+				`Disposal was incomplete (${cleanupFailures.join("; ")}); the provider was unregistered anyway.`,
+			)
+		} else {
+			this.log("Disposed all disposables")
+		}
+
 		ClineProvider.activeInstances.delete(this)
 		this.diagnosticsRequestBroker.dispose()
 
