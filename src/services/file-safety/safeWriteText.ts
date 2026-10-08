@@ -290,8 +290,34 @@ function errorCode(error: unknown): string | undefined {
 
 async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
 	const dirPath = path.dirname(absoluteFilePath)
-	const canonicalDir = await fs.realpath(dirPath).catch(() => dirPath)
-	return path.join(canonicalDir, path.basename(absoluteFilePath))
+	// Walk up to the nearest ancestor that EXISTS, canonicalize that, and re-join the
+	// components that are not there yet. Falling back to the unresolved spelling of the
+	// whole parent - what a single realpath(...).catch(() => dirPath) used to do - makes
+	// the key depend on whether the directory happens to exist: a writer whose parent is
+	// already there canonicalizes through a symlinked ancestor (or a short name) while a
+	// writer racing to create the same directory gets the literal spelling, so the two
+	// take different locks for one file and a read-modify-write loses one side.
+	// A realpath failure that is not "not there yet" says nothing about the canonical
+	// form, so it is propagated rather than papered over with a key that may be wrong.
+	let cursor = dirPath
+	const missing: string[] = []
+	for (;;) {
+		const canonical = await fs.realpath(cursor).catch((error: unknown) => {
+			if (errorCode(error) === "ENOENT") return undefined
+			throw error
+		})
+		if (canonical !== undefined) {
+			return path.join(canonical, ...missing.reverse(), path.basename(absoluteFilePath))
+		}
+		missing.push(path.basename(cursor))
+		const parent = path.dirname(cursor)
+		if (parent === cursor) {
+			// Every component up to the root is missing: there is nothing to canonicalize
+			// against, and the literal path is the only key left.
+			return path.join(dirPath, path.basename(absoluteFilePath))
+		}
+		cursor = parent
+	}
 }
 
 /**
