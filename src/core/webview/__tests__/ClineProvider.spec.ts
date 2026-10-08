@@ -1,5 +1,6 @@
 // pnpm --filter roo-cline test core/webview/__tests__/ClineProvider.spec.ts
 
+
 import fs from "fs"
 import * as path from "path"
 import { TaskRegistry } from "../../task/TaskRegistry"
@@ -4035,7 +4036,7 @@ describe("ClineProvider", () => {
 			// "__proto__" is rejected before assignment so a per-view entry can never be
 			// keyed through the Object.prototype setter: the temporary id stays active and
 			// nothing is persisted under the reserved name.
-			expect(provider["viewStateId"]).toBe(provider.viewId)
+			expect(provider["viewStateId"]).toBe(provider["temporaryViewStateId"])
 			expect(mockContext.globalState.get("viewStates")).toBeUndefined()
 			expect(provider["viewLocalState"]).toEqual({})
 
@@ -4115,7 +4116,7 @@ describe("ClineProvider", () => {
 			// The failed id must not stick: the provider keeps its previous (temporary)
 			// id so a later launch retries registration and the load instead of the
 			// guard early-returning for an id that was never persisted.
-			expect(provider["viewStateId"]).toBe(provider.viewId)
+			expect(provider["viewStateId"]).toBe(provider["temporaryViewStateId"])
 
 			// A later retry succeeds once the storage write works again, and the
 			// pre-launch entry lands under the registered id.
@@ -4409,6 +4410,34 @@ describe("ClineProvider", () => {
 			expect(mockContext.globalState.get("viewStates")).toEqual({
 				"stable-sidebar-view": { mode: "stable-mode", updatedAt: 5 },
 			})
+			await provider.dispose()
+		})
+		it("should not move another window's entry when registering a stable id", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			// The temporary key must not be the counter-derived viewId: globalState is shared
+			// across windows and every host restarts the counter at 0, so sidebar-0 is another
+			// window's key as much as it is this one's.
+			expect(provider["viewStateId"]).not.toBe(provider.viewId)
+
+			// An entry written under this view's counter key by another window (or an earlier
+			// session) must stay put instead of being re-keyed onto this window's stable id.
+			mockContext.globalState.update("viewStates", {
+				[provider.viewId]: { mode: "architect", updatedAt: 1 },
+			})
+
+			await provider["setViewStateId"]("stable-sidebar-view")
+
+			expect(mockContext.globalState.get("viewStates")).toEqual({
+				[provider.viewId]: { mode: "architect", updatedAt: 1 },
+			})
+
 			await provider.dispose()
 		})
 
@@ -9636,7 +9665,7 @@ describe("ClineProvider", () => {
 
 			expect(provider["viewLocalState"].mode).toBe("architect")
 			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
-				[provider.viewId]: { mode: "architect" },
+				[provider["temporaryViewStateId"]]: { mode: "architect" },
 			})
 
 			await provider["setViewStateId"]("stable-sidebar-view")
@@ -9644,7 +9673,7 @@ describe("ClineProvider", () => {
 
 			const viewStates = provider.contextProxy.getValue("viewStates") as Record<string, { mode?: string }>
 			expect(viewStates["stable-sidebar-view"]).toMatchObject({ mode: "debugger" })
-			expect(viewStates[provider.viewId]).toBeUndefined()
+			expect(viewStates[provider["temporaryViewStateId"]]).toBeUndefined()
 
 			await provider.dispose()
 		})
@@ -9672,7 +9701,7 @@ describe("ClineProvider", () => {
 
 			const viewStates = provider.contextProxy.getValue("viewStates") as Record<string, { mode?: string }>
 			expect(viewStates["stable-sidebar-view"]).toMatchObject({ mode: "debugger" })
-			expect(viewStates[provider.viewId]).toBeUndefined()
+			expect(viewStates[provider["temporaryViewStateId"]]).toBeUndefined()
 			expect(provider["viewLocalState"].mode).toBe("debugger")
 
 			await provider.dispose()

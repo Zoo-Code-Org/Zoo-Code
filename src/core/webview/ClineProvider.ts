@@ -526,7 +526,8 @@ export class ClineProvider
 
 	/**
 	 * Stable identifier for persisted per-view state keys.
-	 * Defaults to viewId until the webview reports its VS Code-persisted id.
+	 * Defaults to a session-unique temporary key until the webview reports its
+	 * VS Code-persisted id.
 	 */
 	private viewStateId: string
 
@@ -593,7 +594,10 @@ export class ClineProvider
 		// Initialize viewId based on renderContext and monotonically increasing instance identifier for uniqueness.
 		// activeInstances is used for visibility/iteration checks, so we keep tracking instances separately.
 		this.viewId = `${renderContext}-${ClineProvider.nextViewId++}`
-		this.viewStateId = this.viewId
+		// Unique per provider instance: the counter in viewId collides across windows and
+		// reloads that share globalState.
+		this.temporaryViewStateId = `${this.viewId}-${crypto.randomUUID()}`
+		this.viewStateId = this.temporaryViewStateId
 		ClineProvider.activeInstances.add(this)
 		this.currentWorkspacePath = getWorkspacePath()
 		this.pendingEditOperations = new PendingEditOperationStore(
@@ -1040,7 +1044,7 @@ export class ClineProvider
 	 * queue like every other viewStates mutation.
 	 */
 	private async rekeyPersistedViewStateEntry(nextViewStateId: string): Promise<void> {
-		const previousViewStateId = this.viewId
+		const previousViewStateId = this.temporaryViewStateId
 
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
 			// An entry under this name can belong to a different session, because temporary
