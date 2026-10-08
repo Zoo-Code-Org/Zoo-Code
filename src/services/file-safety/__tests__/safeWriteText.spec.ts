@@ -811,6 +811,74 @@ describe("safeWriteText", () => {
 			expect(fs.rename).toHaveBeenCalledTimes(2)
 		})
 
+		it.each(["EPERM", "EACCES", "EBUSY"] as const)(
+			"retries the commit rename for the transient Windows sharing code %s",
+			async (code) => {
+				const targetPath = "/tmp/test-dir/target.txt"
+				vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+				vi.mocked(fs.access).mockImplementation(async (p: fsSync.PathLike) => {
+					if (p === targetPath) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+				})
+				vi.mocked(fsSync.openSync).mockReturnValue(1)
+				const failure = Object.assign(new Error(code + ": transient sharing violation"), { code })
+				vi.mocked(fs.rename).mockRejectedValueOnce(failure)
+
+				await safeWriteText(targetPath, "data", { platform: "win32" })
+
+				expect(fs.rename).toHaveBeenCalledTimes(2)
+			},
+		)
+
+		it("gives up after five retries and propagates the original rename error", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fs.access).mockImplementation(async (p: fsSync.PathLike) => {
+				if (p === targetPath) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			})
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const ebusy = Object.assign(new Error("EBUSY: resource busy or locked"), { code: "EBUSY" })
+			vi.mocked(fs.rename).mockRejectedValue(ebusy)
+
+			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toBe(ebusy)
+
+			// The initial attempt plus _RENAME_RETRY_ATTEMPTS (5), then the original error.
+			expect(fs.rename).toHaveBeenCalledTimes(6)
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		})
+
+		it("creates the staging dir when lstatSync reports it absent on first use", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+			// First lstat (the guard) sees no staging dir at all; the post-create re-check does.
+			vi.mocked(fsSync.lstatSync)
+				.mockImplementationOnce(() => {
+					throw enoent
+				})
+				.mockImplementation(() => _dirStats())
+
+			await safeWriteText(targetPath, "data", { platform: "linux" })
+
+			// realpath is mocked to return the literal path, so the SUT never resolves it.
+			expect(fsSync.mkdirSync).toHaveBeenCalledWith(_stagingDir(path.dirname(targetPath)), {
+				recursive: true,
+				mode: 0o700,
+			})
+			expect(fs.rename).toHaveBeenCalled()
+		})
+
+		it("rejects when the staging path is replaced between the guard and the re-check", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			// Guard: a real directory. Re-check after mkdirSync: a symlink planted in between.
+			vi.mocked(fsSync.lstatSync).mockReturnValueOnce(_dirStats()).mockReturnValueOnce(_linkStats())
+
+			const name = await _rejectionName(safeWriteText(targetPath, "data", { platform: "linux" }))
+			expect(name).toBe("UnsafeStagingDirectoryError")
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
+
 		it("does not retry a rename failure on a platform without sharing violations", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
