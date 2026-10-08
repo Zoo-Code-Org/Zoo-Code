@@ -961,4 +961,74 @@ describe("safeWriteJson", () => {
 		expect(entries).not.toContain("scope-missing-parent")
 		expect(entries.filter((entry) => entry.endsWith(".lock") || entry.includes(".new_"))).toEqual([])
 	})
+
+	// A scope that cannot be canonicalized must not fall back to a lexical root: a partly
+	// lexical scope can disagree with the canonicalized publish target, which is exactly the
+	// disagreement the confinement check exists to prevent. The errno has to reach the caller.
+	test("propagates a non-ENOENT failure to canonicalize the confined scope instead of guessing a lexical root", async () => {
+		const scope = path.join(tempDir, "unresolvable-scope")
+		const target = path.join(scope, "mcp.json")
+		await fs.mkdir(scope)
+
+		const realpathSpy = vi.spyOn(fs, "realpath").mockImplementation(async (candidate) => {
+			if (String(candidate) === scope) {
+				throw Object.assign(new Error("EACCES: permission denied, realpath"), { code: "EACCES" })
+			}
+			return String(candidate)
+		})
+
+		try {
+			await expect(safeWriteJson(target, { mcpServers: {} }, { confineTo: scope })).rejects.toThrow(
+				"EACCES: permission denied, realpath",
+			)
+
+			// Nothing was published and nothing was staged for a later commit: the scope check
+			// refused before any filesystem side effect of the write.
+			await expect(fs.access(target)).rejects.toThrow()
+			expect(vi.mocked(fs.rename).mock.calls.filter(([, to]) => String(to) === target)).toEqual([])
+			expect(
+				vi.mocked(fs.mkdir).mock.calls.filter(([dir]) => String(dir).startsWith(scope + path.sep)),
+			).toEqual([])
+		} finally {
+			realpathSpy.mockRestore()
+		}
+	})
+
+	// The same rule one level down. When the scope does not exist yet, the walk to the nearest
+	// existing ancestor can itself hit a non-ENOENT errno (a symlink loop above the scope is
+	// the realistic shape). Continuing that walk would resolve the scope from a HIGHER
+	// ancestor and silently widen it, so the errno has to stop the write.
+	test("propagates a non-ENOENT failure from the nearest-ancestor scope walk", async () => {
+		const missingScopeParent = path.join(tempDir, "walk-scope")
+		const scope = path.join(missingScopeParent, "nested")
+		const target = path.join(scope, "mcp.json")
+
+		const realpathSpy = vi.spyOn(fs, "realpath").mockImplementation(async (candidate) => {
+			const given = String(candidate)
+			if (given === scope) {
+				throw Object.assign(new Error("ENOENT: no such file or directory, realpath"), { code: "ENOENT" })
+			}
+			if (given === missingScopeParent) {
+				throw Object.assign(new Error("ELOOP: too many symbolic links encountered, realpath"), {
+					code: "ELOOP",
+				})
+			}
+			return given
+		})
+
+		try {
+			await expect(safeWriteJson(target, { mcpServers: {} }, { confineTo: scope })).rejects.toThrow(
+				"ELOOP: too many symbolic links encountered, realpath",
+			)
+
+			await expect(fs.access(target)).rejects.toThrow()
+			expect(
+				vi
+					.mocked(fs.mkdir)
+					.mock.calls.filter(([dir]) => String(dir).startsWith(missingScopeParent + path.sep)),
+			).toEqual([])
+		} finally {
+			realpathSpy.mockRestore()
+		}
+	})
 })
