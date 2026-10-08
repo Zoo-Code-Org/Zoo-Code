@@ -323,6 +323,46 @@ export const openClineInNewTab = async ({
 	}
 }
 
+/**
+ * Undo a tab creation that failed part way through. A ClineProvider that was constructed
+ * but never resolved stays registered in ClineProvider.activeInstances with its listeners
+ * attached, and setPanel may already have pointed the tracked tab ref at a panel nobody
+ * owns - so every later "Open in editor" either reuses a dead panel or builds a
+ * second provider for the same view. Each step is awaited in its own try/catch so one
+ * failing cleanup cannot strand the other, and the tracked ref is cleared only while it
+ * still names this panel, so a replacement created in the meantime survives.
+ */
+async function disposeFailedTabCreation(
+	provider: ClineProvider,
+	panel: vscode.WebviewPanel | undefined,
+	outputChannel: vscode.OutputChannel,
+	): Promise<void> {
+	const describe = (e: unknown) => (e instanceof Error ? e.message : String(e))
+	const cleanupFailures: string[] = []
+	try {
+		await provider.dispose()
+	} catch (cleanupError: unknown) {
+		cleanupFailures.push(`provider: ${describe(cleanupError)}`)
+	}
+
+	if (panel) {
+		if (tabPanel === panel) {
+			setPanel(undefined, "tab")
+		}
+		try {
+			panel.dispose()
+		} catch (cleanupError: unknown) {
+			cleanupFailures.push(`panel: ${describe(cleanupError)}`)
+		}
+	}
+
+	if (cleanupFailures.length > 0) {
+		outputChannel.appendLine(
+			`[openClineInNewTab] Tab creation failed and cleanup was incomplete (${cleanupFailures.join("; ")}); a leaked provider or panel may remain.`,
+		)
+	}
+}
+
 // The unserialized tab-creation body. Only openClineInNewTab may call it,
 // after it has stored the shared in-flight promise.
 const createTabPanelUnlocked = async ({
@@ -371,74 +411,84 @@ const createTabPanelUnlocked = async ({
 		webviewFocusTracker,
 		mdmService,
 	)
-	const lastCol = Math.max(...vscode.window.visibleTextEditors.map((editor) => editor.viewColumn || 0))
+	// Track the panel outside the try so the cleanup can reach it even when the creation
+	// failed before or while the panel was being built.
+	let newPanel: vscode.WebviewPanel | undefined
+	try {
+		const lastCol = Math.max(...vscode.window.visibleTextEditors.map((editor) => editor.viewColumn || 0))
 
-	// Check if there are any visible text editors, otherwise open a new group
-	// to the right.
-	const hasVisibleEditors = vscode.window.visibleTextEditors.length > 0
+		// Check if there are any visible text editors, otherwise open a new group
+		// to the right.
+		const hasVisibleEditors = vscode.window.visibleTextEditors.length > 0
 
-	if (!hasVisibleEditors) {
-		await vscode.commands.executeCommand("workbench.action.newGroupRight")
+		if (!hasVisibleEditors) {
+			await vscode.commands.executeCommand("workbench.action.newGroupRight")
+		}
+
+		const targetCol = hasVisibleEditors ? Math.max(lastCol + 1, 1) : vscode.ViewColumn.Two
+
+		newPanel = vscode.window.createWebviewPanel(ClineProvider.tabPanelId, "Zoo Code", targetCol, {
+			enableScripts: true,
+			retainContextWhenHidden: true,
+			localResourceRoots: [context.extensionUri],
+		})
+
+		// Save as tab type panel.
+		// Stryker disable next-line StringLiteral: setPanel branches only on type === "sidebar", so any other literal routes to the identical tab-ref assignment
+		setPanel(newPanel, "tab")
+
+		// TODO: Use better svg icon with light and dark variants (see
+		// https://stackoverflow.com/questions/58365687/vscode-extension-iconpath).
+		newPanel.iconPath = {
+			light: vscode.Uri.joinPath(context.extensionUri, "assets", "icons", "panel_light.png"),
+			dark: vscode.Uri.joinPath(context.extensionUri, "assets", "icons", "panel_dark.png"),
+		}
+
+		await tabProvider.resolveWebviewView(newPanel)
+
+		// Add listener for visibility changes to notify webview
+		newPanel.onDidChangeViewState(
+			(e) => {
+				const panel = e.webviewPanel
+				// Re-point the tracked tab ref at the panel the user is actually
+				// looking at: several tab panels can stay visible at once, but
+				// only the active one is the current tab, and the title-bar
+				// commands must resolve that instance, not the last created one.
+				if (panel.active) {
+					// Stryker disable next-line StringLiteral: setPanel only distinguishes "sidebar"; any other value routes to the tab-ref assignment
+					setPanel(panel, "tab")
+				}
+				if (panel.visible) {
+					panel.webview.postMessage({ type: "action", action: "didBecomeVisible" }) // Use the same message type as in SettingsView.tsx
+				}
+			},
+			null, // First null is for `thisArgs`
+			context.subscriptions, // Register listener for disposal
+		)
+
+		// Handle panel closing events: clear the tracked ref only if this panel
+		// is still the tracked one, so a late disposal of an already-replaced
+		// panel cannot clobber the replacement's ref.
+		newPanel.onDidDispose(
+			() => {
+				if (tabPanel === newPanel) {
+					// Stryker disable next-line StringLiteral: setPanel branches only on type === "sidebar", so any other literal routes to the identical tab-ref assignment
+					setPanel(undefined, "tab")
+				}
+			},
+			null,
+			context.subscriptions, // Also register dispose listener
+		)
+
+		// Lock the editor group so clicking on files doesn't open them over the panel.
+		await delay(100)
+		await vscode.commands.executeCommand("workbench.action.lockEditorGroup")
+
+		return tabProvider
+	} catch (error: unknown) {
+		// Nothing that half-built this tab is safe to leave behind: see
+		// disposeFailedTabCreation. The original failure is what the caller must see.
+		await disposeFailedTabCreation(tabProvider, newPanel, outputChannel)
+		throw error
 	}
-
-	const targetCol = hasVisibleEditors ? Math.max(lastCol + 1, 1) : vscode.ViewColumn.Two
-
-	const newPanel = vscode.window.createWebviewPanel(ClineProvider.tabPanelId, "Zoo Code", targetCol, {
-		enableScripts: true,
-		retainContextWhenHidden: true,
-		localResourceRoots: [context.extensionUri],
-	})
-
-	// Save as tab type panel.
-	// Stryker disable next-line StringLiteral: setPanel branches only on type === "sidebar", so any other literal routes to the identical tab-ref assignment
-	setPanel(newPanel, "tab")
-
-	// TODO: Use better svg icon with light and dark variants (see
-	// https://stackoverflow.com/questions/58365687/vscode-extension-iconpath).
-	newPanel.iconPath = {
-		light: vscode.Uri.joinPath(context.extensionUri, "assets", "icons", "panel_light.png"),
-		dark: vscode.Uri.joinPath(context.extensionUri, "assets", "icons", "panel_dark.png"),
-	}
-
-	await tabProvider.resolveWebviewView(newPanel)
-
-	// Add listener for visibility changes to notify webview
-	newPanel.onDidChangeViewState(
-		(e) => {
-			const panel = e.webviewPanel
-			// Re-point the tracked tab ref at the panel the user is actually
-			// looking at: several tab panels can stay visible at once, but
-			// only the active one is the current tab, and the title-bar
-			// commands must resolve that instance, not the last created one.
-			if (panel.active) {
-				// Stryker disable next-line StringLiteral: setPanel only distinguishes "sidebar"; any other value routes to the tab-ref assignment
-				setPanel(panel, "tab")
-			}
-			if (panel.visible) {
-				panel.webview.postMessage({ type: "action", action: "didBecomeVisible" }) // Use the same message type as in SettingsView.tsx
-			}
-		},
-		null, // First null is for `thisArgs`
-		context.subscriptions, // Register listener for disposal
-	)
-
-	// Handle panel closing events: clear the tracked ref only if this panel
-	// is still the tracked one, so a late disposal of an already-replaced
-	// panel cannot clobber the replacement's ref.
-	newPanel.onDidDispose(
-		() => {
-			if (tabPanel === newPanel) {
-				// Stryker disable next-line StringLiteral: setPanel branches only on type === "sidebar", so any other literal routes to the identical tab-ref assignment
-				setPanel(undefined, "tab")
-			}
-		},
-		null,
-		context.subscriptions, // Also register dispose listener
-	)
-
-	// Lock the editor group so clicking on files doesn't open them over the panel.
-	await delay(100)
-	await vscode.commands.executeCommand("workbench.action.lockEditorGroup")
-
-	return tabProvider
 }
