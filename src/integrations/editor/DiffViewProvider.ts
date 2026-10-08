@@ -44,6 +44,12 @@ export class DiffViewProvider {
 	private documentWasPinned = false
 	private relPath?: string
 	private teardownInFlight: Promise<void> | undefined
+	// Counts the teardown passes this provider has actually run; a caller that awaited an
+	// in-flight pass does not count. A save uses it to tell its own post-publish cleanup apart
+	// from a teardown a cancellation or disposal started underneath it: once any teardown has
+	// begun the session is being taken down, and a second pass over the same buffers and tabs is
+	// duplicate cleanup.
+	private teardownPasses = 0
 	private newContent?: string
 	private activeDiffEditor?: vscode.TextEditor
 	private fadedOverlayController?: DecorationController
@@ -129,6 +135,9 @@ export class DiffViewProvider {
 		const fileExists = this.editType === "modify"
 		const absolutePath = path.resolve(this.cwd, relPath)
 		this.isEditing = true
+		// A new diff session may reuse this provider after a cancelled one, so the teardown marker
+		// starts clean: otherwise every later save would report itself cancelled without publishing.
+		this.teardownPasses = 0
 
 		// Snapshot the authorization as it stands before this preview touches the
 		// registry; saveChanges(..., "edit") restores it below.
@@ -788,35 +797,49 @@ export class DiffViewProvider {
 		// active editor even with preserveFocus, so a listener still attached would
 		// record this programmatic revert as a user touch and keep the transient
 		// tab open against the auto-close preference.
-		this.disposeActiveEditorListener()
-		this.cancelDeferredScroll()
-
-		// Revert only while the buffer is still exactly what the guard published.
-		// Keystrokes typed during the publish would be discarded by a revert, so a
-		// buffer that moved on stays dirty: the close helpers skip dirty tabs and
-		// the user's text survives in the editor.
-		if (updatedDocument.isDirty && updatedDocument.getText() === editedContent) {
-			await this.revertDocument(updatedDocument)
+		// A cancellation or disposal that reached teardown while the guarded publish was awaiting
+		// already owns this session: that teardown closed the diff views and applied the auto-close
+		// preferences. Running this save's own post-publish cleanup on top of it would tear the same
+		// session down twice, so the save reports that it did not complete a save flow of its own.
+		if (this.teardownPasses > 0) {
+			return { newProblemsMessage: undefined, userEdits: undefined, finalContent: undefined }
 		}
 
-		await this.closeAllDiffViews()
+		// The post-publish cleanup is a teardown pass like any other, so it goes through the same
+		// serialization revertChanges() uses: a cancellation that lands while it runs waits for it
+		// instead of closing the same tabs underneath it.
+		await this.runTeardown(async () => {
+			this.disposeActiveEditorListener()
+			this.cancelDeferredScroll()
 
-		// Read auto-close preferences from state; fall back to defaults that
-		// preserve the existing behavior when unset (saveTask was resolved above
-		// for the guarded publish).
-		const saveState = await saveTask?.providerRef.deref()?.getState()
+			// Revert only while the buffer is still exactly what the guard published.
+			// Keystrokes typed during the publish would be discarded by a revert, so a
+			// buffer that moved on stays dirty: the close helpers skip dirty tabs and
+			// the user's text survives in the editor.
+			if (updatedDocument.isDirty && updatedDocument.getText() === editedContent) {
+				await this.revertDocument(updatedDocument)
+			}
 
-		await this.keepOrCloseEditedFile(
-			absolutePath,
-			this.userTouchedDiffEditor,
-			saveState?.autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
-			saveState?.autoCloseZooOpenedFilesAfterUserEdited ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
-			saveState?.autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
-		)
+			await this.closeAllDiffViews()
 
-		// Restore any preview tabs the diff evicted, reconstructing the user's
-		// prior not-yet-edited tab state.
-		await this.restorePreviewTabs()
+			// Read auto-close preferences from state; fall back to defaults that
+			// preserve the existing behavior when unset (saveTask was resolved above
+			// for the guarded publish).
+			const saveState = await saveTask?.providerRef.deref()?.getState()
+
+			await this.keepOrCloseEditedFile(
+				absolutePath,
+				this.userTouchedDiffEditor,
+				saveState?.autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
+				saveState?.autoCloseZooOpenedFilesAfterUserEdited ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
+				saveState?.autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
+			)
+
+			// Restore any preview tabs the diff evicted, reconstructing the user's
+			// prior not-yet-edited tab state.
+			await this.restorePreviewTabs()
+		})
+
 
 		// Getting diagnostics before and after the file edit is a better approach than
 		// automatically tracking problems in real-time. This method ensures we only
@@ -1125,6 +1148,7 @@ export class DiffViewProvider {
 			return
 		}
 		const inFlight = cleanup()
+		this.teardownPasses++
 		this.teardownInFlight = inFlight
 		try {
 			await inFlight
