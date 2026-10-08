@@ -831,6 +831,22 @@ describe("ProviderSettingsManager", () => {
 			)
 		})
 
+		it("rejects a missing profile lookup with the typed not-found error", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: { default: { config: {}, id: "default" } },
+				}),
+			)
+
+			// Callers branch on the type, not the message: deleteProviderProfile treats a missing
+			// profile as an expected condition to prune from the list, and wraps every OTHER
+			// failure as a real error. A generic wrapper here would erase that distinction.
+			await expect(providerSettingsManager.getProfile({ name: "nonexistent" })).rejects.toThrow(
+				ProviderSettingsNotFoundError,
+			)
+		})
+
 		it("should throw error if secrets storage fails", async () => {
 			mockSecrets.get.mockResolvedValue(
 				JSON.stringify({

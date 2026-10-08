@@ -552,8 +552,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(provider["viewLocalState"].mode).toBe("architect")
 			expect(provider.getValues().mode).toBe("architect")
 			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]] ?? {}
-			// Either no entry was ever written for this view or the entry has no mode key;
-			// what must not happen is a persisted pin holding the restored shared mode.
+			// The durable pin must hold THIS view's own pre-switch mode. A persisted entry
+			// carrying the restored shared mode would resurrect the wrong mode on reload and
+			// start the next task here in the wrong mode.
 			expect(persisted.mode).toBe("architect")
 			// The task-history compensation is still the pre-switch mode.
 			expect(updateTaskHistorySpy).toHaveBeenCalled()
