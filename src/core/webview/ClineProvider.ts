@@ -2925,8 +2925,14 @@ export class ClineProvider
 			return
 		}
 
-		await Promise.all(
-			affected.map(async (instance) => {
+		const snapshots = affected.map((instance) => ({
+			instance,
+			previousPin: instance.viewLocalState.currentApiConfigName,
+			previousOverlay: instance.viewLocalState.apiConfiguration,
+		}))
+
+		const results = await Promise.allSettled(
+			snapshots.map(async (snapshot) => {
 				const values: Partial<RooCodeSettings> & Partial<ExtensionState> = {
 					currentApiConfigName: replacementName,
 				}
@@ -2935,35 +2941,36 @@ export class ClineProvider
 					values.apiConfiguration = replacementSettings
 				}
 
-				// Snapshot the affected view's own pin and overlay first. If this re-pin write
-				// fails, the caller rolls the shared stores back and this view's buffer and
-				// durable entry must go back with them, instead of keeping a pin to a profile
-				// that was never deleted.
-				const previousPin = instance.viewLocalState.currentApiConfigName
-				const previousOverlay = instance.viewLocalState.apiConfiguration
-
-				try {
-					// Direct private access: compile-time safe across sibling instances.
-					await instance._saveViewLocalStateFromMutation(values)
-				} catch (error) {
-					try {
-						await instance._saveViewLocalStateFromMutation({
-							currentApiConfigName: previousPin,
-							apiConfiguration: previousOverlay,
-						})
-					} catch (rollbackError) {
-						instance.log(
-							`[rePinViewLocalStateForDeletedProfile] Could not restore the pin for view ${instance.viewId} after a failed re-pin: ${
-								rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-							}`,
-						)
-					}
-					throw error
-				}
-
-				await instance.postStateToWebview()
+				// Direct private access: compile-time safe across sibling instances.
+				await snapshot.instance._saveViewLocalStateFromMutation(values)
+				await snapshot.instance.postStateToWebview()
 			}),
 		)
+
+		const rejected = results.filter(
+			(result): result is PromiseRejectedResult => result.status === "rejected",
+		)
+		if (rejected.length > 0) {
+			// Undo every affected view, not just the failing one: _saveViewLocalStateFromMutation
+			// fills the in-memory buffer before the durable write settles, so even a rejected write
+			// leaves the view re-pointed. Each restore is awaited on its own so one failing restore
+			// cannot skip the next one.
+			for (const snapshot of snapshots) {
+				try {
+					await snapshot.instance._saveViewLocalStateFromMutation({
+						currentApiConfigName: snapshot.previousPin,
+						apiConfiguration: snapshot.previousOverlay,
+					})
+				} catch (rollbackError: unknown) {
+					snapshot.instance.log(
+						`[rePinViewLocalStateForDeletedProfile] Could not restore the pin for view ${snapshot.instance.viewId} after a failed re-pin: ${
+							rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+						}`,
+					)
+				}
+			}
+			throw rejected[0].reason
+		}
 	}
 
 	async updateCustomInstructions(instructions?: string) {
