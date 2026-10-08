@@ -1896,6 +1896,45 @@ const provider = new ClineProvider(
 			await provider.dispose()
 		})
 
+
+		it("rolls the shared viewStates cache back when the storage write rejects", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const previous = { "stable-sidebar-view": { mode: "architect", updatedAt: 1 } }
+			await provider["setViewStateId"]("stable-sidebar-view")
+			// Bracket access rather than a cast: the key literal is not needed, and the
+			// donor type build in this worktree predates the viewStates key.
+			await provider["writePersistedViewStates"](previous)
+
+			// ContextProxy#updateGlobalState fills the in-memory cache BEFORE awaiting
+			// globalState.update, so a rejected write would leave every other view reading a map
+			// that was never committed - and the next write would merge into that phantom state.
+			// Only the first viewStates write fails; the rollback write and other keys pass.
+			const originalUpdate = mockContext.globalState.update.bind(mockContext.globalState)
+			let failed = false
+			const updateSpy = vi.spyOn(mockContext.globalState, "update").mockImplementation(
+				async (key, value) => {
+					if (key === "viewStates" && !failed) {
+						failed = true
+						throw new Error("storage down")
+					}
+					return originalUpdate(key, value)
+				},
+			)
+
+			await expect(provider.saveViewState("mode", "code")).rejects.toThrow("storage down")
+
+			expect(updateSpy).toHaveBeenCalled()
+			// Neither the shared cache nor storage keeps the uncommitted entry.
+			expect(provider["getPersistedViewStates"]()).toEqual(previous)
+			expect(mockContext.globalState.get("viewStates")).toEqual(previous)
+			await provider.dispose()
+		})
 		it("should merge saved fields, drop cleared fields and delete emptied entries", async () => {
 const provider = new ClineProvider(
 				mockContext,
