@@ -750,6 +750,96 @@ describe("openClineInNewTab", () => {
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
 	})
 
+	it("disposes the provider and the panel when a creation step rejects", async () => {
+		const panel = Object.assign({} as vscode.WebviewPanel, {
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn(),
+			dispose: vi.fn(),
+		})
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValueOnce(panel)
+
+		// Fail the LAST creation step: the provider is constructed, the panel is created and
+		// tracked, and the view resolved - exactly the state a later "Open in editor" would
+		// otherwise inherit as a dead tab.
+		const executeCommandMock = vscode.commands.executeCommand as Mock
+		const previousExecute = executeCommandMock.getMockImplementation()
+		executeCommandMock.mockImplementation(async (command: string) => {
+			if (command === "workbench.action.lockEditorGroup") {
+				throw new Error("lock failed")
+			}
+			return previousExecute?.(command)
+		})
+
+		await expect(
+			openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			}),
+		).rejects.toThrow("lock failed")
+
+		// Restore the shared command mock: this file's beforeEach only clears call history,
+		// so a lingering implementation would fail every later tab creation.
+		executeCommandMock.mockRestore()
+
+		// Nothing half-built may stay behind: the provider is disposed (it registers in
+		// ClineProvider.activeInstances with its listeners), the panel is disposed, and the
+		// tracked tab ref no longer points at the orphan panel.
+		const created = vi.mocked(ClineProvider).mock.results[0].value
+		expect(created.dispose).toHaveBeenCalledTimes(1)
+		expect(panel.dispose).toHaveBeenCalledTimes(1)
+		expect(getPanel()).toBeUndefined()
+	})
+
+	it("reports incomplete cleanup when the tab-creation rollback itself fails", async () => {
+		const panel = Object.assign({} as vscode.WebviewPanel, {
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn(),
+			dispose: vi.fn().mockImplementation(() => {
+				throw new Error("panel gone")
+			}),
+		})
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValueOnce(panel)
+		const executeCommandMock = vscode.commands.executeCommand as Mock
+		const previousExecute = executeCommandMock.getMockImplementation()
+		executeCommandMock.mockImplementation(async (command: string) => {
+			if (command === "workbench.action.lockEditorGroup") {
+				// Arm the failing provider cleanup here: the instance exists by now, and this is
+				// the last await before the rollback runs, so the ordering is deterministic.
+				vi.mocked(ClineProvider).mock.results[0].value.dispose = vi
+					.fn()
+					.mockRejectedValue(new Error("dispose hung"))
+				throw new Error("lock failed")
+			}
+			return previousExecute?.(command)
+		})
+
+		// The original failure is still what the caller sees...
+		await expect(
+			openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			}),
+		).rejects.toThrow("lock failed")
+
+		// Restore the shared command mock: this file's beforeEach only clears call history,
+		// so a lingering implementation would fail every later tab creation.
+		executeCommandMock.mockRestore()
+		// ...both cleanup steps were attempted, and the incomplete result is surfaced
+		// rather than swallowed behind the original error.
+		const created = vi.mocked(ClineProvider).mock.results[0].value
+		expect(created.dispose).toHaveBeenCalledTimes(1)
+		expect(panel.dispose).toHaveBeenCalledTimes(1)
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+			expect.stringContaining(
+				"cleanup was incomplete (provider: dispose hung; panel: panel gone)",
+			),
+		)
+	})
+
 	it("re-points the tracked tab ref at the panel that becomes active", async () => {
 		// Panel A is created first and tracked...
 		const panelA = Object.assign({} as vscode.WebviewPanel, {
