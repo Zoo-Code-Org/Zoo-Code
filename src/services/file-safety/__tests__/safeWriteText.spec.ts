@@ -4,7 +4,7 @@ import { execFile } from "child_process"
 import type { ChildProcess } from "child_process"
 import * as path from "path"
 
-import { safeWriteText, type SafeWriteTextOptions } from "../safeWriteText"
+import { resolvePublishTarget, safeWriteText, type SafeWriteTextOptions } from "../safeWriteText"
 
 // The two failure classes are module-private (knip ignores __tests__, so a
 // test-only export would be reported as unused), so tests match them by name.
@@ -1060,5 +1060,50 @@ describe("safeWriteText", () => {
 			// The dump path stays tracked so the finally block removes the file the failed save created.
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl.tmp"))
 		})
+	})
+})
+
+
+describe("resolvePublishTarget symlink cycle (S1)", () => {
+	beforeEach(() => {
+		// This describe sits outside the file's main describe, so it clears the shared
+		// fs stubs itself: the assertions below are about 'never called at all'.
+		vi.mocked(fs.rename).mockClear()
+		vi.mocked(fs.copyFile).mockClear()
+		vi.mocked(fs.unlink).mockClear()
+		vi.mocked(fsSync.openSync).mockClear()
+		vi.mocked(fsSync.writeSync).mockClear()
+	})
+
+	it("raises ELOOP for two dangling links that point at each other, before any staging", async () => {
+		const linkA = path.resolve("/work/a.link")
+		const linkB = path.resolve("/work/b.link")
+
+		// realpath reports ENOENT for a dangling link, so the resolver follows the link text.
+		// Two links that point at each other are both dangling: the visited set is what bounds
+		// the recursion, and the cycle must surface as ELOOP.
+		vi.mocked(fs.realpath).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+		vi.mocked(fs.lstat).mockResolvedValue({ isSymbolicLink: () => true } as unknown as fsSync.Stats)
+		vi.mocked(fs.readlink).mockImplementation(async (target) => (String(target) === linkA ? linkB : linkA))
+
+		await expect(resolvePublishTarget(linkA)).rejects.toMatchObject({ code: "ELOOP" })
+
+		// Nothing may be staged or published for a path whose referent cannot be resolved.
+		expect(vi.mocked(fs.rename)).not.toHaveBeenCalled()
+		expect(vi.mocked(fsSync.openSync)).not.toHaveBeenCalled()
+		expect(vi.mocked(fs.copyFile)).not.toHaveBeenCalled()
+	})
+
+	it("surfaces ELOOP through safeWriteText without touching the target", async () => {
+		const linkA = path.resolve("/work/a.link")
+		const linkB = path.resolve("/work/b.link")
+		vi.mocked(fs.realpath).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+		vi.mocked(fs.lstat).mockResolvedValue({ isSymbolicLink: () => true } as unknown as fsSync.Stats)
+		vi.mocked(fs.readlink).mockImplementation(async (target) => (String(target) === linkA ? linkB : linkA))
+
+		await expect(safeWriteText(linkA, "payload")).rejects.toMatchObject({ code: "ELOOP" })
+
+		expect(vi.mocked(fs.rename)).not.toHaveBeenCalled()
+		expect(vi.mocked(fsSync.openSync)).not.toHaveBeenCalled()
 	})
 })
