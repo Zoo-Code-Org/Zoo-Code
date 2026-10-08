@@ -1,4 +1,5 @@
 import * as fs from "fs/promises"
+import type { BigIntStats } from "fs"
 import * as fsSync from "fs"
 import { execFile } from "child_process"
 import type { ChildProcess } from "child_process"
@@ -12,6 +13,7 @@ import {
 	StagingPathError,
 	TargetExistsError,
 	TargetMovedError,
+	AncestorReplacedError,
 	type SafeWriteTextOptions,
 } from "../safeWriteText"
 
@@ -25,6 +27,7 @@ vi.mock("fs/promises", () => ({
 	unlink: vi.fn(),
 	rmdir: vi.fn(),
 	realpath: vi.fn(),
+	stat: vi.fn(),
 	lstat: vi.fn(),
 	readlink: vi.fn(),
 }))
@@ -86,6 +89,16 @@ function mockDefaults(): void {
 	// Staged-file default: a regular file, not a link, so a caller-supplied
 	// tempPath passes the location and file-type check by default.
 	vi.mocked(fs.lstat).mockResolvedValue(_fileStats(false))
+	// Ancestor-identity pin: default to one stable directory identity so the pin
+	// passes unless a test overrides it.
+	vi.mocked(fs.stat).mockResolvedValue(_dirIdentity(100n))
+}
+
+// BigIntStats stand-in for the ancestor pin: the SUT reads only dev/ino off it.
+// BigIntStats is class-backed with no public constructor, so this is a
+// last-resort double assertion (test-local, per AGENTS.md).
+function _dirIdentity(ino: bigint): BigIntStats {
+	return { dev: 1n, ino } as unknown as BigIntStats
 }
 function _stats(mode: number): fsSync.Stats {
 	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats
@@ -1116,6 +1129,70 @@ describe("safeWriteText", () => {
 		expect(fs.link).not.toHaveBeenCalled()
 		// Nothing was staged either: the check runs before the staging directory is made.
 		expect(fs.mkdir).not.toHaveBeenCalled()
+	})
+
+	it("refuses to publish when an authorized parent directory was replaced after the check", async () => {
+		// expectedResolvedPath pins the NAME being published, so it cannot notice the
+		// directory the name lives in being swapped for another one (a link to outside the
+		// workspace looks exactly like this). The recorded ancestor identities are what
+		// catch it, and the commit is aborted before anything is moved into place.
+		const dir = path.resolve("/tmp/test-dir")
+		const targetPath = path.join(dir, "target.txt")
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.rename).mockClear()
+		vi.mocked(fs.link).mockClear()
+		vi.mocked(fs.stat).mockResolvedValue(_dirIdentity(999n)) // was 100n when authorized
+
+		const error = await safeWriteText(targetPath, "new data", {
+			expectedResolvedPath: targetPath,
+			expectedAncestorIdentities: [{ dir, dev: 1n, ino: 100n }],
+			platform: "linux",
+		}).catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(AncestorReplacedError)
+		expect((error as AncestorReplacedError).directory).toBe(dir)
+		expect((error as AncestorReplacedError).message).toContain("no longer the directory that was authorized")
+		expect(fs.rename).not.toHaveBeenCalled()
+		expect(fs.link).not.toHaveBeenCalled()
+		// The staged copy is cleaned up rather than left beside the target.
+		expect(
+			vi.mocked(fs.unlink).mock.calls.some((call) => String(call[0]).includes("safeWriteText")),
+		).toBe(true)
+	})
+
+	it("publishes when the recorded ancestor identities are unchanged", async () => {
+		// The pin must not turn every guarded write into a false rejection: an unchanged
+		// directory chain publishes normally.
+		const dir = path.resolve("/tmp/test-dir")
+		const targetPath = path.join(dir, "target.txt")
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.stat).mockResolvedValue(_dirIdentity(100n))
+
+		await safeWriteText(targetPath, "new data", {
+			expectedResolvedPath: targetPath,
+			expectedAncestorIdentities: [{ dir, dev: 1n, ino: 100n }],
+			platform: "linux",
+		})
+
+		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText"), targetPath)
+	})
+
+	it("refuses the publish when an authorized ancestor disappears before the commit", async () => {
+		const dir = path.resolve("/tmp/test-dir")
+		const targetPath = path.join(dir, "target.txt")
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.stat).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+		const error = await safeWriteText(targetPath, "new data", {
+			expectedResolvedPath: targetPath,
+			expectedAncestorIdentities: [{ dir, dev: 1n, ino: 100n }],
+			platform: "linux",
+		}).catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(AncestorReplacedError)
+		expect((error as AncestorReplacedError).message).toContain("no longer exists")
+		expect(fs.rename).not.toHaveBeenCalled()
+		expect(fs.link).not.toHaveBeenCalled()
 	})
 })
 

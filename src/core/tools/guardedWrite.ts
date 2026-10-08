@@ -24,7 +24,7 @@
 import * as fs from "fs/promises"
 import * as path from "path"
 
-import { safeWriteText, TargetExistsError } from "../../services/file-safety/safeWriteText"
+import { safeWriteText, TargetExistsError, type DirectoryIdentity } from "../../services/file-safety/safeWriteText"
 import { computeVersionToken } from "../../utils/versionToken"
 import { withFileLock } from "../../utils/fileLock"
 import { resolveLockKey } from "../../services/file-safety/safeWriteText"
@@ -153,9 +153,9 @@ export async function createIfAbsent(
 	// Re-checked under the lock, immediately before the publish: the path was authorized
 	// when it was queued, but a symlink can be swapped in while the link waited on the
 	// FIFO chain or on this lock.
-	// Resolves the path again and returns the authorized target, so the publish
-	// can pin its own resolution to it.
-	verifyTarget?: () => Promise<string | undefined>,
+	// Resolves the path again and returns the authorized target plus the directory
+	// identities it was authorized against, so the publish can pin both.
+	verifyTarget?: () => Promise<AuthorizedTarget>,
 ): Promise<string | undefined> {
 	// Lock the key every other writer to this file uses: the resolved publish
 	// target, so a symlink alias and its referent share one lock.
@@ -170,7 +170,7 @@ export async function createIfAbsent(
 			}
 			// Immediately before publication starts.
 			cancelledBeforePublish(absolutePath, displayPath, isCancelled)
-			const authorizedTarget = await verifyTarget?.()
+			const authorized = await verifyTarget?.()
 			// No-replace commit. The access check above only proves absence at the moment
 			// it runs: a writer that never takes the advisory lock can create the target
 			// before this publish, and a plain rename would silently replace that newer
@@ -179,7 +179,8 @@ export async function createIfAbsent(
 			try {
 				await safeWriteText(absolutePath, content, {
 					failIfExist: true,
-					expectedResolvedPath: authorizedTarget,
+					expectedResolvedPath: authorized?.target,
+					expectedAncestorIdentities: authorized?.ancestors,
 				})
 			} catch (error: unknown) {
 				if (error instanceof TargetExistsError) {
@@ -237,9 +238,9 @@ export async function replaceIfVersion(
 	// Re-checked under the lock, immediately before the publish: the path was authorized
 	// when it was queued, but a symlink can be swapped in while the link waited on the
 	// FIFO chain or on this lock.
-	// Resolves the path again and returns the authorized target, so the publish
-	// can pin its own resolution to it.
-	verifyTarget?: () => Promise<string | undefined>,
+	// Resolves the path again and returns the authorized target plus the directory
+	// identities it was authorized against, so the publish can pin both.
+	verifyTarget?: () => Promise<AuthorizedTarget>,
 ): Promise<string | undefined> {
 	// Lock the key every other writer to this file uses: the resolved publish
 	// target, so a symlink alias and its referent share one lock.
@@ -273,9 +274,10 @@ export async function replaceIfVersion(
 		if (currentVersion === expectedVersion) {
 			// Immediately before publication starts.
 			cancelledBeforePublish(absolutePath, displayPath, isCancelled)
-			const authorizedTarget = await verifyTarget?.()
+			const authorized = await verifyTarget?.()
 			await safeWriteText(absolutePath, content, {
-				expectedResolvedPath: authorizedTarget,
+				expectedResolvedPath: authorized?.target,
+				expectedAncestorIdentities: authorized?.ancestors,
 			})
 			// Read the new token under the same lock, otherwise a peer lock-using
 			// writer can publish in the gap and the caller records that writer's
@@ -347,30 +349,29 @@ function assertInsideWorkspace(task: Task, absolutePath: string, displayPath: st
 }
 
 /**
- * The lexical check above cannot see a symlink whose referent leaves the
- * workspace, and the publish resolves through that link. Resolve both sides the
- * same way and compare again. Only a missing path is walked up to the nearest
- * existing ancestor (a create has no target yet); any other realpath failure is
- * treated as "cannot be authorized" and rejected, and a workspace that cannot be
- * resolved at all falls back to the lexical decision already made.
+ * The lexical check above cannot see a symlink whose referent leaves the workspace, and
+ * the publish resolves through that link. Resolve both sides the same way and compare
+ * again. Only a missing TARGET is walked up to the nearest existing ancestor (a create
+ * has no target yet); a workspace that cannot be resolved - for any reason, ENOENT
+ * included - is rejected rather than falling back to the lexical decision, because the
+ * lexical decision is exactly what a symlink defeats. An unresolvable root means there
+ * is no canonical container to check against, so the write is refused instead of
+ * published on a weaker guarantee.
+ *
+ * The check also records the identity (dev, ino) of every directory it walked from the
+ * workspace root down to the target's parent. expectedResolvedPath pins the NAME that
+ * gets published; it cannot notice a parent directory being swapped for a link. The pin
+ * lets the guard notice that.
  */
 async function assertCanonicalInsideWorkspace(
 	task: Task,
 	absolutePath: string,
 	displayPath: string,
-): Promise<string | undefined> {
+): Promise<AuthorizedTarget> {
 	let workspaceRoot: string
 	try {
 		workspaceRoot = await fs.realpath(path.resolve(task.cwd))
-	} catch (error: unknown) {
-		if (errorCode(error) === "ENOENT") {
-			// The workspace itself is not on disk (a deleted workspace, or a fixture cwd in
-			// tests): there is no root to contain the write in, and the publish would fail on
-			// the missing directory anyway. Anything else - EACCES, ELOOP - means the root
-			// exists but cannot be resolved, and a symlink inside the workspace would then
-			// never be checked, so this fails closed rather than falling back to lexical only.
-			return undefined
-		}
+	} catch {
 		throw new GuardRejectedError(
 			"Workspace could not be resolved, so this write cannot be checked against it -- retry with a path inside the workspace.",
 			displayPath,
@@ -383,9 +384,43 @@ async function assertCanonicalInsideWorkspace(
 			displayPath,
 		)
 	}
-	// Hand the authorized target back: the publish resolves the path again, and the
-	// caller pins that second resolution to this one.
-	return target
+	return { target, ancestors: await ancestorIdentities(workspaceRoot, target) }
+}
+
+/**
+ * The directories between the canonical workspace root and the target's parent, each
+ * with the identity it had when the write was authorized. A component that does not
+ * exist yet (a create into a directory that will be made by the publish) has no
+ * identity to pin, so it is skipped; every component that DID exist is pinned.
+ */
+async function ancestorIdentities(root: string, target: string): Promise<DirectoryIdentity[]> {
+	const parent = path.dirname(target)
+	const relative = path.relative(root, parent)
+	const chain: string[] = [root]
+	if (relative && relative !== "." && !relative.startsWith(".." + path.sep)) {
+		let cursor = root
+		for (const segment of relative.split(path.sep)) {
+			cursor = path.join(cursor, segment)
+			chain.push(cursor)
+		}
+	}
+	const pinned: DirectoryIdentity[] = []
+	for (const dir of chain) {
+		const stat = await fs.stat(dir, { bigint: true }).catch(() => undefined)
+		if (stat) {
+			pinned.push({ dir, dev: stat.dev, ino: stat.ino })
+		}
+	}
+	return pinned
+}
+
+/**
+ * What the canonical containment check decided, and the directory identities that
+ * decision was made about. The publish has to be refused when either drifts.
+ */
+export type AuthorizedTarget = {
+	target: string
+	ancestors: DirectoryIdentity[]
 }
 
 async function realpathNearest(target: string, displayPath: string): Promise<string> {
@@ -458,20 +493,53 @@ export async function guardedWrite(
 	// user-specific absolute path into the model's context.
 	const displayPath = relPathOrAbsolute
 
+	// Captured before the FIRST await in this function. The chain is FIFO, so this write
+	// may not run until long after it was submitted, and task.abort can be raised and then
+	// cleared by a resume in the meantime; the generation is what tells the two apart.
+	// Capturing it after the containment awaits would leave a cancel that lands during
+	// those awaits invisible: the write would capture the POST-cancel generation, sail
+	// through the dequeue comparison, and publish work that belongs to the cancelled run.
+	const cancellationGeneration = task.cancellationGeneration
+	if (task.abort) {
+		throw new GuardRejectedError(
+			"Task was cancelled before this write ran -- the queued publish is not performed.",
+			displayPath,
+		)
+	}
+
 	// Containment is decided before the link is queued: a write that would land
 	// outside the workspace must not take a slot on the FIFO chain, take the file
 	// lock, or touch the filesystem at all.
 	assertInsideWorkspace(task, absolutePath, displayPath)
 	// Bound to the task and the caller's spelling so the guard can re-run the same
-	// decision under the lock, immediately before the publish.
-	const verifyTarget = () => assertCanonicalInsideWorkspace(task, absolutePath, displayPath)
+	// decision under the lock, immediately before the publish. The first call records
+	// what was authorized; every later call has to agree with it, or the publish is
+	// acting on a decision that was never made about the file now at this name.
+	let pin: AuthorizedTarget | undefined
+	const verifyTarget = async (): Promise<AuthorizedTarget> => {
+		const fresh = await assertCanonicalInsideWorkspace(task, absolutePath, displayPath)
+		if (!pin) {
+			pin = fresh
+			return fresh
+		}
+		if (fresh.target !== pin.target) {
+			throw new GuardRejectedError(
+				"Path changed between the containment check and the publish -- nothing was written.",
+				displayPath,
+			)
+		}
+		for (const expected of pin.ancestors) {
+			const current = await fs.stat(expected.dir, { bigint: true }).catch(() => undefined)
+			if (!current || current.dev !== expected.dev || current.ino !== expected.ino) {
+				throw new GuardRejectedError(
+					"A directory on the authorized path was replaced after this write was checked -- nothing was written.",
+					displayPath,
+				)
+			}
+		}
+		return fresh
+	}
 	await verifyTarget()
-
-	// Captured BEFORE the link is queued. The chain is FIFO, so this write may not run
-	// until long after it was submitted; task.abort can be raised and then cleared by a
-	// resume in the meantime, which would otherwise let a write that belongs to a
-	// cancelled run publish once its turn arrives.
-	const cancellationGeneration = task.cancellationGeneration
 
 	return enqueue(absolutePath, async () => {
 		// Cancellation is checked when the link is dequeued, not when it was enqueued:

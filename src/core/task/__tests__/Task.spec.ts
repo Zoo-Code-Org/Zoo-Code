@@ -3208,6 +3208,54 @@ describe("Cline", () => {
 			).toHaveLength(1)
 		})
 
+		it("advances the cancellation generation on each cancellation and keeps it advanced across a resume", async () => {
+			// The S4a write guard compares the cancellation generation a queued write
+			// captured against the generation at publish time. The abort FLAG cannot do that
+			// on its own: resumeAfterDelegation() clears it, and a write that belongs to the
+			// cancelled run would then publish as if nothing had been cancelled. Only the
+			// generation keeps the two runs apart, so it must never go backwards.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
+
+			expect(task.cancellationGeneration).toBe(0)
+
+			await task.abortTask()
+			expect(task.abort).toBe(true)
+			expect(task.cancellationGeneration).toBe(1)
+
+			await task.resumeAfterDelegation()
+			expect(task.abort).toBe(false)
+			expect(task.cancellationGeneration).toBe(1)
+
+			await task.abortTask()
+			expect(task.abort).toBe(true)
+			expect(task.cancellationGeneration).toBe(2)
+		})
+
+		it("advances the cancellation generation on disposal, without any explicit cancel", async () => {
+			// A task torn down by the host never sees abortTask(). Disposal has to raise the
+			// same generation, or a write still parked on its path chain publishes after the
+			// task is gone.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(task.cancellationGeneration).toBe(0)
+
+			await task.dispose()
+
+			expect(task.abort).toBe(true)
+			expect(task.cancellationGeneration).toBe(1)
+		})
+
 		it("flushes pending state before TaskAborted and disposal while queue state is intact", async () => {
 			const task = new Task({
 				provider: mockProvider,
