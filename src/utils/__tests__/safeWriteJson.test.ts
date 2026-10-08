@@ -733,7 +733,17 @@ describe("safeWriteJson", () => {
 		const asFile = { isSymbolicLink: () => false } as unknown as fsSyncActual.Stats
 		// The first lstat (the refusal) sees a regular file; the re-check after
 		// resolvePublishTarget sees the link a local writer installed in between.
-		vi.spyOn(fs, "lstat").mockResolvedValueOnce(asFile).mockResolvedValueOnce(asLink)
+		// Path-aware rather than call-order: the ancestor walk also calls lstat, so a
+		// mockResolvedValueOnce chain would be consumed by the wrong component. The first look at
+		// the target sees a regular file; the re-check after resolvePublishTarget sees the link.
+		let targetLooks = 0
+		vi.spyOn(fs, "lstat").mockImplementation(((p: unknown) => {
+			if (String(p) === linkPath) {
+				targetLooks++
+				return Promise.resolve(targetLooks === 1 ? asFile : asLink)
+			}
+			return Promise.resolve(asFile)
+		}) as unknown as typeof fs.lstat)
 
 		await expect(
 			safeWriteJson(linkPath, { leaked: true }, { refuseSymlinkTarget: true }),
@@ -752,10 +762,16 @@ describe("safeWriteJson", () => {
 		const asFile = { isSymbolicLink: () => false } as unknown as fsSyncActual.Stats
 		// The swap happens after resolution and while the write is already under the
 		// lock: the in-lock re-check must stop the commit rename.
-		vi.spyOn(fs, "lstat")
-			.mockResolvedValueOnce(asFile)
-			.mockResolvedValueOnce(asFile)
-			.mockResolvedValueOnce(asLink)
+		// Same path-aware scripting: the swap happens after resolution and while the write is
+		// already under the lock, so the third look at the target is the one that must be a link.
+		let lateLooks = 0
+		vi.spyOn(fs, "lstat").mockImplementation(((p: unknown) => {
+			if (String(p) === linkPath) {
+				lateLooks++
+				return Promise.resolve(lateLooks <= 2 ? asFile : asLink)
+			}
+			return Promise.resolve(asFile)
+		}) as unknown as typeof fs.lstat)
 
 		await expect(
 			safeWriteJson(linkPath, { leaked: true }, { refuseSymlinkTarget: true }),
@@ -823,6 +839,44 @@ describe("safeWriteJson", () => {
 		expect(realpath).toHaveBeenCalledTimes(1)
 		vi.restoreAllMocks()
 		expect(await readFileContent(target)).toEqual({ written: true })
+	})
+
+	test("refuses a write when an ancestor directory is a symlink", async () => {
+		const target = path.join(tempDir, "ancestor-link.json")
+		await fsPromisesActuals.writeFile!(target, JSON.stringify({ own: true }))
+		const asLink = { isSymbolicLink: () => true } as unknown as fsSyncActual.Stats
+		const asFile = { isSymbolicLink: () => false } as unknown as fsSyncActual.Stats
+		// The target itself looks ordinary; the link sits one directory above it. Checking only the
+		// final component would publish a credential payload outside the directory the caller named.
+		vi.spyOn(fs, "lstat").mockImplementation(((p: unknown) => {
+			return Promise.resolve(String(p) === tempDir ? asLink : asFile)
+		}) as unknown as typeof fs.lstat)
+
+		await expect(
+			safeWriteJson(target, { leaked: true }, { refuseSymlinkTarget: true }),
+		).rejects.toThrow(/is a symlink/)
+
+		vi.restoreAllMocks()
+		expect(await readFileContent(target)).toEqual({ own: true })
+	})
+
+	test("fails closed when an ancestor directory cannot be inspected", async () => {
+		const target = path.join(tempDir, "ancestor-eacces.json")
+		await fsPromisesActuals.writeFile!(target, JSON.stringify({ own: true }))
+		const asFile = { isSymbolicLink: () => false } as unknown as fsSyncActual.Stats
+		const failure = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+		// "Could not inspect" is not evidence that the path is safe: only ENOENT is tolerated.
+		vi.spyOn(fs, "lstat").mockImplementation(((p: unknown) => {
+			if (String(p) === tempDir) { return Promise.reject(failure) }
+			return Promise.resolve(asFile)
+		}) as unknown as typeof fs.lstat)
+
+		await expect(
+			safeWriteJson(target, { leaked: true }, { refuseSymlinkTarget: true }),
+		).rejects.toThrow(/EACCES/)
+
+		vi.restoreAllMocks()
+		expect(await readFileContent(target)).toEqual({ own: true })
 	})
 
 	test("does not resolve the publish target when refuseSymlinkTarget is set", async () => {

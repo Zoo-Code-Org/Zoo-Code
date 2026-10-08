@@ -74,6 +74,37 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		throw dirError
 	}
 
+// Every existing ancestor must be checked too, not just the final component: a symlinked
+// directory above the target redirects the payload without leaving a trace on the target path
+// itself (e.g. <workspace>/.roo -> a directory outside the workspace). Only ENOENT stops the
+// walk - a missing ancestor means nothing deeper exists to be a link. Any other inspection
+// error fails closed, because "could not inspect" is not evidence that the path is safe.
+async function _refuseSymlinkedAncestors(absoluteFilePath: string): Promise<void> {
+	let current = path.dirname(absoluteFilePath)
+	for (;;) {
+		let st: fsSync.Stats
+		try {
+			st = await fs.lstat(current)
+		} catch (error: unknown) {
+			const code = error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined
+			if (code === "ENOENT") {
+				return
+			}
+			throw error
+		}
+		if (st.isSymbolicLink()) {
+			throw new Error(
+				`safeWriteJson: refusing to write to ${absoluteFilePath}: ${current} is a symlink, and the payload would be written outside the directory the caller named.`
+			)
+		}
+		const parent = path.dirname(current)
+		if (parent === current) {
+			return
+		}
+		current = parent
+	}
+}
+
 	// A credential-bearing payload must not be redirected through a link the user
 	// never chose: check the final path component before anything is resolved,
 	// staged, or locked.
@@ -96,6 +127,11 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			)
 		}
 	}
+
+	// The final component alone is not enough: a symlinked ancestor redirects the payload while
+	// leaving the target path looking ordinary. Checked here, before anything is resolved, staged
+	await _refuseSymlinkedAncestors(absoluteFilePath)
+	// or locked, and it fails closed on any inspection error that is not ENOENT.
 
 	// Resolve the publish target BEFORE acquiring the lock: proper-lockfile keys
 	// the lock by the given path, so a symlink alias and its referent would
