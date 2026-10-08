@@ -704,9 +704,13 @@ describe("safeWriteJson", () => {
 				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
 			})
 
-			await expect(safeWriteJson(target, { written: true }, { confineTo: scope })).rejects.toThrow(code)
-
-			spy.mockRestore()
+			try {
+				await expect(safeWriteJson(target, { written: true }, { confineTo: scope })).rejects.toThrow(code)
+			} finally {
+				// Restore even when the assertion fails: a leaked ENOENT realpath mock turns one
+				// failure into every later test in the file.
+				spy.mockRestore()
+			}
 			// Nothing was staged or published: the scope failure is detected before any I/O.
 			expect(fsSyncActual.readdirSync(tempDir).filter(function (entry) { return entry.includes("scope-failure-target") })).toEqual([])
 	})

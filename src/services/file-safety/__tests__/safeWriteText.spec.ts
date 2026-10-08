@@ -582,6 +582,27 @@ describe("safeWriteText", () => {
 		})
 	})
 
+	it("retries a failed post-commit backup cleanup once and reports the leftover path", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const onWarning = vi.fn()
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fsSync.closeSync).mockReturnValue(undefined)
+		// Step 6 removes the backup copy after the commit; the unlink keeps failing.
+		vi.mocked(fs.unlink).mockRejectedValue(new Error("EPERM"))
+
+		await safeWriteText(targetPath, "data", { backup: true, platform: "linux", onWarning })
+
+		// The publish succeeded, so the write still resolves - but the leftover copy of the
+		// previous content must be retried once and then reported with its path, never dropped.
+		const backupUnlinks = vi.mocked(fs.unlink).mock.calls.filter(function (call) {
+			return String(call[0]).includes("safeWriteText.bak")
+		})
+		expect(backupUnlinks.length).toBe(2)
+		expect(onWarning).toHaveBeenCalledTimes(1)
+		expect(String(onWarning.mock.calls[0][0])).toContain("safeWriteText.bak")
+	})
+
 	// ── Test 5: win32 DACL path ──────────────────────────────────────────────
 
 	describe("win32 DACL", () => {

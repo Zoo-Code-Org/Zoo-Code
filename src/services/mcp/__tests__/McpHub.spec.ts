@@ -1057,6 +1057,36 @@ describe("McpHub", () => {
 			// when a confinement root is supplied.
 			expect(write![2]?.confineTo).toBeUndefined()
 		})
+
+		it("confines a project-scoped timeout update to the workspace", async () => {
+			// updateServerTimeout writes the project settings file; the confinement root has to
+			// travel with the write or a planted link would be replaced outside the workspace.
+			Object.defineProperty(mockProvider, "cwd", { value: "/mock/workspace", configurable: true })
+			vi.mocked(fs.readFile).mockResolvedValueOnce(
+				JSON.stringify({ mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"], timeout: 1000 } } }),
+			)
+			mcpHub.connections = [projectConnection()]
+
+			await mcpHub.updateServerTimeout("test-server", 120)
+
+			const write = vi.mocked(safeWriteJson).mock.calls.find((call) => String(call[0]).includes("mcp.json"))
+			expect(write).toBeDefined()
+			expect(write![2]).toEqual(expect.objectContaining({ confineTo: "/mock/workspace" }))
+		})
+
+		it("confines a project-scoped server deletion to the workspace", async () => {
+			Object.defineProperty(mockProvider, "cwd", { value: "/mock/workspace", configurable: true })
+			vi.mocked(fs.readFile).mockResolvedValueOnce(
+				JSON.stringify({ mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"] } } }),
+			)
+			mcpHub.connections = [projectConnection()]
+
+			await mcpHub.deleteServer("test-server")
+
+			const write = vi.mocked(safeWriteJson).mock.calls.find((call) => String(call[0]).includes("mcp.json"))
+			expect(write).toBeDefined()
+			expect(write![2]).toEqual(expect.objectContaining({ confineTo: "/mock/workspace" }))
+		})
 		it("should add tool to always allow list when enabling", async () => {
 			const mockConfig = {
 				mcpServers: {

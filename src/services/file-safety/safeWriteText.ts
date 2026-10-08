@@ -569,10 +569,30 @@ export async function safeWriteText(
 
 			// -- Step 6 (backup:true): delete backup on success -----------
 			if (releaseBackupOnSuccess && backupPath) {
-				try {
-					await fs.unlink(backupPath)
-				} catch {
-					// non-fatal — orphaned backup is acceptable
+				// The backup is a full copy of the previous content sitting next to the
+				// published file. Dropping its path on a failed unlink would leave an artifact
+				// that no caller can find or remove, so the unlink is retried once (Windows
+				// commonly reports EPERM while another handle is still being released) and a
+				// persistent failure is reported with the path instead of swallowed. The publish
+				// itself succeeded, so the write still resolves: this is a leftover to clean up,
+				// not a failed save.
+				let backupRemoved = false
+				for (let attempt = 0; attempt < 2 && !backupRemoved; attempt++) {
+					try {
+						await fs.unlink(backupPath)
+						backupRemoved = true
+					} catch (cleanupError: unknown) {
+						if (errorCode(cleanupError) === "ENOENT") {
+							// Already gone: the cleanup goal is met, nothing to report.
+							backupRemoved = true
+						} else if (attempt === 1) {
+							warn(
+								`safeWriteText: committed ${targetPath} but could not remove its backup copy at ${backupPath} (${
+										errorCode(cleanupError) ?? "unknown error"
+									}); the copy of the previous content is still on disk and needs to be removed.`,
+							)
+						}
+					}
 				}
 			}
 		} finally {
