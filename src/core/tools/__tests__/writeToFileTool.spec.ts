@@ -554,6 +554,28 @@ describe("writeToFileTool", () => {
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		})
 
+
+		it("stops before updating the diff view when the task is cancelled while open() is in flight", async () => {
+			// open() is the first provider await after the ask. If TaskAborted lands while
+			// it is in flight, the teardown has already released this task's stream state
+			// (and may have reverted or closed this very view), so the in-flight delta must
+			// not stream partial content into a view for a task the user cancelled.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(1)
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.update.mockClear()
+			mockCline.diffViewProvider.open.mockImplementationOnce(async () => {
+				writeToFileTool.clearTaskState(mockCline)
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
 		it("does nothing when the task has no stream state to release", async () => {
 			await writeToFileTool.teardownAbandonedStream(mockCline)
 			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()

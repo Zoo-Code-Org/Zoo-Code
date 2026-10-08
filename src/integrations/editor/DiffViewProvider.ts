@@ -530,28 +530,66 @@ export class DiffViewProvider {
 
 		const absolutePath = path.resolve(this.cwd, this.relPath)
 		const document = this.activeDiffEditor.document
+		// Snapshot the directories this edit created BEFORE the editor work below, and
+		// clear the field so nothing else can act on them twice. If an await below
+		// rejects, the caller runs reset(), which drops relPath/createdDirs - this is
+		// then the only chance to remove what the abandoned edit left on disk.
+		const createdDirs = this.createdDirs
+		this.createdDirs = []
 
-		this.disposeActiveEditorListener()
-		this.cancelDeferredScroll()
-		await this.closeAllDiffViews()
+		let editorFailure: unknown
+		try {
+			this.disposeActiveEditorListener()
+			this.cancelDeferredScroll()
+			await this.closeAllDiffViews()
 
-		if (document.isDirty) {
-			const edit = new vscode.WorkspaceEdit()
-			const fullRange = new vscode.Range(
-				document.positionAt(0),
-				document.positionAt(document.getText().length),
-			)
-			edit.replace(document.uri, fullRange, "")
-			await vscode.workspace.applyEdit(edit)
-			await document.save()
+			if (document.isDirty) {
+				const edit = new vscode.WorkspaceEdit()
+				const fullRange = new vscode.Range(
+					document.positionAt(0),
+					document.positionAt(document.getText().length),
+				)
+				edit.replace(document.uri, fullRange, "")
+				await vscode.workspace.applyEdit(edit)
+				await document.save()
+			}
+
+			await this.closeFileTab(absolutePath)
+		} catch (error) {
+			// Do NOT stop here: the placeholder and the created directories still have
+			// to go. The original failure is re-thrown once the artifacts are dealt with,
+			// so the caller still reports the rollback hazard instead of a silent success.
+			editorFailure = error
 		}
 
-		await this.closeFileTab(absolutePath)
-		await fs.unlink(absolutePath)
+		let cleanupFailure: unknown
+		try {
+			await fs.unlink(absolutePath).catch((error: unknown) => {
+				// open() creates the placeholder; if it is already gone there is nothing
+				// left to remove and the discard did its job.
+				if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+					throw error
+				}
+			})
 
-		// Remove only the directories this edit created, in reverse order.
-		for (let i = this.createdDirs.length - 1; i >= 0; i--) {
-			await fs.rmdir(this.createdDirs[i])
+			// Remove only the directories this edit created, in reverse order.
+			for (let i = createdDirs.length - 1; i >= 0; i--) {
+				await fs.rmdir(createdDirs[i]).catch((error: unknown) => {
+					if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+						throw error
+					}
+				})
+			}
+		} catch (error) {
+			cleanupFailure = error
+			console.error("Error removing abandoned write_to_file artifacts:", error)
+		}
+
+		if (editorFailure) {
+			throw editorFailure instanceof Error ? editorFailure : new Error(String(editorFailure))
+		}
+		if (cleanupFailure) {
+			throw cleanupFailure instanceof Error ? cleanupFailure : new Error(String(cleanupFailure))
 		}
 	}
 
