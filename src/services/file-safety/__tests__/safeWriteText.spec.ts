@@ -1203,6 +1203,21 @@ describe("resolveLockKey", () => {
 		)
 		expect(fs.readlink).toHaveBeenCalledTimes(8)
 	})
+
+	it("keeps the key canonical while the parent directory is also missing", async () => {
+		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		vi.mocked(fs.realpath).mockImplementation(async (target: unknown) => {
+			const key = String(target)
+			if (key === "/tmp/aliasdir") return "/tmp/realdir"
+			throw enoent
+		})
+		// Two writers creating the same new file under a directory that does not exist yet
+		// must take ONE lock. Falling back to the lexical parent keeps the alias component,
+		// so the key would change the moment the directory appears.
+		await expect(resolveLockKey("/tmp/aliasdir/newdir/file.json")).resolves.toBe(
+			path.join("/tmp/realdir", "newdir", "file.json"),
+		)
+	})
 })
 
 describe("caller-supplied staging path", () => {

@@ -191,8 +191,31 @@ function errorCode(error: unknown): string | undefined {
 
 async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
 	const dirPath = path.dirname(absoluteFilePath)
-	const canonicalDir = await fs.realpath(dirPath).catch(() => dirPath)
+	const canonicalDir = await realpathNearestAncestor(dirPath)
 	return path.join(canonicalDir, path.basename(absoluteFilePath))
+}
+
+/**
+ * Canonicalize the nearest EXISTING ancestor of a directory, re-appending the missing
+ * components. Anything other than a missing-path failure is reported as lexical: the
+ * caller still needs a stable key, and the publish resolves the real target itself.
+ */
+async function realpathNearestAncestor(dirPath: string): Promise<string> {
+	const missing: string[] = []
+	let cursor = dirPath
+	for (;;) {
+		try {
+			const realPath = await fs.realpath(cursor)
+			return missing.length > 0 ? path.join(realPath, ...missing.reverse()) : realPath
+		} catch (error: unknown) {
+			const code = errorCode(error)
+			if (code !== "ENOENT" && code !== "ENOTDIR") return dirPath
+			const parent = path.dirname(cursor)
+			if (parent === cursor) return dirPath
+			missing.push(path.basename(cursor))
+			cursor = parent
+		}
+	}
 }
 
 /**
