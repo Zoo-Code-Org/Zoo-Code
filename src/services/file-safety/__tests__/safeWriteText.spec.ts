@@ -443,6 +443,48 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))
 		})
 
+	it("closes the staging descriptor when applying the target mode fails", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(7)
+		vi.mocked(fsSync.fchmodSync).mockImplementation(() => {
+			throw Object.assign(new Error("EPERM"), { code: "EPERM" })
+		})
+
+		await expect(safeWriteText(targetPath, "data")).rejects.toThrow("EPERM")
+
+		// The descriptor is opened before the mode is applied, so the close has to live in the
+		// finally that also covers the mode call - otherwise a mode failure leaks the fd.
+		expect(fsSync.closeSync).toHaveBeenCalledWith(7)
+		expect(fsSync.writeSync).not.toHaveBeenCalled()
+	})
+
+	it("win32 DACL: when both restore attempts fail, the backup is retained", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+		// /save succeeds (call 1); both /restore attempts fail (calls 2 and 3).
+		let callCount = 0
+		vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+			callCount++
+			if (typeof cb === "function") {
+				cb(callCount === 1 ? null : new Error("icacls restore error"), "", "")
+			}
+			return fakeChild
+		})
+
+		await safeWriteText(targetPath, "data", { platform: "win32", backup: true })
+
+		// The content is still committed - a failed ACL restore is not a write failure.
+		expect(fs.rename).toHaveBeenCalled()
+		// The dump is still cleaned up in the finally block.
+		expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))
+		// But the backup survives: it is the only artifact that still carries the target's
+		// original security descriptor, so deleting it would destroy the recovery path.
+		expect(fs.unlink).not.toHaveBeenCalledWith(expect.stringContaining(".bak"))
+	})
+
 		it("win32 DACL: when target does not exist, no save/restore/dump", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
