@@ -817,7 +817,7 @@ describe("DiffViewProvider", () => {
 			await new Promise((resolve) => setTimeout(resolve, 0))
 
 			// Verify the tail applied the configured write delay
-			expect(mockDelay).toHaveBeenCalledWith(2000)
+			expect(mockDelay).toHaveBeenCalledWith(2000, expect.objectContaining({ signal: expect.any(AbortSignal) }))
 			expect(vscode.languages.getDiagnostics).toHaveBeenCalled()
 
 			// Verify result: L1 no longer returns a problems message
@@ -868,7 +868,7 @@ describe("DiffViewProvider", () => {
 			await new Promise((resolve) => setTimeout(resolve, 0))
 
 			// Verify delay was called with 0 (safe minimum)
-			expect(mockDelay).toHaveBeenCalledWith(0)
+			expect(mockDelay).toHaveBeenCalledWith(0, expect.objectContaining({ signal: expect.any(AbortSignal) }))
 		})
 
 		it("should store results for formatFileWriteResponse", async () => {
@@ -909,7 +909,7 @@ describe("DiffViewProvider", () => {
 			// Flush the fire-and-forget tail (the mocked delay resolves immediately).
 			await new Promise((resolve) => setTimeout(resolve, 0))
 
-			expect(mockDelay).toHaveBeenCalledWith(100)
+			expect(mockDelay).toHaveBeenCalledWith(100, expect.objectContaining({ signal: expect.any(AbortSignal) }))
 			expect(mockTask.say).toHaveBeenCalledTimes(1)
 			// The existing "error" ClineSay type is used, with the new-problems text.
 			expect(mockTask.say).toHaveBeenCalledWith(
@@ -1051,7 +1051,7 @@ describe("DiffViewProvider", () => {
 
 			// writeDelayMs (100) + the 100 ms in-memory diagnostics settle, both
 			// applied by the tail instead of the save path.
-			expect(mockDelay).toHaveBeenCalledWith(200)
+			expect(mockDelay).toHaveBeenCalledWith(200, expect.objectContaining({ signal: expect.any(AbortSignal) }))
 		})
 
 		it("never calls say when there are no new problems", async () => {
