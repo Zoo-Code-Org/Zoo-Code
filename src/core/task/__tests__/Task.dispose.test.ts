@@ -159,6 +159,13 @@ describe("Task dispose method", () => {
 		expect(task.observationRegistry.size).toBe(0)
 		expect(task.observationRegistry.has("/workspace/a.ts")).toBe(false)
 		expect(task.observationRegistry.get("/workspace/b.ts")).toBeUndefined()
+
+		// A read that was still awaiting I/O when disposal began resumes afterwards. Its
+		// observation must not land in a retired registry, or the disposed Task would be
+		// authoritative for that file again.
+		expect(task.observationRegistry.closed).toBe(true)
+		task.observationRegistry.observe("/workspace/late.ts", "v3", true)
+		expect(task.observationRegistry.size).toBe(0)
 	})
 
 	test("should reject the memoized completion promise when disposal cannot start", async () => {

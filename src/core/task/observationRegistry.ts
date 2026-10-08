@@ -26,6 +26,10 @@ export interface FileObservation {
 
 export class ObservationRegistry {
 	private readonly entries = new Map<string, FileObservation>()
+	// Set once the owning Task starts disposal. Reads that were already awaiting I/O when
+	// disposal began resume afterwards, and without this flag they would repopulate a
+	// registry that disposeOnce() has just retired.
+	private retired = false
 
 	/**
 	 * Record an observation for a file at its absolute path.
@@ -38,6 +42,9 @@ export class ObservationRegistry {
 	 * upgrade a partial read into authority for a full-file replacement.
 	 */
 	observe(absolutePath: string, version: string, complete: boolean = true): void {
+		if (this.retired) {
+			return
+		}
 		this.entries.set(absolutePath, { version, observedAt: Date.now(), complete })
 	}
 
@@ -51,6 +58,24 @@ export class ObservationRegistry {
 
 	clear(): void {
 		this.entries.clear()
+	}
+
+	/**
+	 * Retire the registry: drop every entry and refuse later observations.
+	 *
+	 * Task.disposeOnce() calls this so a task that is being torn down cannot end up holding
+	 * observations again - an awaited read that resumes after disposal would otherwise
+	 * re-record the file it had already read, leaving a disposed Task (still reachable
+	 * through a parent/subtask reference) with authority it no longer deserves.
+	 */
+	close(): void {
+		this.retired = true
+		this.entries.clear()
+	}
+
+	/** Whether close() has already run; observations are ignored once this is true. */
+	get closed(): boolean {
+		return this.retired
 	}
 
 	get size(): number {

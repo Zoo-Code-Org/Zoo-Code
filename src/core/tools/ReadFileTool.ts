@@ -235,11 +235,17 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					// received is not the on-disk state, and observing it would let a later write
 					// match a token the model never saw. A stat failure leaves the target
 					// unobserved and never fails the read.
-					const postReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
-					if (preReadStats && postReadStats) {
-						const preReadToken = versionTokenOfStat(preReadStats)
-						if (preReadToken === versionTokenOfStat(postReadStats)) {
-							task.observationRegistry.observe(fullPath, preReadToken, processed.complete && !lossyDecode)
+					// A task that was cancelled or disposed while this read was awaiting I/O must
+					// not record an observation: disposeOnce() has retired the registry, and the
+					// content this turn produced will never be acted on. Skipping also drops the
+					// post-read stat work for a task that no longer has a consumer.
+					if (!task.abort) {
+						const postReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
+						if (preReadStats && postReadStats) {
+							const preReadToken = versionTokenOfStat(preReadStats)
+							if (preReadToken === versionTokenOfStat(postReadStats)) {
+								task.observationRegistry.observe(fullPath, preReadToken, processed.complete && !lossyDecode)
+							}
 						}
 					}
 
@@ -870,11 +876,14 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				// Observe only when the pre-read and post-read tokens match (a mutation between
 				// them means the returned content is not the on-disk state). A stat failure
 				// leaves the target unobserved and never fails the read.
-				const postReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
-				if (preReadStats && postReadStats) {
-					const preReadToken = versionTokenOfStat(preReadStats)
-					if (preReadToken === versionTokenOfStat(postReadStats)) {
-						task.observationRegistry.observe(fullPath, preReadToken, readComplete && !lossyDecode)
+				// Same contract as the native path: an aborted or disposed task records nothing.
+				if (!task.abort) {
+					const postReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
+					if (preReadStats && postReadStats) {
+						const preReadToken = versionTokenOfStat(preReadStats)
+						if (preReadToken === versionTokenOfStat(postReadStats)) {
+							task.observationRegistry.observe(fullPath, preReadToken, readComplete && !lossyDecode)
+						}
 					}
 				}
 			} catch (error) {
