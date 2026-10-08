@@ -290,4 +290,56 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(observation?.version).toBe("1:2:9:9:9")
 		expect(observation?.complete).toBe(true)
 	})
+
+	it("still performs the diff read when the pre-read stat fails, and records no observation", async () => {
+		// A stat failure is not a tool failure: the read still happens, the diff still
+		// applies, and the save still goes through the guard (which fails closed without
+		// an observation). What must not happen is an observation recorded for a version
+		// the tool could not bracket.
+		const stat = vi.mocked((await import("fs/promises")).default.stat)
+		stat.mockRejectedValueOnce(Object.assign(new Error("EACCES"), { code: "EACCES" }))
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockTask.observationRegistry.get(path.resolve(mockTask.cwd, "src/thing.ts"))).toBeUndefined()
+		// The read itself is unaffected: the diff was computed and the save attempted.
+		expect(mockTask.diffStrategy?.applyDiff).toHaveBeenCalled()
+		expect(mockSaveDirectly).toHaveBeenCalledWith(
+			"src/thing.ts",
+			"modified file content\n",
+			false,
+			true,
+			1000,
+			"edit",
+		)
+		expect(mockHandleError).not.toHaveBeenCalled()
+		// Both bracketing stats were still attempted - the failure is not swallowed into
+		// skipping the second one.
+		expect(stat).toHaveBeenCalledTimes(2)
+	})
+
+	it("records no observation when the post-read stat fails", async () => {
+		// The file changed or vanished between the read and the second stat; with no
+		// post-read token the tool cannot prove the version it read, so the read
+		// authorizes nothing and the save falls back to the re-read remediation.
+		const stat = vi.mocked((await import("fs/promises")).default.stat)
+		stat.mockRejectedValue(
+			Object.assign(new Error("EACCES"), { code: "EACCES" }),
+		)
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockTask.observationRegistry.get(path.resolve(mockTask.cwd, "src/thing.ts"))).toBeUndefined()
+		expect(mockSaveDirectly).toHaveBeenCalled()
+		expect(mockHandleError).not.toHaveBeenCalled()
+		expect(stat).toHaveBeenCalledTimes(2)
+	})
 })

@@ -28,6 +28,7 @@ vi.mock("fs/promises", () => ({
 	access: vi.fn(),
 	stat: vi.fn(),
 	realpath: vi.fn(),
+	lstat: vi.fn(),
 }))
 
 vi.mock("../../../utils/versionToken", () => ({
@@ -47,6 +48,7 @@ const mockedWithFileLock = vi.mocked(withFileLock)
 const mockedResolveLockKey = vi.mocked(resolveLockKey)
 const mockedFsAccess = vi.mocked(fs.access)
 const mockedFsRealpath = vi.mocked(fs.realpath)
+const mockedFsLstat = vi.mocked(fs.lstat)
 const mockedComputeVersionToken = vi.mocked(computeVersionToken)
 const mockedSafeWriteText = vi.mocked(safeWriteText)
 
@@ -83,11 +85,15 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 	beforeEach(() => {
 		vi.resetAllMocks()
 		mockedWithFileLock.mockImplementation((filePath, operation) => operation(path.resolve(filePath)))
-		// The canonical containment check resolves the workspace first. The fixture
-		// workspace is not a real directory, so the default is "cannot resolve" and the
-		// check falls back to the lexical decision; the containment tests below override
-		// this to exercise the canonical path.
-		mockedFsRealpath.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+		// The canonical containment check resolves the workspace first, and an
+		// unresolvable workspace now refuses the write instead of falling back to the
+		// lexical decision. The fixture workspace is not a real directory, so the default
+		// is "every path resolves to itself": containment behaves exactly as the lexical
+		// spelling, and the containment tests below override it to exercise links.
+		mockedFsRealpath.mockImplementation(async (p) => String(p))
+		// Nothing on the walked path is a symlink by default; the dangling-link test
+		// overrides this for the component it plants.
+		mockedFsLstat.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
 		resetChain()
 	})
 
@@ -268,6 +274,52 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await expect(guardedWrite(task, "inside.txt", "data", "create")).rejects.toThrow(
 				"Workspace could not be resolved",
+			)
+
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("refuses a write when the workspace directory itself is missing", async () => {
+			// ENOENT on the workspace used to fall through to the lexical-only decision.
+			// A workspace that is not on disk cannot contain the write, and the lexical
+			// check is the one a planted symlink defeats, so the write is refused.
+			mockedFsRealpath.mockImplementation(async (p) => {
+				if (String(p) === path.resolve(WORKSPACE)) {
+					throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+				}
+				return String(p)
+			})
+			const task = createMockTask()
+
+			await expect(guardedWrite(task, "inside.txt", "data", "create")).rejects.toThrow(
+				"Workspace could not be resolved",
+			)
+
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+			expect(mockedWithFileLock).not.toHaveBeenCalled()
+		})
+
+		it("refuses a target that runs through a dangling symlink ancestor", async () => {
+			// A component of the path exists as a symlink whose referent is gone. realpath
+			// reports ENOENT for it, which is also what a not-yet-created directory
+			// reports; rejoining the lexical names would authorize a write whose publish
+			// lands outside the container that was checked.
+			const planted = path.join(path.resolve(WORKSPACE), "linkdir")
+			mockedFsRealpath.mockImplementation(async (p) => {
+				const s = String(p)
+				if (s === path.resolve(WORKSPACE)) return path.resolve(WORKSPACE)
+				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			})
+			mockedFsLstat.mockImplementation(async (p) => {
+				if (String(p) === planted) {
+					return { isSymbolicLink: () => true } as never
+				}
+				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			})
+			const task = createMockTask()
+
+			await expect(guardedWrite(task, "linkdir/nested/new.txt", "data", "create")).rejects.toThrow(
+				"runs through a link",
 			)
 
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()

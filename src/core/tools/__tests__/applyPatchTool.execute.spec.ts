@@ -432,6 +432,32 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts"))).toBe(false)
 		expect(mockHandleError).toHaveBeenCalledWith("apply patch", guardError)
 	})
+
+	it("update: does not observe when the pre-read stat rejects", async () => {
+		// The mirror of the post-read case: the FIRST bracketing stat fails, so there is
+		// no baseline token to compare the read against. The hunk read still happens and
+		// the patch still reaches the guarded publish, but nothing is observed - the
+		// publish fails closed against the existing, unobserved file.
+		const statMock = mockedFsPromises.default.stat
+		statMock.mockRejectedValueOnce(new Error("EACCES: permission denied"))
+		statMock.mockResolvedValueOnce({ dev: 7n, ino: 4242n, size: 1234n, mtimeNs: 1n, ctimeNs: 2n })
+
+		const guardError = new Error(
+			"File already exists at src/thing.ts and was not read before this write -- read the file first, then retry.",
+		)
+		mockSaveDirectly.mockRejectedValue(guardError)
+
+		await tool.execute({ patch: updatePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts"))).toBe(false)
+		// The read was not skipped: the publish was still attempted through the guard.
+		expect(mockSaveDirectly).toHaveBeenCalled()
+		expect(mockHandleError).toHaveBeenCalledWith("apply patch", guardError)
+	})
 	it("add: publishes the new file through the guarded saveDirectly with create kind", async () => {
 		mockedFileExistsAtPath.mockResolvedValueOnce(false)
 
