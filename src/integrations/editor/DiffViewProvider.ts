@@ -670,7 +670,7 @@ export class DiffViewProvider {
 			await this.revertDocument(updatedDocument)
 		}
 
-		await this.closeAllDiffViews()
+await this.closeOwnDiffView(absolutePath)
 
 		// Read auto-close preferences from state; fall back to defaults that
 		// preserve the existing behavior when unset (saveTask was resolved above
@@ -855,7 +855,7 @@ export class DiffViewProvider {
 					await updatedDocument.save()
 				}
 
-				await this.closeAllDiffViews()
+				await this.closeOwnDiffView(absolutePath)
 				// The file was newly created for this edit; close its transiently
 				// opened tab before deleting it from disk.
 				await this.closeFileTab(absolutePath)
@@ -882,7 +882,7 @@ export class DiffViewProvider {
 				await vscode.workspace.applyEdit(edit)
 				await updatedDocument.save()
 
-				await this.closeAllDiffViews()
+				await this.closeOwnDiffView(absolutePath)
 
 				// Read auto-close preferences from state; fall back to defaults that
 				// preserve the existing behavior when unset.

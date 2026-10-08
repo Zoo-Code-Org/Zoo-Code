@@ -2336,7 +2336,7 @@ describe("DiffViewProvider", () => {
 			// unlinked; the normal post-save close flow still ran.
 			expect(fs.unlink).not.toHaveBeenCalled()
 			expect(vi.mocked(vscode.window.showTextDocument)).not.toHaveBeenCalled()
-			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
+			expect(diffViewProvider["closeOwnDiffView"]).toHaveBeenCalled()
 		})
 
 		it("does not adopt an autosaved match for an edit that was never authorized", async () => {
@@ -3102,6 +3102,32 @@ describe("DiffViewProvider", () => {
 
 			expect(closeFileTab).toHaveBeenCalledWith(mockTargetPath)
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
+		})
+
+		it("revertChanges() closes only this task's diff view, not every task's", async () => {
+			// closeAllDiffViews() closes every clean diff tab in the workbench, so one task's
+			// denial tears down another task's diff view while that task's provider still
+			// holds its activation listener and deferred scroll timer against a gone tab.
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			const ownClose = vi.fn().mockResolvedValue(undefined)
+			const allClose = vi.fn().mockResolvedValue(undefined)
+			Object.assign(diffViewProvider, {
+				closeOwnDiffView: ownClose,
+				closeAllDiffViews: allClose,
+				closeFileTab: vi.fn().mockResolvedValue(undefined),
+				relPath: "mock-target-file.ts",
+				documentWasOpen: false,
+				userTouchedDocument: false,
+				preEditScrollLine: undefined,
+				editType: "modify",
+				originalContent: "original",
+				activeDiffEditor: buildActiveDiffEditor(),
+			})
+
+			await diffViewProvider.revertChanges()
+
+			expect(ownClose).toHaveBeenCalled()
+			expect(allClose).not.toHaveBeenCalled()
 		})
 
 		it("revertChanges() keeps the file open when the user touched it", async () => {
