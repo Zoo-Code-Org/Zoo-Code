@@ -2200,6 +2200,46 @@ export class ClineProvider
 			throw error
 		}
 
+		// The durable write can settle AFTER the mutation timeout has already aborted this
+		// run and handed the caller a timeout rejection. Nothing below may then run:
+		// emitting TaskModeSwitched/ModeChanged or loading the mode profile would publish a
+		// switch the caller was told had been cancelled, and the next queued mutation could
+		// start against a half-applied mode. Undo everything that landed and keep the
+		// cancellation result; each restore is awaited on its own so one failing write
+		// cannot skip the next.
+		if (signal?.aborted) {
+			try {
+				await this.contextProxy.setValue("mode", previousSharedMode)
+			} catch (rollbackError) {
+				this.log(
+					`[handleModeSwitch] Failed to roll back shared mode after cancellation: ${
+						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+					}`,
+				)
+			}
+			try {
+				await this._saveViewLocalStateFromMutation({ mode: previousViewMode })
+			} catch (rollbackError) {
+				this.log(
+					`[handleModeSwitch] Failed to roll back the view mode pin after cancellation: ${
+						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+					}`,
+				)
+			}
+			if (undoHistoryWrite) {
+				try {
+					await undoHistoryWrite()
+				} catch (rollbackError) {
+					this.log(
+						`[handleModeSwitch] Failed to roll back task-history mode after cancellation: ${
+							rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+						}`,
+					)
+				}
+			}
+			return
+		}
+
 		// Both durable writes succeeded: this is the point of no return for the task
 		// side. Emitting and updating _taskMode here (rather than before the durable
 		// write) keeps listeners and in-memory task state from observing a switch that
@@ -2223,18 +2263,34 @@ export class ClineProvider
 						)
 					}
 				}
+				// Each restore is awaited on its own: a failed shared-mode write must not skip the
+				// pin restore (or the reverse), because one store left on the new mode while the
+				// other is back on the old one is exactly the split state this rollback exists to
+				// prevent. A rollback that itself failed is reported, not just logged.
+				const rollbackFailures: string[] = []
+				const describeModeRollbackFailure = (e: unknown) => (e instanceof Error ? e.message : String(e))
 				try {
-					// Restore the shared value through the proxy only, then restore the pin
-					// from its own pre-switch value. When the view had no pin, the forward
-					// setValue created one; clearing it (mode: undefined) is what returns this
-					// view to its pre-switch state instead of leaving the shared mode pinned.
+					// Restore the shared value through the proxy only.
 					await this.contextProxy.setValue("mode", previousSharedMode)
+				} catch (rollbackError) {
+					rollbackFailures.push(`shared mode: ${describeModeRollbackFailure(rollbackError)}`)
+				}
+				try {
+					// Then the pin from its own pre-switch value. When the view had no pin, the forward
+					// setValue created one; clearing it (mode: undefined) is what returns this view to
+					// its pre-switch state instead of leaving the shared mode pinned.
 					await this._saveViewLocalStateFromMutation({ mode: previousViewMode })
 				} catch (rollbackError) {
+					rollbackFailures.push(`view mode pin: ${describeModeRollbackFailure(rollbackError)}`)
+				}
+				if (rollbackFailures.length > 0) {
+					// Unrepaired partial state must not be reported as a clean rollback: the caller
+					// needs to know the durable mode may still name the mode this switch abandoned.
 					this.log(
-						`[handleModeSwitch] Failed to roll back shared mode after the emit failed: ${
-							rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-						}`,
+						`[handleModeSwitch] Mode rollback left persisted state inconsistent (${rollbackFailures.join(", ")}).`,
+					)
+					throw new Error(
+						`Mode switch left persisted mode state inconsistent: ${rollbackFailures.join(", ")}. Original failure: ${error instanceof Error ? error.message : String(error)}`,
 					)
 				}
 				throw error
@@ -2464,8 +2520,19 @@ export class ClineProvider
 			deletedProfile = profile as ProviderSettingsWithId
 		} catch (error: unknown) {
 			if (!(error instanceof ProviderSettingsNotFoundError)) {
-				this.log(`deleteProviderProfile: could not read the settings for '${profileToDelete.name}'; a later failure of the list update cannot be compensated. ${error instanceof Error ? error.message : String(error)}`)
+				// Abort BEFORE the destructive delete. Without the captured settings there is no
+				// way to put them back if a later durable write fails, so continuing here would
+				// turn a transient read error into permanent profile loss while the persisted list
+				// still named the profile.
+				this.log(
+					`deleteProviderProfile: could not read the settings for '${profileToDelete.name}'; aborting before the deletion because a later failure could not be compensated. ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+				throw error
 			}
+			// A typed not-found is the idempotent case: the secret is already gone, so there is
+			// nothing to compensate and the stale list entry is still pruned below.
 		}
 
 		try {
@@ -2479,7 +2546,19 @@ export class ClineProvider
 			)
 		}
 
-		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
+		// Snapshot every durable store this method is about to change, so a failure after the
+		// settings commit can be rolled back store by store instead of only re-saving the
+		// settings: a later failed write would otherwise leave the persisted list, the shared
+		// selection, or this view's own pin pointing at a profile that no longer exists.
+		const previousEntries = this.getProviderProfileEntries()
+		const previousGlobalSelection = globalSettings.currentApiConfigName
+		const previousViewPin = this.viewLocalState.currentApiConfigName
+		const previousViewOverlay = this.viewLocalState.apiConfiguration
+		// Which writes have actually landed: only those need compensation.
+		let listWriteLanded = false
+		let selectionWriteLanded = false
+		let viewPinWriteLanded = false
+		const entries = previousEntries.filter(({ name }) => name !== profileToDelete.name)
 
 		// Write only the profile list back: replaying the full settings snapshot
 		// captured above would also rewrite unrelated keys (including viewStates,
@@ -2487,6 +2566,7 @@ export class ClineProvider
 		// with this view's stale cached copy.
 		try {
 			await this.contextProxy.setValue("listApiConfigMeta", entries)
+			listWriteLanded = true
 
 			// Resolve the surviving profile's settings so this view and any other
 			// live view still pinned to the deleted profile can be re-pinned with
@@ -2517,11 +2597,14 @@ export class ClineProvider
 				// survivor to the shared store, which covers the deleted-was-global case
 				// for every other view as well as this one.
 				await this.setValue("currentApiConfigName", profileToActivate)
+				selectionWriteLanded = true
+				viewPinWriteLanded = true
 			} else if (deletedWasGlobal) {
 				// The shared selection changed, but this view's own pin still names a
 				// surviving profile: update the shared store only, leaving the
 				// view-local pin untouched.
 				await this.contextProxy.setValue("currentApiConfigName", profileToActivate)
+				selectionWriteLanded = true
 			}
 
 			if ((deletedWasGlobal || viewWasPinnedToDeleted) && survivingSettings) {
@@ -2536,6 +2619,7 @@ export class ClineProvider
 					// replace it with the survivor's so the re-pointed pin serves matching
 					// settings. A view pinned to another profile keeps its own overlay.
 					await this._saveViewLocalStateFromMutation({ apiConfiguration: survivingSettings })
+					viewPinWriteLanded = true
 				}
 			}
 
@@ -2544,21 +2628,67 @@ export class ClineProvider
 			// deleted profile's name and configuration.
 			await this.rePinViewLocalStateForDeletedProfile(profileToDelete.name, profileToActivate, survivingSettings)
 		} catch (error: unknown) {
-			// The profile's settings are already gone from the secret store while the list
-			// write (or a later selection update) failed. Put the settings back so the durable
-			// metadata and the store agree again - the deletion simply did not happen - and
-			// then surface the original failure rather than a compensation outcome.
+			// Compensate every store that already landed, each awaited on its own so one
+			// failing restore cannot skip the next one. The deletion simply did not happen:
+			// the settings, the profile list, the shared selection, and this view's pin must
+			// all agree again before the original failure is surfaced.
+			const compensationFailures: string[] = []
+			const describeFailure = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
 			if (deletedProfile) {
 				try {
 					await this.providerSettingsManager.saveConfig(profileToDelete.name, deletedProfile)
-					this.log(`deleteProviderProfile: the profile-list update failed after the settings were removed; the settings for '${profileToDelete.name}' were restored, so the stored profile list still resolves and the profile was not deleted.`)
 				} catch (compensationError: unknown) {
-					this.log(`deleteProviderProfile: the profile-list update failed AND the settings for '${profileToDelete.name}' could not be restored; the stored list may name a profile with no settings. ${compensationError instanceof Error ? compensationError.message : String(compensationError)}`)
+					compensationFailures.push(`settings for the deleted profile: ${describeFailure(compensationError)}`)
 				}
 			}
+
+			if (listWriteLanded) {
+				try {
+					await this.contextProxy.setValue("listApiConfigMeta", previousEntries)
+				} catch (compensationError: unknown) {
+					compensationFailures.push(`profile list: ${describeFailure(compensationError)}`)
+				}
+			}
+
+			if (selectionWriteLanded) {
+				try {
+					await this.contextProxy.setValue("currentApiConfigName", previousGlobalSelection)
+				} catch (compensationError: unknown) {
+					compensationFailures.push(`shared selection: ${describeFailure(compensationError)}`)
+				}
+			}
+
+			if (viewPinWriteLanded) {
+				try {
+					// Restoring the pin and its nested overlay together returns this view to its
+					// exact pre-deletion state; a view with no pre-deletion pin gets the pin the
+					// deletion created cleared again instead of left holding the survivor.
+					await this._saveViewLocalStateFromMutation({
+						currentApiConfigName: previousViewPin,
+						apiConfiguration: previousViewOverlay,
+					})
+				} catch (compensationError: unknown) {
+					compensationFailures.push(`view pin: ${describeFailure(compensationError)}`)
+				}
+			}
+
+			if (compensationFailures.length > 0) {
+				// A partially repaired deletion is worse than a reported one: surface it as its
+				// own inconsistent-state error so the caller cannot read it as a clean rollback.
+				this.log(
+					`deleteProviderProfile: the deletion failed AND the rollback was incomplete (${compensationFailures.join("; ")}); the persisted profile state may be inconsistent.`,
+				)
+				throw new Error(
+					`Profile deletion left persisted state inconsistent: ${compensationFailures.join("; ")}. Original failure: ${describeFailure(error)}`,
+				)
+			}
+
+			this.log(
+				`deleteProviderProfile: the deletion failed after durable writes landed; the settings, profile list, shared selection, and view pin were all restored, so the profile was not deleted.`,
+			)
 			throw error
 		}
-
 		await this.postStateToWebview()
 	}
 
@@ -2727,8 +2857,32 @@ export class ClineProvider
 					values.apiConfiguration = replacementSettings
 				}
 
-				// Direct private access: compile-time safe across sibling instances.
-				await instance._saveViewLocalStateFromMutation(values)
+				// Snapshot the affected view's own pin and overlay first. If this re-pin write
+				// fails, the caller rolls the shared stores back and this view's buffer and
+				// durable entry must go back with them, instead of keeping a pin to a profile
+				// that was never deleted.
+				const previousPin = instance.viewLocalState.currentApiConfigName
+				const previousOverlay = instance.viewLocalState.apiConfiguration
+
+				try {
+					// Direct private access: compile-time safe across sibling instances.
+					await instance._saveViewLocalStateFromMutation(values)
+				} catch (error) {
+					try {
+						await instance._saveViewLocalStateFromMutation({
+							currentApiConfigName: previousPin,
+							apiConfiguration: previousOverlay,
+						})
+					} catch (rollbackError) {
+						instance.log(
+							`[rePinViewLocalStateForDeletedProfile] Could not restore the pin for view ${instance.viewId} after a failed re-pin: ${
+								rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+							}`,
+						)
+					}
+					throw error
+				}
+
 				await instance.postStateToWebview()
 			}),
 		)

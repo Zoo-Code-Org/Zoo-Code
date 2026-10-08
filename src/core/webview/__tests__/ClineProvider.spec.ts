@@ -3073,6 +3073,175 @@ const provider = new ClineProvider(
 			await provider.dispose()
 		})
 
+		it("aborts the deletion before the settings store is touched when the pre-delete read fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const deleteConfigSpy = vi.fn().mockResolvedValue(undefined)
+			const saveConfigSpy = vi.fn().mockResolvedValue("doomed-id")
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				// A transient read failure, not the typed not-found: the settings may still exist,
+				// so a later failure could not be compensated and the deletion must not start.
+				getProfile: vi.fn().mockRejectedValue(new Error("secret storage unavailable")),
+				deleteConfig: deleteConfigSpy,
+				saveConfig: saveConfigSpy,
+			}
+
+			await expect(provider.deleteProviderProfile(doomedProfile)).rejects.toThrow("secret storage unavailable")
+
+			// Nothing destructive happened, so the same call can succeed once storage recovers.
+			// Continuing here would have removed the settings with no snapshot to restore, while
+			// the durable profile list still named the profile.
+			expect(deleteConfigSpy).not.toHaveBeenCalled()
+			expect(saveConfigSpy).not.toHaveBeenCalled()
+			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([doomedProfile, keeperProfile])
+			await provider.dispose()
+		})
+
+		it("restores the profile list, shared selection, and view pin when a later write fails after the list write", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+			// This view is pinned to the doomed profile and has its settings loaded, so the
+			// deletion also rewrites this view's pin and nested overlay.
+			provider["viewLocalState"].currentApiConfigName = "doomed-profile"
+			provider["viewLocalState"].apiConfiguration = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "doomed-secret",
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const saveConfigSpy = vi.fn().mockResolvedValue("doomed-id")
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn().mockImplementation(({ name }: { name: string }) =>
+					name === "doomed-profile"
+						? Promise.resolve({
+							name: "doomed-profile",
+							id: "doomed-id",
+							apiProvider: providerIdentifiers.openrouter,
+							openRouterApiKey: "doomed-secret",
+						})
+						: Promise.resolve({
+							name: "keeper-profile",
+							id: "keeper-id",
+							apiProvider: providerIdentifiers.anthropic,
+							apiKey: "keeper-secret",
+						}),
+				),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: saveConfigSpy,
+			}
+
+			// The settings commit and the profile-list write both landed; this later shared write
+			// is what fails, so every store already changed has to be put back.
+			const setProviderSettingsSpy = vi
+				.spyOn(provider.contextProxy, "setProviderSettings")
+				.mockRejectedValue(new Error("provider settings write failed"))
+
+			await expect(provider.deleteProviderProfile(doomedProfile)).rejects.toThrow("provider settings write failed")
+			setProviderSettingsSpy.mockRestore()
+
+			// The settings are back under their original id...
+			expect(saveConfigSpy).toHaveBeenCalledWith(
+				"doomed-profile",
+				expect.objectContaining({ id: "doomed-id", openRouterApiKey: "doomed-secret" }),
+			)
+			// ...and so are the profile list, the shared selection, and this view's own pin:
+			// restoring only the settings would leave the persisted metadata pointing at the
+			// surviving profile while the deleted profile's settings exist again.
+			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([doomedProfile, keeperProfile])
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("doomed-profile")
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("doomed-profile")
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "doomed-secret",
+			})
+			// The durable per-view entry must agree with the restored buffer, or a reload would
+			// re-pin this view to the profile that was never deleted.
+			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]] ?? {}
+			expect(persisted.currentApiConfigName).toBe("doomed-profile")
+			await provider.dispose()
+		})
+
+		it("surfaces an inconsistent-state error when the deletion rollback itself fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn().mockResolvedValue({
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "doomed-secret",
+			}),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				// The settings are already gone and cannot be put back: the caller must not be able
+				// to read this as a clean rollback.
+				saveConfig: vi.fn().mockRejectedValue(new Error("settings restore failed")),
+			}
+			const setValueSpy = vi
+				.spyOn(provider.contextProxy, "setValue")
+				.mockRejectedValue(new Error("storage write failed"))
+
+			await expect(provider.deleteProviderProfile(doomedProfile)).rejects.toThrow(
+				"Profile deletion left persisted state inconsistent",
+			)
+			setValueSpy.mockRestore()
+			await provider.dispose()
+		})
+
 
 		it("leaves the view buffer untouched when the deleted profile is neither globally active nor view-pinned", async () => {
 const provider = new ClineProvider(

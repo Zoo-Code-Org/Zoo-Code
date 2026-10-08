@@ -619,6 +619,159 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(persisted.mode).toBeUndefined()
 		})
 
+
+		it("restores the view mode pin even when the shared-mode rollback write fails", async () => {
+			// Only the TaskModeSwitched emit throws: a listener failure is what triggers the
+			// durable rollback under test.
+			const emit = vi.fn()
+			emit.mockImplementation((event: string) => {
+				if (event === "taskModeSwitched") {
+					throw new Error("listener failed")
+				}
+			})
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit,
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => Promise.resolve([]))
+			await provider.addClineToStack(mockTask)
+			await provider.contextProxy.setValue("mode", "code")
+			// The view is pinned to architect while the shared mode is code, so the rollback
+			// has two different stores to put back.
+			await provider.saveViewState("mode", "architect")
+
+			// Fail ONLY the shared-mode restore. The pin restore is awaited separately, so it
+			// must still land: one try/catch around both restores would skip it and leave this
+			// view pinned to the abandoned mode.
+			const updateSpy = vi.mocked(mockContext.globalState.update)
+			const originalUpdate = updateSpy.getMockImplementation()
+			updateSpy.mockImplementation((key: string, value: unknown) => {
+				if (key === "mode" && value === "code") {
+					return Promise.reject(new Error("shared mode restore failed"))
+				}
+				return originalUpdate ? originalUpdate(key, value) : Promise.resolve()
+			})
+
+			// A rollback that itself failed must not be reported as a clean rollback, and the
+			// caller has to learn which store is still wrong.
+			const rollbackError = await provider["handleModeSwitchUnlocked"]("ask", mockTask).then(
+				() => undefined,
+				(error: unknown) => error as Error,
+			)
+			expect(rollbackError?.message).toContain("left persisted mode state inconsistent")
+			expect(rollbackError?.message).toContain("shared mode: shared mode restore failed")
+			expect(rollbackError?.message).toContain("Original failure: listener failed")
+
+			// The second restore still ran: this view is back on its own pre-switch mode.
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]] ?? {}
+			expect(persisted.mode).toBe("architect")
+			updateSpy.mockRestore()
+		})
+
+		it("compensates the durable mode write and emits nothing when the signal aborts while the write is in flight", async () => {
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			const updateTaskHistorySpy = vi
+				.spyOn(provider, "updateTaskHistory")
+				.mockImplementation(() => Promise.resolve([]))
+			await provider.addClineToStack(mockTask)
+			await provider.contextProxy.setValue("mode", "code")
+			await provider.saveViewState("mode", "architect")
+
+			// Hold the durable mode write open so the cancellation lands while it is still
+			// in flight. The write then SUCCEEDS after the caller was already handed a
+			// timeout rejection: without a post-settle check the emit, the in-memory task
+			// mode, and the profile load all run for a switch that was reported cancelled.
+			const updateSpy = vi.mocked(mockContext.globalState.update)
+			const originalUpdate = updateSpy.getMockImplementation()
+			let releaseModeWrite!: () => void
+			const writeGate = new Promise<void>((resolve) => {
+				releaseModeWrite = resolve
+			})
+			let gated = false
+			updateSpy.mockImplementation(async (key: string, value: unknown) => {
+				if (key === "mode" && !gated) {
+					gated = true
+				await writeGate
+				}
+				return originalUpdate ? originalUpdate(key, value) : Promise.resolve()
+			})
+
+			const emitSpy = vi.spyOn(provider, "emit")
+			const controller = new AbortController()
+			const switchPromise = provider["handleModeSwitchUnlocked"](
+				"ask",
+				mockTask,
+				controller.signal,
+			)
+
+			await vi.waitFor(() => expect(updateSpy).toHaveBeenCalledWith("mode", "ask"))
+			controller.abort()
+			releaseModeWrite()
+			await switchPromise
+
+			// Nothing about the abandoned switch is published.
+			expect(mockTask.emit).not.toHaveBeenCalledWith("taskModeSwitched", mockTask.taskId, "ask")
+			expect(emitSpy).not.toHaveBeenCalledWith("modeChanged", "ask")
+			expect(mockTask["_taskMode"]).toBe("code")
+			// Everything the write had already landed is put back: shared mode, this view's
+			// pin, and the task-history entry.
+			expect(updateSpy).toHaveBeenCalledWith("mode", "code")
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]] ?? {}
+			expect(persisted.mode).toBe("architect")
+			expect(updateTaskHistorySpy).toHaveBeenCalledTimes(2)
+			expect((updateTaskHistorySpy.mock.calls.at(-1)?.[0] as HistoryItem).mode).toBe("code")
+			updateSpy.mockRestore()
+		})
+
 		it("bails out before any task write when the mutation signal is already aborted", async () => {
 			// A minimal typed double keeps the test focused on the mode-switch contract.
 			// The literal is asserted as Partial<Task> so its private members (_taskMode,

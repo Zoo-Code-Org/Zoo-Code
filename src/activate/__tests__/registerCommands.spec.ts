@@ -1101,6 +1101,84 @@ describe("openClineInNewTab", () => {
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2)
 	})
 
+
+		it("clears the in-flight creation when it rejects so a later open retries", async () => {
+			// A creation that fails must not stay in the slot: every later "Open in editor"
+			// would receive the settled rejected promise and the tab could never be opened
+			// again without reloading the window.
+			const failure = new Error("context proxy unavailable")
+			;(ContextProxy.getInstance as Mock).mockRejectedValueOnce(failure)
+
+			await expect(
+				openClineInNewTab({
+					context: mockContext,
+					outputChannel: mockOutputChannel,
+					webviewFocusTracker: new WebviewFocusTracker(),
+				}),
+			).rejects.toThrow(failure)
+
+			// The retry starts a fresh creation instead of replaying the stored rejection.
+			const retried = await openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			})
+			expect(retried).toBeDefined()
+			expect(ContextProxy.getInstance).toHaveBeenCalledTimes(2)
+			expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
+		})
+
+		it("shares a rejected creation with overlapping callers and still clears the slot", async () => {
+			// Both callers join the same in-flight creation, so both must observe its
+			// rejection: dropping it for the joined caller would leave that command
+			// handler hanging on a promise that never yields a usable result.
+			let rejectCreation!: (error: Error) => void
+			// Only the in-flight creation is deferred; the retry after it settles gets the
+			// normal (immediate) context proxy.
+			;(ContextProxy.getInstance as Mock).mockReturnValueOnce(
+				new Promise((_resolve, reject) => {
+					rejectCreation = reject
+				}),
+			)
+
+			const first = openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			})
+			const second = openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			})
+
+			// Attach the observers before the rejection is triggered.
+			const firstSettled = first.then(
+				() => "resolved",
+				(error: unknown) => error,
+			)
+			const secondSettled = second.then(
+				() => "resolved",
+				(error: unknown) => error,
+			)
+
+			const failure = new Error("panel creation failed")
+			rejectCreation(failure)
+
+			expect(await firstSettled).toBe(failure)
+			expect(await secondSettled).toBe(failure)
+			expect(ContextProxy.getInstance).toHaveBeenCalledTimes(1)
+
+			// The slot is cleared even on the shared-rejection path: the next open runs a
+			// fresh creation instead of replaying the stored rejection.
+			const third = await openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			})
+			expect(third).toBeDefined()
+			expect(ContextProxy.getInstance).toHaveBeenCalledTimes(2)
+		})
 	it("keeps the replacement panel tracked when a stale panel's disposal fires late", async () => {
 		// Capture each created panel so the first panel's (stale) dispose
 		// handler can fire after the replacement is already tracked.
