@@ -4599,7 +4599,8 @@ describe("Cline", () => {
 			const cancelSpy = vi
 				.spyOn(task.diffViewProvider, "cancelPostSaveDiagnosticsTails")
 				.mockImplementation(() => {})
-			await task.disposeOnce()
+			// disposeOnce is private; bracket notation is the repo's convention for it.
+			await task["disposeOnce"]()
 			expect(cancelSpy).toHaveBeenCalledTimes(1)
 		})
 
@@ -4612,7 +4613,8 @@ describe("Cline", () => {
 			// The step after the cancel in the same teardown: if the throw escaped, this would
 			// never run and the HTTP request would keep streaming into a dead task.
 			const cancelRequestSpy = vi.spyOn(task, "cancelCurrentRequest").mockImplementation(() => {})
-			await task.disposeOnce()
+			// disposeOnce is private; bracket notation is the repo's convention for it.
+			await task["disposeOnce"]()
 			expect(cancelRequestSpy).toHaveBeenCalled()
 			expect(errorSpy).toHaveBeenCalledWith(
 				expect.stringContaining("Error cancelling post-save diagnostics tails:"),
