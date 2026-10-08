@@ -21,6 +21,11 @@ import { Task } from "../../core/task/Task"
 
 import { DecorationController } from "./DecorationController"
 
+/** Narrow ENOENT test so a rollback can tolerate a file or dir that never landed. */
+function isEnoent(error: unknown): boolean {
+	return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "ENOENT"
+}
+
 export const DIFF_VIEW_URI_SCHEME = "cline-diff"
 export const DIFF_VIEW_LABEL_CHANGES = "Original ↔ Zoo's Changes"
 
@@ -513,13 +518,38 @@ export class DiffViewProvider {
 		return JSON.stringify(result)
 	}
 
+	/**
+	 * Remove a file this edit created. Tolerates ENOENT: when open() failed before the
+	 * placeholder was written (or the write itself failed) there is nothing to delete, and
+	 * that must not abort the rollback.
+	 */
+	private async removeCreatedFile(absolutePath: string): Promise<void> {
+		try {
+			await fs.unlink(absolutePath)
+		} catch (error: unknown) {
+			if (!isEnoent(error)) {
+				throw error
+			}
+		}
+	}
+
+	/** Same tolerance for a directory this edit created that never made it to disk. */
+	private async removeCreatedDir(dirPath: string): Promise<void> {
+		try {
+			await fs.rmdir(dirPath)
+		} catch (error: unknown) {
+			if (!isEnoent(error)) {
+				throw error
+			}
+		}
+	}
+
 	async revertChanges(): Promise<void> {
-		if (!this.relPath || !this.activeDiffEditor) {
+		if (!this.relPath) {
 			return
 		}
 
 		const fileExists = this.editType === "modify"
-		const updatedDocument = this.activeDiffEditor.document
 		const absolutePath = path.resolve(this.cwd, this.relPath)
 
 		// Stop tracking touches and cancel any pending scroll-to-diff before any
@@ -528,21 +558,38 @@ export class DiffViewProvider {
 		this.cancelDeferredScroll()
 
 		if (!fileExists) {
-			if (updatedDocument.isDirty) {
-				await updatedDocument.save()
+			// open() creates the parent directories and an empty placeholder file BEFORE it
+			// awaits openDiffEditor(). If that await rejects there is no activeDiffEditor, and
+			// the previous early return here left the placeholder and the new directories on
+			// disk: the next execute() then saw an empty file and treated the requested new file
+			// as an existing one, so a denial preserved the debris. The filesystem rollback runs
+			// either way; only the document work needs an editor.
+			if (this.activeDiffEditor) {
+				const updatedDocument = this.activeDiffEditor.document
+				if (updatedDocument.isDirty) {
+					await updatedDocument.save()
+				}
+
+				await this.closeAllDiffViews()
+				// The file was newly created for this edit; close its transiently
+				// opened tab before deleting it from disk.
+				await this.closeFileTab(absolutePath)
 			}
 
-			await this.closeAllDiffViews()
-			// The file was newly created for this edit; close its transiently
-			// opened tab before deleting it from disk.
-			await this.closeFileTab(absolutePath)
-			await fs.unlink(absolutePath)
+			await this.removeCreatedFile(absolutePath)
 
 			// Remove only the directories we created, in reverse order.
 			for (let i = this.createdDirs.length - 1; i >= 0; i--) {
-				await fs.rmdir(this.createdDirs[i])
+				await this.removeCreatedDir(this.createdDirs[i])
 			}
+
 		} else {
+			// Only reachable after a successful open(), so the editor exists.
+			const updatedDocument = this.activeDiffEditor?.document
+			if (!updatedDocument) {
+				return
+			}
+
 			// Revert document.
 			const edit = new vscode.WorkspaceEdit()
 
