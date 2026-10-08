@@ -75,26 +75,36 @@ export type DirectoryIdentity = {
 }
 
 /**
- * A publish that failed and whose rollback also failed: the content survives only
- * at the backup path, not at the canonical target. The publish failure stays the
- * cause, and the rollback failure plus the backup location travel with the error so
- * the caller can tell what it is looking at.
+ * The backup copy could not be created AND the partial copy could not be removed.
+ * The write failed either way, but the leftover is a copy of the previous content that
+ * is still on disk: its path travels on the error so the caller can remove it, instead
+ * of the cleanup silently discarding the only reference to it.
  */
-export class RollbackFailureError extends Error {
-	readonly publishError: unknown
-	readonly rollbackError: unknown
-	readonly backupPath: string
-
-	constructor(publishError: unknown, rollbackError: unknown, backupPath: string) {
-		super(
-			`Publish failed (${publishError instanceof Error ? publishError.message : String(publishError)}) and the backup could not be restored to its original path -- the content is preserved at the backup location reported on this error.`,
-			{ cause: publishError },
-		)
-		this.name = "RollbackFailureError"
-		this.publishError = publishError
-		this.rollbackError = rollbackError
-		this.backupPath = backupPath
+export class OrphanedBackupError extends Error {
+	readonly orphanedBackupPath: string
+	readonly originalError: unknown
+	readonly cleanupError: unknown
+	constructor(backupPath: string, targetPath: string, cause: unknown, cleanupError: unknown) {
+		super(_orphanedBackupMessage(targetPath, backupPath, cause, cleanupError), { cause })
+		this.name = "OrphanedBackupError"
+		this.orphanedBackupPath = backupPath
+		this.originalError = cause
+		this.cleanupError = cleanupError
 	}
+}
+
+function _orphanedBackupMessage(
+	targetPath: string,
+	backupPath: string,
+	cause: unknown,
+	cleanupError: unknown,
+): string {
+	const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+	return (
+		`safeWriteText: could not create the backup of ${targetPath} (${reason(cause)}), and the ` +
+		`partial copy at ${backupPath} could not be removed (${reason(cleanupError)}). The copy is ` +
+		`still on disk and must be deleted.`
+	)
 }
 
 /**
@@ -430,18 +440,9 @@ export async function safeWriteText(
 
 	let backupPath: string | null = null
 	let releaseBackupOnSuccess = false
-	// Set once the commit rename has published the new content. After that point the
-	// backup is no longer a safe restore source: rolling it back would overwrite
-	// content the caller can already observe at the target path.
-	let committed = false
 	// Non-null only when the win32 step-2 block saved a successful DACL dump:
 	// it gates the step-5 restore and is tracked for the cleanup unlinks.
 	let daclDumpPath: string | null = null
-	// Set when the rollback itself fails, so cleanup runs before the error that
-	// reports the partial state is thrown.
-	// Held as a pair so the reported error still names the path the content survived at;
-	// declaring it as `unknown` alone would lose the string narrowing at the throw site.
-	let rollbackFailure: { error: unknown; backupPath: string } | null = null
 
 	try {
 		// -- Step 1: write content to staging temp file -------------------
@@ -554,12 +555,72 @@ export async function safeWriteText(
 				}
 			}
 
-			// -- Step 3 (backup:true): rename target -> backup --------------
+			// -- Step 3 (backup:true): durable copy target -> backup ----
 			if (options?.backup) {
 				try {
 					await fs.access(targetPath)
 					backupPath = _tempName(dirPath, "safeWriteText.bak")
-					await fs.rename(targetPath, backupPath)
+					// Copy, never move. Renaming the target away leaves the canonical path absent for
+					// the whole commit window: readers see a missing file, and a concurrent
+					// writer can create a new target that a later rollback would destroy. A copy
+					// keeps the target present, so the step 4 rename is the only change to the
+					// canonical path. The copy is flushed so the retained content survives a crash.
+					try {
+						// Create the destination BEFORE any content exists at it, with the mode fixed
+						// at open time. fs.copyFile picks the destination mode itself (the platform
+						// creation mask subject to umask on some platforms, the source's mode - or its
+						// read-only attribute - on others), so letting it create the file would either
+						// leave a restrictive target's bytes briefly readable to others, or leave the
+						// copy unwritable so the fsync open below fails with EACCES. open() ignores its
+						// mode argument for an existing file, so this 0o600 survives the copy on POSIX;
+						// the chmod afterwards is what clears a copied read-only attribute on Windows
+						// and keeps a backup of a permissive file private.
+						const seedFd = fsSync.openSync(backupPath, "wx", 0o600)
+						// Single close, no retry: on POSIX close(2) can release the descriptor before it
+						// reports an error (and leaves its state unspecified after EINTR), so a second
+						// close could release a descriptor some other operation has meanwhile reused.
+						// The failure propagates; backupPath is already recorded, so the outer cleanup
+						// removes the seeded file instead of leaving it beside the target.
+						fsSync.closeSync(seedFd)
+						await fs.copyFile(targetPath, backupPath)
+						await fs.chmod(backupPath, 0o600)
+						// "r+" not "r": fsync on a read-only handle is EPERM on Windows, and the same
+						// flag the staged temp file uses above.
+						const backupFd = fsSync.openSync(backupPath, "r+")
+						try {
+							_fsyncFile(backupFd)
+						} finally {
+							fsSync.closeSync(backupFd)
+						}
+					} catch (backupError: unknown) {
+						// A partial backup must not outlive this attempt: it is not a complete copy
+						// of anything, and once the write fails nothing else removes it. The unlink is
+						// retried once (Windows reports EPERM for a file whose handle has not been
+						// released yet); if it still fails the path is carried on the thrown error
+						// instead of being dropped where no caller can act on it.
+						const orphanPath = backupPath
+						let backupCleanupError: unknown = null
+						for (let attempt = 0; attempt < 2; attempt++) {
+							try {
+								await fs.unlink(orphanPath)
+								backupCleanupError = null
+								break
+							} catch (cleanupError: unknown) {
+								if (errorCode(cleanupError) === "ENOENT") {
+									// Already gone: that is exactly the outcome the cleanup wanted, so stop
+									// rather than unlinking the same path a second time.
+									backupCleanupError = null
+									break
+								}
+								backupCleanupError = cleanupError
+							}
+						}
+						backupPath = null
+						if (backupCleanupError !== null) {
+							throw new OrphanedBackupError(orphanPath, targetPath, backupError, backupCleanupError)
+						}
+						throw backupError
+					}
 					releaseBackupOnSuccess = true
 				} catch (err: unknown) {
 					if (errorCode(err) !== "ENOENT") throw err
@@ -600,7 +661,6 @@ export async function safeWriteText(
 			} else {
 				await fs.rename(tempPath, targetPath)
 			}
-			committed = true
 
 			if (options?.failIfExist) {
 				// The target name is published at this point; the staged name is only a second
@@ -649,6 +709,7 @@ export async function safeWriteText(
 					// non-fatal — orphaned backup is acceptable
 				}
 			}
+
 		} finally {
 			// Unlink DACL dump regardless of success/failure in this span.
 			if (daclDumpPath !== null) {
@@ -666,22 +727,16 @@ export async function safeWriteText(
 			await fs.rmdir(stagingDir).catch(() => {})
 		}
 	} catch (originalError: unknown) {
-		// Only a pre-commit failure can restore the backup. Once the commit rename
-		// published, a later failure (for example the post-commit directory fsync)
-		// must not overwrite the published content with the old file.
-		if (backupPath && releaseBackupOnSuccess && !committed) {
-			try {
-				await fs.rename(backupPath, targetPath)
-			} catch (rollbackError: unknown) {
-				// The content survives only at the backup path now, and the canonical
-				// target is gone. Reporting just the publish failure would leave the
-				// caller with data it cannot find at the expected path, so the
-				// partial-failure state travels with the error. The staged temp file
-				// and this write's staging directory are released first: a rollback
-				// failure is already a hard enough state to reason about without also
-				// leaking the staging file.
-				rollbackFailure = { error: rollbackError, backupPath }
-			}
+		// The backup is a copy, never a restore source: whether the failure happened before
+		// or after the commit rename, the copy is removed below so no stale duplicate of the
+		// previous content survives next to the target.
+		if (backupPath && releaseBackupOnSuccess) {
+			// Nothing to restore: the backup is a copy, so the target still holds whatever
+			// the commit left there - before the commit that is the pre-write content, and
+			// after it the published content. Either way the copy has served its purpose
+			// and must not be left beside the target where no caller can find it.
+			await fs.unlink(backupPath).catch(() => {})
+			backupPath = null
 		}
 		try {
 			await fs.unlink(tempPath).catch(() => {})
@@ -700,9 +755,6 @@ export async function safeWriteText(
 			await fs.unlink(daclDumpPath).catch(() => {})
 		}
 
-		if (rollbackFailure) {
-			throw new RollbackFailureError(originalError, rollbackFailure.error, rollbackFailure.backupPath)
-		}
 
 		throw originalError
 	}
