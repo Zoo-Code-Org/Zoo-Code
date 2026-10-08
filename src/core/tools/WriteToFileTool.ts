@@ -260,15 +260,35 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 * approved, and that hazard has to be visible in the chat exactly as the parse-failure
 	 * and failed-stream teardowns report it.
 	 */
+
+	/**
+	 * Release the diff view of an abandoned stream. A modify edit restores the original
+	 * content, which is safe. A new-file edit must NOT go through revertChanges(): its
+	 * new-file branch saves the dirty buffer - unapproved partial model output - before
+	 * deleting the file, so it discards the buffer without persisting it instead.
+	 */
+	private async releaseAbandonedDiffView(task: Task): Promise<boolean> {
+		try {
+			if (task.diffViewProvider.editType === "modify") {
+				await task.diffViewProvider.revertChanges()
+			} else {
+				await task.diffViewProvider.discardUnapprovedStream()
+			}
+			return true
+		} catch (releaseError) {
+			console.error("Error releasing the abandoned write_to_file diff view:", releaseError)
+			return false
+		}
+	}
 	async teardownAbandonedStream(task: Task): Promise<void> {
 		if (!this.taskPartialStreamState.has(this.getPartialStreamFailureKey(task))) {
 			return
 		}
 
-		const reverted = await this.revertDiffChangesBeforeReset(task)
+		const released = await this.releaseAbandonedDiffView(task)
 		this.resetTaskPartialState(task)
 		await this.resetDiffViewAfterWrite(task)
-		if (!reverted) {
+		if (!released) {
 			await this.reportRevertFailure(task)
 		}
 	}

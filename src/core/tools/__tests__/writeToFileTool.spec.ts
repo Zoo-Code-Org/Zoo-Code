@@ -465,6 +465,9 @@ describe("writeToFileTool", () => {
 				return mockCline
 			})
 			const diffViewCallOrder: string[] = []
+			mockCline.diffViewProvider.discardUnapprovedStream = vi.fn(async () => {
+				diffViewCallOrder.push("discard")
+			})
 			mockCline.diffViewProvider.revertChanges.mockImplementation(async () => {
 				diffViewCallOrder.push("revert")
 			})
@@ -482,7 +485,11 @@ describe("writeToFileTool", () => {
 			await writeToFileTool.teardownAbandonedStream(mockCline)
 
 			// The streamed content is reverted before the view is reset, and the state is gone.
-			expect(diffViewCallOrder).toEqual(["revert", "reset"])
+			// A new-file stream was never approved: the buffer must be discarded rather than
+			// reverted, because revertChanges() would SAVE the partial content before deleting
+			// the file. The view is still reset and the state released.
+			expect(diffViewCallOrder).toEqual(["discard", "reset"])
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
 			// The malformed call itself is not re-reported (the guard already emitted the
@@ -498,7 +505,9 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
-			mockCline.diffViewProvider.revertChanges.mockRejectedValue(new Error("revert failed"))
+			mockCline.diffViewProvider.discardUnapprovedStream = vi.fn(async () => {
+				throw new Error("discard failed")
+			})
 
 			await writeToFileTool.teardownAbandonedStream(mockCline)
 
@@ -508,6 +517,21 @@ describe("writeToFileTool", () => {
 				"error",
 				expect.stringContaining("could not be restored"),
 			)
+		})
+
+		it("restores the original content for a modify edit instead of discarding it", async () => {
+			// A modify edit has pre-existing content on disk, so restoring it is both safe
+			// and correct; only the new-file case must avoid the save.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			mockCline.diffViewProvider.editType = "modify"
+			mockCline.diffViewProvider.discardUnapprovedStream = vi.fn().mockResolvedValue(undefined)
+
+			await writeToFileTool.teardownAbandonedStream(mockCline)
+
+			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		})
 
 		it("does nothing when the task has no stream state to release", async () => {

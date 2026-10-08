@@ -1,3 +1,4 @@
+import * as fs from "fs/promises"
 import { DiffViewProvider, DIFF_VIEW_URI_SCHEME, DIFF_VIEW_LABEL_CHANGES } from "../DiffViewProvider"
 import * as vscode from "vscode"
 import * as path from "path"
@@ -14,6 +15,10 @@ vi.mock("delay", () => ({
 vi.mock("fs/promises", () => ({
 	readFile: vi.fn().mockResolvedValue("file content"),
 	writeFile: vi.fn().mockResolvedValue(undefined),
+	// The abandoned-stream discard removes the placeholder file and the directories it
+	// created, so the discard path needs these two.
+	unlink: vi.fn().mockResolvedValue(undefined),
+	rmdir: vi.fn().mockResolvedValue(undefined),
 	access: vi.fn().mockResolvedValue(undefined),
 }))
 
@@ -1845,5 +1850,56 @@ describe("DiffViewProvider", () => {
 			expect(closeFileTab).not.toHaveBeenCalled()
 			expect(vscode.window.showTextDocument).toHaveBeenCalled()
 		})
+	// An abandoned partial stream was never approved. revertChanges() saves a dirty
+	// new-file buffer before deleting the file, which would put partial model output on
+	// disk (and leave it there if the delete fails), so the discard path blanks the
+	// buffer first and only then saves the empty placeholder before removing it.
+	describe("discardUnapprovedStream method", () => {
+		it("never persists the unapproved buffer: blanks it, then deletes the placeholder", async () => {
+			const callOrder: string[] = []
+			const document = {
+				isDirty: true,
+				getText: () => "partial model output",
+				positionAt: (offset: number) => ({ line: 0, character: offset }),
+				uri: { fsPath: mockTargetPath, path: mockTargetPath },
+				save: vi.fn(async () => {
+					callOrder.push("save")
+				}),
+			}
+			Object.assign(diffViewProvider, {
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: { document },
+				editType: "create",
+				createdDirs: [],
+				closeAllDiffViews: vi.fn(async () => {
+					callOrder.push("closeDiffViews")
+				}),
+				closeFileTab: vi.fn(async () => {
+					callOrder.push("closeFileTab")
+				}),
+			})
+			vi.mocked(vscode.workspace.applyEdit).mockImplementation(async (edit: unknown) => {
+				callOrder.push("applyEdit")
+				// The only content the discard may write is an empty buffer.
+				expect((edit as { replace: (uri: unknown, range: unknown, text: string) => void })).toBeDefined()
+				return true
+			})
+
+			await diffViewProvider.discardUnapprovedStream()
+
+			expect(callOrder).toEqual(["closeDiffViews", "applyEdit", "save", "closeFileTab"])
+			// The placeholder for THIS relPath is what gets removed.
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("mock-target-file.ts"))
+		})
+
+		it("does nothing when no abandoned view is open", async () => {
+			Object.assign(diffViewProvider, { relPath: undefined, activeDiffEditor: undefined })
+
+			await diffViewProvider.discardUnapprovedStream()
+
+			expect(fs.unlink).not.toHaveBeenCalled()
+		})
+	})
 	})
 })
+

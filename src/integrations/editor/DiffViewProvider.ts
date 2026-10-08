@@ -513,6 +513,48 @@ export class DiffViewProvider {
 		return JSON.stringify(result)
 	}
 
+	/**
+	 * Release a diff view whose content was never approved (an abandoned partial
+	 * stream). Deliberately NOT the same as revertChanges(): for a new-file edit that
+	 * path saves a dirty buffer as-is before deleting the file, which would write
+	 * partial model output the task never approved - and leave it on disk if the
+	 * delete then fails. Here the buffer is emptied FIRST, so the only bytes that can
+	 * ever reach the placeholder file are none; the tab is then clean enough to close
+	 * without a prompt, and the placeholder plus the directories this edit created are
+	 * removed.
+	 */
+	async discardUnapprovedStream(): Promise<void> {
+		if (!this.relPath || !this.activeDiffEditor) {
+			return
+		}
+
+		const absolutePath = path.resolve(this.cwd, this.relPath)
+		const document = this.activeDiffEditor.document
+
+		this.disposeActiveEditorListener()
+		this.cancelDeferredScroll()
+		await this.closeAllDiffViews()
+
+		if (document.isDirty) {
+			const edit = new vscode.WorkspaceEdit()
+			const fullRange = new vscode.Range(
+				document.positionAt(0),
+				document.positionAt(document.getText().length),
+			)
+			edit.replace(document.uri, fullRange, "")
+			await vscode.workspace.applyEdit(edit)
+			await document.save()
+		}
+
+		await this.closeFileTab(absolutePath)
+		await fs.unlink(absolutePath)
+
+		// Remove only the directories this edit created, in reverse order.
+		for (let i = this.createdDirs.length - 1; i >= 0; i--) {
+			await fs.rmdir(this.createdDirs[i])
+		}
+	}
+
 	async revertChanges(): Promise<void> {
 		if (!this.relPath || !this.activeDiffEditor) {
 			return
