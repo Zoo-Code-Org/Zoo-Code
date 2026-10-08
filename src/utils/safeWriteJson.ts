@@ -8,6 +8,7 @@ import {
 	resolveLockKey,
 	resolvePublishTarget,
 	safeWriteText,
+	type DirectoryIdentity,
 	type SafeWriteTextOptions,
 } from "../services/file-safety/safeWriteText"
 
@@ -67,6 +68,33 @@ export class ConfinedPathEscapeError extends Error {
  * legitimate in-scope write. When the scope does not exist yet, the nearest
  * existing ancestor is resolved and the remainder re-appended.
  */
+/**
+ * The identity (dev, ino) of every EXISTING directory between the confined scope root
+ * and the authorized target's parent. These are the directories the confinement walk
+ * went through; a later swap of any one of them sends the commit somewhere the scope
+ * check never looked, so the publish re-checks them.
+ */
+async function _confinedAncestorIdentities(scopeRoot: string, target: string): Promise<DirectoryIdentity[]> {
+	const parent = path.dirname(target)
+	const relative = path.relative(scopeRoot, parent)
+	const chain: string[] = [scopeRoot]
+	if (relative && relative !== "." && !relative.startsWith(".." + path.sep)) {
+		let cursor = scopeRoot
+		for (const segment of relative.split(path.sep)) {
+			cursor = path.join(cursor, segment)
+			chain.push(cursor)
+		}
+	}
+	const pinned: DirectoryIdentity[] = []
+	for (const dir of chain) {
+		const stat = await fs.stat(dir, { bigint: true }).catch(() => undefined)
+		if (stat) {
+			pinned.push({ dir, dev: stat.dev, ino: stat.ino })
+		}
+	}
+	return pinned
+}
+
 async function _resolveScopeRoot(confineTo: string): Promise<string> {
 	const lexical = path.resolve(confineTo)
 	try {
@@ -199,9 +227,17 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// does not exist yet still carries the alias components of the path it was
 		// given. This runs before the merge read and before anything is staged, so a
 		// rejected write leaves nothing behind.
+		// The confinement decision is about a specific resolved path AND the directories
+		// the walk to it went through. Both are handed to the publish primitive, which
+		// re-resolves the path itself: without the pin, a link swapped in after this check
+		// would move the commit outside the scope while every check above still passed.
+		let confinedTarget: string | undefined
+		let confinedAncestors: DirectoryIdentity[] | undefined
 		if (options?.confineTo) {
 			const scopeRoot = await _resolveScopeRoot(options.confineTo)
-			_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(resolvedTargetPath), scopeRoot)
+			confinedTarget = await _resolveScopeRoot(resolvedTargetPath)
+			_assertWithinScope(absoluteFilePath, confinedTarget, scopeRoot)
+			confinedAncestors = await _confinedAncestorIdentities(scopeRoot, confinedTarget)
 		}
 
 		// If a merge callback was provided, read the current file under the lock
@@ -241,6 +277,11 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		const textOptions: SafeWriteTextOptions = {
 			tempPath: actualTempNewFilePath,
 			backup: true,
+			// Pin the confinement decision onto the publish: the target must still resolve
+			// to what was authorized, and every directory the confined walk went through
+			// must still be the same directory, or nothing is committed.
+			expectedResolvedPath: confinedTarget,
+			expectedAncestorIdentities: confinedAncestors,
 		}
 
 		await safeWriteText(resolvedTargetPath, "", textOptions)

@@ -5,10 +5,12 @@ import type { ChildProcess } from "child_process"
 import * as path from "path"
 
 import {
+	AncestorReplacedError,
 	PostCommitDurabilityError,
 	resolveLockKey,
 	safeWriteText,
 	StagingPathError,
+	TargetMovedError,
 	type SafeWriteTextOptions,
 } from "../safeWriteText"
 
@@ -24,6 +26,7 @@ vi.mock("fs/promises", () => ({
 	realpath: vi.fn(),
 	lstat: vi.fn(),
 	readlink: vi.fn(),
+	stat: vi.fn(),
 }))
 
 // Full mock for fs — all sync methods are vi.fn() stubs. Stats is a bare
@@ -91,6 +94,9 @@ function mockDefaults(): void {
 	// Staged-file default: a regular file, not a link, so a caller-supplied
 	// tempPath passes the location and file-type check by default.
 	vi.mocked(fs.lstat).mockResolvedValue(_fileStats(false))
+	// Directory default: it exists, so this write creates no parent directories and
+	// pins no ancestor identities unless a test asks for either.
+	vi.mocked(fs.stat).mockResolvedValue(_fileStats(false) as unknown as fsSync.BigIntStats)
 }
 function _stats(mode: number): fsSync.Stats {
 	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats
@@ -1359,5 +1365,141 @@ describe("resolvePublishTarget", () => {
 
 		// The fallback is the resolved path, not the string that was handed in.
 		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), path.resolve(targetPath))
+	})
+})
+
+// ── The pin a confined caller hands down: same target, same directories ──────
+
+describe("authorized-target pin (confinement TOCTOU)", () => {
+	beforeEach(() => mockDefaults())
+
+	it("refuses to publish when the path no longer resolves to the authorized target", async () => {
+		const dir = path.resolve("/tmp/test-dir")
+		const authorized = path.join(dir, "target.txt")
+		// The caller checked confinement while the name pointed inside its scope; by the
+		// time this primitive resolves it, a local process has repointed the link. The
+		// decision was never made about the file now reachable, so nothing is published.
+		vi.mocked(fs.realpath).mockResolvedValue(path.join(path.resolve("/outside"), "the-victim.txt"))
+
+		const error = await safeWriteText(authorized, "data", {
+			expectedResolvedPath: authorized,
+			platform: "linux",
+		}).catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(TargetMovedError)
+		expect((error as TargetMovedError).authorizedPath).toBe(authorized)
+		expect((error as TargetMovedError).resolvedPath).toBe(path.join(path.resolve("/outside"), "the-victim.txt"))
+		expect(fs.rename).not.toHaveBeenCalled()
+		// Nothing was prepared either: the pin is checked before any directory is made.
+		expect(fs.mkdir).not.toHaveBeenCalled()
+	})
+
+	it("refuses to publish when an authorized parent directory was replaced after the check", async () => {
+		// expectedResolvedPath pins the NAME being published; it cannot notice the
+		// directory the name lives in being swapped for another one. The recorded
+		// ancestor identities are what catch it.
+		const dir = path.resolve("/tmp/test-dir")
+		const targetPath = path.join(dir, "target.txt")
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.stat).mockResolvedValue(_fileStatsWithIdentity(999n, 1n)) // was ino 100n
+
+		const error = await safeWriteText(targetPath, "data", {
+			expectedResolvedPath: targetPath,
+			expectedAncestorIdentities: [{ dir, dev: 1n, ino: 100n }],
+			platform: "linux",
+		}).catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(AncestorReplacedError)
+		expect((error as AncestorReplacedError).directory).toBe(dir)
+		expect((error as AncestorReplacedError).message).toContain("no longer the directory that was authorized")
+		expect(fs.rename).not.toHaveBeenCalled()
+		// The staged copy is cleaned up rather than left beside the target.
+		expect(
+			vi.mocked(fs.unlink).mock.calls.some((call) => String(call[0]).includes("safeWriteText_")),
+		).toBe(true)
+	})
+
+	it("publishes when the recorded ancestor identities are unchanged", async () => {
+		// The pin must not turn every confined write into a false rejection.
+		const dir = path.resolve("/tmp/test-dir")
+		const targetPath = path.join(dir, "target.txt")
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.stat).mockResolvedValue(_fileStatsWithIdentity(100n, 1n))
+
+		await safeWriteText(targetPath, "data", {
+			expectedResolvedPath: targetPath,
+			expectedAncestorIdentities: [{ dir, dev: 1n, ino: 100n }],
+			platform: "linux",
+		})
+
+		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+	})
+
+	it("refuses the publish when an authorized ancestor disappears before the commit", async () => {
+		const dir = path.resolve("/tmp/test-dir")
+		const targetPath = path.join(dir, "target.txt")
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.stat).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+		const error = await safeWriteText(targetPath, "data", {
+			expectedResolvedPath: targetPath,
+			expectedAncestorIdentities: [{ dir, dev: 1n, ino: 100n }],
+			platform: "linux",
+		}).catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(AncestorReplacedError)
+		expect((error as AncestorReplacedError).message).toContain("no longer exists")
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+})
+
+// ── Parent directories this write creates must not outlive a failed write ────
+
+describe("parent directories created by safeWriteText", () => {
+	beforeEach(() => mockDefaults())
+
+	it("does not create them when a caller-supplied staging path is rejected", async () => {
+		// The staging-path checks used to run after the recursive mkdir, so a rejected
+		// staging path still left a freshly created parent tree beside a target that was
+		// never written.
+		const dir = path.resolve("/tmp/deep/new-parent")
+		const targetPath = path.join(dir, "target.txt")
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: path.join(path.resolve("/elsewhere"), "staged.txt"), platform: "linux" }),
+		).rejects.toBeInstanceOf(StagingPathError)
+
+		expect(fs.mkdir).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("removes the directories it created, innermost first, when the write fails before the commit", async () => {
+		const parent = path.resolve("/tmp/test-parent")
+		const dir = path.join(parent, "created-by-this-write")
+		const targetPath = path.join(dir, "target.txt")
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		// Both tail directories are missing before the mkdir; the ancestor exists.
+		vi.mocked(fs.stat).mockImplementation(async (p) => {
+			const s = String(p)
+			if (s === dir || s === parent) {
+				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			}
+			return _fileStatsWithIdentity(1n, 1n)
+		})
+		// The commit is the failure point.
+		vi.mocked(fs.rename).mockRejectedValue(Object.assign(new Error("ENOSPC"), { code: "ENOSPC" }))
+
+		await expect(safeWriteText(targetPath, "data", { platform: "linux" })).rejects.toThrow("ENOSPC")
+
+		const removed = vi.mocked(fs.rmdir).mock.calls.map((call) => String(call[0]))
+		expect(removed).toContain(dir)
+		expect(removed).toContain(parent)
+		// Innermost outward: a parent may only be removed once its child is gone.
+		expect(removed.indexOf(dir)).toBeLessThan(removed.indexOf(parent))
 	})
 })
