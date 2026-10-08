@@ -66,7 +66,7 @@ class UnsafeStagingDirectoryError extends Error {
  * The new content is in place; what is unconfirmed is that the directory entry
  * survives a crash, so callers must not treat the publish as durable.
  */
-class PublishNotDurableError extends Error {
+export class PublishNotDurableError extends Error {
 	constructor(targetPath: string, reason: string) {
 		super(`Published ${targetPath} but could not confirm it is durable: ${reason}`)
 		this.name = "PublishNotDurableError"
@@ -145,8 +145,9 @@ async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunne
 }
 
 /** Restore a DACL dump onto *dirPath* on Windows.
- * Best-effort: content is already committed, so failure is non-fatal. */
-async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<void> {
+ * Returns true when icacls reported success; false otherwise, so the caller can
+ * decide whether a lost DACL is tolerable. */
+async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<boolean> {
 	const runner = execFileRunner ?? execFile
 	try {
 		await new Promise<void>((resolve, reject) => {
@@ -154,8 +155,9 @@ async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRu
 				err ? reject(err) : resolve(),
 			)
 		})
+		return true
 	} catch {
-		// best-effort; content already committed
+		return false
 	}
 }
 
@@ -313,6 +315,16 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				if (!saved) {
 					// Skip the restore step, but keep daclDumpPath tracked: a failed save can
 					// still have created the dump file, and the finally block must remove it.
+					//
+					// This is deliberately NOT fatal. icacls /restore needs backup/restore
+					// privileges: measured on a normal (non-elevated) Windows host it fails with
+					// "Not all privileges or groups referenced are assigned to the caller"
+					// (exit 1300), and /save itself can exit non-zero while still writing a
+					// usable dump. Refusing the write would therefore break every save on such a
+					// host without removing the exposure. The privilege-free fix - copying the
+					// target's DACL onto the staged file BEFORE the commit, so the rename never
+					// changes the security descriptor - is tracked separately; see the note on
+					// tracking issue easonLiangWorldedtech/Zoo-Code#41.
 					daclSaved = false
 				} else {
 					daclSaved = true
@@ -382,7 +394,18 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			// -- Step 5 (win32): restore DACL AFTER commit rename ---------
 			if (platform === "win32" && daclSaved && daclDumpPath !== null) {
 				const restoredDir = path.dirname(targetPath)
-				await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
+				let restored = await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
+				if (!restored) {
+					// One retry: icacls can fail transiently while another process still holds
+					// the just-renamed file open.
+					restored = await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
+				}
+				if (!restored) {
+					// Not fatal, for the same reason the save miss is not: on a non-elevated
+					// host /restore cannot succeed at all. The content is committed and the
+					// backup (when taken) is kept so the previous content and its permissions
+					// stay recoverable.
+				}
 			}
 
 			// -- Step 6 (backup:true): delete backup on success -----------
