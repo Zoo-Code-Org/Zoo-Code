@@ -1940,6 +1940,53 @@ const provider = new ClineProvider(
 			await provider.dispose()
 		})
 
+		it("restores the shared value when the view-local durable write fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("atomic-write-view")
+			await provider.setValue("currentApiConfigName", "first-profile")
+			await provider.setValues({ mode: "architect" })
+
+			// Only the durable viewStates write fails, so the failure lands exactly between the
+			// shared write and the view-local write of the same call.
+			// getMockImplementation, not bind: spyOn reuses the same mock object, so a bound copy
+			// would call the spy's own implementation and recurse.
+			const originalUpdate = vi.mocked(mockContext.globalState.update).getMockImplementation()
+			const updateSpy = vi.spyOn(mockContext.globalState, "update").mockImplementation(
+				async (key, value) => {
+					if (key === "viewStates") {
+						throw new Error("view states write failed")
+					}
+					return originalUpdate?.(key, value)
+				},
+			)
+			const logSpy = vi.spyOn(provider, "log")
+
+			await expect(provider.setValue("currentApiConfigName", "second-profile")).rejects.toThrow(
+				"view states write failed",
+			)
+			await expect(provider.setValues({ mode: "code" })).rejects.toThrow("view states write failed")
+
+			// The shared store must not keep a value that getValues() cannot report: the
+			// view-local buffer is only updated once the durable per-view write succeeds, so an
+			// un-rolled shared write would leave storage on the new profile while every reader
+			// that merges viewLocalState over it keeps serving the old one.
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("first-profile")
+			expect(provider.getValues().currentApiConfigName).toBe("first-profile")
+			expect(provider.contextProxy.getValue("mode")).toBe("architect")
+			expect(provider.getValues().mode).toBe("architect")
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining("the shared value(s) were restored"),
+			)
+			updateSpy.mockRestore()
+			await provider.dispose()
+		})
+
 		it("should rekey a pre-launch entry under the temporary id to the registered stable id", async () => {
 const provider = new ClineProvider(
 				mockContext,

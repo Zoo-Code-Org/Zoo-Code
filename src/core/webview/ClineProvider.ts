@@ -4046,8 +4046,17 @@ export class ClineProvider
 	}
 
 	public async setValue<K extends keyof RooCodeSettings>(key: K, value: RooCodeSettings[K]) {
+		// Snapshot first: the durable per-view pin and the in-memory buffer are written
+		// AFTER the shared store, so a failed view-local write must be able to undo the
+		// shared one (see restoreSharedValuesAfterViewLocalFailure).
+		const previousValues = { [key]: this.contextProxy.getValue(key) } as RooCodeSettings
 		await this.contextProxy.setValue(key, value)
-		await this._saveViewLocalStateFromMutation({ [key]: value })
+		try {
+			await this._saveViewLocalStateFromMutation({ [key]: value })
+		} catch (error: unknown) {
+			await this.restoreSharedValuesAfterViewLocalFailure(previousValues, error)
+			throw error
+		}
 	}
 
 	public getValue<K extends keyof RooCodeSettings>(key: K) {
@@ -4073,8 +4082,51 @@ export class ClineProvider
 			}
 		}
 
+		const previousValues = Object.fromEntries(
+			Object.keys(sanitizedValues).map((key) => [
+				key,
+				this.contextProxy.getValue(key as keyof RooCodeSettings),
+			]),
+		) as RooCodeSettings
 		await this.contextProxy.setValues(sanitizedValues)
-		await this._saveViewLocalStateFromMutation(sanitizedValues)
+		try {
+			await this._saveViewLocalStateFromMutation(sanitizedValues)
+		} catch (error: unknown) {
+			await this.restoreSharedValuesAfterViewLocalFailure(previousValues, error)
+			throw error
+		}
+	}
+
+	/**
+	 * Undo the shared half of a setValue/setValues write whose view-local half failed.
+	 * Without this the shared store holds the new value while getValues() keeps merging the
+	 * stale view-local buffer over it, so the caller's write is durable but invisible -
+	 * and the next read, task, or profile load disagrees with the store. A failed restore is
+	 * surfaced as its own inconsistent-state log instead of hiding behind the original error.
+	 */
+	private async restoreSharedValuesAfterViewLocalFailure(
+		previousValues: RooCodeSettings,
+		cause: unknown,
+		): Promise<void> {
+		const describe = (error: unknown) => (error instanceof Error ? error.message : String(error))
+		const restoreFailures: string[] = []
+		for (const [key, previous] of Object.entries(previousValues)) {
+			try {
+				await this.contextProxy.setValue(key as keyof RooCodeSettings, previous)
+			} catch (error: unknown) {
+				restoreFailures.push(`${key}: ${describe(error)}`)
+			}
+		}
+
+		if (restoreFailures.length > 0) {
+			this.log(
+				`The view-local write failed (${describe(cause)}) and the shared value(s) could not be restored (${restoreFailures.join("; ")}); the shared store and this view's buffer may disagree.`,
+			)
+		} else {
+			this.log(
+				`The view-local write failed (${describe(cause)}); the shared value(s) were restored.`,
+			)
+		}
 	}
 
 	/**
