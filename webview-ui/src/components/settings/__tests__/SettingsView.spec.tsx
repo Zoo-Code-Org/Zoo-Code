@@ -4,12 +4,35 @@ import { renderWithExtensionState, screen, fireEvent, within, waitFor } from "@/
 import { act } from "@testing-library/react"
 
 import { vscode } from "@/utils/vscode"
-import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS } from "@roo-code/types"
+import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, type ProviderSettings } from "@roo-code/types"
+import type { ApiOptionsProps } from "../ApiOptions"
 
 import SettingsView from "../SettingsView"
 
 vi.mock("@src/utils/vscode", () => ({ vscode: { postMessage: vi.fn() } }))
 
+// SettingsView hands the buffered api configuration to the provider section, so the
+// save round trip can be observed without rendering the whole provider tree.
+vi.mock("../ApiOptions", () => ({
+	__esModule: true,
+	default: ({ apiConfiguration, setApiConfigurationField }: Pick<ApiOptionsProps, "apiConfiguration" | "setApiConfigurationField">) => (
+		<div data-testid="api-options">
+			<span data-testid="received-strict">{String(apiConfiguration?.openAiStrictToolSchemas)}</span>
+			<button
+				data-testid="set-strict-true"
+				onClick={() => setApiConfigurationField("openAiStrictToolSchemas", true)}
+			/>
+			<button
+				data-testid="set-strict-false"
+				onClick={() => setApiConfigurationField("openAiStrictToolSchemas", false)}
+			/>
+			<button
+				data-testid="set-other-field"
+				onClick={() => setApiConfigurationField("openAiBaseUrl", "https://example.test")}
+			/>
+		</div>
+	),
+}))
 vi.mock("../ApiConfigManager", () => ({
 	__esModule: true,
 	default: ({ currentApiConfigName }: any) => (
@@ -276,6 +299,7 @@ const mockPostMessage = (state: any) => {
 				shouldShowAnnouncement: false,
 				allowedCommands: [],
 				alwaysAllowExecute: false,
+				alwaysDenyUnapprovedCommands: false,
 				ttsEnabled: false,
 				ttsSpeed: 1,
 				soundEnabled: false,
@@ -802,5 +826,182 @@ describe("SettingsView - Duplicate Commands", () => {
 		// The buffered edit must be reverted before leaving Settings
 		expect(within(getSettingsContent()).queryByText("npm test")).not.toBeInTheDocument()
 		expect(onDone).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("SettingsView - Blanket Auto-Deny", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	// Completes the persisted-setting round trip required by the repo's
+	// AGENTS.md "Persisted Setting Checklist" for the blanket auto-deny
+	// toggle: UI binding buffers in cachedState, and only Save persists the
+	// value to the extension host.
+	it("saves the blanket auto-deny toggle when clicking Save", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView()
+
+		// Activate the autoApprove tab
+		activateTab("autoApprove")
+
+		const content = getSettingsContent()
+		// Enable always allow execute to reveal the execute section
+		const executeCheckbox = within(content).getByTestId("always-allow-execute-toggle")
+		fireEvent.click(executeCheckbox)
+
+		// Enable blanket auto-deny
+		const autoDenyCheckbox = within(content).getByTestId("auto-deny-unapproved-checkbox")
+		fireEvent.click(autoDenyCheckbox)
+		expect(autoDenyCheckbox).toBeChecked()
+
+		// Click Save to save settings
+		const saveButton = screen.getByTestId("save-button")
+		fireEvent.click(saveButton)
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({
+					alwaysDenyUnapprovedCommands: true,
+				}),
+			}),
+		)
+	})
+
+	it("posts blanket auto-deny as false when the setting is unset", () => {
+		// The submit path coerces an omitted setting to false
+		// (`alwaysDenyUnapprovedCommands ?? false`) rather than omitting the
+		// key, so the host always receives an explicit boolean.
+		const { activateTab, getSettingsContent } = renderSettingsView({
+			alwaysDenyUnapprovedCommands: undefined,
+		})
+
+		// Activate the autoApprove tab
+		activateTab("autoApprove")
+
+		const content = getSettingsContent()
+		// Enable always allow execute to reveal the execute section; the
+		// auto-deny toggle stays un-checked.
+		const executeCheckbox = within(content).getByTestId("always-allow-execute-toggle")
+		fireEvent.click(executeCheckbox)
+		expect(within(content).getByTestId("auto-deny-unapproved-checkbox")).not.toBeChecked()
+
+		// Click Save to save settings
+		const saveButton = screen.getByTestId("save-button")
+		fireEvent.click(saveButton)
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({
+					alwaysDenyUnapprovedCommands: false,
+				}),
+			}),
+		)
+	})
+
+	it("buffers the blanket auto-deny toggle until Save", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView()
+
+		// Activate the autoApprove tab
+		activateTab("autoApprove")
+
+		const content = getSettingsContent()
+		// Enable always allow execute to reveal the execute section
+		const executeCheckbox = within(content).getByTestId("always-allow-execute-toggle")
+		fireEvent.click(executeCheckbox)
+
+		// Toggle blanket auto-deny on
+		const autoDenyCheckbox = within(content).getByTestId("auto-deny-unapproved-checkbox")
+		fireEvent.click(autoDenyCheckbox)
+		expect(autoDenyCheckbox).toBeChecked()
+
+		// Toggling must NOT persist before Save; it only buffers in cachedState.
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ alwaysDenyUnapprovedCommands: true }),
+			}),
+		)
+
+		// Save now persists the buffered value.
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ alwaysDenyUnapprovedCommands: true }),
+			}),
+		)
+	})
+})
+
+describe("SettingsView - openAiStrictToolSchemas save round trip", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	const renderWithConfig = (apiConfiguration: ProviderSettings) => {
+		const onDone = vi.fn()
+		renderWithExtensionState(<SettingsView onDone={onDone} targetSection={"providers"} />, {
+			state: { currentApiConfigName: "test-config", apiConfiguration },
+		})
+	}
+
+	const posted = () =>
+		vi
+			.mocked(vscode.postMessage)
+			.mock.calls.map((call) => call[0])
+			.find((message) => message?.type === "upsertApiConfiguration")
+
+	it("restores the control from a loaded API configuration", () => {
+		// The control must show the stored value rather than the display default, so
+		// a saved false survives a reload.
+		renderWithConfig({ openAiStrictToolSchemas: false })
+		expect(screen.getByTestId("received-strict").textContent).toBe("false")
+	})
+
+	it("buffers the change and persists it only on Save", () => {
+		renderWithConfig({ openAiStrictToolSchemas: true })
+		fireEvent.click(screen.getByTestId("set-strict-false"))
+		// Toggling buffers in cachedState; nothing is persisted before Save.
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(posted()).toEqual(
+			expect.objectContaining({
+				type: "upsertApiConfiguration",
+				text: "test-config",
+				apiConfiguration: expect.objectContaining({ openAiStrictToolSchemas: false }),
+			}),
+		)
+	})
+
+	it("persists a toggled-on value as true in the upsert payload", () => {
+		// The save path must carry the value the user set, not only the loaded one:
+		// toggling on from a stored false and saving has to put true in the payload.
+		renderWithConfig({ openAiStrictToolSchemas: false })
+		fireEvent.click(screen.getByTestId("set-strict-true"))
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(posted()?.apiConfiguration?.openAiStrictToolSchemas).toBe(true)
+	})
+
+	it("saves a loaded false back as false when toggled on and off again", () => {
+		renderWithConfig({ openAiStrictToolSchemas: false })
+		fireEvent.click(screen.getByTestId("set-strict-true"))
+		fireEvent.click(screen.getByTestId("set-strict-false"))
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(posted()?.apiConfiguration?.openAiStrictToolSchemas).toBe(false)
+	})
+
+	it("leaves an unset value unset instead of writing the display default", () => {
+		// The control shows the display default, but saving must not materialise it:
+		// a config that never stored the setting stays unset.
+		renderWithConfig({})
+		expect(screen.getByTestId("received-strict").textContent).toBe("undefined")
+		// Make a change elsewhere so Save is enabled, then save.
+		fireEvent.click(screen.getByTestId("set-other-field"))
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(posted()?.apiConfiguration?.openAiBaseUrl).toBe("https://example.test")
+		expect(posted()?.apiConfiguration?.openAiStrictToolSchemas).toBeUndefined()
 	})
 })

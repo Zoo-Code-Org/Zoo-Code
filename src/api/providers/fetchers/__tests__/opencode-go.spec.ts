@@ -35,7 +35,7 @@ describe("Opencode Go Fetchers", () => {
 
 			expect(mockedAxios.get).toHaveBeenCalledWith("https://opencode.ai/zen/go/v1/models", {
 				headers: { Authorization: "Bearer test-key" },
-				timeout: 10_000,
+				signal: undefined,
 			})
 
 			expect(Object.keys(models).sort()).toEqual(["deepseek-v4-pro", "glm-5.1"])
@@ -150,6 +150,33 @@ describe("Opencode Go Fetchers", () => {
 
 			warnSpy.mockRestore()
 		})
+
+		it("forwards the caller's abort signal to the request", async () => {
+			mockedAxios.get.mockResolvedValue({ data: { data: [] } })
+			const controller = new AbortController()
+
+			await getOpencodeGoModels("test-key", { signal: controller.signal })
+
+			expect(mockedAxios.get).toHaveBeenCalledWith("https://opencode.ai/zen/go/v1/models", {
+				headers: { Authorization: "Bearer test-key" },
+				signal: controller.signal,
+			})
+		})
+
+		it("rejects with an AbortError when the signal aborts the pending request", async () => {
+			const controller = new AbortController()
+			mockedAxios.get.mockImplementation((_url: string, config?: { signal?: AbortSignal }) => {
+				// Mirror the HTTP client: a pending request rejects when its signal fires.
+				return new Promise<never>((_resolve, reject) => {
+					config?.signal?.addEventListener?.("abort", () => reject(new Error("canceled")), { once: true })
+				})
+			})
+
+			const fetchPromise = getOpencodeGoModels("k", { signal: controller.signal })
+			controller.abort()
+
+			await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
+		})
 	})
 
 	describe("parseOpencodeGoModel", () => {
@@ -170,6 +197,7 @@ describe("Opencode Go Fetchers", () => {
 				"glm-5",
 				"deepseek-v4-pro",
 				"deepseek-v4-flash",
+				"deepseek-v4.1-flash",
 				"deepseek-v4-flash-vision-exp",
 				"qwen3.7-max",
 				"qwen3.8-max",
@@ -228,6 +256,19 @@ describe("Opencode Go Fetchers", () => {
 			expect(info.supportsPromptCache).toBe(true)
 			expect(info.preserveReasoning).toBe(true)
 			expect(info.supportsReasoningEffort).toEqual(["disable", "low", "medium", "high", "xhigh"])
+		})
+
+		it("resolves DeepSeek V4.1 Flash to its 1M context when live metadata is absent", () => {
+			const info = parseOpencodeGoModel({ id: "deepseek-v4.1-flash" })
+			expect(info.contextWindow).toBe(1_000_000)
+			expect(info.maxTokens).toBe(384_000)
+			expect(info.supportsPromptCache).toBe(true)
+			expect(info.supportsMaxTokens).toBe(true)
+			expect(info.supportsReasoningEffort).toEqual(["disable", "low", "medium", "high", "xhigh"])
+			expect(info.supportsImages).toBe(true)
+			expect(info.inputPrice).toBe(0.3)
+			expect(info.outputPrice).toBe(1.2)
+			expect(info.cacheReadsPrice).toBe(0.006)
 		})
 
 		it("resolves GLM-5.2 with its 1M context and High/Max reasoning effort", () => {

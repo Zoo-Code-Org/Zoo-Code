@@ -1,5 +1,6 @@
 // pnpm --filter roo-cline test core/webview/__tests__/ClineProvider.spec.ts
 
+import fs from "fs"
 import * as path from "path"
 import { TaskRegistry } from "../../task/TaskRegistry"
 
@@ -27,6 +28,7 @@ import { defaultModeSlug } from "../../../shared/modes"
 import { experimentDefault } from "../../../shared/experiments"
 import { setTtsEnabled } from "../../../utils/tts"
 import { ContextProxy } from "../../config/ContextProxy"
+import { WorkspaceIndexingEnablementManager } from "../../../services/code-index/workspace-indexing-enablement-manager"
 import { Task, TaskOptions } from "../../task/Task"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
 
@@ -35,6 +37,9 @@ import { webviewMessageHandler } from "../webviewMessageHandler"
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { MessageManager } from "../../message-manager"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../../api/providers/fetchers/lmstudio"
+import { makeCompositeDisposable, makeEventEmitter } from "../../../test-utils/vscode"
+import { WebviewFocusTracker } from "../WebviewFocusTracker"
+import { resolveChatProvider } from "../../../activate/resolveChatProvider"
 
 // Mock setup must come before imports.
 vi.mock("../../prompts/sections/custom-instructions")
@@ -87,6 +92,9 @@ vi.mock("../../../utils/storage", () => ({
 	getSettingsDirectoryPath: vi.fn().mockResolvedValue("/test/settings/path"),
 	getTaskDirectoryPath: vi.fn().mockResolvedValue("/test/task/path"),
 	getGlobalStoragePath: vi.fn().mockResolvedValue("/test/storage/path"),
+	// Deletion resolves the tasks directory before it removes a history
+	// file, so the harness must provide the passthrough base path.
+	getStorageBasePath: vi.fn().mockImplementation((defaultPath: string) => defaultPath),
 }))
 
 vi.mock("@modelcontextprotocol/sdk/types.js", () => ({
@@ -151,6 +159,7 @@ vi.mock("vscode", () => ({
 	ExtensionContext: vi.fn(),
 	OutputChannel: vi.fn(),
 	WebviewView: vi.fn(),
+	Disposable: { from: (...subscriptions: vscode.Disposable[]) => makeCompositeDisposable(...subscriptions) },
 	EventEmitter: vi.fn().mockImplementation(function () {
 		return {
 			event: vi.fn(),
@@ -536,7 +545,13 @@ describe("ClineProvider", () => {
 			}),
 		}
 
-		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+		provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
 
 		defaultTaskOptions = {
 			provider,
@@ -561,12 +576,379 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	test("exposes only the explicitly associated workspace without a fallback", () => {
+		provider["currentWorkspacePath"] = "/workspace-a"
+		expect(provider.workspacePath).toBe("/workspace-a")
+		provider["currentWorkspacePath"] = "/workspace-b"
+		expect(provider.workspacePath).toBe("/workspace-b")
+		provider["currentWorkspacePath"] = undefined
+		expect(provider.workspacePath).toBeUndefined()
+	})
+
 	test("constructor initializes correctly", () => {
 		expect(provider).toBeInstanceOf(ClineProvider)
 		// Since getVisibleInstance returns the last instance where view.visible is true
 		// @ts-ignore - accessing private property for testing
 		provider.view = mockWebviewView
 		expect(ClineProvider.getVisibleInstance()).toBe(provider)
+	})
+
+	test("reports an unresolved webview as not visible", () => {
+		expect(provider.isViewVisible).toBe(false)
+	})
+
+	describe("Add to Context destination", () => {
+		let originalInstances: Set<ClineProvider>
+		let tabProvider: ClineProvider
+		let sidebar: ReturnType<typeof createView>
+		let tab: ReturnType<typeof createView>
+		let panel: vscode.WebviewPanel
+		let panelState: vscode.EventEmitter<vscode.WebviewPanelOnDidChangeViewStateEvent>
+
+		function createView() {
+			const messages = makeEventEmitter<WebviewMessage>()
+			const visibility = makeEventEmitter<void>()
+			const disposed = makeEventEmitter<void>()
+			const postMessage = vi.fn<(message: ExtensionMessage) => Promise<boolean>>().mockResolvedValue(true)
+			const view: vscode.WebviewView = {
+				viewType: ClineProvider.sideBarId,
+				visible: true,
+				webview: {
+					html: "",
+					options: {},
+					cspSource: "vscode-webview://test-csp-source",
+					asWebviewUri: (uri) => uri,
+					postMessage,
+					onDidReceiveMessage: messages.event,
+				},
+				onDidChangeVisibility: visibility.event,
+				onDidDispose: disposed.event,
+				show: vi.fn(),
+			}
+			return { view, messages, visibility, disposed, postMessage }
+		}
+
+		beforeEach(async () => {
+			originalInstances = ClineProvider["activeInstances"]
+			ClineProvider["activeInstances"] = new Set([provider])
+			tabProvider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				provider.webviewFocusTracker,
+			)
+			sidebar = createView()
+			tab = createView()
+			panelState = makeEventEmitter<vscode.WebviewPanelOnDidChangeViewStateEvent>()
+			panel = {
+				viewType: ClineProvider.tabPanelId,
+				title: "Zoo Code",
+				viewColumn: undefined,
+				webview: tab.view.webview,
+				options: {},
+				active: false,
+				visible: true,
+				onDidChangeViewState: panelState.event,
+				onDidDispose: tab.disposed.event,
+				reveal: vi.fn(),
+				dispose: vi.fn(),
+			}
+			await provider.resolveWebviewView(sidebar.view)
+			await tabProvider.resolveWebviewView(panel)
+			sidebar.postMessage.mockClear()
+			tab.postMessage.mockClear()
+		})
+
+		afterEach(async () => {
+			await provider.dispose()
+			await tabProvider.dispose()
+			ClineProvider["activeInstances"] = originalInstances
+		})
+
+		const addSelection = async () => {
+			const target = await resolveChatProvider(provider.webviewFocusTracker)
+			await target?.handleCodeAction("addToContext", "ADD_TO_CONTEXT", { selectedText: "selected code" })
+		}
+
+		test("reports current visibility independently of panel activation", () => {
+			expect(provider.isViewVisible).toBe(true)
+			expect(tabProvider.isViewVisible).toBe(true)
+			expect(panel.active).toBe(false)
+			Object.defineProperty(sidebar.view, "visible", { value: false, configurable: true })
+			Object.defineProperty(panel, "visible", { value: false, configurable: true })
+			expect(provider.isViewVisible).toBe(false)
+			expect(tabProvider.isViewVisible).toBe(false)
+			Object.defineProperty(sidebar.view, "visible", { value: true, configurable: true })
+			Object.defineProperty(panel, "visible", { value: true, configurable: true })
+			expect(provider.isViewVisible).toBe(true)
+			expect(tabProvider.isViewVisible).toBe(true)
+		})
+
+		test("follows chat focus rather than registration order after returning to the source editor", async () => {
+			sidebar.messages.fire({ type: "webviewDidFocus" })
+			// Both views stay visible while the source editor has focus.
+			expect(ClineProvider.getVisibleInstance()).toBe(tabProvider)
+			await addSelection()
+			expect(sidebar.postMessage).toHaveBeenCalledWith({
+				type: "invoke",
+				invoke: "setChatBoxMessage",
+				text: expect.stringContaining("selected code"),
+			})
+			expect(sidebar.postMessage).toHaveBeenCalledWith({ type: "action", action: "focusInput" })
+			expect(tab.postMessage).not.toHaveBeenCalled()
+
+			sidebar.postMessage.mockClear()
+			tab.messages.fire({ type: "webviewDidFocus" })
+			await addSelection()
+			expect(tab.postMessage).toHaveBeenCalledTimes(2)
+			expect(sidebar.postMessage).not.toHaveBeenCalled()
+		})
+
+		test("remembers explicit chat focus after panel deactivation and background visibility events", async () => {
+			tab.messages.fire({ type: "webviewDidFocus" })
+			Object.defineProperty(panel, "active", { value: false, configurable: true })
+			panelState.fire({ webviewPanel: panel })
+			sidebar.visibility.fire()
+			sidebar.postMessage.mockClear()
+			tab.postMessage.mockClear()
+			await addSelection()
+			expect(tab.postMessage).toHaveBeenCalledTimes(2)
+			expect(sidebar.postMessage).not.toHaveBeenCalled()
+		})
+
+		test.each([
+			{ change: "activation", property: "active", value: true },
+			{ change: "visibility", property: "visible", value: false },
+			{ change: "position", property: "viewColumn", value: 2 },
+		])("panel $change does not overwrite a more recent sidebar interaction", async ({ property, value }) => {
+			Object.defineProperty(panel, "active", { value: property !== "active", configurable: true })
+			tab.messages.fire({ type: "webviewDidFocus" })
+			sidebar.messages.fire({ type: "webviewDidFocus" })
+			Object.defineProperty(panel, property, { value, configurable: true })
+			panelState.fire({ webviewPanel: panel })
+			expect(provider.webviewFocusTracker.getLastActiveProvider()).toBe(provider)
+
+			sidebar.postMessage.mockClear()
+			tab.postMessage.mockClear()
+			await addSelection()
+			expect(sidebar.postMessage).toHaveBeenCalledTimes(2)
+			expect(tab.postMessage).not.toHaveBeenCalled()
+		})
+
+		test("background messages reach the provider handler without changing the last focused chat", async () => {
+			sidebar.messages.fire({ type: "webviewDidFocus" })
+			const handler = vi
+				.spyOn(await import("../webviewMessageHandler"), "webviewMessageHandler")
+				.mockResolvedValue(undefined)
+			try {
+				const message: WebviewMessage = { type: "themeFixtureProbeResponse" }
+				tab.messages.fire(message)
+				expect(handler).toHaveBeenCalledOnce()
+				expect(handler.mock.calls[0].slice(0, 2)).toEqual([tabProvider, message])
+				expect(provider.webviewFocusTracker.getLastActiveProvider()).toBe(provider)
+			} finally {
+				handler.mockRestore()
+			}
+			await addSelection()
+			expect(sidebar.postMessage).toHaveBeenCalledTimes(2)
+			expect(tab.postMessage).not.toHaveBeenCalled()
+		})
+
+		test("waits for explicit focus even when a panel is already active during registration", () => {
+			const state = makeEventEmitter<vscode.WebviewPanelOnDidChangeViewStateEvent>()
+			const activePanel = { ...panel, active: true, onDidChangeViewState: state.event }
+			const tracker = new WebviewFocusTracker()
+			tracker.init(tabProvider, activePanel)
+			expect(tracker.getLastActiveProvider()).toBeUndefined()
+			state.fire({ webviewPanel: activePanel })
+			expect(tracker.getLastActiveProvider()).toBeUndefined()
+			tab.messages.fire({ type: "webviewDidFocus" })
+			expect(tracker.getLastActiveProvider()).toBe(tabProvider)
+			tracker.dispose()
+			expect(tracker.getLastActiveProvider()).toBeUndefined()
+			tab.messages.fire({ type: "webviewDidFocus" })
+			expect(tracker.getLastActiveProvider()).toBeUndefined()
+		})
+
+		test("closing a different chat does not clear the last focused chat", async () => {
+			tab.messages.fire({ type: "webviewDidFocus" })
+			sidebar.disposed.fire()
+			await addSelection()
+			expect(tab.postMessage).toHaveBeenCalledTimes(2)
+			expect(sidebar.postMessage).not.toHaveBeenCalled()
+		})
+
+		test("tracks focus using only message and disposal events", () => {
+			const tracker = new WebviewFocusTracker()
+			const messages = makeEventEmitter<WebviewMessage>()
+			const disposed = makeEventEmitter<void>()
+			tracker.init(provider, {
+				webview: { onDidReceiveMessage: messages.event },
+				onDidDispose: disposed.event,
+			})
+			messages.fire({ type: "webviewDidFocus" })
+			expect(tracker.getLastActiveProvider()).toBe(provider)
+			disposed.fire()
+			expect(tracker.getLastActiveProvider()).toBeUndefined()
+			messages.fire({ type: "webviewDidFocus" })
+			expect(tracker.getLastActiveProvider()).toBeUndefined()
+			tracker.dispose()
+		})
+
+		test("tracker instances keep focus state and disposal independent", () => {
+			const first = new WebviewFocusTracker()
+			const second = new WebviewFocusTracker()
+			const firstView = createView()
+			const secondView = createView()
+			const firstRegistration = first.init(provider, firstView.view)
+			second.init(tabProvider, secondView.view)
+			firstView.messages.fire({ type: "webviewDidFocus" })
+			secondView.messages.fire({ type: "webviewDidFocus" })
+
+			expect(first.getLastActiveProvider()).toBe(provider)
+			expect(second.getLastActiveProvider()).toBe(tabProvider)
+			firstRegistration.dispose()
+			firstRegistration.dispose()
+			firstView.messages.fire({ type: "webviewDidFocus" })
+			expect(first.getLastActiveProvider()).toBeUndefined()
+			expect(second.getLastActiveProvider()).toBe(tabProvider)
+			first.dispose()
+			second.dispose()
+			second.dispose()
+			secondView.messages.fire({ type: "webviewDidFocus" })
+			expect(second.getLastActiveProvider()).toBeUndefined()
+		})
+
+		test("preserves the visible-provider fallback when no chat has been focused", async () => {
+			await addSelection()
+			expect(tab.postMessage).toHaveBeenCalledTimes(2)
+			expect(sidebar.postMessage).not.toHaveBeenCalled()
+		})
+
+		test.each(["sidebar", "tab"])(
+			"falls back to the visible chat when the last focused %s is hidden",
+			async (source) => {
+				const hidden = source === "sidebar" ? sidebar : tab
+				const visible = source === "sidebar" ? tab : sidebar
+				hidden.messages.fire({ type: "webviewDidFocus" })
+				Object.defineProperty(source === "sidebar" ? sidebar.view : panel, "visible", {
+					value: false,
+					configurable: true,
+				})
+
+				const target = await resolveChatProvider(provider.webviewFocusTracker)
+				expect(target).toBe(source === "sidebar" ? tabProvider : provider)
+				await target?.handleCodeAction("addToContext", "ADD_TO_CONTEXT", { selectedText: "selected code" })
+
+				expect(hidden.postMessage).not.toHaveBeenCalled()
+				expect(visible.postMessage).toHaveBeenCalledWith({
+					type: "invoke",
+					invoke: "setChatBoxMessage",
+					text: expect.stringContaining("selected code"),
+				})
+				expect(visible.postMessage).toHaveBeenCalledWith({ type: "action", action: "focusInput" })
+				expect(vscode.commands.executeCommand).not.toHaveBeenCalled()
+			},
+		)
+
+		test.each(["sidebar", "tab"])(
+			"opens the sidebar when the last focused %s and all other chats are hidden",
+			async (source) => {
+				const focused = source === "sidebar" ? sidebar : tab
+				focused.messages.fire({ type: "webviewDidFocus" })
+				Object.defineProperty(sidebar.view, "visible", { value: false, configurable: true })
+				Object.defineProperty(panel, "visible", { value: false, configurable: true })
+				vi.mocked(vscode.commands.executeCommand).mockImplementationOnce(async () => {
+					Object.defineProperty(sidebar.view, "visible", { value: true, configurable: true })
+				})
+
+				const target = await resolveChatProvider(provider.webviewFocusTracker)
+				expect(target).toBe(provider)
+				await target?.handleCodeAction("addToContext", "ADD_TO_CONTEXT", { selectedText: "selected code" })
+
+				expect(vscode.commands.executeCommand).toHaveBeenCalledExactlyOnceWith(
+					`${ClineProvider.sideBarId}.focus`,
+				)
+				expect(sidebar.postMessage).toHaveBeenCalledWith({
+					type: "invoke",
+					invoke: "setChatBoxMessage",
+					text: expect.stringContaining("selected code"),
+				})
+				expect(tab.postMessage).not.toHaveBeenCalled()
+				expect(panel.reveal).not.toHaveBeenCalled()
+			},
+		)
+
+		test("remembers the last focused chat across hiding and showing it without another interaction", async () => {
+			sidebar.messages.fire({ type: "webviewDidFocus" })
+			Object.defineProperty(sidebar.view, "visible", { value: false, configurable: true })
+			expect(await resolveChatProvider(provider.webviewFocusTracker)).toBe(tabProvider)
+			expect(provider.webviewFocusTracker.getLastActiveProvider()).toBe(provider)
+			Object.defineProperty(sidebar.view, "visible", { value: true, configurable: true })
+			expect(await resolveChatProvider(provider.webviewFocusTracker)).toBe(provider)
+		})
+
+		test("preserves single-view behavior", async () => {
+			await tabProvider.dispose()
+			await addSelection()
+			expect(sidebar.postMessage).toHaveBeenCalledTimes(2)
+		})
+
+		test("preserves the sidebar fallback when the last focused tab is disposed", async () => {
+			tab.messages.fire({ type: "webviewDidFocus" })
+			await tabProvider.dispose()
+			Object.defineProperty(sidebar.view, "visible", { value: false, configurable: true })
+			vi.mocked(vscode.commands.executeCommand).mockImplementationOnce(async () => {
+				Object.defineProperty(sidebar.view, "visible", { value: true, configurable: true })
+			})
+			await addSelection()
+			expect(vscode.commands.executeCommand).toHaveBeenCalledWith(`${ClineProvider.sideBarId}.focus`)
+			expect(sidebar.postMessage).toHaveBeenCalledTimes(2)
+			expect(tab.postMessage).not.toHaveBeenCalled()
+		})
+
+		test("forgets a disposed sidebar webview even while its provider remains registered", async () => {
+			sidebar.messages.fire({ type: "webviewDidFocus" })
+			sidebar.disposed.fire()
+			expect(provider.webviewFocusTracker.getLastActiveProvider()).toBeUndefined()
+			await addSelection()
+			expect(tab.postMessage).toHaveBeenCalledTimes(2)
+			expect(sidebar.postMessage).not.toHaveBeenCalled()
+		})
+
+		test.each([
+			["explainCode", "EXPLAIN"],
+			["fixCode", "FIX"],
+			["improveCode", "IMPROVE"],
+		] as const)("creates a task only in the last focused chat for %s", async (command, promptType) => {
+			sidebar.messages.fire({ type: "webviewDidFocus" })
+			const task = new Task(defaultTaskOptions)
+			const sidebarTask = vi.spyOn(provider, "createTask").mockResolvedValue(task)
+			const tabTask = vi.spyOn(tabProvider, "createTask").mockResolvedValue(task)
+			try {
+				const target = provider.webviewFocusTracker.getLastActiveProvider()!
+				await target.handleCodeAction(command, promptType, { selectedText: "selected code" })
+				expect(sidebarTask).toHaveBeenCalledOnce()
+				expect(sidebarTask).toHaveBeenCalledWith(expect.stringContaining("selected code"))
+				expect(tabTask).not.toHaveBeenCalled()
+			} finally {
+				sidebarTask.mockRestore()
+				tabTask.mockRestore()
+			}
+		})
+
+		test("preserves visible-provider fallback for task creation when no chat has been focused", async () => {
+			const task = new Task(defaultTaskOptions)
+			const sidebarTask = vi.spyOn(provider, "createTask").mockResolvedValue(task)
+			const tabTask = vi.spyOn(tabProvider, "createTask").mockResolvedValue(task)
+			const target = await ClineProvider.getInstance()
+			await target?.handleCodeAction("explainCode", "EXPLAIN", { selectedText: "selected code" })
+			expect(tabTask).toHaveBeenCalledOnce()
+			expect(sidebarTask).not.toHaveBeenCalled()
+			sidebarTask.mockRestore()
+			tabTask.mockRestore()
+		})
 	})
 
 	test("loads full model details when preparing an LM Studio task", async () => {
@@ -664,12 +1046,15 @@ describe("ClineProvider", () => {
 	})
 
 	test("resolveWebviewView sets up webview correctly in development mode even if local server is not running", async () => {
+		const developmentContext = { ...mockContext, extensionMode: vscode.ExtensionMode.Development }
 		provider = new ClineProvider(
-			{ ...mockContext, extensionMode: vscode.ExtensionMode.Development },
+			developmentContext,
 			mockOutputChannel,
 			"sidebar",
-			new ContextProxy(mockContext),
+			new ContextProxy(developmentContext),
+			new WebviewFocusTracker(),
 		)
+		// The dev-server probe fails, so the HMR path falls back to the production HTML.
 		;(axios.get as any).mockRejectedValueOnce(new Error("Network error"))
 
 		await provider.resolveWebviewView(mockWebviewView)
@@ -693,6 +1078,57 @@ describe("ClineProvider", () => {
 		expect(scriptSrcMatch![0]).toContain("'nonce-")
 		// Verify wasm-unsafe-eval is present for Shiki syntax highlighting
 		expect(scriptSrcMatch![0]).toContain("'wasm-unsafe-eval'")
+	})
+
+	test("resolveWebviewView builds HMR content against the local dev server when it is reachable", async () => {
+		const originalThemeFixtureProbe = process.env.ROO_CODE_THEME_FIXTURE_PROBE
+		delete process.env.ROO_CODE_THEME_FIXTURE_PROBE
+		// getHMRHtmlContent prefers an on-disk .vite-port file when one exists, so a
+		// stale dev leftover could silently move the probe (and the HMR URLs) to
+		// another port. Establish the default-port branch for this test by hiding
+		// exactly that file from the existence check; every other path falls
+		// through to the real implementation.
+		const realExistsSync = fs.existsSync
+		const existsSyncSpy = vi
+			.spyOn(fs, "existsSync")
+			.mockImplementation((target) =>
+				path.basename(String(target)) === ".vite-port" ? false : realExistsSync(target),
+			)
+
+		try {
+			provider = new ClineProvider(
+				{ ...mockContext, extensionMode: vscode.ExtensionMode.Development },
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy({ ...mockContext, extensionMode: vscode.ExtensionMode.Development }),
+				new WebviewFocusTracker(),
+			)
+			// The default axios mock resolves, so the dev-server probe succeeds and the
+			// HMR HTML branch (instead of the production fallback) is taken.
+			vi.mocked(axios.get).mockClear()
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Pin the health-check URL itself: the mock resolves for any URL, so only
+			// this assertion keeps the probe from silently drifting back to
+			// `localhost` (the IPv6 resolution failure this branch fixes).
+			expect(axios.get).toHaveBeenCalledWith("http://127.0.0.1:5173")
+
+			const html = mockWebviewView.webview.html
+			// The dev server URL must be baked into the module script tag and CSP directives.
+			expect(html).toContain("http://127.0.0.1:5173/src/index.tsx")
+			expect(html).toContain("ws://127.0.0.1:5173")
+			expect(html).toContain("http://127.0.0.1:5173/@react-refresh")
+		} finally {
+			existsSyncSpy.mockRestore()
+			// Always restore the probe flag (even when an assertion above throws),
+			// so later tests outside the fixture-probe describe block cannot observe
+			// this test's deletion.
+			if (originalThemeFixtureProbe !== undefined) {
+				process.env.ROO_CODE_THEME_FIXTURE_PROBE = originalThemeFixtureProbe
+			} else {
+				delete process.env.ROO_CODE_THEME_FIXTURE_PROBE
+			}
+		}
 	})
 
 	test("postMessageToWebview sends message to webview", async () => {
@@ -850,6 +1286,7 @@ describe("ClineProvider", () => {
 			mockOutputChannel,
 			"sidebar",
 			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
 			mdmService,
 		)
 
@@ -1018,6 +1455,33 @@ describe("ClineProvider", () => {
 
 			await vi.advanceTimersByTimeAsync(1)
 			expect(postStateSpy).toHaveBeenCalledTimes(2)
+		})
+
+		// Characterization test for the semantics that made #1078's throttle a no-op in practice:
+		// flushing right after a leading-edge post has no pending trailing invocation to run, so it
+		// only cancels the trailing timer — and the next call then hits the leading edge again.
+		// Callers on a hot path (see Task#addToClineMessages) must therefore not flush per message.
+		test("flushing after every post defeats coalescing entirely", async () => {
+			const postStateSpy = vi.spyOn(provider, "postStateToWebviewWithoutTaskHistory").mockResolvedValue(undefined)
+
+			for (let i = 0; i < 5; i++) {
+				await provider.postStateToWebviewThrottled()
+				await provider.flushPostStateToWebviewThrottled()
+				await vi.advanceTimersByTimeAsync(100)
+			}
+
+			// One full-state post per call: no coalescing at all.
+			expect(postStateSpy).toHaveBeenCalledTimes(5)
+
+			// The same burst without the interleaved flush coalesces into far fewer posts.
+			postStateSpy.mockClear()
+			for (let i = 0; i < 5; i++) {
+				await provider.postStateToWebviewThrottled()
+				await vi.advanceTimersByTimeAsync(100)
+			}
+			await vi.advanceTimersByTimeAsync(500)
+
+			expect(postStateSpy.mock.calls.length).toBeLessThan(5)
 		})
 
 		test("flushes a pending trailing post exactly once and waits for it", async () => {
@@ -1508,6 +1972,20 @@ describe("ClineProvider", () => {
 		expect(state.destructiveCommandGuardEnabled).toBe(true)
 	})
 
+	test("getState returns the saved blanket auto-deny setting", async () => {
+		await provider.contextProxy.setValue("alwaysDenyUnapprovedCommands", true)
+
+		const state = await provider.getState()
+
+		expect(state.alwaysDenyUnapprovedCommands).toBe(true)
+	})
+
+	test("getState defaults blanket auto-deny to false", async () => {
+		const state = await provider.getState()
+
+		expect(state.alwaysDenyUnapprovedCommands).toBe(false)
+	})
+
 	test("getState returns the saved allowed read files", async () => {
 		await provider.contextProxy.setValue("allowedReadFiles", ["notes.md"])
 
@@ -1587,6 +2065,23 @@ describe("ClineProvider", () => {
 		expect(state.destructiveCommandGuardEnabled).toBe(false)
 	})
 
+	test("getStateToPostToWebview returns the saved blanket auto-deny setting", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("alwaysDenyUnapprovedCommands", true)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.alwaysDenyUnapprovedCommands).toBe(true)
+	})
+
+	test("getStateToPostToWebview disables blanket auto-deny by default", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.alwaysDenyUnapprovedCommands).toBe(false)
+	})
+
 	test("language is set to VSCode language", async () => {
 		// Mock VSCode language as Spanish
 		;(vscode.env as any).language = "pt-BR"
@@ -1595,18 +2090,44 @@ describe("ClineProvider", () => {
 		expect(state.language).toBe("pt-BR")
 	})
 
-	test("writeDelayMs defaults to 1000ms", async () => {
-		// Mock globalState.get to return undefined for writeDelayMs
-		;(mockContext.globalState.get as any).mockImplementation((key: string) => {
+	test("writeDelayMs defaults to DEFAULT_WRITE_DELAY_MS", async () => {
+		// Mock globalState.get to return undefined for writeDelayMs (typed reassignment,
+		// same pattern as the customModePrompts test below — Memento.get has no mock type)
+		mockContext.globalState.get = vi.fn((key: string) => {
 			return key === "writeDelayMs" ? undefined : null
 		})
 
 		const state = await provider.getState()
-		expect(state.writeDelayMs).toBe(1000)
+		expect(state.writeDelayMs).toBe(DEFAULT_WRITE_DELAY_MS)
+	})
+
+	test("getStateToPostToWebview returns the persisted writeDelayMs value", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		// Simulate the updateSettings handler storing the value.
+		await provider.contextProxy.setValue("writeDelayMs", 500)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.writeDelayMs).toBe(500)
+	})
+
+	test("getStateToPostToWebview defaults writeDelayMs to DEFAULT_WRITE_DELAY_MS when unset", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		// Ensure the setting is not persisted.
+		await provider.contextProxy.setValue("writeDelayMs", undefined)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.writeDelayMs).toBe(DEFAULT_WRITE_DELAY_MS)
 	})
 
 	test("getState applies fallback defaults for write, diff, and terminal settings", async () => {
-		;(mockContext.globalState.get as any).mockImplementation((key: string) => {
+		// Mock globalState.get to return undefined for the fallback settings
+		// (typed reassignment — Memento.get has no mock type, same pattern as the
+		// writeDelayMs default test above)
+		mockContext.globalState.get = vi.fn((key: string) => {
 			if (
 				[
 					"writeDelayMs",
@@ -2039,7 +2560,13 @@ describe("ClineProvider", () => {
 		} as unknown as vscode.ExtensionContext
 
 		// Create new provider with updated mock context
-		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+		provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
@@ -2957,7 +3484,7 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 				postMessageToWebview: vi.fn().mockResolvedValue(true),
 				postStateToWebview: vi.fn().mockResolvedValue(undefined),
 				getCurrentTask: vi.fn(),
-				getCurrentWorkspaceCodeIndexManager: vi.fn(),
+				getCurrentWorkspaceCodeIndexScope: vi.fn(),
 				getMcpHub: vi.fn().mockReturnValue({
 					getMcpSettingsFilePath: vi.fn().mockResolvedValue("/test/mcp.json"),
 				}),
@@ -3013,10 +3540,11 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 			startIndexing: vi.fn().mockReturnValue(indexingPromise),
 		})
 		const provider = createProvider({
-			getCurrentWorkspaceCodeIndexManager: vi.fn().mockReturnValue(manager),
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue({ codeIndexManager: manager }),
 		})
 
 		await expect(webviewMessageHandler(provider, { type: "startIndexing" })).resolves.toBeUndefined()
+		expect(provider.getCurrentWorkspaceCodeIndexScope).toHaveBeenCalledOnce()
 		expect(manager.startIndexing).toHaveBeenCalledOnce()
 
 		rejectIndexing(new Error("boom"))
@@ -3170,14 +3698,29 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 
 	it("covers changed indexing status, secret, and missing-manager responses", async () => {
 		const manager = createIndexManager()
-		const getManager = vi.fn().mockReturnValueOnce(undefined).mockReturnValue(manager)
-		const provider = createProvider({ getCurrentWorkspaceCodeIndexManager: getManager })
+		const getScope = vi.fn().mockReturnValueOnce(undefined).mockReturnValue({ codeIndexManager: manager })
+		const provider = createProvider({
+			getCurrentWorkspaceCodeIndexScope: getScope,
+		})
 
 		await webviewMessageHandler(provider, { type: "requestIndexingStatus" })
+		expect(manager.getCurrentStatus).not.toHaveBeenCalled()
+		expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "indexingStatusUpdate",
+			values: expect.objectContaining({ systemStatus: "Error", message: expect.any(String) }),
+		})
 		await webviewMessageHandler(provider, { type: "requestIndexingStatus" })
+		expect(getScope).toHaveBeenCalledTimes(2)
+		expect(manager.getCurrentStatus).toHaveBeenCalledOnce()
+		expect(provider.postMessageToWebview).toHaveBeenLastCalledWith({
+			type: "indexingStatusUpdate",
+			values: manager.getCurrentStatus.mock.results[0].value,
+		})
 		await webviewMessageHandler(provider, { type: "requestCodeIndexSecretStatus" })
-		getManager.mockReturnValueOnce(undefined)
+		getScope.mockReturnValueOnce(undefined)
 		await webviewMessageHandler(provider, { type: "startIndexing" })
+		expect(getScope).toHaveBeenCalledTimes(3)
+		expect(manager.setWorkspaceEnabled).not.toHaveBeenCalled()
 
 		expect(provider.postMessageToWebview).toHaveBeenCalledWith(
 			expect.objectContaining({ type: "codeIndexSecretStatus" }),
@@ -3194,7 +3737,7 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 				.mockRejectedValueOnce(new Error("second failure")),
 		})
 		const provider = createProvider({
-			getCurrentWorkspaceCodeIndexManager: vi.fn().mockReturnValue(manager),
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue({ codeIndexManager: manager }),
 		})
 
 		await webviewMessageHandler(provider, { type: "startIndexing" })
@@ -3210,10 +3753,18 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 			startIndexing: vi.fn().mockRejectedValue(new Error("toggle failure")),
 		})
 		const provider = createProvider({
-			getCurrentWorkspaceCodeIndexManager: vi.fn().mockReturnValue(manager),
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue({
+				codeIndexManager: manager,
+				workspaceIndexingEnablementManager: new WorkspaceIndexingEnablementManager(manager),
+			}),
 		})
 
 		await webviewMessageHandler(provider, { type: "stopIndexing" })
+		expect(provider.getCurrentWorkspaceCodeIndexScope).toHaveBeenCalledOnce()
+		expect(provider.postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+			type: "indexingStatusUpdate",
+			values: manager.getCurrentStatus(),
+		})
 		await webviewMessageHandler(provider, { type: "toggleWorkspaceIndexing", bool: true })
 		await Promise.resolve()
 
@@ -3222,6 +3773,85 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 		expect(provider.postMessageToWebview).toHaveBeenCalledWith(
 			expect.objectContaining({ type: "indexingStatusUpdate" }),
 		)
+	})
+
+	it("does not toggle indexing or publish status without a workspace scope", async () => {
+		const provider = createProvider()
+		await webviewMessageHandler(provider, { type: "toggleWorkspaceIndexing", bool: true })
+		expect(provider.getCurrentWorkspaceCodeIndexScope).toHaveBeenCalledOnce()
+		expect(provider.log).toHaveBeenCalledExactlyOnceWith(
+			"Cannot toggle workspace indexing: No workspace folder open",
+		)
+		expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	it.each([
+		{ bool: true, expected: true },
+		{ bool: false, expected: false },
+		{ bool: undefined, expected: false },
+	])("delegates workspace enablement with bool=$bool as $expected", async ({ bool, expected }) => {
+		const setEnabled = vi.fn().mockResolvedValue(undefined)
+		const provider = createProvider({
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue({
+				workspaceIndexingEnablementManager: { setEnabled },
+			}),
+		})
+		const message: WebviewMessage = { type: "toggleWorkspaceIndexing" }
+		if (bool !== undefined) {
+			message.bool = bool
+		}
+		await webviewMessageHandler(provider, message)
+		expect(setEnabled).toHaveBeenCalledExactlyOnceWith(expected, provider)
+		// Status publication belongs to the enablement manager, not the handler.
+		expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+		expect(provider.log).not.toHaveBeenCalled()
+	})
+
+	it("does not stop indexing or publish status without a workspace scope", async () => {
+		const provider = createProvider()
+		await webviewMessageHandler(provider, { type: "stopIndexing" })
+		expect(provider.getCurrentWorkspaceCodeIndexScope).toHaveBeenCalledOnce()
+		expect(provider.log).toHaveBeenCalledWith("Cannot stop indexing: No workspace folder open")
+		expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	it.each([true, false])("resolves the scope after saving index settings (workspace=%s)", async (hasWorkspace) => {
+		const handleSettingsChange = vi.fn().mockResolvedValue(undefined)
+		const manager = createIndexManager({ handleSettingsChange, isFeatureEnabled: false })
+		const provider = createProvider({
+			getCurrentWorkspaceCodeIndexScope: vi
+				.fn()
+				.mockReturnValue(hasWorkspace ? { codeIndexManager: manager } : undefined),
+		})
+
+		await webviewMessageHandler(provider, {
+			type: "saveCodeIndexSettingsAtomic",
+			codeIndexSettings: {
+				codebaseIndexEnabled: false,
+				codebaseIndexQdrantUrl: "http://localhost:6333",
+				codebaseIndexEmbedderProvider: providerIdentifiers.openai,
+				codebaseIndexEmbedderModelId: "text-embedding-3-small",
+			},
+		})
+
+		expect(provider.getCurrentWorkspaceCodeIndexScope).toHaveBeenCalledOnce()
+		expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "codeIndexSettingsSaved", success: true }),
+		)
+		if (hasWorkspace) {
+			expect(handleSettingsChange).toHaveBeenCalledOnce()
+		} else {
+			expect(handleSettingsChange).not.toHaveBeenCalled()
+			expect(provider.log).toHaveBeenCalledWith("Cannot save code index settings: No workspace folder open")
+		}
+	})
+
+	it("does not update auto-enable defaults without a workspace scope", async () => {
+		const provider = createProvider()
+		await webviewMessageHandler(provider, { type: "setAutoEnableDefault", bool: true })
+		expect(provider.getCurrentWorkspaceCodeIndexScope).toHaveBeenCalledOnce()
+		expect(provider.log).toHaveBeenCalledWith("Cannot set auto-enable default: No workspace folder open")
+		expect(provider.postMessageToWebview).not.toHaveBeenCalled()
 	})
 
 	it("catches auto-enabled indexing failures and posts the resulting status", async () => {
@@ -3238,13 +3868,14 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 			.spyOn(CodeIndexManagerRegistry, "getAllInstances")
 			.mockReturnValue([manager] as unknown as ReturnType<typeof CodeIndexManagerRegistry.getAllInstances>)
 		const provider = createProvider({
-			getCurrentWorkspaceCodeIndexManager: vi.fn().mockReturnValue(manager),
+			getCurrentWorkspaceCodeIndexScope: vi.fn().mockReturnValue({ codeIndexManager: manager }),
 		})
 
 		try {
 			await webviewMessageHandler(provider, { type: "setAutoEnableDefault", bool: true })
 			await Promise.resolve()
 
+			expect(provider.getCurrentWorkspaceCodeIndexScope).toHaveBeenCalledOnce()
 			expect(manager.startIndexing).toHaveBeenCalledOnce()
 			expect(provider.log).toHaveBeenCalledWith("Indexing error: Error: auto-enable failure")
 			expect(provider.postMessageToWebview).toHaveBeenCalledWith(
@@ -3257,14 +3888,22 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 
 	it("covers changed clear-index response paths", async () => {
 		const manager = createIndexManager()
-		const getManager = vi.fn().mockReturnValueOnce(undefined).mockReturnValue(manager)
-		const provider = createProvider({ getCurrentWorkspaceCodeIndexManager: getManager })
+		const getScope = vi.fn().mockReturnValueOnce(undefined).mockReturnValue({ codeIndexManager: manager })
+		const provider = createProvider({ getCurrentWorkspaceCodeIndexScope: getScope })
 
 		await webviewMessageHandler(provider, { type: "clearIndexData" })
+		expect(manager.clearIndexData).not.toHaveBeenCalled()
+		expect(provider.log).toHaveBeenCalledWith("Cannot clear index data: No workspace folder open")
+		expect(provider.postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+			type: "indexCleared",
+			values: { success: false, error: expect.any(String) },
+		})
 		await webviewMessageHandler(provider, { type: "clearIndexData" })
 		manager.clearIndexData.mockRejectedValueOnce(new Error("clear failed"))
 		await webviewMessageHandler(provider, { type: "clearIndexData" })
 
+		expect(getScope).toHaveBeenCalledTimes(3)
+		expect(manager.clearIndexData).toHaveBeenCalledTimes(2)
 		expect(provider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "indexCleared",
 			values: { success: true },
@@ -3393,7 +4032,13 @@ describe("Project MCP Settings", () => {
 		}
 		;(vscode.window as any).activeTextEditor = undefined
 		;(vscode.workspace.getWorkspaceFolder as any).mockReset()
-		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+		provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
 	})
 
 	test("handles openProjectMcpSettings message", async () => {
@@ -3522,7 +4167,13 @@ describe("getTelemetryProperties", () => {
 		} as unknown as vscode.ExtensionContext
 
 		mockOutputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
-		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+		provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
 
 		defaultTaskOptions = {
 			provider,
@@ -3730,7 +4381,13 @@ describe("ClineProvider - Router Models", () => {
 			TelemetryService.createInstance([])
 		}
 
-		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+		provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
 	})
 
 	test("handles requestRouterModels with successful responses", async () => {
@@ -4080,7 +4737,13 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			}),
 		}
 
-		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+		provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
 
 		defaultTaskOptions = {
 			provider,
@@ -4962,6 +5625,36 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 	})
 
 	describe("getTaskWithId", () => {
+		it("does not restore a deleted file-backed task from legacy history", async () => {
+			const historyItem = {
+				id: "deleted-task",
+				task: "legacy task",
+				ts: Date.now(),
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			vi.mocked(mockContext.globalState.get).mockImplementation((key: string) => {
+				if (key === "taskHistory") {
+					return [historyItem]
+				}
+				return undefined
+			})
+
+			provider.taskHistoryStore["cache"].set(historyItem.id, historyItem)
+			await provider.taskHistoryStore.delete(historyItem.id)
+			provider["taskHistoryStoreInitialized"] = true
+
+			await expect(provider.getTaskWithId(historyItem.id)).rejects.toThrow("Task not found")
+		})
+
+		it("rejects a missing task before file-backed history initialization", async () => {
+			provider["taskHistoryStoreInitialized"] = false
+			vi.mocked(mockContext.globalState.get).mockReturnValue(undefined)
+			await expect(provider.getTaskWithId("cold-start-missing-task")).rejects.toThrow("Task not found")
+		})
+
 		it("returns empty apiConversationHistory when file is missing", async () => {
 			const historyItem = { id: "missing-api-file-task", task: "test task", ts: Date.now() }
 			vi.mocked(mockContext.globalState.get).mockImplementation((key: string) => {
