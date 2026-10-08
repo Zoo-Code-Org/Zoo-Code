@@ -1935,6 +1935,41 @@ const provider = new ClineProvider(
 			expect(mockContext.globalState.get("viewStates")).toEqual(previous)
 			await provider.dispose()
 		})
+		it("restores the freshly persisted map instead of a stale cache when the write rejects", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-sidebar-view")
+			// This view populates the shared cache and storage with its own map...
+			const cached = { "stable-sidebar-view": { mode: "architect", updatedAt: 1 } }
+			await provider["writePersistedViewStates"](cached)
+			// ...and another writer then replaces what storage holds, so the cache is stale.
+			const fresh = { "stable-editor-view": { mode: "code", updatedAt: 2 } }
+			await mockContext.globalState.update("viewStates", fresh)
+
+			const originalUpdate = mockContext.globalState.update.bind(mockContext.globalState)
+			let failed = false
+			vi.spyOn(mockContext.globalState, "update").mockImplementation(async (key, value) => {
+				if (key === "viewStates" && !failed) {
+					failed = true
+					throw new Error("storage down")
+				}
+				return originalUpdate(key, value)
+			})
+
+			await expect(provider.saveViewState("mode", "code")).rejects.toThrow("storage down")
+
+			// The rollback has to put back the map storage actually held. Rolling back to the
+			// cached snapshot would silently delete the other writer's persisted entry.
+			expect(mockContext.globalState.get("viewStates")).toEqual(fresh)
+			expect(provider["getPersistedViewStates"]()).toEqual(fresh)
+			await provider.dispose()
+		})
+
 		it("should merge saved fields, drop cleared fields and delete emptied entries", async () => {
 const provider = new ClineProvider(
 				mockContext,

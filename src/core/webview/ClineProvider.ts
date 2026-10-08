@@ -543,22 +543,31 @@ export class ClineProvider
 	 * ContextProxy cache) so serialized writes never observe a stale in-memory value.
 	 */
 	/**
-	 * Writes the shared viewStates map and rolls the shared cache back if the storage
-	 * write rejects. ContextProxy#updateGlobalState puts the value in the in-memory cache
-	 * BEFORE awaiting globalState.update, so a rejected write would otherwise leave every
-	 * other view reading a map that was never committed to disk - and the next successful
-	 * write would merge into that phantom state.
+	 * Writes the shared viewStates map and restores the pre-write map if the storage write
+	 * rejects. ContextProxy#updateGlobalState puts the value in the in-memory cache BEFORE
+	 * awaiting globalState.update, so a rejected write would otherwise leave every other
+	 * view reading a map that was never committed to disk - and the next successful write
+	 * would merge into that phantom state. The map put back is the one storage actually
+	 * holds, read fresh: callers build `states` from a fresh read too, so a cached snapshot
+	 * can be older than storage, and writing it back would delete entries another writer
+	 * persisted in the meantime.
 	 */
 	private async writePersistedViewStates(states: Record<string, PersistedViewState>): Promise<void> {
-		const previousCached = this.contextProxy.getValue("viewStates")
+		// What storage actually holds right now - the only safe rollback target. The in-memory
+		// cache may be older than storage when another writer persisted in between.
+		// Read raw, not through getPersistedViewStates: when nothing is persisted the map is
+		// absent, and a rollback must not manufacture an empty one.
+		const previousPersisted = this.context.globalState.get<GlobalState["viewStates"]>("viewStates")
 		try {
 			await this.contextProxy.setValue("viewStates", states)
 		} catch (error) {
 			try {
-				await this.contextProxy.setValue("viewStates", previousCached)
+				// setValue restores storage AND the cache together, so the cache cannot keep the
+				// phantom map the rejected write put there.
+				await this.contextProxy.setValue("viewStates", previousPersisted)
 			} catch (rollbackError) {
 				this.log(
-					`[ClineProvider] Failed to restore the cached viewStates after a rejected write: ${
+					`[ClineProvider] Failed to restore the persisted viewStates after a rejected write: ${
 						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
 					}`,
 				)
