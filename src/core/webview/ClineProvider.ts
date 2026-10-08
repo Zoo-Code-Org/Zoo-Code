@@ -3739,6 +3739,19 @@ export class ClineProvider
 			const selectionAfterDelete = this.contextProxy.getValues().currentApiConfigName
 			const deletedWasGlobal = profileToDelete.name === selectionAfterDelete
 
+			// The queue advances on the timeout-bounded caller result, so a cancelled deletion
+			// must stop touching durable state here. Everything below rewrites the shared
+			// selection, the shared provider settings, and other views' pins - any of those
+			// landing after the next queued mutation has run would overwrite that mutation.
+			if (signal.aborted) {
+				this.log(
+					`deleteProviderProfile: cancelled before the selection/settings rewrite; the deletion stopped with the profile list already updated.`,
+				)
+				throw new Error(
+					"Profile deletion was cancelled before the selection and settings rewrite",
+				)
+			}
+
 			// Capture this view's pin before any rewrite: a view pinned to the
 			// deleted profile while the global selection points elsewhere must still be
 			// reconfigured, or getState() would keep the deleted profile's settings under

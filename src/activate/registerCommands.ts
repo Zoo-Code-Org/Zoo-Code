@@ -515,6 +515,7 @@ const createTabPanelUnlocked = async ({
 		newPanel.onDidDispose(
 			() => {
 				if (tabPanel === newPanel) {
+				// A recovery may already have installed a replacement panel.
 					// Stryker disable next-line StringLiteral: setPanel branches only on type === "sidebar", so any other literal routes to the identical tab-ref assignment
 					setPanel(undefined, "tab")
 				}
