@@ -1998,7 +1998,7 @@ export class ClineProvider
 				const allowedKeys: ReadonlySet<string> = new Set(
 					providerModelKey ? [providerModelKey, ...RESET_ONLY_KEYS] : RESET_ONLY_KEYS,
 				)
-				const merged: Record<string, unknown> = { ...stored, id }
+				const merged: Record<string, unknown> = { ...stored, id, apiProvider: storedProvider }
 				for (const [key, value] of Object.entries(patch)) {
 					// The provider is never patchable.
 					if (key === "apiProvider" || !allowedKeys.has(key)) {
@@ -2052,6 +2052,10 @@ export class ClineProvider
 						await this.contextProxy.setProviderSettings(merged as ProviderSettings)
 						updatedContext = true
 					}
+
+					if (signal.aborted) {
+						throw new Error("Provider profile mutation aborted")
+					}
 				} catch (updateError) {
 					if (savedConfig) {
 						try {
@@ -2072,6 +2076,10 @@ export class ClineProvider
 						}
 					}
 					throw updateError
+				}
+
+				if (signal.aborted) {
+					return
 				}
 
 				this.updateTaskApiHandlerIfNeeded(merged as ProviderSettings, { forceRebuild: true })

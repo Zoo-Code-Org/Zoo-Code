@@ -3,6 +3,7 @@
 import * as vscode from "vscode"
 import { makeCompositeDisposable } from "../../../test-utils/vscode"
 import { TelemetryService } from "@roo-code/telemetry"
+import { CloudService } from "@roo-code/cloud"
 import { providerIdentifiers, type ProviderSettings } from "@roo-code/types"
 
 import { ContextProxy } from "../../config/ContextProxy"
@@ -118,20 +119,24 @@ vi.mock("../../../i18n", async (importOriginal) => ({
 	t: (key: string) => key,
 }))
 
+const { mockCloudInstance } = vi.hoisted(() => ({
+	mockCloudInstance: {
+		isCloudAgent: false,
+		isAuthenticated: vi.fn().mockReturnValue(false),
+		getAllowList: vi.fn().mockReturnValue({ allowAll: true }),
+		getOrganizationSettings: vi.fn().mockReturnValue(undefined),
+		getUserInfo: vi.fn().mockReturnValue(null),
+		on: vi.fn(),
+		off: vi.fn(),
+	},
+}))
+
 vi.mock("@roo-code/cloud", () => ({
 	getRooCodeApiUrl: vi.fn().mockReturnValue("https://api.roocode.com"),
 	CloudService: {
 		hasInstance: vi.fn().mockReturnValue(true),
 		get instance() {
-			return {
-				isCloudAgent: false,
-				isAuthenticated: vi.fn().mockReturnValue(false),
-				getAllowList: vi.fn().mockReturnValue({ allowAll: true }),
-				getOrganizationSettings: vi.fn().mockReturnValue(undefined),
-				getUserInfo: vi.fn().mockReturnValue(null),
-				on: vi.fn(),
-				off: vi.fn(),
-			}
+			return mockCloudInstance
 		},
 	},
 }))
@@ -158,6 +163,9 @@ describe("ClineProvider - updateProfileModel", () => {
 
 	beforeEach(async () => {
 		vi.clearAllMocks()
+		mockCloudInstance.isAuthenticated.mockReturnValue(false)
+		mockCloudInstance.getOrganizationSettings.mockReturnValue(undefined)
+		mockCloudInstance.getAllowList.mockReturnValue({ allowAll: true })
 
 		if (!TelemetryService.hasInstance()) {
 			TelemetryService.createInstance([])
@@ -295,17 +303,60 @@ describe("ClineProvider - updateProfileModel", () => {
 		expect(manager().saveConfig).not.toHaveBeenCalled()
 	})
 
-	it("treats a profile without apiProvider as OpenRouter", async () => {
+	it("treats a profile without apiProvider as OpenRouter and normalizes apiProvider when saving", async () => {
 		mockStoredProfile({})
 
 		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
 			openRouterModelId: "x/y",
 		})
 
-		expect(manager().saveConfig).toHaveBeenCalledWith(
-			"test-config",
-			expect.objectContaining({ openRouterModelId: "x/y" }),
+		expect(manager().saveConfig).toHaveBeenCalledWith("test-config", {
+			id: "test-id",
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "x/y",
+		})
+		expect(provider.contextProxy.getValues().apiProvider).toBe(providerIdentifiers.openrouter)
+	})
+
+	it("normalizes apiProvider to OpenRouter when rebuilding task handler for provider-less profile", async () => {
+		const mockTask = new Task({} as unknown as ConstructorParameters<typeof Task>[0])
+		Object.defineProperty(mockTask, "taskApiConfigName", { value: "test-config" })
+		await provider.addClineToStack(mockTask)
+		mockStoredProfile({})
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "x/y",
+		})
+
+		expect(mockTask.updateApiConfiguration).toHaveBeenCalledWith(
+			expect.objectContaining({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "x/y",
+			}),
 		)
+	})
+
+	it("ignores non-null values for reset-only keys while updating model selection", async () => {
+		mockStoredProfile({
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4",
+			reasoningEffort: "low",
+			modelMaxTokens: 4096,
+			modelMaxThinkingTokens: 2048,
+		})
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "x/y",
+			reasoningEffort: "high",
+			modelMaxTokens: 8192,
+			modelMaxThinkingTokens: 4096,
+		})
+
+		const saved = manager().saveConfig.mock.calls[0][1]
+		expect(saved.openRouterModelId).toBe("x/y")
+		expect(saved.reasoningEffort).toBe("low")
+		expect(saved.modelMaxTokens).toBe(4096)
+		expect(saved.modelMaxThinkingTokens).toBe(2048)
 	})
 
 	it("ignores non-setting keys, apiProvider, own __proto__ keys and non-primitive values", async () => {
@@ -516,6 +567,61 @@ describe("ClineProvider - updateProfileModel", () => {
 			"test-config",
 			expect.objectContaining({ openRouterModelId: "openai/gpt-4", openRouterApiKey: "my-key" }),
 		)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.save_api_config")
+	})
+
+	it("enforces organization allow-list when authenticated through CloudService", async () => {
+		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "allowed/model" })
+		mockCloudInstance.isAuthenticated.mockReturnValue(true)
+		mockCloudInstance.getOrganizationSettings.mockReturnValue({
+			allowList: {
+				allowAll: false,
+				providers: { [providerIdentifiers.openrouter]: { allowAll: false, models: ["allowed/model"] } },
+			},
+		} as unknown as ReturnType<typeof mockCloudInstance.getOrganizationSettings>)
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "blocked/model",
+		})
+		expect(manager().saveConfig).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.violated_organization_allowlist")
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "allowed/model",
+		})
+		expect(manager().saveConfig).toHaveBeenCalledTimes(1)
+		expect(manager().saveConfig).toHaveBeenCalledWith(
+			"test-config",
+			expect.objectContaining({ openRouterModelId: "allowed/model" }),
+		)
+	})
+
+	it("rolls back saved profile and prevents handler rebuild when mutation signal aborts during context update", async () => {
+		const mockTask = new Task({} as unknown as ConstructorParameters<typeof Task>[0])
+		Object.defineProperty(mockTask, "taskApiConfigName", { value: "test-config" })
+		await provider.addClineToStack(mockTask)
+
+		mockStoredProfile({
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4",
+			openRouterApiKey: "my-key",
+		})
+
+		const controller = new AbortController()
+		provider["enqueueProviderProfileMutation"] = vi.fn().mockImplementation(async (fn) => {
+			return fn(controller.signal)
+		})
+
+		vi.spyOn(provider.contextProxy, "setProviderSettings").mockImplementationOnce(async () => {
+			controller.abort()
+		})
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-4.5",
+		})
+
+		expect(manager().saveConfig).toHaveBeenCalledTimes(2)
+		expect(mockTask.updateApiConfiguration).not.toHaveBeenCalled()
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.save_api_config")
 	})
 })
