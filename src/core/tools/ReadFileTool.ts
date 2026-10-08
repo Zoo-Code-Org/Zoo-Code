@@ -241,7 +241,10 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					// post-read stat work for a task that no longer has a consumer.
 					if (!task.abort) {
 						const postReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
-						if (preReadStats && postReadStats) {
+						// Re-checked after the await: the guard above cannot see a cancellation
+						// that lands while the stat is in flight, and that read belongs to a run
+						// that will never act on it.
+						if (preReadStats && postReadStats && !task.abort) {
 							const preReadToken = versionTokenOfStat(preReadStats)
 							if (preReadToken === versionTokenOfStat(postReadStats)) {
 								task.observationRegistry.observe(fullPath, preReadToken, processed.complete && !lossyDecode)
@@ -879,7 +882,9 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				// Same contract as the native path: an aborted or disposed task records nothing.
 				if (!task.abort) {
 					const postReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
-					if (preReadStats && postReadStats) {
+					// Re-checked after the await, as on the native path: a cancel landing
+					// during the stat must still record nothing.
+					if (preReadStats && postReadStats && !task.abort) {
 						const preReadToken = versionTokenOfStat(preReadStats)
 						if (preReadToken === versionTokenOfStat(postReadStats)) {
 							task.observationRegistry.observe(fullPath, preReadToken, readComplete && !lossyDecode)
