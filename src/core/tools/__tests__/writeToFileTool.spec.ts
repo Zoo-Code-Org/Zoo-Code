@@ -485,10 +485,29 @@ describe("writeToFileTool", () => {
 			expect(diffViewCallOrder).toEqual(["revert", "reset"])
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
-			// Silent by design: the guard has already emitted the tool_result, so reporting
-			// here would double-report the same malformed call.
+			// The malformed call itself is not re-reported (the guard already emitted the
+			// tool_result), and a successful rollback has no hazard to surface.
 			expect(mockHandleError).not.toHaveBeenCalled()
 			expect(mockCline.sayAndCreateMissingParamError).not.toHaveBeenCalled()
+			expect(mockCline.say).not.toHaveBeenCalledWith("error", expect.stringContaining("could not be restored"))
+		})
+
+		it("reports the rollback hazard when the streamed content cannot be reverted", async () => {
+			// Same contract as cleanupFailedPartialStream: the state is still released, but the
+			// user has to see that the editor may still hold unapproved content.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.diffViewProvider.revertChanges.mockRejectedValue(new Error("revert failed"))
+
+			await writeToFileTool.teardownAbandonedStream(mockCline)
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			expect(mockCline.say).toHaveBeenCalledWith(
+				"error",
+				expect.stringContaining("could not be restored"),
+			)
 		})
 
 		it("does nothing when the task has no stream state to release", async () => {

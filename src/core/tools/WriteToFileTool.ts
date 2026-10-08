@@ -254,17 +254,23 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 * makes the next write's first delta look stabilized, and a retained streamFailed flag
 	 * suppresses that write's preview.
 	 *
-	 * Deliberately silent - the guard has already pushed the tool_result the provider waits
-	 * for, so reporting here would double-report the same malformed call.
+	 * Silent for the malformed call itself: the guard has already pushed the tool_result
+	 * the provider waits for, so reporting the call again would double-report it. A FAILED
+	 * ROLLBACK is the exception - the editor may still hold content this task never
+	 * approved, and that hazard has to be visible in the chat exactly as the parse-failure
+	 * and failed-stream teardowns report it.
 	 */
 	async teardownAbandonedStream(task: Task): Promise<void> {
 		if (!this.taskPartialStreamState.has(this.getPartialStreamFailureKey(task))) {
 			return
 		}
 
-		await this.revertDiffChangesBeforeReset(task)
+		const reverted = await this.revertDiffChangesBeforeReset(task)
 		this.resetTaskPartialState(task)
 		await this.resetDiffViewAfterWrite(task)
+		if (!reverted) {
+			await this.reportRevertFailure(task)
+		}
 	}
 
 	override resetPartialState(): void {
