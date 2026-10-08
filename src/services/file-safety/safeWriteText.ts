@@ -42,6 +42,36 @@ export interface SafeWriteTextOptions {
 	 * already written data to a temp file via a custom stream.
 	 */
 	tempPath?: string
+
+	/**
+	 * The publish target the caller already authorized.
+	 * A caller that checks confinement (or any other property of the resolved path) and
+	 * then calls this primitive resolves the path twice: once for its own decision and
+	 * once here. If a link is swapped in between the two, the decision was about a
+	 * different file than the one published. Passing the authorized value makes that
+	 * drift fatal instead of silent.
+	 */
+	expectedResolvedPath?: string
+
+	/**
+	 * The directories the caller walked when it authorized this target, with the
+	 * (dev, ino) identity each had at that moment.
+	 *
+	 * expectedResolvedPath pins the NAME this write publishes; it cannot see a parent
+	 * directory being replaced by a link between the caller's check and the commit.
+	 * Re-checking the ancestor identities immediately before the commit makes a swapped
+	 * parent fatal too. Node has no descriptor-relative rename, so a swap that lands
+	 * after this check and before the rename is not eliminable here - it narrows the
+	 * window to the commit itself rather than the whole write.
+	 */
+	expectedAncestorIdentities?: DirectoryIdentity[]
+}
+
+/** One directory's on-disk identity, read with bigint stats so NTFS 64-bit values survive. */
+export type DirectoryIdentity = {
+	dir: string
+	dev: bigint
+	ino: bigint
 }
 
 /**
@@ -50,6 +80,33 @@ export interface SafeWriteTextOptions {
  * filesystems) or is not a regular file. Rejecting it before any write keeps the
  * target from being replaced by whatever the path points at.
  */
+export class TargetMovedError extends Error {
+	readonly authorizedPath: string
+	readonly resolvedPath: string
+	constructor(authorizedPath: string, resolvedPath: string) {
+		super(
+			`The write was authorized for ${authorizedPath}, but that path now resolves to ${resolvedPath} -- nothing was published.`,
+		)
+		this.name = "TargetMovedError"
+		this.authorizedPath = authorizedPath
+		this.resolvedPath = resolvedPath
+	}
+}
+
+/**
+ * A directory on the authorized path is no longer the directory that was authorized:
+ * it was removed, replaced, or turned into a link somewhere else. Publishing through it
+ * would act on a decision that was never made about the file now reachable there.
+ */
+export class AncestorReplacedError extends Error {
+	readonly directory: string
+	constructor(directory: string, reason: string) {
+		super(`A directory on the authorized path (${directory}) ${reason} -- nothing was published.`)
+		this.name = "AncestorReplacedError"
+		this.directory = directory
+	}
+}
+
 export class StagingPathError extends Error {
 	readonly stagingPath: string
 
@@ -79,6 +136,39 @@ export class PostCommitDurabilityError extends Error {
 	}
 }
 // -- helpers ---------------------------------------------------------------
+
+/**
+ * The directories under `dirPath` that do not exist yet, innermost first: exactly the
+ * ones a recursive mkdir would create. A path that cannot be statted for a reason other
+ * than "missing" is treated as existing, so the cleanup never removes a directory it
+ * did not create.
+ */
+async function _missingDirectoryTail(dirPath: string): Promise<string[]> {
+	const missing: string[] = []
+	let cursor = dirPath
+	for (;;) {
+		const exists = await fs
+			.stat(cursor)
+			.then(() => true)
+			.catch((error: unknown) => errorCode(error) !== "ENOENT")
+		if (exists) return missing
+		missing.push(cursor)
+		const parent = path.dirname(cursor)
+		if (parent === cursor) return missing
+		cursor = parent
+	}
+}
+
+/**
+ * Remove directories this write created, innermost outward. rmdir only succeeds on an
+ * empty directory, which is the guarantee the caller relies on: a directory that
+ * acquired content in the meantime is left alone.
+ */
+async function _removeEmptyDirectories(dirs: string[]): Promise<void> {
+	for (const dir of dirs) {
+		await fs.rmdir(dir).catch(() => {})
+	}
+}
 
 /** Generate a unique temp file name in the given directory. */
 function _tempName(dir: string, prefix: string): string {
@@ -253,11 +343,14 @@ export async function safeWriteText(
 
 	// Resolve the symlink referent (see resolvePublishTarget).
 	const targetPath = await resolvePublishTarget(absoluteFilePath)
-	const dirPath = path.dirname(targetPath)
 
-	// Ensure parent directory exists (mirrors safeWriteJson behaviour).
-	await fs.mkdir(dirPath, { recursive: true })
-	await fs.access(dirPath)
+	// The caller authorized a specific resolved path; publishing at a different one
+	// would act on a decision that was never made about this file.
+	if (options?.expectedResolvedPath && path.resolve(options.expectedResolvedPath) !== targetPath) {
+		throw new TargetMovedError(options.expectedResolvedPath, targetPath)
+	}
+
+	const dirPath = path.dirname(targetPath)
 
 	// Create the staging directory only when we generate the temp file there;
 	// callers supplying their own tempPath (e.g. safeWriteJson) must not be left
@@ -321,12 +414,25 @@ export async function safeWriteText(
 		tempPath = _tempName(stagingDir, "safeWriteText")
 	}
 
+	// Which directories THIS call creates, innermost first. mkdir(recursive) does not
+	// report what it made, so the missing tail is measured before the call: a failure
+	// from here on must not leave an empty directory tree beside the target, and the
+	// cleanup must not remove a directory that already existed.
+	const createdDirs = await _missingDirectoryTail(dirPath)
+
 	let backupPath: string | null = null
 	let releaseBackupOnSuccess = false
 	// Non-null only when the win32 step-2 block saved a successful DACL dump:
 	// it gates the step-5 restore and is tracked for the cleanup unlinks.
 	let daclDumpPath: string | null = null
 	try {
+		// Ensure parent directory exists (mirrors safeWriteJson behaviour). This runs
+		// AFTER the staging-path validation above: an invalid caller-supplied staging
+		// path (out of the target's directory, a link, the target itself) must not leave
+		// a freshly created parent tree behind for a write that never happened.
+		await fs.mkdir(dirPath, { recursive: true })
+		await fs.access(dirPath)
+
 		// -- Step 1: write content to staging temp file -------------------
 		if (!options?.tempPath) {
 			// Preserve the existing target's permissions: the staging file must
@@ -454,6 +560,26 @@ export async function safeWriteText(
 			}
 		}
 		try {
+			// -- Step 2b: re-validate the authorized ancestry before committing --
+			// The caller decided containment by walking this directory chain. A parent
+			// swapped for a link to outside that chain would send the commit somewhere the
+			// caller never authorized, even though expectedResolvedPath still matches (the
+			// name is unchanged). Compare each recorded identity now, before anything is
+			// moved into place.
+			if (options?.expectedAncestorIdentities) {
+				for (const expected of options.expectedAncestorIdentities) {
+					const current = await fs.stat(expected.dir, { bigint: true }).catch((error: unknown) => {
+						if (errorCode(error) === "ENOENT") {
+							throw new AncestorReplacedError(expected.dir, "no longer exists")
+						}
+						throw error
+					})
+					if (current.dev !== expected.dev || current.ino !== expected.ino) {
+						throw new AncestorReplacedError(expected.dir, "is no longer the directory that was authorized")
+					}
+				}
+			}
+
 			// -- Step 3 (backup:true): durable copy target -> backup ----
 			if (options?.backup) {
 				try {
@@ -588,6 +714,11 @@ export async function safeWriteText(
 		if (stagingDir) {
 			await fs.rmdir(stagingDir).catch(() => {})
 		}
+
+		// Same rule for the parent directories this write created: remove only the ones
+		// it made, innermost outward, and only while they are still empty (rmdir fails
+		// on a non-empty directory, so a peer writer's file keeps its home).
+		await _removeEmptyDirectories(createdDirs)
 
 		if (daclDumpPath !== null) {
 			await fs.unlink(daclDumpPath).catch(() => {})

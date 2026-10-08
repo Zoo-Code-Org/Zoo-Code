@@ -4,6 +4,7 @@ import * as path from "path"
 import * as os from "os"
 
 import { ConfinedPathEscapeError, safeWriteJson } from "../safeWriteJson"
+import { TargetMovedError } from "../../services/file-safety/safeWriteText"
 import * as lockfile from "proper-lockfile"
 
 // Capture actual implementations before the vi.mock factory runs,
@@ -730,6 +731,54 @@ describe("safeWriteJson", () => {
 	)
 
 	test.skipIf(process.platform === "win32")(
+		"refuses a confined write whose link is swapped after the confinement check",
+		async () => {
+			// The race the under-lock confinement check cannot see on its own: the link is
+			// inside the scope when the check runs, and a local process repoints it outside
+			// before the commit. The merge callback runs under the lock, after the check and
+			// before anything is staged, so it stands in for that process deterministically.
+			const projectDir = path.join(tempDir, "project-race")
+			await fs.mkdir(projectDir)
+			const inside = path.join(projectDir, "inside.json")
+			await fsSyncActual.promises.writeFile(inside, JSON.stringify({ mcpServers: {} }), "utf8")
+			const outside = path.join(tempDir, "outside-race.json")
+			await fsSyncActual.promises.writeFile(outside, JSON.stringify({ secret: "original" }), "utf8")
+			const projectConfig = path.join(projectDir, "mcp.json")
+			await fs.symlink(inside, projectConfig)
+
+			await expect(
+				safeWriteJson(
+					projectConfig,
+					{ mcpServers: { swapped: { url: "http://localhost" } } },
+					{
+						confineTo: projectDir,
+						merge: (existing) => {
+							// Same name, different referent: exactly what the check above
+							// cannot observe after it has run.
+							fsSyncActual.unlinkSync(projectConfig)
+							fsSyncActual.symlinkSync(outside, projectConfig)
+							return existing
+						},
+					},
+				),
+			).rejects.toThrow(TargetMovedError)
+
+			// Neither the new referent nor the original one was written, and no staging or
+			// lock artifact survives in either directory.
+			expect(JSON.parse(await fsSyncActual.promises.readFile(outside, "utf8"))).toEqual({ secret: "original" })
+			expect(JSON.parse(await fsSyncActual.promises.readFile(inside, "utf8"))).toEqual({ mcpServers: {} })
+			for (const dir of [tempDir, projectDir]) {
+				const entries = await fs.readdir(dir)
+				expect(
+					entries.filter(
+						(entry) => entry.includes(".new_") || entry.includes("safeWriteText") || entry.endsWith(".lock"),
+					),
+				).toEqual([])
+			}
+		},
+	)
+
+	test.skipIf(process.platform === "win32")(
 		"confines a scope path that itself runs through a symlink and does not exist yet",
 		async () => {
 			const real = path.join(tempDir, "real-project")
@@ -793,6 +842,52 @@ describe("safeWriteJson", () => {
 		} finally {
 			vi.doUnmock("proper-lockfile")
 			vi.resetModules()
+		}
+	})
+
+	// The symlink cases above only run where symlinks can be created, so the wiring
+	// itself is pinned here, on every lane: the confinement decision has to reach the
+	// publish primitive, or the checks above protect a path the commit no longer uses.
+	test("pins the confined target and its directory identities onto the publish", async () => {
+		vi.resetModules()
+		const projectDir = path.join(tempDir, "pin-project")
+		const nested = path.join(projectDir, "nested")
+		await fs.mkdir(projectDir)
+		await fs.mkdir(nested)
+		const target = path.join(nested, "mcp.json")
+
+		const real = await vi.importActual<typeof import("../../services/file-safety/safeWriteText")>(
+			"../../services/file-safety/safeWriteText",
+		)
+		// Typed parameters so the recorded call's options are readable without a cast.
+		const publishSpy = vi.fn(async (_target: string, _content: string, options?: Record<string, unknown>) => {})
+		vi.doMock("../../services/file-safety/safeWriteText", () => ({ ...real, safeWriteText: publishSpy }))
+		const { safeWriteJson: pinnedSafeWriteJson } = await import("../safeWriteJson")
+
+		try {
+			await pinnedSafeWriteJson(target, { mcpServers: {} }, { confineTo: projectDir })
+
+			expect(publishSpy).toHaveBeenCalledTimes(1)
+			const options = publishSpy.mock.calls[0][2] as Record<string, unknown>
+			// The exact path the scope check authorized...
+			expect(options.expectedResolvedPath).toBe(path.join(await fs.realpath(nested), "mcp.json"))
+			// ...and the identity of every directory that check walked through, from the
+			// scope root down to the target's parent.
+			const ancestors = options.expectedAncestorIdentities as { dir: string; dev: bigint; ino: bigint }[]
+			const pinnedDirs = ancestors.map((entry) => entry.dir)
+			expect(pinnedDirs).toEqual([await fs.realpath(projectDir), await fs.realpath(nested)])
+			for (const entry of ancestors) {
+				const stat = await fs.stat(entry.dir, { bigint: true })
+				expect(entry.dev).toBe(stat.dev)
+				expect(entry.ino).toBe(stat.ino)
+			}
+		} finally {
+			vi.doUnmock("../../services/file-safety/safeWriteText")
+			vi.resetModules()
+			// The publish was stubbed, so the staged temp file was never committed or
+			// cleaned by it; remove it rather than leave it for a later test.
+			const left = await fs.readdir(nested)
+			await Promise.all(left.map((entry) => fs.unlink(path.join(nested, entry)).catch(() => {})))
 		}
 	})
 
