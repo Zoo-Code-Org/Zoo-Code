@@ -3,6 +3,7 @@ import path from "node:path"
 import { type ProviderSettings, RooCodeEventName } from "@roo-code/types"
 
 import { Task } from "../Task"
+import { ObservationRegistry } from "../observationRegistry"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { OutputInterceptor } from "../../../integrations/terminal/OutputInterceptor"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
@@ -116,6 +117,33 @@ describe("Task dispose method", () => {
 			path.join("/test/path/tasks/test-task", "command-output"),
 		)
 		expect(disposalComplete).toBe(true)
+	})
+
+	test("owns a per-Task observation registry", () => {
+		// ReadFileTool and the guarded-write path reach the registry only through the Task,
+		// so a Task that never built one - or shared one across Tasks - would silently drop
+		// read observations. The registry's own tests only exercise standalone instances, and
+		// the tool tests inject their own doubles, so nothing else pins this wiring.
+		expect(task.observationRegistry).toBeInstanceOf(ObservationRegistry)
+
+		const other = new Task({
+			provider: mockProvider as unknown as ClineProvider,
+			apiConfiguration: mockApiConfiguration,
+			startTask: false,
+		})
+		try {
+			expect(other.observationRegistry).toBeInstanceOf(ObservationRegistry)
+			expect(other.observationRegistry).not.toBe(task.observationRegistry)
+
+			// Observing in one Task must not be visible from another: parent and subtask
+			// authority over a file has to stay separate.
+			other.observationRegistry.observe("/workspace/a.ts", "v1", true)
+			expect(other.observationRegistry.get("/workspace/a.ts")?.version).toBe("v1")
+			expect(task.observationRegistry.has("/workspace/a.ts")).toBe(false)
+			expect(task.observationRegistry.size).toBe(0)
+		} finally {
+			void other.dispose().catch(() => {})
+		}
 	})
 
 	test("should reject the memoized completion promise when disposal cannot start", async () => {
