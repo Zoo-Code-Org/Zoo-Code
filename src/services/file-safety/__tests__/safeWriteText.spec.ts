@@ -320,6 +320,25 @@ describe("safeWriteText", () => {
 			expect(fs.rename).toHaveBeenCalled()
 		})
 
+		it("win32 DACL: a partial dump left by a failed save is still unlinked", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// icacls can write a partial dump and still exit non-zero. The dump path must stay
+			// tracked so the cleanup removes it; clearing it on the failure would leave the
+			// dump sitting next to the target with nothing left to remove it.
+			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+				if (typeof cb === "function") cb(new Error("icacls error"), "", "")
+				return fakeChild
+			})
+
+			await safeWriteText(targetPath, "data", { platform: "win32" })
+
+			// No restore attempt (the save failed), but the dump is cleaned up.
+			expect(execFile).toHaveBeenCalledTimes(1)
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))
+		})
+
 		it("win32 DACL save args are [targetPath, /save, dumpPath, /T] before backup rename", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
