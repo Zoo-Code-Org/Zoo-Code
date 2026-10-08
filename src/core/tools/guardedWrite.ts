@@ -153,7 +153,9 @@ export async function createIfAbsent(
 	// Re-checked under the lock, immediately before the publish: the path was authorized
 	// when it was queued, but a symlink can be swapped in while the link waited on the
 	// FIFO chain or on this lock.
-	verifyTarget?: () => Promise<void>,
+	// Resolves the path again and returns the authorized target, so the publish
+	// can pin its own resolution to it.
+	verifyTarget?: () => Promise<string | undefined>,
 ): Promise<string | undefined> {
 	// Lock the key every other writer to this file uses: the resolved publish
 	// target, so a symlink alias and its referent share one lock.
@@ -168,14 +170,17 @@ export async function createIfAbsent(
 			}
 			// Immediately before publication starts.
 			cancelledBeforePublish(absolutePath, displayPath, isCancelled)
-			await verifyTarget?.()
+			const authorizedTarget = await verifyTarget?.()
 			// No-replace commit. The access check above only proves absence at the moment
 			// it runs: a writer that never takes the advisory lock can create the target
 			// before this publish, and a plain rename would silently replace that newer
 			// file. The commit is therefore a link that fails EEXIST, and the collision is
 			// reported as the same guard verdict the pre-check produces.
 			try {
-				await safeWriteText(absolutePath, content, { failIfExist: true })
+				await safeWriteText(absolutePath, content, {
+					failIfExist: true,
+					expectedResolvedPath: authorizedTarget,
+				})
 			} catch (error: unknown) {
 				if (error instanceof TargetExistsError) {
 					throw new GuardRejectedError(
@@ -232,7 +237,9 @@ export async function replaceIfVersion(
 	// Re-checked under the lock, immediately before the publish: the path was authorized
 	// when it was queued, but a symlink can be swapped in while the link waited on the
 	// FIFO chain or on this lock.
-	verifyTarget?: () => Promise<void>,
+	// Resolves the path again and returns the authorized target, so the publish
+	// can pin its own resolution to it.
+	verifyTarget?: () => Promise<string | undefined>,
 ): Promise<string | undefined> {
 	// Lock the key every other writer to this file uses: the resolved publish
 	// target, so a symlink alias and its referent share one lock.
@@ -266,8 +273,10 @@ export async function replaceIfVersion(
 		if (currentVersion === expectedVersion) {
 			// Immediately before publication starts.
 			cancelledBeforePublish(absolutePath, displayPath, isCancelled)
-			await verifyTarget?.()
-			await safeWriteText(absolutePath, content)
+			const authorizedTarget = await verifyTarget?.()
+			await safeWriteText(absolutePath, content, {
+				expectedResolvedPath: authorizedTarget,
+			})
 			// Read the new token under the same lock, otherwise a peer lock-using
 			// writer can publish in the gap and the caller records that writer's
 			// token as its own observation.
@@ -345,7 +354,11 @@ function assertInsideWorkspace(task: Task, absolutePath: string, displayPath: st
  * treated as "cannot be authorized" and rejected, and a workspace that cannot be
  * resolved at all falls back to the lexical decision already made.
  */
-async function assertCanonicalInsideWorkspace(task: Task, absolutePath: string, displayPath: string): Promise<void> {
+async function assertCanonicalInsideWorkspace(
+	task: Task,
+	absolutePath: string,
+	displayPath: string,
+): Promise<string | undefined> {
 	let workspaceRoot: string
 	try {
 		workspaceRoot = await fs.realpath(path.resolve(task.cwd))
@@ -356,7 +369,7 @@ async function assertCanonicalInsideWorkspace(task: Task, absolutePath: string, 
 			// the missing directory anyway. Anything else - EACCES, ELOOP - means the root
 			// exists but cannot be resolved, and a symlink inside the workspace would then
 			// never be checked, so this fails closed rather than falling back to lexical only.
-			return
+			return undefined
 		}
 		throw new GuardRejectedError(
 			"Workspace could not be resolved, so this write cannot be checked against it -- retry with a path inside the workspace.",
@@ -370,6 +383,9 @@ async function assertCanonicalInsideWorkspace(task: Task, absolutePath: string, 
 			displayPath,
 		)
 	}
+	// Hand the authorized target back: the publish resolves the path again, and the
+	// caller pins that second resolution to this one.
+	return target
 }
 
 async function realpathNearest(target: string, displayPath: string): Promise<string> {

@@ -42,6 +42,15 @@ export interface SafeWriteTextOptions {
 	 * file it never saw.
 	 */
 	failIfExist?: boolean
+
+	/**
+	 * The publish target the caller already authorized.
+	 * A caller that checks workspace containment and then calls this primitive resolves
+	 * the path twice: once for its own decision and once here. If a link is swapped in
+	 * between the two, the decision was about a different file than the one published.
+	 * Passing the authorized value makes that drift fatal instead of silent.
+	 */
+	expectedResolvedPath?: string
 }
 
 /**
@@ -113,6 +122,24 @@ export class TargetExistsError extends Error {
 		super(`A file already exists at ${targetPath} -- the no-replace commit refused it.`)
 		this.name = "TargetExistsError"
 		this.targetPath = targetPath
+	}
+}
+
+/**
+ * The path resolved to something other than the target the caller authorized.
+ * Nothing is staged or published: a link swapped in after the caller's containment
+ * check would otherwise send the write to a file that check never covered.
+ */
+export class TargetMovedError extends Error {
+	readonly authorizedPath: string
+	readonly resolvedPath: string
+	constructor(authorizedPath: string, resolvedPath: string) {
+		super(
+			`The write was authorized for ${authorizedPath}, but that path now resolves to ${resolvedPath} -- nothing was published.`,
+		)
+		this.name = "TargetMovedError"
+		this.authorizedPath = authorizedPath
+		this.resolvedPath = resolvedPath
 	}
 }
 // -- helpers ---------------------------------------------------------------
@@ -265,6 +292,13 @@ export async function safeWriteText(
 
 	// Resolve the symlink referent (see resolvePublishTarget).
 	const targetPath = await resolvePublishTarget(absoluteFilePath)
+
+	// The caller authorized a specific resolved path; publishing at a different one
+	// would act on a decision that was never made about this file.
+	if (options?.expectedResolvedPath && path.resolve(options.expectedResolvedPath) !== targetPath) {
+		throw new TargetMovedError(options.expectedResolvedPath, targetPath)
+	}
+
 	const dirPath = path.dirname(targetPath)
 
 	// Ensure parent directory exists (mirrors safeWriteJson behaviour).

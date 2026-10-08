@@ -11,6 +11,7 @@ import {
 	safeWriteText,
 	StagingPathError,
 	TargetExistsError,
+	TargetMovedError,
 	type SafeWriteTextOptions,
 } from "../safeWriteText"
 
@@ -990,6 +991,33 @@ describe("safeWriteText", () => {
 				return String(call[0]).includes("safeWriteText")
 			}),
 		).toBe(true)
+	})
+
+	it("refuses to publish when the path no longer resolves to the authorized target", async () => {
+		// Isolate the commit-phase counters from any async cleanup a previous test left
+		// in flight.
+		vi.mocked(fs.rename).mockClear()
+		vi.mocked(fs.link).mockClear()
+		const authorized = "/tmp/test-dir/target.txt"
+		// The caller authorized this path while it was a real file in the workspace; by the
+		// time the publish resolves it, a local process has swapped in a link to somewhere
+		// else. The decision was never made about that other file, so nothing is published.
+		vi.mocked(fs.realpath).mockResolvedValue("/outside/the-victim.txt")
+
+		const error = await safeWriteText(authorized, "new data", {
+			expectedResolvedPath: authorized,
+			platform: "linux",
+		}).catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(TargetMovedError)
+		const moved = error as TargetMovedError
+		expect(moved.authorizedPath).toBe(authorized)
+		expect(moved.resolvedPath).toBe("/outside/the-victim.txt")
+		expect(moved.message).toContain("/outside/the-victim.txt")
+		expect(fs.rename).not.toHaveBeenCalled()
+		expect(fs.link).not.toHaveBeenCalled()
+		// Nothing was staged either: the check runs before the staging directory is made.
+		expect(fs.mkdir).not.toHaveBeenCalled()
 	})
 })
 
