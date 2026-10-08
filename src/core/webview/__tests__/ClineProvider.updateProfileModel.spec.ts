@@ -157,6 +157,7 @@ describe("ClineProvider - updateProfileModel", () => {
 		return {
 			getProfile: vi.mocked(settingsManager.getProfile),
 			saveConfig: vi.mocked(settingsManager.saveConfig),
+			restoreConfigIfMatches: vi.mocked(settingsManager.restoreConfigIfMatches),
 			activateProfile: vi.mocked(settingsManager.activateProfile),
 			setModeConfig: vi.mocked(settingsManager.setModeConfig),
 			listConfig: vi.mocked(settingsManager.listConfig),
@@ -262,6 +263,31 @@ describe("ClineProvider - updateProfileModel", () => {
 					storedProfiles[name] = { name, id: (config as Partial<StoredProfile>).id || "test-id", ...config }
 					return "test-id"
 				}),
+				restoreConfigIfMatches: vi
+					.fn()
+					.mockImplementation(
+						async (name: string, expectedConfig: ProviderSettings, restoredConfig: ProviderSettings) => {
+							const current = storedProfiles[name]
+							if (!current) return false
+							const expectedTarget = {
+								name,
+								id: (expectedConfig as Partial<StoredProfile>).id || current.id,
+								...expectedConfig,
+							}
+							for (const [key, val] of Object.entries(expectedTarget)) {
+								if (val !== undefined && (current as Record<string, unknown>)[key] !== val) {
+									return false
+								}
+							}
+							for (const [key, val] of Object.entries(current)) {
+								if (val !== undefined && (expectedTarget as Record<string, unknown>)[key] !== val) {
+									return false
+								}
+							}
+							await provider["providerSettingsManager"].saveConfig(name, restoredConfig)
+							return true
+						},
+					),
 				listConfig: vi.fn().mockResolvedValue([
 					{
 						name: "test-config",

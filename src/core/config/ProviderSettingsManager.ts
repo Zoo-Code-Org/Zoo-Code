@@ -374,6 +374,21 @@ export class ProviderSettingsManager {
 		}
 	}
 
+	private normalizeAndFilterConfig(config: ProviderSettingsWithId, id: string): ProviderSettingsWithId {
+		const normalizedConfig = downgradeLegacyRooConfig(config as Record<string, unknown>)
+			.config as ProviderSettingsWithId
+
+		// For active providers, filter out settings from other providers.
+		// For retired providers, preserve full profile fields (including legacy
+		// provider-specific keys) to avoid data loss — passthrough() keeps
+		// unknown keys that strict parse() would strip.
+		const filteredConfig =
+			typeof normalizedConfig.apiProvider === "string" && isRetiredProvider(normalizedConfig.apiProvider)
+				? providerSettingsWithIdSchema.passthrough().parse(normalizedConfig)
+				: discriminatedProviderSettingsWithIdSchema.parse(normalizedConfig)
+		return { ...filteredConfig, id }
+	}
+
 	/**
 	 * Save a config with the given name.
 	 * Preserves the ID from the input 'config' object if it exists,
@@ -386,23 +401,48 @@ export class ProviderSettingsManager {
 				// Preserve the existing ID if this is an update to an existing config.
 				const existingId = providerProfiles.apiConfigs[name]?.id
 				const id = config.id || existingId || this.generateId()
-				const normalizedConfig = downgradeLegacyRooConfig(config as Record<string, unknown>)
-					.config as ProviderSettingsWithId
-
-				// For active providers, filter out settings from other providers.
-				// For retired providers, preserve full profile fields (including legacy
-				// provider-specific keys) to avoid data loss — passthrough() keeps
-				// unknown keys that strict parse() would strip.
-				const filteredConfig =
-					typeof normalizedConfig.apiProvider === "string" && isRetiredProvider(normalizedConfig.apiProvider)
-						? providerSettingsWithIdSchema.passthrough().parse(normalizedConfig)
-						: discriminatedProviderSettingsWithIdSchema.parse(normalizedConfig)
-				providerProfiles.apiConfigs[name] = { ...filteredConfig, id }
+				providerProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(config, id)
 				await this.store(providerProfiles)
 				return id
 			})
 		} catch (error) {
 			throw new Error(`Failed to save config: ${error}`)
+		}
+	}
+
+	/**
+	 * Atomically restores a stored profile to `restoredConfig` if and only if
+	 * the currently stored profile still matches `expectedConfig` (atomic compare-and-swap).
+	 * Returns true if restored; returns false if the stored profile was updated by a competing write.
+	 */
+	public async restoreConfigIfMatches(
+		name: string,
+		expectedConfig: ProviderSettingsWithId,
+		restoredConfig: ProviderSettingsWithId,
+	): Promise<boolean> {
+		try {
+			return await this.lock(async () => {
+				const providerProfiles = await this.load()
+				const current = providerProfiles.apiConfigs[name]
+				if (!current) {
+					return false
+				}
+
+				const currentId = current.id || this.generateId()
+				const expectedTarget = this.normalizeAndFilterConfig(expectedConfig, expectedConfig.id || currentId)
+				if (!deepEqual(current, expectedTarget)) {
+					return false
+				}
+
+				providerProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(
+					restoredConfig,
+					restoredConfig.id || currentId,
+				)
+				await this.store(providerProfiles)
+				return true
+			})
+		} catch (error) {
+			throw new Error(`Failed to restore config: ${error}`)
 		}
 	}
 

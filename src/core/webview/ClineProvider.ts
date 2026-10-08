@@ -9,7 +9,6 @@ import delay from "delay"
 import axios from "axios"
 import debounce from "lodash.debounce"
 import pWaitFor from "p-wait-for"
-import deepEqual from "fast-deep-equal"
 import * as vscode from "vscode"
 
 import {
@@ -2072,11 +2071,9 @@ export class ClineProvider
 				let savedConfig = false
 				let shouldRollbackContext = false
 				const originalContextSettings: ProviderSettings = { ...stored, id } as ProviderSettings
-				let savedProfileSnapshot: (ProviderSettings & { id?: string; name?: string }) | null = null
 				try {
 					await this.providerSettingsManager.saveConfig(name, merged as ProviderSettings)
 					savedConfig = true
-					savedProfileSnapshot = await this.providerSettingsManager.getProfile({ name }).catch(() => null)
 
 					if (signal.aborted || this._disposed) {
 						throw new Error("Provider profile mutation aborted")
@@ -2094,27 +2091,16 @@ export class ClineProvider
 				} catch (updateError) {
 					if (savedConfig) {
 						try {
-							const currentProfile = await this.providerSettingsManager
-								.getProfile({ name })
-								.catch(() => null)
-							// Check if stored profile still matches what this mutation saved.
-							// Compare the full profile (compare-and-swap) so that any concurrent changes
-							// to non-patch fields (such as api keys) are preserved and never overwritten.
-							const matchesSavedSettings = Boolean(
-								currentProfile &&
-								(savedProfileSnapshot
-									? deepEqual(currentProfile, savedProfileSnapshot)
-									: currentProfile.apiProvider === storedProvider &&
-										(!providerModelKey ||
-											currentProfile[providerModelKey as keyof typeof currentProfile] ===
-												merged[providerModelKey]) &&
-										appliedKeys.every(
-											(key) => currentProfile[key as keyof typeof currentProfile] === merged[key],
-										)),
+							// Atomically restore original settings only if stored profile still matches
+							// what this mutation wrote (compare-and-swap). Any competing write to any field
+							// (including API keys) leaves the newer profile intact.
+							const restored = await this.providerSettingsManager.restoreConfigIfMatches(
+								name,
+								merged as ProviderSettings,
+								originalContextSettings,
 							)
 
-							if (matchesSavedSettings) {
-								await this.providerSettingsManager.saveConfig(name, originalContextSettings)
+							if (restored) {
 								await this.updateGlobalState(
 									"listApiConfigMeta",
 									await this.providerSettingsManager.listConfig(),

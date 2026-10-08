@@ -7,6 +7,7 @@ import {
 	openAiModelInfoSaneDefaults,
 	retiredProviderIdentifiers,
 	type ProviderSettings,
+	type ProviderSettingsWithId,
 } from "@roo-code/types"
 
 import { clearAllMocks } from "../../../test-utils/reset"
@@ -1547,6 +1548,92 @@ describe("ProviderSettingsManager", () => {
 			expect(result.hasChanges).toBe(true)
 			expect(result.activeProfileChanged).toBe(false)
 			expect(result.activeProfileId).toBe("local-id")
+		})
+	})
+
+	describe("restoreConfigIfMatches", () => {
+		it("restores original config when current profile matches expected config", async () => {
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "default",
+				apiConfigs: {
+					test: {
+						id: "test-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-7-sonnet",
+						apiKey: "test-key",
+					},
+				},
+			}
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+
+			const expectedConfig: ProviderSettingsWithId = {
+				id: "test-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-3-7-sonnet",
+				apiKey: "test-key",
+			}
+			const restoredConfig: ProviderSettingsWithId = {
+				id: "test-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-3-5-sonnet",
+				apiKey: "test-key",
+			}
+
+			const result = await providerSettingsManager.restoreConfigIfMatches("test", expectedConfig, restoredConfig)
+
+			expect(result).toBe(true)
+			const storedConfig = JSON.parse(mockSecrets.store.mock.calls[mockSecrets.store.mock.calls.length - 1][1])
+			expect(storedConfig.apiConfigs.test.apiModelId).toBe("claude-3-5-sonnet")
+		})
+
+		it("skips restore when current profile differs from expected config (competing write)", async () => {
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "default",
+				apiConfigs: {
+					test: {
+						id: "test-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-7-sonnet",
+						apiKey: "competing-new-key",
+					},
+				},
+			}
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+
+			const expectedConfig: ProviderSettingsWithId = {
+				id: "test-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-3-7-sonnet",
+				apiKey: "initial-key",
+			}
+			const restoredConfig: ProviderSettingsWithId = {
+				id: "test-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-3-5-sonnet",
+				apiKey: "initial-key",
+			}
+
+			const storeCallCountBefore = mockSecrets.store.mock.calls.length
+			const result = await providerSettingsManager.restoreConfigIfMatches("test", expectedConfig, restoredConfig)
+
+			expect(result).toBe(false)
+			expect(mockSecrets.store.mock.calls.length).toBe(storeCallCountBefore)
+		})
+
+		it("returns false if config name does not exist", async () => {
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "default",
+				apiConfigs: {},
+			}
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+
+			const result = await providerSettingsManager.restoreConfigIfMatches(
+				"non-existent",
+				{ apiProvider: providerIdentifiers.anthropic },
+				{ apiProvider: providerIdentifiers.anthropic },
+			)
+
+			expect(result).toBe(false)
 		})
 	})
 })
