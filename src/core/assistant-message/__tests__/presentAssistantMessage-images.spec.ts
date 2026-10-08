@@ -4,6 +4,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest"
 import { Anthropic } from "@anthropic-ai/sdk"
 import { presentAssistantMessage } from "../presentAssistantMessage"
 import { Task } from "../../task/Task"
+import { validateToolUse } from "../../tools/validateToolUse"
+import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
 
 // Mock dependencies
 vi.mock("../../task/Task")
@@ -23,6 +25,13 @@ vi.mock("@roo-code/telemetry", () => ({
 		},
 	},
 }))
+
+// The snapshot the presenter consumes; the getState double below deliberately
+// disagrees with it so any surviving live-read re-entry is caught by assertions.
+const baseSnapshot: RequestPolicySnapshot = {
+	disabledTools: [],
+	customModes: [],
+}
 
 describe("presentAssistantMessage - Image Handling in Native Tool Calling", () => {
 	let mockTask: any
@@ -54,7 +63,11 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 				deref: () => ({
 					getState: vi.fn().mockResolvedValue({
 						mode: "code",
-						customModes: [],
+						// Poisoned: disagrees with baseSnapshot, so a live
+						// read here changes validation behavior and fails tests.
+						customModes: [{ slug: "poison", name: "Poison", roleDefinition: "", groups: [] }],
+						disabledTools: ["ask_followup_question"],
+						experiments: { customTools: true },
 					}),
 				}),
 			},
@@ -105,7 +118,14 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 		})
 
 		// Execute presentAssistantMessage
-		await presentAssistantMessage(mockTask)
+		await presentAssistantMessage(mockTask, baseSnapshot)
+
+		// Frozen-snapshot proof: a live read of the poisoned getState double
+		// would have produced { ask_followup_question: false } requirements
+		// and a non-empty customModes list here.
+		const validateCalls = vi.mocked(validateToolUse).mock.calls
+		expect(validateCalls[0][2]).toEqual([])
+		expect(validateCalls[0][3]).toEqual({})
 
 		// Verify that userMessageContent was populated
 		expect(mockTask.userMessageContent.length).toBeGreaterThan(0)
@@ -148,7 +168,7 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 			images: undefined,
 		})
 
-		await presentAssistantMessage(mockTask)
+		await presentAssistantMessage(mockTask, baseSnapshot)
 
 		const toolResult = mockTask.userMessageContent.find(
 			(item: any) => item.type === "tool_result" && item.tool_use_id === toolCallId,
@@ -176,7 +196,7 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 			images: ["data:image/png;base64,dogImageData"],
 		})
 
-		await presentAssistantMessage(mockTask)
+		await presentAssistantMessage(mockTask, baseSnapshot)
 
 		const textBlocks = mockTask.userMessageContent.filter((item: any) => item.type === "text")
 		expect(textBlocks.length).toBeGreaterThan(0)
@@ -205,7 +225,7 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 			images: undefined,
 		})
 
-		await presentAssistantMessage(mockTask)
+		await presentAssistantMessage(mockTask, baseSnapshot)
 
 		const toolResult = mockTask.userMessageContent.find(
 			(item: any) => item.type === "tool_result" && item.tool_use_id === toolCallId,
@@ -242,7 +262,7 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 
 			// Process the second tool (should be skipped)
 			mockTask.currentStreamingContentIndex = 1
-			await presentAssistantMessage(mockTask)
+			await presentAssistantMessage(mockTask, baseSnapshot)
 
 			// Find the tool_result for the second tool
 			const toolResult = mockTask.userMessageContent.find(
@@ -281,7 +301,7 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 
 			// Process the second tool (should be skipped)
 			mockTask.currentStreamingContentIndex = 1
-			await presentAssistantMessage(mockTask)
+			await presentAssistantMessage(mockTask, baseSnapshot)
 
 			const textBlocks = mockTask.userMessageContent.filter((item: any) => item.type === "text")
 			expect(textBlocks.some((b: any) => String(b.text).includes("XML tool calls are no longer supported"))).toBe(
@@ -306,7 +326,7 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 
 			mockTask.didRejectTool = true
 
-			await presentAssistantMessage(mockTask)
+			await presentAssistantMessage(mockTask, baseSnapshot)
 
 			// Find the tool_result
 			const toolResult = mockTask.userMessageContent.find(

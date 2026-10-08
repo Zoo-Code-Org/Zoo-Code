@@ -38,7 +38,7 @@ import { skillTool } from "../tools/SkillTool"
 import { generateImageTool } from "../tools/GenerateImageTool"
 import { applyDiffTool as applyDiffToolClass } from "../tools/ApplyDiffTool"
 import { isValidToolName, validateToolUse } from "../tools/validateToolUse"
-import { buildToolRequirements } from "../prompts/tools/effective-tool-policy"
+import { buildToolRequirements, type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
 import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
 
 import { formatResponse } from "../prompts/responses"
@@ -86,9 +86,19 @@ export function toTelemetryToolName(
  * as it becomes available.
  */
 
-export async function presentAssistantMessage(cline: Task) {
+export async function presentAssistantMessage(cline: Task, policySnapshot: RequestPolicySnapshot) {
 	if (cline.abort) {
 		return
+	}
+
+	// Tool policy is frozen at request build; re-reading live settings here
+	// would let a mid-request settings edit contradict this request's prompt.
+	// The message must not end in "aborted" — the fire-and-forget wrapper
+	// suppresses only that suffix, so a missing snapshot logs as a real failure.
+	if (!policySnapshot) {
+		throw new Error(
+			`[presentAssistantMessage] task ${cline.taskId}.${cline.instanceId} missing request policy snapshot`,
+		)
 	}
 
 	if (cline.presentAssistantMessageLocked) {
@@ -321,16 +331,16 @@ export async function presentAssistantMessage(cline: Task) {
 			// errors repeatedly during streaming, pushing multiple tool_results for the
 			// same tool_use_id and making the stream appear frozen.
 			if (!mcpBlock.partial) {
-				const state = await cline.providerRef.deref()?.getState()
-				const { customModes, experiments: stateExperiments, disabledTools } = state ?? {}
+				// Policy inputs come from the request's frozen snapshot, never from a
+				// live provider-state re-read mid-stream.
+				const { customModes, experiments: stateExperiments, disabledTools } = policySnapshot
 				// Read the task-local mode, not the shared provider mode.
 				// A delegated child task may run in a different mode than its parent.
 				const taskMode = await cline.getTaskMode()
 
-				const modelInfo = cline.api.getModel()
 				// Resolve aliases in includedTools before validation
 				// e.g., "write_file" should resolve to "write_to_file"
-				const rawIncludedTools = modelInfo.info.includedTools
+				const rawIncludedTools = policySnapshot.modelInfo?.includedTools
 				const { resolveToolAlias } = await import("../prompts/tools/filter-tools-for-mode")
 				const includedTools = rawIncludedTools?.map((tool) => resolveToolAlias(tool))
 
@@ -342,7 +352,7 @@ export async function presentAssistantMessage(cline: Task) {
 					// entry reaches the validator, which checks them before the
 					// always-available class. See `buildToolRequirements` in
 					// effective-tool-policy.ts.
-					const toolRequirements = buildToolRequirements(disabledTools, modelInfo.info)
+					const toolRequirements = buildToolRequirements(disabledTools, policySnapshot.modelInfo)
 
 					validateToolUse(
 						"use_mcp_tool",
@@ -430,9 +440,9 @@ export async function presentAssistantMessage(cline: Task) {
 				break
 			}
 
-			// Shared provider state supplies global settings; mode is owned by the task.
-			const state = await cline.providerRef.deref()?.getState()
-			const { customModes, experiments: stateExperiments, disabledTools } = state ?? {}
+			// Policy inputs come from the request's frozen snapshot, never from a
+			// live provider-state re-read mid-stream.
+			const { customModes, experiments: stateExperiments, disabledTools } = policySnapshot
 			// Read the task-local mode, not the shared provider mode.
 			// A delegated child task may run in a different mode than its parent.
 			const taskMode = await cline.getTaskMode()
@@ -711,10 +721,9 @@ export async function presentAssistantMessage(cline: Task) {
 			// during streaming, pushing multiple tool_results for the same tool_use_id and
 			// potentially causing the stream to appear frozen.
 			if (!block.partial) {
-				const modelInfo = cline.api.getModel()
 				// Resolve aliases in includedTools before validation
 				// e.g., "edit_file" should resolve to "apply_diff"
-				const rawIncludedTools = modelInfo?.info?.includedTools
+				const rawIncludedTools = policySnapshot.modelInfo?.includedTools
 				const { resolveToolAlias } = await import("../prompts/tools/filter-tools-for-mode")
 				const includedTools = rawIncludedTools?.map((tool) => resolveToolAlias(tool))
 
@@ -725,7 +734,7 @@ export async function presentAssistantMessage(cline: Task) {
 					// entry — disabled tools, and an excluded or disabled protocol tool — reaches
 					// the validator, which checks them before the always-available class. See
 					// `buildToolRequirements` in effective-tool-policy.ts.
-					const toolRequirements = buildToolRequirements(disabledTools, modelInfo?.info)
+					const toolRequirements = buildToolRequirements(disabledTools, policySnapshot.modelInfo)
 
 					validateToolUse(
 						block.name as ToolName,
@@ -769,11 +778,14 @@ export async function presentAssistantMessage(cline: Task) {
 				cline.recordToolUsage(recordName)
 				TelemetryService.instance.captureToolUsage(cline.taskId, recordName)
 
-				// Track legacy format usage for read_file tool (for migration monitoring)
+				// Track legacy format usage for read_file tool (for migration monitoring).
+				// Model ids on telemetry events are non-policy labels: a live
+				// `getModel()` read is fine where nothing about this request's tool
+				// policy derives from the result.
 				if (block.name === "read_file" && block.usedLegacyFormat) {
 					TelemetryService.instance.captureEvent(TelemetryEventName.READ_FILE_LEGACY_FORMAT_USED, {
 						taskId: cline.taskId,
-						model: modelInfo?.id,
+						model: cline.api.getModel()?.id,
 					})
 				}
 			}
@@ -1115,7 +1127,7 @@ export async function presentAssistantMessage(cline: Task) {
 		if (cline.currentStreamingContentIndex < cline.assistantMessageContent.length) {
 			// There are already more content blocks to stream, so we'll call
 			// this function ourselves.
-			return presentAssistantMessage(cline)
+			return presentAssistantMessage(cline, policySnapshot)
 		} else {
 			// CRITICAL FIX: If we're out of bounds and the stream is complete, set userMessageContentReady
 			// This handles the case where assistantMessageContent is empty or becomes empty after processing
@@ -1127,7 +1139,7 @@ export async function presentAssistantMessage(cline: Task) {
 
 	// Block is partial, but the read stream may have finished.
 	if (cline.presentAssistantMessageHasPendingUpdates) {
-		return presentAssistantMessage(cline)
+		return presentAssistantMessage(cline, policySnapshot)
 	}
 }
 
