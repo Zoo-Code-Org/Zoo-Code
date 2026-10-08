@@ -2,6 +2,8 @@
 
 import * as path from "path"
 
+import * as fsPromises from "fs/promises"
+
 import * as lockfile from "proper-lockfile"
 
 import { acquireFileLock, withFileLock } from "../fileLock"
@@ -14,6 +16,11 @@ vi.mock("fs/promises", () => ({
 			throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
 		}
 		return asString.replace("aliasDir", "realDir")
+	}),
+	// A non-link rejects readlink, exactly like the real fs; the link tests
+	// override this per path.
+	readlink: vi.fn(async () => {
+		throw Object.assign(new Error("EINVAL"), { code: "EINVAL" })
 	}),
 }))
 
@@ -82,3 +89,22 @@ describe("fileLock - canonical lock keys", () => {
 		)
 	})
 })
+
+	test("locks the referent of a file symlink whose target is temporarily absent", async () => {
+		// A backup-mode commit renames the referent away and back. During that window the
+		// link is dangling, realpath fails, and a naive fallback re-appends the LINK's
+		// basename onto the canonical parent - a different key from the one safeWriteJson
+		// holds through resolveLockKey, so the two writers stop excluding each other.
+		const linkPath = path.join(STORE, "link.json")
+		const referent = path.join(STORE, "referent.json")
+		vi.mocked(fsPromises.readlink).mockImplementation(async (p: unknown) => {
+			if (String(p) === linkPath) return referent
+			throw Object.assign(new Error("EINVAL"), { code: "EINVAL" })
+		})
+
+		const releaseLock = await acquireFileLock(linkPath)
+
+		expect(lockfile.lock).toHaveBeenCalledWith(referent, expect.objectContaining({ realpath: false }))
+
+		await releaseLock()
+	})

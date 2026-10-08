@@ -26,6 +26,25 @@ export const LOCK_STALE_MS = 31_000
  */
 async function canonicalLockPath(filePath: string): Promise<string> {
 	const absoluteFilePath = path.resolve(filePath)
+
+	// A file symlink has to produce the same key the writer's lock uses
+	// (resolveLockKey in safeWriteText). Walking readlink even when the referent is
+	// temporarily absent - which is exactly the window a backup-mode commit creates -
+	// keeps a raw withFileLock caller on the link path excluding the peer writing
+	// through the referent; re-appending the link's basename onto the canonical
+	// parent would take a different lock and the two operations would stop excluding
+	// each other. The walk is bounded so a two-link cycle terminates.
+	let linkCursor = absoluteFilePath
+	for (let depth = 0; depth < 8; depth++) {
+		const referent = await fs.readlink(linkCursor).catch(() => undefined)
+		if (referent === undefined) {
+			break
+		}
+		linkCursor = path.resolve(path.dirname(linkCursor), referent)
+	}
+	if (linkCursor !== absoluteFilePath) {
+		return await canonicalLockPath(linkCursor)
+	}
 	const missing: string[] = []
 	let cursor = absoluteFilePath
 	for (;;) {
