@@ -1722,20 +1722,38 @@ const provider = new ClineProvider(
 		})
 
 		it("should not update viewLocalState when durable view-state persistence fails", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-			vi.spyOn(provider.contextProxy, "setValue").mockRejectedValueOnce(new Error("persist failed"))
+			// Conditioned on the payload, never on call order: this flow writes the viewStates
+			// map more than once (the registration re-key, then the mode write), so a
+			// mockRejectedValueOnce would pin whichever call happened to come first - and if it
+			// pinned nothing at all the test would still be green. rejectedKeys makes the
+			// injection observable: if the write below is not the one that fails, the assertion
+			// at the end says so instead of the test silently passing.
+			const rejectedKeys: string[] = []
+			const setValueOriginal = provider.contextProxy.setValue.bind(provider.contextProxy)
+			vi
+				.spyOn(provider.contextProxy, "setValue")
+				.mockImplementation(async (key, value) => {
+					const states = value as Record<string, { mode?: string }> | undefined
+					if (String(key) === "viewStates" && states?.["stable-sidebar-view"]?.mode === "architect") {
+						rejectedKeys.push(key)
+						throw new Error("persist failed")
+					}
+					return setValueOriginal(key, value)
+				})
 
 			await provider["setViewStateId"]("stable-sidebar-view")
 
 			await expect(provider.saveViewState("mode", "architect")).rejects.toThrow("persist failed")
 			expect(provider["viewLocalState"]).not.toHaveProperty("mode")
 			expect(provider.contextProxy.getValue("viewStates")).toBeUndefined()
+			expect(rejectedKeys).toContain("viewStates")
 
 			await provider.dispose()
 		})
