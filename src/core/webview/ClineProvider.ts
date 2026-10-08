@@ -2037,20 +2037,42 @@ export class ClineProvider
 					return
 				}
 
-				const savedId = await this.providerSettingsManager.saveConfig(name, merged as ProviderSettings)
+				let savedConfig = false
+				let updatedContext = false
+				try {
+					await this.providerSettingsManager.saveConfig(name, merged as ProviderSettings)
+					savedConfig = true
 
-				if (signal.aborted) return
+					if (signal.aborted) {
+						throw new Error("Provider profile mutation aborted")
+					}
 
-				const { mode } = await this.getState()
-
-				await Promise.all([
-					this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
-					this.updateGlobalState("currentApiConfigName", name),
-					this.providerSettingsManager.setModeConfig(mode, savedId),
-					this.contextProxy.setProviderSettings(merged as ProviderSettings),
-				])
-
-				if (signal.aborted) return
+					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
+					if (name === currentApiConfigName) {
+						await this.contextProxy.setProviderSettings(merged as ProviderSettings)
+						updatedContext = true
+					}
+				} catch (updateError) {
+					if (savedConfig) {
+						try {
+							await this.providerSettingsManager.saveConfig(name, { ...stored, id } as ProviderSettings)
+							await this.updateGlobalState(
+								"listApiConfigMeta",
+								await this.providerSettingsManager.listConfig(),
+							)
+							if (updatedContext) {
+								await this.contextProxy.setProviderSettings({ ...stored, id } as ProviderSettings)
+							}
+						} catch (rollbackError) {
+							this.log(
+								`Failed to rollback profile '${name}' after update failure: ${
+									rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+								}`,
+							)
+						}
+					}
+					throw updateError
+				}
 
 				this.updateTaskApiHandlerIfNeeded(merged as ProviderSettings, { forceRebuild: true })
 				await this.persistStickyProviderProfileToCurrentTask(name)

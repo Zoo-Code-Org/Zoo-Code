@@ -16,7 +16,14 @@ type UseRouterModelsOptions = {
 
 export const fetchRouterModels = async (provider?: string, signal?: AbortSignal) =>
 	new Promise<RouterModels>((resolve, reject) => {
+		let timeout: ReturnType<typeof setTimeout> | undefined
+
 		const cleanup = () => {
+			if (timeout !== undefined) {
+				clearTimeout(timeout)
+				timeout = undefined
+			}
+			signal?.removeEventListener("abort", abortHandler)
 			if (typeof window !== "undefined") {
 				window.removeEventListener("message", handler)
 			}
@@ -27,16 +34,15 @@ export const fetchRouterModels = async (provider?: string, signal?: AbortSignal)
 			return
 		}
 
-		const timeout = setTimeout(() => {
-			cleanup()
-			reject(new Error("Router models request timed out"))
-		}, 10000)
-
 		const abortHandler = () => {
-			clearTimeout(timeout)
 			cleanup()
 			reject(new Error("Router models request aborted"))
 		}
+
+		timeout = setTimeout(() => {
+			cleanup()
+			reject(new Error("Router models request timed out"))
+		}, 10000)
 
 		signal?.addEventListener("abort", abortHandler, { once: true })
 
@@ -52,8 +58,6 @@ export const fetchRouterModels = async (provider?: string, signal?: AbortSignal)
 					return
 				}
 
-				clearTimeout(timeout)
-				signal?.removeEventListener("abort", abortHandler)
 				cleanup()
 
 				if (message.routerModels) {

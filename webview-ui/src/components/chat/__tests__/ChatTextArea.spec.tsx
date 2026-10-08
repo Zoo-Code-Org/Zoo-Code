@@ -1329,6 +1329,34 @@ describe("ChatTextArea", () => {
 			})
 			expect(message).not.toHaveProperty("apiConfiguration")
 		})
+
+		it("updates the target profile when currentApiConfigName changes", () => {
+			const { rerender } = render(<ChatTextArea {...defaultProps} />)
+
+			;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+				filePaths: [],
+				openedTabs: [],
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+				currentTaskId: "task-local-context",
+				currentApiConfigName: "updated-profile",
+				taskHistory: [],
+				cwd: "/test/workspace",
+			})
+
+			rerender(<ChatTextArea {...defaultProps} />)
+
+			mockPostMessage.mockClear()
+			fireEvent.click(screen.getByTestId("model-selector-trigger"))
+			fireEvent.click(screen.getAllByText(/claude-3-5-haiku/i)[0])
+
+			expect(mockPostMessage).toHaveBeenCalledTimes(1)
+			expect(mockPostMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "updateProfileModel",
+					text: "updated-profile",
+				}),
+			)
+		})
 	})
 
 	describe("blank suggestion copy crash (issue #1226)", () => {

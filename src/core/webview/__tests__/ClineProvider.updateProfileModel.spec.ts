@@ -148,6 +148,8 @@ describe("ClineProvider - updateProfileModel", () => {
 			getProfile: vi.mocked(settingsManager.getProfile),
 			saveConfig: vi.mocked(settingsManager.saveConfig),
 			activateProfile: vi.mocked(settingsManager.activateProfile),
+			setModeConfig: vi.mocked(settingsManager.setModeConfig),
+			listConfig: vi.mocked(settingsManager.listConfig),
 		}
 	}
 
@@ -398,18 +400,26 @@ describe("ClineProvider - updateProfileModel", () => {
 		expect(provider.contextProxy.getValues().currentApiConfigName).toBe("other-config")
 	})
 
-	it("uses the task's sticky profile name as the visible profile when a task is active", async () => {
+	it("uses the task's sticky profile name as the visible profile when a task is active without modifying global profile or mode config", async () => {
 		// Test double with minimal options
 		const mockTask = new Task({} as unknown as ConstructorParameters<typeof Task>[0])
 		Object.defineProperty(mockTask, "taskApiConfigName", { value: "sticky-config" })
 		await provider.addClineToStack(mockTask)
 		mockStoredProfile({ name: "sticky-config", apiProvider: providerIdentifiers.openrouter })
 
+		const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
+
 		await provider.updateProfileModel("sticky-config", providerIdentifiers.openrouter, {
 			openRouterModelId: "x/y",
 		})
 		expect(manager().saveConfig).toHaveBeenCalledWith(
 			"sticky-config",
+			expect.objectContaining({ openRouterModelId: "x/y" }),
+		)
+		expect(manager().setModeConfig).not.toHaveBeenCalled()
+		expect(provider.contextProxy.getValues().currentApiConfigName).toBe("test-config")
+		expect(setProviderSettingsSpy).not.toHaveBeenCalled()
+		expect(mockTask.updateApiConfiguration).toHaveBeenCalledWith(
 			expect.objectContaining({ openRouterModelId: "x/y" }),
 		)
 
@@ -419,5 +429,93 @@ describe("ClineProvider - updateProfileModel", () => {
 			openRouterModelId: "x/z",
 		})
 		expect(manager().saveConfig).not.toHaveBeenCalled()
+	})
+
+	it("updates contextProxy provider settings when updating the current global profile", async () => {
+		mockStoredProfile({
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4",
+		})
+
+		const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-4.5",
+		})
+
+		expect(setProviderSettingsSpy).toHaveBeenCalledWith(
+			expect.objectContaining({ openRouterModelId: "openai/gpt-4.5" }),
+		)
+		expect(manager().setModeConfig).not.toHaveBeenCalled()
+	})
+
+	it("rolls back saved profile if post-save state update fails", async () => {
+		mockStoredProfile({
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4",
+			openRouterApiKey: "my-key",
+		})
+
+		let listConfigCalls = 0
+		manager().listConfig.mockImplementation(async () => {
+			listConfigCalls++
+			if (listConfigCalls === 1) {
+				throw new Error("Global state sync failed")
+			}
+			return []
+		})
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-4.5",
+		})
+
+		// First call saves the patched model, second call rolls back to original stored config
+		expect(manager().saveConfig).toHaveBeenCalledTimes(2)
+		expect(manager().saveConfig).toHaveBeenNthCalledWith(
+			1,
+			"test-config",
+			expect.objectContaining({ openRouterModelId: "openai/gpt-4.5" }),
+		)
+		expect(manager().saveConfig).toHaveBeenNthCalledWith(
+			2,
+			"test-config",
+			expect.objectContaining({ openRouterModelId: "openai/gpt-4", openRouterApiKey: "my-key" }),
+		)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.save_api_config")
+	})
+
+	it("rolls back saved profile if mutation signal is aborted after saveConfig", async () => {
+		mockStoredProfile({
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4",
+			openRouterApiKey: "my-key",
+		})
+
+		const controller = new AbortController()
+		provider["enqueueProviderProfileMutation"] = vi.fn().mockImplementation(async (fn) => {
+			return fn(controller.signal)
+		})
+
+		manager().saveConfig.mockImplementationOnce(async () => {
+			controller.abort()
+			return "test-id"
+		})
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-4.5",
+		})
+
+		expect(manager().saveConfig).toHaveBeenCalledTimes(2)
+		expect(manager().saveConfig).toHaveBeenNthCalledWith(
+			1,
+			"test-config",
+			expect.objectContaining({ openRouterModelId: "openai/gpt-4.5" }),
+		)
+		expect(manager().saveConfig).toHaveBeenNthCalledWith(
+			2,
+			"test-config",
+			expect.objectContaining({ openRouterModelId: "openai/gpt-4", openRouterApiKey: "my-key" }),
+		)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.save_api_config")
 	})
 })
