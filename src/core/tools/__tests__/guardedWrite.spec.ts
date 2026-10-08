@@ -592,3 +592,47 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		})
 	})
 })
+
+describe("task cancellation (S4a, epic #1375)", () => {
+	// The file's shared beforeEach lives inside the main describe, so this top-level one needs its
+	// own resets - otherwise assertions here see the previous test's recorded calls.
+	beforeEach(() => {
+		mockedSafeWriteText.mockClear()
+		mockedFsAccess.mockClear()
+		mockedComputeVersionToken.mockClear()
+		mockedFsAccess.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+	})
+
+	it("drops a queued write when the task is aborted while it waits behind another write", async () => {
+		let releaseFirst: () => void = () => {}
+		const firstGate = new Promise<void>(function (resolve) {
+			releaseFirst = resolve
+		})
+		mockedSafeWriteText.mockImplementationOnce(async () => {
+			await firstGate
+		})
+		const task = createMockTask()
+		const first = guardedWrite(task, "queued.txt", "first", "create")
+		const second = guardedWrite(task, "queued.txt", "second", "create")
+		// Let the first link enter the publish (the chain runs on microtasks) before the
+		// disposal lands: Task.dispose() sets task.abort while the second write is still
+		// queued behind it.
+		await new Promise(function (resolve) {
+			setImmediate(resolve)
+		})
+		task.abort = true
+		releaseFirst()
+		await first
+		await expect(second).rejects.toThrow(/was cancelled/)
+		// Only the first write published; the cancelled one touched nothing.
+		expect(mockedSafeWriteText.mock.calls.map(function (call) { return call[1] })).toEqual(["first"])
+	})
+
+	it("refuses an already-cancelled task's write before any I/O", async () => {
+		const task = createMockTask()
+		task.abort = true
+		await expect(guardedWrite(task, "gone.txt", "x", "create")).rejects.toThrow(/was cancelled/)
+		expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		expect(mockedFsAccess).not.toHaveBeenCalled()
+	})
+})
