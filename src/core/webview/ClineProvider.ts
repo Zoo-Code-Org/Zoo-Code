@@ -116,7 +116,7 @@ import { PendingActionSettlementError, Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
 import type { WebviewFocusTracker } from "./WebviewFocusTracker"
-import type { ClineMessage, TodoItem } from "@roo-code/types"
+import type { ClineMessage, ProviderSettingsWithId, TodoItem } from "@roo-code/types"
 import {
 	type ApiMessage,
 	readApiMessages,
@@ -2452,6 +2452,22 @@ export class ClineProvider
 		// delete the last remaining configuration) propagates. Matching message text
 		// instead would let a profile whose name contains "not found" swallow an
 		// unrelated failure.
+		// The settings-store commit and the profile-list write below are two separate
+		// durable writes. Capture the settings first so a failure after the commit can be
+		// compensated: without them the stored profile list would name a profile whose
+		// settings no longer exist, and a later selection or load could not recover them.
+		let deletedProfile: ProviderSettingsWithId | undefined
+		try {
+			const { name: _deletedName, ...profile } = await this.providerSettingsManager.getProfile({
+				name: profileToDelete.name,
+			})
+			deletedProfile = profile as ProviderSettingsWithId
+		} catch (error: unknown) {
+			if (!(error instanceof ProviderSettingsNotFoundError)) {
+				this.log(`deleteProviderProfile: could not read the settings for '${profileToDelete.name}'; a later failure of the list update cannot be compensated. ${error instanceof Error ? error.message : String(error)}`)
+			}
+		}
+
 		try {
 			await this.providerSettingsManager.deleteConfig(profileToDelete.name)
 		} catch (error) {
@@ -2469,63 +2485,79 @@ export class ClineProvider
 		// captured above would also rewrite unrelated keys (including viewStates,
 		// which ClineProvider mutates directly in storage for concurrent views)
 		// with this view's stale cached copy.
-		await this.contextProxy.setValue("listApiConfigMeta", entries)
-
-		// Resolve the surviving profile's settings so this view and any other
-		// live view still pinned to the deleted profile can be re-pinned with
-		// a matching configuration.
-		let survivingSettings: ProviderSettings | undefined
 		try {
-			const { name: _survivingName, ...settings } = await this.providerSettingsManager.getProfile({
-				name: profileToActivate,
-			})
-			survivingSettings = settings as ProviderSettings
-		} catch (error) {
-			this.log(
-				`[deleteProviderProfile] Unable to resolve API profile '${profileToActivate}': ${
-					error instanceof Error ? error.message : String(error)
-				}`,
-			)
-		}
+			await this.contextProxy.setValue("listApiConfigMeta", entries)
 
-		// Capture this view's pin before any rewrite: a view pinned to the
-		// deleted profile while the global selection points elsewhere must still be
-		// reconfigured, or getState() would keep the deleted profile's settings under
-		// the surviving profile's name.
-		const viewWasPinnedToDeleted = this.viewLocalState.currentApiConfigName === profileToDelete.name
-		const deletedWasGlobal = profileToDelete.name === globalSettings.currentApiConfigName
+			// Resolve the surviving profile's settings so this view and any other
+			// live view still pinned to the deleted profile can be re-pinned with
+			// a matching configuration.
+			let survivingSettings: ProviderSettings | undefined
+			try {
+				const { name: _survivingName, ...settings } = await this.providerSettingsManager.getProfile({
+					name: profileToActivate,
+				})
+				survivingSettings = settings as ProviderSettings
+			} catch (error) {
+				this.log(
+					`[deleteProviderProfile] Unable to resolve API profile '${profileToActivate}': ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+			}
 
-		if (viewWasPinnedToDeleted) {
-			// This view's pin now dangles: re-point it. setValue also persists the
-			// survivor to the shared store, which covers the deleted-was-global case
-			// for every other view as well as this one.
-			await this.setValue("currentApiConfigName", profileToActivate)
-		} else if (deletedWasGlobal) {
-			// The shared selection changed, but this view's own pin still names a
-			// surviving profile: update the shared store only, leaving the
-			// view-local pin untouched.
-			await this.contextProxy.setValue("currentApiConfigName", profileToActivate)
-		}
-
-		if ((deletedWasGlobal || viewWasPinnedToDeleted) && survivingSettings) {
-			// The deleted profile was the active one (globally, or for this view), so
-			// the shared provider keys still carry its settings; replace them so
-			// getState() reports the surviving profile's configuration.
-			await this.contextProxy.setProviderSettings(survivingSettings)
+			// Capture this view's pin before any rewrite: a view pinned to the
+			// deleted profile while the global selection points elsewhere must still be
+			// reconfigured, or getState() would keep the deleted profile's settings under
+			// the surviving profile's name.
+			const viewWasPinnedToDeleted = this.viewLocalState.currentApiConfigName === profileToDelete.name
+			const deletedWasGlobal = profileToDelete.name === globalSettings.currentApiConfigName
 
 			if (viewWasPinnedToDeleted) {
-				// This view's nested overlay (viewLocalState.apiConfiguration, seeded
-				// by loadViewState) still serves the deleted profile's configuration:
-				// replace it with the survivor's so the re-pointed pin serves matching
-				// settings. A view pinned to another profile keeps its own overlay.
-				await this._saveViewLocalStateFromMutation({ apiConfiguration: survivingSettings })
+				// This view's pin now dangles: re-point it. setValue also persists the
+				// survivor to the shared store, which covers the deleted-was-global case
+				// for every other view as well as this one.
+				await this.setValue("currentApiConfigName", profileToActivate)
+			} else if (deletedWasGlobal) {
+				// The shared selection changed, but this view's own pin still names a
+				// surviving profile: update the shared store only, leaving the
+				// view-local pin untouched.
+				await this.contextProxy.setValue("currentApiConfigName", profileToActivate)
 			}
-		}
 
-		// Re-pin other live views still buffered on the deleted profile: their
-		// buffer and durable viewStates entry would otherwise keep serving the
-		// deleted profile's name and configuration.
-		await this.rePinViewLocalStateForDeletedProfile(profileToDelete.name, profileToActivate, survivingSettings)
+			if ((deletedWasGlobal || viewWasPinnedToDeleted) && survivingSettings) {
+				// The deleted profile was the active one (globally, or for this view), so
+				// the shared provider keys still carry its settings; replace them so
+				// getState() reports the surviving profile's configuration.
+				await this.contextProxy.setProviderSettings(survivingSettings)
+
+				if (viewWasPinnedToDeleted) {
+					// This view's nested overlay (viewLocalState.apiConfiguration, seeded
+					// by loadViewState) still serves the deleted profile's configuration:
+					// replace it with the survivor's so the re-pointed pin serves matching
+					// settings. A view pinned to another profile keeps its own overlay.
+					await this._saveViewLocalStateFromMutation({ apiConfiguration: survivingSettings })
+				}
+			}
+
+			// Re-pin other live views still buffered on the deleted profile: their
+			// buffer and durable viewStates entry would otherwise keep serving the
+			// deleted profile's name and configuration.
+			await this.rePinViewLocalStateForDeletedProfile(profileToDelete.name, profileToActivate, survivingSettings)
+		} catch (error: unknown) {
+			// The profile's settings are already gone from the secret store while the list
+			// write (or a later selection update) failed. Put the settings back so the durable
+			// metadata and the store agree again - the deletion simply did not happen - and
+			// then surface the original failure rather than a compensation outcome.
+			if (deletedProfile) {
+				try {
+					await this.providerSettingsManager.saveConfig(profileToDelete.name, deletedProfile)
+					this.log(`deleteProviderProfile: the profile-list update failed after the settings were removed; the settings for '${profileToDelete.name}' were restored, so the stored profile list still resolves and the profile was not deleted.`)
+				} catch (compensationError: unknown) {
+					this.log(`deleteProviderProfile: the profile-list update failed AND the settings for '${profileToDelete.name}' could not be restored; the stored list may name a profile with no settings. ${compensationError instanceof Error ? compensationError.message : String(compensationError)}`)
+				}
+			}
+			throw error
+		}
 
 		await this.postStateToWebview()
 	}
