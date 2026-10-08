@@ -1678,7 +1678,11 @@ describe("ProviderSettingsManager", () => {
 			mockSecrets.get.mockImplementation(async () => {
 				readCount++
 				if (readCount === 1) {
-					// managerB performs a competing save right after managerA reads the profile
+					// Return original profile on first read so initial comparison succeeds
+					return storedRaw
+				}
+				if (readCount === 2) {
+					// Interleave competing save by managerB before second read (write-time recheck)
 					await managerB.saveConfig("test", {
 						id: "test-id",
 						apiProvider: providerIdentifiers.anthropic,
