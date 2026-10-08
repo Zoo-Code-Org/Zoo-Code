@@ -610,6 +610,10 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({}, { isPartial: true })
 			expect(mockCline.ask).toHaveBeenCalledTimes(1)
 		})
+
+	})
+
+	describe("parse-failure reporting and early-return cleanup", () => {
 		it("reports the captured streaming failure once instead of the incidental parse error", async () => {
 			// A streaming delta hit a fatal filesystem error and the finalized block then
 			// arrives without nativeArgs: execute() never runs, so its authoritative retry of
@@ -640,7 +644,6 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 		})
-
 		it("releases the per-task stream state when execute() returns early on a denied path", async () => {
 			// The rooignore branch returns before execute()'s success/catch cleanup; without
 			// this the abort listener and the streamFailed guard outlive the call and suppress
@@ -653,7 +656,6 @@ describe("writeToFileTool", () => {
 			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
 		})
 	})
-
 	describe("per-task stream state isolation", () => {
 		// A second task streaming through the same singleton while mockCline runs.
 		// Structural double, same pattern as the partial-state-cleanup spec.
@@ -694,6 +696,7 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({})
 
 			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+
 			// The diff-view branch opened a partial ask for this write; without the
 			// finalize the spinner and Save/Reject stay live after the failure.
 			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(expectedPartialToolMessage)
