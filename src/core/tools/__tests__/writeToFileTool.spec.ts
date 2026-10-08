@@ -366,6 +366,13 @@ describe("writeToFileTool", () => {
 			mockCline.diffViewProvider.reset.mockImplementation(async () => {
 				diffViewCallOrder.push("reset")
 			})
+			let abortCleanup: (() => void) | undefined
+			mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+				if (event === RooCodeEventName.TaskAborted) {
+					abortCleanup = listener
+				}
+				return mockCline
+			})
 			await streamPartialAsk()
 
 			// The missing-parameter branch awaits revertChanges() before reset(): with the
@@ -386,6 +393,10 @@ describe("writeToFileTool", () => {
 			// document before reset() clears the state revertChanges() relies on.
 			expect(diffViewCallOrder).toEqual(["revert", "reset"])
 			expect(mockHandleError).not.toHaveBeenCalled()
+			// The per-task stream state must be gone, not just the diff view: the entry and its
+			// TaskAborted listener would otherwise live for the rest of the task.
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
 		})
 
 		it("finalizes the partial ask when path is missing after partial streaming", async () => {
@@ -406,6 +417,13 @@ describe("writeToFileTool", () => {
 			mockCline.diffViewProvider.reset.mockImplementation(async () => {
 				diffViewCallOrder.push("reset")
 			})
+			let abortCleanup: (() => void) | undefined
+			mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+				if (event === RooCodeEventName.TaskAborted) {
+					abortCleanup = listener
+				}
+				return mockCline
+			})
 			await streamPartialAsk()
 
 			// The missing-parameter branch awaits revertChanges() before reset(): with the
@@ -425,6 +443,59 @@ describe("writeToFileTool", () => {
 			// revertChanges() relies on.
 			expect(diffViewCallOrder).toEqual(["revert", "reset"])
 			expect(mockHandleError).not.toHaveBeenCalled()
+			// The per-task stream state must be gone, not just the diff view: the entry and its
+			// TaskAborted listener would otherwise live for the rest of the task.
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
+		})
+	})
+
+	describe("abandoned-stream teardown (presenter missing-nativeArgs guard)", () => {
+		it("releases the per-task stream state when the finalized block never reaches handle()", async () => {
+			// Streaming JSON that never parses: Task marks the block complete with nativeArgs
+			// undefined, presentAssistantMessage pushes the error tool_result and breaks, so
+			// neither execute()'s finally nor onParameterParseFailure() runs. The presenter
+			// routes the abandoned block here instead; without it the entry, the TaskAborted
+			// listener and the streamed diff view survive into the next API request.
+			let abortCleanup: (() => void) | undefined
+			mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+				if (event === RooCodeEventName.TaskAborted) {
+					abortCleanup = listener
+				}
+				return mockCline
+			})
+			const diffViewCallOrder: string[] = []
+			mockCline.diffViewProvider.revertChanges.mockImplementation(async () => {
+				diffViewCallOrder.push("revert")
+			})
+			mockCline.diffViewProvider.reset.mockImplementation(async () => {
+				diffViewCallOrder.push("reset")
+			})
+
+			// Two deltas stabilize the path: the entry, the listener, the partial ask and the
+			// diff view all exist before the block is finalized.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			expect(abortCleanup).toBeTypeOf("function")
+
+			await writeToFileTool.teardownAbandonedStream(mockCline)
+
+			// The streamed content is reverted before the view is reset, and the state is gone.
+			expect(diffViewCallOrder).toEqual(["revert", "reset"])
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
+			// Silent by design: the guard has already emitted the tool_result, so reporting
+			// here would double-report the same malformed call.
+			expect(mockHandleError).not.toHaveBeenCalled()
+			expect(mockCline.sayAndCreateMissingParamError).not.toHaveBeenCalled()
+		})
+
+		it("does nothing when the task has no stream state to release", async () => {
+			await writeToFileTool.teardownAbandonedStream(mockCline)
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
+			expect(mockCline.off).not.toHaveBeenCalled()
 		})
 	})
 

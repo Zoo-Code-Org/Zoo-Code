@@ -244,6 +244,29 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		return true
 	}
 
+	/**
+	 * Teardown for the presenter's missing-nativeArgs guard. A finalized write_to_file
+	 * block whose streamed JSON never parsed never reaches handle(): the presenter emits
+	 * the tool_result and breaks, so neither execute()'s finally nor
+	 * onParameterParseFailure() runs. Without this the per-task stream state (map entry,
+	 * TaskAborted listener, and a diff view that streaming may have opened with unapproved
+	 * partial content) outlives the call and leaks into the next API request: a stale path
+	 * makes the next write's first delta look stabilized, and a retained streamFailed flag
+	 * suppresses that write's preview.
+	 *
+	 * Deliberately silent - the guard has already pushed the tool_result the provider waits
+	 * for, so reporting here would double-report the same malformed call.
+	 */
+	async teardownAbandonedStream(task: Task): Promise<void> {
+		if (!this.taskPartialStreamState.has(this.getPartialStreamFailureKey(task))) {
+			return
+		}
+
+		await this.revertDiffChangesBeforeReset(task)
+		this.resetTaskPartialState(task)
+		await this.resetDiffViewAfterWrite(task)
+	}
+
 	override resetPartialState(): void {
 		super.resetPartialState()
 		for (const state of this.taskPartialStreamState.values()) {

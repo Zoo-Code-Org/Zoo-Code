@@ -552,6 +552,14 @@ export async function presentAssistantMessage(cline: Task) {
 						is_error: true,
 					})
 
+					// A write_to_file call that streamed partial deltas leaves per-task stream state
+					// (and possibly an open diff view) behind, and this guard bypasses handle(), so
+					// the teardown that execute()/onParameterParseFailure would have run never does.
+					// Release it here instead of leaking it into the next API request.
+					if (block.name === "write_to_file") {
+						await writeToFileTool.teardownAbandonedStream(cline)
+					}
+
 					break
 				}
 			}
