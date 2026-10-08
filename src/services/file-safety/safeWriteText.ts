@@ -68,14 +68,22 @@ export class StagingPathError extends Error {
  */
 export class PostCommitDurabilityError extends Error {
 	readonly targetPath: string
+	/**
+	 * The old-content copy retained for recovery on this path, or null when backup
+	 * mode was off or the target did not exist before the write. The name is a hidden
+	 * random path, so without this field no caller could find the copy the catch block
+	 * deliberately keeps.
+	 */
+	readonly backupPath: string | null
 
-	constructor(targetPath: string, cause: unknown) {
+	constructor(targetPath: string, cause: unknown, backupPath: string | null = null) {
 		super(
 			"The rename committed but the parent directory could not be fsynced -- the content is at the target path reported on this error, and the directory entry may not be durable.",
 			{ cause },
 		)
 		this.name = "PostCommitDurabilityError"
 		this.targetPath = targetPath
+		this.backupPath = backupPath
 	}
 }
 // -- helpers ---------------------------------------------------------------
@@ -501,7 +509,14 @@ export async function safeWriteText(
 					// so the failure is surfaced as its own error: the caller can
 					// still find the content at the target, it just cannot rely on
 					// the directory entry having reached the disk.
-					throw new PostCommitDurabilityError(targetPath, error)
+					// The catch block keeps the backup on this path, so hand the caller the
+					// path of the copy it is keeping - it is a hidden random name and is
+					// otherwise unrecoverable.
+					throw new PostCommitDurabilityError(
+						targetPath,
+						error,
+						releaseBackupOnSuccess ? backupPath : null,
+					)
 				}
 			}
 

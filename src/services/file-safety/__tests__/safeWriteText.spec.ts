@@ -423,6 +423,63 @@ describe("safeWriteText", () => {
 			// The staged temp is still cleaned up.
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
 		})
+
+		it("reports the retained backup path on a post-commit durability failure", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			const dirPath = path.dirname(targetPath)
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockImplementation((target) => {
+				if (String(target) === dirPath) {
+					throw new Error("EBADF")
+				}
+				return 1
+			})
+
+			const error = await safeWriteText(targetPath, "new data", {
+				backup: true,
+				platform: "linux",
+			}).catch(function (caught: unknown) {
+				return caught
+			})
+
+			// The backup is kept on this path, and its name is a hidden random string. Without
+			// the field the caller is told a recovery copy exists and given no way to find it.
+			expect(error).toBeInstanceOf(PostCommitDurabilityError)
+			const retained = (error as PostCommitDurabilityError).backupPath
+			expect(typeof retained).toBe("string")
+			expect(String(retained)).toContain("safeWriteText.bak_")
+			// The reported path is exactly the copy that was made, so a caller can open it.
+			const copiedBackups = vi
+				.mocked(fs.copyFile)
+				.mock.calls.map(function (call: unknown[]) {
+					return String(call[1])
+				})
+				.filter(function (p: string) {
+					return p.includes("safeWriteText.bak_")
+				})
+			expect(copiedBackups).toContain(retained)
+		})
+
+		it("reports a null backup path when no backup was taken", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			const dirPath = path.dirname(targetPath)
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockImplementation((target) => {
+				if (String(target) === dirPath) {
+					throw new Error("EBADF")
+				}
+				return 1
+			})
+
+			const error = await safeWriteText(targetPath, "new data", {
+				platform: "linux",
+			}).catch(function (caught: unknown) {
+				return caught
+			})
+
+			expect(error).toBeInstanceOf(PostCommitDurabilityError)
+			expect((error as PostCommitDurabilityError).backupPath).toBeNull()
+		})
 	})
 
 	// ── Test 4: backup:true keeps old safeWriteJson semantics, copy-based ──

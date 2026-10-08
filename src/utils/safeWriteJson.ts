@@ -83,6 +83,20 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 	// the target when the resolution itself rejects.
 	let resolvedTargetPath: string | undefined
 
+	// Confinement is checked before ANY filesystem side effect. mkdir -p through a
+	// planted symlinked ancestor (projectDir/.roo -> /elsewhere) would create
+	// directories outside the declared scope, and an unwritable referent would surface
+	// the mkdir error instead of the ConfinedPathEscapeError the caller is entitled to.
+	// _resolveScopeRoot resolves a not-yet-existing path through its nearest existing
+	// ancestor, so this works for the target's missing parents too.
+	if (options?.confineTo) {
+		const scopeRoot = await _resolveScopeRoot(options.confineTo)
+		const requested = await _resolveScopeRoot(absoluteFilePath)
+		if (_escapesScope(scopeRoot, requested)) {
+			throw new ConfinedPathEscapeError(absoluteFilePath, requested, scopeRoot)
+		}
+	}
+
 	try {
 		await fs.mkdir(dirPath, { recursive: true })
 		await fs.access(dirPath)
@@ -92,9 +106,12 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 	}
 
 	// Lock key: the symlink referent when the path is an existing symlink, so a
-	// symlink alias and its referent share one lock. The key must be computable
-	// while a peer writer is mid-commit (backup mode renames the referent away and
-	// back), so the walk tolerates a dangling link instead of rejecting it here.
+	// symlink alias and its referent share one lock. The key must stay computable while
+	// a peer writer is mid-commit - the commit rename briefly leaves the path without
+	// the referent it had when the walk started - so the walk tolerates a dangling link
+	// instead of rejecting it here. (The backup itself is a copy: the target is never
+	// renamed away, so a dangling link here means a peer's commit or an external
+	// unlink, not a backup rename.)
 	const lockKey = await resolveLockKey(absoluteFilePath)
 
 	// Confinement is checked here as well as under the lock. The lock file lives NEXT
@@ -222,10 +239,10 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 
 		const newFileToCleanupWithinCatch = actualTempNewFilePath
 
-		// A failed safeWriteText already rolled the backup (if any) back to
-		// the target path. Clean up the .new file if it still exists
-		// (safeWriteText also cleans up its tempPath on failure; this is a
-		// safety net in case its cleanup missed it).
+		// A pre-commit failure leaves the target untouched, and safeWriteText has
+		// already removed its own backup copy and temp file (a POST-commit failure
+		// keeps the backup on purpose and reports its path on the error). Clean up
+		// the .new file if it still exists - safety net in case its cleanup missed it.
 		if (newFileToCleanupWithinCatch) {
 			try {
 				await fs.unlink(newFileToCleanupWithinCatch)
