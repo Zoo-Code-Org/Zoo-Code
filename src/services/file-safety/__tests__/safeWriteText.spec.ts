@@ -1392,3 +1392,45 @@ describe("resolvePublishTarget symlink cycle (S1)", () => {
 		await expect(resolvePublishTarget(linkPath)).rejects.toThrow("EIO")
 	})
 })
+
+describe("parent directory creation (safeWriteText.ts:288-290)", () => {
+	beforeEach(() => {
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fs.mkdir).mockResolvedValue(undefined)
+		vi.mocked(fs.access).mockResolvedValue(undefined)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+	})
+
+	it("propagates an mkdir failure before any staging, open or publish", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const err = Object.assign(new Error("EACCES: cannot create"), { code: "EACCES" })
+		vi.mocked(fs.mkdir).mockRejectedValue(err)
+
+		await expect(safeWriteText(targetPath, "data", { platform: "linux" })).rejects.toBe(err)
+
+		expect(fsSync.openSync).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("propagates an access failure on the parent directory before any staging, open or publish", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const err = Object.assign(new Error("EACCES: cannot verify"), { code: "EACCES" })
+		vi.mocked(fs.access).mockRejectedValue(err)
+
+		await expect(safeWriteText(targetPath, "data", { platform: "linux" })).rejects.toBe(err)
+
+		expect(fsSync.openSync).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("creates and verifies the parent directory on the successful path", async () => {
+		const targetPath = "/tmp/test-dir/nested/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+
+		await safeWriteText(targetPath, "data", { platform: "linux" })
+
+		expect(fs.mkdir).toHaveBeenCalledWith("/tmp/test-dir/nested", { recursive: true })
+		expect(fs.access).toHaveBeenCalledWith("/tmp/test-dir/nested")
+		expect(fs.rename).toHaveBeenCalled()
+	})
+})
