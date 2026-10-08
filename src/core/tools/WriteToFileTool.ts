@@ -467,6 +467,14 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				await task.diffViewProvider.open(relPath!)
 			}
 
+			// Cancellation may land while open() is in flight: its abort handler has
+			// already torn the stream down (and may have reverted or closed this very
+			// diff view), so streaming the partial content into it now would resurrect a
+			// view for a task that no longer exists.
+			if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+				return
+			}
+
 			await task.diffViewProvider.update(
 				everyLineHasLineNumbers(newContent) ? stripLineNumbers(newContent) : newContent,
 				false,
