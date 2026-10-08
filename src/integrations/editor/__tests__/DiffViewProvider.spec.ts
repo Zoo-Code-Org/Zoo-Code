@@ -11,6 +11,7 @@ import { computeVersionToken, versionTokenOfStat } from "../../../utils/versionT
 import type { BigIntStats } from "fs"
 import { safeWriteText } from "../../../services/file-safety/safeWriteText"
 import { withFileLock } from "../../../utils/fileLock"
+import { createDirectoriesForFile } from "../../../utils/fs"
 import { ObservationRegistry } from "../../../core/task/observationRegistry"
 import type { Task } from "../../../core/task/Task"
 
@@ -1139,6 +1140,31 @@ describe("DiffViewProvider", () => {
 				await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
 
 				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			})
+
+			it("removes the parent directories it created when the guarded publish is refused", async () => {
+				// The directories are made before the guard runs, so a rejection - a cancelled
+				// task, a stale version, an unobserved overwrite - would otherwise leave empty
+				// scaffolding behind in the workspace.
+				mockTask.observationRegistry.clear()
+				vi.mocked(createDirectoriesForFile).mockResolvedValueOnce([
+					`${mockCwd}/new`,
+					`${mockCwd}/new/dir`,
+				])
+				const order: string[] = []
+				vi.mocked(fs.rmdir).mockImplementation(async (dir: unknown) => {
+					order.push(String(dir))
+				})
+
+				await expect(
+					diffViewProvider.saveDirectly("new/dir/test.ts", "new content", true, false, 0),
+				).rejects.toThrow("File already exists at new/dir/test.ts")
+
+				// Innermost first, so an ancestor is never removed while it still holds a child.
+				expect(order).toEqual([
+					mockCwd + "/new/dir",
+					mockCwd + "/new",
+				])
 			})
 
 			it("rejects an observed write whose version token is stale", async () => {
