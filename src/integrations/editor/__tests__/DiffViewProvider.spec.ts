@@ -3110,12 +3110,20 @@ describe("DiffViewProvider", () => {
 				}),
 			})
 			diffViewProvider["activeDiffEditor"] = editor
+			// The tail of revertChanges() - restoring the preview tabs the diff evicted and
+			// resetting the provider - belongs to the teardown, not to every caller.
+			const restorePreviewTabs = vi.fn().mockResolvedValue(undefined)
+			const reset = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
+			diffViewProvider["reset"] = reset
 
 			const first = diffViewProvider.revertChanges()
 			const second = diffViewProvider.revertChanges()
 			await Promise.all([first, second])
 
 			expect(applyEdit).toHaveBeenCalledTimes(1)
+			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
+			expect(reset).toHaveBeenCalledTimes(1)
 		})
 
 		it("saveChanges() keeps the file open when the user touched it", async () => {
