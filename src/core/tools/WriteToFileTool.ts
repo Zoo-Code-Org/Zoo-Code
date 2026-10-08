@@ -131,6 +131,19 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		this.taskPartialStreamState.delete(key)
 	}
 
+	/**
+	 * Whether this task's partial stream is still the live one. handlePartial() awaits
+	 * provider state, a filesystem probe, task.ask() and diffViewProvider.open() before it
+	 * touches the diff view; a cancellation during any of those awaits runs the TaskAborted
+	 * teardown (or a direct clearTaskState), which deletes this entry. Continuing would
+	 * re-ask, re-open a diff view, or stream a partial delta into a view the teardown has
+	 * already released for a task the user cancelled. Identity, not presence: a re-created
+	 * entry for the same key belongs to a new stream, and this one must not write into it.
+	 */
+	private isPartialStreamStillLive(task: Task, state: TaskPartialStreamState): boolean {
+		return this.taskPartialStreamState.get(this.getPartialStreamFailureKey(task)) === state
+	}
+
 	private async resetDiffViewAfterWrite(task: Task): Promise<void> {
 		await task.diffViewProvider.reset().catch((resetError) => {
 			console.error("Error resetting write_to_file diff view:", resetError)
@@ -484,6 +497,13 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 		const provider = task.providerRef.deref()
 		const state = await provider?.getState()
+
+		// Cancelled while provider state was in flight: the teardown already
+		// released this task's stream state.
+		if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+			return
+		}
+
 		const isPreventFocusDisruptionEnabled = experiments.isEnabled(
 			state?.experiments ?? {},
 			EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION,
@@ -501,6 +521,9 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			fileExists = task.diffViewProvider.editType === "modify"
 		} else {
 			fileExists = await fileExistsAtPath(absolutePath)
+			if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+				return
+			}
 			task.diffViewProvider.editType = fileExists ? "modify" : "create"
 		}
 
@@ -518,10 +541,22 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		const partialMessage = JSON.stringify(sharedMessageProps)
 		await task.ask("tool", partialMessage, block.partial).catch(() => {})
 
+		if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+			return
+		}
+
 		if (newContent) {
 			try {
 				if (!task.diffViewProvider.isEditing) {
 					await task.diffViewProvider.open(relPath!)
+				}
+
+				// Cancellation may land while open() is in flight: its abort handler has
+				// already torn the stream down (and may have reverted or closed this very
+				// diff view), so streaming the partial content into it now would resurrect a
+				// view for a task that no longer exists.
+				if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+					return
 				}
 
 				await task.diffViewProvider.update(
