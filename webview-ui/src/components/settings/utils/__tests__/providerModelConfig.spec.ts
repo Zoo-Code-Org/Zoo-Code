@@ -307,7 +307,9 @@ describe("providerModelConfig", () => {
 			handleModelChangeSideEffects(providerIdentifiers.bedrock, "custom-arn", setApiConfigurationField)
 
 			expect(setApiConfigurationField).not.toHaveBeenCalledWith("awsCustomArn", expect.anything())
-			expect(setApiConfigurationField).not.toHaveBeenCalledWith("awsCustomArnBaseModelId", expect.anything())
+			expect(
+				setApiConfigurationField.mock.calls.filter(([field]) => field === "awsCustomArnBaseModelId"),
+			).toHaveLength(0)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxThinkingTokens", undefined)

@@ -874,6 +874,24 @@ describe("useSelectedModel", () => {
 			)
 		})
 
+		it("keeps standard pricing with 1M context for a custom ARN base model without a pricing tier", () => {
+			const sonnet45: ModelInfo = bedrockModels["anthropic.claude-sonnet-4-5-20250929-v1:0"]
+			expect(sonnet45.tiers).toBeUndefined()
+
+			expect(
+				renderCustomArn({
+					awsCustomArnBaseModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0",
+					awsBedrock1MContext: true,
+				}).info,
+			).toMatchObject({
+				contextWindow: 1_000_000,
+				inputPrice: sonnet45.inputPrice,
+				outputPrice: sonnet45.outputPrice,
+				cacheWritesPrice: sonnet45.cacheWritesPrice,
+				cacheReadsPrice: sonnet45.cacheReadsPrice,
+			})
+		})
+
 		it("applies a configured context window to a listed custom ARN base model", () => {
 			expect(
 				renderCustomArn({
