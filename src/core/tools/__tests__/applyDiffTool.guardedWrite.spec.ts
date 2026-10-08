@@ -242,6 +242,11 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 				pushToolResult: mockPushToolResult,
 			})
 
+			// Both stat calls must be consumed: beforeEach only clears call history, so a
+			// queued mockResolvedValueOnce would leak into the next test if the tool ever
+			// skipped one of the reads.
+			expect(statMock).toHaveBeenCalledTimes(2)
+
 			// A stat failure is not evidence the file changed and not a reason to abort: the
 			// diff still ran against the content that WAS read successfully.
 			expect(mockSaveDirectly).toHaveBeenCalledWith(
