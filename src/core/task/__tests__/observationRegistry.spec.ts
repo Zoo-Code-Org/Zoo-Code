@@ -105,4 +105,28 @@ describe("ObservationRegistry", () => {
 			expect(obs.complete).toBe(false)
 		})
 	})
+
+	describe("closure on task disposal", () => {
+		it("close drops every entry and reports the registry closed", () => {
+			const reg = new ObservationRegistry()
+			reg.observe("/a/b/c.ts", "v1")
+			expect(reg.closed).toBe(false)
+
+			reg.close()
+
+			expect(reg.size).toBe(0)
+			expect(reg.get("/a/b/c.ts")).toBeUndefined()
+			expect(reg.closed).toBe(true)
+		})
+
+		it("observe is a no-op after close, so a read resuming after disposal records nothing", () => {
+			const reg = new ObservationRegistry()
+			reg.close()
+
+			reg.observe("/late.ts", "v1")
+
+			expect(reg.size).toBe(0)
+			expect(reg.has("/late.ts")).toBe(false)
+		})
+	})
 })

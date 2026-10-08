@@ -3381,7 +3381,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// reachable through a parent/subtask reference; a guarded write must not accept one of
 		// those tokens for a file this task has not re-read since. Clearing also stops a long
 		// task from pinning every file it ever read.
-		this.observationRegistry.clear()
+		this.observationRegistry.close()
 
 		// Release any terminals associated with this task.
 		try {
