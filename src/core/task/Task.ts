@@ -380,6 +380,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 */
 	private taskApiConfigReady: Promise<void>
 
+	/**
+	 * Set when the derived metadata / task-history stage of a save failed while the message
+	 * write itself succeeded. Drives one awaited retry in disposeOnce() so a task being torn
+	 * down does not leave its history entry stale; cleared on the next successful metadata
+	 * stage.
+	 *
+	 * @private
+	 */
+	private pendingTaskMetadataRepair: boolean = false
+
 	providerRef: WeakRef<ClineProvider>
 	private readonly globalStoragePath: string
 	abort: boolean = false
@@ -1680,11 +1690,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	/**
 	 * Persist the message array, then refresh the derived metadata / task-history entries.
 	 *
-	 * The returned boolean reflects the message write only: `saveTaskMessages` failure
-	 * leaves the on-disk record stale, so callers gating UI updates on durable state must
-	 * skip them. Metadata / task-history stage failures are logged and swallowed — the
-	 * message array is already persisted, and the next save recomputes and re-emits the
-	 * metadata.
+	 * The two stages report separately on purpose. The returned boolean reflects the MESSAGE
+	 * WRITE: `saveTaskMessages` failure leaves the on-disk record stale, so callers gating
+	 * UI updates on durable state must skip them. A metadata / task-history failure does NOT
+	 * turn that result false — the message array really is persisted, and reporting it as
+	 * failed would make callers skip a webview update that is safe. It is not silently
+	 * dropped either: `persistTaskMetadata()` records the failure and `disposeOnce()` retries
+	 * it once, awaited, before the task stops.
 	 *
 	 * `merge` (default `true`) is passed through to `saveTaskMessages`: the in-memory
 	 * snapshot is merged with the on-disk record. `overwriteClineMessages` passes `false`
@@ -1703,6 +1715,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			return false
 		}
 
+		await this.persistTaskMetadata()
+
+		return true
+	}
+
+	/**
+	 * Recompute the derived task metadata and write the task-history entry for messages that
+	 * are already on disk. Returns whether THIS stage succeeded — deliberately separate from
+	 * `saveClineMessages()` so a metadata failure is never reported as a failed message write.
+	 *
+	 * A failure is recorded in `pendingTaskMetadataRepair` so `disposeOnce()` gets one awaited
+	 * retry before shutdown; any later `saveClineMessages()` also recomputes it from scratch.
+	 */
+	private async persistTaskMetadata(): Promise<boolean> {
 		try {
 			if (this._taskApiConfigName === undefined) {
 				await this.taskApiConfigReady
@@ -1731,14 +1757,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const provider = this.providerRef.deref()
 			const existingStatus = provider?.taskHistoryStore.get(this.taskId)?.status
 			await provider?.updateTaskHistory(existingStatus ? { ...historyItem, status: existingStatus } : historyItem)
+			this.pendingTaskMetadataRepair = false
+			return true
 		} catch (error) {
-			// The message array was persisted above; a metadata or task-history failure must
-			// not mask that write (see the method docs). The next saveClineMessages() call
-			// recomputes and re-emits the metadata update.
+			// The message array is already durable; a metadata or task-history failure must not
+			// mask that write (see saveClineMessages). Record it so the retry in disposeOnce()
+			// runs even if no further save happens before the task is torn down.
+			this.pendingTaskMetadataRepair = true
 			console.error("Failed to save task metadata:", error)
+			return false
 		}
-
-		return true
 	}
 
 	private findMessageByTimestamp(ts: number): ClineMessage | undefined {
@@ -3394,6 +3422,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async disposeOnce(): Promise<void> {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
 		this.cancelAssistantMessagePersistence()
+
+		// A save whose metadata / task-history stage failed leaves the history entry behind
+		// the messages that are already on disk. Give that stage one awaited chance to catch
+		// up before the task stops serving, so shutdown does not persist a stale history item.
+		if (this.pendingTaskMetadataRepair) {
+			try {
+				await this.persistTaskMetadata()
+			} catch (error) {
+				console.error("Failed to retry task metadata during dispose:", error)
+			}
+		}
 
 		// Stop the idle telemetry check and report any unflushed activity as a
 		// shutdown installment, so a task torn down mid-work (panel closed, task

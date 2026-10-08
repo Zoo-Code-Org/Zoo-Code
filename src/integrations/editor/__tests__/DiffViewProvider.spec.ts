@@ -1959,6 +1959,85 @@ describe("DiffViewProvider", () => {
 			expect(fs.rmdir).toHaveBeenCalledWith(`${mockCwd}/mock-dir`)
 		})
 		
+		it("removes the placeholder and created directories even when open() failed before activeDiffEditor was assigned", async () => {
+			// open() creates the directories (line 130) and the empty placeholder (line 134)
+			// BEFORE openDiffEditor() assigns activeDiffEditor (line 173). If that call rejects
+			// - the 10s timeout or a failed vscode.diff - an abandoned create therefore has
+			// artifacts on disk and no editor, and the early return must not skip the cleanup.
+			Object.assign(diffViewProvider, {
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "create",
+				createdDirs: [`${mockCwd}/mock-dir`],
+			})
+
+			await diffViewProvider.discardUnapprovedStream()
+
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("mock-target-file.ts"))
+			expect(fs.rmdir).toHaveBeenCalledWith(`${mockCwd}/mock-dir`)
+			// Nothing editor-side ran, and nothing threw: the artifacts are the whole job here.
+			expect(vscode.workspace.applyEdit).not.toHaveBeenCalled()
+			// Bracket access for the private field: the snapshot must be consumed, so a second
+			// discard cannot try to remove the same directories again.
+			expect(diffViewProvider["createdDirs"]).toEqual([])
+		})
+
+		it("logs and rejects when the placeholder unlink fails for a reason other than ENOENT", async () => {
+			const callOrder: string[] = []
+			const document = makeAbandonedDocument(callOrder)
+			openAbandonedView(document, [], callOrder)
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			const permissionError = Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+			vi.mocked(fs.unlink).mockRejectedValueOnce(permissionError)
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow("EPERM: operation not permitted")
+
+			expect(errorSpy).toHaveBeenCalledWith("Error removing abandoned write_to_file artifacts:", permissionError)
+		})
+
+		it("logs and rejects when removing a created directory fails for a reason other than ENOENT", async () => {
+			const callOrder: string[] = []
+			const document = makeAbandonedDocument(callOrder)
+			openAbandonedView(document, [`${mockCwd}/mock-dir`], callOrder)
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			vi.mocked(fs.unlink).mockResolvedValue(undefined)
+			const notEmpty = Object.assign(new Error("ENOTEMPTY: directory not empty"), { code: "ENOTEMPTY" })
+			vi.mocked(fs.rmdir).mockRejectedValueOnce(notEmpty)
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow("ENOTEMPTY: directory not empty")
+
+			expect(errorSpy).toHaveBeenCalledWith("Error removing abandoned write_to_file artifacts:", notEmpty)
+		})
+
+		it("tolerates an already-deleted placeholder and directories (ENOENT) without throwing", async () => {
+			const callOrder: string[] = []
+			const document = makeAbandonedDocument(callOrder)
+			openAbandonedView(document, [`${mockCwd}/mock-dir`], callOrder)
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			vi.mocked(fs.unlink).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			vi.mocked(fs.rmdir).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await expect(diffViewProvider.discardUnapprovedStream()).resolves.toBeUndefined()
+
+			expect(errorSpy).not.toHaveBeenCalledWith("Error removing abandoned write_to_file artifacts:", expect.anything())
+		})
+
+		it("reports the editor failure rather than the cleanup failure when both happen", async () => {
+			const callOrder: string[] = []
+			const document = makeAbandonedDocument(callOrder)
+			openAbandonedView(document, [`${mockCwd}/mock-dir`], callOrder)
+			vi.mocked(vscode.workspace.applyEdit).mockRejectedValue(new Error("applyEdit rejected"))
+			vi.mocked(fs.unlink).mockRejectedValueOnce(Object.assign(new Error("EPERM"), { code: "EPERM" }))
+			vi.spyOn(console, "error").mockImplementation(() => {})
+
+			// The caller reports a rollback hazard from the thrown error, so the ORIGINAL failure
+			// is what must surface; the cleanup failure is still logged for the operator.
+			await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow("applyEdit rejected")
+		})
+
 		it("does nothing when no abandoned view is open", async () => {
 			Object.assign(diffViewProvider, { relPath: undefined, activeDiffEditor: undefined })
 		

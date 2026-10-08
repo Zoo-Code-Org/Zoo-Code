@@ -6230,6 +6230,42 @@ describe("Cline", () => {
 			historySpy.mockRestore()
 		})
 
+		it("retries the failed metadata / task-history stage once, awaited, during dispose", async () => {
+			// A metadata or task-history failure is reported separately from the message write,
+			// but it must not simply be dropped: the failure is recorded and dispose() awaits
+			// one retry before the task stops serving, so a task torn down after a partially
+			// successful save does not leave its history entry behind the messages that are
+			// already on disk.
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
+			fsReal.mkdirSync(taskDir, { recursive: true })
+			const historySpy = vi
+				.spyOn(mockProvider, "updateTaskHistory")
+				.mockRejectedValueOnce(new Error("history stage unavailable"))
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			// The message write succeeded, so the save still reports success even though the
+			// metadata stage failed - and the failure is logged, not swallowed.
+			await expect(getTaskTestAccess(task).saveClineMessages()).resolves.toBe(true)
+			expect(historySpy).toHaveBeenCalledTimes(1)
+			expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to save task metadata:", expect.any(Error))
+
+			await task.dispose()
+
+			// dispose() awaited the retry: by the time it resolves the metadata stage has run
+			// again with the recomputed history item for this task.
+			expect(historySpy).toHaveBeenCalledTimes(2)
+			// The history record is keyed by `id` (the task id), not a taskId field.
+			expect(historySpy.mock.calls[1][0]).toEqual(expect.objectContaining({ id: task.taskId }))
+
+			historySpy.mockRestore()
+		})
+
 		it("finalizePartialToolAsk skips the webview update when the message write itself fails", async () => {
 			// Complements the later-stage-failure test above by failing the first save
 			// stage: with the real task directory removed, safeWriteJson's fs.access

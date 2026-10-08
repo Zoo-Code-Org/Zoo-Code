@@ -767,6 +767,14 @@ export async function presentAssistantMessage(cline: Task) {
 						error.message,
 					)
 
+					// Same leak as the missing-nativeArgs guard: the block streamed partial
+					// deltas (handlePartial ran), this exit bypasses handle()/execute(), so the
+					// per-task stream state and any open diff view must be released here. A
+					// mode file restriction blocking the target path lands exactly here.
+					if (block.name === "write_to_file") {
+						await writeToFileTool.teardownAbandonedStream(cline)
+					}
+
 					break
 				}
 
@@ -834,6 +842,12 @@ export async function presentAssistantMessage(cline: Task) {
 							`Tool call repetition limit reached for ${block.name}. Please try a different approach.`,
 						),
 					)
+
+					// The repetition exit also bypasses handle(): release the stream state and
+					// diff view the partial deltas created, or they leak into the next request.
+					if (block.name === "write_to_file") {
+						await writeToFileTool.teardownAbandonedStream(cline)
+					}
 					break
 				}
 			}

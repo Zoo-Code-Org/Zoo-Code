@@ -524,12 +524,11 @@ export class DiffViewProvider {
 	 * removed.
 	 */
 	async discardUnapprovedStream(): Promise<void> {
-		if (!this.relPath || !this.activeDiffEditor) {
+		if (!this.relPath) {
 			return
 		}
 
 		const absolutePath = path.resolve(this.cwd, this.relPath)
-		const document = this.activeDiffEditor.document
 		// Snapshot the directories this edit created BEFORE the editor work below, and
 		// clear the field so nothing else can act on them twice. If an await below
 		// rejects, the caller runs reset(), which drops relPath/createdDirs - this is
@@ -538,28 +537,36 @@ export class DiffViewProvider {
 		this.createdDirs = []
 
 		let editorFailure: unknown
-		try {
-			this.disposeActiveEditorListener()
-			this.cancelDeferredScroll()
-			await this.closeAllDiffViews()
+		// open() creates the directories and the empty placeholder BEFORE it assigns
+		// activeDiffEditor (openDiffEditor() can reject on its 10s timeout or a failed
+		// vscode.diff call), so an abandoned create can leave artifacts on disk with no
+		// editor at all. Only the buffer and tab work needs the editor; the artifact
+		// cleanup below runs either way.
+		if (this.activeDiffEditor) {
+			const document = this.activeDiffEditor.document
+			try {
+				this.disposeActiveEditorListener()
+				this.cancelDeferredScroll()
+				await this.closeAllDiffViews()
 
-			if (document.isDirty) {
-				const edit = new vscode.WorkspaceEdit()
-				const fullRange = new vscode.Range(
-					document.positionAt(0),
-					document.positionAt(document.getText().length),
-				)
-				edit.replace(document.uri, fullRange, "")
-				await vscode.workspace.applyEdit(edit)
-				await document.save()
+				if (document.isDirty) {
+					const edit = new vscode.WorkspaceEdit()
+					const fullRange = new vscode.Range(
+						document.positionAt(0),
+						document.positionAt(document.getText().length),
+					)
+					edit.replace(document.uri, fullRange, "")
+					await vscode.workspace.applyEdit(edit)
+					await document.save()
+				}
+
+				await this.closeFileTab(absolutePath)
+			} catch (error) {
+				// Do NOT stop here: the placeholder and the created directories still have
+				// to go. The original failure is re-thrown once the artifacts are dealt with,
+				// so the caller still reports the rollback hazard instead of a silent success.
+				editorFailure = error
 			}
-
-			await this.closeFileTab(absolutePath)
-		} catch (error) {
-			// Do NOT stop here: the placeholder and the created directories still have
-			// to go. The original failure is re-thrown once the artifacts are dealt with,
-			// so the caller still reports the rollback hazard instead of a silent success.
-			editorFailure = error
 		}
 
 		let cleanupFailure: unknown
