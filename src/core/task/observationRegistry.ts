@@ -25,13 +25,22 @@ export interface FileObservation {
 export class ObservationRegistry {
 	private readonly entries = new Map<string, FileObservation>()
 
+	/** Set by close(): after disposal the registry refuses further observations. */
+	private closed = false
+
 	/**
-	 * Record an observation for a file at its absolute path.
+	 * Record an observation for a file at its absolute path, unless the registry is closed.
 	 *
 	 * Re-observing replaces the entry with a fresh observedAt timestamp and
-	 * the new version token.
+	 * the new version token. A read that was already in flight can finish after
+	 * Task.disposeOnce() dropped the observations; recording then would hand a version token
+	 * to a task that no longer serves any request, and a later guarded write could consult
+	 * it. close() therefore makes this a no-op, so disposal is terminal at this layer.
 	 */
 	observe(absolutePath: string, version: string): void {
+		if (this.closed) {
+			return
+		}
 		this.entries.set(absolutePath, { version, observedAt: Date.now() })
 	}
 
@@ -45,6 +54,19 @@ export class ObservationRegistry {
 
 	clear(): void {
 		this.entries.clear()
+	}
+
+	/**
+	 * Drop every observation and refuse any later one. Task.disposeOnce() calls this so a
+	 * disposed task's registry cannot be repopulated by a read that finishes late.
+	 */
+	close(): void {
+		this.closed = true
+		this.entries.clear()
+	}
+
+	get isClosed(): boolean {
+		return this.closed
 	}
 
 	get size(): number {

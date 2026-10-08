@@ -1052,6 +1052,62 @@ describe("McpHub", () => {
 			expect(writtenConfig.mcpServers["test-server"].alwaysAllow).toContain("new-tool")
 		})
 
+		describe("symlink policy on MCP settings writes", () => {
+			it("refuses a symlinked target when deleteServer omits the source but the server is a project server", async () => {
+				vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({ mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"] } } }))
+				mcpHub.connections = [
+					{
+						type: "connected",
+						server: { name: "test-server", type: "stdio", command: "node", args: ["test.js"], source: "project" },
+						client: {},
+						transport: {},
+					} as unknown as ConnectedMcpConnection,
+				]
+
+				// deleteServer("name") takes no source: findConnection resolves the connection and
+				// configPath is chosen from THAT source. The write policy must be derived from the same
+				// value, or a project server reached through an omitted argument loses symlink refusal.
+				await mcpHub.deleteServer("test-server")
+
+				const write = vi.mocked(safeWriteJson).mock.calls.at(-1)
+				expect(write && write[2]).toEqual(expect.objectContaining({ refuseSymlinkTarget: true }))
+			})
+
+			it("refuses a symlinked target for a project toggleToolAlwaysAllow write", async () => {
+				vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({ mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"], alwaysAllow: [] } } }))
+				mcpHub.connections = [
+					{
+						type: "connected",
+						server: { name: "test-server", type: "stdio", command: "node", args: ["test.js"], source: "project" },
+						client: {},
+						transport: {},
+					} as unknown as ConnectedMcpConnection,
+				]
+
+				await mcpHub.toggleToolAlwaysAllow("test-server", "project", "new-tool", true)
+
+				const write = vi.mocked(safeWriteJson).mock.calls.at(-1)
+				expect(write && write[2]).toEqual(expect.objectContaining({ refuseSymlinkTarget: true }))
+			})
+
+			it("leaves the global toggleToolAlwaysAllow write free to follow a symlink", async () => {
+				vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({ mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"], alwaysAllow: [] } } }))
+				mcpHub.connections = [
+					{
+						type: "connected",
+						server: { name: "test-server", type: "stdio", command: "node", args: ["test.js"], source: "global" },
+						client: {},
+						transport: {},
+					} as unknown as ConnectedMcpConnection,
+				]
+
+				await mcpHub.toggleToolAlwaysAllow("test-server", "global", "new-tool", true)
+
+				const write = vi.mocked(safeWriteJson).mock.calls.at(-1)
+				expect(write && write[2]).not.toHaveProperty("refuseSymlinkTarget")
+			})
+		})
+
 		it("should remove tool from always allow list when disabling", async () => {
 			const mockConfig = {
 				mcpServers: {

@@ -1014,7 +1014,30 @@ describe("Cline", () => {
 			// A disposed task cannot serve another guarded write, so its observed paths
 			// (version token + timestamp each) must not stay reachable for the host lifetime.
 			expect(task.observationRegistry.get("/workspace/a.ts")).toBeUndefined()
+			// A disposed task cannot serve another guarded write, so its observed paths
+			// (version token + timestamp each) must not stay reachable for the host lifetime.
 			expect(task.observationRegistry.get("/workspace/b.ts")).toBeUndefined()
+			// disposeOnce() closes the registry rather than only clearing the map.
+		})
+
+		it("refuses an observation recorded after the task was disposed", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "late observation task",
+				startTask: false,
+			})
+
+			await task.dispose()
+
+			// A read that was already in flight when the task was disposed can finish late and
+			// call observe(). Recording then would repopulate a registry no task owns and hand a
+			// version token to a guarded write that will never happen.
+			task.observationRegistry.observe("/workspace/late.ts", "v-late")
+
+			expect(task.observationRegistry.get("/workspace/late.ts")).toBeUndefined()
+			expect(task.observationRegistry.size).toBe(0)
+			expect(task.observationRegistry.isClosed).toBe(true)
 		})
 	})
 

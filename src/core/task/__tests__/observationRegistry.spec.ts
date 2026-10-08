@@ -70,3 +70,22 @@ describe("ObservationRegistry", () => {
 		expect(regB.get("/shared.ts")!.version).toBe("v2")
 	})
 })
+
+
+describe("close() - disposal is terminal", () => {
+	it("drops every observation and refuses later ones", () => {
+		const registry = new ObservationRegistry()
+		registry.observe("/workspace/a.ts", "v-a")
+		expect(registry.size).toBe(1)
+
+		registry.close()
+
+		expect(registry.size).toBe(0)
+		expect(registry.isClosed).toBe(true)
+
+		// A read that was in flight when the task was disposed must not repopulate it.
+		registry.observe("/workspace/late.ts", "v-late")
+		expect(registry.get("/workspace/late.ts")).toBeUndefined()
+		expect(registry.size).toBe(0)
+	})
+})

@@ -3332,7 +3332,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// path the task read or wrote (version token + timestamp); nothing can consume them
 		// after disposal, and a long-lived extension host would otherwise keep every path a
 		// finished task touched alive.
-		this.observationRegistry.clear()
+		this.observationRegistry.close()
 
 		// Stop the idle telemetry check and report any unflushed activity as a
 		// shutdown installment, so a task torn down mid-work (panel closed, task
