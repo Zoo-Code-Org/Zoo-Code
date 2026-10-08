@@ -104,6 +104,9 @@ export class DiffViewProvider {
 	 * caller never read, publishing stale content over the intervening change.
 	 */
 	private preOpenObservation: { version: string; complete: boolean } | null | undefined = undefined
+	// The on-disk version open() stat-matched, kept so accept-time adoption can
+	// verify the save was authorized against that exact version.
+	private openToken: string | undefined = undefined
 
 	constructor(
 		private cwd: string,
@@ -168,10 +171,15 @@ export class DiffViewProvider {
 			// preview token is recorded (stat-matched) but never as a complete read:
 			// this is the tool's own preview, not a read the model made, so it must
 			// not authorize a later full-file replacement.
-			if (displayTask && preStats && postStats && !displayTask.observationRegistry.has(absolutePath)) {
-				const displayToken = versionTokenOfStat(preStats)
-				if (displayToken === versionTokenOfStat(postStats)) {
-					displayTask.observationRegistry.observe(absolutePath, displayToken, false)
+			if (preStats && postStats && versionTokenOfStat(preStats) === versionTokenOfStat(postStats)) {
+				// The version this preview stat-matched. Adoption at accept time is only
+				// sound when the save was authorized against exactly this version, so it is
+				// recorded whether or not the registry already had an observation for the
+				// path - the case it exists for is a prior read followed by an external
+				// writer moving the file before this preview ran.
+				this.openToken = versionTokenOfStat(preStats)
+				if (displayTask && !displayTask.observationRegistry.has(absolutePath)) {
+					displayTask.observationRegistry.observe(absolutePath, this.openToken, false)
 				}
 			}
 		} else {
@@ -539,6 +547,38 @@ export class DiffViewProvider {
 		task.observationRegistry.observe(absolutePath, versionTokenOfStat(after), observation?.complete ?? false)
 		return true
 	}
+	/**
+	 * Whether a byte-for-byte match on disk may be adopted as this save's publish.
+	 *
+	 * Adoption exists for one shape: the preview (or an autosave of it) already put
+	 * the accepted content on disk, so the compare-and-swap rejects on a moved token
+	 * even though the intended publish is satisfied. That reading is only sound when
+	 * the save was authorized against the exact version open() stat-matched.
+	 */
+	private canAdoptPublishedContent(): boolean {
+		// A create placeholder is the file open() itself wrote, so a match is
+		// unambiguous and the CAS baseline is the placeholder token.
+		if (this.placeholderVersion !== undefined) {
+			return true
+		}
+		// open() snapshots the authorization as it stood before the preview. No
+		// snapshot means no preview ran, so there is no pairing to verify.
+		if (this.preOpenObservation === undefined) {
+			return true
+		}
+		// A preview over a target the model never read: the rejection is about
+		// authorization, not a moved token, for every write kind. Adopting the match
+		// would record an observation for content the model never read and authorize a
+		// later full-file replacement.
+		if (this.preOpenObservation === null) {
+			return false
+		}
+		// The caller's observation must still name the version the preview saw. If a
+		// different writer moved the file first, the guard was right to reject and the
+		// matching bytes are the clobber it warned about.
+		return this.openToken !== undefined && this.preOpenObservation.version === this.openToken
+	}
+
 	async saveChanges(
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
@@ -616,11 +656,12 @@ export class DiffViewProvider {
 				error instanceof GuardRejectedError &&
 				saveTask &&
 				encodedContent &&
-				// An edit with no pre-open observation was rejected for AUTHORIZATION, not for a
-				// moved token. Adopting the match would report success and record a partial
-				// observation for a file the model never read, which would then authorize a
-				// later edit publish - exactly what the unobserved-edit guard exists to prevent.
-				!(writeKind === "edit" && this.preOpenObservation === null) &&
+				// The match must be attributable to THIS save: adoption exists for the
+				// autosave shape, where the preview already put the accepted bytes on disk and
+				// only the version token moved. A rejection caused by an external writer, or
+				// by a save that was never authorized at all, must stay a rejection - the
+				// matching bytes are what the clobber looks like from here.
+				this.canAdoptPublishedContent() &&
 				// Only the autosave shape: a clean buffer means its content is what autosave
 				// already put on disk. A dirty buffer means the disk content came from
 				// someone else, so the discard cleanup below is still the right outcome.
@@ -1578,6 +1619,7 @@ export class DiffViewProvider {
 		this.snapshotPreviewTabs = []
 		this.placeholderVersion = undefined
 		this.preOpenObservation = undefined
+		this.openToken = undefined
 	}
 
 	/**

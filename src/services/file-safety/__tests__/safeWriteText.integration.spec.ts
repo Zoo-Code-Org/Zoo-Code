@@ -31,19 +31,24 @@ describe("safeWriteText against a real filesystem", () => {
 		expect(await fs.readdir(dir)).toEqual(["target.txt"])
 	})
 
-	it("leaves the target bytes untouched when the commit cannot replace it", async () => {
-		// A regular file cannot be renamed over a directory, so the backup copy and
-		// the commit both fail on a real filesystem with no mocking at all.
-		const targetPath = path.join(dir, "target-dir")
-		await fs.mkdir(targetPath)
-		const inside = path.join(targetPath, "payload.txt")
-		await fs.writeFile(inside, "original bytes")
+	it.each([false, true])(
+		"leaves the target bytes untouched when the publish fails (backup: %s)",
+		async (backup) => {
+			// backup:false reaches the commit rename, which cannot replace a directory with
+			// a regular file (EISDIR on POSIX, EPERM on Windows). backup:true fails earlier,
+			// at the copy of the directory made for the backup. Both must leave the target
+			// exactly as it was, with no residue.
+			const targetPath = path.join(dir, "target-dir")
+			await fs.mkdir(targetPath)
+			const inside = path.join(targetPath, "payload.txt")
+			await fs.writeFile(inside, "original bytes")
 
-		await expect(safeWriteText(targetPath, "new data", { backup: true })).rejects.toThrow()
+			await expect(safeWriteText(targetPath, "new data", { backup })).rejects.toThrow()
 
-		// The directory and its content are exactly as they were, and no backup copy
-		// or staging directory was left behind next to them.
-		expect(await fs.readFile(inside, "utf8")).toBe("original bytes")
-		expect(await fs.readdir(dir)).toEqual(["target-dir"])
-	})
+			// The directory and its content are exactly as they were, and no backup copy
+			// or staging directory was left behind next to them.
+			expect(await fs.readFile(inside, "utf8")).toBe("original bytes")
+			expect(await fs.readdir(dir)).toEqual(["target-dir"])
+		},
+	)
 })
