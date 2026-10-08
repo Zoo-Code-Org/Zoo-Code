@@ -1434,3 +1434,21 @@ describe("parent directory creation (safeWriteText.ts:288-290)", () => {
 		expect(fs.rename).toHaveBeenCalled()
 	})
 })
+
+describe("partial backup after a failed copy (backup:true)", () => {
+	it("removes the partial backup when copyFile fails with ENOENT and the publish succeeds", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		// The target exists for the backup pre-check, then the copy itself fails: a partial file
+		// may already sit at the .bak path while backupCreated stays false. The publish still
+		// succeeds, and nothing else in the flow would ever remove that half-written backup.
+		vi.mocked(fs.access).mockResolvedValue(undefined)
+		vi.mocked(fs.copyFile).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+		await safeWriteText(targetPath, "data", { platform: "linux", backup: true })
+
+		expect(fs.rename).toHaveBeenCalled()
+		expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak"))
+	})
+})
