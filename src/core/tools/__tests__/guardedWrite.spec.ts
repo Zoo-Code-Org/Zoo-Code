@@ -86,6 +86,21 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			})
 		})
 
+		it("defaults kind to update when the caller omits the argument", async () => {
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			const task = createMockTask()
+
+			// Every other call in this file passes kind explicitly, so the default was never exercised.
+			// The default only matters on the UNOBSERVED path: once a file is observed the guard is
+			// chosen by the observation, not by kind. Omitting it must take the create-if-absent guard
+			// (which publishes); a default of "edit" would hit the read-first guard and reject instead.
+			await guardedWrite(task, "new-file.txt", "hello")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("new-file.txt"), "hello", {
+				verifyBeforeCommit: expect.any(Function),
+			})
+		})
+
 		it("fails with the read-first remediation when the file exists - nothing published", async () => {
 			mockedFsAccess.mockResolvedValue(undefined)
 			const task = createMockTask()
@@ -183,6 +198,24 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, "kept.txt", "rewritten", "create")
 
 			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("kept.txt"), "rewritten", {
+				verifyBeforeCommit: expect.any(Function),
+			})
+		})
+
+		it("uses the update guard when the caller omits the argument on an observed file", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			// Documents the contract for the omitted argument on the observed path. Note that this case
+			// is NOT load-bearing: once a file is observed the guard is chosen by the observation, so
+			// changing the default does not change this call. The load-bearing pin for the default is
+			// 'defaults kind to update when the caller omits the argument' on the unobserved path.
+			await guardedWrite(task, "doc.txt", "new content")
+
+			expect(mockedComputeVersionToken).toHaveBeenCalledWith(abs("doc.txt"))
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "new content", {
 				verifyBeforeCommit: expect.any(Function),
 			})
 		})
