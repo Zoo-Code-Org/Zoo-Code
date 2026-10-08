@@ -5,6 +5,7 @@ import type { ChildProcess } from "child_process"
 import * as path from "path"
 
 import {
+	OrphanedBackupError,
 	PostCommitDurabilityError,
 	resolveLockKey,
 	safeWriteText,
@@ -517,6 +518,45 @@ describe("safeWriteText", () => {
 			expect(fs.rename).not.toHaveBeenCalled()
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		})
+
+		it("carries the leftover path when the partial backup cannot be removed either", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockImplementation((p: unknown) =>
+				String(p).includes("safeWriteText.bak_") ? 7 : 1,
+			)
+			vi.mocked(fsSync.fsyncSync).mockImplementation((fd: unknown) => {
+				if (fd === 7) {
+					throw new Error("EIO")
+				}
+			})
+			let unlinkAttempts = 0
+			vi.mocked(fs.unlink).mockImplementation(async (p: unknown) => {
+				if (String(p).includes("safeWriteText.bak_")) {
+					unlinkAttempts++
+				}
+				throw Object.assign(new Error("EPERM"), { code: "EPERM" })
+			})
+
+			// The copy failed and the locked leftover could not be unlinked even after the
+			// retry. Dropping the path would leave a partial copy of the previous content on
+			// disk with no reference to it anywhere, so the error carries it.
+			const error = await safeWriteText(targetPath, "new data", {
+				backup: true,
+				platform: "linux",
+			}).catch((caught: unknown) => caught)
+
+			expect(error).toBeInstanceOf(OrphanedBackupError)
+			const orphan = error as OrphanedBackupError
+			expect(orphan.orphanedBackupPath).toContain("safeWriteText.bak_")
+			expect(orphan.message).toContain("safeWriteText.bak_")
+			expect(orphan.message).toContain("EPERM")
+			expect(orphan.originalError).toBeInstanceOf(Error)
+			expect((orphan.originalError as Error).message).toBe("EIO")
+			expect(orphan.cause).toBe(orphan.originalError)
+			expect(unlinkAttempts).toBe(2)
+			expect(fs.rename).not.toHaveBeenCalled()
 		})
 
 		it("backup:true when target does not exist: no backup created, just commit", async () => {

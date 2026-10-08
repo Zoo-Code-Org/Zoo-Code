@@ -779,6 +779,60 @@ describe("safeWriteJson", () => {
 		}
 	})
 
+	test("fails closed when the confined scope cannot be canonicalized", async () => {
+		const scope = path.join(tempDir, "project")
+		await fs.mkdir(scope)
+		const target = path.join(scope, "mcp.json")
+		const merge = vi.fn()
+		// Only ENOENT means "walk up and re-join". EACCES means the scope root is unknown,
+		// and continuing with a partly lexical root would let the confinement check compare
+		// against a scope that may disagree with the canonical target.
+		const failure = Object.assign(new Error("EACCES"), { code: "EACCES" })
+		const realpathSpy = vi.spyOn(fs, "realpath").mockImplementation(async () => {
+			throw failure
+		})
+		try {
+			await expect(safeWriteJson(target, { mcpServers: {} }, { confineTo: scope, merge })).rejects.toThrow(
+				"EACCES",
+			)
+		} finally {
+			realpathSpy.mockRestore()
+		}
+
+		// Nothing was merged, staged, locked or published.
+		expect(merge).not.toHaveBeenCalled()
+		expect(await fs.readdir(scope)).toEqual([])
+		const root = await fs.readdir(tempDir)
+		expect(root.filter((entry) => entry.includes(".new_") || entry.endsWith(".lock"))).toEqual([])
+	})
+
+	test("fails closed when a missing scope cannot be resolved through its ancestors", async () => {
+		const scope = path.join(tempDir, "missing", "nested")
+		const target = path.join(tempDir, "mcp.json")
+		const merge = vi.fn()
+		// The scope itself is missing, so the resolver walks up. The ancestor lookup then
+		// fails for a non-ENOENT reason (a symlink loop), which is not a "missing path" signal:
+		// the write has to fail rather than fall back to the lexical scope.
+		const realpathSpy = vi.spyOn(fs, "realpath").mockImplementation(async (candidate) => {
+			if (String(candidate).includes("missing")) {
+				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			}
+			throw Object.assign(new Error("ELOOP"), { code: "ELOOP" })
+		})
+		try {
+			await expect(safeWriteJson(target, { mcpServers: {} }, { confineTo: scope, merge })).rejects.toThrow(
+				"ELOOP",
+			)
+		} finally {
+			realpathSpy.mockRestore()
+		}
+
+		expect(merge).not.toHaveBeenCalled()
+		const root = await fs.readdir(tempDir)
+		expect(root.filter((entry) => entry.includes(".new_") || entry.endsWith(".lock"))).toEqual([])
+		expect(root).not.toContain("mcp.json")
+	})
+
 	test("does not create the parent directory of an out-of-scope confined target", async () => {
 		const projectDir = path.join(tempDir, "scope-dir-project")
 		await fs.mkdir(projectDir)
