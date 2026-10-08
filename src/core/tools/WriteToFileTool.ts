@@ -261,6 +261,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			task.consecutiveMistakeCount++
 			task.recordToolError("write_to_file")
 			pushToolResult(await task.sayAndCreateMissingParamError("write_to_file", "path"))
+
+			// Returning here skips the cleanup below: release THIS task's stream state (and
+			// only this task's) so the abort listener and any streamFailed guard do not outlive
+			// the call.
+			this.resetTaskPartialState(task)
 			await task.diffViewProvider.reset()
 			return
 		}
@@ -269,6 +274,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			task.consecutiveMistakeCount++
 			task.recordToolError("write_to_file")
 			pushToolResult(await task.sayAndCreateMissingParamError("write_to_file", "content"))
+
+			// Returning here skips the cleanup below: release THIS task's stream state (and
+			// only this task's) so the abort listener and any streamFailed guard do not outlive
+			// the call.
+			this.resetTaskPartialState(task)
 			await task.diffViewProvider.reset()
 			return
 		}
@@ -278,6 +288,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		if (!accessAllowed) {
 			await task.say("rooignore_error", relPath)
 			pushToolResult(formatResponse.rooIgnoreError(relPath))
+
+			// Returning here skips the cleanup below: release THIS task's stream state (and
+			// only this task's) so the abort listener and any streamFailed guard do not outlive
+			// the call.
+			this.resetTaskPartialState(task)
 			return
 		}
 
