@@ -72,6 +72,7 @@ function createMockTask(options: MockTaskOptions = {}): Task {
 	const task = {
 		cwd: options.cwd ?? WORKSPACE,
 		abort: options.abort ?? false,
+		cancellationGeneration: 0,
 		observationRegistry: options.observationRegistry ?? new ObservationRegistry(),
 	}
 	return task as unknown as Task
@@ -879,6 +880,50 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		)
 
 		expect(mockedSafeWriteText).not.toHaveBeenCalled()
+	})
+
+	it("refuses a queued write whose task was cancelled and resumed before its turn", async () => {
+		// A write parks on the path chain behind another write for a different task, so it
+		// has not reached its own checks yet. Its task is then cancelled and resumed: by the
+		// time the link dequeues, abort is back to false, and the flag alone cannot tell the
+		// write that it belongs to the cancelled run. The captured generation can.
+		const blocker = createMockTask()
+		const cancelled = createMockTask()
+		mockedComputeVersionToken.mockResolvedValue("v1") // post-publish refresh
+		let releaseCheck!: () => void
+		const gate = new Promise<void>((resolve) => {
+			releaseCheck = resolve
+		})
+		let accessCalls = 0
+		mockedFsAccess.mockImplementation(async () => {
+			accessCalls++
+			if (accessCalls === 1) {
+				await gate
+			}
+			throw { code: "ENOENT" }
+		})
+
+		const first = guardedWrite(blocker, "queued.txt", "first", "create")
+		const second = guardedWrite(cancelled, "queued.txt", "second", "create")
+
+		// Both links have captured their generation; the first is parked inside its
+		// absence check with the second still queued behind it on the same path.
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		expect(accessCalls).toBe(1)
+
+		cancelled.abort = true
+		cancelled.cancellationGeneration++
+		cancelled.abort = false
+
+		releaseCheck()
+		await first
+		await expect(second).rejects.toThrow(
+			"Task was cancelled before this write ran -- the queued publish is not performed.",
+		)
+
+		// Only the write that was already running published; the cancelled one did not.
+		expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
+		expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("queued.txt"), "first")
 	})
 
 	it("re-checks cancellation under the publish lock before writing", async () => {

@@ -434,11 +434,20 @@ export async function guardedWrite(
 	const verifyTarget = () => assertCanonicalInsideWorkspace(task, absolutePath, displayPath)
 	await verifyTarget()
 
+	// Captured BEFORE the link is queued. The chain is FIFO, so this write may not run
+	// until long after it was submitted; task.abort can be raised and then cleared by a
+	// resume in the meantime, which would otherwise let a write that belongs to a
+	// cancelled run publish once its turn arrives.
+	const cancellationGeneration = task.cancellationGeneration
+
 	return enqueue(absolutePath, async () => {
 		// Cancellation is checked when the link is dequeued, not when it was enqueued:
 		// a write queued before an abort can still reach its turn on the chain after the
-		// task is gone, and the caller has already reported the write to the model.
-		if (task.abort) {
+		// task is gone, and the caller has already reported the write to the model. The
+		// generation is compared as well because abort is a mutable flag: a cancel followed
+		// by a resume while this link waited leaves abort false again, and the write still
+		// belongs to the cancelled run.
+		if (task.abort || task.cancellationGeneration !== cancellationGeneration) {
 			throw new GuardRejectedError(
 				"Task was cancelled before this write ran -- the queued publish is not performed.",
 				displayPath,
@@ -465,7 +474,7 @@ export async function guardedWrite(
 					obs.version,
 					content,
 					displayPath,
-					() => task.abort,
+					() => task.abort || task.cancellationGeneration !== cancellationGeneration,
 					verifyTarget,
 				)
 				staysPartial = obs.complete === false
@@ -491,10 +500,10 @@ export async function guardedWrite(
 
 			if (obs === undefined) {
 				// Never read: only an absent target may be created.
-				publishedToken = await createIfAbsent(absolutePath, content, displayPath, () => task.abort, verifyTarget)
+				publishedToken = await createIfAbsent(absolutePath, content, displayPath, () => task.abort || task.cancellationGeneration !== cancellationGeneration, verifyTarget)
 			} else if (absent) {
 				// A "create" on a file that vanished after the read recreates it.
-				publishedToken = await createIfAbsent(absolutePath, content, displayPath, () => task.abort, verifyTarget)
+				publishedToken = await createIfAbsent(absolutePath, content, displayPath, () => task.abort || task.cancellationGeneration !== cancellationGeneration, verifyTarget)
 			} else {
 				// The version recorded at read time must still match the on-disk
 				// token.
@@ -503,7 +512,7 @@ export async function guardedWrite(
 					obs.version,
 					content,
 					displayPath,
-					() => task.abort,
+					() => task.abort || task.cancellationGeneration !== cancellationGeneration,
 					verifyTarget,
 				)
 			}
