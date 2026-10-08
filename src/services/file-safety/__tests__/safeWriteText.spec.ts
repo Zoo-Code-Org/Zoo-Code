@@ -349,26 +349,48 @@ describe("safeWriteText", () => {
 			expect(execFile).not.toHaveBeenCalled()
 		})
 
-		it("win32 DACL failure falls back to plain rename (never fails the write)", async () => {
+		it("win32 DACL capture failure aborts before publishing", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
-			// icacls dump fails — the callback-based mock must invoke cb with an error.
+			// icacls dump fails and no usable dump exists.
 			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
 				if (typeof cb === "function") cb(new Error("icacls error"), "", "")
 				return fakeChild
 			})
 
+			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toThrow(/refusing to publish/)
+
+			// Fail closed: the target is never published, because publishing would replace its security
+			// descriptor with inherited permissions and nothing could put the original back.
+			expect(fs.rename).not.toHaveBeenCalled()
+			// Only the save ran: a failed capture must not be followed by a restore attempt.
+			expect(execFile).toHaveBeenCalledTimes(1)
+			// The staging file and any partial dump are still cleaned up by the rollback.
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl.tmp"))
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		})
+
+		it("win32 DACL: a non-zero icacls exit that still wrote a dump counts as a capture", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// Measured on a normal host: /save can exit non-zero while leaving a usable dump behind.
+			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+				if (typeof cb === "function") cb(new Error("icacls exit 1"), "", "")
+				return fakeChild
+			})
+			vi.mocked(fsSync.statSync).mockReturnValue({ size: 256 } as never)
+
 			await safeWriteText(targetPath, "data", { platform: "win32" })
 
-			// write succeeded despite icacls failure (fallback to plain rename)
-			expect(fs.rename).toHaveBeenCalled()
-			// Only the save ran: a failed save must not be followed by a restore attempt.
-			expect(execFile).toHaveBeenCalledTimes(1)
-			// The dump the failed save may have created is still cleaned up, so nothing is left behind.
-			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl.tmp"))
-			// The write itself is unaffected: plain rename of the staged file onto the target.
+			// The capture is judged by the artifact, so the publish proceeds and the restore is attempted.
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+			// Save, then the restore attempt (icacls is retried once if it fails, so >= 2).
+			const restoreCalls = vi.mocked(execFile).mock.calls.filter(function (call) {
+				return Array.isArray(call[1]) && String(call[1]).includes("/restore")
+			})
+			expect(restoreCalls.length).toBeGreaterThan(0)
 		})
 
 		it("win32 DACL save args are [targetPath, /save, dumpPath, /T] before backup rename", async () => {
@@ -1126,20 +1148,21 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
 		})
 
-		it("removes the DACL dump when the save fails after creating it", async () => {
+		it("removes the DACL dump and aborts when the save fails after creating it", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 			// execFile callback form: report a failure after the dump file was created.
-			vi.mocked(execFile).mockImplementationOnce(((_cmd: string, _args: string[], _opts: unknown, cb: (e: Error | null) => void) => {
+			vi.mocked(execFile).mockImplementationOnce(((_cmd: string, _args: string[], _opts: unknown, cb: (err: Error) => void) => {
 				cb(new Error("icacl dump failed"))
 				return fakeChild
 			}) as unknown as typeof execFile)
 
-			await safeWriteText(targetPath, "hello world", { platform: "win32" })
+			await expect(safeWriteText(targetPath, "hello world", { platform: "win32" })).rejects.toThrow(/refusing to publish/)
 
-			// The dump path stays tracked so the finally block removes the file the failed save created.
+			// The dump path stays tracked so the rollback removes the file the failed save created.
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl.tmp"))
+			expect(fs.rename).not.toHaveBeenCalled()
 		})
 	})
 })

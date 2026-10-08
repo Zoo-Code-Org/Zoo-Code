@@ -66,6 +66,21 @@ class UnsafeStagingDirectoryError extends Error {
  * The new content is in place; what is unconfirmed is that the directory entry
  * survives a crash, so callers must not treat the publish as durable.
  */
+/**
+ * The target exists but its DACL could not be captured, so publishing would replace its security
+ * descriptor with inherited permissions and no record would exist to restore it from. Thrown
+ * before the commit rename; the target is left untouched.
+ */
+export class DaclCaptureError extends Error {
+	constructor(
+		public readonly targetPath: string,
+		public readonly dumpPath: string,
+	) {
+		super(`safeWriteText: refusing to publish ${targetPath}: its DACL could not be captured (no icacls dump was written at ${dumpPath}). No change was made to the target.`)
+		this.name = "DaclCaptureError"
+	}
+}
+
 export class PublishNotDurableError extends Error {
 	constructor(targetPath: string, reason: string) {
 		super(`Published ${targetPath} but could not confirm it is durable: ${reason}`)
@@ -127,9 +142,10 @@ function _fsyncFile(fd: number): void {
 	fsSync.fsyncSync(fd)
 }
 
-/** Save the DACL of *srcPath* to a dump file on Windows.
- * Returns true when the dump was written successfully; false otherwise.
- * Never throws — callers treat failure as "skip DACL handling". */
+	/** Save the DACL of *srcPath* to a dump file on Windows.
+	 * Returns true when a usable dump exists; false otherwise.
+	 * Never throws - a false return means no usable dump was produced, which the caller treats
+	 * as "the security descriptor cannot be preserved" and fails closed before publishing. */
 async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<boolean> {
 	const runner = execFileRunner ?? execFile
 	try {
@@ -140,7 +156,13 @@ async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunne
 		})
 		return true
 	} catch {
-		return false
+		// icacls can exit non-zero while still writing a usable dump (measured on a normal host), so
+		// judge the capture by the artifact, not only by the exit code: a non-empty dump is a capture.
+		try {
+			return fsSync.statSync(dumpPath).size > 0
+		} catch {
+			return false
+		}
 	}
 }
 
@@ -343,24 +365,22 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				daclDumpPath = _tempName(dirPath, "safeWriteText.acl.tmp")
 				const saved = await _saveDaclWindows(targetPath, daclDumpPath, options?.execFileRunner)
 				if (!saved) {
-					// Skip the restore step, but keep daclDumpPath tracked: a failed save can
-					// still have created the dump file, and the finally block must remove it.
-					//
-					// This is deliberately NOT fatal. icacls /restore needs backup/restore
-					// privileges: measured on a normal (non-elevated) Windows host it fails with
-					// "Not all privileges or groups referenced are assigned to the caller"
-					// (exit 1300), and /save itself can exit non-zero while still writing a
-					// usable dump. Refusing the write would therefore break every save on such a
-					// host without removing the exposure. The privilege-free fix - copying the
-					// target's DACL onto the staged file BEFORE the commit, so the rename never
-					// changes the security descriptor - is tracked separately; see the note on
-					// tracking issue easonLiangWorldedtech/Zoo-Code#41.
+					// Fail closed. Publishing without a captured DACL replaces the target's security
+					// descriptor with whatever the parent directory inherits, and no later step can put the
+					// original back. icacls /save does not need the backup/restore privileges that /restore
+					// does (measured: /restore exits 1300 un-elevated), so refusing here does not break
+					// ordinary hosts - it removes the exposure instead of accepting it. The staging file,
+					// any partial backup and the dump are cleaned by the rollback below.
 					daclSaved = false
+					throw new DaclCaptureError(targetPath, daclDumpPath)
 				} else {
 					daclSaved = true
 				}
-			} catch {
-				// target does not exist or access failed — no DACL handling
+			} catch (err: unknown) {
+				if (err instanceof DaclCaptureError) {
+					// Not an access probe failure: the target exists and its DACL could not be captured.
+					throw err
+				}
 				daclDumpPath = null
 			}
 		}
