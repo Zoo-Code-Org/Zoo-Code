@@ -1126,6 +1126,28 @@ describe("OpenAiHandler", () => {
 			})
 		})
 
+
+		// The Azure path test above covers createMessage and the completePrompt signal test
+		// uses a non-Azure handler; neither pins both options in one request config, which is
+		// what the Azure completePrompt branch composes (path + merged signal).
+		it("should keep the Azure AI Inference path while passing the completePrompt abort signal", async () => {
+			const azureHandler = new OpenAiHandler({
+				...mockOptions,
+				openAiBaseUrl: "https://test.services.ai.azure.com",
+				openAiModelId: "deepseek-v3",
+			})
+			const controller = new AbortController()
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			await expect(azureHandler.completePrompt("test prompt", { abortSignal: controller.signal })).resolves.toBe(
+				"response",
+			)
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.anything(), {
+				path: "/models/chat/completions",
+				signal: controller.signal,
+			})
+		})
 		it("should pass the completePrompt abort signal to the request", async () => {
 			const controller = new AbortController()
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })

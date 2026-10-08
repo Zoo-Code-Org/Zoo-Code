@@ -813,6 +813,61 @@ describe("ZAiHandler", () => {
 			// the built request config is empty and nothing is forwarded to the SDK.
 			expect(mockCreate.mock.calls.at(-1)?.[1]).toBeUndefined()
 		})
+
+		// The pre-aborted guard in the glm-5.3 override is its own: the shared
+		// pre-aborted test above uses the default glm-4.7 model, which delegates to
+		// super.completePrompt, so it never reaches this override's throwIfAborted.
+		it("glm-5.3 completePrompt should reject before any request when the signal is already aborted", async () => {
+			const h53 = new ZAiHandler({
+				apiModelId: "glm-5.3",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			const controller = new AbortController()
+			controller.abort()
+
+			await expect(h53.completePrompt("prompt", { abortSignal: controller.signal })).rejects.toMatchObject({
+				name: "AbortError",
+				message: "This operation was aborted",
+			})
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		// A timeout with no caller abort must stay a TimeoutError: the caller signal is
+		// absent, so only the merged request signal carries a TimeoutError reason, and the
+		// override's own catch is what classifies it.
+		it("glm-5.3 completePrompt should classify a timeout-only abort as TimeoutError", async () => {
+			const h53 = new ZAiHandler({
+				apiModelId: "glm-5.3",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			let capturedOptions: { signal?: AbortSignal; timeout?: number } | undefined
+			mockCreate.mockImplementationOnce(
+				async (_params: unknown, options?: { signal?: AbortSignal; timeout?: number }) => {
+					capturedOptions = options
+					await new Promise<void>((resolve) => {
+						if (options?.signal?.aborted) {
+							resolve()
+						} else {
+							options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+					throw new APIUserAbortError()
+				},
+			)
+
+			const requestPromise = h53.completePrompt("prompt", { timeoutMs: 50 })
+			const resultPromise = captureError(requestPromise)
+
+			await vi.waitFor(() => expect(capturedOptions?.signal?.aborted).toBe(true))
+			expect(capturedOptions?.timeout).toBe(50)
+
+			const result = await resultPromise
+			expect(result.name).toBe("TimeoutError")
+			expect(result.message).toBe("Z.ai request timed out")
+			expect(result.cause).toBeInstanceOf(Error)
+		})
 	})
 
 	describe("GLM-4.7 Thinking Mode", () => {
