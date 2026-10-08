@@ -216,10 +216,16 @@ export class SearchReplaceTool extends BaseTool<"search_replace"> {
 					diagnosticsEnabled,
 					writeDelayMs,
 					"edit",
+					isOutsideWorkspace,
 				)
 			} else {
 				// Call saveChanges to update the DiffViewProvider properties
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs, "edit")
+				await task.diffViewProvider.saveChanges(
+					diagnosticsEnabled,
+					writeDelayMs,
+					"edit",
+					isOutsideWorkspace,
+				)
 			}
 
 			// Track file edit operation

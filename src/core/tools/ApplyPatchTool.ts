@@ -250,11 +250,17 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				diagnosticsEnabled,
 				writeDelayMs,
 				"create",
+				isOutsideWorkspace,
 			)
 		} else {
 			// The add path publishes a whole new file, so create-guard semantics
 			// apply here as well.
-			await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs, "create")
+			await task.diffViewProvider.saveChanges(
+				diagnosticsEnabled,
+				writeDelayMs,
+				"create",
+				isOutsideWorkspace,
+			)
 		}
 
 		// Track file edit operation
@@ -499,6 +505,8 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					writeDelayMs,
 					"create",
 					sourceComplete,
+					// The user approved the whole patch, which names this destination.
+					isPathOutsideWorkspace(moveAbsolutePath),
 				)
 			} else {
 				// Write to new path and delete old file
@@ -528,12 +536,18 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					diagnosticsEnabled,
 					writeDelayMs,
 					"edit",
+					isOutsideWorkspace,
 				)
 			} else {
 				// The diff-view save is the same targeted hunk as the guarded save above:
 				// it must select the same edit guard, otherwise a partial read is
 				// rejected and the approved patch is thrown away.
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs, "edit")
+				await task.diffViewProvider.saveChanges(
+					diagnosticsEnabled,
+					writeDelayMs,
+					"edit",
+					isOutsideWorkspace,
+				)
 			}
 
 			await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)

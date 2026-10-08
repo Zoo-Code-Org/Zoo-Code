@@ -313,6 +313,87 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		})
 	})
 
+	describe("approved outside-workspace writes", () => {
+		it("publishes a target outside the workspace once the tool layer obtained approval for it", async () => {
+			// The write tools classify against ALL workspace folders and put an outside-
+			// workspace path in front of the user. Once the user approved that path, the
+			// guard must not reject the write it was told about.
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask()
+
+			await guardedWrite(task, "/elsewhere/outside.txt", "data", "create", undefined, {
+				approvedOutsideWorkspace: true,
+			})
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("/elsewhere/outside.txt"), "data")
+		})
+
+		it("still rejects the same target when no approval was obtained", async () => {
+			// The flag means 'an approval decision was obtained', not 'the path is outside'.
+			// An unapproved call keeps the containment checks in force.
+			const task = createMockTask()
+
+			await expect(
+				guardedWrite(task, "/elsewhere/outside.txt", "data", "create", undefined, {
+					approvedOutsideWorkspace: false,
+				}),
+			).rejects.toThrow("Path resolves outside the workspace")
+
+			expect(mockedWithFileLock).not.toHaveBeenCalled()
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("re-checks the approved identity under the lock and rejects a swapped-in link", async () => {
+			// Containment was the user's decision, but the target must still be the target the
+			// user saw: a link planted while the write waits on the chain would move the
+			// publish, so the identity comparison rejects it.
+			let targetLookups = 0
+			mockedFsRealpath.mockImplementation(async (p) => {
+				targetLookups++
+				return targetLookups === 1 ? "/real/approved/outside.txt" : "/real/elsewhere/secret.txt"
+			})
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			const task = createMockTask()
+
+			await expect(
+				guardedWrite(task, "/elsewhere/outside.txt", "data", "create", undefined, {
+					approvedOutsideWorkspace: true,
+				}),
+			).rejects.toThrow("no longer resolves to the path that was approved")
+
+			expect(targetLookups).toBeGreaterThan(1)
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("contains a write in another workspace folder named by the caller", async () => {
+			// Multi-root workspace: the tool layer treats a path in a second folder as an
+			// ordinary in-workspace edit and asks for no approval, so the guard must accept
+			// it once the caller names that root.
+			mockedFsRealpath.mockImplementation(async (p) => String(p))
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask()
+
+			await guardedWrite(task, "/other-folder/in.txt", "data", "create", undefined, {
+				additionalRoots: ["/other-folder"],
+			})
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("/other-folder/in.txt"), "data")
+		})
+
+		it("rejects that same second-folder path when the caller does not name the root", async () => {
+			mockedFsRealpath.mockImplementation(async (p) => String(p))
+			const task = createMockTask()
+
+			await expect(guardedWrite(task, "/other-folder/in.txt", "data", "create")).rejects.toThrow(
+				"Path resolves outside the workspace",
+			)
+
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+	})
+
 	describe("observed create", () => {
 		it("recreates a file that vanished after the read", async () => {
 			const reg = new ObservationRegistry()
