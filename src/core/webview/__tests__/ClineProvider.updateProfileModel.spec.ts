@@ -411,9 +411,12 @@ describe("ClineProvider - updateProfileModel", () => {
 		expect(manager().saveConfig).toHaveBeenCalledTimes(1)
 	})
 
-	it("rejects a model update when the authenticated organization policy is unavailable", async () => {
+	it("rejects a model update when the authenticated organization policy is unavailable or throws", async () => {
 		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "allowed/model" })
-		provider["getOrganizationAllowListForProfileMutation"] = vi.fn().mockReturnValue(undefined)
+		mockCloudInstance.isAuthenticated.mockReturnValue(true)
+		mockCloudInstance.getOrganizationSettings.mockImplementation(() => {
+			throw new Error("Failed to fetch settings")
+		})
 
 		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
 			openRouterModelId: "blocked/model",
@@ -612,7 +615,9 @@ describe("ClineProvider - updateProfileModel", () => {
 			return fn(controller.signal)
 		})
 
-		vi.spyOn(provider.contextProxy, "setProviderSettings").mockImplementationOnce(async () => {
+		const originalSetProviderSettings = provider.contextProxy.setProviderSettings.bind(provider.contextProxy)
+		vi.spyOn(provider.contextProxy, "setProviderSettings").mockImplementationOnce(async (settings) => {
+			await originalSetProviderSettings(settings)
 			controller.abort()
 		})
 
@@ -621,7 +626,59 @@ describe("ClineProvider - updateProfileModel", () => {
 		})
 
 		expect(manager().saveConfig).toHaveBeenCalledTimes(2)
+		expect(manager().saveConfig).toHaveBeenNthCalledWith(
+			2,
+			"test-config",
+			expect.objectContaining({ openRouterModelId: "openai/gpt-4", openRouterApiKey: "my-key" }),
+		)
+		expect(provider.contextProxy.getValues().openRouterModelId).toBe("openai/gpt-4")
 		expect(mockTask.updateApiConfiguration).not.toHaveBeenCalled()
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.save_api_config")
+	})
+
+	it("rolls back saved profile and restores context when contextProxy.setProviderSettings fails", async () => {
+		mockStoredProfile({
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4",
+			openRouterApiKey: "my-key",
+		})
+
+		let setSettingsCalls = 0
+		const originalSetProviderSettings = provider.contextProxy.setProviderSettings.bind(provider.contextProxy)
+		vi.spyOn(provider.contextProxy, "setProviderSettings").mockImplementation(async (settings) => {
+			setSettingsCalls++
+			if (setSettingsCalls === 1) {
+				throw new Error("Context secret storage write failed")
+			}
+			return originalSetProviderSettings(settings)
+		})
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-4.5",
+		})
+
+		expect(manager().saveConfig).toHaveBeenCalledTimes(2)
+		expect(manager().saveConfig).toHaveBeenNthCalledWith(
+			2,
+			"test-config",
+			expect.objectContaining({ openRouterModelId: "openai/gpt-4", openRouterApiKey: "my-key" }),
+		)
+		expect(provider.contextProxy.setProviderSettings).toHaveBeenCalledTimes(2)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.save_api_config")
+	})
+
+	it("aborts active and queued profile mutations upon provider disposal", async () => {
+		mockStoredProfile({
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4",
+		})
+
+		await provider.dispose()
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-4.5",
+		})
+
+		expect(manager().saveConfig).not.toHaveBeenCalled()
 	})
 })

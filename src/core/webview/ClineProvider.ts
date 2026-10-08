@@ -259,6 +259,7 @@ export class ClineProvider
 	private taskHistoryStoreInitialized = false
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
 	private providerProfileMutationQueue = Promise.resolve()
+	private providerProfileMutationAbortController = new AbortController()
 	private historyTaskCreationQueue = Promise.resolve()
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
@@ -266,12 +267,23 @@ export class ClineProvider
 	}
 
 	private enqueueProviderProfileMutation<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+		if (this._disposed) {
+			return Promise.reject(new Error("ClineProvider is disposed"))
+		}
+
 		const controller = new AbortController()
+		const onProviderDispose = () => controller.abort()
+		this.providerProfileMutationAbortController.signal.addEventListener("abort", onProviderDispose, { once: true })
+
 		// Run fn after either outcome so a rejected mutation never poisons the queue.
-		const run = this.providerProfileMutationQueue.then(
-			() => fn(controller.signal),
-			() => fn(controller.signal),
-		)
+		const run = this.providerProfileMutationQueue
+			.then(
+				() => fn(controller.signal),
+				() => fn(controller.signal),
+			)
+			.finally(() => {
+				this.providerProfileMutationAbortController.signal.removeEventListener("abort", onProviderDispose)
+			})
 		const callerResult = this.withProviderProfileMutationTimeout(run, () => {
 			controller.abort()
 			this.log("Provider profile mutation timed out; aborting in-flight mutation")
@@ -294,9 +306,8 @@ export class ClineProvider
 			},
 		)
 
-		// Advance from the timeout-bounded result. Each fn checks its AbortSignal before
-		// writing state, so advancing the queue on timeout cannot produce stale overwrites.
-		this.providerProfileMutationQueue = callerResult.then(
+		// Keep serialization in place until the timed-out mutation and its rollback settle.
+		this.providerProfileMutationQueue = run.then(
 			() => undefined,
 			() => undefined,
 		)
@@ -848,6 +859,7 @@ export class ClineProvider
 
 		this._disposed = true
 		this._postStateToWebviewThrottled.cancel()
+		this.providerProfileMutationAbortController.abort()
 		this.log("Disposing ClineProvider...")
 
 		// Reject any tasks still waiting for a scheduler permit so they don't
@@ -1963,8 +1975,14 @@ export class ClineProvider
 	 * from is dropped instead of saved and reactivated.
 	 */
 	async updateProfileModel(name: string, expectedProvider: string, patch: Record<string, unknown>): Promise<void> {
+		if (this._disposed) {
+			return
+		}
+
 		try {
 			await this.enqueueProviderProfileMutation(async (signal) => {
+				if (signal.aborted || this._disposed) return
+
 				// Mirrors the profile name the webview is shown (see getStateToPostToWebview).
 				const task = this.getCurrentTask()
 				const { currentApiConfigName, organizationAllowList: stateOrganizationAllowList } =
@@ -1978,7 +1996,7 @@ export class ClineProvider
 
 				const { name: _name, id, ...stored } = await this.providerSettingsManager.getProfile({ name })
 
-				if (signal.aborted) return
+				if (signal.aborted || this._disposed) return
 
 				// A profile without an explicit provider is treated as OpenRouter, matching the chat ModelSelector.
 				const storedProvider = stored.apiProvider ?? providerIdentifiers.openrouter
@@ -2038,35 +2056,33 @@ export class ClineProvider
 				}
 
 				let savedConfig = false
-				let updatedContext = false
+				let shouldRollbackContext = false
+				const originalContextSettings: ProviderSettings = { ...stored, id } as ProviderSettings
 				try {
 					await this.providerSettingsManager.saveConfig(name, merged as ProviderSettings)
 					savedConfig = true
 
-					if (signal.aborted) {
+					if (signal.aborted || this._disposed) {
 						throw new Error("Provider profile mutation aborted")
 					}
 
 					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
 					if (name === currentApiConfigName) {
+						shouldRollbackContext = true
 						await this.contextProxy.setProviderSettings(merged as ProviderSettings)
-						updatedContext = true
 					}
 
-					if (signal.aborted) {
+					if (signal.aborted || this._disposed) {
 						throw new Error("Provider profile mutation aborted")
 					}
 				} catch (updateError) {
 					if (savedConfig) {
 						try {
-							await this.providerSettingsManager.saveConfig(name, { ...stored, id } as ProviderSettings)
+							await this.providerSettingsManager.saveConfig(name, originalContextSettings)
 							await this.updateGlobalState(
 								"listApiConfigMeta",
 								await this.providerSettingsManager.listConfig(),
 							)
-							if (updatedContext) {
-								await this.contextProxy.setProviderSettings({ ...stored, id } as ProviderSettings)
-							}
 						} catch (rollbackError) {
 							this.log(
 								`Failed to rollback profile '${name}' after update failure: ${
@@ -2075,10 +2091,21 @@ export class ClineProvider
 							)
 						}
 					}
+					if (shouldRollbackContext) {
+						try {
+							await this.contextProxy.setProviderSettings(originalContextSettings)
+						} catch (rollbackError) {
+							this.log(
+								`Failed to rollback context settings for '${name}' after update failure: ${
+									rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+								}`,
+							)
+						}
+					}
 					throw updateError
 				}
 
-				if (signal.aborted) {
+				if (signal.aborted || this._disposed) {
 					return
 				}
 
