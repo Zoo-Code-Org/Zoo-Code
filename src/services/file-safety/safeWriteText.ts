@@ -543,7 +543,10 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			// Kept when durability is unconfirmed (the rename may be lost on power loss) AND when
 			// the DACL restore failed: that backup is the only artifact still carrying the target's
 			// original security descriptor, so deleting it would destroy the recovery path.
-			if (backupCreated && backupPath && durabilityError === null && !daclRestoreFailed) {
+			// A copy that failed part way leaves a partial file at backupPath with backupCreated
+			// never set, so the condition has to cover backupAttempted too: after a successful
+			// publish nothing else would ever remove that half-written backup.
+			if ((backupCreated || backupAttempted) && backupPath && durabilityError === null && !daclRestoreFailed) {
 				try {
 					await fs.unlink(backupPath)
 				} catch {
