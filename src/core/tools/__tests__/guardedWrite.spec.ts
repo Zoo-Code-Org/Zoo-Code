@@ -346,6 +346,35 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
 
+		it("authorizes a create under an aliased ancestor and pins the publish's own spelling", async () => {
+			// The macOS /var -> /private/var shape: the workspace resolves through a link, and
+			// the directory the create lands in does not exist yet. Both the containment check
+			// and the publish primitive canonicalize through the nearest existing ancestor, so
+			// the write must proceed and the pin must be the SAME canonical spelling the
+			// publish computes for itself - two spellings of one file would make the pin
+			// reject a write that was just authorized.
+			const canonicalRoot = "/real/workspace"
+			mockedFsRealpath.mockImplementation(async (p) => {
+				const s = String(p)
+				if (s === path.resolve(WORKSPACE)) return canonicalRoot
+				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			})
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask()
+
+			await guardedWrite(task, "linkdir/new.txt", "data", "create")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
+			const options = mockedSafeWriteText.mock.calls[0][2] as Record<string, unknown>
+			// path.join, not a literal: the canonical spelling is joined the same way the
+			// guard and the publish both join it.
+			expect(options.expectedResolvedPath).toBe(path.join(canonicalRoot, "linkdir", "new.txt"))
+			// No TargetMovedError, no refusal: the guard and the publish agree on the
+			// canonical spelling of the file they are about to write.
+			expect(mockedSafeWriteText.mock.calls[0][0]).toBe(abs("linkdir/new.txt"))
+		})
+
 		it("re-checks containment under the lock, after the wait on the FIFO chain", async () => {
 			// The path was inside the workspace when it was queued; a link is swapped in while the
 			// write waits. The publish must not follow the new link.
