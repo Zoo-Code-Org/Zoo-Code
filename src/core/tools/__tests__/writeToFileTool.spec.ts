@@ -774,6 +774,33 @@ describe("writeToFileTool", () => {
 		})
 	})
 
+	describe("early-return stream state cleanup", () => {
+		it("releases the per-task stream state when a rooignore denial returns early", async () => {
+			// The denial returns before the try/catch teardown: without the release the abort
+			// listener stays for the task's lifetime and a retained streamFailed suppresses the
+			// diff preview of every later write_to_file in this task.
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never).streamFailed = true
+
+			await executeWriteFileTool({}, { accessAllowed: false })
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+		})
+
+		it("releases the per-task stream state when a missing parameter returns early", async () => {
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never).streamFailed = true
+
+			await writeToFileTool.execute({ path: "", content: "mock content" }, mockCline, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+		})
+	})
+
 	describe("user interaction", () => {
 		it("reverts changes when user rejects approval", async () => {
 			mockAskApproval.mockResolvedValue(false)
