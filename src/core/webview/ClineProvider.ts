@@ -58,6 +58,7 @@ import {
 	modelIdKeysByProvider,
 	isRetiredProvider,
 	providerIdentifiers,
+	type ProviderSettingsWithId,
 } from "@roo-code/types"
 
 const RESET_ONLY_KEYS: readonly string[] = [
@@ -1918,6 +1919,8 @@ export class ClineProvider
 				if (activate) {
 					const { mode } = await this.getState()
 
+					if (signal.aborted || this._disposed) return id
+
 					// These promises do the following:
 					// 1. Adds or updates the list of provider profiles.
 					// 2. Sets the current provider profile.
@@ -1935,6 +1938,8 @@ export class ClineProvider
 						this.contextProxy.setProviderSettings(providerSettings),
 					])
 
+					if (signal.aborted || this._disposed) return id
+
 					// Change the provider for the current task.
 					// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
 					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
@@ -1944,6 +1949,8 @@ export class ClineProvider
 				} else {
 					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
 				}
+
+				if (signal.aborted || this._disposed) return id
 
 				await this.postStateToWebview()
 				return id
@@ -1969,7 +1976,7 @@ export class ClineProvider
 				return ORGANIZATION_ALLOW_ALL
 			}
 			const settings = cloudService.getOrganizationSettings()
-			return settings ? settings.allowList : ORGANIZATION_ALLOW_ALL
+			return settings ? settings.allowList : undefined
 		} catch (error) {
 			this.log(
 				`Unable to read organization allow-list for model update: ${error instanceof Error ? error.message : String(error)}`,
@@ -2005,76 +2012,54 @@ export class ClineProvider
 					return
 				}
 
-				const { name: _name, id, ...stored } = await this.providerSettingsManager.getProfile({ name })
-
-				if (signal.aborted || this._disposed) return
-
-				// A profile without an explicit provider is treated as OpenRouter, matching the chat ModelSelector.
-				const storedProvider = stored.apiProvider ?? providerIdentifiers.openrouter
-
-				if (storedProvider !== expectedProvider) {
-					this.log(
-						`Ignoring model update for profile '${name}': provider is '${storedProvider}', expected '${expectedProvider}'`,
-					)
-					return
-				}
-
-				// Only model selection and its side-effect resets may be patched (see handleModelChangeSideEffects).
-				const providerModelKey: string | undefined =
-					storedProvider === providerIdentifiers.openai
-						? "openAiModelId"
-						: modelIdKeysByProvider[storedProvider as keyof typeof modelIdKeysByProvider]
-				const allowedKeys: ReadonlySet<string> = new Set(
-					providerModelKey ? [providerModelKey, ...RESET_ONLY_KEYS] : RESET_ONLY_KEYS,
-				)
-				const merged: Record<string, unknown> = { ...stored, id, apiProvider: storedProvider }
-				const appliedKeys: string[] = []
-				for (const [key, value] of Object.entries(patch)) {
-					// The provider is never patchable.
-					if (key === "apiProvider" || !allowedKeys.has(key)) {
-						continue
-					}
-					if (value !== null && typeof value !== "string" && typeof value !== "number") {
-						continue
-					}
-					if (RESET_ONLY_KEYS.includes(key) && value !== null && !(key === "awsCustomArn" && value === "")) {
-						continue
-					}
-					merged[key] = value === null ? undefined : value
-					appliedKeys.push(key)
-				}
-
 				const authoritativeOrganizationAllowList = this.getOrganizationAllowListForProfileMutation()
 				if (!authoritativeOrganizationAllowList) {
 					this.log(`Ignoring model update for profile '${name}': organization allow-list is unavailable`)
 					vscode.window.showErrorMessage(t("common:errors.violated_organization_allowlist"))
 					return
 				}
-				if (
-					!ProfileValidator.isProfileAllowed(merged as ProviderSettings, authoritativeOrganizationAllowList)
-				) {
-					this.log(
-						`Ignoring model update for profile '${name}': violates authoritative organization allow-list`,
-					)
-					vscode.window.showErrorMessage(t("common:errors.violated_organization_allowlist"))
-					return
+
+				const validateProfileAllowed = (candidate: ProviderSettingsWithId) => {
+					if (
+						!ProfileValidator.isProfileAllowed(
+							candidate as ProviderSettings,
+							authoritativeOrganizationAllowList,
+						)
+					) {
+						return false
+					}
+					if (
+						!stateOrganizationAllowList.allowAll &&
+						!ProfileValidator.isProfileAllowed(candidate as ProviderSettings, stateOrganizationAllowList)
+					) {
+						return false
+					}
+					return true
 				}
-				if (
-					!stateOrganizationAllowList.allowAll &&
-					!ProfileValidator.isProfileAllowed(merged as ProviderSettings, stateOrganizationAllowList)
-				) {
-					this.log(`Ignoring model update for profile '${name}': violates state organization allow-list`)
-					vscode.window.showErrorMessage(t("common:errors.violated_organization_allowlist"))
+
+				const result = await this.providerSettingsManager.updateProfileModel(
+					name,
+					expectedProvider,
+					patch,
+					validateProfileAllowed,
+				)
+
+				if (!result.success) {
+					if (result.reason === "disallowed") {
+						this.log(`Ignoring model update for profile '${name}': violates organization allow-list`)
+						vscode.window.showErrorMessage(t("common:errors.violated_organization_allowlist"))
+					} else if (result.reason === "provider_mismatch") {
+						this.log(
+							`Ignoring model update for profile '${name}': provider mismatch against expected '${expectedProvider}'`,
+						)
+					}
 					return
 				}
 
-				let savedConfig = false
+				const updatedProfile = result.updatedProfile!
+				const previousProfile = result.previousProfile!
 				let shouldRollbackContext = false
-				const originalContextSettings: ProviderSettings = { ...stored, id } as ProviderSettings
 				try {
-					await this.providerSettingsManager.saveConfig(name, merged as ProviderSettings)
-					savedConfig = true
-
 					if (signal.aborted || this._disposed) {
 						throw new Error("Provider profile mutation aborted")
 					}
@@ -2082,54 +2067,38 @@ export class ClineProvider
 					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
 					if (name === currentApiConfigName) {
 						shouldRollbackContext = true
-						await this.contextProxy.setProviderSettings(merged as ProviderSettings)
+						await this.contextProxy.setProviderSettings(updatedProfile as ProviderSettings)
 					}
 
 					if (signal.aborted || this._disposed) {
 						throw new Error("Provider profile mutation aborted")
 					}
 				} catch (updateError) {
-					if (savedConfig) {
-						try {
-							// Atomically restore original settings only if stored profile still matches
-							// what this mutation wrote (compare-and-swap). Any competing write to any field
-							// (including API keys) leaves the newer profile intact.
-							const restored = await this.providerSettingsManager.restoreConfigIfMatches(
-								name,
-								merged as ProviderSettings,
-								originalContextSettings,
+					try {
+						const restored = await this.providerSettingsManager.restoreConfigIfMatches(
+							name,
+							updatedProfile,
+							previousProfile,
+						)
+						if (restored) {
+							await this.updateGlobalState(
+								"listApiConfigMeta",
+								await this.providerSettingsManager.listConfig(),
 							)
-
-							if (restored) {
-								await this.updateGlobalState(
-									"listApiConfigMeta",
-									await this.providerSettingsManager.listConfig(),
-								)
-								if (shouldRollbackContext) {
-									await this.contextProxy.setProviderSettings(originalContextSettings)
-								}
-							} else {
-								this.log(
-									`Preserving newer profile for '${name}' saved by another provider instance; skipping rollback`,
-								)
+							if (shouldRollbackContext) {
+								await this.contextProxy.setProviderSettings(previousProfile as ProviderSettings)
 							}
-						} catch (rollbackError) {
+						} else {
 							this.log(
-								`Failed to rollback profile '${name}' after update failure: ${
-									rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-								}`,
+								`Preserving newer profile for '${name}' saved by another provider instance; skipping rollback`,
 							)
 						}
-					} else if (shouldRollbackContext) {
-						try {
-							await this.contextProxy.setProviderSettings(originalContextSettings)
-						} catch (rollbackError) {
-							this.log(
-								`Failed to rollback context settings for '${name}' after update failure: ${
-									rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-								}`,
-							)
-						}
+					} catch (rollbackError) {
+						this.log(
+							`Failed to rollback profile '${name}' after update failure: ${
+								rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+							}`,
+						)
 					}
 					throw updateError
 				}
@@ -2148,9 +2117,14 @@ export class ClineProvider
 					currentTask.instanceId === initialInstanceId
 
 				if (isSameTask) {
-					this.updateTaskApiHandlerIfNeeded(merged as ProviderSettings, { forceRebuild: true })
+					this.updateTaskApiHandlerIfNeeded(updatedProfile as ProviderSettings, { forceRebuild: true })
 					await this.persistStickyProviderProfileToCurrentTask(name)
 				}
+
+				if (signal.aborted || this._disposed) {
+					return
+				}
+
 				await this.postStateToWebview()
 			})
 		} catch (error) {
@@ -2236,7 +2210,7 @@ export class ClineProvider
 	): Promise<void> {
 		const { name, id, ...providerSettings } = await this.providerSettingsManager.activateProfile(args)
 
-		if (signal?.aborted) return
+		if (signal?.aborted || this._disposed) return
 
 		const persistModeConfig = options?.persistModeConfig ?? true
 		const persistTaskHistory = options?.persistTaskHistory ?? true
@@ -2251,11 +2225,17 @@ export class ClineProvider
 			])
 		}
 
+		if (signal?.aborted || this._disposed) return
+
 		const { mode } = await this.getState()
+
+		if (signal?.aborted || this._disposed) return
 
 		if (id && persistModeConfig) {
 			await this.providerSettingsManager.setModeConfig(mode, id)
 		}
+
+		if (signal?.aborted || this._disposed) return
 
 		// Change the provider for the current task.
 		this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true, skipCurrentTaskRebuild })
@@ -2266,9 +2246,13 @@ export class ClineProvider
 			await this.persistStickyProviderProfileToCurrentTask(name, { skipCurrentTaskRebuild })
 		}
 
+		if (signal?.aborted || this._disposed) return
+
 		if (!skipCurrentTaskRebuild) {
 			await this.postStateToWebview()
 		}
+
+		if (signal?.aborted || this._disposed) return
 
 		if (providerSettings.apiProvider && !skipCurrentTaskRebuild) {
 			this.emit(RooCodeEventName.ProviderProfileChanged, { name, provider: providerSettings.apiProvider })

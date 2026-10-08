@@ -4,10 +4,16 @@ import * as vscode from "vscode"
 import { makeCompositeDisposable } from "../../../test-utils/vscode"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService } from "@roo-code/cloud"
-import { providerIdentifiers, type ProviderSettings } from "@roo-code/types"
+import {
+	providerIdentifiers,
+	modelIdKeysByProvider,
+	type ProviderSettings,
+	type ProviderSettingsWithId,
+} from "@roo-code/types"
 import deepEqual from "fast-deep-equal"
 
 import { ContextProxy } from "../../config/ContextProxy"
+import { RESET_ONLY_KEYS } from "../../config/ProviderSettingsManager"
 import { ClineProvider } from "../ClineProvider"
 import { WebviewFocusTracker } from "../WebviewFocusTracker"
 import { Task } from "../../task/Task"
@@ -158,6 +164,7 @@ describe("ClineProvider - updateProfileModel", () => {
 		return {
 			getProfile: vi.mocked(settingsManager.getProfile),
 			saveConfig: vi.mocked(settingsManager.saveConfig),
+			updateProfileModel: vi.mocked(settingsManager.updateProfileModel),
 			restoreConfigIfMatches: vi.mocked(settingsManager.restoreConfigIfMatches),
 			activateProfile: vi.mocked(settingsManager.activateProfile),
 			setModeConfig: vi.mocked(settingsManager.setModeConfig),
@@ -264,6 +271,49 @@ describe("ClineProvider - updateProfileModel", () => {
 					storedProfiles[name] = { name, id: (config as Partial<StoredProfile>).id || "test-id", ...config }
 					return "test-id"
 				}),
+				updateProfileModel: vi
+					.fn()
+					.mockImplementation(
+						async (
+							name: string,
+							expectedProvider: string,
+							patch: Record<string, unknown>,
+							validate?: (candidate: ProviderSettingsWithId) => boolean,
+						) => {
+							const current = storedProfiles[name]
+							if (!current) return { success: false, reason: "not_found" }
+							const storedProvider = current.apiProvider ?? providerIdentifiers.openrouter
+							if (storedProvider !== expectedProvider)
+								return { success: false, reason: "provider_mismatch" }
+
+							const providerModelKey =
+								storedProvider === providerIdentifiers.openai
+									? "openAiModelId"
+									: modelIdKeysByProvider[storedProvider as keyof typeof modelIdKeysByProvider]
+							const allowedKeys = new Set(
+								providerModelKey ? [providerModelKey, ...RESET_ONLY_KEYS] : RESET_ONLY_KEYS,
+							)
+							const { name: _profileName, ...cleanCurrent } = current
+							const merged: Record<string, unknown> = { ...cleanCurrent, apiProvider: storedProvider }
+							for (const [key, value] of Object.entries(patch)) {
+								if (key === "apiProvider" || !allowedKeys.has(key)) continue
+								if (value !== null && typeof value !== "string" && typeof value !== "number") continue
+								if (
+									RESET_ONLY_KEYS.includes(key) &&
+									value !== null &&
+									!(key === "awsCustomArn" && value === "")
+								)
+									continue
+								merged[key] = value === null ? undefined : value
+							}
+							const candidate = { id: current.id || "test-id", ...merged } as ProviderSettingsWithId
+							if (validate && !validate(candidate)) {
+								return { success: false, reason: "disallowed" }
+							}
+							await provider["providerSettingsManager"].saveConfig(name, candidate as ProviderSettings)
+							return { success: true, updatedProfile: candidate, previousProfile: current }
+						},
+					),
 				restoreConfigIfMatches: vi
 					.fn()
 					.mockImplementation(
@@ -332,7 +382,7 @@ describe("ClineProvider - updateProfileModel", () => {
 			reasoningEffort: null,
 		})
 
-		expect(manager().getProfile).toHaveBeenCalledWith({ name: "test-config" })
+		expect(manager().updateProfileModel).toHaveBeenCalledTimes(1)
 		expect(manager().saveConfig).toHaveBeenCalledTimes(1)
 		expect(manager().saveConfig).toHaveBeenCalledWith("test-config", {
 			id: "test-id",
@@ -347,6 +397,50 @@ describe("ClineProvider - updateProfileModel", () => {
 		await provider.updateProfileModel("test-config", providerIdentifiers.anthropic, { apiModelId: "x" })
 
 		expect(manager().saveConfig).not.toHaveBeenCalled()
+	})
+
+	it("updates a normal provider (Anthropic) profile using apiModelId", async () => {
+		mockStoredProfile({
+			apiProvider: providerIdentifiers.anthropic,
+			apiModelId: "claude-3-5-sonnet",
+			apiKey: "anthropic-key",
+		})
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.anthropic, {
+			apiModelId: "claude-3-7-sonnet",
+		})
+
+		expect(manager().saveConfig).toHaveBeenCalledTimes(1)
+		expect(manager().saveConfig).toHaveBeenCalledWith("test-config", {
+			id: "test-id",
+			apiProvider: providerIdentifiers.anthropic,
+			apiModelId: "claude-3-7-sonnet",
+			apiKey: "anthropic-key",
+		})
+		expect(storedProfiles["test-config"].apiModelId).toBe("claude-3-7-sonnet")
+		expect(storedProfiles["test-config"].apiKey).toBe("anthropic-key")
+	})
+
+	it("updates OpenAI profile using openAiModelId", async () => {
+		mockStoredProfile({
+			apiProvider: providerIdentifiers.openai,
+			openAiModelId: "gpt-4o",
+			openAiApiKey: "openai-key",
+		})
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openai, {
+			openAiModelId: "gpt-4.5-preview",
+		})
+
+		expect(manager().saveConfig).toHaveBeenCalledTimes(1)
+		expect(manager().saveConfig).toHaveBeenCalledWith("test-config", {
+			id: "test-id",
+			apiProvider: providerIdentifiers.openai,
+			openAiModelId: "gpt-4.5-preview",
+			openAiApiKey: "openai-key",
+		})
+		expect(storedProfiles["test-config"].openAiModelId).toBe("gpt-4.5-preview")
+		expect(storedProfiles["test-config"].openAiApiKey).toBe("openai-key")
 	})
 
 	it("treats a profile without apiProvider as OpenRouter and normalizes apiProvider when saving", async () => {
@@ -472,7 +566,7 @@ describe("ClineProvider - updateProfileModel", () => {
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.violated_organization_allowlist")
 	})
 
-	it("allows a model update when an authenticated session has no organization settings (defaults to ORGANIZATION_ALLOW_ALL)", async () => {
+	it("rejects a model update when an authenticated session has no organization settings (fails closed)", async () => {
 		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "stored/model" })
 		mockCloudInstance.isAuthenticated.mockReturnValue(true)
 		mockCloudInstance.getOrganizationSettings.mockReturnValue(undefined)
@@ -481,13 +575,8 @@ describe("ClineProvider - updateProfileModel", () => {
 			openRouterModelId: "new/model",
 		})
 
-		expect(manager().saveConfig).toHaveBeenCalledWith(
-			"test-config",
-			expect.objectContaining({
-				openRouterModelId: "new/model",
-			}),
-		)
-		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		expect(manager().saveConfig).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.violated_organization_allowlist")
 	})
 
 	it("drops an update for a profile that is not the visible profile without reading or saving it", async () => {
@@ -495,7 +584,7 @@ describe("ClineProvider - updateProfileModel", () => {
 			openRouterModelId: "x/y",
 		})
 
-		expect(manager().getProfile).not.toHaveBeenCalled()
+		expect(manager().updateProfileModel).not.toHaveBeenCalled()
 		expect(manager().saveConfig).not.toHaveBeenCalled()
 	})
 

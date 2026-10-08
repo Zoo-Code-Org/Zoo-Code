@@ -13,12 +13,28 @@ import {
 	type ProviderName,
 	isProviderName,
 	isRetiredProvider,
+	providerIdentifiers,
+	modelIdKeysByProvider,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { Mode, modes } from "../../shared/modes"
 import { buildApiHandler } from "../../api"
 import { downgradeLegacyRooConfig } from "./routerRemoval"
+
+export const RESET_ONLY_KEYS: readonly string[] = [
+	"awsCustomArn",
+	"reasoningEffort",
+	"modelMaxTokens",
+	"modelMaxThinkingTokens",
+]
+
+export interface UpdateProfileModelResult {
+	success: boolean
+	updatedProfile?: ProviderSettingsWithId
+	previousProfile?: ProviderSettingsWithId
+	reason?: "not_found" | "provider_mismatch" | "disallowed" | "cas_failed"
+}
 
 // Type-safe model migrations mapping
 type ModelMigrations = {
@@ -464,6 +480,104 @@ export class ProviderSettingsManager {
 			})
 		} catch (error) {
 			throw new Error(`Failed to restore config: ${error}`)
+		}
+	}
+
+	/**
+	 * Atomically updates a profile's model configuration if and only if the profile exists,
+	 * its stored provider matches expectedProvider, and any optional validator passes.
+	 * Applies only model-specific keys and resets, preserving other profile fields (such as
+	 * API keys or base URLs) that may have been updated concurrently by another manager instance.
+	 * Performs a compare-and-swap write to guard against clobbering concurrent storage changes.
+	 */
+	public async updateProfileModel(
+		name: string,
+		expectedProvider: string,
+		patch: Record<string, unknown>,
+		validateProfileAllowed?: (candidate: ProviderSettingsWithId) => boolean,
+	): Promise<UpdateProfileModelResult> {
+		try {
+			return await this.lock(async () => {
+				const rawBefore = await this.context.secrets.get(this.secretsKey)
+				const providerProfiles = rawBefore ? (JSON.parse(rawBefore) as ProviderProfiles) : await this.load()
+				const current = providerProfiles.apiConfigs[name]
+				if (!current) {
+					return { success: false, reason: "not_found" }
+				}
+
+				const storedProvider = current.apiProvider ?? providerIdentifiers.openrouter
+				if (storedProvider !== expectedProvider) {
+					return { success: false, reason: "provider_mismatch" }
+				}
+
+				const applyPatchToProfile = (base: ProviderSettingsWithId) => {
+					const baseProvider = base.apiProvider ?? providerIdentifiers.openrouter
+					const providerModelKey: string | undefined =
+						baseProvider === providerIdentifiers.openai
+							? "openAiModelId"
+							: modelIdKeysByProvider[baseProvider as keyof typeof modelIdKeysByProvider]
+					const allowedKeys: ReadonlySet<string> = new Set(
+						providerModelKey ? [providerModelKey, ...RESET_ONLY_KEYS] : RESET_ONLY_KEYS,
+					)
+
+					const merged: Record<string, unknown> = { ...base, apiProvider: baseProvider }
+					for (const [key, value] of Object.entries(patch)) {
+						if (key === "apiProvider" || !allowedKeys.has(key)) {
+							continue
+						}
+						if (value !== null && typeof value !== "string" && typeof value !== "number") {
+							continue
+						}
+						if (
+							RESET_ONLY_KEYS.includes(key) &&
+							value !== null &&
+							!(key === "awsCustomArn" && value === "")
+						) {
+							continue
+						}
+						merged[key] = value === null ? undefined : value
+					}
+					return this.normalizeAndFilterConfig(merged as ProviderSettingsWithId, base.id || this.generateId())
+				}
+
+				const candidate = applyPatchToProfile(current)
+				if (validateProfileAllowed && !validateProfileAllowed(candidate)) {
+					return { success: false, reason: "disallowed" }
+				}
+
+				// Storage-level compare-and-swap:
+				const rawLatest = await this.context.secrets.get(this.secretsKey)
+				let targetProfiles = providerProfiles
+				if (rawLatest !== rawBefore) {
+					targetProfiles = rawLatest
+						? (JSON.parse(rawLatest) as ProviderProfiles)
+						: this.defaultProviderProfiles
+					const latestCurrent = targetProfiles.apiConfigs?.[name]
+					if (
+						!latestCurrent ||
+						(latestCurrent.apiProvider ?? providerIdentifiers.openrouter) !== expectedProvider
+					) {
+						return { success: false, reason: "cas_failed" }
+					}
+					// Re-apply patch onto latestCurrent to preserve any newly updated API keys or fields
+					const reCandidate = applyPatchToProfile(latestCurrent)
+					if (validateProfileAllowed && !validateProfileAllowed(reCandidate)) {
+						return { success: false, reason: "disallowed" }
+					}
+					targetProfiles.apiConfigs[name] = reCandidate
+				} else {
+					targetProfiles.apiConfigs[name] = candidate
+				}
+
+				await this.store(targetProfiles)
+				return {
+					success: true,
+					updatedProfile: targetProfiles.apiConfigs[name],
+					previousProfile: current,
+				}
+			})
+		} catch (error) {
+			throw new Error(`Failed to update profile model: ${error}`)
 		}
 	}
 

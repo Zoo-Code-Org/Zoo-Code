@@ -1731,5 +1731,248 @@ describe("ProviderSettingsManager", () => {
 
 			expect(result).toBe(false)
 		})
+
+		it("throws wrapped error and does not store when secrets read fails", async () => {
+			mockSecrets.get.mockRejectedValue(new Error("Disk I/O error"))
+
+			await expect(
+				providerSettingsManager.restoreConfigIfMatches(
+					"test",
+					{ apiProvider: providerIdentifiers.anthropic },
+					{ apiProvider: providerIdentifiers.anthropic },
+				),
+			).rejects.toThrow("Failed to restore config: Error: Disk I/O error")
+
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+
+		it("throws wrapped error and does not store when secrets data is corrupted JSON", async () => {
+			mockSecrets.get.mockResolvedValue("invalid json content")
+
+			await expect(
+				providerSettingsManager.restoreConfigIfMatches(
+					"test",
+					{ apiProvider: providerIdentifiers.anthropic },
+					{ apiProvider: providerIdentifiers.anthropic },
+				),
+			).rejects.toThrow("Failed to restore config:")
+
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+
+		it("throws wrapped error when secrets store fails", async () => {
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "test",
+				apiConfigs: {
+					test: {
+						id: "test-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-7-sonnet",
+					},
+				},
+			}
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+			mockSecrets.store.mockRejectedValue(new Error("Keychain locked"))
+
+			await expect(
+				providerSettingsManager.restoreConfigIfMatches(
+					"test",
+					{ id: "test-id", apiProvider: providerIdentifiers.anthropic, apiModelId: "claude-3-7-sonnet" },
+					{ id: "test-id", apiProvider: providerIdentifiers.anthropic, apiModelId: "claude-3-5-sonnet" },
+				),
+			).rejects.toThrow(
+				"Failed to restore config: Error: Failed to write provider profiles to secrets: Error: Keychain locked",
+			)
+		})
+	})
+
+	describe("updateProfileModel", () => {
+		it("atomically updates a normal provider (Anthropic) model using apiModelId", async () => {
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "test",
+				apiConfigs: {
+					test: {
+						id: "test-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-5-sonnet",
+						apiKey: "test-key",
+					},
+				},
+			}
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+
+			const result = await providerSettingsManager.updateProfileModel("test", providerIdentifiers.anthropic, {
+				apiModelId: "claude-3-7-sonnet",
+			})
+
+			expect(result.success).toBe(true)
+			expect(result.updatedProfile?.apiModelId).toBe("claude-3-7-sonnet")
+			expect(result.updatedProfile?.apiKey).toBe("test-key")
+			expect(mockSecrets.store).toHaveBeenCalledTimes(1)
+		})
+
+		it("atomically updates OpenAI model using openAiModelId", async () => {
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "test",
+				apiConfigs: {
+					test: {
+						id: "test-id",
+						apiProvider: providerIdentifiers.openai,
+						openAiModelId: "gpt-4o",
+						openAiApiKey: "test-key",
+					},
+				},
+			}
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+
+			const result = await providerSettingsManager.updateProfileModel("test", providerIdentifiers.openai, {
+				openAiModelId: "gpt-4.5-preview",
+			})
+
+			expect(result.success).toBe(true)
+			expect(result.updatedProfile?.openAiModelId).toBe("gpt-4.5-preview")
+			expect(result.updatedProfile?.openAiApiKey).toBe("test-key")
+			expect(mockSecrets.store).toHaveBeenCalledTimes(1)
+		})
+
+		it("rejects provider mismatch without modifying storage", async () => {
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "test",
+				apiConfigs: {
+					test: {
+						id: "test-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-5-sonnet",
+					},
+				},
+			}
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+
+			const result = await providerSettingsManager.updateProfileModel("test", providerIdentifiers.openai, {
+				openAiModelId: "gpt-4o",
+			})
+
+			expect(result.success).toBe(false)
+			expect(result.reason).toBe("provider_mismatch")
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+
+		it("returns not_found when config name does not exist", async () => {
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "test",
+				apiConfigs: {},
+			}
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+
+			const result = await providerSettingsManager.updateProfileModel(
+				"non-existent",
+				providerIdentifiers.anthropic,
+				{ apiModelId: "claude-3-7-sonnet" },
+			)
+
+			expect(result.success).toBe(false)
+			expect(result.reason).toBe("not_found")
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+
+		it("rejects model when validation function returns false", async () => {
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "test",
+				apiConfigs: {
+					test: {
+						id: "test-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-5-sonnet",
+					},
+				},
+			}
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+
+			const result = await providerSettingsManager.updateProfileModel(
+				"test",
+				providerIdentifiers.anthropic,
+				{ apiModelId: "claude-3-7-sonnet" },
+				(_candidate) => false,
+			)
+
+			expect(result.success).toBe(false)
+			expect(result.reason).toBe("disallowed")
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+
+		it("preserves concurrent API key changes across manager instances", async () => {
+			let storedRaw = JSON.stringify({
+				currentApiConfigName: "test",
+				apiConfigs: {
+					test: {
+						id: "test-id",
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openai/gpt-4",
+						openRouterApiKey: "initial-key",
+					},
+				},
+			})
+
+			mockSecrets.get.mockImplementation(async () => storedRaw)
+			const managerA = new ProviderSettingsManager(mockContext)
+			const managerB = new ProviderSettingsManager(mockContext)
+			await managerA.initialize()
+			await managerB.initialize()
+
+			let readCount = 0
+			mockSecrets.get.mockImplementation(async () => {
+				readCount++
+				if (readCount === 1) {
+					return storedRaw
+				}
+				if (readCount === 2) {
+					// Interleave competing write that updates the API key
+					await managerB.saveConfig("test", {
+						id: "test-id",
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openai/gpt-4",
+						openRouterApiKey: "concurrent-api-key",
+					})
+				}
+				return storedRaw
+			})
+			mockSecrets.store.mockImplementation(async (_key, val) => {
+				storedRaw = val
+			})
+
+			const result = await managerA.updateProfileModel("test", providerIdentifiers.openrouter, {
+				openRouterModelId: "openai/gpt-4.5",
+			})
+
+			expect(result.success).toBe(true)
+			expect(result.updatedProfile?.openRouterModelId).toBe("openai/gpt-4.5")
+			expect(result.updatedProfile?.openRouterApiKey).toBe("concurrent-api-key")
+			const finalStored = JSON.parse(storedRaw)
+			expect(finalStored.apiConfigs.test.openRouterApiKey).toBe("concurrent-api-key")
+			expect(finalStored.apiConfigs.test.openRouterModelId).toBe("openai/gpt-4.5")
+		})
+
+		it("throws wrapped error when secrets store fails", async () => {
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "test",
+				apiConfigs: {
+					test: {
+						id: "test-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-5-sonnet",
+					},
+				},
+			}
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+			mockSecrets.store.mockRejectedValue(new Error("Disk write error"))
+
+			await expect(
+				providerSettingsManager.updateProfileModel("test", providerIdentifiers.anthropic, {
+					apiModelId: "claude-3-7-sonnet",
+				}),
+			).rejects.toThrow(
+				"Failed to update profile model: Error: Failed to write provider profiles to secrets: Error: Disk write error",
+			)
+		})
 	})
 })
