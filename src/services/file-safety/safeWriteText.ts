@@ -102,14 +102,29 @@ function _stagingDir(dir: string): string {
 	// symlink planted by another process would stage - and then publish - outside
 	// the target directory. Anything that is not a real directory owned by this
 	// process is rejected instead of used.
+	let preExisted = false
 	try {
 		const existing = fsSync.lstatSync(sd)
+		preExisted = true
 		if (!existing.isDirectory()) {
 			throw new UnsafeStagingDirectoryError(sd, "it exists and is not a directory")
 		}
 	} catch (error: unknown) {
 		if (error instanceof UnsafeStagingDirectoryError) throw error
 		if (_errorCode(error) !== "ENOENT") throw error
+	}
+	// A directory this call created but never hands to the caller would sit in the user's
+	// target directory forever - the caller never receives the path, so nothing else can
+	// clean it up. A pre-existing staging directory is left alone: it may belong to a
+	// concurrent write.
+	function _abandonIfCreated(): void {
+		if (!preExisted) {
+			try {
+				fsSync.rmdirSync(sd)
+			} catch {
+				// not empty or already gone: there is nothing else this call can do
+			}
+		}
 	}
 	// mode:0o700 protects a freshly created staging dir; the best-effort chmod
 	// repairs a pre-existing one (mkdirSync with recursive:true never chmods an
@@ -119,9 +134,11 @@ function _stagingDir(dir: string): string {
 	// check above and mkdirSync.
 	const created = fsSync.lstatSync(sd)
 	if (!created.isDirectory()) {
+		_abandonIfCreated()
 		throw new UnsafeStagingDirectoryError(sd, "it was replaced by a non-directory")
 	}
 	if (typeof process.getuid === "function" && created.uid !== process.getuid()) {
+		_abandonIfCreated()
 		throw new UnsafeStagingDirectoryError(sd, "it is not owned by this process")
 	}
 	try {

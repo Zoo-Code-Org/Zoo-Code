@@ -42,6 +42,7 @@ vi.mock("fs", () => ({
 	fchmodSync: vi.fn(),
 	statSync: vi.fn(),
 	lstatSync: vi.fn(),
+	rmdirSync: vi.fn(),
 	Stats: class Stats {},
 }))
 
@@ -1167,6 +1168,36 @@ describe("safeWriteText", () => {
 			const name = await _rejectionName(safeWriteText(targetPath, "data", { platform: "linux" }))
 			expect(name).toBe("UnsafeStagingDirectoryError")
 			expect(fs.rename).not.toHaveBeenCalled()
+		})
+
+		it("removes a staging directory it created when the post-create re-check rejects it", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+			// Guard: nothing there, so this call is the one that creates it. Re-check: swapped for a
+			// symlink. The caller never receives the path, so this call is also the only one that can
+			// clean it up - otherwise a stray .file-safety-staging sits in the user's directory.
+			vi.mocked(fsSync.lstatSync)
+				.mockImplementationOnce(() => {
+					throw enoent
+				})
+				.mockReturnValueOnce(_linkStats())
+
+			const name = await _rejectionName(safeWriteText(targetPath, "data", { platform: "linux" }))
+			expect(name).toBe("UnsafeStagingDirectoryError")
+			expect(fsSync.rmdirSync).toHaveBeenCalledWith(_stagingDir(path.dirname(targetPath)))
+		})
+
+		it("leaves a pre-existing staging directory when the post-create re-check rejects it", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			// Guard: the directory was already there - it may belong to a concurrent write, so this
+			// call must not remove it even though the re-check rejects the path.
+			vi.mocked(fsSync.lstatSync).mockReturnValueOnce(_dirStats()).mockReturnValueOnce(_linkStats())
+
+			const name = await _rejectionName(safeWriteText(targetPath, "data", { platform: "linux" }))
+			expect(name).toBe("UnsafeStagingDirectoryError")
+			expect(fsSync.rmdirSync).not.toHaveBeenCalled()
 		})
 
 		it("does not retry a rename failure on a platform without sharing violations", async () => {
