@@ -429,8 +429,11 @@ export class ProviderSettingsManager {
 				}
 
 				const currentId = current.id || this.generateId()
-				const expectedTarget = this.normalizeAndFilterConfig(expectedConfig, expectedConfig.id || currentId)
-				if (!deepEqual(current, expectedTarget)) {
+				const expectedTarget = JSON.parse(
+					JSON.stringify(this.normalizeAndFilterConfig(expectedConfig, expectedConfig.id || currentId)),
+				) as ProviderSettingsWithId
+				const cleanCurrent = JSON.parse(JSON.stringify(current)) as ProviderSettingsWithId
+				if (!deepEqual(cleanCurrent, expectedTarget)) {
 					return false
 				}
 

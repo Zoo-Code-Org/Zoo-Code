@@ -5,6 +5,7 @@ import { makeCompositeDisposable } from "../../../test-utils/vscode"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService } from "@roo-code/cloud"
 import { providerIdentifiers, type ProviderSettings } from "@roo-code/types"
+import deepEqual from "fast-deep-equal"
 
 import { ContextProxy } from "../../config/ContextProxy"
 import { ClineProvider } from "../ClineProvider"
@@ -274,15 +275,10 @@ describe("ClineProvider - updateProfileModel", () => {
 								id: (expectedConfig as Partial<StoredProfile>).id || current.id,
 								...expectedConfig,
 							}
-							for (const [key, val] of Object.entries(expectedTarget)) {
-								if (val !== undefined && (current as Record<string, unknown>)[key] !== val) {
-									return false
-								}
-							}
-							for (const [key, val] of Object.entries(current)) {
-								if (val !== undefined && (expectedTarget as Record<string, unknown>)[key] !== val) {
-									return false
-								}
+							const cleanCurrent = JSON.parse(JSON.stringify(current))
+							const cleanExpected = JSON.parse(JSON.stringify(expectedTarget))
+							if (!deepEqual(cleanCurrent, cleanExpected)) {
+								return false
 							}
 							await provider["providerSettingsManager"].saveConfig(name, restoredConfig)
 							return true

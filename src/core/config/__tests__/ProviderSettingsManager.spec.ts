@@ -1586,6 +1586,41 @@ describe("ProviderSettingsManager", () => {
 			expect(storedConfig.apiConfigs.test.apiModelId).toBe("claude-3-5-sonnet")
 		})
 
+		it("restores original config when expectedConfig has an undefined key absent from stored profile", async () => {
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "default",
+				apiConfigs: {
+					test: {
+						id: "test-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-7-sonnet",
+						apiKey: "test-key",
+					},
+				},
+			}
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+
+			const expectedConfig: ProviderSettingsWithId = {
+				id: "test-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-3-7-sonnet",
+				apiKey: "test-key",
+				anthropicBaseUrl: undefined,
+			}
+			const restoredConfig: ProviderSettingsWithId = {
+				id: "test-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-3-5-sonnet",
+				apiKey: "test-key",
+			}
+
+			const result = await providerSettingsManager.restoreConfigIfMatches("test", expectedConfig, restoredConfig)
+
+			expect(result).toBe(true)
+			const storedConfig = JSON.parse(mockSecrets.store.mock.calls[mockSecrets.store.mock.calls.length - 1][1])
+			expect(storedConfig.apiConfigs.test.apiModelId).toBe("claude-3-5-sonnet")
+		})
+
 		it("skips restore when current profile differs from expected config (competing write)", async () => {
 			const existingConfig: ProviderProfiles = {
 				currentApiConfigName: "default",
