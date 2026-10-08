@@ -3599,6 +3599,19 @@ export class ClineProvider
 	}
 
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {
+		// Deletion snapshots and compensates the same durable stores that upsert,
+		// activation, and mode switch mutate, so it has to run serialized against them:
+		// an overlapping mutation could otherwise land between the snapshot and the
+		// rollback, and the compensation would restore a stale copy over the newer write.
+		return this.enqueueProviderProfileMutation((signal) =>
+			this.deleteProviderProfileUnlocked(profileToDelete, signal),
+		)
+	}
+
+	private async deleteProviderProfileUnlocked(
+		profileToDelete: ProviderSettingsEntry,
+		signal: AbortSignal,
+		): Promise<void> {
 		const globalSettings = this.contextProxy.getValues()
 		let profileToActivate: string | undefined = globalSettings.currentApiConfigName
 
@@ -3686,6 +3699,19 @@ export class ClineProvider
 			// tracked as its own unit rather than widened into this method.
 			const selectionAfterDelete = this.contextProxy.getValues().currentApiConfigName
 			deletedWasGlobal = profileToDelete.name === selectionAfterDelete
+
+			// The queue advances on the timeout-bounded caller result, so a cancelled deletion
+			// must stop touching durable state here. Everything below rewrites the shared
+			// selection, the shared provider settings, and other views' pins - any of those
+			// landing after the next queued mutation has run would overwrite that mutation.
+			if (signal.aborted) {
+				this.log(
+					`deleteProviderProfile: cancelled before the selection/settings rewrite; the deletion stopped with the profile list already updated.`,
+				)
+				throw new Error(
+					"Profile deletion was cancelled before the selection and settings rewrite",
+				)
+			}
 
 			// Capture this view's pin before any rewrite: a view pinned to the
 			// deleted profile while the global selection points elsewhere must still be
