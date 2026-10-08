@@ -3617,6 +3617,69 @@ const provider = new ClineProvider(
 			await provider.dispose()
 		})
 
+		it("restores the shared provider settings when a step after the rewrite fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+			await provider.contextProxy.setProviderSettings({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "doomed-key",
+			})
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue("doomed-id"),
+				getProfile: vi.fn().mockImplementation(async ({ name }) =>
+					name === "doomed-profile"
+						? {
+							name: "doomed-profile",
+							id: "doomed-id",
+							apiProvider: providerIdentifiers.openrouter,
+							openRouterApiKey: "doomed-key",
+						}
+						: {
+							name: "keeper-profile",
+							id: "keeper-id",
+							apiProvider: providerIdentifiers.anthropic,
+							apiKey: "keeper-key",
+						}
+				),
+			}
+			// The failure lands after the shared provider keys were replaced with the survivor's:
+			// the rollback has to put those keys back too, or the restored selection would be
+			// paired with another profile's provider and credentials.
+			provider["rePinViewLocalStateForDeletedProfile"] = vi
+				.fn()
+				.mockRejectedValue(new Error("sibling re-pin failed"))
+
+			await expect(provider.deleteProviderProfile(doomedProfile)).rejects.toThrow("sibling re-pin failed")
+
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("doomed-profile")
+			expect(provider.contextProxy.getProviderSettings()).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "doomed-key",
+			})
+			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([doomedProfile, keeperProfile])
+			await provider.dispose()
+		})
+
 
 		it("leaves the view buffer untouched when the deleted profile is neither globally active nor view-pinned", async () => {
 const provider = new ClineProvider(

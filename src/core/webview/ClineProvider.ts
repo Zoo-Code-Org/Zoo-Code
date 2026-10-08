@@ -2523,7 +2523,7 @@ export class ClineProvider
 	private async deleteProviderProfileUnlocked(
 		profileToDelete: ProviderSettingsEntry,
 		signal: AbortSignal,
-		): Promise<void> {
+	): Promise<void> {
 		const globalSettings = this.contextProxy.getValues()
 		let profileToActivate: string | undefined = globalSettings.currentApiConfigName
 
@@ -2596,10 +2596,16 @@ export class ClineProvider
 		const previousGlobalSelection = globalSettings.currentApiConfigName
 		const previousViewPin = this.viewLocalState.currentApiConfigName
 		const previousViewOverlay = this.viewLocalState.apiConfiguration
+			// The shared provider keys are a fifth durable store this method rewrites: without the
+			// same snapshot the compensation would restore the profile list and the selection while
+			// leaving the survivor's provider keys in place, i.e. the restored profile's name paired
+			// with another profile's configuration.
+			const previousSharedProviderSettings = this.contextProxy.getProviderSettings()
 		// Which writes have actually landed: only those need compensation.
 		let listWriteLanded = false
 		let selectionWriteLanded = false
 		let viewPinWriteLanded = false
+		let providerSettingsWriteLanded = false
 		const entries = previousEntries.filter(({ name }) => name !== profileToDelete.name)
 
 		// Write only the profile list back: replaying the full settings snapshot
@@ -2674,6 +2680,7 @@ export class ClineProvider
 				// the shared provider keys still carry its settings; replace them so
 				// getState() reports the surviving profile's configuration.
 				await this.contextProxy.setProviderSettings(survivingSettings)
+					providerSettingsWriteLanded = true
 
 				if (viewWasPinnedToDeleted) {
 					// This view's nested overlay (viewLocalState.apiConfiguration, seeded
@@ -2721,6 +2728,16 @@ export class ClineProvider
 					await this.contextProxy.setValue("listApiConfigMeta", previousEntries)
 				} catch (compensationError: unknown) {
 					compensationFailures.push(`profile list: ${describeFailure(compensationError)}`)
+				}
+			}
+
+			if (providerSettingsWriteLanded) {
+				try {
+					await this.contextProxy.setProviderSettings(previousSharedProviderSettings)
+				} catch (compensationError: unknown) {
+					compensationFailures.push(
+						`shared provider settings: ${describeFailure(compensationError)}`,
+					)
 				}
 			}
 

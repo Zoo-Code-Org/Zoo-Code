@@ -771,25 +771,31 @@ describe("openClineInNewTab", () => {
 			return previousExecute?.(command)
 		})
 
-		await expect(
-			openClineInNewTab({
-				context: mockContext,
-				outputChannel: mockOutputChannel,
-				webviewFocusTracker: new WebviewFocusTracker(),
-			}),
-		).rejects.toThrow("lock failed")
+		try {
+			await expect(
+				openClineInNewTab({
+					context: mockContext,
+					outputChannel: mockOutputChannel,
+					webviewFocusTracker: new WebviewFocusTracker(),
+				}),
+			).rejects.toThrow("lock failed")
 
-		// Restore the shared command mock: this file's beforeEach only clears call history,
-		// so a lingering implementation would fail every later tab creation.
-		executeCommandMock.mockRestore()
-
-		// Nothing half-built may stay behind: the provider is disposed (it registers in
-		// ClineProvider.activeInstances with its listeners), the panel is disposed, and the
-		// tracked tab ref no longer points at the orphan panel.
-		const created = vi.mocked(ClineProvider).mock.results[0].value
-		expect(created.dispose).toHaveBeenCalledTimes(1)
-		expect(panel.dispose).toHaveBeenCalledTimes(1)
-		expect(getPanel()).toBeUndefined()
+			// Nothing half-built may stay behind: the provider is disposed (it registers in
+			// ClineProvider.activeInstances with its listeners), the panel is disposed, and the
+			// tracked tab ref no longer points at the orphan panel.
+			const created = vi.mocked(ClineProvider).mock.results[0].value
+			expect(created.dispose).toHaveBeenCalledTimes(1)
+			expect(panel.dispose).toHaveBeenCalledTimes(1)
+			expect(getPanel()).toBeUndefined()
+		} finally {
+			// Restore the saved implementation rather than mockRestore(): this file's beforeEach
+			// only clears call history, and mockRestore() on a bare vi.fn() leaves executeCommand
+			// with no implementation at all, so every later tab creation in this file breaks.
+			// In a finally so a failing assertion cannot leak the override.
+			// The saved default can be undefined (a bare vi.fn()), which is behaviourally
+			// the same as a no-op implementation - mockImplementation needs a function.
+			executeCommandMock.mockImplementation(previousExecute ?? (async () => undefined))
+		}
 	})
 
 	it("reports incomplete cleanup when the tab-creation rollback itself fails", async () => {
@@ -817,27 +823,34 @@ describe("openClineInNewTab", () => {
 		})
 
 		// The original failure is still what the caller sees...
-		await expect(
-			openClineInNewTab({
-				context: mockContext,
-				outputChannel: mockOutputChannel,
-				webviewFocusTracker: new WebviewFocusTracker(),
-			}),
-		).rejects.toThrow("lock failed")
+		try {
+			await expect(
+				openClineInNewTab({
+					context: mockContext,
+					outputChannel: mockOutputChannel,
+					webviewFocusTracker: new WebviewFocusTracker(),
+				}),
+			).rejects.toThrow("lock failed")
 
-		// Restore the shared command mock: this file's beforeEach only clears call history,
-		// so a lingering implementation would fail every later tab creation.
-		executeCommandMock.mockRestore()
-		// ...both cleanup steps were attempted, and the incomplete result is surfaced
-		// rather than swallowed behind the original error.
-		const created = vi.mocked(ClineProvider).mock.results[0].value
-		expect(created.dispose).toHaveBeenCalledTimes(1)
-		expect(panel.dispose).toHaveBeenCalledTimes(1)
-		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
-			expect.stringContaining(
-				"cleanup was incomplete (provider: dispose hung; panel: panel gone)",
-			),
-		)
+			// ...both cleanup steps were attempted, and the incomplete result is surfaced
+			// rather than swallowed behind the original error.
+			const created = vi.mocked(ClineProvider).mock.results[0].value
+			expect(created.dispose).toHaveBeenCalledTimes(1)
+			expect(panel.dispose).toHaveBeenCalledTimes(1)
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining(
+					"cleanup was incomplete (provider: dispose hung; panel: panel gone)",
+				),
+			)
+		} finally {
+			// Restore the saved implementation rather than mockRestore(): this file's beforeEach
+			// only clears call history, and mockRestore() on a bare vi.fn() leaves executeCommand
+			// with no implementation at all, so every later tab creation in this file breaks.
+			// In a finally so a failing assertion cannot leak the override.
+			// The saved default can be undefined (a bare vi.fn()), which is behaviourally
+			// the same as a no-op implementation - mockImplementation needs a function.
+			executeCommandMock.mockImplementation(previousExecute ?? (async () => undefined))
+		}
 	})
 
 	it("re-points the tracked tab ref at the panel that becomes active", async () => {
@@ -1191,98 +1204,98 @@ describe("openClineInNewTab", () => {
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2)
 	})
 
+	it("clears the in-flight creation when it rejects so a later open retries", async () => {
+		// A creation that fails must not stay in the slot: every later "Open in editor"
+		// would receive the settled rejected promise and the tab could never be opened
+		// again without reloading the window.
+		const failure = new Error("context proxy unavailable")
+		;(ContextProxy.getInstance as Mock).mockRejectedValueOnce(failure)
 
-		it("clears the in-flight creation when it rejects so a later open retries", async () => {
-			// A creation that fails must not stay in the slot: every later "Open in editor"
-			// would receive the settled rejected promise and the tab could never be opened
-			// again without reloading the window.
-			const failure = new Error("context proxy unavailable")
-			;(ContextProxy.getInstance as Mock).mockRejectedValueOnce(failure)
-
-			await expect(
-				openClineInNewTab({
-					context: mockContext,
-					outputChannel: mockOutputChannel,
-					webviewFocusTracker: new WebviewFocusTracker(),
-				}),
-			).rejects.toThrow(failure)
-
-			// The retry starts a fresh creation instead of replaying the stored rejection.
-			// Capture how many providers have been constructed so the retry's own
-			// instance can be identified below.
-			const ctor = vi.mocked(ClineProvider)
-			const createdBeforeRetry = ctor.mock.instances.length
-			const retried = await openClineInNewTab({
+		await expect(
+			openClineInNewTab({
 				context: mockContext,
 				outputChannel: mockOutputChannel,
 				webviewFocusTracker: new WebviewFocusTracker(),
-			})
-			// Identity, not just definedness: the retry must return the provider it
-			// constructed in this call, not a leftover from the rejected one.
-			const expected = ctor.mock.instances[createdBeforeRetry]
-			expect(expected).toBeDefined()
-			expect(retried).toBe(expected)
-			expect(ContextProxy.getInstance).toHaveBeenCalledTimes(2)
-			expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
+			}),
+		).rejects.toThrow(failure)
+
+		// The retry starts a fresh creation instead of replaying the stored rejection.
+		// Capture how many providers have been constructed so the retry's own
+		// instance can be identified below.
+		const ctor = vi.mocked(ClineProvider)
+		const createdBeforeRetry = ctor.mock.instances.length
+		const retried = await openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+		})
+		// Identity, not just definedness: the retry must return the provider it
+		// constructed in this call, not a leftover from the rejected one.
+		const expected = ctor.mock.instances[createdBeforeRetry]
+		expect(expected).toBeDefined()
+		expect(retried).toBe(expected)
+		expect(ContextProxy.getInstance).toHaveBeenCalledTimes(2)
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
+	})
+
+	it("shares a rejected creation with overlapping callers and still clears the slot", async () => {
+		// Both callers join the same in-flight creation, so both must observe its
+		// rejection: dropping it for the joined caller would leave that command
+		// handler hanging on a promise that never yields a usable result.
+		let rejectCreation!: (error: Error) => void
+		// Only the in-flight creation is deferred; the retry after it settles gets the
+		// normal (immediate) context proxy.
+		;(ContextProxy.getInstance as Mock).mockReturnValueOnce(
+			new Promise((_resolve, reject) => {
+				rejectCreation = reject
+			}),
+		)
+
+		const first = openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+		})
+		const second = openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
 		})
 
-		it("shares a rejected creation with overlapping callers and still clears the slot", async () => {
-			// Both callers join the same in-flight creation, so both must observe its
-			// rejection: dropping it for the joined caller would leave that command
-			// handler hanging on a promise that never yields a usable result.
-			let rejectCreation!: (error: Error) => void
-			// Only the in-flight creation is deferred; the retry after it settles gets the
-			// normal (immediate) context proxy.
-			;(ContextProxy.getInstance as Mock).mockReturnValueOnce(
-				new Promise((_resolve, reject) => {
-					rejectCreation = reject
-				}),
-			)
+		// Attach the observers before the rejection is triggered.
+		const firstSettled = first.then(
+			() => "resolved",
+			(error: unknown) => error,
+		)
+		const secondSettled = second.then(
+			() => "resolved",
+			(error: unknown) => error,
+		)
 
-			const first = openClineInNewTab({
-				context: mockContext,
-				outputChannel: mockOutputChannel,
-				webviewFocusTracker: new WebviewFocusTracker(),
-			})
-			const second = openClineInNewTab({
-				context: mockContext,
-				outputChannel: mockOutputChannel,
-				webviewFocusTracker: new WebviewFocusTracker(),
-			})
+		const failure = new Error("panel creation failed")
+		rejectCreation(failure)
 
-			// Attach the observers before the rejection is triggered.
-			const firstSettled = first.then(
-				() => "resolved",
-				(error: unknown) => error,
-			)
-			const secondSettled = second.then(
-				() => "resolved",
-				(error: unknown) => error,
-			)
+		expect(await firstSettled).toBe(failure)
+		expect(await secondSettled).toBe(failure)
+		expect(ContextProxy.getInstance).toHaveBeenCalledTimes(1)
 
-			const failure = new Error("panel creation failed")
-			rejectCreation(failure)
-
-			expect(await firstSettled).toBe(failure)
-			expect(await secondSettled).toBe(failure)
-			expect(ContextProxy.getInstance).toHaveBeenCalledTimes(1)
-
-			// The slot is cleared even on the shared-rejection path: the next open runs a
-			// fresh creation instead of replaying the stored rejection.
-			const ctor = vi.mocked(ClineProvider)
-			const createdBeforeRetry = ctor.mock.instances.length
-			const third = await openClineInNewTab({
-				context: mockContext,
-				outputChannel: mockOutputChannel,
-				webviewFocusTracker: new WebviewFocusTracker(),
-			})
-			// Identity, not just definedness: the next open returns the provider this
-			// call constructed, proving the slot was cleared rather than replayed.
-			const expected = ctor.mock.instances[createdBeforeRetry]
-			expect(expected).toBeDefined()
-			expect(third).toBe(expected)
-			expect(ContextProxy.getInstance).toHaveBeenCalledTimes(2)
+		// The slot is cleared even on the shared-rejection path: the next open runs a
+		// fresh creation instead of replaying the stored rejection.
+		const ctor = vi.mocked(ClineProvider)
+		const createdBeforeRetry = ctor.mock.instances.length
+		const third = await openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
 		})
+		// Identity, not just definedness: the next open returns the provider this
+		// call constructed, proving the slot was cleared rather than replayed.
+		const expected = ctor.mock.instances[createdBeforeRetry]
+		expect(expected).toBeDefined()
+		expect(third).toBe(expected)
+		expect(ContextProxy.getInstance).toHaveBeenCalledTimes(2)
+	})
+
 	it("keeps the replacement panel tracked when a stale panel's disposal fires late", async () => {
 		// Capture each created panel so the first panel's (stale) dispose
 		// handler can fire after the replacement is already tracked.
