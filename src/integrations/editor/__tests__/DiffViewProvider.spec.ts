@@ -950,6 +950,57 @@ describe("DiffViewProvider", () => {
 			expect(mockTask.say.mock.calls[0]?.[1]).not.toContain("other-file-problem")
 		})
 
+		it("stops a post-save tail that is cancelled while the diagnostic settings are read", async () => {
+			const mockDelay = vi.mocked(delay)
+			// Two delay() calls exist on this path (the save's own settle wait and the tail's),
+			// so both must resolve: if the tail's wait never resolves the test would pass
+			// vacuously instead of proving the re-check.
+			mockDelay.mockImplementationOnce(() => Promise.resolve()).mockImplementationOnce(() => Promise.resolve())
+
+			// A real problem is pending, so the only thing that can keep it from being
+			// persisted is the re-check after the awaited settings read.
+			const ownDiag: vscode.Diagnostic = {
+				severity: vscode.DiagnosticSeverity.Error,
+				range: new vscode.Range(0, 0, 0, 1),
+				message: "cancelled-tail-problem",
+			}
+			const postDiagnostics: [vscode.Uri, vscode.Diagnostic[]][] = [[makeUri(`${mockCwd}/test.ts`), [ownDiag]]]
+			vi.mocked(vscode.languages.getDiagnostics).mockReturnValueOnce([]).mockReturnValue(postDiagnostics)
+
+			// The settings read is the last await before the formatting and the emit. Resolving
+			// it AFTER the cancellation is how a cancellation lands inside it: the await returns
+			// normally and only the signal shows that the task is gone.
+			const provider = mockTask.providerRef.deref()
+			const originalGetState = provider.getState
+			const slowGetState = vi.fn(
+				() =>
+					new Promise((resolve) =>
+						setTimeout(() => resolve({ includeDiagnosticMessages: true, maxDiagnosticMessages: 50 }), 20),
+					),
+			)
+			provider.getState = slowGetState
+
+			try {
+				await diffViewProvider.saveDirectly("test.ts", "content", true, true, 100)
+				// Let the tail pass the settle delay and reach the settings await.
+				await new Promise((resolve) => setTimeout(resolve, 5))
+				expect(mockTask.say).not.toHaveBeenCalled()
+
+				diffViewProvider.cancelPostSaveDiagnosticsTails()
+				// The pending settings read resolves after the cancellation.
+				await new Promise((resolve) => setTimeout(resolve, 80))
+
+				expect(slowGetState).toHaveBeenCalledTimes(1)
+				// The tail had already taken its pre-save baseline and read the post-save
+				// diagnostics; it stopped at the re-check, so the pending problem is never
+				// emitted into a task that no longer exists.
+				expect(vscode.languages.getDiagnostics).toHaveBeenCalledTimes(2)
+				expect(mockTask.say).not.toHaveBeenCalled()
+			} finally {
+				provider.getState = originalGetState
+			}
+		})
+
 		it("attributes diagnostics to the saved file when the URI casing differs (Windows)", async () => {
 			const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("win32")
 			vi.mocked(vscode.languages.getDiagnostics).mockClear()

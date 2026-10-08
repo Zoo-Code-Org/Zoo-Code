@@ -1274,6 +1274,13 @@ export class DiffViewProvider {
 				maxDiagnosticMessages,
 			)
 
+			// Formatting is awaited too, so a cancellation can land inside it. The emit below
+			// persists an error row into the task, so it must not start once the caller is gone:
+			// say() would otherwise be dropped or land in a task the user already left.
+			if (controller.signal.aborted) {
+				return
+			}
+
 			if (newProblems.length > 0) {
 				await task?.say("error", `New problems detected after saving file: ${relPath}\n\n${newProblems}`)
 			}
