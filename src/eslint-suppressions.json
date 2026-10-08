@@ -46,7 +46,7 @@
 	},
 	"__tests__/new-task-delegation.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 9
+			"count": 8
 		}
 	},
 	"activate/CodeActionProvider.ts": {
@@ -1026,7 +1026,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 198
+			"count": 196
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
@@ -1291,12 +1291,12 @@
 	},
 	"services/code-index/__tests__/manager.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 87
+			"count": 84
 		}
 	},
 	"services/code-index/__tests__/orchestrator.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 25
+			"count": 23
 		}
 	},
 	"services/code-index/__tests__/service-factory.spec.ts": {

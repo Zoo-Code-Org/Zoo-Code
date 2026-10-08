@@ -9,6 +9,7 @@ import { type Task } from "../core/task/Task"
 import { API } from "../extension/api"
 import * as ProfileValidatorMod from "../shared/ProfileValidator"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
+import { makeClineProviderFactory } from "../test-utils/provider"
 
 type PrivateClineProviderMethods = {
 	createTask: (
@@ -431,7 +432,7 @@ describe("Single-open-task invariant", () => {
 		} as unknown as ClineProvider
 
 		const output = { appendLine: vi.fn() } as unknown as OutputChannel
-		const api = new API(output, provider, undefined, false)
+		const api = new API(output, provider, makeClineProviderFactory(), undefined, false)
 
 		const taskId = await api.startNewTask({
 			configuration: {},

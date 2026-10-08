@@ -258,6 +258,7 @@ export const bedrockModels = {
 		// 128K max output tokens per the AWS Bedrock model card:
 		// https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-opus-5-5.html
 		maxTokens: 128_000,
+		supportsMaxTokens: true,
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
