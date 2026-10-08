@@ -25,7 +25,7 @@ for research, documentation lookup, and fact-checking.
   time; method-level parameters only apply to the selected method) and writes the
   server into the project's `<workspace>/.roo/mcp.json` (or the user's global
   `mcp_settings.json` when installed with the global target).
-- **Runtime:** `McpHub` (`src/services/marketplace/McpHub.ts`) natively supports the
+- **Runtime:** `McpHub` (`src/services/mcp/McpHub.ts`) natively supports the
   `streamable-http` transport type, so no code changes were needed — this integration
   is configuration only.
 
@@ -36,8 +36,8 @@ this table documents the vendor's offering, not a contract):
 
 | Tool | Purpose | Key parameters |
 | ---- | ------- | -------------- |
-| `search` | Web search | `query` (required), `max_results` (1–50, default 10), `region` (`us`/`eu`/`ap`), `recency` (`day`/`week`/`month`/`year`), `domains[]` (include-list) |
-| `batch_search` | Parallel batch search (multiple queries at once) | array of `search` requests |
+| `search` | Web search, general or vertical domain | `query` (required), `max_results` (1–10, default 10), `domain` / `sub_domain` / `sub_domain_params` (vertical routing; values must come from `get_sub_domains`) |
+| `batch_search` | Parallel batch search (1–5 independent queries; one failure doesn't block others) | `queries` (required, 1–5 query objects with the same fields as `search`) |
 | `extract` | Fetch a URL and return its content as markdown | `url` (required) |
 | `get_sub_domains` | Discover vertical (domain-specific) search scopes | — |
 
