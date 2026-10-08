@@ -18,6 +18,10 @@ describe("safeWriteText against a real filesystem", () => {
 		await fs.rm(dir, { recursive: true, force: true })
 	})
 
+	// The commit-rename failure mode is covered deterministically in safeWriteText.spec.ts
+	// ('a failed commit does not move the target, so nothing has to be rolled back'): on a real
+	// filesystem there is no portable way to make only the rename fail - the ESM fs namespace
+	// cannot be spied, and read-only-parent / sticky-bit / cross-device setups are not portable.
 	it("publishes the new bytes and leaves no staging or backup residue", async () => {
 		const targetPath = path.join(dir, "target.txt")
 		await fs.writeFile(targetPath, "old bytes")
@@ -31,9 +35,10 @@ describe("safeWriteText against a real filesystem", () => {
 		expect(await fs.readdir(dir)).toEqual(["target.txt"])
 	})
 
-	it("leaves the target bytes untouched when the commit cannot replace it", async () => {
-		// A regular file cannot be renamed over a directory, so the backup copy and
-		// the commit both fail on a real filesystem with no mocking at all.
+	it("leaves the target bytes untouched when the backup copy cannot be made", async () => {
+		// A regular file cannot be renamed over a directory, so the step-3 backup copy fails
+		// on a real filesystem with no mocking. Note what this case does NOT cover: the commit
+		// rename is never reached, because the backup failure aborts the write first.
 		const targetPath = path.join(dir, "target-dir")
 		await fs.mkdir(targetPath)
 		const inside = path.join(targetPath, "payload.txt")

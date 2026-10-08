@@ -1319,7 +1319,7 @@ describe("resolveLockKey", () => {
 		// return type matching fs.promises.readlink.
 		vi.mocked(fs.readlink).mockResolvedValue("referent.json")
 
-		// Mid-commit a peer writer renames the referent away and back, so the key
+		// Mid-commit a peer writer unlinks the referent and re-creates it, so the key
 		// must still be computable while the link dangles.
 		await expect(resolveLockKey("/tmp/linkdir/file.json")).resolves.toBe(
 			path.resolve(path.join("/tmp/linkdir", "referent.json")),
