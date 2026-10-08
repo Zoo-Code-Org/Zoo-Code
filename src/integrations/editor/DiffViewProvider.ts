@@ -876,7 +876,7 @@ export class DiffViewProvider {
 		this.disposeActiveEditorListener()
 		this.cancelDeferredScroll()
 
-		await this.runTeardown(async () => {
+		const ownedTeardown = await this.runTeardown(async () => {
 			if (!fileExists) {
 				if (updatedDocument.isDirty) {
 					await updatedDocument.save()
@@ -926,6 +926,12 @@ export class DiffViewProvider {
 				)
 			}
 		})
+		if (!ownedTeardown) {
+			// The teardown's owner restores the preview tabs and resets the provider.
+			// Repeating them here would re-run tab work for tabs this caller never
+			// touched and reset state the other cleanup is still relying on.
+			return
+		}
 		// Restore any preview tabs the diff evicted, reconstructing the user's
 		// prior not-yet-edited tab state.
 		await this.restorePreviewTabs()
@@ -1017,10 +1023,12 @@ export class DiffViewProvider {
 	 * both would edit the document and close the same tabs. The second caller awaits the
 	 * cleanup already in flight instead of repeating it.
 	 */
-	private async runTeardown(cleanup: () => Promise<void>): Promise<void> {
+	private async runTeardown(cleanup: () => Promise<void>): Promise<boolean> {
 		if (this.teardownInFlight !== undefined) {
 			await this.teardownInFlight
-			return
+			// Not ours: the caller that started this teardown owns everything that
+			// belongs to it, including the steps that follow the callback.
+			return false
 		}
 		const inFlight = cleanup()
 		this.teardownInFlight = inFlight
@@ -1029,6 +1037,7 @@ export class DiffViewProvider {
 		} finally {
 			this.teardownInFlight = undefined
 		}
+		return true
 	}
 
 	// Stop tracking user activation of the target file. Called before any

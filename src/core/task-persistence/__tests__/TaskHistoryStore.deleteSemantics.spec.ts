@@ -523,6 +523,41 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			expect(writtenIds).toEqual(["lock-a"])
 		})
 
+		it("reports every id, keeps every entry and file, and skips the write-through when the whole batch failed", async () => {
+			// deletedAny stays false when nothing was removed: the store must not write a state
+			// it did not change, and every requested id has to be reported - a partial report
+			// would let the caller forget ids that are still on disk.
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "all-a", ts: 1000 }))
+			await store.upsert(makeHistoryItem({ id: "all-b", ts: 2000 }))
+			onWrite.mockClear()
+
+			const before = storeInternals(store)
+			// One id fails at the lock, the other at the unlink: both outcomes count as
+			// "not deleted", and neither may be treated as gone.
+			vi.mocked(withFileLock).mockRejectedValueOnce(new Error("lock acquisition timed out"))
+			vi.mocked(fs.unlink).mockRejectedValueOnce(Object.assign(new Error("EBUSY: resource busy"), { code: "EBUSY" }))
+
+			const failure = await store
+				.deleteMany(["all-a", "all-b"])
+				.then(() => null)
+				.catch((error: unknown) => error)
+			expect(failure).toBeInstanceOf(TaskHistoryDeleteError)
+			expect((failure as TaskHistoryDeleteError).taskIds).toEqual(["all-a", "all-b"])
+
+			const { cache, taskFileMtimes } = storeInternals(store)
+			expect(cache.has("all-a")).toBe(before.cache.has("all-a"))
+			expect(cache.has("all-b")).toBe(before.cache.has("all-b"))
+			expect(taskFileMtimes.has("all-a")).toBe(before.taskFileMtimes.has("all-a"))
+			expect(taskFileMtimes.has("all-b")).toBe(before.taskFileMtimes.has("all-b"))
+			await expect(fs.access(historyFilePath(storagePath, "all-a"))).resolves.toBeUndefined()
+			await expect(fs.access(historyFilePath(storagePath, "all-b"))).resolves.toBeUndefined()
+
+			// Nothing was deleted, so nothing was written through.
+			expect(onWrite).not.toHaveBeenCalled()
+		})
+
 		it("locks the resolved publish target for every item while unlinking the given paths", async () => {
 			const store = createStore()
 			await store.initialize()
