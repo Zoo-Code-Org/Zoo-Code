@@ -3098,6 +3098,108 @@ describe("DiffViewProvider", () => {
 
 			expect(applyEdit).toHaveBeenCalledTimes(1)
 		})
+		// The save's post-publish cleanup touches the same buffers and tabs a cancellation's
+		// teardown does, so it has to be one serialized pass - and a save whose session was torn
+		// down while the guarded publish was still awaiting must not run a cleanup of its own.
+		it("saveChanges() skips its post-publish cleanup when a teardown began during the publish", async () => {
+			// A cancellation can reach revertChanges() while the publish is awaiting. That teardown
+			// already closed the diff views and applied the auto-close preferences; a second pass
+			// would close the same tabs and re-run the same document revert.
+			const closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			const restorePreviewTabs = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
+			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
+			applyEdit.mockResolvedValue(true)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({
+				document: makeTextDocument({
+					uri: makeUri(mockTargetPath),
+					getText: vi.fn().mockReturnValue("content"),
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				}),
+			})
+
+			// The cancellation lands inside the guarded publish. The implementation has to be
+			// restored afterwards: clearAllMocks() drops call records but keeps queued
+			// implementations, and a leaked publish would cancel every later save in this file.
+			vi.mocked(safeWriteText).mockImplementation(async () => {
+				await diffViewProvider.revertChanges()
+			})
+
+			let result: Awaited<ReturnType<DiffViewProvider["saveChanges"]>> | undefined
+			try {
+				result = await diffViewProvider.saveChanges(false)
+			} finally {
+				vi.mocked(safeWriteText).mockReset()
+				vi.mocked(safeWriteText).mockResolvedValue(undefined)
+			}
+
+			expect(result).toEqual({
+				newProblemsMessage: undefined,
+				userEdits: undefined,
+				finalContent: undefined,
+			})
+			// Exactly one teardown ran - the cancellation's - and the save added no cleanup of its
+			// own on top of it.
+			expect(applyEdit).toHaveBeenCalledTimes(1)
+			expect(closeAllDiffViews).toHaveBeenCalledTimes(1)
+			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
+		})
+
+		it("saveChanges() serializes its post-publish cleanup with a revertChanges() that lands during it", async () => {
+			// The cleanup closes the same tabs a cancellation would close. Going through the shared
+			// teardown state means the cancellation waits for the save instead of racing it.
+			let release: () => void = () => {}
+			const gate = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			let cleanupEntered = false
+			const closeAllDiffViews = vi.fn().mockImplementation(async () => {
+				cleanupEntered = true
+				await gate
+			})
+			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["restorePreviewTabs"] = vi.fn().mockResolvedValue(undefined)
+			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
+			applyEdit.mockResolvedValue(true)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({
+				document: makeTextDocument({
+					uri: makeUri(mockTargetPath),
+					getText: vi.fn().mockReturnValue("content"),
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				}),
+			})
+
+			const save = diffViewProvider.saveChanges(false)
+			while (!cleanupEntered) {
+				await new Promise((resolve) => setImmediate(resolve))
+			}
+
+			const revert = diffViewProvider.revertChanges()
+			await new Promise((resolve) => setImmediate(resolve))
+
+			// The revert has not touched the document: it is waiting for the save's cleanup.
+			expect(applyEdit).not.toHaveBeenCalled()
+
+			release()
+			await Promise.all([save, revert])
+
+			// One pass over the tabs, and the cancellation did not repeat the document revert.
+			expect(closeAllDiffViews).toHaveBeenCalledTimes(1)
+			expect(applyEdit).not.toHaveBeenCalled()
+		})
 
 		it("saveChanges() keeps the file open when the user touched it", async () => {
 			const closeFileTab = vi.fn().mockResolvedValue(undefined)
