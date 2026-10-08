@@ -348,6 +348,30 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalled()
 	})
 
+	it("drops the deleted profile's overlay and re-posts state when re-pinning the view", async () => {
+		vi.mocked(mockClineProvider.providerSettingsManager.hasConfig).mockImplementation(
+			async (name: string) => name === "shared-profile",
+		)
+
+		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
+		await new Promise((resolve) => setImmediate(resolve))
+
+		// A reload on a live provider skips loadViewState, so an overlay resolved before the
+		// profile was deleted would keep serving that profile's provider and key under the
+		// global name. The re-pin must drop it...
+		const clearIndex = vi
+			.mocked(mockClineProvider.saveViewState)
+			.mock.calls.findIndex((call) => call[0] === "apiConfiguration" && call[1] === undefined)
+		expect(clearIndex).toBeGreaterThanOrEqual(0)
+		// ...and push the corrected state: the launch flow already posted state once, with the
+		// missing pin still in it, and only listApiConfig is posted afterwards.
+		const clearOrder = vi
+			.mocked(mockClineProvider.saveViewState)
+			.mock.invocationCallOrder[clearIndex]
+		const posts = vi.mocked(mockClineProvider.postStateToWebview).mock.invocationCallOrder
+		expect(posts[posts.length - 1]).toBeGreaterThan(clearOrder)
+	})
+
 	it("re-pins the view to the shared global profile rather than the first listed profile", async () => {
 		double.providerSettingsManager.listConfig = vi.fn().mockResolvedValue([
 			{ name: "first-listed", apiProvider: providerIdentifiers.anthropic },

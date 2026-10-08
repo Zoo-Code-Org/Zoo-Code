@@ -661,6 +661,14 @@ export const webviewMessageHandler = async (
 								// first listed profile) so the view adopts the shared choice; the
 								// global selection itself is left untouched.
 								await provider.saveViewState("currentApiConfigName", globalConfigName)
+								// Drop any overlay this view kept for the deleted profile: getState() would
+								// otherwise keep serving the deleted profile's provider and key under the global
+								// name. The shared provider keys already hold the global profile's settings.
+								await provider.saveViewState("apiConfiguration", undefined)
+								// The state posted earlier in this flow still carried the missing pin, so push
+								// the corrected state; only listApiConfig is posted below.
+								await provider.postStateToWebview()
+
 								// Fall through: refresh listApiConfigMeta and post listApiConfig
 								// to this webview below.
 							} else {
