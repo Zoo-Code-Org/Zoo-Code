@@ -566,7 +566,7 @@ describe("editFileTool", () => {
 
 			await executeEditFileTool()
 
-			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalledWith(true, 1000, "edit")
+			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalledWith(true, 1000, "edit", false)
 			expect(mockTask.didEditFile).toBe(true)
 		})
 
@@ -578,7 +578,7 @@ describe("editFileTool", () => {
 
 			await executeEditFileTool({ old_string: "", new_string: "New file content" }, { fileExists: false })
 
-			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalledWith(true, 1000, "create")
+			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalledWith(true, 1000, "create", false)
 			// Usage is recorded once at the central presentAssistantMessage
 			// attribution point, not locally by the handler.
 			expect(mockTask.recordToolUsage).not.toHaveBeenCalled()
@@ -722,6 +722,7 @@ describe("editFileTool", () => {
 				true,
 				1000,
 				"edit",
+				false,
 			)
 			expect(mockTask.diffViewProvider.saveChanges).not.toHaveBeenCalled()
 			expect(mockTask.didEditFile).toBe(true)
@@ -742,6 +743,7 @@ describe("editFileTool", () => {
 				true,
 				1000,
 				"create",
+				false,
 			)
 			expect(mockTask.didEditFile).toBe(true)
 			expect(mockHandleError).not.toHaveBeenCalled()

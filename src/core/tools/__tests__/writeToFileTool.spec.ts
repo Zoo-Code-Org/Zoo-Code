@@ -484,6 +484,7 @@ describe("writeToFileTool", () => {
 				true,
 				1000,
 				"create",
+				false,
 			)
 			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
 			expect(mockCline.fileContextTracker.trackFileContext).toHaveBeenCalledWith(testFilePath, "roo_edited")

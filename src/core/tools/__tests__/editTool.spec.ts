@@ -351,7 +351,7 @@ describe("editTool", () => {
 
 			await executeEditTool()
 
-			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalledWith(true, 1000, "edit")
+			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalledWith(true, 1000, "edit", false)
 			expect(mockTask.didEditFile).toBe(true)
 			// Usage is recorded once at the central presentAssistantMessage
 			// attribution point, not locally by the handler.
@@ -449,6 +449,7 @@ describe("editTool", () => {
 				true,
 				1000,
 				"edit",
+				false,
 			)
 			expect(mockTask.didEditFile).toBe(true)
 			expect(result).toBe("Tool result message")
