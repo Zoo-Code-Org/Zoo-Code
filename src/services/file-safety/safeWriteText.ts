@@ -441,13 +441,35 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				try {
 					await fs.unlink(backupPath)
 				} catch {
-					// non-fatal — orphaned backup is acceptable
+					// One bounded retry: the backup can still be held open by another process right
+					// after the commit rename. If that fails too the path is surfaced instead of
+					// silently abandoned - an orphaned backup is acceptable, an invisible one is not.
+					try {
+						await fs.unlink(backupPath)
+					} catch (cleanupError: unknown) {
+						console.warn(
+							`safeWriteText: the write to ${targetPath} committed but its backup copy could not be removed at ${backupPath} (${String(cleanupError)}); the copy is left in place.`
+						)
+					}
 				}
 			}
 		} finally {
 			// Unlink DACL dump regardless of success/failure in this span.
 			if (daclDumpPath !== null) {
-				await fs.unlink(daclDumpPath).catch(() => {})
+				try {
+					await fs.unlink(daclDumpPath)
+				} catch {
+					// One bounded retry, then surface the path: an icacls dump left next to the
+					// settings file is a readable copy of its ACL, so an invisible orphan is worse
+					// than a visible one.
+					try {
+						await fs.unlink(daclDumpPath)
+					} catch (cleanupError: unknown) {
+						console.warn(
+							`safeWriteText: the DACL dump at ${daclDumpPath} could not be removed (${String(cleanupError)}); it is left in place.`,
+						)
+					}
+				}
 			}
 		}
 
