@@ -117,7 +117,7 @@ describe("safeWriteJson", () => {
 			// commit rename. Failing only the second one is the PublishNotDurableError case:
 			// the bytes are in place, only their durability is unconfirmed.
 			let fsyncCalls = 0
-			fsSyncActual.fsyncSync.mockImplementation(() => {
+			vi.mocked(fsSyncActual.fsyncSync).mockImplementation(() => {
 				fsyncCalls++
 				if (fsyncCalls === 2) {
 					throw Object.assign(new Error("EIO: i/o error"), { code: "EIO" })
