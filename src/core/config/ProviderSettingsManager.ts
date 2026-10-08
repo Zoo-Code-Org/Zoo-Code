@@ -424,31 +424,26 @@ export class ProviderSettingsManager {
 	public async saveConfig(name: string, config: ProviderSettingsWithId): Promise<string> {
 		try {
 			return await this.lock(async () => {
-				const rawBefore = await this.context.secrets.get(this.secretsKey)
-				const providerProfiles = rawBefore ? (JSON.parse(rawBefore) as ProviderProfiles) : await this.load()
-				// Preserve the existing ID if this is an update to an existing config.
-				const existingId = providerProfiles.apiConfigs[name]?.id
-				const id = config.id || existingId || this.generateId()
-				providerProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(config, id)
+				const maxAttempts = 5
+				let id = config.id || ""
 
-				const rawLatest = await this.context.secrets.get(this.secretsKey)
-				let targetProfiles = providerProfiles
-				let expectedWriteRaw = rawBefore
-				if (rawLatest !== rawBefore && rawLatest) {
-					targetProfiles = JSON.parse(rawLatest) as ProviderProfiles
-					targetProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(config, id)
-					expectedWriteRaw = rawLatest
-				}
-				const stored = await this.storeWithCas(targetProfiles, expectedWriteRaw)
-				if (!stored) {
-					const rawFinal = await this.context.secrets.get(this.secretsKey)
-					const finalProfiles = rawFinal
-						? (JSON.parse(rawFinal) as ProviderProfiles)
+				for (let attempt = 0; attempt < maxAttempts; attempt++) {
+					const rawBefore = await this.context.secrets.get(this.secretsKey)
+					const providerProfiles = rawBefore
+						? (JSON.parse(rawBefore) as ProviderProfiles)
 						: structuredClone(this.defaultProviderProfiles)
-					finalProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(config, id)
-					await this.store(finalProfiles)
+					const existingId = providerProfiles.apiConfigs[name]?.id
+					if (!id) {
+						id = config.id || existingId || this.generateId()
+					}
+					providerProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(config, id)
+
+					const stored = await this.storeWithCas(providerProfiles, rawBefore)
+					if (stored) {
+						return id
+					}
 				}
-				return id
+				throw new Error("Concurrent write conflict: failed to save config after multiple retries")
 			})
 		} catch (error) {
 			throw new Error(`Failed to save config: ${error}`)

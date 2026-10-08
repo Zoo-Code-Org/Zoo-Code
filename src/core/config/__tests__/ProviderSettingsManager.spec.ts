@@ -668,6 +668,64 @@ describe("ProviderSettingsManager", () => {
 			])
 		})
 
+		it("retries on storeWithCas conflict and preserves concurrent profile changes", async () => {
+			let storedRaw = JSON.stringify({
+				currentApiConfigName: "default",
+				apiConfigs: {
+					default: { id: "default-id" },
+				},
+			})
+			let readCount = 0
+			mockSecrets.get.mockImplementation(async () => {
+				readCount++
+				if (readCount === 2) {
+					// Simulate another writer modifying a different profile during the first attempt
+					const updated = JSON.parse(storedRaw)
+					updated.apiConfigs.concurrent = {
+						id: "concurrent-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "concurrent-key",
+					}
+					storedRaw = JSON.stringify(updated)
+				}
+				return storedRaw
+			})
+			mockSecrets.store.mockImplementation(async (_key, val) => {
+				storedRaw = val
+			})
+
+			await providerSettingsManager.saveConfig("test", {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "my-key",
+			})
+
+			const finalProfiles = JSON.parse(storedRaw)
+			expect(finalProfiles.apiConfigs.test.apiKey).toBe("my-key")
+			expect(finalProfiles.apiConfigs.concurrent.apiKey).toBe("concurrent-key")
+		})
+
+		it("throws concurrent write conflict if all CAS retry attempts fail", async () => {
+			let storedRaw = JSON.stringify({
+				currentApiConfigName: "default",
+				apiConfigs: { default: {} },
+			})
+			let readCount = 0
+			mockSecrets.get.mockImplementation(async () => {
+				readCount++
+				// Mutate storage on every read so CAS always conflicts
+				const updated = JSON.parse(storedRaw)
+				updated.apiConfigs[`conflict-${readCount}`] = { id: `id-${readCount}` }
+				storedRaw = JSON.stringify(updated)
+				return storedRaw
+			})
+
+			await expect(
+				providerSettingsManager.saveConfig("test", {
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+			).rejects.toThrow("Concurrent write conflict: failed to save config after multiple retries")
+		})
+
 		it("should preserve full fields including legacy provider-specific keys when saving retired provider profiles", async () => {
 			mockSecrets.get.mockResolvedValue(
 				JSON.stringify({
@@ -1722,48 +1780,6 @@ describe("ProviderSettingsManager", () => {
 			expect(finalStored.apiConfigs.test.apiKey).toBe("competing-api-key")
 		})
 
-		it("serializes concurrent profile mutations across different ProviderSettingsManager instances", async () => {
-			let storedRaw = JSON.stringify({
-				currentApiConfigName: "default",
-				apiConfigs: {
-					test: {
-						id: "test-id",
-						apiProvider: providerIdentifiers.anthropic,
-						apiModelId: "claude-3-5-sonnet",
-					},
-				},
-			})
-			mockSecrets.get.mockImplementation(async () => storedRaw)
-			mockSecrets.store.mockImplementation(async (_key, val) => {
-				storedRaw = val
-			})
-
-			const manager1 = new ProviderSettingsManager(mockContext)
-			const manager2 = new ProviderSettingsManager(mockContext)
-			await manager1.initialize()
-			await manager2.initialize()
-
-			const [res1, res2] = await Promise.all([
-				manager1.updateProfileModel("test", providerIdentifiers.anthropic, {
-					apiModelId: "claude-3-7-sonnet",
-				}),
-				manager2.saveConfig("other", {
-					apiProvider: providerIdentifiers.anthropic,
-					apiModelId: "claude-3-5-haiku",
-				}),
-			])
-
-			expect(res1).toEqual({
-				success: true,
-				previousProfile: expect.any(Object),
-				updatedProfile: expect.any(Object),
-			})
-			expect(typeof res2).toBe("string")
-			const finalProfiles = JSON.parse(storedRaw)
-			expect(finalProfiles.apiConfigs.test.apiModelId).toBe("claude-3-7-sonnet")
-			expect(finalProfiles.apiConfigs.other.apiModelId).toBe("claude-3-5-haiku")
-		})
-
 		it("returns false if config name does not exist", async () => {
 			const existingConfig: ProviderProfiles = {
 				currentApiConfigName: "default",
@@ -2240,6 +2256,46 @@ describe("ProviderSettingsManager", () => {
 			).rejects.toThrow(
 				"Failed to update profile model: Error: Failed to write provider profiles to secrets: Error: Disk write error",
 			)
+		})
+
+		it("serializes concurrent profile mutations across different ProviderSettingsManager instances", async () => {
+			let storedRaw = JSON.stringify({
+				currentApiConfigName: "default",
+				apiConfigs: {
+					test: {
+						id: "test-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-5-sonnet",
+					},
+				},
+			})
+			mockSecrets.get.mockImplementation(async () => storedRaw)
+			mockSecrets.store.mockImplementation(async (_key, val) => {
+				storedRaw = val
+			})
+
+			const manager1 = new ProviderSettingsManager(mockContext)
+			const manager2 = new ProviderSettingsManager(mockContext)
+			await manager1.initialize()
+			await manager2.initialize()
+
+			const [res1, res2] = await Promise.all([
+				manager1.updateProfileModel("test", providerIdentifiers.anthropic, {
+					apiModelId: "claude-3-7-sonnet",
+				}),
+				manager2.saveConfig("other", {
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "claude-3-5-haiku",
+				}),
+			])
+
+			expect(res1.success).toBe(true)
+			expect(res1.updatedProfile?.apiModelId).toBe("claude-3-7-sonnet")
+			expect(res1.previousProfile?.apiModelId).toBe("claude-3-5-sonnet")
+			expect(typeof res2).toBe("string")
+			const finalProfiles = JSON.parse(storedRaw)
+			expect(finalProfiles.apiConfigs.test.apiModelId).toBe("claude-3-7-sonnet")
+			expect(finalProfiles.apiConfigs.other.apiModelId).toBe("claude-3-5-haiku")
 		})
 	})
 })

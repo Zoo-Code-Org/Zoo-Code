@@ -152,6 +152,12 @@ export const ModelSelector = ({
 
 	const handleSelect = useCallback(
 		(modelId: string) => {
+			if (modelId === selectedModelId) {
+				setOpen(false)
+				setSearchValue("")
+				return
+			}
+
 			const patch: ModelSelectionPatch = {}
 			const setField = <K extends keyof ProviderSettings>(field: K, value: ProviderSettings[K]) => {
 				patch[field] = typeof value === "string" || typeof value === "number" ? value : null
@@ -165,7 +171,7 @@ export const ModelSelector = ({
 			setOpen(false)
 			setSearchValue("")
 		},
-		[modelConfig, provider, onChange],
+		[modelConfig, provider, onChange, selectedModelId],
 	)
 
 	const renderModelItem = useCallback(

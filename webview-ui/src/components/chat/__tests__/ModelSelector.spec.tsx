@@ -236,6 +236,30 @@ describe("ModelSelector", () => {
 		expect(selection.patch).not.toHaveProperty("apiProvider")
 	})
 
+	it("does not call onChange when clicking the currently active model", () => {
+		render(
+			<ModelSelector
+				apiConfiguration={
+					{
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-sonnet-4-5",
+					} satisfies ProviderSettings
+				}
+				onChange={onChangeMock}
+				title="Select model"
+			/>,
+		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
+		expect(screen.getByTestId("popover-content")).toBeInTheDocument()
+
+		const currentModel = screen.getByRole("button", { pressed: true })
+		expect(currentModel).toBeInTheDocument()
+		fireEvent.click(currentModel)
+
+		expect(onChangeMock).not.toHaveBeenCalled()
+		expect(screen.queryByTestId("popover-content")).not.toBeInTheDocument()
+	})
+
 	it("resets reasoning/thinking-token overrides and closes the popover after selecting a model", () => {
 		render(
 			<ModelSelector

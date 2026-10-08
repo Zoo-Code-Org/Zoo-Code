@@ -536,10 +536,12 @@ describe("ClineProvider - updateProfileModel", () => {
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.violated_organization_allowlist")
 	})
 
-	it("rejects a model update when an authenticated session has no organization settings (fails closed)", async () => {
+	it("rejects a model update when reading organization settings throws (fails closed on error)", async () => {
 		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "stored/model" })
 		mockCloudInstance.isAuthenticated.mockReturnValue(true)
-		mockCloudInstance.getOrganizationSettings.mockReturnValue(undefined)
+		mockCloudInstance.getOrganizationSettings.mockImplementation(() => {
+			throw new Error("Failed to read org settings")
+		})
 
 		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
 			openRouterModelId: "new/model",
@@ -721,6 +723,23 @@ describe("ClineProvider - updateProfileModel", () => {
 			"test-config",
 			expect.objectContaining({ openRouterModelId: "allowed/model" }),
 		)
+	})
+
+	it("allows model updates for authenticated user when organization settings are undefined", async () => {
+		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
+		mockCloudInstance.isAuthenticated.mockReturnValue(true)
+		mockCloudInstance.getOrganizationSettings.mockReturnValue(undefined)
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-4.5",
+		})
+
+		expect(manager().saveConfig).toHaveBeenCalledTimes(1)
+		expect(manager().saveConfig).toHaveBeenCalledWith(
+			"test-config",
+			expect.objectContaining({ openRouterModelId: "openai/gpt-4.5" }),
+		)
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
 	})
 
 	it("rolls back saved profile and prevents handler rebuild when mutation signal aborts during context update", async () => {
@@ -973,7 +992,7 @@ describe("ClineProvider - updateProfileModel", () => {
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.save_api_config")
 	})
 
-	it("rolls back saved profile even if patch contains unallowed or skipped keys", async () => {
+	it("rolls back stored profile to previous state when context update fails", async () => {
 		mockStoredProfile({
 			apiProvider: providerIdentifiers.openrouter,
 			openRouterModelId: "openai/gpt-4",
@@ -990,8 +1009,7 @@ describe("ClineProvider - updateProfileModel", () => {
 			unallowedKey: "some-value",
 		})
 
-		// Since saveConfig succeeded with gpt-5 (and reasoningEffort kept as "low"),
-		// but setProviderSettings threw, rollback should execute and restore gpt-4!
+		// When context update throws, stored profile rolls back to its previous state.
 		expect(storedProfiles["test-config"].openRouterModelId).toBe("openai/gpt-4")
 		expect(storedProfiles["test-config"].reasoningEffort).toBe("low")
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.save_api_config")

@@ -55,18 +55,11 @@ import {
 	DEFAULT_MODES,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	getModelId,
-	modelIdKeysByProvider,
 	isRetiredProvider,
 	providerIdentifiers,
 	type ProviderSettingsWithId,
 } from "@roo-code/types"
 
-const RESET_ONLY_KEYS: readonly string[] = [
-	"awsCustomArn",
-	"reasoningEffort",
-	"modelMaxTokens",
-	"modelMaxThinkingTokens",
-]
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
 import { TaskScheduler } from "../task/TaskScheduler"
@@ -313,11 +306,23 @@ export class ClineProvider
 			},
 		)
 
-		// Keep serialization in place until the timed-out mutation and its rollback settle.
-		this.providerProfileMutationQueue = run.then(
-			() => undefined,
-			() => undefined,
-		)
+		// Keep serialization in place until the timed-out mutation and its rollback settle,
+		// but cap the queue block with a secondary deadline so stalled mutations do not poison the queue indefinitely.
+		let queueTimeoutId: ReturnType<typeof setTimeout> | undefined
+		const queueDeadline = new Promise<void>((resolve) => {
+			queueTimeoutId = setTimeout(resolve, ClineProvider.PENDING_OPERATION_TIMEOUT_MS * 2)
+		})
+		const queueSettled = run
+			.then(
+				() => undefined,
+				() => undefined,
+			)
+			.finally(() => {
+				if (queueTimeoutId) {
+					clearTimeout(queueTimeoutId)
+				}
+			})
+		this.providerProfileMutationQueue = Promise.race([queueSettled, queueDeadline])
 		return callerResult
 	}
 
@@ -1977,7 +1982,7 @@ export class ClineProvider
 				return ORGANIZATION_ALLOW_ALL
 			}
 			const settings = cloudService.getOrganizationSettings()
-			return settings ? settings.allowList : undefined
+			return settings?.allowList ?? ORGANIZATION_ALLOW_ALL
 		} catch (error) {
 			this.log(
 				`Unable to read organization allow-list for model update: ${error instanceof Error ? error.message : String(error)}`,
@@ -2006,6 +2011,7 @@ export class ClineProvider
 				const initialInstanceId = initialTask?.instanceId
 				const { currentApiConfigName, organizationAllowList: stateOrganizationAllowList } =
 					await this.getState()
+				if (signal.aborted || this._disposed) return
 				const visibleProfileName = initialTask ? initialTask.taskApiConfigName : currentApiConfigName
 
 				if (visibleProfileName !== name) {
@@ -2037,6 +2043,8 @@ export class ClineProvider
 					}
 					return true
 				}
+
+				if (signal.aborted || this._disposed) return
 
 				const result = await this.providerSettingsManager.updateProfileModel(
 					name,
