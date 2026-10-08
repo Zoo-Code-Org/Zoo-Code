@@ -2339,6 +2339,122 @@ describe("DiffViewProvider", () => {
 			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
 		})
 
+		it("does not adopt a match when an external writer moved the file before the preview", async () => {
+			const mockEditor = mockTextEditor(`${mockCwd}/ext-writer.ts`)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockTextDocument(`${mockCwd}/ext-writer.ts`)), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			diffViewProvider.editType = "modify"
+			mockTask.observationRegistry.clear()
+
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/ext-writer.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+
+			// The model read v1. A different writer then moved the file to v2, and the preview
+			// stat-matched v2. Autosave published the model's bytes over v2, so the disk now
+			// matches this save byte for byte - which is exactly what the clobber the guard
+			// rejected looks like from here.
+			const externalStats = {
+				isDirectory: () => false,
+				dev: BigInt(1),
+				ino: BigInt(9),
+				size: BigInt(300),
+				mtimeNs: BigInt(4_000_000_001n),
+				ctimeNs: BigInt(5_000_000_000n),
+			} as unknown as BigIntStats
+			mockTask.observationRegistry.observe(
+				`${mockCwd}/ext-writer.ts`,
+				versionTokenOfStat(previewStats),
+				true,
+			)
+			vi.mocked(fs.stat).mockResolvedValue(externalStats)
+			vi.mocked(fs.readFile).mockResolvedValue("external bytes")
+
+			await diffViewProvider.open("ext-writer.ts")
+
+			// The autosave shape: a clean buffer holding exactly the accepted content.
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+
+			// The autosave shape: a clean buffer holding exactly the accepted content, and a
+			// disk token that moved past the version the save was authorized against.
+			vi.mocked(computeVersionToken).mockResolvedValue("moved")
+			vi.mocked(fs.readFile).mockResolvedValue("new content")
+
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("Stale version")
+
+			// No adoption: the observation is not moved onto the state that was clobbered,
+			// so the model's next write is not authorized by it.
+			expect(
+				mockTask.observationRegistry.get(`${mockCwd}/ext-writer.ts`)?.version,
+			).toBe(versionTokenOfStat(previewStats))
+		})
+
+		it("does not adopt a match for an update over a target the model never read", async () => {
+			const mockEditor = mockTextEditor(`${mockCwd}/unread-target.ts`)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback(mockTextDocument(`${mockCwd}/unread-target.ts`)), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			diffViewProvider.editType = "modify"
+			mockTask.observationRegistry.clear()
+
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/unread-target.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+
+			// open() found no observation for the path, so the preview is the only read and
+			// the rejection is about authorization rather than a moved token. The exclusion
+			// used to cover an "edit" with no pre-open observation only, so an
+			// "update" over the same unread target was adopted as a success.
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("on disk bytes")
+
+			await diffViewProvider.open("unread-target.ts")
+
+			// The autosave shape: a clean buffer holding exactly the accepted content.
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+
+			vi.mocked(computeVersionToken).mockResolvedValue("moved")
+			vi.mocked(fs.readFile).mockResolvedValue("new content")
+
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("File was only partially read")
+
+			// The rejection is the outcome: under the old gate the byte match was adopted
+			// and saveChanges resolved as a success, granting the model a clean result for
+			// a write that never happened.
+			expect(
+				mockTask.observationRegistry.get(`${mockCwd}/unread-target.ts`)?.complete,
+			).toBe(false)
+		})
+
 		it("does not adopt an autosaved match for an edit that was never authorized", async () => {
 			// Same autosave shape, different verdict: with no observation from before open()
 			// the guard rejects for AUTHORIZATION. Adopting the byte match would report a
