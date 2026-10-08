@@ -564,6 +564,18 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					false,
 				)
 			} catch (error) {
+				// A cancellation that lands while open() or update() is in flight runs the
+				// TaskAborted teardown - which releases this task's stream state, reverts or
+				// closes this very diff view, and reports the failure itself - and it can also
+				// reject the call in flight. Marking the already-released state failed, finalizing
+				// the ask, or running the failed-stream cleanup a second time would resurrect UI
+				// and roll back twice for a task the user cancelled, so the teardown owns the
+				// outcome here.
+				if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+					console.error(`Error streaming write_to_file diff view:`, error)
+					return
+				}
+
 				// Opening or updating the diff view can throw on filesystem errors
 				// (EACCES/EROFS on read-only paths). Finalize the partial tool message
 				// so the UI spinner doesn't get stuck and reset the diff view. Do NOT

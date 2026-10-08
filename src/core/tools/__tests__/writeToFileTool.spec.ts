@@ -885,6 +885,32 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		})
+		it("does not finalize the ask or roll back twice when open() rejects after a cancellation", async () => {
+			// A cancellation during open() releases the stream state through the TaskAborted
+			// teardown (which also reverts or closes this diff view) AND can reject the call in
+			// flight. The catch used to mark the released state failed, finalize the ask and run
+			// the failed-stream cleanup again - a second rollback and a fresh ask row for a task
+			// the user already cancelled.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.update.mockClear()
+			mockCline.diffViewProvider.revertChanges.mockClear()
+			mockCline.finalizePartialToolAsk.mockClear()
+			mockCline.diffViewProvider.open.mockImplementationOnce(async () => {
+				writeToFileTool.clearTaskState(mockCline)
+				throw new Error("EACCES: permission denied, open mock-file")
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+			// The teardown that already ran owns the outcome: no finalize and no second rollback.
+			expect(mockCline.finalizePartialToolAsk).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
 	})
 
 	describe("user interaction", () => {
