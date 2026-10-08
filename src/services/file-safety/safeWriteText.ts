@@ -37,6 +37,24 @@ export interface SafeWriteTextOptions {
 	 * already written data to a temp file via a custom stream.
 	 */
 	tempPath?: string
+
+	/**
+	 * Verification that runs AFTER the staged copy is written and fsynced and IMMEDIATELY
+	 * BEFORE the commit rename. A guard that has to compare on-disk state against an
+	 * expectation (a version token, or absence) cannot do that before the staging work:
+	 * the window between check and publish would then span the whole staging + fsync
+	 * sequence. Running the check here shrinks it to the rename syscall itself. A
+	 * rejection skips the commit rename, so the target is left exactly as it was and the
+	 * staged temp is cleaned up by the failure path.
+	 *
+	 * This is not an atomic compare-and-swap. No portable rename primitive compares the
+	 * on-disk CONTENT against an expectation, so a writer that neither takes the advisory
+	 * lock nor goes through this path can still change the file inside that last window.
+	 * The guard narrows the window and turns a silent lost update into a rejected write;
+	 * full atomicity would need a content-addressed publish (or a lock every writer in
+	 * the ecosystem honors), which this layer cannot enforce from outside.
+	 */
+	preCommitVerify?: (targetPath: string) => Promise<void>
 }
 
 // -- helpers ---------------------------------------------------------------
@@ -286,6 +304,13 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				}
 			}
 
+			// -- Step 3a: pre-commit verification -------------------------
+			// Runs before the commit rename so a rejection leaves the target untouched -
+			// no backup is taken and nothing is moved yet.
+			if (options?.preCommitVerify) {
+				await options.preCommitVerify(targetPath)
+			}
+
 			// -- Step 4: atomic rename temp -> target ---------------------
 			await fs.rename(tempPath, targetPath)
 
@@ -356,6 +381,18 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			await fs.unlink(tempPath).catch(() => {})
 		} catch {
 			// cleanup failure is non-fatal
+		}
+
+		// The staging directory was created for this write's temp file, so a failed write
+		// must not leave an empty .file-safety-staging in the user's workspace. rmdir only
+		// removes an empty directory, so a concurrent write still holding a temp file here
+		// keeps it in place.
+		if (stagingDir !== null) {
+			try {
+				await fs.rmdir(stagingDir)
+			} catch {
+				// best-effort: non-empty (concurrent write) or already removed
+			}
 		}
 
 		if (daclDumpPath !== null) {

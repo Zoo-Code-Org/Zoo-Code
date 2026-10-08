@@ -166,6 +166,41 @@ describe("safeWriteText", () => {
 			expect(fs.rename).toHaveBeenCalledTimes(1)
 		})
 
+		it("removes the empty staging directory when the commit fails", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fs.rename).mockRejectedValue(new Error("ENOSPC"))
+
+			await expect(safeWriteText(targetPath, "new data", { platform: "linux" })).rejects.toThrow("ENOSPC")
+
+			// The temp file is gone, so the staging directory it was created for is empty.
+			// Leaving it behind puts hidden clutter in the user's workspace until some later
+			// successful write happens to remove it.
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
+		})
+
+		it("a preCommitVerify rejection skips the commit rename and leaves the target untouched", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const verify = vi.fn(async () => {
+				throw new Error("Stale version at commit time")
+			})
+
+			await expect(
+				safeWriteText(targetPath, "new data", { platform: "linux", preCommitVerify: verify }),
+			).rejects.toThrow("Stale version at commit time")
+
+			// The verifier runs after staging and fsync but before the rename, so the target
+			// was never moved and the staged content was cleaned up.
+			expect(verify).toHaveBeenCalledWith(targetPath)
+			expect(fs.rename).not.toHaveBeenCalled()
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
+		})
+
 		it("a post-commit backup cleanup failure is non-fatal: the target stays committed and no temp is left behind", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)

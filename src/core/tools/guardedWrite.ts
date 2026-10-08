@@ -143,8 +143,29 @@ export async function createIfAbsent(absolutePath: string, content: string): Pro
 				throw error
 			}
 			// Absent under the lock: no other lock-honoring writer can create it between
-			// this check and the publish.
-			await safeWriteText(absolutePath, content)
+			// this check and the publish. A writer that does NOT honor the advisory lock can
+			// still create the file while the staged copy is being written and fsynced, so
+			// absence is re-asserted inside safeWriteText immediately before the commit
+			// rename: the window then covers only that syscall, and the race surfaces as a
+			// rejected write instead of silently clobbering whoever created the file.
+			await safeWriteText(absolutePath, content, {
+				preCommitVerify: async (targetPath) => {
+					try {
+						await fs.access(targetPath)
+					} catch (error: unknown) {
+						if (errorCode(error) === "ENOENT") {
+							return
+						}
+						throw error
+					}
+					throw new GuardRejectedError(
+						"File appeared at " +
+							targetPath +
+							" while this write was being staged -- read the file first, then retry.",
+						absolutePath,
+					)
+				},
+			})
 			// Recomputed under the same lock: the caller records this as the new
 			// observation, so a later write is compared against what this publish
 			// actually wrote rather than against no observation at all.
@@ -196,8 +217,41 @@ export async function replaceIfVersion(
 
 		if (currentVersion === expectedVersion) {
 			// The check and the publish run under the same lock, so the token cannot
-			// change between them for any writer that honors it.
-			await safeWriteText(absolutePath, content)
+			// change between them for any writer that honors it. A writer that does NOT
+			// honor the advisory lock can still rewrite the file while the staged copy is
+			// being written and fsynced, so the token is re-checked inside safeWriteText
+			// immediately before the commit rename: the window then covers only that
+			// syscall, and the race surfaces as a rejected stale write instead of a newer
+			// version being replaced by the older one.
+			await safeWriteText(absolutePath, content, {
+				preCommitVerify: async (targetPath) => {
+					let verifiedVersion: string
+					try {
+						verifiedVersion = await computeVersionToken(targetPath)
+					} catch (error: unknown) {
+						if (errorCode(error) === "ENOENT") {
+							throw new GuardRejectedError(
+								"File was deleted after it was read -- the version recorded at read time (" +
+									expectedVersion +
+									") no longer exists; re-read the file, then retry.",
+								absolutePath,
+							)
+						}
+						throw error
+					}
+					if (verifiedVersion !== expectedVersion) {
+						throw new GuardRejectedError(
+							"Stale version at commit time -- the file changed while this write was being " +
+								"staged (expected " +
+								expectedVersion +
+								", current " +
+								verifiedVersion +
+								"); re-read the file, then retry.",
+							absolutePath,
+						)
+					}
+				},
+			})
 			// The publish moved the token; hand the new one back so the caller can
 			// record it instead of leaving the read-time token in the registry.
 			return computeVersionToken(absolutePath)

@@ -88,7 +88,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, "new-file.txt", "hello", "create")
 
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("new-file.txt"), "hello")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("new-file.txt"), "hello", { preCommitVerify: expect.any(Function) })
 		})
 
 		it("fails with the read-first remediation when the file exists - nothing published", async () => {
@@ -145,7 +145,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "new-file.txt", "hello", "update")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("new-file.txt"), "hello")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("new-file.txt"), "hello", { preCommitVerify: expect.any(Function) })
 		})
 
 		it("fails with the read-first remediation when the file exists - nothing published", async () => {
@@ -171,7 +171,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, "gone.txt", "back", "create")
 
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("gone.txt"), "back")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("gone.txt"), "back", { preCommitVerify: expect.any(Function) })
 		})
 
 		it("goes through the version guard when the file still exists", async () => {
@@ -183,7 +183,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "kept.txt", "rewritten", "create")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("kept.txt"), "rewritten")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("kept.txt"), "rewritten", { preCommitVerify: expect.any(Function) })
 		})
 
 		it("fails with the stale remediation suffix when the version moved", async () => {
@@ -223,7 +223,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, "doc.txt", "new content", "update")
 
 			expect(mockedComputeVersionToken).toHaveBeenCalledWith(abs("doc.txt"))
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "new content")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "new content", { preCommitVerify: expect.any(Function) })
 		})
 
 		it("fails with the stale remediation suffix when the version moved - nothing published", async () => {
@@ -259,7 +259,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "doc.txt", "patched", "edit")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "patched")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "patched", { preCommitVerify: expect.any(Function) })
 		})
 
 		it("fails with the stale remediation suffix when the version moved", async () => {
@@ -292,7 +292,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, "created.txt", "again", "update")
 
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
-			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("created.txt"), "again")
+			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("created.txt"), "again", { preCommitVerify: expect.any(Function) })
 		})
 
 		it("replaces the read-time token after a successful update", async () => {
@@ -380,7 +380,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await expect(p2).resolves.toBeUndefined()
 
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("settle.txt"), "second")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("settle.txt"), "second", { preCommitVerify: expect.any(Function) })
 		})
 
 		it("evicts settled chain entries - a later write still serializes in order", async () => {
@@ -434,7 +434,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "sub/dir.txt", "content", "update")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("sub/dir.txt"), "content")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("sub/dir.txt"), "content", { preCommitVerify: expect.any(Function) })
 		})
 
 		it("normalizes an already-absolute input (trailing separator) to the observation key", async () => {
@@ -451,7 +451,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, canonical + "/", "content", "update")
 
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(canonical, "content")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(canonical, "content", { preCommitVerify: expect.any(Function) })
 		})
 
 		it("serializes two spellings of one file through a single chain key", async () => {
@@ -493,7 +493,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			resetChain()
 			await guardedWrite(task, "x.txt", "b", "update")
 
-			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("x.txt"), "b")
+			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("x.txt"), "b", { preCommitVerify: expect.any(Function) })
 		})
 	})
 
@@ -539,7 +539,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(mockedAcquireFileLock).not.toHaveBeenCalledWith(alias)
 			// The publish still goes through the path the caller (and safeWriteText's own
 			// resolution) owns, so the observation key and symlink semantics are unchanged.
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(alias, "new")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(alias, "new", { preCommitVerify: expect.any(Function) })
 		})
 
 		it("releases the lock when the guard rejects as stale", async () => {
@@ -556,6 +556,43 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await expect(replaceIfVersion(abs("x.txt"), "v1", "new")).rejects.toThrow(/Stale version/)
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 			expect(order).toEqual(["acquire", "release"])
+		})
+
+		it("re-checks the version token immediately before the commit rename", async () => {
+			// The pre-flight check passes, then a writer that ignores the advisory lock
+			// rewrites the file while the staged copy is being written and fsynced.
+			mockedComputeVersionToken.mockResolvedValueOnce("v1").mockResolvedValueOnce("v2")
+
+			await replaceIfVersion(abs("x.txt"), "v1", "new")
+
+			// The publish is handed a verifier, so the comparison runs after staging and fsync
+			// rather than only before them: the race window shrinks to the commit syscall, and
+			// a newer version cannot be replaced by an older one without the write being refused.
+			const verifier = mockedSafeWriteText.mock.calls[0]?.[2]?.preCommitVerify
+			expect(verifier).toBeTypeOf("function")
+			if (verifier) {
+				await expect(verifier(abs("x.txt"))).rejects.toThrow(/Stale version at commit time/)
+			}
+		})
+
+		it("re-asserts absence immediately before the commit rename", async () => {
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			// Guard check: the file is absent, so the create is allowed to proceed.
+			mockedFsAccess.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+			await createIfAbsent(abs("new.txt"), "content")
+
+			const verifier = mockedSafeWriteText.mock.calls[0]?.[2]?.preCommitVerify
+			expect(verifier).toBeTypeOf("function")
+			if (verifier) {
+				// Still absent: the commit may land.
+				mockedFsAccess.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+				await expect(verifier(abs("new.txt"))).resolves.toBeUndefined()
+				// Created by someone during the staging span: the commit must be refused rather
+				// than clobbering whoever created the file.
+				mockedFsAccess.mockResolvedValueOnce(undefined)
+				await expect(verifier(abs("new.txt"))).rejects.toThrow(/appeared at/)
+			}
 		})
 
 		it("holds the lock across the absence check and the create publish", async () => {

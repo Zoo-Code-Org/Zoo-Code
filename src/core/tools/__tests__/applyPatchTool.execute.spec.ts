@@ -281,6 +281,48 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(mockHandleError).toHaveBeenCalledWith("apply patch", guardError)
 	})
 
+	it.each(["pre-read", "post-read"])(
+		"update: continues the hunk read and records no observation when the %s stat fails",
+		async (which) => {
+			const statMock = mockedFsPromises.default.stat
+			const stable = {
+				dev: 7n,
+				ino: 4242n,
+				size: 1234n,
+				mtimeNs: 1700000000123456789n,
+				ctimeNs: 1700000000789999999n,
+			}
+			const failure = new Error("EACCES: permission denied")
+			if (which === "pre-read") {
+				statMock.mockRejectedValueOnce(failure).mockResolvedValueOnce(stable)
+			} else {
+				statMock.mockResolvedValueOnce(stable).mockRejectedValueOnce(failure)
+			}
+
+			const guardError = new Error(
+				"File already exists at /workspace/project/src/thing.ts and was not read before this write -- read the file first, then retry.",
+			)
+			mockSaveDirectly.mockRejectedValue(guardError)
+
+			await tool.execute({ patch: updatePatch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			// A stat failure is not evidence the file changed and not a reason to abort the
+			// read: the hunk was still processed against the content that was read.
+			expect(mockSaveDirectly).toHaveBeenCalledTimes(1)
+			// But a read whose version is unknown may not be observed...
+			expect(
+				mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts")),
+			).toBe(false)
+			// ...and the publish it leaves unauthorized is reported as an error, not a save.
+			expect(mockHandleError).toHaveBeenCalledWith("apply patch", guardError)
+			expect(mockPushToolResult).not.toHaveBeenCalledWith("Saved file")
+		},
+	)
+
 	it("add: publishes the new file through the guarded saveDirectly with create kind", async () => {
 		mockedFileExistsAtPath.mockResolvedValueOnce(false)
 

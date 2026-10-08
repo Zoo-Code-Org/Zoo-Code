@@ -211,5 +211,54 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		// A read that straddled a write proves nothing about the current version, so no
 		// observation may be recorded and the guarded publish keeps its remediation.
 		expect(mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts"))).toBe(false)
+
 	})
+	it.each(["pre-read", "post-read"])(
+		"continues the read and records no observation when the %s stat fails",
+		async (which) => {
+			const statMock = vi.mocked((await import("fs/promises")).default.stat)
+			const stable = {
+				dev: 7n,
+				ino: 4242n,
+				size: 1234n,
+				mtimeNs: 1700000000123456789n,
+				ctimeNs: 1700000000789999999n,
+			} as unknown as BigIntStats
+			const failure = new Error("EACCES: permission denied")
+			if (which === "pre-read") {
+				statMock.mockRejectedValueOnce(failure).mockResolvedValueOnce(stable)
+			} else {
+				statMock.mockResolvedValueOnce(stable).mockRejectedValueOnce(failure)
+			}
+
+			// With no observation the guarded publish refuses, which is what the second half
+			// of this assertion checks.
+			const guardError = new Error("File not read yet -- read the file, then retry.")
+			mockSaveDirectly.mockRejectedValue(guardError)
+
+			await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			// A stat failure is not evidence the file changed and not a reason to abort: the
+			// diff still ran against the content that WAS read successfully.
+			expect(mockSaveDirectly).toHaveBeenCalledWith(
+				"src/thing.ts",
+				"modified file content\n",
+				false,
+				true,
+				1000,
+				"edit",
+			)
+			// Nothing may be observed from a read whose version is unknown.
+			expect(
+				mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts")),
+			).toBe(false)
+			// And the refused publish surfaces as an error rather than a saved file.
+			expect(mockHandleError).toHaveBeenCalledWith("applying diff", guardError)
+			expect(mockPushToolResult).not.toHaveBeenCalledWith("Saved file")
+		},
+	)
 })
