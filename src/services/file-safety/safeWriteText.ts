@@ -489,7 +489,19 @@ export async function safeWriteText(
 						// the chmod afterwards is what clears a copied read-only attribute on Windows
 						// and keeps a backup of a permissive file private.
 						const seedFd = fsSync.openSync(backupPath, "wx", 0o600)
-						fsSync.closeSync(seedFd)
+						try {
+							fsSync.closeSync(seedFd)
+						} catch (closeError: unknown) {
+							// A failed close must not leave the descriptor untracked while the copy
+							// proceeds against the same path: retry once (best-effort), then propagate.
+							// backupPath is already recorded, so the outer cleanup removes the seeded file.
+							try {
+								fsSync.closeSync(seedFd)
+							} catch {
+								// A descriptor the OS refuses to release is not recoverable here.
+							}
+							throw closeError
+						}
 						await fs.copyFile(targetPath, backupPath)
 						await fs.chmod(backupPath, 0o600)
 						// "r+" not "r": fsync on a read-only handle is EPERM on Windows, and the same
@@ -514,7 +526,13 @@ export async function safeWriteText(
 								backupCleanupError = null
 								break
 							} catch (cleanupError: unknown) {
-								backupCleanupError = errorCode(cleanupError) === "ENOENT" ? null : cleanupError
+								if (errorCode(cleanupError) === "ENOENT") {
+									// Already gone: that is exactly the outcome the cleanup wanted, so stop
+									// rather than unlinking the same path a second time.
+									backupCleanupError = null
+									break
+								}
+								backupCleanupError = cleanupError
 							}
 						}
 						backupPath = null

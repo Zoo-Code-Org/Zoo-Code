@@ -663,6 +663,47 @@ describe("safeWriteText", () => {
 		})
 	})
 
+	it("treats an already-absent post-commit backup as cleaned up, without a second unlink", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const onWarning = vi.fn()
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fsSync.closeSync).mockReturnValue(undefined)
+		// Step 6 removes the backup copy after the commit; something else removed it first.
+		vi.mocked(fs.unlink).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+		await safeWriteText(targetPath, "data", { backup: true, platform: "linux", onWarning })
+
+		// ENOENT means the cleanup goal is already met: the write resolves, nothing is reported
+		// as a leftover, and the retry loop stops instead of unlinking the same path twice.
+		const backupUnlinks = vi.mocked(fs.unlink).mock.calls.filter(function (call) {
+			return String(call[0]).includes("safeWriteText.bak")
+		})
+		expect(backupUnlinks.length).toBe(1)
+		expect(onWarning).not.toHaveBeenCalled()
+	})
+
+	it("retries the seed-descriptor close and removes the seeded backup", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		// The seed open is the only "wx" open; give its descriptor a distinguishable fd.
+		vi.mocked(fsSync.openSync).mockImplementation(((p: fsSync.PathLike, flags?: fsSync.OpenMode) => (flags === "wx" ? 42 : 1)) as typeof fsSync.openSync)
+		let seedCloseFailures = 0
+		vi.mocked(fsSync.closeSync).mockImplementation((fd: number) => {
+			if (fd === 42 && seedCloseFailures++ === 0) {
+				throw new Error("close failed")
+			}
+			return undefined
+		})
+
+		await expect(safeWriteText(targetPath, "data", { backup: true, platform: "linux" })).rejects.toThrow("close failed")
+
+		// The descriptor is closed twice (best-effort retry) and the seeded backup is unlinked,
+		// so neither the fd nor the partial backup outlives the failed write.
+		expect(vi.mocked(fsSync.closeSync).mock.calls.filter(function (call) { return call[0] === 42 }).length).toBe(2)
+		expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak"))
+	})
+
 	// ── Test 5: win32 DACL path ──────────────────────────────────────────────
 
 	describe("win32 DACL", () => {
