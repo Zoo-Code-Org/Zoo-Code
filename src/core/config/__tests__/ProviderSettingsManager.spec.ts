@@ -1668,8 +1668,11 @@ describe("ProviderSettingsManager", () => {
 				},
 			})
 
+			mockSecrets.get.mockImplementation(async () => storedRaw)
 			const managerA = new ProviderSettingsManager(mockContext)
 			const managerB = new ProviderSettingsManager(mockContext)
+			await managerA.initialize()
+			await managerB.initialize()
 
 			let readCount = 0
 			mockSecrets.get.mockImplementation(async () => {
