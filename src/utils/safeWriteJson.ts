@@ -67,6 +67,19 @@ export class ConfinedPathEscapeError extends Error {
  * legitimate in-scope write. When the scope does not exist yet, the nearest
  * existing ancestor is resolved and the remainder re-appended.
  */
+/**
+ * Whether `candidate` sits outside `scopeRoot`. The scope root itself counts as
+ * outside: a file write cannot land on the directory that declares the scope.
+ */
+function _escapesScope(scopeRoot: string, candidate: string): boolean {
+	const relative = path.relative(scopeRoot, candidate)
+	return (
+		relative === "" ||
+		relative === ".." ||
+		relative.startsWith(".." + path.sep) ||
+		path.isAbsolute(relative)
+	)
+}
 async function _resolveScopeRoot(confineTo: string): Promise<string> {
 	const lexical = path.resolve(confineTo)
 	try {
@@ -146,6 +159,21 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// back), so the walk tolerates a dangling link instead of rejecting it here.
 	const lockKey = await resolveLockKey(absoluteFilePath)
 
+	// Confinement is checked here as well as under the lock. The lock file lives NEXT
+	// TO the key, so a planted symlink that points outside the declared scope would
+	// first make this write create "<referent>.lock" outside that scope - a side effect
+	// the caller declared it would not have - and if that directory is not writable the
+	// caller would get a lock-acquisition error instead of the ConfinedPathEscapeError
+	// it is entitled to. The key is the symlink referent, so this check sees the same
+	// destination the lock would be taken on. The under-lock check stays: it covers the
+	// target re-resolved after a peer commits.
+	if (options?.confineTo) {
+		const scopeRoot = await _resolveScopeRoot(options.confineTo)
+		if (_escapesScope(scopeRoot, await _resolveScopeRoot(lockKey))) {
+			throw new ConfinedPathEscapeError(absoluteFilePath, lockKey, scopeRoot)
+		}
+	}
+
 	// Acquire the lock before any file operations. If acquisition fails it throws
 	// immediately, and releaseLock stays a no-op so the finally block does not try
 	// to release an unacquired lock.
@@ -168,14 +196,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// rejected write leaves nothing behind.
 		if (options?.confineTo) {
 			const scopeRoot = await _resolveScopeRoot(options.confineTo)
-			const resolvedTarget = await _resolveScopeRoot(resolvedTargetPath)
-			const relative = path.relative(scopeRoot, resolvedTarget)
-			if (
-				relative === "" ||
-				relative === ".." ||
-				relative.startsWith(".." + path.sep) ||
-				path.isAbsolute(relative)
-			) {
+			if (_escapesScope(scopeRoot, await _resolveScopeRoot(resolvedTargetPath))) {
 				throw new ConfinedPathEscapeError(absoluteFilePath, resolvedTargetPath, scopeRoot)
 			}
 		}

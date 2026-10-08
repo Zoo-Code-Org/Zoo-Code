@@ -104,12 +104,13 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					if (preReadToken === versionTokenOfStat(postReadStats)) {
 						// The tool's own hunk read, not a model read. When the model already observed the
 						// file, keep the completeness it earned and only on the version it was earned on; a
-						// partial view stays partial. With no prior observation this read returned the whole
-						// content, so the observation is complete.
+						// partial view stays partial. With no prior observation the model has seen only the
+						// patch's hunks, so this read stays incomplete: it must not become authority for a
+						// later full-file replacement.
 						const prior = task.observationRegistry.get(absolutePath)
-						// Nothing to carry when the model never observed the file: this read returned the
-						// whole content, so it is a complete observation. Carry only when a prior observation
-						// exists and still describes the version that was read.
+						// With no prior observation there is nothing to carry, and the read stays
+						// incomplete. Carry completeness only when a prior observation exists and still
+						// describes the version that was read.
 						const complete = prior === undefined ? false : prior.complete === true && prior.version === preReadToken
 						task.observationRegistry.observe(absolutePath, preReadToken, complete)
 					}

@@ -410,9 +410,18 @@ describe("safeWriteText", () => {
 			expect(fs.rename).toHaveBeenCalledTimes(1)
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 
-			// The durability failure is reported, not swallowed - and the backup copy is not
-			// left beside the target where no caller could find it.
-			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
+			// The durability failure is reported, not swallowed. The backup is NOT deleted:
+			// after the commit the target holds the NEW content, and this copy is the only
+			// one known to hold the previous content - the recovery copy the contract
+			// promises for exactly this path.
+			const backupUnlinks = vi
+				.mocked(fs.unlink)
+				.mock.calls.filter(function (call: unknown[]) {
+					return String(call[0]).includes("safeWriteText.bak_")
+				})
+			expect(backupUnlinks).toEqual([])
+			// The staged temp is still cleaned up.
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
 		})
 	})
 
