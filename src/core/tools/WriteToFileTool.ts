@@ -131,6 +131,19 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		this.taskPartialStreamState.delete(key)
 	}
 
+	/**
+	 * Whether this task's partial stream is still the live one. handlePartial() awaits
+	 * provider state, a filesystem probe and task.ask() before it touches the diff view; a
+	 * cancellation during any of those awaits runs the TaskAborted teardown (or a direct
+	 * clearTaskState), which deletes this entry. Continuing would re-open a diff view and
+	 * re-ask for a task the user already cancelled, resurrecting the state the teardown
+	 * released. Identity, not presence: a re-created entry for the same key belongs to a new
+	 * stream, and this one must not write into it.
+	 */
+	private isPartialStreamStillLive(task: Task, state: TaskPartialStreamState): boolean {
+		return this.taskPartialStreamState.get(this.getPartialStreamFailureKey(task)) === state
+	}
+
 	private async resetDiffViewAfterWrite(task: Task): Promise<void> {
 		await task.diffViewProvider.reset().catch((resetError) => {
 			console.error("Error resetting write_to_file diff view:", resetError)
@@ -554,6 +567,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 		const provider = task.providerRef.deref()
 		const state = await provider?.getState()
+
+		// Cancelled while provider state was in flight: the teardown already
+		// released this task's stream state.
+		if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+			return
+		}
 		const isPreventFocusDisruptionEnabled = experiments.isEnabled(
 			state?.experiments ?? {},
 			EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION,
@@ -571,6 +590,9 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			fileExists = task.diffViewProvider.editType === "modify"
 		} else {
 			fileExists = await fileExistsAtPath(absolutePath)
+			if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+				return
+			}
 			task.diffViewProvider.editType = fileExists ? "modify" : "create"
 		}
 
@@ -587,6 +609,10 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 		const partialMessage = JSON.stringify(sharedMessageProps)
 		await task.ask("tool", partialMessage, block.partial).catch(() => {})
+
+		if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+			return
+		}
 
 		if (newContent) {
 			try {

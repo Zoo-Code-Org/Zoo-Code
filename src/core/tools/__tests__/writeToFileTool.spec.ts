@@ -534,6 +534,26 @@ describe("writeToFileTool", () => {
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		})
 
+		it("stops before touching the diff view when the stream state is released during an in-flight await", async () => {
+			// A cancellation while task.ask() is in flight runs the TaskAborted teardown. The
+			// delta that was already in flight must not then re-open the diff view for a task
+			// the user cancelled - that resurrects the state the teardown just released.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.update.mockClear()
+			mockCline.ask.mockImplementation(async () => {
+				writeToFileTool.clearTaskState(mockCline)
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
 		it("does nothing when the task has no stream state to release", async () => {
 			await writeToFileTool.teardownAbandonedStream(mockCline)
 			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
