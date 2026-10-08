@@ -3445,21 +3445,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
 		this.cancelAssistantMessagePersistence()
 
-		// A save whose metadata / task-history stage failed leaves the history entry behind
-		// the messages that are already on disk. Give that stage one awaited chance to catch
-		// up before the task stops serving, so shutdown does not persist a stale history item.
-		// Skipped while taskApiConfigReady has not settled: persistTaskMetadata() awaits
-		// it, and an initialization that never settles would block teardown. A task that merely
-		// has no stored api config name (a history entry saved before it was recorded) HAS
-		// settled, and still gets its retry.
-		if (this.pendingTaskMetadataRepair && this.taskApiConfigReadySettled) {
-			try {
-				await this.persistTaskMetadata()
-			} catch (error) {
-				console.error("Failed to retry task metadata during dispose:", error)
-			}
-		}
-
 		// Stop the idle telemetry check and report any unflushed activity as a
 		// shutdown installment, so a task torn down mid-work (panel closed, task
 		// switched, extension deactivated) isn't invisible to telemetry.
@@ -3547,6 +3532,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 		} catch (error) {
 			console.error("Error reverting diff changes:", error)
+		}
+
+		// A save whose metadata / task-history stage failed leaves the history entry
+		// behind the messages that are already on disk. Give that stage one awaited chance to
+		// catch up before the task stops serving. Deliberately last: everything synchronous above
+		// has to happen before the first yield, because abortTaskOnce() awaits diffReversionPromise
+		// right after void dispose(), an abandoned stream can reach its finally while this await is
+		// in flight and leave the revert decision below false, and direct dispose() callers rely on
+		// the abort flag being set synchronously. Skipped while taskApiConfigReady has not settled -
+		// persistTaskMetadata() awaits it and teardown must not block on it. It reports its own
+		// failure and returns false, so there is nothing to catch here.
+		if (this.pendingTaskMetadataRepair && this.taskApiConfigReadySettled) {
+			await this.persistTaskMetadata()
 		}
 
 		await pendingCleanup

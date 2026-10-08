@@ -6299,6 +6299,50 @@ describe("Cline", () => {
 			historySpy.mockRestore()
 		})
 
+		it("finishes the synchronous teardown before the dispose-time metadata retry", async () => {
+			// The retry has to sit after disposeOnce()'s synchronous section, not in front of it:
+			// abortTaskOnce() awaits diffReversionPromise right after void dispose(), an abandoned
+			// stream can reach its finally while the retry is in flight and leave the revert decision
+			// below false, and direct dispose() callers rely on the abort flag being set
+			// synchronously. A task-history write that never settles turns any of those three
+			// regressions into an observable hang.
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
+			fsReal.mkdirSync(taskDir, { recursive: true })
+			let releaseHistory: (() => void) | undefined
+			const historyGate = new Promise<void>((resolve) => {
+				releaseHistory = resolve
+			})
+			const historySpy = vi.spyOn(mockProvider, "updateTaskHistory").mockImplementation(() => historyGate.then(() => []))
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			// Let the async api-config initialization settle first: the retry is deliberately
+			// skipped while it is pending, which would hide the ordering under test.
+			await task["taskApiConfigReady"]
+			task["pendingTaskMetadataRepair"] = true
+			task.isStreaming = true
+			task.diffViewProvider.isEditing = true
+			const revertSpy = vi.spyOn(task.diffViewProvider, "revertChanges").mockResolvedValue(undefined)
+
+			const disposing = task.dispose()
+			await new Promise<void>((resolve) => setImmediate(resolve))
+
+			// The teardown completed without waiting for the task-history write.
+			expect(task.abort).toBe(true)
+			expect(revertSpy).toHaveBeenCalledTimes(1)
+
+			releaseHistory?.()
+			await disposing
+
+			expect(historySpy).toHaveBeenCalledTimes(1)
+			historySpy.mockRestore()
+			revertSpy.mockRestore()
+		})
+
 		it("does not block teardown when a pending metadata repair has an unsettled api-config init", async () => {
 			// persistTaskMetadata() awaits taskApiConfigReady. For a task whose async api-config
 			// initialization never settles, an unconditional dispose-time retry would hang the

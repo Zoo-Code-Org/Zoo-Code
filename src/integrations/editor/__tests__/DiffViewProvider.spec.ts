@@ -2069,6 +2069,82 @@ describe("DiffViewProvider", () => {
 			expect(mockWorkspaceEdit.replace.mock.calls[0][2]).toBe("")
 		})
 
+		it("removes the placeholder that a new-file open() wrote, driven through the public methods", async () => {
+			// The ownership lifecycle lives at the public-method layer, so exercise it there:
+			// open() writes the empty placeholder and records it, and the discard of an abandoned
+			// create removes exactly that path.
+			const relPath = "owned-placeholder.ts"
+			const fsPath = `${mockCwd}/${relPath}`
+			const mockEditor = {
+				document: {
+					uri: { fsPath, scheme: "file" },
+					getText: vi.fn().mockReturnValue(""),
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+					lineCount: 0,
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			}
+			// Structural double for the mocked editor: the mock only implements the members
+			// open() touches, so it is routed through unknown rather than any.
+			const editor = mockEditor as unknown as vscode.TextEditor
+			vi.mocked(vscode.window).visibleTextEditors = [editor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback({ uri: { fsPath, scheme: "file" } } as vscode.TextDocument), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+			vi.mocked(vscode.window.onDidChangeTextEditorVisibleRanges).mockReturnValue({ dispose: vi.fn() })
+			vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+			diffViewProvider.editType = "create"
+
+			await diffViewProvider.open(relPath)
+
+			// open() created the placeholder, and this edit now owns it.
+			expect(fs.writeFile).toHaveBeenCalledWith(fsPath, "")
+
+			await diffViewProvider.discardUnapprovedStream()
+
+			expect(fs.unlink).toHaveBeenCalledWith(fsPath)
+		})
+
+		it("does not remove the file once saveChanges() has approved the content", async () => {
+			// saveChanges() turns the placeholder into approved content and drops this edit's
+			// claim on it, so a later abandoned cleanup must leave the approved file on disk.
+			const relPath = "approved-by-save.ts"
+			const fsPath = `${mockCwd}/${relPath}`
+			Object.assign(diffViewProvider, {
+				relPath,
+				newContent: "approved content",
+				editType: "create",
+				createdDirs: [],
+				placeholderPath: fsPath,
+				preDiagnostics: [],
+				activeDiffEditor: {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue("approved content"),
+						isDirty: false,
+						save: vi.fn().mockResolvedValue(undefined),
+					},
+				},
+				closeAllDiffViews: vi.fn().mockResolvedValue(undefined),
+				closeFileTab: vi.fn().mockResolvedValue(undefined),
+			})
+			vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(undefined as never)
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+
+			await diffViewProvider.saveChanges(false, 0)
+
+			await diffViewProvider.discardUnapprovedStream()
+
+			expect(fs.unlink).not.toHaveBeenCalled()
+		})
+
 		it("does nothing when no abandoned view is open", async () => {
 			Object.assign(diffViewProvider, { relPath: undefined, activeDiffEditor: undefined })
 		
