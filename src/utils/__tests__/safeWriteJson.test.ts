@@ -46,6 +46,8 @@ vi.mock("fs", async () => {
 	return {
 		...actualFs, // Spread actual implementations
 		createWriteStream: vi.fn(actualFs.createWriteStream) as any, // Default to actual, but mockable
+		// Wrapped so a test can fail the parent-directory fsync that follows the commit rename.
+		fsyncSync: vi.fn(actualFs.fsyncSync),
 	}
 })
 
@@ -106,9 +108,51 @@ describe("safeWriteJson", () => {
 		}
 	}
 
+	// Durability of the commit (Persistence Integrity)
+	test.skipIf(process.platform === "win32")(
+			"keeps the published target when the commit landed but the directory fsync failed",
+			async () => {
+			const target = path.join(tempDir, "durable.json")
+			// The first fsync is the staged file, the second is the parent directory AFTER the
+			// commit rename. Failing only the second one is the PublishNotDurableError case:
+			// the bytes are in place, only their durability is unconfirmed.
+			let fsyncCalls = 0
+			fsSyncActual.fsyncSync.mockImplementation(() => {
+				fsyncCalls++
+				if (fsyncCalls === 2) {
+					throw Object.assign(new Error("EIO: i/o error"), { code: "EIO" })
+				}
+			})
+
+			const payload = { committed: "value" }
+			await expect(safeWriteJson(target, payload)).rejects.toThrow(/could not confirm it is durable/)
+			expect(fsyncCalls).toBe(2)
+
+			// The staged file was renamed onto the target, so the catch path must not treat that
+			// path as a leftover temp file: the new content has to survive the rejection.
+			expect(await readFileContent(target)).toEqual(payload)
+	},
+	)
+
 	// Staging permissions
 	test.skipIf(process.platform === "win32")(
-		"stages the temp file with the existing target's mode instead of the process default",
+			"omits an explicit mode for an absent target so the file takes the umask default",
+			async () => {
+			const target = path.join(tempDir, "absent-target.json")
+			await safeWriteJson(target, { fresh: 1 })
+
+			// Mirroring a mode only makes sense when there IS a target to mirror. Inheriting a
+			// mode here would either pin 0o600 for a brand new file or, worse, mask the umask.
+			const streamCall = vi.mocked(fsSyncActual.createWriteStream).mock.calls.at(-1)
+			expect((streamCall?.[1] as { mode?: number } | undefined)?.mode).toBeUndefined()
+
+			const mode = (await fs.stat(target)).mode & 0o777
+			expect(mode).toBe(0o666 & ~process.umask())
+			},
+	)
+
+	test.skipIf(process.platform === "win32")(
+			"stages the temp file with the existing target's mode instead of the process default",
 		async () => {
 			const target = path.join(tempDir, "private.json")
 			await fs.writeFile(target, JSON.stringify({ initial: 1 }), { mode: 0o600 })

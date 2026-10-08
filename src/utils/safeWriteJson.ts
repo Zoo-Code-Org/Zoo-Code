@@ -4,7 +4,12 @@ import * as path from "path"
 import { JsonStreamStringify } from "json-stream-stringify"
 
 
-import { resolvePublishTarget, safeWriteText, type SafeWriteTextOptions } from "../services/file-safety/safeWriteText"
+import {
+	resolvePublishTarget,
+	safeWriteText,
+	PublishNotDurableError,
+	type SafeWriteTextOptions,
+} from "../services/file-safety/safeWriteText"
 
 
 import { acquireFileLock } from "./fileLock"
@@ -148,12 +153,20 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	} catch (originalError) {
 		console.error(`Operation failed for ${absoluteFilePath}: [Original Error Caught]`, originalError)
 
+		// PublishNotDurableError is the one failure where the commit rename DID land:
+		// the staged path was renamed onto the target, so it is no longer a leftover
+		// temp file and must never be treated as one below. Only the durability of the
+		// directory entry is unconfirmed; the content is in place.
+		if (originalError instanceof PublishNotDurableError) {
+			actualTempNewFilePath = null
+		}
+
 		const newFileToCleanupWithinCatch = actualTempNewFilePath
 
-		// A failed safeWriteText leaves the target untouched (the commit rename never
-		// landed). Clean up the .new file if it still exists (safeWriteText also
-		// cleans up its tempPath on failure; this is a safety net in case its
-		// cleanup missed it).
+		// Any other failure means the commit rename never landed, so the target still
+		// holds the previous bytes. Clean up the staged file if it still exists
+		// (safeWriteText also cleans up its tempPath on failure; this is a safety net
+		// in case its cleanup missed it).
 		if (newFileToCleanupWithinCatch) {
 			try {
 				await fs.unlink(newFileToCleanupWithinCatch)
