@@ -489,19 +489,12 @@ export async function safeWriteText(
 						// the chmod afterwards is what clears a copied read-only attribute on Windows
 						// and keeps a backup of a permissive file private.
 						const seedFd = fsSync.openSync(backupPath, "wx", 0o600)
-						try {
-							fsSync.closeSync(seedFd)
-						} catch (closeError: unknown) {
-							// A failed close must not leave the descriptor untracked while the copy
-							// proceeds against the same path: retry once (best-effort), then propagate.
-							// backupPath is already recorded, so the outer cleanup removes the seeded file.
-							try {
-								fsSync.closeSync(seedFd)
-							} catch {
-								// A descriptor the OS refuses to release is not recoverable here.
-							}
-							throw closeError
-						}
+						// Single close, no retry: on POSIX close(2) can release the descriptor before it
+						// reports an error (and leaves its state unspecified after EINTR), so a second
+						// close could release a descriptor some other operation has meanwhile reused.
+						// The failure propagates; backupPath is already recorded, so the outer cleanup
+						// removes the seeded file instead of leaving it beside the target.
+						fsSync.closeSync(seedFd)
 						await fs.copyFile(targetPath, backupPath)
 						await fs.chmod(backupPath, 0o600)
 						// "r+" not "r": fsync on a read-only handle is EPERM on Windows, and the same

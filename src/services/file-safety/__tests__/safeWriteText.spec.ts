@@ -683,14 +683,15 @@ describe("safeWriteText", () => {
 		expect(onWarning).not.toHaveBeenCalled()
 	})
 
-	it("retries the seed-descriptor close and removes the seeded backup", async () => {
+	it("propagates a seed-descriptor close failure and runs the backup cleanup", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 		// The seed open is the only "wx" open; give its descriptor a distinguishable fd.
 		vi.mocked(fsSync.openSync).mockImplementation(((p: fsSync.PathLike, flags?: fsSync.OpenMode) => (flags === "wx" ? 42 : 1)) as typeof fsSync.openSync)
-		let seedCloseFailures = 0
+		let seedCloseAttempts = 0
 		vi.mocked(fsSync.closeSync).mockImplementation((fd: number) => {
-			if (fd === 42 && seedCloseFailures++ === 0) {
+			if (fd === 42) {
+				seedCloseAttempts++
 				throw new Error("close failed")
 			}
 			return undefined
@@ -698,9 +699,10 @@ describe("safeWriteText", () => {
 
 		await expect(safeWriteText(targetPath, "data", { backup: true, platform: "linux" })).rejects.toThrow("close failed")
 
-		// The descriptor is closed twice (best-effort retry) and the seeded backup is unlinked,
-		// so neither the fd nor the partial backup outlives the failed write.
-		expect(vi.mocked(fsSync.closeSync).mock.calls.filter(function (call) { return call[0] === 42 }).length).toBe(2)
+		// Exactly one close attempt: POSIX close(2) may have released the descriptor before it
+		// reported the error, so a retry could release a descriptor another operation reused.
+		expect(seedCloseAttempts).toBe(1)
+		// The seeded backup must not outlive the failed write.
 		expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak"))
 	})
 
