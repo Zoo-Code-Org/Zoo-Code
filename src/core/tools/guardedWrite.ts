@@ -346,10 +346,12 @@ function assertInsideWorkspace(roots: string[], absolutePath: string, displayPat
 /**
  * The lexical check above cannot see a symlink whose referent leaves the
  * workspace, and the publish resolves through that link. Resolve both sides the
- * same way and compare again. Only a missing path is walked up to the nearest
- * existing ancestor (a create has no target yet); any other realpath failure is
- * treated as "cannot be authorized" and rejected, and a workspace that cannot be
- * resolved at all falls back to the lexical decision already made.
+ * same way and compare again. Only a missing TARGET is walked up to the nearest
+ * existing ancestor (a create has no target yet); a workspace that cannot be
+ * resolved - for any reason, ENOENT included - is rejected rather than falling back
+ * to the lexical decision, because the lexical decision is exactly what a symlink
+ * defeats. A root that is not on disk is not a container this write can be checked
+ * against, so the write is refused instead of published on a weaker guarantee.
  */
 async function assertCanonicalInsideWorkspace(
 	roots: string[],
@@ -360,13 +362,11 @@ async function assertCanonicalInsideWorkspace(
 	for (const root of roots) {
 		try {
 			resolvedRoots.push(await fs.realpath(root))
-		} catch (error: unknown) {
-			if (errorCode(error) === "ENOENT") {
-				// This root is not on disk (a deleted workspace, or a fixture cwd in
-				// tests): there is nothing to contain the write in here. Other roots may
-				// still resolve, and the write is then checked against those.
-				continue
-			}
+		} catch {
+			// ENOENT is not a safe fallback either: a workspace directory that is not on
+			// disk cannot contain anything, and the lexical check that already ran is the
+			// very check a planted symlink defeats. Every failure to canonicalize a root
+			// therefore refuses the write.
 			throw new GuardRejectedError(
 				"Workspace could not be resolved, so this write cannot be checked against it -- retry with a path inside the workspace.",
 				displayPath,
@@ -374,10 +374,10 @@ async function assertCanonicalInsideWorkspace(
 		}
 	}
 	if (resolvedRoots.length === 0) {
-		// No root exists: the publish would fail on the missing directory anyway, and
-		// the lexical decision above already ran. Anything OTHER than a missing root
-		// failed closed above rather than falling back to lexical only.
-		return
+		throw new GuardRejectedError(
+			"Workspace could not be resolved, so this write cannot be checked against it -- retry with a path inside the workspace.",
+			displayPath,
+		)
 	}
 	const target = await realpathNearest(absolutePath, displayPath)
 	if (!resolvedRoots.some((root) => isInside(root, target))) {
@@ -415,6 +415,19 @@ async function realpathNearest(target: string, displayPath: string): Promise<str
 				if (errorCode(innerError) !== "ENOENT") {
 					throw new GuardRejectedError(
 						"Path could not be resolved, so it cannot be checked against the workspace -- retry with a path inside the workspace.",
+						displayPath,
+					)
+				}
+				// "Missing" has two meanings and only one of them is benign. A directory
+				// that has not been created yet is fine - the publish makes it. A component
+				// that EXISTS as a symlink whose referent is gone is a dangling link: the
+				// lexical name would be re-joined onto a container that points elsewhere
+				// (or nowhere), and the publish would then create the file outside the
+				// directory this check authorized.
+				const asLink = await fs.lstat(ancestor, { bigint: true }).catch(() => undefined)
+				if (asLink?.isSymbolicLink()) {
+					throw new GuardRejectedError(
+						`Path runs through a link (${ancestor}) that does not resolve -- retry with a path inside the workspace.`,
 						displayPath,
 					)
 				}
