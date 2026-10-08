@@ -1655,6 +1655,60 @@ describe("ProviderSettingsManager", () => {
 			expect(mockSecrets.store.mock.calls.length).toBe(storeCallCountBefore)
 		})
 
+		it("preserves competing save from another manager instance interleaved after restore reads the profile", async () => {
+			let storedRaw = JSON.stringify({
+				currentApiConfigName: "default",
+				apiConfigs: {
+					test: {
+						id: "test-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-7-sonnet",
+						apiKey: "test-key",
+					},
+				},
+			})
+
+			const managerA = new ProviderSettingsManager(mockContext)
+			const managerB = new ProviderSettingsManager(mockContext)
+
+			let readCount = 0
+			mockSecrets.get.mockImplementation(async () => {
+				readCount++
+				if (readCount === 1) {
+					// managerB performs a competing save right after managerA reads the profile
+					await managerB.saveConfig("test", {
+						id: "test-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-7-sonnet",
+						apiKey: "competing-api-key",
+					})
+				}
+				return storedRaw
+			})
+			mockSecrets.store.mockImplementation(async (_key, val) => {
+				storedRaw = val
+			})
+
+			const expectedConfig: ProviderSettingsWithId = {
+				id: "test-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-3-7-sonnet",
+				apiKey: "test-key",
+			}
+			const restoredConfig: ProviderSettingsWithId = {
+				id: "test-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-3-5-sonnet",
+				apiKey: "test-key",
+			}
+
+			const result = await managerA.restoreConfigIfMatches("test", expectedConfig, restoredConfig)
+
+			expect(result).toBe(false)
+			const finalStored = JSON.parse(storedRaw)
+			expect(finalStored.apiConfigs.test.apiKey).toBe("competing-api-key")
+		})
+
 		it("returns false if config name does not exist", async () => {
 			const existingConfig: ProviderProfiles = {
 				currentApiConfigName: "default",

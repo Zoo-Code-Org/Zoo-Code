@@ -422,7 +422,8 @@ export class ProviderSettingsManager {
 	): Promise<boolean> {
 		try {
 			return await this.lock(async () => {
-				const providerProfiles = await this.load()
+				const rawBefore = await this.context.secrets.get(this.secretsKey)
+				const providerProfiles = rawBefore ? (JSON.parse(rawBefore) as ProviderProfiles) : await this.load()
 				const current = providerProfiles.apiConfigs[name]
 				if (!current) {
 					return false
@@ -437,11 +438,28 @@ export class ProviderSettingsManager {
 					return false
 				}
 
-				providerProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(
+				// Storage-level compare-and-swap: verify the profile still matches at write time
+				// to guard against competing writes from other manager instances
+				const rawLatest = await this.context.secrets.get(this.secretsKey)
+				let targetProfiles = providerProfiles
+				if (rawLatest !== rawBefore) {
+					targetProfiles = rawLatest
+						? (JSON.parse(rawLatest) as ProviderProfiles)
+						: this.defaultProviderProfiles
+					const latestCurrent = targetProfiles.apiConfigs?.[name]
+					const cleanLatest = latestCurrent
+						? (JSON.parse(JSON.stringify(latestCurrent)) as ProviderSettingsWithId)
+						: null
+					if (!cleanLatest || !deepEqual(cleanLatest, expectedTarget)) {
+						return false
+					}
+				}
+
+				targetProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(
 					restoredConfig,
 					restoredConfig.id || currentId,
 				)
-				await this.store(providerProfiles)
+				await this.store(targetProfiles)
 				return true
 			})
 		} catch (error) {
