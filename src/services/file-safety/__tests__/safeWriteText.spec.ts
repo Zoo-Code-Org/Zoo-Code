@@ -465,6 +465,51 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))
 		})
 
+		it("removes the DACL dump on the second attempt when the first unlink fails", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			let dumpUnlinks = 0
+			const unlinkMock = vi.mocked(fs.unlink)
+			unlinkMock.mockImplementation(async (p) => {
+				if (typeof p === "string" && p.includes(".acl.tmp")) {
+					dumpUnlinks++
+					if (dumpUnlinks === 1) { throw new Error("EBUSY") }
+				}
+				return undefined
+			})
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			await safeWriteText(targetPath, "data", { platform: "win32" })
+
+			// One bounded retry is enough here, and nothing is surfaced because the retry succeeded.
+			expect(dumpUnlinks).toBe(2)
+			expect(warnSpy).not.toHaveBeenCalled()
+		})
+
+		it("warns with the retained dump path when both dump unlinks fail", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const unlinkMock = vi.mocked(fs.unlink)
+			unlinkMock.mockImplementation(async (p) => {
+				if (typeof p === "string" && p.includes(".acl.tmp")) { throw new Error("EBUSY") }
+				return undefined
+			})
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			await safeWriteText(targetPath, "data", { platform: "win32" })
+
+			// An icacls dump is a readable copy of the target's ACL: leaving it behind is acceptable,
+			// leaving it behind invisibly is not.
+			const dumpCalls = unlinkMock.mock.calls.filter(function (call) {
+				return typeof call[0] === "string" && call[0].includes(".acl.tmp")
+			})
+			expect(dumpCalls).toHaveLength(2)
+			const warned = warnSpy.mock.calls.map(function (call) { return String(call[0]) }).join("\n")
+			expect(warned).toContain(".acl.tmp")
+		})
+
 	it("keeps the publish and warns when both backup-removal attempts fail", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
@@ -1209,5 +1254,30 @@ describe("resolvePublishTarget symlink cycle (S1)", () => {
 
 		expect(vi.mocked(fs.rename)).not.toHaveBeenCalled()
 		expect(vi.mocked(fsSync.openSync)).not.toHaveBeenCalled()
+	})
+
+	it("propagates an lstat failure that follows a realpath ENOENT", async () => {
+		const linkPath = "/tmp/test-dir/dangling-link"
+		vi.mocked(fs.realpath).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+		vi.mocked(fs.lstat).mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }))
+		// readlink is stubbed by earlier tests in this file and this describe does not reset it,
+		// so clear it here to make "never called" mean what it says.
+		vi.mocked(fs.readlink).mockClear()
+
+		// "Could not inspect" is not "not a link": falling back to the link path here would let the
+		// publish replace the link, which is what the resolver exists to prevent.
+		await expect(resolvePublishTarget(linkPath)).rejects.toThrow("EACCES")
+		expect(fs.readlink).not.toHaveBeenCalled()
+	})
+
+	it("propagates a readlink failure for a dangling symlink", async () => {
+		const linkPath = "/tmp/test-dir/dangling-link"
+		vi.mocked(fs.realpath).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+		vi.mocked(fs.lstat).mockResolvedValue({ isSymbolicLink: () => true } as never)
+		vi.mocked(fs.readlink).mockRejectedValue(Object.assign(new Error("EIO"), { code: "EIO" }))
+
+		// The link is known to exist but its target cannot be read: publishing onto the link path
+		// would replace the link with a regular file, so the error has to surface.
+		await expect(resolvePublishTarget(linkPath)).rejects.toThrow("EIO")
 	})
 })
