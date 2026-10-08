@@ -1772,6 +1772,48 @@ describe("McpHub", () => {
 		})
 
 		describe("updateServerTimeout", () => {
+			it("refuses a symlinked target for a project-scoped timeout write", async () => {
+				vi.mocked(fs.readFile).mockResolvedValueOnce(JSON.stringify({ mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"], timeout: 60 } } }))
+				// The SDK client/transport are never touched by this write path (it reads only
+				// server.name and server.source), so the literal is projected onto the connection
+				// type through unknown rather than adding another `as any` to this file.
+				mcpHub.connections = [
+					{
+						type: "connected",
+						server: { name: "test-server", type: "stdio", command: "node", args: ["test.js"], timeout: 60, source: "project" },
+						client: {},
+						transport: {},
+					} as unknown as ConnectedMcpConnection,
+				]
+
+				await mcpHub.updateServerTimeout("test-server", 120)
+
+				// A project .roo/mcp.json is repository-controlled: if it is a symlink, the merged
+				// settings (secrets + server commands) must NOT land at the referent outside the
+				// workspace, so this write refuses the link instead of following it.
+				const write = vi.mocked(safeWriteJson).mock.calls.at(-1)
+				expect(write && write[2]).toEqual(expect.objectContaining({ refuseSymlinkTarget: true }))
+			})
+
+			it("still follows a symlink for the global settings write", async () => {
+				vi.mocked(fs.readFile).mockResolvedValueOnce(JSON.stringify({ mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"], timeout: 60 } } }))
+				mcpHub.connections = [
+					{
+						type: "connected",
+						server: { name: "test-server", type: "stdio", command: "node", args: ["test.js"], timeout: 60, source: "global" },
+						client: {},
+						transport: {},
+					} as unknown as ConnectedMcpConnection,
+				]
+
+				await mcpHub.updateServerTimeout("test-server", 120)
+
+				// The global file lives in the extension global storage and users legitimately link
+				// it, so it keeps the resolve-and-follow behaviour.
+				const write = vi.mocked(safeWriteJson).mock.calls.at(-1)
+				expect(write && write[2]).not.toHaveProperty("refuseSymlinkTarget")
+			})
+
 			it("should update server timeout in settings file", async () => {
 				const mockConfig = {
 					mcpServers: {

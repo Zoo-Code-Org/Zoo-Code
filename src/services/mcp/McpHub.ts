@@ -495,6 +495,21 @@ export class McpHub {
 		return mcpServersPath
 	}
 
+	/**
+	 * A project-scoped MCP settings file is content the REPOSITORY controls, so a
+	 * repository that plants .roo/mcp.json as a symlink must not receive the merged
+	 * settings at the linked target - the payload would land outside the workspace, and
+	 * MCP configs carry secrets and server commands. Those writes therefore refuse a
+	 * symlink target instead of following it. The global settings file is deliberately
+	 * left to follow a symlink: users legitimately link mcp_settings.json, it lives in
+	 * the extension's global storage, and no repository controls that path.
+	 * A connection with no recorded source is treated as global, matching the rest of this
+	 * file (`conn.server.source || "global"`).
+	 */
+	private symlinkPolicyForSource(source: "global" | "project" | undefined): { refuseSymlinkTarget?: boolean } {
+		return source === "project" ? { refuseSymlinkTarget: true } : {}
+	}
+
 	async getMcpSettingsFilePath(): Promise<string> {
 		const provider = this.providerRef.deref()
 		if (!provider) {
@@ -2091,7 +2106,7 @@ export class McpHub {
 		}
 		this.isProgrammaticUpdate = true
 		try {
-			await safeWriteJson(configPath, updatedConfig, { prettyPrint: true })
+			await safeWriteJson(configPath, updatedConfig, { prettyPrint: true, ...this.symlinkPolicyForSource(source) })
 		} finally {
 			// Reset flag after watcher debounce period (non-blocking)
 			this.flagResetTimer = setTimeout(() => {
@@ -2176,7 +2191,7 @@ export class McpHub {
 					mcpServers: config.mcpServers,
 				}
 
-				await safeWriteJson(configPath, updatedConfig, { prettyPrint: true })
+				await safeWriteJson(configPath, updatedConfig, { prettyPrint: true, ...this.symlinkPolicyForSource(source) })
 
 				// Update server connections with the correct source
 				await this.updateServerConnections(config.mcpServers, serverSource)
@@ -2385,7 +2400,7 @@ export class McpHub {
 		}
 		this.isProgrammaticUpdate = true
 		try {
-			await safeWriteJson(normalizedPath, config, { prettyPrint: true })
+			await safeWriteJson(normalizedPath, config, { prettyPrint: true, ...this.symlinkPolicyForSource(source) })
 		} finally {
 			// Reset flag after watcher debounce period (non-blocking)
 			this.flagResetTimer = setTimeout(() => {
