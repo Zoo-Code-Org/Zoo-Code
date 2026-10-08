@@ -591,7 +591,7 @@ describe("ReadFileTool", () => {
 
 			mockedFsReadFile.mockResolvedValue(Buffer.from("line1\nline2\nline3\nline4\nline5"))
 			mockedReadWithSlice.mockReturnValue({
-				content: "Error: offset 99 is beyond file end (5 lines)",
+				content: "Error: offset 100 is beyond file end (5 lines)",
 				returnedLines: 0,
 				totalLines: 5,
 				wasTruncated: false,
