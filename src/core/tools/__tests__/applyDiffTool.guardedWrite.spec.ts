@@ -78,6 +78,11 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		stat.mockResolvedValue(
 			{ dev: 1n, ino: 2n, size: 22n, mtimeNs: 100n, ctimeNs: 100n } as unknown as BigIntStats,
 		)
+		// The role-aware stat mock above also drives readFile, so its implementation is reset here too:
+		// a leaked implementation would decide which stat call the NEXT test sees as pre-read.
+		const readFile = vi.mocked((await import("fs/promises")).default.readFile)
+		readFile.mockReset()
+		readFile.mockResolvedValue("original file content\n")
 	})
 
 	beforeEach(() => {
@@ -296,8 +301,28 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		// applies, and the save still goes through the guard (which fails closed without
 		// an observation). What must not happen is an observation recorded for a version
 		// the tool could not bracket.
-		const stat = vi.mocked((await import("fs/promises")).default.stat)
-		stat.mockRejectedValueOnce(Object.assign(new Error("EACCES"), { code: "EACCES" }))
+		const fsMock = await import("fs/promises")
+		const stat = vi.mocked(fsMock.default.stat)
+		const readFile = vi.mocked(fsMock.default.readFile)
+		// Pin WHICH of the two bracketing stats fails. Both run against the same path, so a
+		// once-value cannot express the role: verified by flipping the injected failure to the
+		// post-read stat, which leaves this test green while testing a different scenario. The
+		// pre-read stat is the one that runs before the read, so the failure is keyed to that
+		// interleaving rather than to a call index.
+		let readStarted = false
+		readFile.mockImplementation(async () => {
+			readStarted = true
+			return "original file content\n"
+		})
+		const statRoles: string[] = []
+		stat.mockImplementation(async () => {
+			if (!readStarted) {
+				statRoles.push("pre:threw")
+				throw Object.assign(new Error("EACCES"), { code: "EACCES" })
+			}
+			statRoles.push("post:ok")
+			return { dev: 1n, ino: 2n, size: 22n, mtimeNs: 100n, ctimeNs: 100n } as unknown as BigIntStats
+		})
 
 		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
 			askApproval: mockAskApproval,
@@ -306,6 +331,10 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		})
 
 		expect(mockTask.observationRegistry.get(path.resolve(mockTask.cwd, "src/thing.ts"))).toBeUndefined()
+		// Both bracketing stats ran, and the one that failed was the PRE-read one. The
+		// roles are recorded from the interleaving with the read, so flipping which call throws
+		// makes this assertion fail - the outcome assertions alone cannot tell the two apart.
+		expect(statRoles).toEqual(["pre:threw", "post:ok"])
 		// The read itself is unaffected: the diff was computed and the save attempted.
 		expect(mockTask.diffStrategy?.applyDiff).toHaveBeenCalled()
 		expect(mockSaveDirectly).toHaveBeenCalledWith(
