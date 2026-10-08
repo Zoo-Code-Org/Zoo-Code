@@ -50,6 +50,10 @@ export class DiffViewProvider {
 	// disposal can cancel the wait instead of leaving a timer (and this provider and
 	// the pre-save diagnostics snapshot it closes over) running past the teardown.
 	private readonly postSaveTails = new Set<AbortController>()
+	// Latched once Task disposal has cancelled the tails. A save that was already awaiting
+	// its file operations can still reach the tail start after that point, and a tail that
+	// begins after disposal would emit into a dead task and keep its providers alive.
+	private tailsDisposed = false
 	// Tracks whether the user activated the target file's editor tab during the
 	// diff session. When the file was not already open before the edit, we only
 	// keep it open afterward if the user explicitly interacted with it.
@@ -1227,6 +1231,11 @@ export class DiffViewProvider {
 		preDiagnostics: [vscode.Uri, vscode.Diagnostic[]][],
 		inMemoryDocument = false,
 	): Promise<void> {
+		if (this.tailsDisposed) {
+			// Disposal already ran: emitting now would call say() on a disposed task.
+			return
+		}
+
 		const controller = new AbortController()
 		this.postSaveTails.add(controller)
 		try {
@@ -1301,6 +1310,7 @@ export class DiffViewProvider {
 	 * problems it is waiting for.
 	 */
 	public cancelPostSaveDiagnosticsTails(): void {
+		this.tailsDisposed = true
 		for (const controller of this.postSaveTails) {
 			controller.abort()
 		}

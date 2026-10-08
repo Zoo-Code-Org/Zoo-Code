@@ -4594,6 +4594,32 @@ describe("Cline", () => {
 			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Timed out"))
 		})
 
+		it("cancels post-save diagnostics tails when the task is disposed", async () => {
+			const task = new Task({ provider: mockProvider, apiConfiguration: mockApiConfig, task: "test task", startTask: false })
+			const cancelSpy = vi
+				.spyOn(task.diffViewProvider, "cancelPostSaveDiagnosticsTails")
+				.mockImplementation(() => {})
+			await task.disposeOnce()
+			expect(cancelSpy).toHaveBeenCalledTimes(1)
+		})
+
+		it("continues disposal when cancelling the post-save diagnostics tails throws", async () => {
+			const task = new Task({ provider: mockProvider, apiConfiguration: mockApiConfig, task: "test task", startTask: false })
+			vi.spyOn(task.diffViewProvider, "cancelPostSaveDiagnosticsTails").mockImplementation(() => {
+				throw new Error("cancel boom")
+			})
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			// The step after the cancel in the same teardown: if the throw escaped, this would
+			// never run and the HTTP request would keep streaming into a dead task.
+			const cancelRequestSpy = vi.spyOn(task, "cancelCurrentRequest").mockImplementation(() => {})
+			await task.disposeOnce()
+			expect(cancelRequestSpy).toHaveBeenCalled()
+			expect(errorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Error cancelling post-save diagnostics tails:"),
+				expect.any(Error),
+			)
+		})
+
 		it("refuses to send a request when the task is disposed during the bounded metadata wait", async () => {
 			// Disposal alone — no cancel button, no abortTask — must make the
 			// task observe cancellation: disposeOnce sets the abort state
