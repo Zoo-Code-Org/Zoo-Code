@@ -1569,8 +1569,25 @@ export class DiffViewProvider {
 			// unreachable and the write cannot be guarded.
 			throw new Error("Cannot guard the write: the owning task is no longer available")
 		}
-		await createDirectoriesForFile(absolutePath)
-		await guardedWrite(task, relPath, content, writeKind, completeOverride)
+		const createdDirs = await createDirectoriesForFile(absolutePath)
+		try {
+			await guardedWrite(task, relPath, content, writeKind, completeOverride)
+		} catch (error: unknown) {
+			// The publish never committed, so the parent directories this call made would be
+			// left behind as empty scaffolding - most often because the task was cancelled
+			// while the write waited on the guard's chain. Remove them innermost first;
+			// rmdir refuses a directory another writer populated in the meantime, so the
+			// cleanup stops at the first failure. The write error is what the caller must
+			// see, so the scaffolding cleanup never replaces it.
+			for (let i = createdDirs.length - 1; i >= 0; i--) {
+				try {
+					await fs.rmdir(createdDirs[i])
+				} catch {
+					break
+				}
+			}
+			throw error
+		}
 
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory
