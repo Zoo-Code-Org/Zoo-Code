@@ -221,7 +221,18 @@ export async function resolvePublishTarget(
 		// Renaming onto the link path would replace the link with a regular file, so follow
 		// the link text to its referent instead; a link cycle surfaces as ELOOP and still
 		// propagates, so the recursion is bounded.
-		const link = await fs.lstat(absoluteFilePath).catch(() => null)
+		// Only ENOENT means "there is nothing here that could be a link". Any other lstat error
+		// (EACCES, EIO, ...) must propagate: treating "could not inspect" as "not a link" would let
+		// a write land on the link path and replace the link, which is exactly what this resolver
+		// exists to prevent - and the doc comment above already promises that it propagates.
+		let link: Awaited<ReturnType<typeof fs.lstat>> | null = null
+		try {
+			link = await fs.lstat(absoluteFilePath)
+		} catch (statError: unknown) {
+			if (_errorCode(statError) !== "ENOENT") {
+				throw statError
+			}
+		}
 		if (link?.isSymbolicLink()) {
 			const linkText = await fs.readlink(absoluteFilePath)
 			if (visitedLinks.has(absoluteFilePath)) {
