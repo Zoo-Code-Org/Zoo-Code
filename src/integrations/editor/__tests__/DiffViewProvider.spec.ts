@@ -818,6 +818,29 @@ describe("DiffViewProvider", () => {
 			vi.mocked(fs.access).mockResolvedValue(undefined)
 		})
 
+		it("checks write permission on the absolute target before publishing", async () => {
+			const fs = await import("fs/promises")
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			vi.mocked(safeWriteText).mockClear()
+			vi.mocked(fs.access).mockClear()
+
+			await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200)
+
+			// safeWriteText publishes with rename, which only needs write permission on the
+			// DIRECTORY. The contract this unit preserves requires it on the FILE, so the guard
+			// must be handed the absolute target - not the relative path the caller passed.
+			const calls = vi.mocked(fs.access).mock.calls
+			const accessIndex = calls.findIndex((call) => String(call[0]).endsWith("test.ts"))
+			expect(accessIndex).toBeGreaterThanOrEqual(0)
+			expect(calls[accessIndex][0]).toBe(`${mockCwd}/test.ts`)
+
+			// The check is only meaningful before the publish; after it, an EACCES target would
+			// already have been renamed over.
+			expect(vi.mocked(fs.access).mock.invocationCallOrder[accessIndex]).toBeLessThan(
+				vi.mocked(safeWriteText).mock.invocationCallOrder[0],
+			)
+		})
+
 		beforeEach(() => {
 			// Mock vscode functions
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue({} as any)
