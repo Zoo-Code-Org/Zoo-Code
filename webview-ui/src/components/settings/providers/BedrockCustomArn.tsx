@@ -1,10 +1,25 @@
 import { useMemo } from "react"
 import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
-import type { ProviderSettings } from "@roo-code/types"
+import {
+	type ProviderSettings,
+	BEDROCK_DEFAULT_CONTEXT,
+	BEDROCK_MAX_TOKENS,
+	bedrockModels,
+	resolveBedrockCustomArnBaseModelId,
+} from "@roo-code/types"
 
 import { validateBedrockArn } from "@src/utils/validate"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@src/components/ui"
+
+const OTHER_BASE_MODEL = "other"
+const baseModelIds = Object.keys(bedrockModels).sort((a, b) => a.localeCompare(b))
+
+const toPositiveInteger = (value: string): number | undefined => {
+	const parsed = Number.parseInt(value, 10)
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
+}
 
 type BedrockCustomArnProps = {
 	apiConfiguration: ProviderSettings
@@ -18,6 +33,19 @@ export const BedrockCustomArn = ({ apiConfiguration, setApiConfigurationField }:
 		const { awsCustomArn, awsRegion } = apiConfiguration
 		return awsCustomArn ? validateBedrockArn(awsCustomArn, awsRegion) : { isValid: true, errorMessage: undefined }
 	}, [apiConfiguration])
+
+	const baseModelId =
+		resolveBedrockCustomArnBaseModelId(apiConfiguration.awsCustomArn, apiConfiguration.awsCustomArnBaseModelId) ??
+		OTHER_BASE_MODEL
+
+	const onBaseModelChange = (value: string) => {
+		setApiConfigurationField("awsCustomArnBaseModelId", value === OTHER_BASE_MODEL ? "" : value)
+		// Different models have different output, thinking and context defaults.
+		setApiConfigurationField("modelMaxTokens", undefined)
+		setApiConfigurationField("modelMaxThinkingTokens", undefined)
+		setApiConfigurationField("reasoningEffort", undefined)
+		setApiConfigurationField("awsModelContextWindow", undefined)
+	}
 
 	return (
 		<>
@@ -47,6 +75,61 @@ export const BedrockCustomArn = ({ apiConfiguration, setApiConfigurationField }:
 				validation.errorMessage && (
 					<div className="text-sm text-vscode-errorForeground mt-2">{validation.errorMessage}</div>
 				)
+			)}
+			<div data-testid="custom-arn-base-model">
+				<label className="block font-medium mb-1">{t("settings:providers.awsCustomArnBaseModel")}</label>
+				<Select value={baseModelId} onValueChange={onBaseModelChange}>
+					<SelectTrigger className="w-full">
+						<SelectValue placeholder={t("settings:common.select")} />
+					</SelectTrigger>
+					<SelectContent>
+						<SelectItem value={OTHER_BASE_MODEL}>
+							{t("settings:providers.awsCustomArnBaseModelOther")}
+						</SelectItem>
+						{baseModelIds.map((id) => (
+							<SelectItem key={id} value={id}>
+								{id}
+							</SelectItem>
+						))}
+					</SelectContent>
+				</Select>
+				<div className="text-sm text-vscode-descriptionForeground mt-1">
+					{t("settings:providers.awsCustomArnBaseModelDesc")}
+				</div>
+			</div>
+			{baseModelId === OTHER_BASE_MODEL && (
+				<>
+					<VSCodeTextField
+						value={apiConfiguration.awsModelContextWindow?.toString() ?? ""}
+						onInput={(e) =>
+							setApiConfigurationField(
+								"awsModelContextWindow",
+								toPositiveInteger((e.target as HTMLInputElement).value),
+							)
+						}
+						placeholder={BEDROCK_DEFAULT_CONTEXT.toString()}
+						className="w-full"
+						data-testid="custom-arn-context-window">
+						<label className="block font-medium mb-1">
+							{t("settings:providers.awsCustomArnContextWindow")}
+						</label>
+					</VSCodeTextField>
+					<VSCodeTextField
+						value={apiConfiguration.modelMaxTokens?.toString() ?? ""}
+						onInput={(e) =>
+							setApiConfigurationField(
+								"modelMaxTokens",
+								toPositiveInteger((e.target as HTMLInputElement).value),
+							)
+						}
+						placeholder={BEDROCK_MAX_TOKENS.toString()}
+						className="w-full"
+						data-testid="custom-arn-max-tokens">
+						<label className="block font-medium mb-1">
+							{t("settings:providers.awsCustomArnMaxTokens")}
+						</label>
+					</VSCodeTextField>
+				</>
 			)}
 		</>
 	)

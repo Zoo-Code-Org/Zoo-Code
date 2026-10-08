@@ -12,6 +12,9 @@ import {
 	type RouterModels,
 	anthropicModels,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
+	BEDROCK_DEFAULT_CONTEXT,
+	BEDROCK_MAX_TOKENS,
+	bedrockModels,
 	litellmDefaultModelInfo,
 	kenariDefaultModelId,
 	kenariDefaultModelInfo,
@@ -818,6 +821,57 @@ describe("useSelectedModel", () => {
 
 			expect(result.current.id).toBe("custom-arn")
 			expect(result.current.info?.supportsImages).toBe(true)
+		})
+
+		const renderCustomArn = (settings: Partial<ProviderSettings>) => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.bedrock,
+				apiModelId: "custom-arn",
+				awsCustomArn: "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/abcd1234efgh",
+				...settings,
+			}
+			return renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() }).result.current
+		}
+
+		it("uses the selected base model's info for a custom ARN", () => {
+			const { id, info } = renderCustomArn({ awsCustomArnBaseModelId: "anthropic.claude-opus-5-5" })
+
+			expect(id).toBe("custom-arn")
+			expect(info).toMatchObject({
+				contextWindow: 1_000_000,
+				maxTokens: bedrockModels["anthropic.claude-opus-5-5"].maxTokens,
+				supportsTemperature: false,
+				supportsReasoningBinary: true,
+			})
+		})
+
+		it("applies the 1M context option to a custom ARN base model that supports it", () => {
+			expect(renderCustomArn({ awsCustomArnBaseModelId: "anthropic.claude-opus-4-8" }).info?.contextWindow).toBe(
+				bedrockModels["anthropic.claude-opus-4-8"].contextWindow,
+			)
+			expect(
+				renderCustomArn({ awsCustomArnBaseModelId: "anthropic.claude-opus-4-8", awsBedrock1MContext: true })
+					.info?.contextWindow,
+			).toBe(1_000_000)
+		})
+
+		it("detects the base model from an inference profile ARN that names it", () => {
+			const { info } = renderCustomArn({
+				awsCustomArn: "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-opus-4-8",
+			})
+
+			expect(info?.maxTokens).toBe(bedrockModels["anthropic.claude-opus-4-8"].maxTokens)
+		})
+
+		it("uses the provider fallback and user limits when the base model is not listed", () => {
+			expect(renderCustomArn({}).info).toMatchObject({
+				contextWindow: BEDROCK_DEFAULT_CONTEXT,
+				maxTokens: BEDROCK_MAX_TOKENS,
+			})
+			expect(renderCustomArn({ awsModelContextWindow: 32_000, modelMaxTokens: 2048 }).info).toMatchObject({
+				contextWindow: 32_000,
+				maxTokens: 2048,
+			})
 		})
 	})
 

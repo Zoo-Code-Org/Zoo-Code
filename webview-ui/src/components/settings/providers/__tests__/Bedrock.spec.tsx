@@ -551,4 +551,32 @@ describe("Bedrock Component", () => {
 			})
 		})
 	})
+
+	describe("custom ARN capabilities", () => {
+		const oneMillionCheckbox = "checkbox-settings:providers.awsbedrock1mcontextbetalabel"
+		const renderCustomArn = (awsCustomArnBaseModelId?: string) =>
+			render(
+				<Bedrock
+					apiConfiguration={{
+						apiModelId: "custom-arn",
+						awsCustomArn:
+							"arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/abcd1234efgh",
+						awsCustomArnBaseModelId,
+					}}
+					setApiConfigurationField={mockSetApiConfigurationField}
+				/>,
+			)
+
+		it("offers the 1M context option when the custom ARN's base model supports it", () => {
+			renderCustomArn("anthropic.claude-opus-4-8")
+
+			expect(screen.getByTestId(oneMillionCheckbox)).toBeInTheDocument()
+		})
+
+		it("hides the 1M context option when the custom ARN's base model is unknown", () => {
+			renderCustomArn()
+
+			expect(screen.queryByTestId(oneMillionCheckbox)).not.toBeInTheDocument()
+		})
+	})
 })

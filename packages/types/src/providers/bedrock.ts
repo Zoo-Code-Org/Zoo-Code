@@ -739,3 +739,27 @@ export const BEDROCK_SERVICE_TIER_PRICING = {
 	FLEX: 0.5, // 50% discount from standard
 	PRIORITY: 1.75, // 75% premium over standard
 } as const
+
+const isBedrockModelId = (id: string): id is BedrockModelId => Object.prototype.hasOwnProperty.call(bedrockModels, id)
+
+/**
+ * Resolves the registry model a custom ARN points to: the user's explicit choice when it is a known
+ * model, otherwise a model named at the end of the ARN (e.g. `inference-profile/us.anthropic.claude-opus-4-8`).
+ * Returns undefined when the ARN doesn't identify its model (e.g. application inference profiles).
+ */
+export const resolveBedrockCustomArnBaseModelId = (
+	customArn: string | undefined,
+	baseModelId: string | undefined,
+): BedrockModelId | undefined => {
+	if (baseModelId && isBedrockModelId(baseModelId)) {
+		return baseModelId
+	}
+
+	if (!customArn) {
+		return undefined
+	}
+
+	return (Object.keys(bedrockModels) as BedrockModelId[]).find(
+		(id) => customArn.endsWith(`/${id}`) || customArn.endsWith(`.${id}`),
+	)
+}
