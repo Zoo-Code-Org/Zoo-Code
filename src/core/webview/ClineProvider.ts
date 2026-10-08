@@ -772,6 +772,31 @@ export class ClineProvider
 	 * When fresh is set, the map is read directly from globalState (bypassing the
 	 * ContextProxy cache) so serialized writes never observe a stale in-memory value.
 	 */
+	/**
+	 * Writes the shared viewStates map and rolls the shared cache back if the storage
+	 * write rejects. ContextProxy#updateGlobalState puts the value in the in-memory cache
+	 * BEFORE awaiting globalState.update, so a rejected write would otherwise leave every
+	 * other view reading a map that was never committed to disk - and the next successful
+	 * write would merge into that phantom state.
+	 */
+	private async writePersistedViewStates(states: Record<string, PersistedViewState>): Promise<void> {
+		const previousCached = this.contextProxy.getValue("viewStates")
+		try {
+			await this.contextProxy.setValue("viewStates", states)
+		} catch (error) {
+			try {
+				await this.contextProxy.setValue("viewStates", previousCached)
+			} catch (rollbackError) {
+				this.log(
+					`[ClineProvider] Failed to restore the cached viewStates after a rejected write: ${
+						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+					}`,
+				)
+			}
+			throw error
+		}
+	}
+
 	private getPersistedViewStates(options: { fresh?: boolean } = {}): Record<string, PersistedViewState> {
 		const viewStates = options.fresh
 			? this.context.globalState.get<GlobalState["viewStates"]>("viewStates")
@@ -1064,6 +1089,10 @@ export class ClineProvider
 		await write
 	}
 
+	/**
+	 * Registers this provider's stable view identifier and loads any persisted selections it owns.
+	 * The identifier is sanitized so it remains a safe object key in the shared viewStates map.
+	 */
 	/**
 	 * Registers this provider's stable view identifier and loads any persisted selections it owns.
 	 * The identifier is sanitized so it remains a safe object key in the shared viewStates map.
