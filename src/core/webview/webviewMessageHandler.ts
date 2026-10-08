@@ -94,6 +94,14 @@ import { getLMStudioModels } from "../../api/providers/fetchers/lmstudio"
 
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 
+// Keys that only host-side, validated paths may write. `apiConfiguration` and
+// `listApiConfigMeta` are resolved by ProviderSettingsManager, which validates a
+// configuration before it can become active, and `viewStates` is the per-view durable
+// map that ClineProvider owns. The generic settings loop below writes straight into
+// the shared store and into this view's local buffer - and getState() prefers the
+// buffer - so a webview payload must not be allowed to carry them.
+const HOST_OWNED_SETTINGS = new Set(["apiConfiguration", "listApiConfigMeta", "viewStates"])
+
 // Serializes handling of "telemetrySetting" messages. Each invocation reads the previous
 // setting, awaits a persistence write, then applies the new live telemetry state -- with no
 // serialization, two rapid messages (e.g. a fast toggle) can interleave across those awaits:
@@ -779,6 +787,17 @@ export const webviewMessageHandler = async (
 				}
 
 				for (const [key, value] of Object.entries(message.updatedSettings)) {
+					if (HOST_OWNED_SETTINGS.has(key)) {
+						// Boundary check, not normalization: these keys reach the runtime through the
+						// profile-management paths, which validate them first. Applying them here would
+						// let an injected webview swap in an attacker-controlled API configuration that
+						// getState() then serves to every consumer.
+						provider.log(
+							`[updateSettings] Ignoring host-owned setting '${key}' supplied by the webview; it must go through the profile-management path.`,
+						)
+						continue
+					}
+
 					let newValue = value
 
 					if (key === "language") {

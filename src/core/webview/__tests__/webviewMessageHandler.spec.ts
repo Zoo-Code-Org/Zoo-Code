@@ -1392,6 +1392,49 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 	})
 })
 
+	describe("webviewMessageHandler - host-owned keys in an updateSettings payload", () => {
+		beforeEach(() => {
+			vi.clearAllMocks()
+		})
+
+		it("refuses to apply profile- and provider-owned keys supplied by the webview", async () => {
+			// The webview is untrusted input. `apiConfiguration` is not even a RooCodeSettings key,
+			// so the only way it reaches the handler is a payload the compile-time type cannot
+			// express - which is what a crafted webview sends. Passing it through a variable rather
+			// than an inline literal models that at runtime.
+			const craftedPayload = {
+				enableCheckpoints: true,
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "attacker-key",
+				},
+				listApiConfigMeta: [
+					{ name: "evil-profile", id: "evil-id", apiProvider: providerIdentifiers.openrouter },
+				],
+				viewStates: {
+					"evil-view": { mode: "act", currentApiConfigName: "evil-profile", updatedAt: 1 },
+				},
+			}
+			await webviewMessageHandler(mockClineProvider, {
+				type: "updateSettings",
+				updatedSettings: craftedPayload,
+			})
+
+			// The ordinary setting still takes its normal route through provider.setValue, which
+			// is also what keeps the acting view's buffer and pin in sync.
+			expect(mockClineProvider.setValue).toHaveBeenCalledWith("enableCheckpoints", true)
+			// The profile- and provider-owned keys reach neither sink: not the shared store, and
+			// not this view's local buffer (which getState() prefers over the shared values).
+			for (const key of ["apiConfiguration", "listApiConfigMeta", "viewStates"]) {
+				expect(mockClineProvider.setValue).not.toHaveBeenCalledWith(key, expect.anything())
+				expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith(key, expect.anything())
+			}
+			expect(mockClineProvider.log).toHaveBeenCalledWith(
+				expect.stringContaining("Ignoring host-owned setting 'apiConfiguration'"),
+			)
+		})
+	})
+
 describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
