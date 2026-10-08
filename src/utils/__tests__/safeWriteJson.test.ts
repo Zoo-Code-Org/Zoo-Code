@@ -725,6 +725,26 @@ describe("safeWriteJson", () => {
 		}
 	})
 
+	test("rejects an out-of-scope target before creating any directory", async () => {
+		const projectDir = path.join(tempDir, "scope")
+		await fs.mkdir(projectDir)
+		// The target lives in a directory that does not exist. A confinement check that runs
+		// after the mkdir -p would create that directory OUTSIDE the declared scope first -
+		// the same side effect the pre-lock check exists to prevent, reached through a
+		// symlinked ancestor in the reported case - and an unwritable referent would surface
+		// the mkdir error instead of the confinement verdict.
+		const missingParent = path.join(tempDir, "no-such-dir")
+		const outside = path.join(missingParent, "elsewhere.json")
+
+		await expect(safeWriteJson(outside, { mcpServers: {} }, { confineTo: projectDir })).rejects.toThrow(
+			ConfinedPathEscapeError,
+		)
+
+		// Nothing was created outside the scope, and no lock was attempted there.
+		expect(fsSyncActual.existsSync(missingParent)).toBe(false)
+		expect((await fs.readdir(tempDir)).filter(function (entry: string) { return entry.endsWith(".lock") })).toEqual([])
+	})
+
 	test.skipIf(process.platform === "win32")(
 		"rejects a confined write whose symlink resolves outside the confined directory",
 		async () => {

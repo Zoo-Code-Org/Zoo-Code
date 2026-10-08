@@ -1569,7 +1569,9 @@ export class DiffViewProvider {
 			// unreachable and the write cannot be guarded.
 			throw new Error("Cannot guard the write: the owning task is no longer available")
 		}
-		await createDirectoriesForFile(absolutePath)
+		// No pre-guard mkdir: safeWriteText creates missing parent directories at publish
+		// time, so a rejected guard leaves NO directories behind - including outside the
+		// workspace, where a rejected write must not leave a trace.
 		await guardedWrite(task, relPath, content, writeKind, completeOverride)
 
 		// Open the document to ensure diagnostics are loaded
