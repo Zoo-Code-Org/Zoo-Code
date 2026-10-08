@@ -81,7 +81,7 @@ describe("API - configuration", () => {
 			// scope (the upstream siblings above use the same pattern).
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
-		const api = new API(outputChannel, provider)
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
 
 		const configuration = api.getConfiguration()
 
