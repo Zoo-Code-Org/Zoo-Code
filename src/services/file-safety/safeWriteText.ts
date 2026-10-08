@@ -229,7 +229,7 @@ export async function resolvePublishTarget(absoluteFilePath: string): Promise<st
 			throw lstatError
 		})
 		if (linkStat?.isSymbolicLink()) throw error
-		return absoluteFilePath
+		return await canonicalizeNearestAncestor(absoluteFilePath)
 	})
 }
 /**
@@ -256,6 +256,31 @@ async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
 	const dirPath = path.dirname(absoluteFilePath)
 	const canonicalDir = await fs.realpath(dirPath).catch(() => dirPath)
 	return path.join(canonicalDir, path.basename(absoluteFilePath))
+}
+
+/**
+ * Canonicalize the nearest EXISTING ancestor and re-append the missing components.
+ * The guard hands back a pin produced exactly this way (guardedWrite#realpathNearest),
+ * so an absent target has to resolve identically here: a lexical fallback differs from
+ * that pin whenever an ancestor is a symlink, and the create would then abort with
+ * TargetMovedError even though nothing moved.
+ */
+async function canonicalizeNearestAncestor(absoluteFilePath: string): Promise<string> {
+	const missing: string[] = []
+	let cursor = absoluteFilePath
+	for (;;) {
+		try {
+			const realPath = await fs.realpath(cursor)
+			return missing.length > 0 ? path.join(realPath, ...missing.reverse()) : realPath
+		} catch (error: unknown) {
+			const code = errorCode(error)
+			if (code !== "ENOENT" && code !== "ENOTDIR") return absoluteFilePath
+			const parent = path.dirname(cursor)
+			if (parent === cursor) return absoluteFilePath
+			missing.push(path.basename(cursor))
+			cursor = parent
+		}
+	}
 }
 
 /**
@@ -468,16 +493,41 @@ export async function safeWriteText(
 				try {
 					await fs.link(tempPath, targetPath)
 				} catch (error: unknown) {
-					if (errorCode(error) === "EEXIST") {
+					const code = errorCode(error)
+					if (code === "EEXIST") {
 						throw new TargetExistsError(targetPath)
 					}
-					throw error
+					// FAT32/exFAT volumes and some SMB/network mounts have no hard links, where
+					// link(2) fails EPERM/ENOTSUP/ENOSYS. Fall back to an exclusive copy so a
+					// create still works there: copyFile with COPYFILE_EXCL still fails EEXIST
+					// when the name exists, so the no-replace verdict is unchanged. Unlike link(2)
+					// the copy is not atomic - a reader can observe a partial file - so it is only
+					// used when the atomic primitive is unavailable.
+					if (code !== "EPERM" && code !== "ENOTSUP" && code !== "ENOSYS") {
+						throw error
+					}
+					try {
+						await fs.copyFile(tempPath, targetPath, fsSync.constants.COPYFILE_EXCL)
+					} catch (copyError: unknown) {
+						if (errorCode(copyError) === "EEXIST") {
+							throw new TargetExistsError(targetPath)
+						}
+						throw copyError
+					}
 				}
-				await fs.unlink(tempPath)
 			} else {
 				await fs.rename(tempPath, targetPath)
 			}
 			committed = true
+
+			if (options?.failIfExist) {
+				// The target name is published at this point; the staged name is only a second
+				// link to the same inode (or a copy of it). Removal is best-effort: on Windows
+				// an antivirus handle can make unlink fail with EBUSY/EPERM after the content
+				// is already visible, and the write must not be reported as failed for content
+				// the caller can now read back.
+				await fs.unlink(tempPath).catch(() => undefined)
+			}
 
 			// -- Step 4b (POSIX): fsync the parent directory so the directory entry
 			// changed by the commit rename is durable, not just the file content.

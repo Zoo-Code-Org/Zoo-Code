@@ -21,6 +21,7 @@ vi.mock("fs/promises", () => ({
 	access: vi.fn(),
 	rename: vi.fn(),
 	link: vi.fn(),
+		copyFile: vi.fn(),
 	unlink: vi.fn(),
 	rmdir: vi.fn(),
 	realpath: vi.fn(),
@@ -31,6 +32,8 @@ vi.mock("fs/promises", () => ({
 // Full mock for fs — all sync methods are vi.fn() stubs. Stats is a bare
 // class stub so tests can build minimal Stats stand-ins via its prototype.
 vi.mock("fs", () => ({
+	// Mirrors Node's value; the no-replace fallback passes it to copyFile.
+	constants: { COPYFILE_EXCL: 1 },
 	openSync: vi.fn(),
 	writeSync: vi.fn(),
 	closeSync: vi.fn(),
@@ -993,6 +996,101 @@ describe("safeWriteText", () => {
 		).toBe(true)
 	})
 
+	it("a no-replace commit refuses a target that appeared after the caller checked", async () => {
+		// Isolate the commit-phase counters from any async cleanup a previous
+		// test left in flight.
+		vi.mocked(fs.rename).mockClear()
+		vi.mocked(fs.unlink).mockClear()
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.link).mockRejectedValue(Object.assign(new Error("EEXIST"), { code: "EEXIST" }))
+		// The failure path still cleans up its staging file and directory; keep those
+		// promises real so the cleanup does not mask the rejection under test.
+		vi.mocked(fs.unlink).mockResolvedValue(undefined)
+		vi.mocked(fs.rmdir).mockResolvedValue(undefined)
+
+		const error = await safeWriteText(targetPath, "new data", {
+			failIfExist: true,
+			platform: "linux",
+		}).catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(TargetExistsError)
+		expect((error as TargetExistsError).targetPath).toBe(targetPath)
+		// Nothing replaced the newer file, and the staged copy is not left behind.
+		expect(fs.rename).not.toHaveBeenCalled()
+		expect(
+			vi.mocked(fs.unlink).mock.calls.some(function (call) {
+				return String(call[0]).includes("safeWriteText")
+			}),
+		).toBe(true)
+	})
+
+	it("resolves an absent target through a symlinked ancestor to the canonical path", async () => {
+		// The guard pins the publish to the canonical nearest-ancestor path. An absent
+		// target has to resolve to that same path, or a create through a symlinked
+		// ancestor aborts with TargetMovedError although nothing moved.
+		const linkDir = path.resolve("/tmp/link-dir")
+		const canonicalDir = path.resolve("/real/dir")
+		const canonical = path.join(canonicalDir, "target.txt")
+		vi.mocked(fs.realpath).mockImplementation(async (p: unknown) => {
+			if (String(p) === path.join(linkDir, "target.txt")) {
+				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			}
+			if (String(p) === linkDir) return canonicalDir
+			return String(p)
+		})
+		vi.mocked(fs.lstat).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+		await safeWriteText(path.join(linkDir, "target.txt"), "new data", {
+			expectedResolvedPath: canonical,
+			platform: "linux",
+		})
+
+		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText"), canonical)
+	})
+
+	it("falls back to an exclusive copy when the filesystem has no hard links", async () => {
+		// FAT32/exFAT and some SMB mounts reject link(2); the create must still work, and
+		// COPYFILE_EXCL keeps the no-replace verdict identical.
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.link).mockRejectedValue(Object.assign(new Error("ENOTSUP"), { code: "ENOTSUP" }))
+
+		await safeWriteText(targetPath, "new data", { failIfExist: true, platform: "linux" })
+
+		expect(fs.copyFile).toHaveBeenCalledWith(
+			expect.stringContaining("safeWriteText"),
+			targetPath,
+			fsSync.constants.COPYFILE_EXCL,
+		)
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("refuses the write when the exclusive copy finds an existing target", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.link).mockRejectedValue(Object.assign(new Error("EPERM"), { code: "EPERM" }))
+		vi.mocked(fs.copyFile).mockRejectedValue(Object.assign(new Error("EEXIST"), { code: "EEXIST" }))
+
+		await expect(
+			safeWriteText(targetPath, "new data", { failIfExist: true, platform: "linux" }),
+		).rejects.toBeInstanceOf(TargetExistsError)
+	})
+
+	it("still reports success when the staged copy cannot be unlinked after the link", async () => {
+		// An antivirus handle on Windows can make unlink fail with EBUSY after link(2)
+		// published the name. The content is readable at the target, so the write must
+		// not be reported as a failure the model then retries into an 'already exists'.
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.unlink).mockRejectedValue(Object.assign(new Error("EBUSY"), { code: "EBUSY" }))
+
+		await expect(
+			safeWriteText(targetPath, "new data", { failIfExist: true, platform: "linux" }),
+		).resolves.toBeUndefined()
+		expect(fs.link).toHaveBeenCalledWith(expect.stringContaining("safeWriteText"), targetPath)
+	})
+
 	it("refuses to publish when the path no longer resolves to the authorized target", async () => {
 		// Isolate the commit-phase counters from any async cleanup a previous test left
 		// in flight.
@@ -1176,31 +1274,3 @@ describe("resolvePublishTarget", () => {
 })
 
 
-	it("a no-replace commit refuses a target that appeared after the caller checked", async () => {
-		// Isolate the commit-phase counters from any async cleanup a previous
-		// test left in flight.
-		vi.mocked(fs.rename).mockClear()
-		vi.mocked(fs.unlink).mockClear()
-		const targetPath = "/tmp/test-dir/target.txt"
-		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-		vi.mocked(fs.link).mockRejectedValue(Object.assign(new Error("EEXIST"), { code: "EEXIST" }))
-		// The failure path still cleans up its staging file and directory; keep those
-		// promises real so the cleanup does not mask the rejection under test.
-		vi.mocked(fs.unlink).mockResolvedValue(undefined)
-		vi.mocked(fs.rmdir).mockResolvedValue(undefined)
-
-		const error = await safeWriteText(targetPath, "new data", {
-			failIfExist: true,
-			platform: "linux",
-		}).catch((caught: unknown) => caught)
-
-		expect(error).toBeInstanceOf(TargetExistsError)
-		expect((error as TargetExistsError).targetPath).toBe(targetPath)
-		// Nothing replaced the newer file, and the staged copy is not left behind.
-		expect(fs.rename).not.toHaveBeenCalled()
-		expect(
-			vi.mocked(fs.unlink).mock.calls.some(function (call) {
-				return String(call[0]).includes("safeWriteText")
-			}),
-		).toBe(true)
-	})
