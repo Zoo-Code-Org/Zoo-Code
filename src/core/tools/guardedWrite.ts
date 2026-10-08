@@ -24,7 +24,7 @@
 import * as fs from "fs/promises"
 import * as path from "path"
 
-import { safeWriteText } from "../../services/file-safety/safeWriteText"
+import { safeWriteText, TargetExistsError } from "../../services/file-safety/safeWriteText"
 import { computeVersionToken } from "../../utils/versionToken"
 import { withFileLock } from "../../utils/fileLock"
 import { resolveLockKey } from "../../services/file-safety/safeWriteText"
@@ -169,7 +169,24 @@ export async function createIfAbsent(
 			// Immediately before publication starts.
 			cancelledBeforePublish(absolutePath, displayPath, isCancelled)
 			await verifyTarget?.()
-			await safeWriteText(absolutePath, content)
+			// No-replace commit. The access check above only proves absence at the moment
+			// it runs: a writer that never takes the advisory lock can create the target
+			// before this publish, and a plain rename would silently replace that newer
+			// file. The commit is therefore a link that fails EEXIST, and the collision is
+			// reported as the same guard verdict the pre-check produces.
+			try {
+				await safeWriteText(absolutePath, content, { failIfExist: true })
+			} catch (error: unknown) {
+				if (error instanceof TargetExistsError) {
+					throw new GuardRejectedError(
+						"File already exists at " +
+							displayPath +
+							" and was not read before this write -- read the file first, then retry.",
+						displayPath,
+					)
+				}
+				throw error
+			}
 			// Read the new token under the same lock, otherwise a peer lock-using
 			// writer can publish in the gap and the caller records that writer's
 			// token as its own observation.

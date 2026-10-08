@@ -15,7 +15,7 @@ import * as path from "path"
 import { describe, expect, it, beforeEach, vi } from "vitest"
 
 import { createIfAbsent, guardedWrite, replaceIfVersion, resetChain, GuardRejectedError } from "../guardedWrite"
-import { safeWriteText } from "../../../services/file-safety/safeWriteText"
+import { safeWriteText, TargetExistsError } from "../../../services/file-safety/safeWriteText"
 import { computeVersionToken } from "../../../utils/versionToken"
 import { withFileLock } from "../../../utils/fileLock"
 import { resolveLockKey } from "../../../services/file-safety/safeWriteText"
@@ -34,10 +34,16 @@ vi.mock("../../../utils/versionToken", () => ({
 	computeVersionToken: vi.fn(),
 }))
 
-vi.mock("../../../services/file-safety/safeWriteText", () => ({
-	safeWriteText: vi.fn(),
-	resolveLockKey: vi.fn(async (p: string) => p),
-}))
+vi.mock("../../../services/file-safety/safeWriteText", async (importOriginal) => {
+	// Keep the real error classes: guardedWrite compares the publish failure against
+	// TargetExistsError, so the identity has to be the production one.
+	const actual = await importOriginal<typeof import("../../../services/file-safety/safeWriteText")>()
+	return {
+		...actual,
+		safeWriteText: vi.fn(),
+		resolveLockKey: vi.fn(async (p: string) => p),
+	}
+}) 
 
 vi.mock("../../../utils/fileLock", () => ({
 	withFileLock: vi.fn(),
@@ -101,7 +107,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, "new-file.txt", "hello", "create")
 
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("new-file.txt"), "hello")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("new-file.txt"), "hello", { failIfExist: true })
 		})
 
 		it("publishes caller-supplied bytes unchanged", async () => {
@@ -113,7 +119,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "bytes.txt", Buffer.from([0x00, 0x68]), "create")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("bytes.txt"), Buffer.from([0x00, 0x68]))
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("bytes.txt"), Buffer.from([0x00, 0x68]), { failIfExist: true })
 		})
 
 		it("records an unobserved create as complete so a later full-file update is allowed", async () => {
@@ -154,6 +160,24 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 					" and was not read before this write -- read the file first, then retry.",
 			)
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("refuses a create when the target appears between the absence check and the commit", async () => {
+			// The advisory lock only serializes writers that take it. A writer that never
+			// takes it can create the file after fs.access reported it absent, so the
+			// commit itself has to refuse: the no-replace link fails EEXIST and the guard
+			// turns that into the same read-first verdict the pre-check produces.
+			const task = createMockTask()
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedSafeWriteText.mockRejectedValueOnce(new TargetExistsError(abs("race.txt")))
+
+			await expect(guardedWrite(task, "race.txt", "hello", "create")).rejects.toThrow(
+				"File already exists at race.txt and was not read before this write -- read the file first, then retry.",
+			)
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("race.txt"), "hello", {
+				failIfExist: true,
+			})
 		})
 
 		it("rethrows I/O errors that are not ENOENT verbatim (no guard verdict on access failure)", async () => {
@@ -199,7 +223,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "new-file.txt", "hello", "update")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("new-file.txt"), "hello")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("new-file.txt"), "hello", { failIfExist: true })
 		})
 
 		it("fails with the read-first remediation when the file exists - nothing published", async () => {
@@ -310,7 +334,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "nested/in.txt", "data", "create")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("nested/in.txt"), "data")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("nested/in.txt"), "data", { failIfExist: true })
 		})
 	})
 
@@ -325,7 +349,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, "gone.txt", "back", "create")
 
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("gone.txt"), "back")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("gone.txt"), "back", { failIfExist: true })
 		})
 
 		it("goes through the version guard when the file still exists", async () => {
@@ -476,7 +500,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "doc.txt", "created", "create")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "created")
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "created", { failIfExist: true })
 		})
 
 		it("publishes a create-kind overwrite of an existing file when the observation is complete", async () => {
@@ -640,7 +664,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(r1.status).toBe("fulfilled")
 			expect(r2.status).toBe("fulfilled")
 			expect(publishes).toBe(2)
-			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, abs("absent.txt"), "first")
+			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, abs("absent.txt"), "first", { failIfExist: true })
 			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(2, abs("absent.txt"), "second")
 		})
 
@@ -923,7 +947,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 		// Only the write that was already running published; the cancelled one did not.
 		expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
-		expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("queued.txt"), "first")
+		expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("queued.txt"), "first", { failIfExist: true })
 	})
 
 	it("re-checks cancellation under the publish lock before writing", async () => {

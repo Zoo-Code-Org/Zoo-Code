@@ -32,6 +32,16 @@ export interface SafeWriteTextOptions {
 	 * already written data to a temp file via a custom stream.
 	 */
 	tempPath?: string
+
+	/**
+	 * Commit only if the target name does NOT exist at commit time.
+	 * rename(2) has no no-replace form - it silently displaces a target that another
+	 * writer created after the caller's absence check - so the commit is done with
+	 * link(2) instead, which fails EEXIST for an existing name (and does not follow a
+	 * symlink placed at that name). A conditional create therefore cannot overwrite a
+	 * file it never saw.
+	 */
+	failIfExist?: boolean
 }
 
 /**
@@ -88,6 +98,20 @@ export class PostCommitDurabilityError extends Error {
 			{ cause },
 		)
 		this.name = "PostCommitDurabilityError"
+		this.targetPath = targetPath
+	}
+}
+
+/**
+ * A conditional create (failIfExist) found a target at commit time. The write is
+ * refused without touching it: whatever is at the path was created by someone else
+ * and stays exactly as it is.
+ */
+export class TargetExistsError extends Error {
+	readonly targetPath: string
+	constructor(targetPath: string) {
+		super(`A file already exists at ${targetPath} -- the no-replace commit refused it.`)
+		this.name = "TargetExistsError"
 		this.targetPath = targetPath
 	}
 }
@@ -401,8 +425,24 @@ export async function safeWriteText(
 				}
 			}
 
-			// -- Step 4: atomic rename temp -> target ---------------------
-			await fs.rename(tempPath, targetPath)
+			// -- Step 4: atomic commit temp -> target ---------------------
+			if (options?.failIfExist) {
+				// No-replace commit: link(2) fails EEXIST when the name already exists,
+				// where a rename would silently displace whatever a non-participating
+				// writer put there after the caller checked. The staged copy is removed
+				// once the name points at it.
+				try {
+					await fs.link(tempPath, targetPath)
+				} catch (error: unknown) {
+					if (errorCode(error) === "EEXIST") {
+						throw new TargetExistsError(targetPath)
+					}
+					throw error
+				}
+				await fs.unlink(tempPath)
+			} else {
+				await fs.rename(tempPath, targetPath)
+			}
 			committed = true
 
 			// -- Step 4b (POSIX): fsync the parent directory so the directory entry

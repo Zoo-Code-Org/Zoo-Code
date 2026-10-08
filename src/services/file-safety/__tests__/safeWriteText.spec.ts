@@ -10,6 +10,7 @@ import {
 	RollbackFailureError,
 	safeWriteText,
 	StagingPathError,
+	TargetExistsError,
 	type SafeWriteTextOptions,
 } from "../safeWriteText"
 
@@ -18,6 +19,7 @@ vi.mock("fs/promises", () => ({
 	mkdir: vi.fn(),
 	access: vi.fn(),
 	rename: vi.fn(),
+	link: vi.fn(),
 	unlink: vi.fn(),
 	rmdir: vi.fn(),
 	realpath: vi.fn(),
@@ -72,6 +74,7 @@ function mockDefaults(): void {
 	vi.mocked(fs.mkdir).mockResolvedValue(undefined)
 	vi.mocked(fs.access).mockResolvedValue(undefined)
 	vi.mocked(fs.rename).mockResolvedValue(undefined)
+	vi.mocked(fs.link).mockResolvedValue(undefined)
 	vi.mocked(fs.unlink).mockResolvedValue(undefined)
 	vi.mocked(fs.rmdir).mockResolvedValue(undefined)
 	// Existing-target default: a regular 0o644 file.
@@ -967,6 +970,27 @@ describe("safeWriteText", () => {
 			expect(fsSync.writeSync).toHaveBeenCalledWith(1, bytes, 0, 4)
 		})
 	})
+	it("a no-replace commit links the staged file into place when the target is absent", async () => {
+		// Isolate the commit-phase counters from any async cleanup a previous
+		// test left in flight.
+		vi.mocked(fs.rename).mockClear()
+		vi.mocked(fs.unlink).mockClear()
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+
+		await safeWriteText(targetPath, "new data", { failIfExist: true, platform: "linux" })
+
+		// link(2) is the only atomic no-replace publish: a rename would displace a
+		// target that appeared after the caller's absence check.
+		expect(fs.link).toHaveBeenCalledWith(expect.stringContaining("safeWriteText"), targetPath)
+		expect(fs.rename).not.toHaveBeenCalled()
+		// The staged copy is dropped once the name points at it.
+		expect(
+			vi.mocked(fs.unlink).mock.calls.some(function (call) {
+				return String(call[0]).includes("safeWriteText")
+			}),
+		).toBe(true)
+	})
 })
 
 // ── Test 12: lock key, staging path, and post-commit durability ─────────────
@@ -1122,3 +1146,33 @@ describe("resolvePublishTarget", () => {
 		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), path.resolve(targetPath))
 	})
 })
+
+
+	it("a no-replace commit refuses a target that appeared after the caller checked", async () => {
+		// Isolate the commit-phase counters from any async cleanup a previous
+		// test left in flight.
+		vi.mocked(fs.rename).mockClear()
+		vi.mocked(fs.unlink).mockClear()
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.link).mockRejectedValue(Object.assign(new Error("EEXIST"), { code: "EEXIST" }))
+		// The failure path still cleans up its staging file and directory; keep those
+		// promises real so the cleanup does not mask the rejection under test.
+		vi.mocked(fs.unlink).mockResolvedValue(undefined)
+		vi.mocked(fs.rmdir).mockResolvedValue(undefined)
+
+		const error = await safeWriteText(targetPath, "new data", {
+			failIfExist: true,
+			platform: "linux",
+		}).catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(TargetExistsError)
+		expect((error as TargetExistsError).targetPath).toBe(targetPath)
+		// Nothing replaced the newer file, and the staged copy is not left behind.
+		expect(fs.rename).not.toHaveBeenCalled()
+		expect(
+			vi.mocked(fs.unlink).mock.calls.some(function (call) {
+				return String(call[0]).includes("safeWriteText")
+			}),
+		).toBe(true)
+	})
