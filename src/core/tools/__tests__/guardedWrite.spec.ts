@@ -29,6 +29,7 @@ vi.mock("fs/promises", () => ({
 	access: vi.fn(),
 	stat: vi.fn(),
 	realpath: vi.fn(),
+	lstat: vi.fn(),
 }))
 
 vi.mock("../../../utils/versionToken", () => ({
@@ -54,6 +55,7 @@ const mockedWithFileLock = vi.mocked(withFileLock)
 const mockedResolveLockKey = vi.mocked(resolveLockKey)
 const mockedFsAccess = vi.mocked(fs.access)
 const mockedFsRealpath = vi.mocked(fs.realpath)
+const mockedFsLstat = vi.mocked(fs.lstat)
 const mockedFsStat = vi.mocked(fs.stat)
 const mockedComputeVersionToken = vi.mocked(computeVersionToken)
 const mockedSafeWriteText = vi.mocked(safeWriteText)
@@ -106,6 +108,9 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		// to itself: the fixture workspace behaves like a real directory. The containment
 		// tests below override this to exercise the link cases.
 		mockedFsRealpath.mockImplementation(async (p) => String(p))
+		// Nothing on the walked path is a symlink by default; the dangling-link test
+		// overrides this for the component it plants.
+		mockedFsLstat.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
 		// By default no directory on the way to the target exists, so the ancestor
 		// identity pin is empty and the publish assertions stay readable. The pinning
 		// tests install real stats.
@@ -310,6 +315,32 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await expect(guardedWrite(task, "inside.txt", "data", "create")).rejects.toThrow(
 				"Workspace could not be resolved",
+			)
+
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("refuses a target that runs through a dangling symlink ancestor", async () => {
+			// A component of the path exists as a symlink whose referent is gone. realpath
+			// reports ENOENT for it, which is also what a not-yet-created directory
+			// reports; rejoining the lexical names would authorize a write whose publish
+			// lands outside the container that was checked.
+			const planted = path.join(path.resolve(WORKSPACE), "linkdir")
+			mockedFsRealpath.mockImplementation(async (p) => {
+				const s = String(p)
+				if (s === path.resolve(WORKSPACE)) return path.resolve(WORKSPACE)
+				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			})
+			mockedFsLstat.mockImplementation(async (p) => {
+				if (String(p) === planted) {
+					return { isSymbolicLink: () => true } as never
+				}
+				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			})
+			const task = createMockTask()
+
+			await expect(guardedWrite(task, "linkdir/nested/new.txt", "data", "create")).rejects.toThrow(
+				"runs through a link",
 			)
 
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()

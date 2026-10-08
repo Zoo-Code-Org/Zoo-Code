@@ -453,6 +453,19 @@ async function realpathNearest(target: string, displayPath: string): Promise<str
 						displayPath,
 					)
 				}
+				// "Missing" has two meanings and only one of them is benign. A directory
+				// that has not been created yet is fine - the publish makes it. A component
+				// that EXISTS as a symlink whose referent is gone is a dangling link: the
+				// lexical name would be re-joined onto a container that points elsewhere
+				// (or nowhere), and the publish would then create the file outside the
+				// directory this check authorized.
+				const asLink = await fs.lstat(ancestor, { bigint: true }).catch(() => undefined)
+				if (asLink?.isSymbolicLink()) {
+					throw new GuardRejectedError(
+						`Path runs through a link (${ancestor}) that does not resolve -- retry with a path inside the workspace.`,
+						displayPath,
+					)
+				}
 			}
 		}
 	}
