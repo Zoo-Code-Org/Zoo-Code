@@ -3376,6 +3376,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			console.error("Error removing event listeners:", error)
 		}
 
+		// A disposed task is no longer authoritative for what it read. The registry holds
+		// version tokens captured while the task was alive, and a disposed task can still be
+		// reachable through a parent/subtask reference; a guarded write must not accept one of
+		// those tokens for a file this task has not re-read since. Clearing also stops a long
+		// task from pinning every file it ever read.
+		this.observationRegistry.clear()
+
 		// Release any terminals associated with this task.
 		try {
 			// Release any terminals associated with this task.

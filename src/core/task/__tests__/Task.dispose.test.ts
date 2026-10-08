@@ -146,6 +146,21 @@ describe("Task dispose method", () => {
 		}
 	})
 
+	test("clears the per-Task observation registry on disposal", async () => {
+		// The registry holds on-disk version tokens for files this task read. Disposal does not
+		// free the Task object - a parent or subtask reference can outlive it - so a token
+		// captured before teardown must not survive as authority for a guarded write.
+		task.observationRegistry.observe("/workspace/a.ts", "v1", true)
+		task.observationRegistry.observe("/workspace/b.ts", "v2", false)
+		expect(task.observationRegistry.size).toBe(2)
+
+		await task.dispose()
+
+		expect(task.observationRegistry.size).toBe(0)
+		expect(task.observationRegistry.has("/workspace/a.ts")).toBe(false)
+		expect(task.observationRegistry.get("/workspace/b.ts")).toBeUndefined()
+	})
+
 	test("should reject the memoized completion promise when disposal cannot start", async () => {
 		const disposalError = new Error("disposal failed")
 		skipCleanup = true

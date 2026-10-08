@@ -3,6 +3,8 @@ import * as path from "path"
 
 import type { Mock } from "vitest"
 import type { ExtensionContext, Uri } from "vscode"
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
+import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 
 import type { ClineProvider } from "../../../core/webview/ClineProvider"
 
@@ -1003,6 +1005,59 @@ describe("McpHub", () => {
 	})
 
 	describe("toggleToolAlwaysAllow", () => {
+		// A fully typed double: the SDK constructors are mocked at the top of the file, so
+		// no cast is needed to build a connected connection here.
+		const projectConnection = (source: "global" | "project" = "project"): ConnectedMcpConnection => ({
+			type: "connected",
+			server: {
+				name: "test-server",
+				config: JSON.stringify({ type: "stdio", command: "node", args: ["test.js"], alwaysAllow: [] }),
+				status: "connected",
+				source,
+				errorHistory: [],
+			},
+			client: new Client({ name: "test-client", version: "1.0.0" }),
+			transport: new StdioClientTransport({ command: "node", args: ["test.js"] }),
+		})
+
+		it("confines a project-scoped allowlist write to the workspace root", async () => {
+			// A repository can ship .roo/mcp.json as a symlink to a file outside the workspace.
+			// safeWriteJson resolves the publish target before staging, so without confinement an
+			// allowlist edit would replace that outside file. The workspace root has to be handed
+			// over as confineTo so the write fails closed instead.
+			// cwd is a read-only getter on ClineProvider, so the test installs the value.
+			Object.defineProperty(mockProvider, "cwd", { value: "/mock/workspace", configurable: true })
+			vi.mocked(fs.readFile).mockResolvedValueOnce(
+				JSON.stringify({
+					mcpServers: {
+						"test-server": { type: "stdio", command: "node", args: ["test.js"], alwaysAllow: [] },
+					},
+				}),
+			)
+			mcpHub.connections = [projectConnection()]
+
+			await mcpHub.toggleToolAlwaysAllow("test-server", "project", "new-tool", true)
+
+			const write = vi.mocked(safeWriteJson).mock.calls.find((call) => String(call[0]).includes("mcp.json"))
+			expect(write).toBeDefined()
+			expect(write![2]).toEqual(expect.objectContaining({ confineTo: "/mock/workspace" }))
+		})
+
+		it("leaves a global-scoped allowlist write unconstrained", async () => {
+			// Global settings live in the user's own settings directory, which is not under the
+			// workspace; confining them would break every global edit.
+			Object.defineProperty(mockProvider, "cwd", { value: "/mock/workspace", configurable: true })
+			mcpHub.connections = [projectConnection("global")]
+
+			await mcpHub.toggleToolAlwaysAllow("test-server", "global", "another-tool", true)
+
+			const write = vi.mocked(safeWriteJson).mock.calls.find((call) => String(call[0]).includes("mcp"))
+			expect(write).toBeDefined()
+			// undefined confineTo is the unconstrained case: safeWriteJson only checks the path
+			// when a confinement root is supplied.
+			expect(write![2]?.confineTo).toBeUndefined()
+		})
+
 		it("should add tool to always allow list when enabling", async () => {
 			const mockConfig = {
 				mcpServers: {
