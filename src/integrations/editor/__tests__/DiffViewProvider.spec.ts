@@ -1641,6 +1641,100 @@ describe("DiffViewProvider", () => {
 			expect(diffViewProvider["placeholderVersion"]).toBeUndefined()
 		})
 
+		it("open() leaves a peer's file and the created directories when the placeholder token moved before the failed-open cleanup", async () => {
+			// The failed-open cleanup is data-preserving: when another writer owns the path by
+			// the time open() fails, undoPartialOpen must leave their file AND the directories
+			// that now hold it, while open() still rethrows its own failure.
+			const createdDirs = [`${mockCwd}/t3-peer`, `${mockCwd}/t3-peer/nested`]
+			vi.mocked(createDirectoriesForFile).mockResolvedValueOnce(createdDirs)
+			vi.mocked(vscode.window.showTextDocument).mockRejectedValue(new Error("Cannot open file"))
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockReturnValue({ dispose: vi.fn() })
+			vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+			// open() wrote the placeholder (first stat), then a peer replaced it before the
+			// bracketing post-stat: the tokens disagree, so no cleanup token is recorded.
+			const peerStats = {
+				isDirectory: () => false,
+				dev: BigInt(9),
+				ino: BigInt(11),
+				size: BigInt(64),
+				mtimeNs: BigInt(4_000_000_009n),
+				ctimeNs: BigInt(5_000_000_000n),
+			} as unknown as BigIntStats
+			vi.mocked(fs.stat).mockResolvedValueOnce(previewStats).mockResolvedValueOnce(peerStats)
+			// The stat the cleanup itself performs sees the peer's file.
+			vi.mocked(fs.stat).mockResolvedValue(peerStats)
+			vi.mocked(fs.readFile).mockResolvedValue("peer content")
+			diffViewProvider.editType = "create"
+
+			await expect(diffViewProvider.open("t3-peer/nested/new.ts")).rejects.toThrow(/Failed to/)
+
+			expect(vi.mocked(fs.unlink)).not.toHaveBeenCalled()
+			expect(vi.mocked(fs.rmdir)).not.toHaveBeenCalled()
+			expect(diffViewProvider["placeholderVersion"]).toBeUndefined()
+			expect(diffViewProvider["createdDirs"]).toEqual([])
+		})
+
+		it("open() removes its own empty placeholder when no stat-matched token was recorded", async () => {
+			// The bracketing read failed, so placeholderVersion is undefined - but the file on
+			// disk is still the empty one this open() created. Ownership is provable from the
+			// identity captured at creation, so the placeholder must not be left behind.
+			const createdDirs = [`${mockCwd}/t3-notoken`, `${mockCwd}/t3-notoken/nested`]
+			vi.mocked(createDirectoriesForFile).mockResolvedValueOnce(createdDirs)
+			vi.mocked(vscode.window.showTextDocument).mockRejectedValue(new Error("Cannot open file"))
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockReturnValue({ dispose: vi.fn() })
+			vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+			const emptyOurs = {
+				isDirectory: () => false,
+				dev: BigInt(7),
+				ino: BigInt(8),
+				size: BigInt(0),
+				mtimeNs: BigInt(4_000_000_000n),
+				ctimeNs: BigInt(5_000_000_000n),
+			} as unknown as BigIntStats
+			const movedAway = { ...emptyOurs, mtimeNs: BigInt(4_000_000_005n) } as unknown as BigIntStats
+			// pre/post stats disagree -> no token; the identity is still ours.
+			vi.mocked(fs.stat).mockResolvedValueOnce(emptyOurs).mockResolvedValueOnce(movedAway)
+			vi.mocked(fs.stat).mockResolvedValue(emptyOurs)
+			vi.mocked(fs.readFile).mockResolvedValue("")
+			diffViewProvider.editType = "create"
+
+			await expect(diffViewProvider.open("t3-notoken/nested/new.ts")).rejects.toThrow(/Failed to/)
+
+			expect(diffViewProvider["placeholderVersion"]).toBeUndefined()
+			expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith(`${mockCwd}/t3-notoken/nested/new.ts`)
+			expect(vi.mocked(fs.rmdir)).toHaveBeenNthCalledWith(1, `${mockCwd}/t3-notoken/nested`)
+			expect(vi.mocked(fs.rmdir)).toHaveBeenNthCalledWith(2, `${mockCwd}/t3-notoken`)
+			expect(diffViewProvider["placeholderIdentity"]).toBeUndefined()
+		})
+
+		it("keeps a placeholder that gained content when no stat-matched token was recorded", async () => {
+			// The identity fallback may only ever remove an EMPTY file: a writer that put
+			// content through the same inode keeps it, and so do the directories holding it.
+			const createdDirs = [`${mockCwd}/t3-filled`, `${mockCwd}/t3-filled/nested`]
+			vi.mocked(createDirectoriesForFile).mockResolvedValueOnce(createdDirs)
+			vi.mocked(vscode.window.showTextDocument).mockRejectedValue(new Error("Cannot open file"))
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockReturnValue({ dispose: vi.fn() })
+			vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+			const emptyOurs = {
+				isDirectory: () => false,
+				dev: BigInt(7),
+				ino: BigInt(8),
+				size: BigInt(0),
+				mtimeNs: BigInt(4_000_000_000n),
+				ctimeNs: BigInt(5_000_000_000n),
+			} as unknown as BigIntStats
+			const movedAway = { ...emptyOurs, mtimeNs: BigInt(4_000_000_005n) } as unknown as BigIntStats
+			const nowFilled = { ...emptyOurs, size: BigInt(24), mtimeNs: BigInt(4_000_000_007n) } as unknown as BigIntStats
+			vi.mocked(fs.stat).mockResolvedValueOnce(emptyOurs).mockResolvedValueOnce(movedAway)
+			vi.mocked(fs.stat).mockResolvedValue(nowFilled)
+			vi.mocked(fs.readFile).mockResolvedValue("")
+			diffViewProvider.editType = "create"
+
+			await expect(diffViewProvider.open("t3-filled/nested/new.ts")).rejects.toThrow(/Failed to/)
+
+			expect(vi.mocked(fs.unlink)).not.toHaveBeenCalled()
+			expect(vi.mocked(fs.rmdir)).not.toHaveBeenCalled()
+		})
 		it("open() on a create with a collected task writes the placeholder but tracks nothing", async () => {
 			// The task has been collected (dead WeakRef): the placeholder is still
 			// written (the file must exist to open the diff), but there is no live
