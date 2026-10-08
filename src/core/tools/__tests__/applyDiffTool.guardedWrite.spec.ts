@@ -227,7 +227,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
-		}) as unknown as void
+		})
 
 		const observation = mockTask.observationRegistry.get(path.resolve(mockTask.cwd, "src/thing.ts"))
 		expect(observation?.version).toBe(
@@ -249,7 +249,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
-		}) as unknown as void
+		})
 
 		expect(mockTask.observationRegistry.get(path.resolve(mockTask.cwd, "src/thing.ts"))).toBeUndefined()
 		// Exactly the two bracketing stats: no queued value left over for the next test.
@@ -266,7 +266,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
-		}) as unknown as void
+		})
 
 		const observation = mockTask.observationRegistry.get(key)
 		expect(observation?.version).toBe("1:2:22:100:100")
@@ -284,7 +284,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
-		}) as unknown as void
+		})
 
 		const observation = mockTask.observationRegistry.get(key)
 		expect(observation?.version).toBe("1:2:9:9:9")

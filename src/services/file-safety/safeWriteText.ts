@@ -300,6 +300,10 @@ export async function safeWriteText(
 
 	let backupPath: string | null = null
 	let releaseBackupOnSuccess = false
+	// Whether the commit rename ran. A failure after it is a durability problem
+	// with the published file, not a pre-commit failure, and the backup is then
+	// the only known-good copy of the previous content.
+	let committed = false
 	// Non-null only when the win32 step-2 block saved a successful DACL dump:
 	// it gates the step-5 restore and is tracked for the cleanup unlinks.
 	let daclDumpPath: string | null = null
@@ -478,6 +482,7 @@ export async function safeWriteText(
 
 			// -- Step 4: atomic rename temp -> target ---------------------
 			await fs.rename(tempPath, targetPath)
+			committed = true
 
 			// -- Step 4b (POSIX): fsync the parent directory so the directory entry
 			// changed by the commit rename is durable, not just the file content.
@@ -514,7 +519,7 @@ export async function safeWriteText(
 					// temp directory restore fails with "Not all privileges or groups referenced
 					// are assigned to the caller"), so the change of access rights is reported
 					// rather than thrown.
-					console.warn(`safeWriteText: content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`)
+					warn(`Content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`)
 				}
 			}
 
@@ -545,11 +550,15 @@ export async function safeWriteText(
 	} catch (originalError: unknown) {
 		// The backup is never restored: it is a copy, and the target already holds
 		// either the pre-write content (before the commit) or the published content.
-		if (backupPath && releaseBackupOnSuccess) {
+		// Only a pre-commit failure may discard the backup. After the commit the target
+		// holds the NEW content, and when the failure is a post-commit durability error the
+		// backup is the only copy known to hold the previous content - deleting it here
+		// would destroy the recovery copy the contract promises.
+		if (backupPath && releaseBackupOnSuccess && !committed) {
 			// Nothing to restore: the backup is a copy, so the target still holds whatever
-			// the commit left there - before the commit that is the pre-write content, and
-			// after it the published content. Either way the copy has served its purpose
-			// and must not be left beside the target where no caller can find it.
+			// the commit left there. Before the commit that is the pre-write content, and
+			// the copy beside it is redundant; it must not be left where no caller can
+			// find it.
 			await fs.unlink(backupPath).catch(() => {})
 			backupPath = null
 		}
