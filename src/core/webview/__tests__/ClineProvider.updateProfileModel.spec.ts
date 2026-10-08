@@ -450,6 +450,24 @@ describe("ClineProvider - updateProfileModel", () => {
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.violated_organization_allowlist")
 	})
 
+	it("allows a model update when an authenticated session has no organization settings (defaults to ORGANIZATION_ALLOW_ALL)", async () => {
+		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "stored/model" })
+		mockCloudInstance.isAuthenticated.mockReturnValue(true)
+		mockCloudInstance.getOrganizationSettings.mockReturnValue(undefined)
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "new/model",
+		})
+
+		expect(manager().saveConfig).toHaveBeenCalledWith(
+			"test-config",
+			expect.objectContaining({
+				openRouterModelId: "new/model",
+			}),
+		)
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+	})
+
 	it("drops an update for a profile that is not the visible profile without reading or saving it", async () => {
 		await provider.updateProfileModel("other-config", providerIdentifiers.openrouter, {
 			openRouterModelId: "x/y",
@@ -841,6 +859,30 @@ describe("ClineProvider - updateProfileModel", () => {
 		// rollback must NOT overwrite it with gpt-4!
 		expect(storedProfiles["test-config"].openRouterModelId).toBe("openai/gpt-5")
 		expect(storedProfiles["test-config"].openRouterApiKey).toBe("other-key")
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.save_api_config")
+	})
+
+	it("rolls back saved profile even if patch contains unallowed or skipped keys", async () => {
+		mockStoredProfile({
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4",
+			reasoningEffort: "low",
+		})
+
+		vi.spyOn(provider.contextProxy, "setProviderSettings").mockRejectedValue(
+			new Error("Context secret storage write failed"),
+		)
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-5",
+			reasoningEffort: "high",
+			unallowedKey: "some-value",
+		})
+
+		// Since saveConfig succeeded with gpt-5 (and reasoningEffort kept as "low"),
+		// but setProviderSettings threw, rollback should execute and restore gpt-4!
+		expect(storedProfiles["test-config"].openRouterModelId).toBe("openai/gpt-4")
+		expect(storedProfiles["test-config"].reasoningEffort).toBe("low")
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.save_api_config")
 	})
 

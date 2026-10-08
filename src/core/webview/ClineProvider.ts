@@ -1968,7 +1968,8 @@ export class ClineProvider
 			if (!cloudService.isAuthenticated()) {
 				return ORGANIZATION_ALLOW_ALL
 			}
-			return cloudService.getOrganizationSettings()?.allowList
+			const settings = cloudService.getOrganizationSettings()
+			return settings ? settings.allowList : ORGANIZATION_ALLOW_ALL
 		} catch (error) {
 			this.log(
 				`Unable to read organization allow-list for model update: ${error instanceof Error ? error.message : String(error)}`,
@@ -2027,6 +2028,7 @@ export class ClineProvider
 					providerModelKey ? [providerModelKey, ...RESET_ONLY_KEYS] : RESET_ONLY_KEYS,
 				)
 				const merged: Record<string, unknown> = { ...stored, id, apiProvider: storedProvider }
+				const appliedKeys: string[] = []
 				for (const [key, value] of Object.entries(patch)) {
 					// The provider is never patchable.
 					if (key === "apiProvider" || !allowedKeys.has(key)) {
@@ -2039,6 +2041,7 @@ export class ClineProvider
 						continue
 					}
 					merged[key] = value === null ? undefined : value
+					appliedKeys.push(key)
 				}
 
 				const authoritativeOrganizationAllowList = this.getOrganizationAllowListForProfileMutation()
@@ -2100,12 +2103,9 @@ export class ClineProvider
 								(!providerModelKey ||
 									currentProfile[providerModelKey as keyof typeof currentProfile] ===
 										merged[providerModelKey]) &&
-								Object.entries(patch).every(([key, value]) => {
-									if (key === "apiProvider") return true
-									const actual = currentProfile[key as keyof typeof currentProfile]
-									const expected = value === null ? undefined : value
-									return actual === expected
-								}),
+								appliedKeys.every(
+									(key) => currentProfile[key as keyof typeof currentProfile] === merged[key],
+								),
 							)
 
 							if (matchesSavedSettings) {

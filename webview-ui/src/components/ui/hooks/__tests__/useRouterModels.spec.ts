@@ -234,9 +234,11 @@ describe("fetchRouterModels", () => {
 	})
 
 	it("cleans up successfully when called without an abort signal", async () => {
+		const addWindowListenerSpy = vi.spyOn(window, "addEventListener")
 		const removeWindowListenerSpy = vi.spyOn(window, "removeEventListener")
 
 		const promise = fetchRouterModels(providerIdentifiers.openrouter)
+		const addedMessageHandler = addWindowListenerSpy.mock.calls.find(([type]) => type === "message")?.[1]
 
 		window.dispatchEvent(
 			new MessageEvent("message", {
@@ -250,19 +252,23 @@ describe("fetchRouterModels", () => {
 
 		const result = await promise
 		expect(result).toEqual(mockRouterModels)
-		expect(removeWindowListenerSpy).toHaveBeenCalledWith("message", expect.any(Function))
+		expect(typeof addedMessageHandler).toBe("function")
+		expect(removeWindowListenerSpy).toHaveBeenCalledWith("message", addedMessageHandler)
 	})
 
 	it("times out and cleans up when called without an abort signal", async () => {
 		vi.useFakeTimers()
+		const addWindowListenerSpy = vi.spyOn(window, "addEventListener")
 		const removeWindowListenerSpy = vi.spyOn(window, "removeEventListener")
 
 		const promise = fetchRouterModels(providerIdentifiers.openrouter)
+		const addedMessageHandler = addWindowListenerSpy.mock.calls.find(([type]) => type === "message")?.[1]
 
 		vi.advanceTimersByTime(10000)
 
 		await expect(promise).rejects.toThrow("Router models request timed out")
-		expect(removeWindowListenerSpy).toHaveBeenCalledWith("message", expect.any(Function))
+		expect(typeof addedMessageHandler).toBe("function")
+		expect(removeWindowListenerSpy).toHaveBeenCalledWith("message", addedMessageHandler)
 	})
 })
 
