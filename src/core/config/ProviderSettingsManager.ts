@@ -432,7 +432,7 @@ export class ProviderSettingsManager {
 					name = params.name
 
 					if (!providerProfiles.apiConfigs[name]) {
-						throw new Error(`Config with name '${name}' not found`)
+						throw new ProviderSettingsNotFoundError(`Config with name '${name}' not found`)
 					}
 
 					providerSettings = providerProfiles.apiConfigs[name]
@@ -444,7 +444,7 @@ export class ProviderSettingsManager {
 					)
 
 					if (!entry) {
-						throw new Error(`Config with ID '${id}' not found`)
+						throw new ProviderSettingsNotFoundError(`Config with ID '${id}' not found`)
 					}
 
 					name = entry[0]
@@ -454,6 +454,13 @@ export class ProviderSettingsManager {
 				return { name, ...providerSettings }
 			})
 		} catch (error) {
+			// A missing profile is an expected, actionable condition, not an I/O failure, and
+			// callers branch on the typed error (deleteProviderProfile prunes a stale list
+			// entry only for that type). Wrapping it here would erase the distinction, so the
+			// typed error is rethrown as-is; every other failure keeps the wrapped context.
+			if (error instanceof ProviderSettingsNotFoundError) {
+				throw error
+			}
 			throw new Error(`Failed to get profile: ${error instanceof Error ? error.message : error}`)
 		}
 	}

@@ -2154,6 +2154,10 @@ const writer = new ClineProvider(
 			await writer.saveViewState("mode", "architect")
 			await writer.saveViewState("currentApiConfigName", "my-profile")
 
+		// The reload this models has the previous provider disposed; a live view
+		// that still holds the id keeps it (ownership check in setViewStateId).
+		await writer.dispose()
+
 const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
@@ -2181,7 +2185,6 @@ const provider = new ClineProvider(
 			})
 			expect(getProfileSpy).toHaveBeenCalledWith({ name: "my-profile" })
 			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Loaded state for viewId"))
-			await writer.dispose()
 			await provider.dispose()
 		})
 
@@ -2292,6 +2295,10 @@ const writer = new ClineProvider(
 			await writer.saveViewState("mode", "code")
 			await writer.saveViewState("currentApiConfigName", "my-profile")
 
+		// The reload this models has the previous provider disposed; a live view
+		// that still holds the id keeps it (ownership check in setViewStateId).
+		await writer.dispose()
+
 const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
@@ -2320,7 +2327,6 @@ const provider = new ClineProvider(
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "model-x",
 			})
-			await writer.dispose()
 			await provider.dispose()
 		})
 
@@ -2632,6 +2638,10 @@ const writer = new ClineProvider(
 			await writer["setViewStateId"]("shared-view")
 			await writer.saveViewState("currentApiConfigName", "old-profile")
 
+		// The reload this models has the previous provider disposed; a live view
+		// that still holds the id keeps it (ownership check in setViewStateId).
+		await writer.dispose()
+
 			const profile: ProviderSettingsEntry = {
 				name: "new-profile",
 				id: "new-id",
@@ -2669,7 +2679,6 @@ const provider = new ClineProvider(
 			// The buffer must track the activated profile so getValues() agrees with the proxy.
 			expect(provider.getValues().currentApiConfigName).toBe("new-profile")
 			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("new-profile")
-			await writer.dispose()
 			await provider.dispose()
 		})
 
@@ -2919,6 +2928,174 @@ const provider = new ClineProvider(
 				apiProvider: providerIdentifiers.anthropic,
 				apiKey: "pinned-profile-secret",
 			})
+			await provider.dispose()
+		})
+		it("aborts the deletion before the settings store is touched when the pre-delete read fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const deleteConfigSpy = vi.fn().mockResolvedValue(undefined)
+			const saveConfigSpy = vi.fn().mockResolvedValue("doomed-id")
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				// A transient read failure, not the typed not-found: the settings may still exist,
+				// so a later failure could not be compensated and the deletion must not start.
+				getProfile: vi.fn().mockRejectedValue(new Error("secret storage unavailable")),
+				deleteConfig: deleteConfigSpy,
+				saveConfig: saveConfigSpy,
+			}
+
+			await expect(provider.deleteProviderProfile(doomedProfile)).rejects.toThrow("secret storage unavailable")
+
+			// Nothing destructive happened, so the same call can succeed once storage recovers.
+			// Continuing here would have removed the settings with no snapshot to restore,
+			// leaving the persisted list naming a profile whose settings are gone.
+			expect(deleteConfigSpy).not.toHaveBeenCalled()
+			expect(saveConfigSpy).not.toHaveBeenCalled()
+			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([doomedProfile, keeperProfile])
+			await provider.dispose()
+		})
+
+		it("restores the profile list, shared selection, and view pin when a later write fails after the list write", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+			// This view is pinned to the doomed profile and has its settings loaded, so the
+			// deletion also rewrites this view's pin and nested overlay.
+			provider["viewLocalState"].currentApiConfigName = "doomed-profile"
+			provider["viewLocalState"].apiConfiguration = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "doomed-secret",
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const saveConfigSpy = vi.fn().mockResolvedValue("doomed-id")
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn().mockImplementation(({ name }: { name: string }) =>
+					name === "doomed-profile"
+						? Promise.resolve({
+							name: "doomed-profile",
+							id: "doomed-id",
+							apiProvider: providerIdentifiers.openrouter,
+							openRouterApiKey: "doomed-secret",
+						})
+						: Promise.resolve({
+							name: "keeper-profile",
+							id: "keeper-id",
+							apiProvider: providerIdentifiers.anthropic,
+							apiKey: "keeper-secret",
+						}),
+				),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: saveConfigSpy,
+			}
+
+			// The settings commit and the profile-list write both landed; this later shared
+			// write is what fails, so every store already changed has to be put back.
+			const setProviderSettingsSpy = vi
+				.spyOn(provider.contextProxy, "setProviderSettings")
+				.mockRejectedValue(new Error("provider settings write failed"))
+
+			await expect(provider.deleteProviderProfile(doomedProfile)).rejects.toThrow("provider settings write failed")
+			setProviderSettingsSpy.mockRestore()
+
+			// The settings are back under their original id...
+			expect(saveConfigSpy).toHaveBeenCalledWith(
+				"doomed-profile",
+				expect.objectContaining({ id: "doomed-id", openRouterApiKey: "doomed-secret" }),
+			)
+			// ...and so are the profile list, the shared selection, and this view's own pin:
+			// restoring only the settings would leave the persisted metadata naming the
+			// surviving profile while the deleted profile's settings exist again.
+			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([doomedProfile, keeperProfile])
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("doomed-profile")
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("doomed-profile")
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "doomed-secret",
+			})
+			// The durable per-view entry must agree with the restored buffer, or a reload
+			// would re-pin this view to the profile that was never deleted.
+			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]] ?? {}
+			expect(persisted.currentApiConfigName).toBe("doomed-profile")
+			await provider.dispose()
+		})
+
+		it("surfaces an inconsistent-state error when the deletion rollback itself fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn().mockResolvedValue({
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "doomed-secret",
+			}),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				// The settings are already gone and cannot be put back: the caller must not be
+				// able to read this as a clean rollback.
+				saveConfig: vi.fn().mockRejectedValue(new Error("settings restore failed")),
+			}
+			const setValueSpy = vi
+				.spyOn(provider.contextProxy, "setValue")
+				.mockRejectedValue(new Error("storage write failed"))
+
+			await expect(provider.deleteProviderProfile(doomedProfile)).rejects.toThrow(
+				"Profile deletion left persisted state inconsistent",
+			)
+			setValueSpy.mockRestore()
 			await provider.dispose()
 		})
 	})
@@ -3337,6 +3514,93 @@ const provider = new ClineProvider(
 			})
 			expect(provider.contextProxy.getValue("viewStates")).not.toHaveProperty("tab panel/with.dots and spaces")
 
+			await provider.dispose()
+		})
+
+		it("refuses a viewStateId that another live view already owns", async () => {
+			const owner = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await owner["setViewStateId"]("owned-by-first-view")
+			await owner.saveViewState("currentApiConfigName", "owner-profile")
+			await owner.saveViewState("mode", "architect")
+
+			const intruder = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const intruderTempId = intruder["temporaryViewStateId"]
+			const logSpy = vi.spyOn(intruder, "log")
+
+			// The id arrives from the webview, so a second view can name the key another
+			// view is using. Adopting it would load that view's pinned profile, nested
+			// overlay, and mode into this provider, and let this webview overwrite the
+			// other view's persisted entry.
+			await intruder["setViewStateId"]("owned-by-first-view")
+
+			// The intruder keeps its temporary id instead of taking the key over.
+			expect(intruder["viewStateId"]).toBe(intruderTempId)
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("already claimed by live view"))
+			// It did not inherit the owner's per-view selections.
+			expect(intruder["viewLocalState"].currentApiConfigName).toBeUndefined()
+			expect(intruder["viewLocalState"].mode).toBeUndefined()
+			// The owner's durable entry is still its own, and nothing was written under the
+			// intruder's key.
+			const persisted = intruder["getPersistedViewStates"]({ fresh: true })
+			expect(persisted["owned-by-first-view"]).toMatchObject({
+				currentApiConfigName: "owner-profile",
+				mode: "architect",
+			})
+			expect(persisted[intruderTempId]).toBeUndefined()
+			await intruder.dispose()
+			await owner.dispose()
+		})
+
+		it("refuses an oversized viewStateId instead of using it as a persisted key", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const temporaryId = provider["temporaryViewStateId"]
+			// The webview generates a UUID; a far longer value is not a view id, and an
+			// unbounded key is unbounded growth in the shared viewStates map.
+			await provider["setViewStateId"]("x".repeat(200))
+			expect(provider["viewStateId"]).toBe(temporaryId)
+
+			await provider.saveViewState("mode", "architect")
+			const states = provider["getPersistedViewStates"]({ fresh: true })
+			expect(Object.keys(states).some((key) => key.length > 64)).toBe(false)
+			expect(states[temporaryId]).toMatchObject({ mode: "architect" })
+			await provider.dispose()
+		})
+
+		it("ignores a non-string viewStateId arriving from a crafted message", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const temporaryId = provider["temporaryViewStateId"]
+			const logSpy = vi.spyOn(provider, "log")
+			// A webview postMessage is JSON: the declared message type is not enforced at
+			// the boundary, so a number reaches the registration exactly as sent.
+			const craftedViewStateId = JSON.parse('{"viewStateId": 42}').viewStateId
+			await provider["setViewStateId"](craftedViewStateId)
+
+			expect(provider["viewStateId"]).toBe(temporaryId)
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Ignoring a non-string viewStateId"))
 			await provider.dispose()
 		})
 
