@@ -7988,6 +7988,58 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				)
 			})
 
+			it("pushes the new token into the buffer of the view pinned to an updated non-active profile", async () => {
+				const baseState = await provider.getState()
+				vi.spyOn(provider, "getState").mockResolvedValue({
+					...baseState,
+					apiConfiguration: {
+						...baseState.apiConfiguration,
+						zooGatewayModelId: "anthropic/claude-sonnet-4",
+					},
+				})
+				vi.spyOn(provider.contextProxy, "getProviderSettings").mockReturnValue({
+					...provider.contextProxy.getProviderSettings(),
+					apiProvider: providerIdentifiers.zooGateway,
+				})
+				vi.spyOn(provider.contextProxy, "getValues").mockReturnValue({
+					...provider.contextProxy.getValues(),
+					currentApiConfigName: "Zoo Gateway",
+				})
+				vi.spyOn(provider, "upsertProviderProfile").mockResolvedValue("profile-id")
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				const saveConfigSpy = vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("profile-id")
+				vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+					{ id: "zoo-gateway", name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
+					{ id: "backup-zoo", name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway },
+				])
+				// The stored profile only needs to exist here: the callback spreads it and
+				// overwrites the token, which is what the assertions below read.
+				// The stored profile only has to be a ProviderSettings-shaped value: the
+				// callback spreads it and overwrites the token, which is what is asserted below.
+				// Double assertion, last resort: the value only has to be shaped like a stored
+				// profile, and the type build resolved in this workspace types getProviderSettings
+				// wider than ProviderSettings, so no direct expression is assignable here.
+				const storedProfile = provider.contextProxy.getProviderSettings() as unknown as Awaited<
+					ReturnType<ClineProvider["providerSettingsManager"]["getProfile"]>
+				>
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue(storedProfile)
+
+				// This view is pinned to the NON-active zoo-gateway profile. Saving that profile
+				// does not activate it, so nothing else pushes the new token into the view-local
+				// buffer: it would keep serving the stale token until a window reload.
+				await provider.setValue("currentApiConfigName", "Backup Zoo")
+				expect(provider.pinnedProfileName).toBe("Backup Zoo")
+
+				await provider.handleZooCodeCallback("new-token")
+
+				expect(saveConfigSpy).toHaveBeenCalledWith(
+					"Backup Zoo",
+					expect.objectContaining({ zooSessionToken: "new-token" }),
+				)
+				expect(provider["viewLocalState"].apiConfiguration).toMatchObject({ zooSessionToken: "new-token" })
+			})
+
+
 			it("updates every zoo-gateway profile and activates only the active one", async () => {
 				vi.spyOn(provider, "getState").mockResolvedValue({
 					apiConfiguration: { zooGatewayModelId: "anthropic/claude-sonnet-4" },
