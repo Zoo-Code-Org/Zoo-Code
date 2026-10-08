@@ -179,22 +179,39 @@ async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRu
 
 /**
  * Resolve the publish target: the symlink referent when the given path is an
- * existing symlink, the path itself otherwise. Only ENOENT (target absent yet)
- * may fall back to the given path; any other resolution error (EACCES, EIO, ...)
- * propagates so a broken or unreadable symlink is never written through its
- * link path. Callers that stage a temp file themselves must stage it beside
- * the resolved path: the commit is a rename onto the referent, and a rename
- * across filesystems fails with EXDEV.
+ * existing symlink, the path itself otherwise. A dangling symlink is followed to
+ * its referent too (renaming onto the link path would replace the link), and only
+ * a path that neither exists nor is a link falls back to the given path. Any other
+ * resolution error (EACCES, EIO, ELOOP, ...) propagates so a broken or unreadable
+ * symlink is never written through its link path. Callers that stage a temp file
+ * themselves must stage it beside the resolved path: the commit is a rename onto
+ * the referent, and a rename across filesystems fails with EXDEV.
  */
-export async function resolvePublishTarget(absoluteFilePath: string): Promise<string> {
-	return fs.realpath(absoluteFilePath).catch((error: unknown) => {
-		const code =
-			typeof error === "object" && error !== null && "code" in error
-				? (error as { code?: string }).code
-				: undefined
-		if (code !== "ENOENT") throw error
+export async function resolvePublishTarget(
+	absoluteFilePath: string,
+	visitedLinks: Set<string> = new Set(),
+): Promise<string> {
+	try {
+		return await fs.realpath(absoluteFilePath)
+	} catch (error: unknown) {
+		if (_errorCode(error) !== "ENOENT") throw error
+		// realpath reports ENOENT for a dangling symlink as well as for a missing path.
+		// Renaming onto the link path would replace the link with a regular file, so follow
+		// the link text to its referent instead; a link cycle surfaces as ELOOP and still
+		// propagates, so the recursion is bounded.
+		const link = await fs.lstat(absoluteFilePath).catch(() => null)
+		if (link?.isSymbolicLink()) {
+			const linkText = await fs.readlink(absoluteFilePath)
+			if (visitedLinks.has(absoluteFilePath)) {
+				const loopError = new Error(`Symlink loop while resolving publish target ${absoluteFilePath}`)
+				;(loopError as NodeJS.ErrnoException).code = "ELOOP"
+				throw loopError
+			}
+			visitedLinks.add(absoluteFilePath)
+			return resolvePublishTarget(path.resolve(path.dirname(absoluteFilePath), linkText), visitedLinks)
+		}
 		return absoluteFilePath
-	})
+	}
 }
 
 export async function safeWriteText(filePath: string, content: string, options?: SafeWriteTextOptions): Promise<void> {

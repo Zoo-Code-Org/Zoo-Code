@@ -24,6 +24,8 @@ vi.mock("fs/promises", () => ({
 	rename: vi.fn(),
 	unlink: vi.fn(),
 	realpath: vi.fn(),
+	lstat: vi.fn(),
+	readlink: vi.fn(),
 	copyFile: vi.fn(),
 	rmdir: vi.fn(),
 }))
@@ -102,6 +104,8 @@ describe("safeWriteText", () => {
 		vi.mocked(fs.access).mockResolvedValue(undefined)
 		vi.mocked(fs.rename).mockResolvedValue(undefined)
 		vi.mocked(fs.unlink).mockResolvedValue(undefined)
+		// Link lookups default to 'not a link' so an ENOENT realpath falls back to the path.
+		vi.mocked(fs.lstat).mockResolvedValue(null as unknown as fsSync.Stats)
 		// Existing-target default: a regular 0o644 file.
 		vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o644))
 		// Staging path default: a real directory owned by this process.
@@ -608,9 +612,38 @@ describe("safeWriteText", () => {
 			const resolvedFallback = _resolvedTarget(targetPath)
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), resolvedFallback)
 		})
+
+		it("follows a dangling symlink to its referent instead of replacing the link", async () => {
+			const linkPath = path.resolve("/tmp/dangling-dir/link.txt")
+			const referent = path.resolve("/tmp/dangling-dir/real.txt")
+			// realpath reports ENOENT both for a missing path and for a dangling link; only the
+			// link lookup is a symlink, the referent resolves as an ordinary absent target.
+			vi.mocked(fs.realpath).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			vi.mocked(fs.realpath).mockResolvedValue(referent)
+			const linkStats = Object.create(fsSync.Stats.prototype) as fsSync.Stats & {
+				isSymbolicLink?: () => boolean
+				isDirectory?: () => boolean
+			}
+			linkStats.isSymbolicLink = () => true
+			linkStats.isDirectory = () => false
+			vi.mocked(fs.lstat).mockResolvedValueOnce(linkStats)
+			vi.mocked(fs.readlink).mockResolvedValueOnce("real.txt")
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fsSync.closeSync).mockReturnValue(undefined)
+
+			await safeWriteText(linkPath, "hello", { platform: "linux" })
+
+			// The commit rename must publish at the referent, never over the link path.
+			expect(fs.lstat).toHaveBeenCalledWith(linkPath)
+			const renames = vi.mocked(fs.rename).mock.calls
+			expect(renames.at(-1)?.[1]).toBe(referent)
+			expect(renames.some((call) => call[1] === linkPath)).toBe(false)
+		})
+
 	})
 
 	// ── Test 8: review fixes (permissions, partial writes, resolution, durability) ──
+
 
 	describe("review fixes", () => {
 		it("preserves the target's restrictive mode and tolerates a failed staging-dir permission repair", async () => {

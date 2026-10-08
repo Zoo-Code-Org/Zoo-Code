@@ -790,6 +790,34 @@ describe("DiffViewProvider", () => {
 	})
 
 	describe("saveDirectly method", () => {
+		it("rejects a save over a read-only target instead of renaming onto it", async () => {
+			const fs = await import("fs/promises")
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			vi.mocked(safeWriteText).mockClear()
+			const eacces = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+			vi.mocked(fs.access).mockRejectedValueOnce(eacces)
+
+			await expect(
+				diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200),
+			).rejects.toThrow("EACCES")
+
+			// The old fs.writeFile path failed the same way; safeWriteText must not run.
+			expect(safeWriteText).not.toHaveBeenCalled()
+			vi.mocked(fs.access).mockResolvedValue(undefined)
+		})
+
+		it("still writes when the target does not exist yet", async () => {
+			const fs = await import("fs/promises")
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			vi.mocked(safeWriteText).mockClear()
+			vi.mocked(fs.access).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+			await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200)
+
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			vi.mocked(fs.access).mockResolvedValue(undefined)
+		})
+
 		beforeEach(() => {
 			// Mock vscode functions
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue({} as any)
