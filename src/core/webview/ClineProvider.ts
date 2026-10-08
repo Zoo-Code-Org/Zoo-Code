@@ -4376,8 +4376,17 @@ export class ClineProvider
 			return
 		}
 
-		await Promise.all(
-			affected.map(async (instance) => {
+		// Snapshot every affected view BEFORE any write starts: a failure in one sibling
+		// has to roll back the siblings that already landed too, otherwise the deletion
+		// leaves some views pinned to a profile that no longer exists.
+		const snapshots = affected.map((instance) => ({
+			instance,
+			previousPin: instance.viewLocalState.currentApiConfigName,
+			previousOverlay: instance.viewLocalState.apiConfiguration,
+		}))
+
+		const results = await Promise.allSettled(
+			snapshots.map(async (snapshot) => {
 				const values: Partial<RooCodeSettings> & Partial<ExtensionState> = {
 					currentApiConfigName: replacementName,
 				}
@@ -4389,7 +4398,7 @@ export class ClineProvider
 				values.apiConfiguration = replacementSettings
 
 				// Direct private access: compile-time safe across sibling instances.
-				await instance._saveViewLocalStateFromMutation(values)
+				await snapshot.instance._saveViewLocalStateFromMutation(values)
 				// The active task of a view pinned to the deleted profile holds its own API
 				// handler and sticky profile name built from the deleted profile: rebuild
 				// the handler with the replacement's settings and re-point the sticky name,
@@ -4400,15 +4409,40 @@ export class ClineProvider
 				// hold a task that follows a different sticky profile, and forcing the
 				// replacement would silently switch that conversation and rewrite its
 				// persisted profile name without the user asking.
-				if (instance.getCurrentTask()?.taskApiConfigName === deletedProfileName) {
+				if (snapshot.instance.getCurrentTask()?.taskApiConfigName === deletedProfileName) {
 					if (replacementSettings) {
-						instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
+						snapshot.instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
 					}
-					await instance.persistStickyProviderProfileToCurrentTask(replacementName)
+					await snapshot.instance.persistStickyProviderProfileToCurrentTask(replacementName)
 				}
-				await instance.postStateToWebview()
+				await snapshot.instance.postStateToWebview()
 			}),
 		)
+
+		const rejected = results.filter(
+			(result): result is PromiseRejectedResult => result.status === "rejected",
+		)
+		if (rejected.length > 0) {
+			// Undo every affected view, not just the failing one: _saveViewLocalStateFromMutation
+			// fills the in-memory buffer before the durable write settles, so even a rejected write
+			// leaves the view re-pointed. Each restore is awaited on its own so one failing restore
+			// cannot skip the next one.
+			for (const snapshot of snapshots) {
+				try {
+					await snapshot.instance._saveViewLocalStateFromMutation({
+						currentApiConfigName: snapshot.previousPin,
+						apiConfiguration: snapshot.previousOverlay,
+					})
+				} catch (rollbackError: unknown) {
+					snapshot.instance.log(
+						`[rePinViewLocalStateForDeletedProfile] Could not restore the pin for view ${snapshot.instance.viewId} after a failed re-pin: ${
+							rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+						}`,
+					)
+				}
+			}
+			throw rejected[0].reason
+		}
 	}
 
 	/**
