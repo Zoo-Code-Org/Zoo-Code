@@ -381,10 +381,11 @@ describe("safeWriteText", () => {
 			// Call-order aware: only the DACL step's probe fails. A later fs.access in the publish
 			// path succeeds, so a swallowed probe error would let the write continue - which is what
 			// makes this assertion load-bearing rather than accidentally satisfied by a later failure.
-			let probeCalls = 0
-			vi.mocked(fs.access).mockImplementation((async () => {
-				probeCalls++
-				if (probeCalls === 1) { throw Object.assign(new Error("probe failed"), code ? { code } : {}) }
+			// Path-aware, not call-order: fs.access is also called for the parent directory earlier in
+			// the flow, so a first-call mock fails the WRONG probe and the assertion is satisfied by
+			// accident. Only the probe of the target itself may fail here.
+			vi.mocked(fs.access).mockImplementation((async (p: string) => {
+				if (p === targetPath) { throw Object.assign(new Error("probe failed"), code ? { code } : {}) }
 				return undefined
 			}) as never)
 
