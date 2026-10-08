@@ -271,6 +271,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			true,
 			1000,
 			"edit",
+			false,
 		)
 		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
 		expect(mockTask.didEditFile).toBe(true)
@@ -300,6 +301,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			true,
 			1000,
 			"edit",
+			false,
 		)
 
 		await expect(guardedWrite(mockTask as Task, "src/thing.ts", "full replacement", "update")).rejects.toThrow(
@@ -446,6 +448,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			true,
 			1000,
 			"create",
+			false,
 		)
 		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
 		expect(mockTask.didEditFile).toBe(true)
@@ -469,6 +472,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			true,
 			1000,
 			"create",
+			false,
 			false,
 		)
 	})
@@ -678,7 +682,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			pushToolResult: mockPushToolResult,
 		})
 
-		expect(mockSaveChanges).toHaveBeenCalledWith(true, 1000, "edit")
+		expect(mockSaveChanges).toHaveBeenCalledWith(true, 1000, "edit", false)
 		expect(mockSaveDirectly).not.toHaveBeenCalled()
 		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
 		expect(mockHandleError).not.toHaveBeenCalled()
@@ -694,7 +698,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			pushToolResult: mockPushToolResult,
 		})
 
-		expect(mockSaveChanges).toHaveBeenCalledWith(true, 1000, "create")
+		expect(mockSaveChanges).toHaveBeenCalledWith(true, 1000, "create", false)
 		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
 		expect(mockHandleError).not.toHaveBeenCalled()
 	})
