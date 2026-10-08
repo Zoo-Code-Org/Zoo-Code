@@ -446,10 +446,16 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 					diagnosticsEnabled,
 					writeDelayMs,
 					isNewFile ? "create" : "edit",
+					isOutsideWorkspace,
 				)
 			} else {
 				// Call saveChanges to update the DiffViewProvider properties
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs, isNewFile ? "create" : "edit")
+				await task.diffViewProvider.saveChanges(
+					diagnosticsEnabled,
+					writeDelayMs,
+					isNewFile ? "create" : "edit",
+					isOutsideWorkspace,
+				)
 			}
 
 			// Track file edit operation

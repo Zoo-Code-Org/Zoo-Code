@@ -104,13 +104,14 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					if (preReadToken === versionTokenOfStat(postReadStats)) {
 						// The tool's own hunk read, not a model read. When the model already observed the
 						// file, keep the completeness it earned and only on the version it was earned on; a
-						// partial view stays partial. With no prior observation this read returned the whole
-						// content, so the observation is complete.
+						// partial view stays partial. With no prior observation the model has seen only the
+						// patch's hunks, so this read stays incomplete: it must not become authority for a
+						// later full-file replacement.
 						const prior = task.observationRegistry.get(absolutePath)
-						// Nothing to carry when the model never observed the file: this read returned the
-						// whole content, so it is a complete observation. Carry only when a prior observation
-						// exists and still describes the version that was read.
-						const complete = prior === undefined ? true : prior.complete === true && prior.version === preReadToken
+						// With no prior observation there is nothing to carry, and the read stays
+						// incomplete. Carry completeness only when a prior observation exists and still
+						// describes the version that was read.
+						const complete = prior === undefined ? false : prior.complete === true && prior.version === preReadToken
 						task.observationRegistry.observe(absolutePath, preReadToken, complete)
 					}
 				}
@@ -249,11 +250,17 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				diagnosticsEnabled,
 				writeDelayMs,
 				"create",
+				isOutsideWorkspace,
 			)
 		} else {
 			// The add path publishes a whole new file, so create-guard semantics
 			// apply here as well.
-			await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs, "create")
+			await task.diffViewProvider.saveChanges(
+				diagnosticsEnabled,
+				writeDelayMs,
+				"create",
+				isOutsideWorkspace,
+			)
 		}
 
 		// Track file edit operation
@@ -498,6 +505,8 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					writeDelayMs,
 					"create",
 					sourceComplete,
+					// The user approved the whole patch, which names this destination.
+					isPathOutsideWorkspace(moveAbsolutePath),
 				)
 			} else {
 				// Write to new path and delete old file
@@ -527,12 +536,18 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					diagnosticsEnabled,
 					writeDelayMs,
 					"edit",
+					isOutsideWorkspace,
 				)
 			} else {
 				// The diff-view save is the same targeted hunk as the guarded save above:
 				// it must select the same edit guard, otherwise a partial read is
 				// rejected and the approved patch is thrown away.
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs, "edit")
+				await task.diffViewProvider.saveChanges(
+					diagnosticsEnabled,
+					writeDelayMs,
+					"edit",
+					isOutsideWorkspace,
+				)
 			}
 
 			await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)

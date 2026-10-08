@@ -682,6 +682,69 @@ describe("safeWriteJson", () => {
 		expect(left.filter((entry) => entry.includes(".new_") || entry.endsWith(".lock"))).toEqual([])
 	})
 
+	test("rejects an out-of-scope target before the advisory lock is taken", async () => {
+		const projectDir = path.join(tempDir, "scope")
+		await fs.mkdir(projectDir)
+		const outside = path.join(tempDir, "elsewhere.json")
+
+		// Capture every lock attempt without changing how locking works. The lock file
+		// lives NEXT TO the key, so taking the lock on an out-of-scope referent already
+		// writes outside the scope the caller declared - and an unwritable directory
+		// there would surface a lock error instead of the confinement verdict.
+		const realLockfile = await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")
+		const lockCalls: string[] = []
+		const lockMock = vi.fn(async (file: unknown, options?: unknown) => {
+			lockCalls.push(String(file))
+			return realLockfile.lock(file as never, options as never)
+		})
+		vi.doMock("proper-lockfile", () => ({
+			...realLockfile,
+			lock: lockMock as unknown as typeof realLockfile.lock,
+		}))
+
+		// Re-import the whole graph so the SUT AND its fileLock dependency pick up the
+		// wrapped lock; without the reset, fileLock keeps the already-loaded real
+		// proper-lockfile and the capture never sees a call. The error class is taken from
+		// the same module instance the SUT came from.
+		vi.resetModules()
+		const { safeWriteJson: reimported, ConfinedPathEscapeError: ReimportedError } = await import(
+			"../safeWriteJson"
+		)
+
+		try {
+			await expect(
+				reimported(outside, { mcpServers: {} }, { confineTo: projectDir }),
+			).rejects.toThrow(ReimportedError)
+
+			// The confinement verdict came first: no lock was ever attempted.
+			expect(lockCalls).toEqual([])
+			expect((await fs.readdir(tempDir)).filter(function (entry: string) { return entry.endsWith(".lock") })).toEqual([])
+		} finally {
+			vi.doUnmock("proper-lockfile")
+			vi.resetModules()
+		}
+	})
+
+	test("rejects an out-of-scope target before creating any directory", async () => {
+		const projectDir = path.join(tempDir, "scope")
+		await fs.mkdir(projectDir)
+		// The target lives in a directory that does not exist. A confinement check that runs
+		// after the mkdir -p would create that directory OUTSIDE the declared scope first -
+		// the same side effect the pre-lock check exists to prevent, reached through a
+		// symlinked ancestor in the reported case - and an unwritable referent would surface
+		// the mkdir error instead of the confinement verdict.
+		const missingParent = path.join(tempDir, "no-such-dir")
+		const outside = path.join(missingParent, "elsewhere.json")
+
+		await expect(safeWriteJson(outside, { mcpServers: {} }, { confineTo: projectDir })).rejects.toThrow(
+			ConfinedPathEscapeError,
+		)
+
+		// Nothing was created outside the scope, and no lock was attempted there.
+		expect(fsSyncActual.existsSync(missingParent)).toBe(false)
+		expect((await fs.readdir(tempDir)).filter(function (entry: string) { return entry.endsWith(".lock") })).toEqual([])
+	})
+
 	test.skipIf(process.platform === "win32")(
 		"rejects a confined write whose symlink resolves outside the confined directory",
 		async () => {

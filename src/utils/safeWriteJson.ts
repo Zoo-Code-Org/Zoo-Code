@@ -34,12 +34,11 @@ export interface SafeWriteJsonOptions {
 	merge?: (existing: unknown, incoming: unknown) => unknown
 
 	/**
-	 * Restrict the write to a directory. A caller that picked the path from a known
-	 * scope (a workspace, a project settings directory) can refuse a write that a
-	 * planted symlink would land somewhere else. The declared path is checked before
-	 * the lock is taken and before any parent directory is created, and the resolved
-	 * publish target is checked again under the target's advisory lock, since a peer
-	 * writer may move the referent in between.
+	 * Restrict the write to a directory. The publish target is resolved through
+	 * symlinks before this check runs, so a caller that picked the path from a
+	 * known scope (a workspace, a project settings directory) can refuse a write
+	 * that a planted symlink would land somewhere else. The check runs before the
+	 * advisory lock is taken and before anything is staged.
 	 */
 	confineTo?: string
 }
@@ -102,21 +101,17 @@ async function _resolveScopeRoot(confineTo: string): Promise<string> {
 }
 
 /**
- * Reject a candidate publish path that escapes the caller's confined scope.
- * Shared by the pre-lock check and the in-lock check so both canonicalize the
- * same way: the candidate is resolved through symlinks and compared against the
- * resolved scope root.
+ * Whether `candidate` sits outside `scopeRoot`. The scope root itself counts as
+ * outside: a file write cannot land on the directory that declares the scope.
  */
-function _assertWithinScope(requestedPath: string, candidatePath: string, scopeRoot: string): void {
-	const relative = path.relative(scopeRoot, candidatePath)
-	if (
+function _escapesScope(scopeRoot: string, candidate: string): boolean {
+	const relative = path.relative(scopeRoot, candidate)
+	return (
 		relative === "" ||
 		relative === ".." ||
 		relative.startsWith(".." + path.sep) ||
 		path.isAbsolute(relative)
-	) {
-		throw new ConfinedPathEscapeError(requestedPath, candidatePath, scopeRoot)
-	}
+	)
 }
 
 function _scopeErrorCode(error: unknown): string | undefined {
@@ -151,24 +146,18 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// the target when the resolution itself rejects.
 	let resolvedTargetPath: string | undefined
 
-	// Lock key: the symlink referent when the path is an existing symlink, so a
-	// symlink alias and its referent share one lock. The key must be computable
-	// while a peer writer is mid-commit (backup mode renames the referent away and
-	// back), so the walk tolerates a dangling link instead of rejecting it here.
-	const lockKey = await resolveLockKey(absoluteFilePath)
-
-	// Confinement, if the caller declared a scope, is checked BEFORE the lock is
-	// taken and before the parent-directory creation below: an out-of-scope target
-	// with a missing parent would otherwise get a directory created outside
-	// confineTo, and proper-lockfile creates ${lockKey}.lock beside the lock key -
-	// a key that is the symlink referent, so a repository-planted link out of the
-	// scope would otherwise create a lock file outside the scope (and an unwritable
-	// referent directory would surface a lock-acquisition error after retries
-	// instead of ConfinedPathEscapeError). Repeated on the resolved publish target
-	// inside the lock, since a peer writer may move the referent in between.
+	// Confinement is checked before ANY filesystem side effect. mkdir -p through a
+	// planted symlinked ancestor (projectDir/.roo -> /elsewhere) would create
+	// directories outside the declared scope, and an unwritable referent would surface
+	// the mkdir error instead of the ConfinedPathEscapeError the caller is entitled to.
+	// _resolveScopeRoot resolves a not-yet-existing path through its nearest existing
+	// ancestor, so this works for the target's missing parents too.
 	if (options?.confineTo) {
 		const scopeRoot = await _resolveScopeRoot(options.confineTo)
-		_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(lockKey), scopeRoot)
+		const requested = await _resolveScopeRoot(absoluteFilePath)
+		if (_escapesScope(scopeRoot, requested)) {
+			throw new ConfinedPathEscapeError(absoluteFilePath, requested, scopeRoot)
+		}
 	}
 
 	try {
@@ -179,8 +168,31 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		throw dirError
 	}
 
+	// Lock key: the symlink referent when the path is an existing symlink, so a
+	// symlink alias and its referent share one lock. The key must stay computable while
+	// a peer writer is mid-commit - the commit rename briefly leaves the path without
+	// the referent it had when the walk started - so the walk tolerates a dangling link
+	// instead of rejecting it here. (The backup itself is a copy: the target is never
+	// renamed away, so a dangling link here means a peer's commit or an external
+	// unlink, not a backup rename.)
+	const lockKey = await resolveLockKey(absoluteFilePath)
 
+	// Confinement is checked here as well as under the lock. The lock file lives NEXT
+	// TO the key, so a planted symlink that points outside the declared scope would
+	// first make this write create "<referent>.lock" outside that scope - a side effect
+	// the caller declared it would not have - and if that directory is not writable the
+	// caller would get a lock-acquisition error instead of the ConfinedPathEscapeError
+	// it is entitled to. The key is the symlink referent, so this check sees the same
+	// destination the lock would be taken on. The under-lock check stays: it covers the
+	// target re-resolved after a peer commits.
+	if (options?.confineTo) {
+		const scopeRoot = await _resolveScopeRoot(options.confineTo)
+		if (_escapesScope(scopeRoot, await _resolveScopeRoot(lockKey))) {
+			throw new ConfinedPathEscapeError(absoluteFilePath, lockKey, scopeRoot)
+		}
+	}
 
+	// Acquire the lock before any file operations. If acquisition fails it throws
 	// immediately, and releaseLock stays a no-op so the finally block does not try
 	// to release an unacquired lock.
 	releaseLock = await acquireFileLock(lockKey)
@@ -202,7 +214,9 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// rejected write leaves nothing behind.
 		if (options?.confineTo) {
 			const scopeRoot = await _resolveScopeRoot(options.confineTo)
-			_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(resolvedTargetPath), scopeRoot)
+			if (_escapesScope(scopeRoot, await _resolveScopeRoot(resolvedTargetPath))) {
+				throw new ConfinedPathEscapeError(absoluteFilePath, resolvedTargetPath, scopeRoot)
+			}
 		}
 
 		// If a merge callback was provided, read the current file under the lock
@@ -233,12 +247,11 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
 
-		// Step 2: Delegate backup + commit + rollback to safeWriteText with the
-		// pre-written temp path. backup:true keeps the old safeWriteJson
-		// semantics (target -> backup before commit, rollback on failure) and
-		// keeps the target in place until safeWriteText captures its Windows
-		// DACL (safeWriteText dumps the DACL before its own backup rename and
-		// restores it onto the directory after the commit rename).
+		// Step 2: Delegate backup + commit to safeWriteText with the pre-written
+		// temp path. backup:true makes safeWriteText COPY the target to a backup
+		// before the commit rename; the target itself never moves, so there is no
+		// rollback to undo. On win32 the DACL is dumped before that backup copy and
+		// restored onto the directory after the commit rename.
 		const textOptions: SafeWriteTextOptions = {
 			tempPath: actualTempNewFilePath,
 			backup: true,
@@ -257,10 +270,10 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		const newFileToCleanupWithinCatch = actualTempNewFilePath
 
-		// A failed safeWriteText already rolled the backup (if any) back to
-		// the target path. Clean up the .new file if it still exists
-		// (safeWriteText also cleans up its tempPath on failure; this is a
-		// safety net in case its cleanup missed it).
+		// A pre-commit failure leaves the target untouched, and safeWriteText has
+		// already removed its own backup copy and temp file (a POST-commit failure
+		// keeps the backup on purpose and reports its path on the error). Clean up
+		// the .new file if it still exists - safety net in case its cleanup missed it.
 		if (newFileToCleanupWithinCatch) {
 			try {
 				await fs.unlink(newFileToCleanupWithinCatch)

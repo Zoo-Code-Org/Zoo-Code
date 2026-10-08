@@ -68,14 +68,22 @@ export class StagingPathError extends Error {
  */
 export class PostCommitDurabilityError extends Error {
 	readonly targetPath: string
+	/**
+	 * The old-content copy retained for recovery on this path, or null when backup
+	 * mode was off or the target did not exist before the write. The name is a hidden
+	 * random path, so without this field no caller could find the copy the catch block
+	 * deliberately keeps.
+	 */
+	readonly backupPath: string | null
 
-	constructor(targetPath: string, cause: unknown) {
+	constructor(targetPath: string, cause: unknown, backupPath: string | null = null) {
 		super(
 			"The rename committed but the parent directory could not be fsynced -- the content is at the target path reported on this error, and the directory entry may not be durable.",
 			{ cause },
 		)
 		this.name = "PostCommitDurabilityError"
 		this.targetPath = targetPath
+		this.backupPath = backupPath
 	}
 }
 // -- helpers ---------------------------------------------------------------
@@ -300,6 +308,10 @@ export async function safeWriteText(
 
 	let backupPath: string | null = null
 	let releaseBackupOnSuccess = false
+	// Whether the commit rename ran. A failure after it is a durability problem
+	// with the published file, not a pre-commit failure, and the backup is then
+	// the only known-good copy of the previous content.
+	let committed = false
 	// Non-null only when the win32 step-2 block saved a successful DACL dump:
 	// it gates the step-5 restore and is tracked for the cleanup unlinks.
 	let daclDumpPath: string | null = null
@@ -478,6 +490,7 @@ export async function safeWriteText(
 
 			// -- Step 4: atomic rename temp -> target ---------------------
 			await fs.rename(tempPath, targetPath)
+			committed = true
 
 			// -- Step 4b (POSIX): fsync the parent directory so the directory entry
 			// changed by the commit rename is durable, not just the file content.
@@ -496,7 +509,14 @@ export async function safeWriteText(
 					// so the failure is surfaced as its own error: the caller can
 					// still find the content at the target, it just cannot rely on
 					// the directory entry having reached the disk.
-					throw new PostCommitDurabilityError(targetPath, error)
+					// The catch block keeps the backup on this path, so hand the caller the
+					// path of the copy it is keeping - it is a hidden random name and is
+					// otherwise unrecoverable.
+					throw new PostCommitDurabilityError(
+						targetPath,
+						error,
+						releaseBackupOnSuccess ? backupPath : null,
+					)
 				}
 			}
 
@@ -514,7 +534,7 @@ export async function safeWriteText(
 					// temp directory restore fails with "Not all privileges or groups referenced
 					// are assigned to the caller"), so the change of access rights is reported
 					// rather than thrown.
-					warn(`safeWriteText: content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`)
+					warn(`Content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`)
 				}
 			}
 
@@ -545,11 +565,15 @@ export async function safeWriteText(
 	} catch (originalError: unknown) {
 		// The backup is never restored: it is a copy, and the target already holds
 		// either the pre-write content (before the commit) or the published content.
-		if (backupPath && releaseBackupOnSuccess) {
+		// Only a pre-commit failure may discard the backup. After the commit the target
+		// holds the NEW content, and when the failure is a post-commit durability error the
+		// backup is the only copy known to hold the previous content - deleting it here
+		// would destroy the recovery copy the contract promises.
+		if (backupPath && releaseBackupOnSuccess && !committed) {
 			// Nothing to restore: the backup is a copy, so the target still holds whatever
-			// the commit left there - before the commit that is the pre-write content, and
-			// after it the published content. Either way the copy has served its purpose
-			// and must not be left beside the target where no caller can find it.
+			// the commit left there. Before the commit that is the pre-write content, and
+			// the copy beside it is redundant; it must not be left where no caller can
+			// find it.
 			await fs.unlink(backupPath).catch(() => {})
 			backupPath = null
 		}

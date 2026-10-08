@@ -11,6 +11,7 @@ import { computeVersionToken, versionTokenOfStat } from "../../../utils/versionT
 import type { BigIntStats } from "fs"
 import { safeWriteText } from "../../../services/file-safety/safeWriteText"
 import { withFileLock } from "../../../utils/fileLock"
+import { createDirectoriesForFile } from "../../../utils/fs"
 import { ObservationRegistry } from "../../../core/task/observationRegistry"
 import type { Task } from "../../../core/task/Task"
 
@@ -31,6 +32,10 @@ vi.mock("fs/promises", () => ({
 	rename: vi.fn().mockResolvedValue(undefined),
 	unlink: vi.fn().mockResolvedValue(undefined),
 	rmdir: vi.fn().mockResolvedValue(undefined),
+	// guardedWrite resolves the workspace root (and the nearest existing ancestor of the
+	// target) before publishing. The double returns the path unchanged so the containment
+	// check sees the same spelling the rest of the test uses.
+	realpath: vi.fn(async (p: string) => p),
 }))
 
 // Mock safeWriteText (used by saveDirectly)
@@ -69,6 +74,16 @@ vi.mock("path", () => ({
 	basename: vi.fn((path) => path.split("/").pop()),
 	dirname: vi.fn((path) => path.split("/").slice(0, -1).join("/") || "/"),
 	join: (...args: string[]) => args.join("/"),
+	sep: "/",
+	// guardedWrite's workspace containment compares paths lexically, so the double needs
+	// a POSIX relative() that matches the resolve()/join() doubles above.
+	relative: (from: string, to: string) => {
+		const f = from.split("/").filter(Boolean)
+		const t = to.split("/").filter(Boolean)
+		let i = 0
+		while (i < f.length && i < t.length && f[i] === t[i]) i++
+		return [...Array.from({ length: f.length - i }, () => ".."), ...t.slice(i)].join("/")
+	},
 }))
 
 // Mock vscode
@@ -1065,6 +1080,32 @@ describe("DiffViewProvider", () => {
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
 		})
 
+		it("publishes an approved outside-workspace target", async () => {
+			// The tool layer classified this path as outside every workspace folder, put it in
+			// front of the user, and the user approved. The guard must not then reject the
+			// write it was told about.
+			vi.mocked(fs.access).mockRejectedValue({ code: "ENOENT" })
+			vi.mocked(computeVersionToken).mockResolvedValue("v1")
+
+			await diffViewProvider.saveDirectly("../outside.ts", "new content", false, true, 1000, "create", undefined, true)
+
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/../outside.ts`, "new content")
+		})
+
+		it("rejects the same escape when no approval was obtained", async () => {
+			// The flag is what carries the approval; without it the containment line inside the
+			// publish helper still holds.
+			vi.mocked(fs.access).mockRejectedValue({ code: "ENOENT" })
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+
+			await expect(
+				diffViewProvider.saveDirectly("../outside.ts", "new content", false, true, 1000, "create"),
+			).rejects.toThrow("Path resolves outside the workspace")
+
+			expect(safeWriteText).not.toHaveBeenCalled()
+		})
+
 		it("does not save a dirty buffer in the memory-only diagnostics path", async () => {
 			// The guarded publish already committed the accepted content. Saving a dirty
 			// buffer here would republish its stale bytes through VS Code's unguarded save
@@ -1139,6 +1180,22 @@ describe("DiffViewProvider", () => {
 				await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
 
 				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			})
+
+			it("leaves no directories behind when the guard rejects the write", async () => {
+				// A rejected guard must not touch the filesystem at all. Creating the parent
+				// directories before the guard runs would leave empty directories behind - and
+				// for an outside-workspace target, outside the workspace. safeWriteText creates
+				// missing parents itself at publish time.
+				mockTask.observationRegistry.clear()
+				vi.mocked(createDirectoriesForFile).mockClear()
+
+				await expect(
+					diffViewProvider.saveDirectly("nested/dir/test.ts", "new content", true, false, 0),
+				).rejects.toThrow("File already exists at nested/dir/test.ts")
+
+				expect(createDirectoriesForFile).not.toHaveBeenCalled()
+				expect(safeWriteText).not.toHaveBeenCalled()
 			})
 
 			it("rejects an observed write whose version token is stale", async () => {
