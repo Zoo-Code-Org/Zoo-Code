@@ -837,7 +837,7 @@ describe("DiffViewProvider", () => {
 
 			// Verify file was written via safeWriteText
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { preCommitVerify: expect.any(Function) })
 
 			// Verify file was opened without focus
 			expect(vscode.window.showTextDocument).toHaveBeenCalledWith(
@@ -860,7 +860,7 @@ describe("DiffViewProvider", () => {
 
 			// Verify file was written via safeWriteText
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { preCommitVerify: expect.any(Function) })
 
 			// Verify file was NOT opened
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
@@ -875,7 +875,7 @@ describe("DiffViewProvider", () => {
 
 			// Verify file was written via safeWriteText
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { preCommitVerify: expect.any(Function) })
 
 			// Verify delay was NOT called
 			expect(mockDelay).not.toHaveBeenCalled()
@@ -921,7 +921,7 @@ describe("DiffViewProvider", () => {
 
 				await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
 
-				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { preCommitVerify: expect.any(Function) })
 
 			})
 			it("holds the lock across the guard check and the publish", async () => {
@@ -969,7 +969,7 @@ describe("DiffViewProvider", () => {
 
 				await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
 
-				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { preCommitVerify: expect.any(Function) })
 			})
 
 			it("fails closed when the owning task has been collected", async () => {
