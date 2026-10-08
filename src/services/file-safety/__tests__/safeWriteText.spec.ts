@@ -1318,3 +1318,48 @@ describe("resolvePublishTarget", () => {
 		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), path.resolve(targetPath))
 	})
 })
+
+describe("resolveLockKey when the parent directory does not exist yet", () => {
+	beforeEach(() => mockDefaults())
+
+	it("canonicalizes through the nearest existing ancestor instead of the literal parent", async () => {
+		// Two writers must take ONE lock: the one whose parent directory is already there,
+		// and the one racing to create it. Resolving only the immediate parent and falling
+		// back to its literal spelling on ENOENT gave them different keys whenever an
+		// ancestor was a symlink or a Windows short name, so a read-modify-write under the
+		// advisory lock lost one side.
+		const aliasDir = path.resolve("/tmp/alias-parent")
+		const canonicalDir = path.resolve("/tmp/real-parent")
+		const nested = path.join(aliasDir, "nested")
+		const target = path.join(nested, "history_item.json")
+		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(false))
+		vi.mocked(fs.realpath).mockImplementation(async (p) => {
+			const s = String(p)
+			if (s === target || s === nested) {
+				throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+			}
+			if (s === aliasDir) {
+				return canonicalDir
+			}
+			return s
+		})
+
+		expect(await resolveLockKey(target)).toBe(path.join(canonicalDir, "nested", "history_item.json"))
+	})
+
+	it("propagates a realpath failure that is not ENOENT instead of guessing a key", async () => {
+		// A realpath that fails for another reason says nothing about the canonical form;
+		// returning a literal key would silently put this writer on a different lock.
+		const target = path.join(path.resolve("/tmp/test-dir"), "history_item.json")
+		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(false))
+		// Not a link: the walk must reach the canonicalization step, which is where the
+		// non-ENOENT failure has to surface.
+		vi.mocked(fs.readlink).mockRejectedValue(Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }))
+		vi.mocked(fs.realpath).mockImplementation(async (p) => {
+			if (String(p) === target) return target
+			throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+		})
+
+		await expect(resolveLockKey(target)).rejects.toThrow("EACCES")
+	})
+})
