@@ -249,6 +249,11 @@ describe("safeWriteText", () => {
 	// ── Test 4: backup:true keeps old safeWriteJson semantics incl. rollback ──
 
 	describe("backup:true", () => {
+	// These tests exercise the win32 publish path, whose DACL capture is judged by its
+	// artifact, so the mock world has to produce a usable dump.
+	beforeEach(() => {
+		vi.mocked(fsSync.statSync).mockImplementation((() => ({ isFile: () => true, size: 256 })) as never)
+	})
 		it("copies target -> backup before commit, deletes backup on success", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
@@ -312,6 +317,11 @@ describe("safeWriteText", () => {
 	// ── Test 5: win32 DACL path ──────────────────────────────────────────────
 
 	describe("win32 DACL", () => {
+	// The DACL capture is judged by its artifact, so the mock world has to produce one:
+	// a regular, non-empty dump. Tests that want an unusable artifact override this.
+	beforeEach(() => {
+		vi.mocked(fsSync.statSync).mockImplementation((() => ({ isFile: () => true, size: 256 })) as never)
+	})
 		it.skipIf(process.platform !== "win32")(
 			"copies target DACL onto staging file via icacls before rename on Windows",
 			async () => {
@@ -349,7 +359,76 @@ describe("safeWriteText", () => {
 			expect(execFile).not.toHaveBeenCalled()
 		})
 
+		it("fails closed when icacls reports success but wrote no dump", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// icacls exits 0 without producing the dump (measured when the target's owner differs
+			// from the caller). The exit code alone is not evidence that a descriptor was captured.
+			vi.mocked(execFile).mockImplementation(((_c: string, _a: string[], _o: unknown, cb?: (e?: Error | null) => void) => { cb?.(null); return undefined }) as never)
+			vi.mocked(fsSync.statSync).mockImplementation((() => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }) }) as never)
+
+			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toThrow(/refusing to publish/)
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
+
+		it.each([["EACCES", "EACCES"], ["a code-less probe error", undefined]])("propagates a %s target-existence probe instead of treating the target as absent", async (_label, code) => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// An unreadable target is not an absent target: publishing over it would replace a file
+			// whose security descriptor was never captured.
+			// Call-order aware: only the DACL step's probe fails. A later fs.access in the publish
+			// path succeeds, so a swallowed probe error would let the write continue - which is what
+			// makes this assertion load-bearing rather than accidentally satisfied by a later failure.
+			let probeCalls = 0
+			vi.mocked(fs.access).mockImplementation((async () => {
+				probeCalls++
+				if (probeCalls === 1) { throw Object.assign(new Error("probe failed"), code ? { code } : {}) }
+				return undefined
+			}) as never)
+
+			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toThrow("probe failed")
+			expect(fs.rename).not.toHaveBeenCalled()
+			expect(execFile).not.toHaveBeenCalled()
+			// Nothing downstream of the probe may run: a swallowed probe error would keep going and
+			// copy the target to a backup, which is what makes this assertion load-bearing.
+			expect(fs.copyFile).not.toHaveBeenCalled()
+		})
+
+		it("removes the staged file and the dump when the DACL capture aborts", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fsSync.statSync).mockImplementation((() => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }) }) as never)
+			const unlinkMock = vi.mocked(fs.unlink)
+
+			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toThrow(/refusing to publish/)
+
+			// The abort leaves the try/finally that owns cleanup, so the artifacts are released on the
+			// abort path itself: neither the dump nor the staged file may be orphaned.
+			const unlinked = unlinkMock.mock.calls.map(function (call) { return String(call[0]) })
+			expect(unlinked.some(function (p) { return p.includes(".acl.tmp") })).toBe(true)
+			expect(unlinked.some(function (p) { return p.includes("safeWriteText_") })).toBe(true)
+		})
+
+		it("reports the retained artifact when the abort cleanup cannot remove it", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fsSync.statSync).mockImplementation((() => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }) }) as never)
+			vi.mocked(fs.unlink).mockRejectedValue(new Error("EBUSY"))
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toThrow(/refusing to publish/)
+
+			const warned = warnSpy.mock.calls.map(function (call) { return String(call[0]) }).join("\n")
+			expect(warned).toContain("could not remove")
+		})
+
 		it("win32 DACL capture failure aborts before publishing", async () => {
+			// The capture is judged by the artifact: make the dump absent so the capture fails.
+			vi.mocked(fsSync.statSync).mockImplementation((() => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }) }) as never)
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
@@ -380,7 +459,7 @@ describe("safeWriteText", () => {
 				if (typeof cb === "function") cb(new Error("icacls exit 1"), "", "")
 				return fakeChild
 			})
-			vi.mocked(fsSync.statSync).mockReturnValue({ size: 256 } as never)
+			vi.mocked(fsSync.statSync).mockReturnValue({ isFile: () => true, size: 256 } as never)
 
 			await safeWriteText(targetPath, "data", { platform: "win32" })
 

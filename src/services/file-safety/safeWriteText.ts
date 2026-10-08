@@ -154,15 +154,29 @@ async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunne
 				err ? reject(err) : resolve(),
 			)
 		})
-		return true
+		return _dumpIsUsable(dumpPath)
 	} catch {
 		// icacls can exit non-zero while still writing a usable dump (measured on a normal host), so
 		// judge the capture by the artifact, not only by the exit code: a non-empty dump is a capture.
 		try {
-			return fsSync.statSync(dumpPath).size > 0
+			return _dumpIsUsable(dumpPath)
 		} catch {
 			return false
 		}
+	}
+}
+
+// A DACL dump is only usable if it is actually there, is a regular file, and has bytes in it.
+// Both the success and the failure callback have to be judged by this: icacls can exit 0 without
+// writing anything (measured on a host where the target's owner differs from the caller), and a
+// zero-byte dump restores nothing - so trusting the exit code alone would let the commit rename
+// destroy a security descriptor that was never captured.
+function _dumpIsUsable(dumpPath: string): boolean {
+	try {
+		const st = fsSync.statSync(dumpPath)
+		return st.isFile() && st.size > 0
+	} catch {
+		return false
 	}
 }
 
@@ -383,6 +397,28 @@ export async function safeWriteText(filePath: string, content: string, options?:
 					// ordinary hosts - it removes the exposure instead of accepting it. The staging file,
 					// any partial backup and the dump are cleaned by the rollback below.
 					daclSaved = false
+					// This throw leaves the try/finally that owns cleanup, so release the artifacts here:
+					// the staged file and the (unusable) dump must not be orphaned. Removal is retried once
+					// and a retained path is reported rather than suppressed.
+					const abortArtifacts: Array<string | null> = [
+						daclDumpPath,
+						options?.tempPath ? null : tempPath, // a caller-supplied temp belongs to the caller
+					]
+					for (const artifact of abortArtifacts) {
+						if (!artifact) { continue }
+						let removed = false
+						for (let attempt = 0; attempt < 2 && !removed; attempt++) {
+							try {
+								await fs.unlink(artifact)
+								removed = true
+							} catch {
+								// retry once, then report
+							}
+						}
+						if (!removed) {
+							console.warn(`safeWriteText: aborted before publishing and could not remove ${artifact}; it is retained and must be cleaned up out of band.`)
+						}
+					}
 					throw new DaclCaptureError(targetPath, daclDumpPath)
 				} else {
 					daclSaved = true
@@ -390,6 +426,14 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			} catch (err: unknown) {
 				if (err instanceof DaclCaptureError) {
 					// Not an access probe failure: the target exists and its DACL could not be captured.
+					throw err
+				}
+
+				// Only ENOENT means "there is no target, so there is no DACL to preserve". EACCES or any
+				// other probe error says nothing about the target's security descriptor, and publishing
+				// over a target we could not inspect would replace it without a captured DACL.
+				const probeCode = err && typeof err === "object" && "code" in err ? (err as { code?: string }).code : undefined
+				if (probeCode !== "ENOENT") {
 					throw err
 				}
 				daclDumpPath = null
