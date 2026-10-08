@@ -648,6 +648,43 @@ describe("ClineProvider", () => {
 		it("returns undefined when no live instance owns the view", () => {
 			expect(ClineProvider.getInstanceForView({} as vscode.WebviewView)).toBeUndefined()
 		})
+
+		it("unregisters a provider whose teardown step rejects", async () => {
+			const failingProvider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// Own view object, so the lookup below cannot resolve to the shared test provider.
+			failingProvider["view"] = { dispose: vi.fn(), visible: false } as never
+
+			// Two teardown failures with different shapes: a rejected await and a synchronous throw.
+			failingProvider["mcpHub"] = {
+				unregisterClient: vi.fn().mockRejectedValue(new Error("unregister hung")),
+			} as never
+			failingProvider["marketplaceManager"] = {
+				cleanup: vi.fn(() => {
+					throw new Error("cleanup threw")
+				}),
+			} as never
+
+			// Disposal must not surface the teardown failure as a crash - callers dispose providers
+			// during activation and tab rollback, where a throw would strand the rest of the cleanup.
+			await failingProvider.dispose()
+
+			// _disposed is already true, so nothing here runs again: a provider left in activeInstances
+			// would stay counted by getVisibleInstance/getAllInstances and resolvable by
+			// getInstanceForView forever.
+			expect(ClineProvider.getAllInstances()).not.toContain(failingProvider)
+			expect(ClineProvider.getInstanceForView(failingProvider["view"] as vscode.WebviewView)).toBeUndefined()
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining(
+					"Disposal was incomplete (mcpHub: unregister hung; marketplace manager: cleanup threw)",
+				),
+			)
+		})
 	})
 
 	test("reports an unresolved webview as not visible", () => {
