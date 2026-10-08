@@ -35,6 +35,29 @@ import type { Task } from "../task/Task"
 /** Write kind that drives guard selection. */
 export type GuardedWriteKind = "create" | "update" | "edit"
 
+/**
+ * Call-site context the guard needs but cannot derive itself.
+ */
+export interface GuardedWriteOptions {
+	/**
+	 * The target sits outside every workspace root and the tool layer obtained an
+	 * approval DECISION for it (the user approved, or the auto-approval policy
+	 * permitted it). Only a tool's post-approval path may set this: it is not the
+	 * same as 'the path is outside the workspace', and an unapproved call keeps the
+	 * containment checks in force.
+	 */
+	approvedOutsideWorkspace?: boolean
+	/**
+	 * Roots other than task.cwd that a write may be contained in - the other VS Code
+	 * workspace folders. The tool layer classifies paths against ALL workspace folders
+	 * (isPathOutsideWorkspace) and only asks for approval for paths outside every one
+	 * of them, so a guard that knew only task.cwd would reject a write the tool layer
+	 * had already treated as an ordinary in-workspace edit. Core stays host-agnostic:
+	 * the extension-host caller supplies them.
+	 */
+	additionalRoots?: string[]
+}
+
 /** Error thrown when a guard rejects a write. Exported so a caller can tell a guard verdict from an unrelated failure.
  */
 export class GuardRejectedError extends Error {
@@ -311,8 +334,8 @@ function isInside(root: string, target: string): boolean {
 	)
 }
 
-function assertInsideWorkspace(task: Task, absolutePath: string, displayPath: string): void {
-	if (!isInside(path.resolve(task.cwd), absolutePath)) {
+function assertInsideWorkspace(roots: string[], absolutePath: string, displayPath: string): void {
+	if (!roots.some((root) => isInside(root, absolutePath))) {
 		throw new GuardRejectedError(
 			`Path resolves outside the workspace -- write inside the workspace, then retry.`,
 			displayPath,
@@ -328,26 +351,36 @@ function assertInsideWorkspace(task: Task, absolutePath: string, displayPath: st
  * treated as "cannot be authorized" and rejected, and a workspace that cannot be
  * resolved at all falls back to the lexical decision already made.
  */
-async function assertCanonicalInsideWorkspace(task: Task, absolutePath: string, displayPath: string): Promise<void> {
-	let workspaceRoot: string
-	try {
-		workspaceRoot = await fs.realpath(path.resolve(task.cwd))
-	} catch (error: unknown) {
-		if (errorCode(error) === "ENOENT") {
-			// The workspace itself is not on disk (a deleted workspace, or a fixture cwd in
-			// tests): there is no root to contain the write in, and the publish would fail on
-			// the missing directory anyway. Anything else - EACCES, ELOOP - means the root
-			// exists but cannot be resolved, and a symlink inside the workspace would then
-			// never be checked, so this fails closed rather than falling back to lexical only.
-			return
+async function assertCanonicalInsideWorkspace(
+	roots: string[],
+	absolutePath: string,
+	displayPath: string,
+): Promise<void> {
+	const resolvedRoots: string[] = []
+	for (const root of roots) {
+		try {
+			resolvedRoots.push(await fs.realpath(root))
+		} catch (error: unknown) {
+			if (errorCode(error) === "ENOENT") {
+				// This root is not on disk (a deleted workspace, or a fixture cwd in
+				// tests): there is nothing to contain the write in here. Other roots may
+				// still resolve, and the write is then checked against those.
+				continue
+			}
+			throw new GuardRejectedError(
+				"Workspace could not be resolved, so this write cannot be checked against it -- retry with a path inside the workspace.",
+				displayPath,
+			)
 		}
-		throw new GuardRejectedError(
-			"Workspace could not be resolved, so this write cannot be checked against it -- retry with a path inside the workspace.",
-			displayPath,
-		)
+	}
+	if (resolvedRoots.length === 0) {
+		// No root exists: the publish would fail on the missing directory anyway, and
+		// the lexical decision above already ran. Anything OTHER than a missing root
+		// failed closed above rather than falling back to lexical only.
+		return
 	}
 	const target = await realpathNearest(absolutePath, displayPath)
-	if (!isInside(workspaceRoot, target)) {
+	if (!resolvedRoots.some((root) => isInside(root, target))) {
 		throw new GuardRejectedError(
 			`Path resolves through a link to outside the workspace -- write a real file inside the workspace, then retry.`,
 			displayPath,
@@ -418,6 +451,7 @@ export async function guardedWrite(
 	// view of another file must carry that view's completeness through the publish
 	// instead of claiming completeness for lines it never read.
 	completeOverride?: boolean,
+	options?: GuardedWriteOptions,
 ): Promise<void> {
 	const absolutePath = resolveAbsolutePath(task, relPathOrAbsolute)
 	// Model-facing path: the caller's own spelling, not the resolved absolute
@@ -425,13 +459,41 @@ export async function guardedWrite(
 	// user-specific absolute path into the model's context.
 	const displayPath = relPathOrAbsolute
 
+	const approvedOutside = options?.approvedOutsideWorkspace === true
+	// task.cwd is the task's own root; the other workspace folders come from the
+	// extension-host caller because the tool layer classifies against all of them.
+	const roots = [path.resolve(task.cwd), ...(options?.additionalRoots ?? []).map((root) => path.resolve(root))]
+
 	// Containment is decided before the link is queued: a write that would land
 	// outside the workspace must not take a slot on the FIFO chain, take the file
-	// lock, or touch the filesystem at all.
-	assertInsideWorkspace(task, absolutePath, displayPath)
+	// lock, or touch the filesystem at all. An approved outside-workspace write skips
+	// containment - the tool layer already put it in front of the user - but not the
+	// identity re-check below.
+	if (!approvedOutside) {
+		assertInsideWorkspace(roots, absolutePath, displayPath)
+	}
 	// Bound to the task and the caller's spelling so the guard can re-run the same
 	// decision under the lock, immediately before the publish.
-	const verifyTarget = () => assertCanonicalInsideWorkspace(task, absolutePath, displayPath)
+	let authorizedTarget: string | undefined
+	const verifyTarget = async (): Promise<void> => {
+		if (!approvedOutside) {
+			await assertCanonicalInsideWorkspace(roots, absolutePath, displayPath)
+			return
+		}
+		// For an approved outside-workspace write the re-check is an IDENTITY check:
+		// the path that resolves now must still be the path that was approved. A symlink
+		// swapped in while this link waited on the chain would otherwise move the write
+		// somewhere the user never saw.
+		const resolved = await realpathNearest(absolutePath, displayPath)
+		if (authorizedTarget === undefined) {
+			authorizedTarget = resolved
+		} else if (authorizedTarget !== resolved) {
+			throw new GuardRejectedError(
+				"The approved target no longer resolves to the path that was approved -- re-approve the write, then retry.",
+				displayPath,
+			)
+		}
+	}
 	await verifyTarget()
 
 	return enqueue(absolutePath, async () => {

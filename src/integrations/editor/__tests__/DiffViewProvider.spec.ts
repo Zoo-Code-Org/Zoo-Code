@@ -1080,6 +1080,32 @@ describe("DiffViewProvider", () => {
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
 		})
 
+		it("publishes an approved outside-workspace target", async () => {
+			// The tool layer classified this path as outside every workspace folder, put it in
+			// front of the user, and the user approved. The guard must not then reject the
+			// write it was told about.
+			vi.mocked(fs.access).mockRejectedValue({ code: "ENOENT" })
+			vi.mocked(computeVersionToken).mockResolvedValue("v1")
+
+			await diffViewProvider.saveDirectly("../outside.ts", "new content", false, true, 1000, "create", undefined, true)
+
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/../outside.ts`, "new content")
+		})
+
+		it("rejects the same escape when no approval was obtained", async () => {
+			// The flag is what carries the approval; without it the containment line inside the
+			// publish helper still holds.
+			vi.mocked(fs.access).mockRejectedValue({ code: "ENOENT" })
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+
+			await expect(
+				diffViewProvider.saveDirectly("../outside.ts", "new content", false, true, 1000, "create"),
+			).rejects.toThrow("Path resolves outside the workspace")
+
+			expect(safeWriteText).not.toHaveBeenCalled()
+		})
+
 		it("does not save a dirty buffer in the memory-only diagnostics path", async () => {
 			// The guarded publish already committed the accepted content. Saving a dirty
 			// buffer here would republish its stale bytes through VS Code's unguarded save

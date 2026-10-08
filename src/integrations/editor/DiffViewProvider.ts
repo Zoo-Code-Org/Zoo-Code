@@ -484,6 +484,16 @@ export class DiffViewProvider {
 		task.observationRegistry.observe(absolutePath, versionTokenOfStat(after), observation?.complete ?? false)
 		return true
 	}
+	/**
+	 * Roots the guard may contain a write in, beyond the task's own cwd: every other
+	 * VS Code workspace folder. The write tools classify paths against ALL workspace
+	 * folders (isPathOutsideWorkspace) and only ask for approval for paths outside every
+	 * one of them, so a guard that knew only task.cwd would reject a write in a second
+	 * workspace folder that the tool layer had treated as an ordinary in-workspace edit.
+	 */
+	private additionalWorkspaceRoots(): string[] {
+		return (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath)
+	}
 	async saveChanges(
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
@@ -491,6 +501,10 @@ export class DiffViewProvider {
 		// like "update" in guardedWrite (only "edit" and "create" branch distinctly),
 		// so the StringLiteral mutant here is equivalent.
 		writeKind: GuardedWriteKind = "update",
+		// The tool layer put this write in front of the user and the user approved it,
+		// for a target outside every workspace root. Only that post-approval path sets
+		// it; unapproved saves keep the guard's containment checks.
+		approvedOutsideWorkspace?: boolean,
 	): Promise<{
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
@@ -545,7 +559,10 @@ export class DiffViewProvider {
 					saveTask.observationRegistry.forget(absolutePath)
 				}
 			}
-			await guardedWrite(saveTask, this.relPath, encodedContent, writeKind)
+			await guardedWrite(saveTask, this.relPath, encodedContent, writeKind, undefined, {
+				approvedOutsideWorkspace: approvedOutsideWorkspace === true,
+				additionalRoots: this.additionalWorkspaceRoots(),
+			})
 		} catch (error) {
 			// Autosave can publish the modified side of the diff before the user
 			// accepts, so the bytes on disk may already be exactly what this save
@@ -1548,6 +1565,8 @@ export class DiffViewProvider {
 		// Completeness the caller earned elsewhere; a move carries the source's
 		// view through the publish instead of claiming completeness for lines it never read.
 		completeOverride?: boolean,
+		// Approved by the user for a target outside every workspace root (see saveChanges).
+		approvedOutsideWorkspace?: boolean,
 	): Promise<{
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
@@ -1572,7 +1591,10 @@ export class DiffViewProvider {
 		// No pre-guard mkdir: safeWriteText creates missing parent directories at publish
 		// time, so a rejected guard leaves NO directories behind - including outside the
 		// workspace, where a rejected write must not leave a trace.
-		await guardedWrite(task, relPath, content, writeKind, completeOverride)
+		await guardedWrite(task, relPath, content, writeKind, completeOverride, {
+			approvedOutsideWorkspace: approvedOutsideWorkspace === true,
+			additionalRoots: this.additionalWorkspaceRoots(),
+		})
 
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory

@@ -142,6 +142,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					diagnosticsEnabled,
 					writeDelayMs,
 					"create",
+					isOutsideWorkspace,
 				)
 			} else {
 				if (!task.diffViewProvider.isEditing) {
@@ -175,7 +176,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					return
 				}
 
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+				await task.diffViewProvider.saveChanges(
+					diagnosticsEnabled,
+					writeDelayMs,
+					undefined,
+					isOutsideWorkspace,
+				)
 			}
 
 			if (relPath) {
