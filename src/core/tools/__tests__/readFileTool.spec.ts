@@ -1714,6 +1714,80 @@ describe("ReadFileTool", () => {
 				expect(reg.size).toBe(0)
 			})
 
+			it("records nothing when the task is cancelled while the post-read stat is in flight (native path)", async () => {
+				// The guard before the stat cannot see a cancellation that lands DURING the
+				// stat. The re-check before observe() is what keeps a read that belongs to a
+				// cancelled run out of the registry - and out of a registry that disposal has
+				// already retired.
+				const mockTask = createMockTask({ observationRegistry: new ObservationRegistry() })
+				const callbacks = createMockCallbacks()
+
+				const stats = {
+					isDirectory: () => false,
+					dev: BigInt(1),
+					ino: BigInt(2),
+					size: BigInt(300),
+					mtimeNs: BigInt(4_000_000_000n),
+					ctimeNs: BigInt(5_000_000_000n),
+					// Cast: the mock only implements the members the tool and versionToken read.
+				} as unknown as Stats
+				mockedFsStat
+					.mockResolvedValueOnce(stats) // pre-read
+					.mockImplementationOnce(async () => {
+						// The cancel lands while this await is pending.
+						mockTask.abort = true
+						return stats
+					}) // post-read
+				mockedIsBinaryFile.mockResolvedValue(false)
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute({ path: "existing.ts" }, mockTask as unknown as Task, callbacks)
+
+				expect(observeSpy).not.toHaveBeenCalled()
+				expect(reg.size).toBe(0)
+				// The read itself still answered the model; only the observation is withheld.
+				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
+			})
+
+			it("records nothing when the task is cancelled while the post-read stat is in flight (legacy path)", async () => {
+				const mockTask = createMockTask({ observationRegistry: new ObservationRegistry() })
+				const callbacks = createMockCallbacks()
+
+				const stats = {
+					isDirectory: () => false,
+					dev: BigInt(1),
+					ino: BigInt(2),
+					size: BigInt(300),
+					mtimeNs: BigInt(4_000_000_000n),
+					ctimeNs: BigInt(5_000_000_000n),
+					// Cast: the mock only implements the members the tool and versionToken read.
+				} as unknown as Stats
+				mockedFsStat
+					.mockResolvedValueOnce(stats) // pre-read
+					.mockImplementationOnce(async () => {
+						mockTask.abort = true
+						return stats
+					}) // post-read
+				mockedIsBinaryFile.mockResolvedValue(false)
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				const legacyParams: LegacyReadFileParams = {
+					files: [{ path: "legacy.ts" }],
+					_legacyFormat: true,
+				}
+
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
+
+				expect(observeSpy).not.toHaveBeenCalled()
+				expect(reg.size).toBe(0)
+			})
+
 			it("leaves the target unobserved without failing the read when the pre-read stat fails", async () => {
 				const mockTask = createMockTask({
 					observationRegistry: new ObservationRegistry(),
