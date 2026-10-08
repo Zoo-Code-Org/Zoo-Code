@@ -413,12 +413,30 @@ export class ProviderSettingsManager {
 	public async saveConfig(name: string, config: ProviderSettingsWithId): Promise<string> {
 		try {
 			return await this.lock(async () => {
-				const providerProfiles = await this.load()
+				const rawBefore = await this.context.secrets.get(this.secretsKey)
+				const providerProfiles = rawBefore ? (JSON.parse(rawBefore) as ProviderProfiles) : await this.load()
 				// Preserve the existing ID if this is an update to an existing config.
 				const existingId = providerProfiles.apiConfigs[name]?.id
 				const id = config.id || existingId || this.generateId()
 				providerProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(config, id)
-				await this.store(providerProfiles)
+
+				const rawLatest = await this.context.secrets.get(this.secretsKey)
+				let targetProfiles = providerProfiles
+				let expectedWriteRaw = rawBefore
+				if (rawLatest !== rawBefore && rawLatest) {
+					targetProfiles = JSON.parse(rawLatest) as ProviderProfiles
+					targetProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(config, id)
+					expectedWriteRaw = rawLatest
+				}
+				const stored = await this.storeWithCas(targetProfiles, expectedWriteRaw)
+				if (!stored) {
+					const rawFinal = await this.context.secrets.get(this.secretsKey)
+					const finalProfiles = rawFinal
+						? (JSON.parse(rawFinal) as ProviderProfiles)
+						: this.defaultProviderProfiles
+					finalProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(config, id)
+					await this.store(finalProfiles)
+				}
 				return id
 			})
 		} catch (error) {
@@ -458,6 +476,7 @@ export class ProviderSettingsManager {
 				// to guard against competing writes from other manager instances
 				const rawLatest = await this.context.secrets.get(this.secretsKey)
 				let targetProfiles = providerProfiles
+				let expectedWriteRaw = rawBefore
 				if (rawLatest !== rawBefore) {
 					targetProfiles = rawLatest
 						? (JSON.parse(rawLatest) as ProviderProfiles)
@@ -469,14 +488,14 @@ export class ProviderSettingsManager {
 					if (!cleanLatest || !deepEqual(cleanLatest, expectedTarget)) {
 						return false
 					}
+					expectedWriteRaw = rawLatest
 				}
 
 				targetProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(
 					restoredConfig,
 					restoredConfig.id || currentId,
 				)
-				await this.store(targetProfiles)
-				return true
+				return await this.storeWithCas(targetProfiles, expectedWriteRaw)
 			})
 		} catch (error) {
 			throw new Error(`Failed to restore config: ${error}`)
@@ -548,6 +567,8 @@ export class ProviderSettingsManager {
 				// Storage-level compare-and-swap:
 				const rawLatest = await this.context.secrets.get(this.secretsKey)
 				let targetProfiles = providerProfiles
+				let replacedProfile = current
+				let expectedWriteRaw = rawBefore
 				if (rawLatest !== rawBefore) {
 					targetProfiles = rawLatest
 						? (JSON.parse(rawLatest) as ProviderProfiles)
@@ -564,16 +585,21 @@ export class ProviderSettingsManager {
 					if (validateProfileAllowed && !validateProfileAllowed(reCandidate)) {
 						return { success: false, reason: "disallowed" }
 					}
+					replacedProfile = latestCurrent
 					targetProfiles.apiConfigs[name] = reCandidate
+					expectedWriteRaw = rawLatest
 				} else {
 					targetProfiles.apiConfigs[name] = candidate
 				}
 
-				await this.store(targetProfiles)
+				const stored = await this.storeWithCas(targetProfiles, expectedWriteRaw)
+				if (!stored) {
+					return { success: false, reason: "cas_failed" }
+				}
 				return {
 					success: true,
 					updatedProfile: targetProfiles.apiConfigs[name],
-					previousProfile: current,
+					previousProfile: replacedProfile,
 				}
 			})
 		} catch (error) {
@@ -875,6 +901,19 @@ export class ProviderSettingsManager {
 		}
 
 		return apiConfig
+	}
+
+	private async storeWithCas(providerProfiles: ProviderProfiles, expectedRaw: string | undefined): Promise<boolean> {
+		try {
+			const currentRaw = await this.context.secrets.get(this.secretsKey)
+			if (currentRaw !== expectedRaw) {
+				return false
+			}
+			await this.context.secrets.store(this.secretsKey, JSON.stringify(providerProfiles, null, 2))
+			return true
+		} catch (error) {
+			throw new Error(`Failed to write provider profiles to secrets: ${error}`)
+		}
 	}
 
 	private async store(providerProfiles: ProviderProfiles) {

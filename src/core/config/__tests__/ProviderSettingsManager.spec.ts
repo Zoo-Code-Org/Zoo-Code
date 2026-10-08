@@ -1947,9 +1947,231 @@ describe("ProviderSettingsManager", () => {
 			expect(result.success).toBe(true)
 			expect(result.updatedProfile?.openRouterModelId).toBe("openai/gpt-4.5")
 			expect(result.updatedProfile?.openRouterApiKey).toBe("concurrent-api-key")
+			expect(result.previousProfile?.openRouterApiKey).toBe("concurrent-api-key")
 			const finalStored = JSON.parse(storedRaw)
 			expect(finalStored.apiConfigs.test.openRouterApiKey).toBe("concurrent-api-key")
 			expect(finalStored.apiConfigs.test.openRouterModelId).toBe("openai/gpt-4.5")
+		})
+
+		it("throws wrapped error when secrets get fails", async () => {
+			mockSecrets.get.mockRejectedValue(new Error("Keychain read failure"))
+			await expect(
+				providerSettingsManager.updateProfileModel("test", providerIdentifiers.anthropic, {
+					apiModelId: "claude-3-7-sonnet",
+				}),
+			).rejects.toThrow("Failed to update profile model: Error: Keychain read failure")
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+
+		it("throws wrapped error when secrets contains malformed JSON", async () => {
+			mockSecrets.get.mockResolvedValue("{ invalid json")
+			await expect(
+				providerSettingsManager.updateProfileModel("test", providerIdentifiers.anthropic, {
+					apiModelId: "claude-3-7-sonnet",
+				}),
+			).rejects.toThrow(/Failed to update profile model: (?:SyntaxError|Error)/)
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+
+		it("returns cas_failed and does not write when profile is deleted before write-time recheck", async () => {
+			const initialProfiles: ProviderProfiles = {
+				currentApiConfigName: "test",
+				apiConfigs: {
+					test: {
+						id: "test-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-5-sonnet",
+					},
+				},
+			}
+			const storedRaw = JSON.stringify(initialProfiles)
+			let readCount = 0
+			mockSecrets.get.mockImplementation(async () => {
+				readCount++
+				if (readCount === 1) return storedRaw
+				return JSON.stringify({ currentApiConfigName: "other", apiConfigs: {} })
+			})
+
+			const result = await providerSettingsManager.updateProfileModel("test", providerIdentifiers.anthropic, {
+				apiModelId: "claude-3-7-sonnet",
+			})
+
+			expect(result).toEqual({ success: false, reason: "cas_failed" })
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+
+		it("returns cas_failed and does not write when profile provider changes before write-time recheck", async () => {
+			const initialProfiles: ProviderProfiles = {
+				currentApiConfigName: "test",
+				apiConfigs: {
+					test: {
+						id: "test-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-5-sonnet",
+					},
+				},
+			}
+			const storedRaw = JSON.stringify(initialProfiles)
+			let readCount = 0
+			mockSecrets.get.mockImplementation(async () => {
+				readCount++
+				if (readCount === 1) return storedRaw
+				return JSON.stringify({
+					currentApiConfigName: "test",
+					apiConfigs: {
+						test: {
+							id: "test-id",
+							apiProvider: providerIdentifiers.openai,
+							openAiModelId: "gpt-4o",
+						},
+					},
+				})
+			})
+
+			const result = await providerSettingsManager.updateProfileModel("test", providerIdentifiers.anthropic, {
+				apiModelId: "claude-3-7-sonnet",
+			})
+
+			expect(result).toEqual({ success: false, reason: "cas_failed" })
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+
+		it("returns cas_failed and preserves storage when a competing save occurs after the final read and before store", async () => {
+			let storedRaw = JSON.stringify({
+				currentApiConfigName: "test",
+				apiConfigs: {
+					test: {
+						id: "test-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-5-sonnet",
+						apiKey: "initial-key",
+					},
+				},
+			})
+
+			mockSecrets.get.mockImplementation(async () => storedRaw)
+			const managerA = new ProviderSettingsManager(mockContext)
+			await managerA.initialize()
+
+			let readCount = 0
+			mockSecrets.get.mockImplementation(async () => {
+				readCount++
+				if (readCount === 3) {
+					// Simulate competing write right before storeWithCas validation
+					storedRaw = JSON.stringify({
+						currentApiConfigName: "test",
+						apiConfigs: {
+							test: {
+								id: "test-id",
+								apiProvider: providerIdentifiers.anthropic,
+								apiModelId: "claude-3-5-sonnet",
+								apiKey: "raced-api-key",
+							},
+						},
+					})
+				}
+				return storedRaw
+			})
+			mockSecrets.store.mockImplementation(async (_key, val) => {
+				storedRaw = val
+			})
+
+			const result = await managerA.updateProfileModel("test", providerIdentifiers.anthropic, {
+				apiModelId: "claude-3-7-sonnet",
+			})
+
+			expect(result).toEqual({ success: false, reason: "cas_failed" })
+			const finalStored = JSON.parse(storedRaw)
+			expect(finalStored.apiConfigs.test.apiKey).toBe("raced-api-key")
+			expect(finalStored.apiConfigs.test.apiModelId).toBe("claude-3-5-sonnet")
+		})
+
+		it("filters patch keys through real updateProfileModel: ignores apiProvider, unknown keys, non-null reset keys, allows awsCustomArn empty string, clears null keys", async () => {
+			const initialProfiles: ProviderProfiles = {
+				currentApiConfigName: "test",
+				apiConfigs: {
+					test: {
+						id: "test-id",
+						apiProvider: providerIdentifiers.bedrock,
+						apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+						awsCustomArn: "arn:aws:bedrock:custom-arn",
+						reasoningEffort: "low",
+					},
+				},
+			}
+			let storedRaw = JSON.stringify(initialProfiles)
+			mockSecrets.get.mockImplementation(async () => storedRaw)
+			mockSecrets.store.mockImplementation(async (_key, val) => {
+				storedRaw = val
+			})
+
+			const result = await providerSettingsManager.updateProfileModel("test", providerIdentifiers.bedrock, {
+				apiProvider: providerIdentifiers.anthropic, // Ignored: cannot mutate provider
+				unknownKey: "should-be-ignored", // Ignored: not allowed
+				reasoningEffort: "high", // Ignored: non-null reset-only key
+				awsCustomArn: "", // Allowed exception: empty string reset
+				apiModelId: "anthropic.claude-3-7-sonnet-20250219-v1:0", // Allowed model id
+			})
+
+			expect(result.success).toBe(true)
+			expect(result.updatedProfile?.apiProvider).toBe(providerIdentifiers.bedrock)
+			expect(result.updatedProfile).not.toHaveProperty("unknownKey")
+			expect(result.updatedProfile?.reasoningEffort).toBe("low")
+			expect(result.updatedProfile?.awsCustomArn).toBe("")
+			expect(result.updatedProfile?.apiModelId).toBe("anthropic.claude-3-7-sonnet-20250219-v1:0")
+		})
+
+		it("clears a reset-only key when patched with null", async () => {
+			const initialProfiles: ProviderProfiles = {
+				currentApiConfigName: "test",
+				apiConfigs: {
+					test: {
+						id: "test-id",
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openai/gpt-4",
+						reasoningEffort: "high",
+					},
+				},
+			}
+			let storedRaw = JSON.stringify(initialProfiles)
+			mockSecrets.get.mockImplementation(async () => storedRaw)
+			mockSecrets.store.mockImplementation(async (_key, val) => {
+				storedRaw = val
+			})
+
+			const result = await providerSettingsManager.updateProfileModel("test", providerIdentifiers.openrouter, {
+				openRouterModelId: "openai/gpt-4.5",
+				reasoningEffort: null, // Clears the key
+			})
+
+			expect(result.success).toBe(true)
+			expect(result.updatedProfile?.openRouterModelId).toBe("openai/gpt-4.5")
+			expect(result.updatedProfile?.reasoningEffort).toBeUndefined()
+		})
+
+		it("defaults to openrouter when profile has no apiProvider set", async () => {
+			const initialProfiles: ProviderProfiles = {
+				currentApiConfigName: "test",
+				apiConfigs: {
+					test: {
+						id: "test-id",
+						openRouterModelId: "openai/gpt-4",
+					} as ProviderSettingsWithId,
+				},
+			}
+			let storedRaw = JSON.stringify(initialProfiles)
+			mockSecrets.get.mockImplementation(async () => storedRaw)
+			mockSecrets.store.mockImplementation(async (_key, val) => {
+				storedRaw = val
+			})
+
+			const result = await providerSettingsManager.updateProfileModel("test", providerIdentifiers.openrouter, {
+				openRouterModelId: "openai/gpt-5",
+			})
+
+			expect(result.success).toBe(true)
+			expect(result.updatedProfile?.apiProvider).toBe(providerIdentifiers.openrouter)
+			expect(result.updatedProfile?.openRouterModelId).toBe("openai/gpt-5")
 		})
 
 		it("throws wrapped error when secrets store fails", async () => {

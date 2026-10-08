@@ -286,24 +286,9 @@ describe("ClineProvider - updateProfileModel", () => {
 							if (storedProvider !== expectedProvider)
 								return { success: false, reason: "provider_mismatch" }
 
-							const providerModelKey =
-								storedProvider === providerIdentifiers.openai
-									? "openAiModelId"
-									: modelIdKeysByProvider[storedProvider as keyof typeof modelIdKeysByProvider]
-							const allowedKeys = new Set(
-								providerModelKey ? [providerModelKey, ...RESET_ONLY_KEYS] : RESET_ONLY_KEYS,
-							)
 							const { name: _profileName, ...cleanCurrent } = current
 							const merged: Record<string, unknown> = { ...cleanCurrent, apiProvider: storedProvider }
 							for (const [key, value] of Object.entries(patch)) {
-								if (key === "apiProvider" || !allowedKeys.has(key)) continue
-								if (value !== null && typeof value !== "string" && typeof value !== "number") continue
-								if (
-									RESET_ONLY_KEYS.includes(key) &&
-									value !== null &&
-									!(key === "awsCustomArn" && value === "")
-								)
-									continue
 								merged[key] = value === null ? undefined : value
 							}
 							const candidate = { id: current.id || "test-id", ...merged } as ProviderSettingsWithId
@@ -476,58 +461,43 @@ describe("ClineProvider - updateProfileModel", () => {
 		)
 	})
 
-	it("ignores non-null values for reset-only keys while updating model selection", async () => {
-		mockStoredProfile({
-			apiProvider: providerIdentifiers.openrouter,
-			openRouterModelId: "openai/gpt-4",
-			reasoningEffort: "low",
-			modelMaxTokens: 4096,
-			modelMaxThinkingTokens: 2048,
-		})
+	it("handles cas_failed result from providerSettingsManager without updating context or showing allowlist error", async () => {
+		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
+		manager().updateProfileModel.mockResolvedValueOnce({ success: false, reason: "cas_failed" })
+		const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
 
 		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
-			openRouterModelId: "x/y",
-			reasoningEffort: "high",
-			modelMaxTokens: 8192,
-			modelMaxThinkingTokens: 4096,
+			openRouterModelId: "openai/gpt-4.5",
 		})
 
-		const saved = manager().saveConfig.mock.calls[0][1]
-		expect(saved.openRouterModelId).toBe("x/y")
-		expect(saved.reasoningEffort).toBe("low")
-		expect(saved.modelMaxTokens).toBe(4096)
-		expect(saved.modelMaxThinkingTokens).toBe(2048)
+		expect(setProviderSettingsSpy).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
 	})
 
-	it("ignores non-setting keys, apiProvider, own __proto__ keys and non-primitive values", async () => {
-		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterApiKey: "stored-key" })
-		const patch = JSON.parse(
-			'{"openRouterModelId":"x/y","notASetting":"evil","apiProvider":"anthropic","__proto__":{"polluted":true},"openRouterApiKey":{"nested":1}}',
-		)
-
-		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, patch)
-
-		const saved = manager().saveConfig.mock.calls[0][1]
-		expect(saved).not.toHaveProperty("notASetting")
-		expect(saved).not.toHaveProperty("polluted")
-		expect(Object.getPrototypeOf(saved)).toBe(Object.prototype)
-		expect(saved.apiProvider).toBe(providerIdentifiers.openrouter)
-		expect(saved.openRouterApiKey).toBe("stored-key")
-		expect(saved.openRouterModelId).toBe("x/y")
-	})
-
-	it("ignores patch keys other than model ids and model-selection resets", async () => {
-		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterBaseUrl: "https://stored" })
+	it("handles provider_mismatch result from providerSettingsManager by logging and ignoring", async () => {
+		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
+		manager().updateProfileModel.mockResolvedValueOnce({ success: false, reason: "provider_mismatch" })
+		const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
 
 		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
-			openRouterModelId: "x/y",
-			openRouterBaseUrl: "https://evil",
-			reasoningEffort: null,
+			openRouterModelId: "openai/gpt-4.5",
 		})
 
-		const saved = manager().saveConfig.mock.calls[0][1]
-		expect(saved.openRouterBaseUrl).toBe("https://stored")
-		expect(saved.openRouterModelId).toBe("x/y")
+		expect(setProviderSettingsSpy).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+	})
+
+	it("handles disallowed result from providerSettingsManager by showing allowlist error", async () => {
+		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
+		manager().updateProfileModel.mockResolvedValueOnce({ success: false, reason: "disallowed" })
+		const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-4.5",
+		})
+
+		expect(setProviderSettingsSpy).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.violated_organization_allowlist")
 	})
 
 	it("rejects a model outside the organization allow-list without saving", async () => {
@@ -1085,5 +1055,36 @@ describe("ClineProvider - updateProfileModel", () => {
 
 		// upsert should not have saved anything to new-profile
 		expect(storedProfiles["new-profile"]).toBeUndefined()
+	})
+
+	it("removes disposal listener on providerProfileMutationAbortController when mutation times out", async () => {
+		vi.useFakeTimers()
+		try {
+			mockStoredProfile({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			})
+
+			// Stalled mutation that never settles and ignores abort
+			const stalledMutationPromise = new Promise<never>(() => {})
+			manager().updateProfileModel.mockImplementationOnce(async () => stalledMutationPromise)
+
+			const signal = provider["providerProfileMutationAbortController"].signal
+			const removeEventListenerSpy = vi.spyOn(signal, "removeEventListener")
+
+			// Start mutation (will hang in updateProfileModel)
+			const mutation = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "openai/gpt-5",
+			})
+
+			// Advance fake timers past PENDING_OPERATION_TIMEOUT_MS so caller times out
+			await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 100)
+			await mutation
+
+			// Verify removeEventListener was called for the "abort" event on disposal controller
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 })

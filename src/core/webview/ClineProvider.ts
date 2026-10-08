@@ -275,6 +275,9 @@ export class ClineProvider
 		const controller = new AbortController()
 		const onProviderDispose = () => controller.abort()
 		this.providerProfileMutationAbortController.signal.addEventListener("abort", onProviderDispose, { once: true })
+		const removeDisposeListener = () => {
+			this.providerProfileMutationAbortController.signal.removeEventListener("abort", onProviderDispose)
+		}
 
 		const invoke = () => {
 			if (this._disposed) {
@@ -287,13 +290,11 @@ export class ClineProvider
 		}
 
 		// Run fn after either outcome so a rejected mutation never poisons the queue.
-		const run = this.providerProfileMutationQueue.then(invoke, invoke).finally(() => {
-			this.providerProfileMutationAbortController.signal.removeEventListener("abort", onProviderDispose)
-		})
+		const run = this.providerProfileMutationQueue.then(invoke, invoke).finally(removeDisposeListener)
 		const callerResult = this.withProviderProfileMutationTimeout(run, () => {
 			controller.abort()
 			this.log("Provider profile mutation timed out; aborting in-flight mutation")
-		})
+		}).finally(removeDisposeListener)
 
 		void run.then(
 			() => {
