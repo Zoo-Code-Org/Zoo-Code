@@ -2489,6 +2489,19 @@ export class ClineProvider
 	}
 
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {
+		// Deletion snapshots and compensates the same durable stores that upsert,
+		// activation, and mode switch mutate, so it has to run serialized against them:
+		// an overlapping mutation could otherwise land between the snapshot and the
+		// rollback, and the compensation would restore a stale copy over the newer write.
+		return this.enqueueProviderProfileMutation((signal) =>
+			this.deleteProviderProfileUnlocked(profileToDelete, signal),
+		)
+	}
+
+	private async deleteProviderProfileUnlocked(
+		profileToDelete: ProviderSettingsEntry,
+		signal: AbortSignal,
+		): Promise<void> {
 		const globalSettings = this.contextProxy.getValues()
 		let profileToActivate: string | undefined = globalSettings.currentApiConfigName
 
@@ -2535,6 +2548,13 @@ export class ClineProvider
 			// nothing to compensate and the stale list entry is still pruned below.
 		}
 
+		if (signal.aborted) {
+			// Queue contract: check the signal before the first destructive write, so a
+			// deletion that timed out while queued behind another mutation does not destroy
+			// settings that no caller is waiting for any more.
+			throw new Error("Profile deletion was cancelled before the settings commit")
+		}
+
 		try {
 			await this.providerSettingsManager.deleteConfig(profileToDelete.name)
 		} catch (error) {
@@ -2565,6 +2585,13 @@ export class ClineProvider
 		// which ClineProvider mutates directly in storage for concurrent views)
 		// with this view's stale cached copy.
 		try {
+			if (signal.aborted) {
+				// Same contract after the settings commit: throwing here routes through the
+				// compensation below, so the settings are put back instead of leaving a
+				// half-applied deletion behind for the next mutation to read.
+				throw new Error("Profile deletion was cancelled before the profile-list write")
+			}
+
 			await this.contextProxy.setValue("listApiConfigMeta", entries)
 			listWriteLanded = true
 

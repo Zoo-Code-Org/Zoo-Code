@@ -3242,6 +3242,84 @@ const provider = new ClineProvider(
 			await provider.dispose()
 		})
 
+		it("serializes a deletion with a concurrent upsert so the rollback cannot restore a stale profile list", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn().mockResolvedValue({
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "keeper-secret",
+			}),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue("doomed-id"),
+				listConfig: vi.fn().mockResolvedValue([
+					"doomed-profile",
+					"keeper-profile",
+					"new-profile",
+				]),
+			}
+
+			// The deletion parks in this write, so the concurrent upsert gets its chance
+			// while the deletion holds the profile stores half-updated.
+			let parked = false
+			let releaseFailingWrite!: () => void
+			const failingWrite = new Promise<void>((resolve) => {
+				releaseFailingWrite = resolve
+			})
+			const setProviderSettingsSpy = vi
+				.spyOn(provider.contextProxy, "setProviderSettings")
+				.mockImplementation(async () => {
+					parked = true
+					await failingWrite
+					throw new Error("provider settings write failed")
+				})
+
+			const deletion = provider.deleteProviderProfile(doomedProfile)
+			while (!parked) {
+				await new Promise((resolve) => setImmediate(resolve))
+			}
+			// The upsert starts while the deletion is mid-flight: if the two are not
+			// serialized, its list write lands inside the deletion's snapshot/rollback window.
+			const upsert = provider.upsertProviderProfile(
+				"new-profile",
+				{ apiProvider: providerIdentifiers.anthropic },
+				false,
+			)
+			releaseFailingWrite()
+
+			await expect(deletion).rejects.toThrow("provider settings write failed")
+			await upsert
+			setProviderSettingsSpy.mockRestore()
+
+			// The upsert's newer list write must survive. An unserialized deletion rolls back
+			// to the snapshot it took before the upsert ran and silently drops the new profile.
+			expect(JSON.stringify(provider.contextProxy.getValue("listApiConfigMeta"))).toContain(
+				"new-profile",
+			)
+			await provider.dispose()
+		})
+
 
 		it("leaves the view buffer untouched when the deleted profile is neither globally active nor view-pinned", async () => {
 const provider = new ClineProvider(

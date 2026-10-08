@@ -1118,12 +1118,20 @@ describe("openClineInNewTab", () => {
 			).rejects.toThrow(failure)
 
 			// The retry starts a fresh creation instead of replaying the stored rejection.
+			// Capture how many providers have been constructed so the retry's own
+			// instance can be identified below.
+			const ctor = vi.mocked(ClineProvider)
+			const createdBeforeRetry = ctor.mock.instances.length
 			const retried = await openClineInNewTab({
 				context: mockContext,
 				outputChannel: mockOutputChannel,
 				webviewFocusTracker: new WebviewFocusTracker(),
 			})
-			expect(retried).toBeDefined()
+			// Identity, not just definedness: the retry must return the provider it
+			// constructed in this call, not a leftover from the rejected one.
+			const expected = ctor.mock.instances[createdBeforeRetry]
+			expect(expected).toBeDefined()
+			expect(retried).toBe(expected)
 			expect(ContextProxy.getInstance).toHaveBeenCalledTimes(2)
 			expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
 		})
@@ -1171,12 +1179,18 @@ describe("openClineInNewTab", () => {
 
 			// The slot is cleared even on the shared-rejection path: the next open runs a
 			// fresh creation instead of replaying the stored rejection.
+			const ctor = vi.mocked(ClineProvider)
+			const createdBeforeRetry = ctor.mock.instances.length
 			const third = await openClineInNewTab({
 				context: mockContext,
 				outputChannel: mockOutputChannel,
 				webviewFocusTracker: new WebviewFocusTracker(),
 			})
-			expect(third).toBeDefined()
+			// Identity, not just definedness: the next open returns the provider this
+			// call constructed, proving the slot was cleared rather than replayed.
+			const expected = ctor.mock.instances[createdBeforeRetry]
+			expect(expected).toBeDefined()
+			expect(third).toBe(expected)
 			expect(ContextProxy.getInstance).toHaveBeenCalledTimes(2)
 		})
 	it("keeps the replacement panel tracked when a stale panel's disposal fires late", async () => {
