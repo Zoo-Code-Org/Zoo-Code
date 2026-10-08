@@ -595,12 +595,38 @@ describe("safeWriteText", () => {
 
 		// The publish succeeded, so the write still resolves - but the leftover copy of the
 		// previous content must be retried once and then reported with its path, never dropped.
+		const backupPath = vi.mocked(fs.copyFile).mock.calls[0][1]
 		const backupUnlinks = vi.mocked(fs.unlink).mock.calls.filter(function (call) {
 			return String(call[0]).includes("safeWriteText.bak")
 		})
 		expect(backupUnlinks.length).toBe(2)
+		expect(backupUnlinks.map(function (call) { return call[0] })).toEqual([backupPath, backupPath])
 		expect(onWarning).toHaveBeenCalledTimes(1)
-		expect(String(onWarning.mock.calls[0][0])).toContain("safeWriteText.bak")
+		expect(String(onWarning.mock.calls[0][0])).toContain(String(backupPath))
+	})
+
+	it("reports the exact orphan paths when cleanup fails after a failed write, keeping the write error", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const onWarning = vi.fn()
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fsSync.closeSync).mockReturnValue(undefined)
+		// The commit rename fails, and every cleanup unlink fails as well.
+		vi.mocked(fs.rename).mockRejectedValue(new Error("ENOSPC"))
+		vi.mocked(fs.unlink).mockRejectedValue(new Error("EACCES"))
+
+		await expect(safeWriteText(targetPath, "data", { backup: true, platform: "linux", onWarning })).rejects.toThrow("ENOSPC")
+
+		const backupPath = vi.mocked(fs.copyFile).mock.calls[0][1]
+		const tempArg = vi.mocked(fs.rename).mock.calls[0][0]
+		// Both leftovers are retried once, and each leftover is reported with its exact path
+		// instead of being dropped - the caller still gets the original write error.
+		expect(vi.mocked(fs.unlink).mock.calls.filter(function (call) { return String(call[0]) === String(backupPath) }).length).toBe(2)
+		expect(vi.mocked(fs.unlink).mock.calls.filter(function (call) { return String(call[0]) === String(tempArg) }).length).toBe(2)
+		expect(onWarning).toHaveBeenCalledTimes(2)
+		const messages = onWarning.mock.calls.map(function (call) { return String(call[0]) })
+		expect(messages.some(function (m) { return m.includes(String(backupPath)) })).toBe(true)
+		expect(messages.some(function (m) { return m.includes(String(tempArg)) })).toBe(true)
 	})
 
 	// ── Test 5: win32 DACL path ──────────────────────────────────────────────

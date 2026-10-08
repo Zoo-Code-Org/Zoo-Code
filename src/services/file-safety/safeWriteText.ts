@@ -336,6 +336,32 @@ export async function safeWriteText(
 	// Non-null only when the win32 step-2 block saved a successful DACL dump:
 	// it gates the step-5 restore and is tracked for the cleanup unlinks.
 	let daclDumpPath: string | null = null
+		// Warning delivery must never abort the write: the notices below describe a
+		// committed-but-imperfect publish, and a caller whose callback throws (a UI sink,
+		// a logger that is mid-restart) must not turn that into a failed save.
+		const warn = (message: string) => {
+			const report = (label: string, error: unknown) => {
+				console.warn(
+					`safeWriteText: onWarning callback ${label}: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+			try {
+				const sink = options?.onWarning ?? ((m: string) => console.warn(m))
+				const result: unknown = sink(message)
+				// A sink may be async - TypeScript accepts a value-returning callback where
+				// a void one is expected. Awaiting it would let warning delivery delay a
+				// write that has already committed (and hang it if the sink never settles),
+				// while leaving the promise unhandled turns a rejection into an unhandled
+				// rejection, which under Node's default mode can end the process after a
+				// successful write. Attach a handler without awaiting.
+				if (result instanceof Promise) {
+					result.catch((error: unknown) => report("rejected", error))
+				}
+			} catch (error: unknown) {
+				report("failed", error)
+			}
+		}
+
 	try {
 		// -- Step 1: write content to staging temp file -------------------
 		if (!options?.tempPath) {
@@ -405,31 +431,6 @@ export async function safeWriteText(
 
 		// -- Step 2 (win32): save DACL BEFORE the backup copy -----------
 		const platform = options?.platform ?? process.platform
-		// Warning delivery must never abort the write: the notices below describe a
-		// committed-but-imperfect publish, and a caller whose callback throws (a UI sink,
-		// a logger that is mid-restart) must not turn that into a failed save.
-		const warn = (message: string) => {
-			const report = (label: string, error: unknown) => {
-				console.warn(
-					`safeWriteText: onWarning callback ${label}: ${error instanceof Error ? error.message : String(error)}`,
-				)
-			}
-			try {
-				const sink = options?.onWarning ?? ((m: string) => console.warn(m))
-				const result: unknown = sink(message)
-				// A sink may be async - TypeScript accepts a value-returning callback where
-				// a void one is expected. Awaiting it would let warning delivery delay a
-				// write that has already committed (and hang it if the sink never settles),
-				// while leaving the promise unhandled turns a rejection into an unhandled
-				// rejection, which under Node's default mode can end the process after a
-				// successful write. Attach a handler without awaiting.
-				if (result instanceof Promise) {
-					result.catch((error: unknown) => report("rejected", error))
-				}
-			} catch (error: unknown) {
-				report("failed", error)
-			}
-		}
 		if (platform === "win32") {
 			let accessError: unknown = null
 			try {
@@ -618,17 +619,44 @@ export async function safeWriteText(
 		// content when it did. The copy has served its purpose and must not be left
 		// beside the target where no caller can find it.
 		if (backupPath && releaseBackupOnSuccess) {
-			// Nothing to restore: the backup is a copy, so the target still holds whatever
-			// the commit left there - before the commit that is the pre-write content, and
-			// after it the published content. Either way the copy has served its purpose
-			// and must not be left beside the target where no caller can find it.
-			await fs.unlink(backupPath).catch(() => {})
-			backupPath = null
+			// Retry once (Windows reports EPERM while a handle is still being released), and
+			// if it still fails keep the path: clearing it would drop the only reference to
+			// the orphan. The original write error is what propagates; the leftover is
+			// reported through the warning sink with both paths.
+			let cleanupError: unknown = null
+			try {
+				await fs.unlink(backupPath)
+			} catch {
+				try {
+					await fs.unlink(backupPath)
+				} catch (secondError: unknown) {
+					cleanupError = secondError
+				}
+			}
+			if (cleanupError) {
+				warn(
+					`safeWriteText: the write to ${targetPath} failed and its backup copy could not be removed at ${backupPath} (${
+						cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+					}); the copy is left in place so the previous content is still recoverable by hand`,
+				)
+			} else {
+				backupPath = null
+			}
 		}
 		try {
-			await fs.unlink(tempPath).catch(() => {})
+			await fs.unlink(tempPath)
 		} catch {
-			// cleanup failure is non-fatal
+			try {
+				await fs.unlink(tempPath)
+			} catch (secondError: unknown) {
+				// A leftover staged temp is not the caller's failure, but its path must not
+				// be dropped silently: report it and keep the original error propagating.
+				warn(
+					`safeWriteText: could not remove the staging temp ${tempPath} (${
+						secondError instanceof Error ? secondError.message : String(secondError)
+					})`,
+				)
+			}
 		}
 
 		// A failed self-staged write must not leave its staging directory behind.

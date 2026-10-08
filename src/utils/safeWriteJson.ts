@@ -237,12 +237,15 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
 
 		// Step 2: Delegate backup + commit + cleanup to safeWriteText with the
-		// pre-written temp path. backup:true keeps the old safeWriteJson semantics
-		// (the target is COPIED to a backup before the commit rename; the copy is
-		// deleted on success and on failure, and the target is never moved aside),
-		// and keeps the target in place until safeWriteText captures its Windows
-		// DACL (safeWriteText dumps the DACL before taking its backup copy and
-		// restores it onto the directory after the commit rename).
+		// pre-written temp path. backup:true preserves the pre-existing safeWriteJson
+		// semantics: the target is COPIED to a backup before the commit rename, and the
+		// copy is deleted on success and on failure. It is NOT a recovery source - the
+		// commit rename is atomic, so the target always holds either the old or the new
+		// bytes - and it also keeps the target in place until safeWriteText captures its
+		// Windows DACL (the DACL is dumped before the backup copy is taken and restored
+		// onto the directory after the rename). Whether to drop the copy in favour of a
+		// cheaper durability path is a cross-unit decision for the file-safety chain, not
+		// a consumer-side change in this unit; it is recorded on the tracking issue.
 		const textOptions: SafeWriteTextOptions = {
 			tempPath: actualTempNewFilePath,
 			backup: true,
