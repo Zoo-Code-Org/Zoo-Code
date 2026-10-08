@@ -3367,6 +3367,153 @@ const provider = new ClineProvider(
 			await provider.dispose()
 		})
 
+		it("refreshes another live view pinned to a profile that was just upserted", async () => {
+			const updater = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await sibling["setViewStateId"]("sibling-refresh-view")
+			// The sibling is pinned to the profile with its settings loaded into the buffer.
+			await sibling.saveViewState("currentApiConfigName", "shared-profile")
+			await sibling.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "stale-key",
+			})
+			const siblingPostSpy = vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+
+			const sharedProfile: ProviderSettingsEntry = {
+				name: "shared-profile",
+				id: "shared-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			updater.providerSettingsManager = {
+				saveConfig: vi.fn().mockResolvedValue("shared-id"),
+				listConfig: vi.fn().mockResolvedValue([sharedProfile]),
+				setModeConfig: vi.fn(),
+			}
+			vi.spyOn(updater, "postStateToWebview").mockResolvedValue(undefined)
+			await updater.contextProxy.setValue("listApiConfigMeta", [sharedProfile])
+
+			await updater.upsertProviderProfile("shared-profile", {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "fresh-key",
+			})
+
+			// The other live view must not keep serving the pre-update settings: its buffer
+			// overlay is what getState() merges over the shared store, so a stale overlay here
+			// means the sibling keeps sending the old key after the profile was edited.
+			expect(sibling["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "fresh-key",
+			})
+			expect(siblingPostSpy).toHaveBeenCalled()
+			await updater.dispose()
+			await sibling.dispose()
+		})
+
+		it("restores an affected sibling view's own pin when the deletion re-pin write fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// A context of its own for the sibling: same backing store, but this view's durable
+			// viewStates write is the one that fails. Failing ContextProxy#setValue instead would
+			// skip updateGlobalState entirely, so the phantom cache entry the rollback repairs
+			// would never exist and the test would prove nothing.
+			const siblingContext = {
+				...mockContext,
+				globalState: {
+					...mockContext.globalState,
+					update: (key: string, value: unknown) => {
+						// Reject exactly the re-pin write - the map that would name the survivor for this
+						// view - so the setup writes and the rollback write still land.
+						const states = value as Record<string, { currentApiConfigName?: string }> | undefined
+						if (
+							key === "viewStates" &&
+							states?.["sibling-pin-view"]?.currentApiConfigName === "keeper-profile"
+						) {
+							return Promise.reject(new Error("sibling pin write failed"))
+						}
+						return mockContext.globalState.update(key, value)
+					},
+				},
+			}
+			const sibling = new ClineProvider(
+				siblingContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(siblingContext),
+				new WebviewFocusTracker(),
+			)
+			await sibling["setViewStateId"]("sibling-pin-view")
+			await sibling.saveViewState("currentApiConfigName", "doomed-profile")
+			await sibling.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "doomed-secret",
+			})
+
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn().mockResolvedValue({
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "keeper-secret",
+			}),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue("doomed-id"),
+			}
+
+			await expect(provider.deleteProviderProfile(doomedProfile)).rejects.toThrow("sibling pin write failed")
+
+			// The sibling keeps its own pin and overlay: a rolled-back deletion must not leave it
+			// pinned to the surviving profile, or a reload would re-pin that view to a profile the
+			// user never chose for it.
+			expect(sibling["viewLocalState"].currentApiConfigName).toBe("doomed-profile")
+			expect(sibling["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "doomed-secret",
+			})
+			// The ContextProxy cache is where the phantom lives: updateGlobalState fills it before
+			// awaiting the durable write, so a failed re-pin leaves the cache naming the survivor
+			// unless the rollback writes the previous pin back.
+			const cached = sibling["getPersistedViewStates"]()["sibling-pin-view"] ?? {}
+			expect(cached.currentApiConfigName).toBe("doomed-profile")
+			const persisted = sibling["getPersistedViewStates"]({ fresh: true })["sibling-pin-view"] ?? {}
+			expect(persisted.currentApiConfigName).toBe("doomed-profile")
+			// The deleting view rolled its own stores back too.
+			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([doomedProfile, keeperProfile])
+			await provider.dispose()
+			await sibling.dispose()
+		})
+
 
 		it("leaves the view buffer untouched when the deleted profile is neither globally active nor view-pinned", async () => {
 const provider = new ClineProvider(
