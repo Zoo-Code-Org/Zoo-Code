@@ -104,7 +104,18 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// update. Locking the resolved referent coordinates every alias through one
 	// lock. resolvePublishTarget tolerates a not-yet-existing file (it returns
 	// the given path on ENOENT), preserving the previous create-from-absent flow.
-	const resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
+	// With refuseSymlinkTarget the caller-named path IS the publish target: resolving
+	// it through realpath would hand back a referent the caller never chose if a link is
+	// planted between the refusal check and this resolution (the later lstat re-checks
+	// would then pass, because the link was already removed, while the publish still
+	// landed on the referent). Publishing onto the named path is no-follow for the final
+	// component: the commit is a rename, and rename replaces the directory entry rather
+	// than writing through a link, so an inserted link gets replaced and its referent
+	// never receives the payload. Every refuseSymlinkTarget writer keys its lock to the
+	// same named path, so the lock still serializes all writers to that entry.
+	const resolvedTargetPath = options?.refuseSymlinkTarget
+		? absoluteFilePath
+		: await resolvePublishTarget(absoluteFilePath)
 
 // The refusal above and this resolution are separate syscalls, so a local writer
 // could replace the final component with a link in between; resolvedTargetPath
@@ -112,7 +123,19 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 // the caller named - once here and again under the lock before publishing - so the
 // refusal stays effective through publication.
 const assertFinalComponentNotReplaced = async (stage: string): Promise<void> => {
-	const nowStat = await fs.lstat(absoluteFilePath).catch(() => undefined)
+	// Fail closed: only ENOENT (nothing there that could be a link) is tolerated. A lstat
+	// failing for another reason - EACCES on the parent directory, for example - says
+	// nothing about whether the entry is safe, so the write stops instead of publishing
+	// blind through an unexamined destination.
+	let nowStat: fsSync.Stats | undefined
+	try {
+		nowStat = await fs.lstat(absoluteFilePath)
+	} catch (error: unknown) {
+		const code = error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined
+		if (code !== "ENOENT") {
+			throw error
+		}
+	}
 	if (nowStat?.isSymbolicLink()) {
 		throw new Error(
 			`safeWriteJson: refusing to write through the symlink now at ${absoluteFilePath} (${stage}); the payload would land at ${resolvedTargetPath}, a destination the caller never chose.`,

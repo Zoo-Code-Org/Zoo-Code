@@ -182,6 +182,43 @@ export async function resolvePublishTarget(absoluteFilePath: string): Promise<st
 	})
 }
 
+/**
+ * Raised when the commit rename failed AND the backup could not be renamed back onto the
+ * target: the target path is absent and the previous content survives only under the
+ * randomized backup path. The primary failure is preserved as originalError so callers
+ * keep the reason the publish failed while also learning where the saved state is.
+ */
+class RollbackFailedError extends Error {
+	readonly originalError: unknown
+
+	constructor(
+		public readonly filePath: string,
+		public readonly backupPath: string,
+		rollbackError: unknown,
+		originalError: unknown,
+	) {
+		super(_rollbackFailureMessage(filePath, backupPath, rollbackError, originalError), {
+			cause: rollbackError,
+		})
+		this.name = "RollbackFailedError"
+		this.originalError = originalError
+	}
+}
+
+function _rollbackFailureMessage(
+	filePath: string,
+	backupPath: string,
+	rollbackError: unknown,
+	originalError: unknown,
+): string {
+	const primary = originalError instanceof Error ? originalError.message : String(originalError)
+	const rollback = rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+	return (
+		`Publish to ${filePath} failed (${primary}) and the backup could not be restored (${rollback}). ` +
+		`The previous content is still at ${backupPath}.`
+	)
+}
+
 export async function safeWriteText(filePath: string, content: string, options?: SafeWriteTextOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 
@@ -209,6 +246,7 @@ export async function safeWriteText(filePath: string, content: string, options?:
 	let backupPath: string | null = null
 	let releaseBackupOnSuccess = false
 	let daclDumpPath: string | null = null // tracked for cleanup in finally
+	let daclSaved = false // the restore step runs only when the save succeeded
 
 	try {
 		// -- Step 1: write content to staging temp file -------------------
@@ -280,7 +318,12 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				daclDumpPath = targetPath + ".acl.tmp"
 				const saved = await _saveDaclWindows(targetPath, daclDumpPath, options?.execFileRunner)
 				if (!saved) {
-					daclDumpPath = null // skip DACL handling entirely
+					// Skip the RESTORE step only. icacls can create a partial dump and still exit
+					// non-zero, so the path stays tracked: dropping it here would leave that file
+					// next to the target with nothing left to remove it.
+					daclSaved = false
+				} else {
+					daclSaved = true
 				}
 			} catch {
 				// target does not exist or access failed — no DACL handling
@@ -336,7 +379,7 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			}
 
 			// -- Step 5 (win32): restore DACL AFTER commit rename ---------
-			if (platform === "win32" && daclDumpPath !== null) {
+			if (platform === "win32" && daclSaved && daclDumpPath !== null) {
 				const restoredDir = path.dirname(targetPath)
 				await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
 			}
@@ -363,11 +406,16 @@ export async function safeWriteText(filePath: string, content: string, options?:
 		}
 	} catch (originalError: unknown) {
 		// -- Rollback / cleanup on failure ----------------------------------
+		let rollbackFailure: { backupPath: string; error: unknown } | null = null
 		if (backupPath && releaseBackupOnSuccess) {
 			try {
 				await fs.rename(backupPath, targetPath)
-			} catch {
-				// rollback failed — do not mask original error
+			} catch (rollbackError: unknown) {
+				// The commit failed AND the restore failed: the target path is absent and the
+				// previous content survives only under the randomized backup name. Reporting only
+				// the primary failure leaves the caller unable to find that copy, so both are
+				// surfaced - the primary error stays reachable as originalError and in the text.
+				rollbackFailure = { backupPath, error: rollbackError }
 			}
 		}
 
@@ -386,6 +434,10 @@ export async function safeWriteText(filePath: string, content: string, options?:
 
 		if (daclDumpPath !== null) {
 			await fs.unlink(daclDumpPath).catch(() => {})
+		}
+
+		if (rollbackFailure !== null) {
+			throw new RollbackFailedError(targetPath, rollbackFailure.backupPath, rollbackFailure.error, originalError)
 		}
 
 		throw originalError

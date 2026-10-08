@@ -465,14 +465,28 @@ describe("safeWriteJson", () => {
 			return fsPromisesActuals.rename!(oldPath, newPath)
 		})
 
-		// The original error must propagate, not the rollback error
-		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Primary rename failed")
+		// The primary failure has to stay readable even though the rollback failure is what
+		// gets thrown on top of it.
+		const rejection = await safeWriteJson(currentTestFilePath, newData).then(() => null, (error) => error)
+		expect(rejection).toBeInstanceOf(Error)
+		expect(rejection.name).toBe("RollbackFailedError")
+		expect(rejection.message).toContain("Primary rename failed")
+
+		// Partial failure must be actionable: the caller learns the previous content is
+		// recoverable and exactly where it is, instead of only that a rename failed.
+		expect(rejection.backupPath).toMatch(/safeWriteText\.bak_/)
+		expect(String(rejection.message)).toContain("previous content is still at")
+		expect(rejection.originalError).toBeInstanceOf(Error)
+		expect((rejection.originalError as Error).message).toBe("Primary rename failed")
+		expect(rejection.cause).toBeInstanceOf(Error)
+		expect((rejection.cause as Error).message).toBe("Rollback rename failed")
 
 		// The rollback failed inside safeWriteText, so the target is gone and
-		// the backup is orphaned on disk.
+		// the backup is orphaned on disk - and it is the file the error points at.
 		expect(await fileExists(currentTestFilePath)).toBe(false)
 		const entries = await fs.readdir(tempDir)
 		expect(entries.some((entry) => entry.includes("safeWriteText.bak_"))).toBe(true)
+		expect(await fileExists(rejection.backupPath)).toBe(true)
 
 		consoleErrorSpy.mockRestore()
 	})
@@ -751,15 +765,76 @@ describe("safeWriteJson", () => {
 		expect(await readFileContent(referentPath)).toEqual({ seed: "untouched" })
 	})
 
+	test.each([
+		["EACCES", Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })],
+		["a code-less error", new Error("lstat exploded")],
+	])("fails closed when the refusal check fails with %s", async (_label, failure) => {
+		const target = path.join(tempDir, "refuse-lstat-failure.json")
+		// A stat error that is not ENOENT is not evidence that the destination is safe, so
+		// the write has to stop here rather than publish through an unexamined entry.
+		vi.spyOn(fs, "lstat").mockRejectedValue(failure)
+
+		await expect(
+			safeWriteJson(target, { written: true }, { refuseSymlinkTarget: true }),
+		).rejects.toThrow(failure.message)
+
+		vi.restoreAllMocks()
+		// Nothing was locked, staged, or published: no target and no leftover temp file.
+		expect(await fileExists(target)).toBe(false)
+		const leftovers = fsSyncActual.readdirSync(tempDir).filter(function (entry) {
+			return entry.includes("refuse-lstat-failure")
+		})
+		expect(leftovers).toEqual([])
+	})
+
+	test("publishes onto the named path when a link is planted during target resolution", async () => {
+		const referentPath = path.join(tempDir, "race-referent.json")
+		const namedPath = path.join(tempDir, "race-named.json")
+		await fsPromisesActuals.writeFile!(referentPath, JSON.stringify({ seed: "untouched" }))
+		await fsPromisesActuals.writeFile!(namedPath, JSON.stringify({ own: true }))
+		const asFile = { isSymbolicLink: () => false } as unknown as fsSyncActual.Stats
+		// Every lstat in the sequence sees a regular file: the link a local writer plants
+		// while the destination is being resolved is gone again before the next check, so
+		// no check in the sequence can catch it.
+		vi.spyOn(fs, "lstat").mockResolvedValue(asFile)
+		// Resolution is the step that would hand back a destination the caller never chose.
+		const realpathSpy = vi.spyOn(fs, "realpath").mockResolvedValue(referentPath)
+
+		await safeWriteJson(namedPath, { written: true }, { refuseSymlinkTarget: true })
+
+		vi.restoreAllMocks()
+		// With refuseSymlinkTarget the named path is the publish target, so resolution never
+		// runs and there is no window in which a planted link can redirect the payload. The
+		// commit is a rename, which replaces the named directory entry instead of writing
+		// through a link, so the referent cannot receive the export.
+		expect(realpathSpy).not.toHaveBeenCalled()
+		expect(await readFileContent(namedPath)).toEqual({ written: true })
+		expect(await readFileContent(referentPath)).toEqual({ seed: "untouched" })
+	})
+
 	test("resolves the publish target only once during a guarded publication", async () => {
 		const target = path.join(tempDir, "single-resolve.json")
 		// The caller resolves once for the lock key; safeWriteText must not resolve again,
 		// or a link installed after the caller's re-check would be followed there.
 		const realpath = vi.spyOn(fs, "realpath").mockImplementation(async (p) => String(p))
 
-		await safeWriteJson(target, { written: true }, { refuseSymlinkTarget: true })
+		await safeWriteJson(target, { written: true })
 
 		expect(realpath).toHaveBeenCalledTimes(1)
+		vi.restoreAllMocks()
+		expect(await readFileContent(target)).toEqual({ written: true })
+	})
+
+	test("does not resolve the publish target when refuseSymlinkTarget is set", async () => {
+		const target = path.join(tempDir, "no-resolve.json")
+		// Resolving is what turns a planted link into a destination the caller never chose,
+		// so the credential-bearing path skips it entirely and publishes onto the name the
+		// caller gave.
+		const realpath = vi.spyOn(fs, "realpath").mockImplementation(async (p) => String(p))
+
+		await safeWriteJson(target, { written: true }, { refuseSymlinkTarget: true })
+
+		expect(realpath).not.toHaveBeenCalled()
 		vi.restoreAllMocks()
 		expect(await readFileContent(target)).toEqual({ written: true })
 	})
