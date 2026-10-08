@@ -105,6 +105,15 @@ export class DiffViewProvider {
 	 */
 	private preOpenObservation: { version: string; complete: boolean } | null | undefined = undefined
 
+	/**
+	 * The registry entry this provider's own open() wrote (path + token), or null when it
+	 * wrote none. reset() revokes exactly that entry when the preview ends without a save,
+	 * so a denied or rejected preview cannot leave behind an observation that authorizes a
+	 * later edit of a file the model never read. The token match keeps the revoke from
+	 * touching an entry a save (or another writer) has already replaced.
+	 */
+	private previewObservation: { path: string; version: string } | null = null
+
 	constructor(
 		private cwd: string,
 		task: Task,
@@ -172,6 +181,7 @@ export class DiffViewProvider {
 				const displayToken = versionTokenOfStat(preStats)
 				if (displayToken === versionTokenOfStat(postStats)) {
 					displayTask.observationRegistry.observe(absolutePath, displayToken, false)
+					this.previewObservation = { path: absolutePath, version: displayToken }
 				}
 			}
 		} else {
@@ -1539,6 +1549,20 @@ export class DiffViewProvider {
 		this.userTouchedDiffEditor = false
 		this.snapshotPreviewTabs = []
 		this.placeholderVersion = undefined
+
+		// A preview that never reached a save must not stay authorized: open() recorded a
+		// stat-matched entry for a target the model had not read. If it still holds that
+		// token, revoke it - a denial (revertChanges + reset) or a rejected save otherwise
+		// leaves it behind, and the next attempt would CAS against a version never read.
+		// When a save did publish, the entry carries the published token and is left alone.
+		if (this.preOpenObservation === null && this.previewObservation !== null) {
+			const task = this.taskRef.deref()
+			const entry = task?.observationRegistry.get(this.previewObservation.path)
+			if (task && entry && entry.version === this.previewObservation.version) {
+				task.observationRegistry.forget(this.previewObservation.path)
+			}
+		}
+		this.previewObservation = null
 		this.preOpenObservation = undefined
 	}
 

@@ -1524,6 +1524,26 @@ describe("DiffViewProvider", () => {
 			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.txt`, Buffer.from("new content"))
 		})
 
+
+		it("does not let a denied preview authorize the retry of an unread edit", async () => {
+			// The model never read this file. open() records the preview token so the accept-time
+			// CAS has an entry to compare against; when the user denies, that entry must not
+			// survive into the next attempt - otherwise the retry publishes against a version the
+			// model never read, the exact invariant the save above enforces.
+			mockTask.observationRegistry.clear()
+			await openPreview()
+			expect(mockTask.observationRegistry.has(`${mockCwd}/test.txt`)).toBe(true)
+
+			// A denial ends in reset() (revertChanges() then reset()); the revoke lives in
+			// reset() so every path that ends without a save is covered.
+			await diffViewProvider.reset()
+			expect(mockTask.observationRegistry.has(`${mockCwd}/test.txt`)).toBe(false)
+
+			// The retry is still an edit of a file that was never read.
+			await openPreview()
+			await expect(diffViewProvider.saveChanges(false, 0, "edit")).rejects.toThrow(/File not read yet/)
+			expect(safeWriteText).not.toHaveBeenCalled()
+		})
 		it("publishes the accepted content in the document's own encoding", async () => {
 			// A utf8bom document: getText() returns the text without the BOM, so the
 			// publish must go through VS Code's codec for the document's own
