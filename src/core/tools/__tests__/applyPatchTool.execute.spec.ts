@@ -364,6 +364,27 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(mockHandleError).not.toHaveBeenCalled()
 	})
 
+	it("move: surfaces a guarded destination publish failure as a tool error", async () => {
+		const publishError = new Error(
+			"Stale version at commit time -- the file changed while this write was being staged; re-read the file, then retry.",
+		)
+		mockSaveDirectly.mockRejectedValue(publishError)
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		// The destination saveDirectly is the guarded publish for a move: a failure there
+		// must route through handleError, reset the diff view, and leave no success result
+		// (the source file stays where it was).
+		expect(mockHandleError).toHaveBeenCalledWith("apply patch", publishError)
+		expect(vi.mocked(mockTask.diffViewProvider.reset)).toHaveBeenCalled()
+		expect(mockTask.didEditFile).toBe(false)
+		expect(mockPushToolResult).not.toHaveBeenCalledWith("Saved file")
+	})
+
 	it("update: surfaces the unobserved-existing remediation as a tool error", async () => {
 		const guardError = new Error(
 			"File already exists at /workspace/project/src/thing.ts and was not read before this write -- read the file first, then retry.",

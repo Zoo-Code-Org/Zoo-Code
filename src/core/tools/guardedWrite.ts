@@ -39,6 +39,24 @@ class GuardRejectedError extends Error {
 	}
 }
 
+/**
+ * A queued guarded write reached the head of its path's chain after the task that
+ * issued it had already been aborted or disposed. Task.dispose() sets the same
+ * `abort` flag that abortTask() sets, so that flag is the disposal signal visible
+ * at this layer.
+ */
+export class CancelledTaskWriteError extends Error {
+	readonly path: string
+	constructor(absolutePath: string) {
+		super(
+			`Guarded write for ${absolutePath} was cancelled -- the task was aborted or disposed ` +
+				"before its turn in the per-path write queue; nothing was published.",
+		)
+		this.name = "CancelledTaskWriteError"
+		this.path = absolutePath
+	}
+}
+
 // -- Per-path tail-promise chain --------------------------------------------
 
 /**
@@ -322,6 +340,14 @@ export async function guardedWrite(
 	const obs = task.observationRegistry.get(absolutePath)
 
 	return enqueue(absolutePath, async () => {
+		// The link can reach the head of the queue long after the task that issued it is
+		// gone (panel closed, task switched, abort landed while another write held the
+		// path). Running it then would publish for a task that no longer serves requests
+		// and re-observe the path, so the write stops here instead.
+		if (task.abort) {
+			throw new CancelledTaskWriteError(absolutePath)
+		}
+
 		let publishedVersion: string
 
 		if (obs === undefined) {

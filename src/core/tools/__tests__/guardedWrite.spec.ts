@@ -60,14 +60,15 @@ interface MockTaskOptions {
 }
 
 /**
- * Minimal structural Task: guardedWrite only reads task.cwd and
- * task.observationRegistry. The real Task constructor needs the full provider
- * machinery, so a single documented double cast stands in for the class.
+	 * Minimal structural Task: guardedWrite reads task.cwd, task.observationRegistry and
+	 * task.abort (the flag Task.dispose() sets). The real Task constructor needs the
+	 * full provider machinery, so a single documented double cast stands in for the class.
  */
 function createMockTask(options: MockTaskOptions = {}): Task {
 	const task = {
 		cwd: options.cwd ?? WORKSPACE,
 		observationRegistry: options.observationRegistry ?? new ObservationRegistry(),
+		abort: false,
 	}
 	return task as unknown as Task
 }
@@ -615,6 +616,44 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await createIfAbsent(abs("new.txt"), "hello")
 
 			expect(order).toEqual(["acquire", "check", "publish", "release"])
+		})
+	})
+
+	describe("cancellation while queued (S4b lifecycle)", () => {
+		it("does not publish a queued write after the issuing task is disposed", async () => {
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			// The first link holds the path's chain, so the second write is genuinely queued.
+			let releaseFirst: () => void = () => {}
+			const firstGate = new Promise<void>(function (resolve) {
+				releaseFirst = resolve
+			})
+			mockedSafeWriteText.mockImplementationOnce(async () => {
+				await firstGate
+			})
+			const task = createMockTask()
+			const first = guardedWrite(task, "queued.txt", "first", "create")
+			const second = guardedWrite(task, "queued.txt", "second", "create")
+			// Let the first link enter the publish (the chain runs on microtasks) before the
+			// disposal lands: Task.dispose() sets task.abort while the second write is still
+			// queued behind it.
+			await new Promise(function (resolve) {
+				setImmediate(resolve)
+			})
+			task.abort = true
+			releaseFirst()
+			await first
+			await expect(second).rejects.toThrow(/was cancelled/)
+			// Only the first write published; the cancelled one touched nothing.
+			expect(mockedSafeWriteText.mock.calls.map(function (call) { return call[1] })).toEqual(["first"])
+		})
+
+		it("refuses an already-cancelled task's write before any I/O", async () => {
+			const task = createMockTask()
+			task.abort = true
+			await expect(guardedWrite(task, "gone.txt", "x", "create")).rejects.toThrow(/was cancelled/)
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+			expect(mockedFsAccess).not.toHaveBeenCalled()
 		})
 	})
 })
