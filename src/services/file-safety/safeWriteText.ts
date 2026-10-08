@@ -51,6 +51,27 @@ export interface SafeWriteTextOptions {
 	 * Passing the authorized value makes that drift fatal instead of silent.
 	 */
 	expectedResolvedPath?: string
+
+	/**
+	 * The directories the caller walked when it authorized this target, with the
+	 * (dev, ino) identity each had at that moment.
+	 *
+	 * expectedResolvedPath pins the NAME this write publishes; it cannot see a parent
+	 * directory being replaced by a link between the caller's containment check and the
+	 * commit. Re-checking the ancestor identities immediately before the commit makes a
+	 * swapped parent fatal too: the publish then aborts instead of writing through the new
+	 * link. Node has no descriptor-relative rename, so a swap that lands after this check
+	 * and before the rename is not eliminable here - it narrows the window to the commit
+	 * itself rather than the whole guard.
+	 */
+	expectedAncestorIdentities?: DirectoryIdentity[]
+}
+
+/** One directory's on-disk identity, read with bigint stats so NTFS 64-bit values survive. */
+export type DirectoryIdentity = {
+	dir: string
+	dev: bigint
+	ino: bigint
 }
 
 /**
@@ -140,6 +161,21 @@ export class TargetMovedError extends Error {
 		this.name = "TargetMovedError"
 		this.authorizedPath = authorizedPath
 		this.resolvedPath = resolvedPath
+	}
+}
+
+/**
+ * A directory the caller walked on its way to the authorized target is no longer the
+ * directory it was: it was removed, replaced, or turned into a link to somewhere else.
+ * Publishing through it would act on a decision that was never made about the file now
+ * reachable there, so the commit is aborted.
+ */
+export class AncestorReplacedError extends Error {
+	readonly directory: string
+	constructor(directory: string, reason: string) {
+		super(`A directory on the authorized path (${directory}) ${reason} -- nothing was published.`)
+		this.name = "AncestorReplacedError"
+		this.directory = directory
 	}
 }
 // -- helpers ---------------------------------------------------------------
@@ -472,6 +508,26 @@ export async function safeWriteText(
 		}
 
 		try {
+			// -- Step 2b: re-validate the authorized ancestry before committing --
+			// The caller decided containment by walking this directory chain. A parent
+			// swapped for a link to outside that chain would send the commit somewhere the
+			// caller never authorized, even though expectedResolvedPath still matches (the
+			// name is unchanged). Compare each recorded identity now, before anything is
+			// moved into place.
+			if (options?.expectedAncestorIdentities) {
+				for (const expected of options.expectedAncestorIdentities) {
+					const current = await fs.stat(expected.dir, { bigint: true }).catch((error: unknown) => {
+						if (errorCode(error) === "ENOENT") {
+							throw new AncestorReplacedError(expected.dir, "no longer exists")
+						}
+						throw error
+					})
+					if (current.dev !== expected.dev || current.ino !== expected.ino) {
+						throw new AncestorReplacedError(expected.dir, "is no longer the directory that was authorized")
+					}
+				}
+			}
+
 			// -- Step 3 (backup:true): rename target -> backup --------------
 			if (options?.backup) {
 				try {
