@@ -443,6 +443,45 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))
 		})
 
+	it("keeps the publish and warns when both backup-removal attempts fail", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		// Only the backup unlink fails, twice; every other unlink works.
+		const unlinkMock = vi.mocked(fs.unlink)
+		unlinkMock.mockImplementation(async (p) => {
+			if (typeof p === "string" && p.includes(".bak")) { throw new Error("EBUSY") }
+			return undefined
+		})
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+		await safeWriteText(targetPath, "new data", { backup: true })
+
+		// The write itself is unaffected - the backup is cleanup, not part of the commit.
+		expect(fs.rename).toHaveBeenCalled()
+		const bakCalls = unlinkMock.mock.calls.filter(function (call) {
+			return typeof call[0] === "string" && call[0].includes(".bak")
+		})
+		expect(bakCalls).toHaveLength(2)
+		const warned = warnSpy.mock.calls.map(function (call) { return String(call[0]) }).join("\n")
+		expect(warned).toContain("could not be removed")
+		expect(warned).toContain(".bak")
+	})
+
+	it("removes a partially copied backup when the copy itself fails", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		// copyFile can create the destination and then fail part way through.
+		vi.mocked(fs.copyFile).mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }))
+
+		await expect(safeWriteText(targetPath, "new data", { backup: true })).rejects.toThrow("EACCES")
+
+		// The half-written backup must not be left next to the target, and the original error
+		// is still the one that surfaces.
+		expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".bak"))
+	})
+
 	it("closes the staging descriptor when applying the target mode fails", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
