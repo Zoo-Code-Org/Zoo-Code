@@ -534,6 +534,8 @@
 		"apiKey": "API-ключ",
 		"openAiApiKey": "OpenAI API-ключ",
 		"openAiBaseUrl": "Базовый URL",
+		"openAiStrictToolSchemas": "Строгие схемы инструментов (strict: true)",
+		"openAiStrictToolSchemasDescription": "Отправляет strict: true вместе со схемами инструментов, чтобы включить строгое соблюдение схемы. Отключите, чтобы использовать нестрогий вызов инструментов.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Имя развёртывания Azure",
 		"azureOpenAiDeploymentNameDescription": "Введите имя развёртывания из Azure AI Studio, а не имя базовой модели.",

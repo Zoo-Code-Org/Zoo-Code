@@ -392,9 +392,11 @@ function getSelectedModel({
 			const isChina = zaiApiLineConfigs[apiLine].isChina
 			const models = getZAiModels(apiLine)
 			const defaultModelId = getProviderDefaultModelId(provider, { isChina })
-			const id = getValidatedModelId(apiConfiguration.apiModelId, models, defaultModelId)
-			const info = models[id]
-			return { id, info }
+			const configuredId = apiConfiguration.apiModelId
+			if (configuredId) {
+				return { id: configuredId, info: models[configuredId] ?? openAiModelInfoSaneDefaults }
+			}
+			return { id: defaultModelId, info: models[defaultModelId] }
 		}
 		case providerIdentifiers.openaiNative: {
 			const id = apiConfiguration.apiModelId ?? defaultModelId

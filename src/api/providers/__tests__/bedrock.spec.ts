@@ -141,16 +141,17 @@ describe("AwsBedrockHandler", () => {
 		["anthropic.claude-opus-4-7", 128_000],
 		["anthropic.claude-opus-4-8", 128_000],
 		["anthropic.claude-opus-5", 128_000],
+		["anthropic.claude-opus-5-5", 128_000],
 	] as const)("exposes %s output ceiling without raising request defaults", async (apiModelId, ceiling) => {
 		for (const enableReasoningEffort of [true, false]) {
 			for (const modelMaxTokens of [undefined, ceiling]) {
 				const provider = new AwsBedrockHandler({ apiModelId, enableReasoningEffort, modelMaxTokens })
-				expect(provider.getModel().info.maxTokens).toBe(ceiling)
+				const modelInfo = provider.getModel().info
+				expect(modelInfo.maxTokens).toBe(ceiling)
 				provider["client"].send = vi.fn().mockResolvedValue({ stream: asyncStreamFrom([]) })
 				await collectStream(provider.createMessage("system", [{ role: "user", content: "hello" }]))
-				const configurableWithoutReasoning = apiModelId.endsWith("-5")
 				const expected =
-					modelMaxTokens && (enableReasoningEffort || configurableWithoutReasoning)
+					modelMaxTokens && (enableReasoningEffort || modelInfo.supportsMaxTokens)
 						? ceiling
 						: enableReasoningEffort
 							? 16_384

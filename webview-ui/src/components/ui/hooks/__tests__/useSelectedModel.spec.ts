@@ -1570,10 +1570,49 @@ describe("useSelectedModel", () => {
 			expect(result.current.info).toEqual(getZAiModels("international_api")["glm-5.3"])
 		})
 
-		it("falls back when GLM-5.3 is unavailable on the China API", () => {
+		it("displays the configured model ID with sane defaults when it is not in the API line catalog", () => {
+			expect(getZAiModels("china_api")["glm-5.3"]).toBeUndefined()
+
 			const apiConfiguration: ProviderSettings = {
 				apiProvider: providerIdentifiers.zai,
 				apiModelId: "glm-5.3",
+				zaiApiLine: "china_api",
+			}
+
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
+
+			expect(result.current.id).toBe("glm-5.3")
+			expect(result.current.info).toEqual(openAiModelInfoSaneDefaults)
+		})
+
+		it("displays a custom model ID that is in no Z.ai catalog", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.zai,
+				apiModelId: "glm-custom-preview",
+			}
+
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
+
+			expect(result.current.id).toBe("glm-custom-preview")
+			expect(result.current.info).toEqual(openAiModelInfoSaneDefaults)
+		})
+
+		it("falls back to the API line default when no model is configured", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.zai,
+				zaiApiLine: "china_api",
+			}
+
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
+
+			expect(result.current.id).toBe(mainlandZAiDefaultModelId)
+			expect(result.current.info).toEqual(getZAiModels("china_api")[mainlandZAiDefaultModelId])
+		})
+
+		it("falls back to the API line default when the configured model ID is empty", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.zai,
+				apiModelId: "",
 				zaiApiLine: "china_api",
 			}
 
