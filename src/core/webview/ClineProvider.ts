@@ -9,6 +9,7 @@ import delay from "delay"
 import axios from "axios"
 import debounce from "lodash.debounce"
 import pWaitFor from "p-wait-for"
+import deepEqual from "fast-deep-equal"
 import * as vscode from "vscode"
 
 import {
@@ -2071,9 +2072,11 @@ export class ClineProvider
 				let savedConfig = false
 				let shouldRollbackContext = false
 				const originalContextSettings: ProviderSettings = { ...stored, id } as ProviderSettings
+				let savedProfileSnapshot: (ProviderSettings & { id?: string; name?: string }) | null = null
 				try {
 					await this.providerSettingsManager.saveConfig(name, merged as ProviderSettings)
 					savedConfig = true
+					savedProfileSnapshot = await this.providerSettingsManager.getProfile({ name }).catch(() => null)
 
 					if (signal.aborted || this._disposed) {
 						throw new Error("Provider profile mutation aborted")
@@ -2095,17 +2098,19 @@ export class ClineProvider
 								.getProfile({ name })
 								.catch(() => null)
 							// Check if stored profile still matches what this mutation saved.
-							// If another provider instance saved a newer profile in the meantime,
-							// do not overwrite it with originalContextSettings.
+							// Compare the full profile (compare-and-swap) so that any concurrent changes
+							// to non-patch fields (such as api keys) are preserved and never overwritten.
 							const matchesSavedSettings = Boolean(
 								currentProfile &&
-								currentProfile.apiProvider === storedProvider &&
-								(!providerModelKey ||
-									currentProfile[providerModelKey as keyof typeof currentProfile] ===
-										merged[providerModelKey]) &&
-								appliedKeys.every(
-									(key) => currentProfile[key as keyof typeof currentProfile] === merged[key],
-								),
+								(savedProfileSnapshot
+									? deepEqual(currentProfile, savedProfileSnapshot)
+									: currentProfile.apiProvider === storedProvider &&
+										(!providerModelKey ||
+											currentProfile[providerModelKey as keyof typeof currentProfile] ===
+												merged[providerModelKey]) &&
+										appliedKeys.every(
+											(key) => currentProfile[key as keyof typeof currentProfile] === merged[key],
+										)),
 							)
 
 							if (matchesSavedSettings) {

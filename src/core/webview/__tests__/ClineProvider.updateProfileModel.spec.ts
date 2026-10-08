@@ -862,6 +862,36 @@ describe("ClineProvider - updateProfileModel", () => {
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.save_api_config")
 	})
 
+	it("preserves concurrent non-patch-field changes (e.g. openRouterApiKey) saved by another instance and skips rollback", async () => {
+		mockStoredProfile({
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4",
+			openRouterApiKey: "initial-key",
+		})
+
+		vi.spyOn(provider.contextProxy, "setProviderSettings").mockImplementation(async () => {
+			// Simulate another provider instance updating only a non-patch field (api key)
+			// while leaving the newly saved model (gpt-4.5) unchanged
+			storedProfiles["test-config"] = {
+				name: "test-config",
+				id: "test-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4.5",
+				openRouterApiKey: "concurrently-updated-key",
+			}
+			throw new Error("Context secret storage write failed")
+		})
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-4.5",
+		})
+
+		// Rollback must NOT restore initial-key and overwrite the newer API key!
+		expect(storedProfiles["test-config"].openRouterApiKey).toBe("concurrently-updated-key")
+		expect(storedProfiles["test-config"].openRouterModelId).toBe("openai/gpt-4.5")
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.save_api_config")
+	})
+
 	it("rolls back saved profile even if patch contains unallowed or skipped keys", async () => {
 		mockStoredProfile({
 			apiProvider: providerIdentifiers.openrouter,
