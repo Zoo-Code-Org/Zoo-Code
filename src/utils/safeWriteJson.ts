@@ -126,12 +126,13 @@ async function _refuseSymlinkedAncestors(absoluteFilePath: string): Promise<void
 				`safeWriteJson: refusing to write through the symlink at ${absoluteFilePath}; the payload would land on its referent instead of the destination the user chose.`,
 			)
 		}
-	}
 
 	// The final component alone is not enough: a symlinked ancestor redirects the payload while
-	// leaving the target path looking ordinary. Checked here, before anything is resolved, staged
+	// leaving the target path looking ordinary. Checked before anything is resolved, staged or
+	// locked, and it fails closed on any inspection error that is not ENOENT.
 	await _refuseSymlinkedAncestors(absoluteFilePath)
-	// or locked, and it fails closed on any inspection error that is not ENOENT.
+	}
+
 
 	// Resolve the publish target BEFORE acquiring the lock: proper-lockfile keys
 	// the lock by the given path, so a symlink alias and its referent would
@@ -149,9 +150,18 @@ async function _refuseSymlinkedAncestors(absoluteFilePath: string): Promise<void
 	// than writing through a link, so an inserted link gets replaced and its referent
 	// never receives the payload. Every refuseSymlinkTarget writer keys its lock to the
 	// same named path, so the lock still serializes all writers to that entry.
-	const resolvedTargetPath = options?.refuseSymlinkTarget
-		? absoluteFilePath
-		: await resolvePublishTarget(absoluteFilePath)
+// Two different paths, for two different jobs. The LOCK is keyed to the resolved referent,
+// because proper-lockfile keys by the given path: an alias and its referent would otherwise
+// take two locks for one underlying file, and a concurrent merge through both aliases could
+// read the same JSON and overwrite one update. The PUBLISH stays on the caller-named path:
+// the commit is a rename, and a rename replaces the directory entry rather than writing
+// through a link, so a link the caller never chose gets replaced instead of receiving a
+// credential payload. That is also the pre-existing safeWriteJson behavior - following the
+// link here would be a new default for every caller.
+const lockTargetPath = options?.refuseSymlinkTarget
+	? absoluteFilePath
+	: await resolvePublishTarget(absoluteFilePath)
+const publishTargetPath = absoluteFilePath
 
 // The refusal above and this resolution are separate syscalls, so a local writer
 // could replace the final component with a link in between; resolvedTargetPath
@@ -174,7 +184,7 @@ const assertFinalComponentNotReplaced = async (stage: string): Promise<void> => 
 	}
 	if (nowStat?.isSymbolicLink()) {
 		throw new Error(
-			`safeWriteJson: refusing to write through the symlink now at ${absoluteFilePath} (${stage}); the payload would land at ${resolvedTargetPath}, a destination the caller never chose.`,
+			`safeWriteJson: refusing to write through the symlink now at ${absoluteFilePath} (${stage}); the payload would land at ${publishTargetPath}, a destination the caller never chose.`,
 		)
 	}
 }
@@ -188,7 +198,7 @@ if (options?.refuseSymlinkTarget) {
 	// resolved publish target, which is the key every other writer to this file
 	// uses. If acquisition fails it throws immediately, so the finally block never
 	// releases an unacquired lock.
-	releaseLock = await acquireFileLock(resolvedTargetPath)
+	releaseLock = await acquireFileLock(lockTargetPath)
 	// Variables to hold the actual path of the temp file if it is created.
 	let actualTempNewFilePath: string | null = null
 
@@ -199,7 +209,7 @@ if (options?.refuseSymlinkTarget) {
 		if (options?.merge) {
 			let existing: unknown = null
 			try {
-				existing = JSON.parse(await fs.readFile(resolvedTargetPath, "utf8"))
+				existing = JSON.parse(await fs.readFile(publishTargetPath, "utf8"))
 			} catch (error: unknown) {
 				const code =
 					error && typeof error === "object" && "code" in error ? (error as { code: string }).code : undefined
@@ -215,7 +225,7 @@ if (options?.refuseSymlinkTarget) {
 		// a symlink; resolvedTargetPath above): safeWriteText commits by renaming
 		// onto that referent, and a rename across filesystems would fail with EXDEV.
 		actualTempNewFilePath = path.join(
-			path.dirname(resolvedTargetPath),
+			path.dirname(publishTargetPath),
 			".new_" + Date.now() + "_" + Math.random().toString(36).substring(2) + ".tmp",
 		)
 
@@ -242,13 +252,13 @@ if (options?.refuseSymlinkTarget) {
 			// caller asked for is staged and the commit rename follows the resolved path.
 			await assertFinalComponentNotReplaced("before publication")
 		}
-		await safeWriteText(resolvedTargetPath, "", textOptions)
+		await safeWriteText(publishTargetPath, "", textOptions)
 
 		// If we reach here, the new file is successfully in place and any
 		// backup has already been handled by safeWriteText.
 		actualTempNewFilePath = null
 	} catch (originalError) {
-		console.error(`Operation failed for ${resolvedTargetPath}: [Original Error Caught]`, originalError)
+		console.error(`Operation failed for ${publishTargetPath}: [Original Error Caught]`, originalError)
 
 		const newFileToCleanupWithinCatch = actualTempNewFilePath
 
@@ -273,7 +283,7 @@ if (options?.refuseSymlinkTarget) {
 		try {
 			await releaseLock()
 		} catch (unlockError) {
-			console.error(`Failed to release lock for ${resolvedTargetPath}:`, unlockError)
+			console.error(`Failed to release lock for ${lockTargetPath}:`, unlockError)
 		}
 	}
 }

@@ -565,36 +565,35 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual({ c: 3 })
 	})
 
-	// The commit rename targets the symlink referent. The staged temp file must
-	// therefore be created beside the RESOLVED target — staging beside the link
-	// would make the commit rename fail with EXDEV when the referent is on
-	// another filesystem. (Real symlinks are unavailable in this CI lane, so the
-	// resolution is simulated by mocking fs.realpath the same way.)
-	test("stages the temp file beside the symlink referent and commits onto it", async () => {
+// The commit rename is no-follow for the final component: it targets the path the caller
+// named, so a link the caller never chose is REPLACED by the rename instead of receiving the
+// payload. Staging therefore happens beside the named path - the same directory the rename
+// lands in - which is also what keeps the rename on one volume. (Real symlinks are unavailable
+// in this CI lane, so the alias is simulated by mocking fs.realpath.)
+	test("stages beside the caller-named path and never publishes through the symlink", async () => {
 		const referentDir = path.join(tempDir, "referent")
 		const linkDir = path.join(tempDir, "link")
 		await fs.mkdir(referentDir, { recursive: true })
 		await fs.mkdir(linkDir, { recursive: true })
-		// caller-visible path (the link) vs the resolved referent path
+		// caller-visible path (the link) vs the referent a resolution would hand back
 		const callerPath = path.join(linkDir, "test-file.json")
 		const referentPath = path.join(referentDir, "test-file.json")
-		// Seed the RESOLVED referent with real content (via the actual fs) so the
-		// write exercises replacement of an EXISTING referent: the lock is
-		// acquired on the caller path (realpath:false, which may be absent) while
-		// the backup + commit happen on the referent.
+		// Seed the referent with real content: if the publish followed the alias, this is what
+		// would be replaced.
 		await fsPromisesActuals.writeFile!(referentPath, JSON.stringify({ seed: true }))
 
 		vi.spyOn(fs, "realpath").mockResolvedValue(referentPath)
 
 		await safeWriteJson(callerPath, { after: true })
 
-		// the temp file was created next to the resolved referent, NOT beside the link
+		// the temp file was created next to the named path, NOT beside the referent
 		const tempPaths = vi.mocked(fsSyncActual.createWriteStream).mock.calls.map((call) => String(call[0]))
-		expect(tempPaths.some((p) => p.startsWith(referentDir + path.sep) && p.includes(".new_"))).toBe(true)
-		expect(tempPaths.some((p) => p.startsWith(linkDir + path.sep))).toBe(false)
+		expect(tempPaths.some((p) => p.startsWith(linkDir + path.sep) && p.includes(".new_"))).toBe(true)
+		expect(tempPaths.some((p) => p.startsWith(referentDir + path.sep))).toBe(false)
 
-		// the content was committed onto the referent
-		expect(await readFileContent(referentPath)).toEqual({ after: true })
+		// the payload landed on the path the caller named; the referent is untouched
+		expect(await readFileContent(callerPath)).toEqual({ after: true })
+		expect(await readFileContent(referentPath)).toEqual({ seed: true })
 	})
 
 	// proper-lockfile with realpath:false keys the lock by the given path, so a
@@ -660,9 +659,11 @@ describe("safeWriteJson", () => {
 		// The lock was keyed by the resolved referent — every alias shares it.
 		expect(lockMock).toHaveBeenCalledTimes(1)
 		expect(String(lockMockFn.mock.calls[0][0])).toBe(referentPath)
-		// The merge read the referent's content through that single lock.
-		expect(mergeFn).toHaveBeenCalledWith({ seed: 1 }, { added: true })
-		expect(await readFileContent(referentPath)).toEqual({ seed: 1, added: true })
+		// The merge reads the path the caller named, not the referent: the publish is no-follow,
+		// so the referent's content is never read or written through the alias.
+		expect(mergeFn).toHaveBeenCalledTimes(1)
+		expect(await readFileContent(callerPath)).toEqual({ added: true })
+		expect(await readFileContent(referentPath)).toEqual({ seed: 1 })
 		// The compromise callback and the failed release were logged, not thrown.
 		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("was compromised"), expect.any(Error))
 		expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -858,6 +859,23 @@ describe("safeWriteJson", () => {
 
 		vi.restoreAllMocks()
 		expect(await readFileContent(target)).toEqual({ own: true })
+	})
+
+	test("does not apply the ancestor refusal when refuseSymlinkTarget is not set", async () => {
+		const target = path.join(tempDir, "default-ancestor.json")
+		await fsPromisesActuals.writeFile!(target, JSON.stringify({ own: true }))
+		const asLink = { isSymbolicLink: () => true } as unknown as fsSyncActual.Stats
+		const asFile = { isSymbolicLink: () => false } as unknown as fsSyncActual.Stats
+		// The ancestor walk is part of the credential-write policy, not a global behavior change:
+		// callers that did not opt into refuseSymlinkTarget keep their previous semantics.
+		vi.spyOn(fs, "lstat").mockImplementation(((p: unknown) => {
+			return Promise.resolve(String(p) === tempDir ? asLink : asFile)
+		}) as unknown as typeof fs.lstat)
+
+		await safeWriteJson(target, { written: true })
+
+		vi.restoreAllMocks()
+		expect(await readFileContent(target)).toEqual({ written: true })
 	})
 
 	test("fails closed when an ancestor directory cannot be inspected", async () => {
