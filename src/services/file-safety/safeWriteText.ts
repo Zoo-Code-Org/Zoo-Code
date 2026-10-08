@@ -259,8 +259,10 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			// not be published wider than the file it replaces (a 0o600 target
 			// must not become 0o644 through the atomic rename).
 			let targetMode = 0o644 // default for a fresh target
+			let targetExists = false
 			try {
 				targetMode = fsSync.statSync(targetPath).mode & 0o777
+				targetExists = true
 			} catch (error: unknown) {
 				// Only a genuinely absent target may take the default mode. Any other
 				// stat failure leaves the real mode unknown, and publishing with the
@@ -278,6 +280,13 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				if (_errorCode(error) !== "ENOENT" || stagingDir === null) throw error
 				_stagingDir(dirPath)
 				fd = fsSync.openSync(tempPath, "w", targetMode)
+			}
+			// The creation mode handed to openSync is masked by the process umask: an existing
+			// 0o664 target would be published as 0o644 and a shared repository would lose group
+			// write access on every save. Apply the exact target mode on the descriptor, which is
+			// also what the caller-staged branch below does.
+			if (targetExists) {
+				fsSync.fchmodSync(fd, targetMode)
 			}
 			try {
 				// Loop until every byte is written: writeSync can report a short

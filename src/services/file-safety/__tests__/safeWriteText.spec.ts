@@ -646,6 +646,35 @@ describe("safeWriteText", () => {
 
 
 	describe("review fixes", () => {
+		it("applies an existing target's mode with fchmodSync, not the umask-masked creation mode", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fsSync.closeSync).mockReturnValue(undefined)
+			// A group-writable target: openSync(path, "w", 0o664) would create 0o644 under a
+			// 0o022 umask, and the rename would publish the narrowed mode.
+			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o664))
+
+			await safeWriteText(targetPath, "data", { platform: "linux" })
+
+			expect(fsSync.fchmodSync).toHaveBeenCalledWith(1, 0o664)
+		})
+
+		it("leaves a fresh target to its creation mode", async () => {
+			const targetPath = "/tmp/test-dir/new-target.txt"
+			const enoent = Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			vi.mocked(fs.realpath).mockRejectedValue(enoent)
+			vi.mocked(fsSync.statSync).mockImplementation(() => {
+				throw enoent
+			})
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fsSync.closeSync).mockReturnValue(undefined)
+
+			await safeWriteText(targetPath, "data", { platform: "linux" })
+
+			expect(fsSync.fchmodSync).not.toHaveBeenCalled()
+		})
+
 		it("preserves the target's restrictive mode and tolerates a failed staging-dir permission repair", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
