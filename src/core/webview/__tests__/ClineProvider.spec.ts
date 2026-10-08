@@ -603,6 +603,20 @@ describe("ClineProvider", () => {
 		it("returns undefined when no live instance owns the view", () => {
 			expect(ClineProvider.getInstanceForView({} as vscode.WebviewView)).toBeUndefined()
 		})
+
+		it("excludes an instance whose disposal has started", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			expect(ClineProvider.getInstanceForView(mockWebviewView)).toBe(provider)
+
+			// dispose() marks the instance disposed synchronously but only removes it from
+			// activeInstances once its ASYNCHRONOUS task cleanup finishes. A tab command
+			// queued inside that window must not be handed this provider: it would re-run task
+			// eviction and workspace refresh on top of the disposal already doing them.
+			const disposal = provider.dispose()
+			expect(ClineProvider.getInstanceForView(mockWebviewView)).toBeUndefined()
+
+			await expect(disposal).resolves.toBeUndefined()
+		})
 	})
 
 	test("reports an unresolved webview as not visible", () => {

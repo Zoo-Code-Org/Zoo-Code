@@ -435,21 +435,33 @@ describe("registerCommands handlers", () => {
 		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 	})
 
-	it("focusInput does not post when a tab panel is tracked alongside the sidebar", async () => {
+	it("focusInput posts to the tab provider when a tab panel is tracked alongside the sidebar", async () => {
 		setPanel({} as vscode.WebviewView, "sidebar")
-		setPanel({} as vscode.WebviewPanel, "tab")
+		const tabPanel = {} as vscode.WebviewPanel
+		setPanel(tabPanel, "tab")
+		const tabProvider = { postMessageToWebview: vi.fn().mockResolvedValue(undefined) }
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(tabProvider)
 
 		await handlers["zoo-code.focusInput"]()
 
+		// focusPanel selects the tab when one is tracked, so the focus message follows that
+		// selection: the tab webview is the one that became visible and must receive it.
+		expect(ClineProvider.getInstanceForView as Mock).toHaveBeenCalledWith(tabPanel)
+		expect(tabProvider.postMessageToWebview).toHaveBeenCalledWith({ type: "action", action: "focusInput" })
 		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 	})
 
 	it("setPanel keeps independent refs: clearing only the tab ref re-enables the sidebar post", async () => {
 		setPanel({} as vscode.WebviewView, "sidebar")
-		setPanel({} as vscode.WebviewPanel, "tab")
+		const tabPanel = {} as vscode.WebviewPanel
+		setPanel(tabPanel, "tab")
+		const tabProvider = { postMessageToWebview: vi.fn().mockResolvedValue(undefined) }
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(tabProvider)
 
-		// The tab ref does not wipe the sidebar ref...
+		// The tab ref does not wipe the sidebar ref, and while it is set the tab is the
+		// focus target...
 		await handlers["zoo-code.focusInput"]()
+		expect(tabProvider.postMessageToWebview).toHaveBeenCalledWith({ type: "action", action: "focusInput" })
 		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 
 		// ...and clearing only the tab ref re-enables the sidebar post.
@@ -934,6 +946,56 @@ describe("openClineInNewTab", () => {
 		expect(second).toBeDefined()
 		expect(secondProvider).toBe(second)
 		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2)
+	})
+
+	it("does not reuse a rejected creation: a later call creates a fresh panel", async () => {
+		// Creation fails partway through. The in-flight slot has to be cleared even on
+		// rejection, otherwise every later "Open in editor" receives this same rejected
+		// promise and the command is permanently broken for the session.
+		const failure = new Error("ContextProxy unavailable")
+		;(ContextProxy.getInstance as Mock).mockRejectedValueOnce(failure)
+
+		await expect(
+			openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: tabFocusTracker,
+			}),
+		).rejects.toThrow("ContextProxy unavailable")
+
+		const provider = await openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: tabFocusTracker,
+		})
+
+		const ctor = ClineProvider as unknown as Mock
+		expect(ctor.mock.instances[0]).toBeDefined()
+		expect(provider).toBe(ctor.mock.instances[0])
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
+	})
+
+	it("hands the same rejection to every caller sharing a failed creation", async () => {
+		const failure = new Error("ContextProxy unavailable")
+		// Once only: the two callers share one creation, and a persistent rejection would
+		// leak into the next test.
+		;(ContextProxy.getInstance as Mock).mockRejectedValueOnce(failure)
+
+		const open = () =>
+			openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: tabFocusTracker,
+			})
+
+		const results = await Promise.allSettled([open(), open()])
+
+		// Overlapping callers share one creation, so both observe the original rejection
+		// rather than one of them silently receiving a later, unrelated result.
+		expect(results.map((result) => result.status)).toEqual(["rejected", "rejected"])
+		expect((results[0] as PromiseRejectedResult).reason).toBe(failure)
+		expect((results[1] as PromiseRejectedResult).reason).toBe(failure)
+		expect(vscode.window.createWebviewPanel).not.toHaveBeenCalled()
 	})
 
 	it("keeps the replacement panel tracked when a stale panel's disposal fires late", async () => {

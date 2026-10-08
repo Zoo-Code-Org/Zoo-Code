@@ -923,7 +923,14 @@ export class ClineProvider
 	 * heuristic (which picks whichever surface the user last focused).
 	 */
 	public static getInstanceForView(view: vscode.WebviewView | vscode.WebviewPanel): ClineProvider | undefined {
-		return Array.from(this.activeInstances).find((instance) => instance.view === view)
+		// A provider whose disposal has started is still listed in activeInstances until
+		// dispose() finishes its ASYNCHRONOUS task cleanup (the set removal happens after
+		// it), so a command queued during that window would otherwise be handed a dying
+		// provider and re-run task eviction and workspace refresh on top of the disposal
+		// already performing them. A disposing instance never resolves a view lookup, which
+		// also means every *InTab handler bails on undefined instead of mutating a disposed
+		// task.
+		return Array.from(this.activeInstances).find((instance) => instance.view === view && !instance._disposed)
 	}
 
 	public static async getInstance(): Promise<ClineProvider | undefined> {

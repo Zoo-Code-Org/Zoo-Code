@@ -236,13 +236,13 @@ const getCommandsMap = ({
 		try {
 			await focusPanel(tabPanel, sidebarPanel)
 
-			// Send focus input message only when the sidebar panel was
-			// focused: the tab takes selection priority in focusPanel, so
-			// the sidebar receives the message only when no tab panel is
-			// tracked.
-			if (sidebarPanel && !tabPanel) {
-				await provider.postMessageToWebview({ type: "action", action: "focusInput" })
-			}
+			// focusPanel selects the TAB whenever a tab panel is tracked, so the input
+			// focus has to go to whichever provider focusPanel actually focused: the tab's
+			// when one is tracked, otherwise the sidebar's, and nothing when neither is
+			// available. The previous guard skipped the post as soon as a tab existed, so
+			// in the both-tracked state the tab became visible without focusing its input.
+			const focusTarget = tabPanel ? getTabProvider() : sidebarPanel ? provider : undefined
+			await focusTarget?.postMessageToWebview({ type: "action", action: "focusInput" })
 		} catch (error) {
 			outputChannel.appendLine(`Error focusing input: ${error}`)
 		}
