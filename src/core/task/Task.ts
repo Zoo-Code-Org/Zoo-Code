@@ -3426,7 +3426,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// A save whose metadata / task-history stage failed leaves the history entry behind
 		// the messages that are already on disk. Give that stage one awaited chance to catch
 		// up before the task stops serving, so shutdown does not persist a stale history item.
-		if (this.pendingTaskMetadataRepair) {
+		// Skipped when the api-config initialization never completed: persistTaskMetadata()
+		// awaits taskApiConfigReady, and a never-settling initialization would block teardown.
+		// Nothing was written for that save's metadata stage anyway, so there is nothing to repair.
+		if (this.pendingTaskMetadataRepair && this._taskApiConfigName !== undefined) {
 			try {
 				await this.persistTaskMetadata()
 			} catch (error) {

@@ -6266,6 +6266,33 @@ describe("Cline", () => {
 			historySpy.mockRestore()
 		})
 
+		it("does not block teardown when a pending metadata repair has no initialized api config", async () => {
+			// persistTaskMetadata() awaits taskApiConfigReady. For a task whose async api-config
+			// initialization never settles, an unconditional dispose-time retry would hang the
+			// teardown, so the retry is skipped when the config never initialized.
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
+			fsReal.mkdirSync(taskDir, { recursive: true })
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			// Bracket access for the private fields: this is the pathological construction where
+			// the async api-config initialization never resolves, which no public API can produce.
+			task["_taskApiConfigName"] = undefined
+			task["taskApiConfigReady"] = new Promise<void>(() => {})
+			task["pendingTaskMetadataRepair"] = true
+
+			const outcome = await Promise.race([
+				task.dispose().then(() => "disposed"),
+				new Promise<string>((resolve) => setTimeout(() => resolve("timed out"), 2000)),
+			])
+
+			expect(outcome).toBe("disposed")
+		})
+
 		it("finalizePartialToolAsk skips the webview update when the message write itself fails", async () => {
 			// Complements the later-stage-failure test above by failing the first save
 			// stage: with the real task directory removed, safeWriteJson's fs.access
