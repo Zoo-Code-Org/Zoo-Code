@@ -13,12 +13,28 @@ import {
 	type ProviderName,
 	isProviderName,
 	isRetiredProvider,
+	providerIdentifiers,
+	modelIdKeysByProvider,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { Mode, modes } from "../../shared/modes"
 import { buildApiHandler } from "../../api"
 import { downgradeLegacyRooConfig } from "./routerRemoval"
+
+export const RESET_ONLY_KEYS: readonly string[] = [
+	"awsCustomArn",
+	"reasoningEffort",
+	"modelMaxTokens",
+	"modelMaxThinkingTokens",
+]
+
+export interface UpdateProfileModelResult {
+	success: boolean
+	updatedProfile?: ProviderSettingsWithId
+	previousProfile?: ProviderSettingsWithId
+	reason?: "not_found" | "provider_mismatch" | "disallowed" | "cas_failed"
+}
 
 // Type-safe model migrations mapping
 type ModelMigrations = {
@@ -87,11 +103,22 @@ export class ProviderSettingsManager {
 		return Math.random().toString(36).substring(2, 15)
 	}
 
-	// Synchronize readConfig/writeConfig operations to avoid data loss.
-	private _lock = Promise.resolve()
+	// Synchronize readConfig/writeConfig operations across instances sharing secretsKey to avoid data loss.
+	private static readonly locks = new Map<string, Promise<void>>()
+	public static resetLocksForTesting(): void {
+		ProviderSettingsManager.locks.clear()
+	}
 	private lock<T>(cb: () => Promise<T>) {
-		const next = this._lock.then(cb)
-		this._lock = next.catch(() => {}) as Promise<void>
+		const key = this.secretsKey
+		const previous = ProviderSettingsManager.locks.get(key) ?? Promise.resolve()
+		const next = previous.then(cb)
+		ProviderSettingsManager.locks.set(
+			key,
+			next.then(
+				() => undefined,
+				() => undefined,
+			),
+		)
 		return next
 	}
 
@@ -374,6 +401,21 @@ export class ProviderSettingsManager {
 		}
 	}
 
+	private normalizeAndFilterConfig(config: ProviderSettingsWithId, id: string): ProviderSettingsWithId {
+		const normalizedConfig = downgradeLegacyRooConfig(config as Record<string, unknown>)
+			.config as ProviderSettingsWithId
+
+		// For active providers, filter out settings from other providers.
+		// For retired providers, preserve full profile fields (including legacy
+		// provider-specific keys) to avoid data loss — passthrough() keeps
+		// unknown keys that strict parse() would strip.
+		const filteredConfig =
+			typeof normalizedConfig.apiProvider === "string" && isRetiredProvider(normalizedConfig.apiProvider)
+				? providerSettingsWithIdSchema.passthrough().parse(normalizedConfig)
+				: discriminatedProviderSettingsWithIdSchema.parse(normalizedConfig)
+		return { ...filteredConfig, id }
+	}
+
 	/**
 	 * Save a config with the given name.
 	 * Preserves the ID from the input 'config' object if it exists,
@@ -382,27 +424,197 @@ export class ProviderSettingsManager {
 	public async saveConfig(name: string, config: ProviderSettingsWithId): Promise<string> {
 		try {
 			return await this.lock(async () => {
-				const providerProfiles = await this.load()
+				const rawBefore = await this.context.secrets.get(this.secretsKey)
+				const providerProfiles = rawBefore ? (JSON.parse(rawBefore) as ProviderProfiles) : await this.load()
 				// Preserve the existing ID if this is an update to an existing config.
 				const existingId = providerProfiles.apiConfigs[name]?.id
 				const id = config.id || existingId || this.generateId()
-				const normalizedConfig = downgradeLegacyRooConfig(config as Record<string, unknown>)
-					.config as ProviderSettingsWithId
+				providerProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(config, id)
 
-				// For active providers, filter out settings from other providers.
-				// For retired providers, preserve full profile fields (including legacy
-				// provider-specific keys) to avoid data loss — passthrough() keeps
-				// unknown keys that strict parse() would strip.
-				const filteredConfig =
-					typeof normalizedConfig.apiProvider === "string" && isRetiredProvider(normalizedConfig.apiProvider)
-						? providerSettingsWithIdSchema.passthrough().parse(normalizedConfig)
-						: discriminatedProviderSettingsWithIdSchema.parse(normalizedConfig)
-				providerProfiles.apiConfigs[name] = { ...filteredConfig, id }
-				await this.store(providerProfiles)
+				const rawLatest = await this.context.secrets.get(this.secretsKey)
+				let targetProfiles = providerProfiles
+				let expectedWriteRaw = rawBefore
+				if (rawLatest !== rawBefore && rawLatest) {
+					targetProfiles = JSON.parse(rawLatest) as ProviderProfiles
+					targetProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(config, id)
+					expectedWriteRaw = rawLatest
+				}
+				const stored = await this.storeWithCas(targetProfiles, expectedWriteRaw)
+				if (!stored) {
+					const rawFinal = await this.context.secrets.get(this.secretsKey)
+					const finalProfiles = rawFinal
+						? (JSON.parse(rawFinal) as ProviderProfiles)
+						: structuredClone(this.defaultProviderProfiles)
+					finalProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(config, id)
+					await this.store(finalProfiles)
+				}
 				return id
 			})
 		} catch (error) {
 			throw new Error(`Failed to save config: ${error}`)
+		}
+	}
+
+	/**
+	 * Atomically restores a stored profile to `restoredConfig` if and only if
+	 * the currently stored profile still matches `expectedConfig` (atomic compare-and-swap).
+	 * Returns true if restored; returns false if the stored profile was updated by a competing write.
+	 */
+	public async restoreConfigIfMatches(
+		name: string,
+		expectedConfig: ProviderSettingsWithId,
+		restoredConfig: ProviderSettingsWithId,
+	): Promise<boolean> {
+		try {
+			return await this.lock(async () => {
+				const rawBefore = await this.context.secrets.get(this.secretsKey)
+				const providerProfiles = rawBefore ? (JSON.parse(rawBefore) as ProviderProfiles) : await this.load()
+				const current = providerProfiles.apiConfigs[name]
+				if (!current) {
+					return false
+				}
+
+				const currentId = current.id || this.generateId()
+				const expectedTarget = JSON.parse(
+					JSON.stringify(this.normalizeAndFilterConfig(expectedConfig, expectedConfig.id || currentId)),
+				) as ProviderSettingsWithId
+				const cleanCurrent = JSON.parse(JSON.stringify(current)) as ProviderSettingsWithId
+				if (!deepEqual(cleanCurrent, expectedTarget)) {
+					return false
+				}
+
+				// Storage-level compare-and-swap: verify the profile still matches at write time
+				// to guard against competing writes from other manager instances
+				const rawLatest = await this.context.secrets.get(this.secretsKey)
+				let targetProfiles = providerProfiles
+				let expectedWriteRaw = rawBefore
+				if (rawLatest !== rawBefore) {
+					targetProfiles = rawLatest
+						? (JSON.parse(rawLatest) as ProviderProfiles)
+						: structuredClone(this.defaultProviderProfiles)
+					const latestCurrent = targetProfiles.apiConfigs?.[name]
+					const cleanLatest = latestCurrent
+						? (JSON.parse(JSON.stringify(latestCurrent)) as ProviderSettingsWithId)
+						: null
+					if (!cleanLatest || !deepEqual(cleanLatest, expectedTarget)) {
+						return false
+					}
+					expectedWriteRaw = rawLatest
+				}
+
+				targetProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(
+					restoredConfig,
+					restoredConfig.id || currentId,
+				)
+				return await this.storeWithCas(targetProfiles, expectedWriteRaw)
+			})
+		} catch (error) {
+			throw new Error(`Failed to restore config: ${error}`)
+		}
+	}
+
+	/**
+	 * Atomically updates a profile's model configuration if and only if the profile exists,
+	 * its stored provider matches expectedProvider, and any optional validator passes.
+	 * Applies only model-specific keys and resets, preserving other profile fields (such as
+	 * API keys or base URLs) that may have been updated concurrently by another manager instance.
+	 * Performs a compare-and-swap write to guard against clobbering concurrent storage changes.
+	 */
+	public async updateProfileModel(
+		name: string,
+		expectedProvider: string,
+		patch: Record<string, unknown>,
+		validateProfileAllowed?: (candidate: ProviderSettingsWithId) => boolean,
+	): Promise<UpdateProfileModelResult> {
+		try {
+			return await this.lock(async () => {
+				const rawBefore = await this.context.secrets.get(this.secretsKey)
+				const providerProfiles = rawBefore ? (JSON.parse(rawBefore) as ProviderProfiles) : await this.load()
+				const current = providerProfiles.apiConfigs[name]
+				if (!current) {
+					return { success: false, reason: "not_found" }
+				}
+
+				const storedProvider = current.apiProvider ?? providerIdentifiers.openrouter
+				if (storedProvider !== expectedProvider) {
+					return { success: false, reason: "provider_mismatch" }
+				}
+
+				const applyPatchToProfile = (base: ProviderSettingsWithId) => {
+					const baseProvider = base.apiProvider ?? providerIdentifiers.openrouter
+					const providerModelKey: string | undefined =
+						baseProvider === providerIdentifiers.openai
+							? "openAiModelId"
+							: modelIdKeysByProvider[baseProvider as keyof typeof modelIdKeysByProvider]
+					const allowedKeys: ReadonlySet<string> = new Set(
+						providerModelKey ? [providerModelKey, ...RESET_ONLY_KEYS] : RESET_ONLY_KEYS,
+					)
+
+					const merged: Record<string, unknown> = { ...base, apiProvider: baseProvider }
+					for (const [key, value] of Object.entries(patch)) {
+						if (key === "apiProvider" || !allowedKeys.has(key)) {
+							continue
+						}
+						if (value !== null && typeof value !== "string" && typeof value !== "number") {
+							continue
+						}
+						if (
+							RESET_ONLY_KEYS.includes(key) &&
+							value !== null &&
+							!(key === "awsCustomArn" && value === "")
+						) {
+							continue
+						}
+						merged[key] = value === null ? undefined : value
+					}
+					return this.normalizeAndFilterConfig(merged as ProviderSettingsWithId, base.id || this.generateId())
+				}
+
+				const candidate = applyPatchToProfile(current)
+				if (validateProfileAllowed && !validateProfileAllowed(candidate)) {
+					return { success: false, reason: "disallowed" }
+				}
+
+				// Storage-level compare-and-swap:
+				const rawLatest = await this.context.secrets.get(this.secretsKey)
+				let targetProfiles = providerProfiles
+				let replacedProfile = current
+				let expectedWriteRaw = rawBefore
+				if (rawLatest !== rawBefore) {
+					targetProfiles = rawLatest
+						? (JSON.parse(rawLatest) as ProviderProfiles)
+						: structuredClone(this.defaultProviderProfiles)
+					const latestCurrent = targetProfiles.apiConfigs?.[name]
+					if (
+						!latestCurrent ||
+						(latestCurrent.apiProvider ?? providerIdentifiers.openrouter) !== expectedProvider
+					) {
+						return { success: false, reason: "cas_failed" }
+					}
+					// Re-apply patch onto latestCurrent to preserve any newly updated API keys or fields
+					const reCandidate = applyPatchToProfile(latestCurrent)
+					if (validateProfileAllowed && !validateProfileAllowed(reCandidate)) {
+						return { success: false, reason: "disallowed" }
+					}
+					replacedProfile = latestCurrent
+					targetProfiles.apiConfigs[name] = reCandidate
+					expectedWriteRaw = rawLatest
+				} else {
+					targetProfiles.apiConfigs[name] = candidate
+				}
+
+				const stored = await this.storeWithCas(targetProfiles, expectedWriteRaw)
+				if (!stored) {
+					return { success: false, reason: "cas_failed" }
+				}
+				return {
+					success: true,
+					updatedProfile: targetProfiles.apiConfigs[name],
+					previousProfile: replacedProfile,
+				}
+			})
+		} catch (error) {
+			throw new Error(`Failed to update profile model: ${error}`)
 		}
 	}
 
@@ -700,6 +912,19 @@ export class ProviderSettingsManager {
 		}
 
 		return apiConfig
+	}
+
+	private async storeWithCas(providerProfiles: ProviderProfiles, expectedRaw: string | undefined): Promise<boolean> {
+		try {
+			const currentRaw = await this.context.secrets.get(this.secretsKey)
+			if (currentRaw !== expectedRaw) {
+				return false
+			}
+			await this.context.secrets.store(this.secretsKey, JSON.stringify(providerProfiles, null, 2))
+			return true
+		} catch (error) {
+			throw new Error(`Failed to write provider profiles to secrets: ${error}`)
+		}
 	}
 
 	private async store(providerProfiles: ProviderProfiles) {

@@ -55,9 +55,18 @@ import {
 	DEFAULT_MODES,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	getModelId,
+	modelIdKeysByProvider,
 	isRetiredProvider,
 	providerIdentifiers,
+	type ProviderSettingsWithId,
 } from "@roo-code/types"
+
+const RESET_ONLY_KEYS: readonly string[] = [
+	"awsCustomArn",
+	"reasoningEffort",
+	"modelMaxTokens",
+	"modelMaxThinkingTokens",
+]
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
 import { TaskScheduler } from "../task/TaskScheduler"
@@ -251,6 +260,7 @@ export class ClineProvider
 	private taskHistoryStoreInitialized = false
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
 	private providerProfileMutationQueue = Promise.resolve()
+	private providerProfileMutationAbortController = new AbortController()
 	private historyTaskCreationQueue = Promise.resolve()
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
@@ -258,16 +268,33 @@ export class ClineProvider
 	}
 
 	private enqueueProviderProfileMutation<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+		if (this._disposed) {
+			return Promise.reject(new Error("ClineProvider is disposed"))
+		}
+
 		const controller = new AbortController()
+		const onProviderDispose = () => controller.abort()
+		this.providerProfileMutationAbortController.signal.addEventListener("abort", onProviderDispose, { once: true })
+		const removeDisposeListener = () => {
+			this.providerProfileMutationAbortController.signal.removeEventListener("abort", onProviderDispose)
+		}
+
+		const invoke = () => {
+			if (this._disposed) {
+				return Promise.reject(new Error("ClineProvider is disposed"))
+			}
+			if (controller.signal.aborted) {
+				return Promise.reject(new Error("Provider profile mutation aborted"))
+			}
+			return fn(controller.signal)
+		}
+
 		// Run fn after either outcome so a rejected mutation never poisons the queue.
-		const run = this.providerProfileMutationQueue.then(
-			() => fn(controller.signal),
-			() => fn(controller.signal),
-		)
+		const run = this.providerProfileMutationQueue.then(invoke, invoke).finally(removeDisposeListener)
 		const callerResult = this.withProviderProfileMutationTimeout(run, () => {
 			controller.abort()
 			this.log("Provider profile mutation timed out; aborting in-flight mutation")
-		})
+		}).finally(removeDisposeListener)
 
 		void run.then(
 			() => {
@@ -286,9 +313,8 @@ export class ClineProvider
 			},
 		)
 
-		// Advance from the timeout-bounded result. Each fn checks its AbortSignal before
-		// writing state, so advancing the queue on timeout cannot produce stale overwrites.
-		this.providerProfileMutationQueue = callerResult.then(
+		// Keep serialization in place until the timed-out mutation and its rollback settle.
+		this.providerProfileMutationQueue = run.then(
 			() => undefined,
 			() => undefined,
 		)
@@ -840,6 +866,7 @@ export class ClineProvider
 
 		this._disposed = true
 		this._postStateToWebviewThrottled.cancel()
+		this.providerProfileMutationAbortController.abort()
 		this.log("Disposing ClineProvider...")
 
 		// Reject any tasks still waiting for a scheduler permit so they don't
@@ -1878,6 +1905,9 @@ export class ClineProvider
 	): Promise<string | undefined> {
 		try {
 			return await this.enqueueProviderProfileMutation(async (signal) => {
+				if (signal.aborted || this._disposed) {
+					return undefined
+				}
 				// TODO: Do we need to be calling `activateProfile`? It's not
 				// clear to me what the source of truth should be; in some cases
 				// we rely on the `ContextProxy`'s data store and in other cases
@@ -1885,10 +1915,12 @@ export class ClineProvider
 				// be simpler to unify these two.
 				const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
 
-				if (signal.aborted) return id
+				if (signal.aborted || this._disposed) return id
 
 				if (activate) {
 					const { mode } = await this.getState()
+
+					if (signal.aborted || this._disposed) return id
 
 					// These promises do the following:
 					// 1. Adds or updates the list of provider profiles.
@@ -1907,6 +1939,8 @@ export class ClineProvider
 						this.contextProxy.setProviderSettings(providerSettings),
 					])
 
+					if (signal.aborted || this._disposed) return id
+
 					// Change the provider for the current task.
 					// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
 					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
@@ -1916,6 +1950,8 @@ export class ClineProvider
 				} else {
 					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
 				}
+
+				if (signal.aborted || this._disposed) return id
 
 				await this.postStateToWebview()
 				return id
@@ -1927,6 +1963,174 @@ export class ClineProvider
 
 			vscode.window.showErrorMessage(t("common:errors.create_api_config"))
 			return undefined
+		}
+	}
+
+	private getOrganizationAllowListForProfileMutation() {
+		if (!CloudService.hasInstance()) {
+			return ORGANIZATION_ALLOW_ALL
+		}
+
+		try {
+			const cloudService = CloudService.instance
+			if (!cloudService.isAuthenticated()) {
+				return ORGANIZATION_ALLOW_ALL
+			}
+			const settings = cloudService.getOrganizationSettings()
+			return settings ? settings.allowList : undefined
+		} catch (error) {
+			this.log(
+				`Unable to read organization allow-list for model update: ${error instanceof Error ? error.message : String(error)}`,
+			)
+			return undefined
+		}
+	}
+
+	/**
+	 * Applies a model selection to a stored profile. Everything runs inside one queued
+	 * mutation so a selection made against a profile that has since been switched away
+	 * from is dropped instead of saved and reactivated.
+	 */
+	async updateProfileModel(name: string, expectedProvider: string, patch: Record<string, unknown>): Promise<void> {
+		if (this._disposed) {
+			return
+		}
+
+		try {
+			await this.enqueueProviderProfileMutation(async (signal) => {
+				if (signal.aborted || this._disposed) return
+
+				// Retain initial task identity to guard against task switches/delegation during async operations
+				const initialTask = this.getCurrentTask()
+				const initialTaskId = initialTask?.taskId
+				const initialInstanceId = initialTask?.instanceId
+				const { currentApiConfigName, organizationAllowList: stateOrganizationAllowList } =
+					await this.getState()
+				const visibleProfileName = initialTask ? initialTask.taskApiConfigName : currentApiConfigName
+
+				if (visibleProfileName !== name) {
+					this.log(`Ignoring model update for profile '${name}': active profile is '${visibleProfileName}'`)
+					return
+				}
+
+				const authoritativeOrganizationAllowList = this.getOrganizationAllowListForProfileMutation()
+				if (!authoritativeOrganizationAllowList) {
+					this.log(`Ignoring model update for profile '${name}': organization allow-list is unavailable`)
+					vscode.window.showErrorMessage(t("common:errors.violated_organization_allowlist"))
+					return
+				}
+
+				const validateProfileAllowed = (candidate: ProviderSettingsWithId) => {
+					if (
+						!ProfileValidator.isProfileAllowed(
+							candidate as ProviderSettings,
+							authoritativeOrganizationAllowList,
+						)
+					) {
+						return false
+					}
+					if (
+						!stateOrganizationAllowList.allowAll &&
+						!ProfileValidator.isProfileAllowed(candidate as ProviderSettings, stateOrganizationAllowList)
+					) {
+						return false
+					}
+					return true
+				}
+
+				const result = await this.providerSettingsManager.updateProfileModel(
+					name,
+					expectedProvider,
+					patch,
+					validateProfileAllowed,
+				)
+
+				if (!result.success) {
+					if (result.reason === "disallowed") {
+						this.log(`Ignoring model update for profile '${name}': violates organization allow-list`)
+						vscode.window.showErrorMessage(t("common:errors.violated_organization_allowlist"))
+					} else if (result.reason === "provider_mismatch") {
+						this.log(
+							`Ignoring model update for profile '${name}': provider mismatch against expected '${expectedProvider}'`,
+						)
+					}
+					return
+				}
+
+				const updatedProfile = result.updatedProfile!
+				const previousProfile = result.previousProfile!
+				let shouldRollbackContext = false
+				try {
+					if (signal.aborted || this._disposed) {
+						throw new Error("Provider profile mutation aborted")
+					}
+
+					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
+					if (name === currentApiConfigName) {
+						shouldRollbackContext = true
+						await this.contextProxy.setProviderSettings(updatedProfile as ProviderSettings)
+					}
+
+					if (signal.aborted || this._disposed) {
+						throw new Error("Provider profile mutation aborted")
+					}
+				} catch (updateError) {
+					try {
+						const restored = await this.providerSettingsManager.restoreConfigIfMatches(
+							name,
+							updatedProfile,
+							previousProfile,
+						)
+						if (restored) {
+							await this.updateGlobalState(
+								"listApiConfigMeta",
+								await this.providerSettingsManager.listConfig(),
+							)
+							if (shouldRollbackContext) {
+								await this.contextProxy.setProviderSettings(previousProfile as ProviderSettings)
+							}
+						} else {
+							this.log(
+								`Preserving newer profile for '${name}' saved by another provider instance; skipping rollback`,
+							)
+						}
+					} catch (rollbackError) {
+						this.log(
+							`Failed to rollback profile '${name}' after update failure: ${
+								rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+							}`,
+						)
+					}
+					throw updateError
+				}
+
+				if (signal.aborted || this._disposed) {
+					return
+				}
+
+				// Only update the task if it is still the same task that was active when this update started.
+				const currentTask = this.getCurrentTask()
+				const isSameTask =
+					initialTask &&
+					currentTask &&
+					currentTask === initialTask &&
+					currentTask.taskId === initialTaskId &&
+					currentTask.instanceId === initialInstanceId
+
+				if (isSameTask) {
+					this.updateTaskApiHandlerIfNeeded(updatedProfile as ProviderSettings, { forceRebuild: true })
+					await this.persistStickyProviderProfileToCurrentTask(name)
+				}
+
+				if (signal.aborted || this._disposed) {
+					return
+				}
+
+				await this.postStateToWebview()
+			})
+		} catch (error) {
+			this.log(`Error updating profile model: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`)
+			vscode.window.showErrorMessage(t("common:errors.save_api_config"))
 		}
 	}
 
@@ -2007,7 +2211,7 @@ export class ClineProvider
 	): Promise<void> {
 		const { name, id, ...providerSettings } = await this.providerSettingsManager.activateProfile(args)
 
-		if (signal?.aborted) return
+		if (signal?.aborted || this._disposed) return
 
 		const persistModeConfig = options?.persistModeConfig ?? true
 		const persistTaskHistory = options?.persistTaskHistory ?? true
@@ -2022,11 +2226,17 @@ export class ClineProvider
 			])
 		}
 
+		if (signal?.aborted || this._disposed) return
+
 		const { mode } = await this.getState()
+
+		if (signal?.aborted || this._disposed) return
 
 		if (id && persistModeConfig) {
 			await this.providerSettingsManager.setModeConfig(mode, id)
 		}
+
+		if (signal?.aborted || this._disposed) return
 
 		// Change the provider for the current task.
 		this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true, skipCurrentTaskRebuild })
@@ -2037,9 +2247,13 @@ export class ClineProvider
 			await this.persistStickyProviderProfileToCurrentTask(name, { skipCurrentTaskRebuild })
 		}
 
+		if (signal?.aborted || this._disposed) return
+
 		if (!skipCurrentTaskRebuild) {
 			await this.postStateToWebview()
 		}
+
+		if (signal?.aborted || this._disposed) return
 
 		if (providerSettings.apiProvider && !skipCurrentTaskRebuild) {
 			this.emit(RooCodeEventName.ProviderProfileChanged, { name, provider: providerSettings.apiProvider })

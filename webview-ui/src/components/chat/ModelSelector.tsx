@@ -1,0 +1,286 @@
+import { useState, useMemo, useCallback } from "react"
+import { Fzf } from "fzf"
+
+import {
+	type ModelInfo,
+	type ModelRecord,
+	type OrganizationAllowList,
+	type ProviderName,
+	type ProviderSettings,
+	isDynamicProvider,
+	isRetiredProvider,
+	providerIdentifiers,
+} from "@roo-code/types"
+
+import { cn } from "@/lib/utils"
+import { enabledSelectorTriggerClassName, selectorTriggerClassName } from "@/components/ui/selectorTriggerStyles"
+import { useRooPortal } from "@/components/ui/hooks/useRooPortal"
+import { useRouterModels } from "@/components/ui/hooks/useRouterModels"
+import { useSelectedModel } from "@/components/ui/hooks/useSelectedModel"
+import { Popover, PopoverContent, PopoverTrigger, StandardTooltip } from "@/components/ui"
+import { useAppTranslation } from "@/i18n/TranslationContext"
+import { vscode } from "@/utils/vscode"
+
+import {
+	getProviderModelConfig,
+	handleModelChangeSideEffects,
+	getStaticModelsForProvider,
+	isStaticModelProvider,
+} from "../settings/utils/providerModelConfig"
+import { filterModels } from "../settings/utils/organizationFilters"
+import { SEARCH_THRESHOLD } from "./selectorConstants"
+
+export type ModelSelectionPatch = Record<string, string | number | null>
+
+export interface ModelSelection {
+	expectedProvider: ProviderName
+	patch: ModelSelectionPatch
+}
+
+interface ModelSelectorProps {
+	apiConfiguration: ProviderSettings
+	onChange: (selection: ModelSelection) => void
+	disabled?: boolean
+	title: string
+	triggerClassName?: string
+	organizationAllowList?: OrganizationAllowList
+}
+
+export const ModelSelector = ({
+	apiConfiguration,
+	onChange,
+	disabled = false,
+	title,
+	triggerClassName = "",
+	organizationAllowList,
+}: ModelSelectorProps) => {
+	const { t } = useAppTranslation()
+	const [open, setOpen] = useState(false)
+	const [searchValue, setSearchValue] = useState("")
+	const portalContainer = useRooPortal("roo-portal")
+
+	const rawProvider = apiConfiguration?.apiProvider || providerIdentifiers.openrouter
+	const retired = isRetiredProvider(rawProvider)
+	const provider = retired ? providerIdentifiers.openrouter : rawProvider
+	const dynamicProvider = !retired && isDynamicProvider(provider) ? provider : undefined
+	const modelConfig = retired ? undefined : getProviderModelConfig(provider, apiConfiguration)
+
+	const routerModels = useRouterModels({ provider: dynamicProvider, enabled: !!dynamicProvider })
+	const { id: selectedModelId, info: selectedModelInfo, isLoading } = useSelectedModel(apiConfiguration)
+
+	const models: ModelRecord = useMemo(() => {
+		if (!modelConfig) {
+			return {}
+		}
+
+		const staticModels = isStaticModelProvider(provider)
+			? getStaticModelsForProvider(provider, undefined, apiConfiguration)
+			: {}
+		const { "custom-arn": _customArn, ...modelsWithoutCustomArn } = staticModels
+
+		const allowedModels = dynamicProvider
+			? filterModels(
+					{ ...modelsWithoutCustomArn, ...(routerModels.data?.[dynamicProvider] ?? {}) },
+					provider,
+					organizationAllowList,
+				)
+			: filterModels(modelsWithoutCustomArn, provider, organizationAllowList)
+
+		// Exclude deprecated models from being newly selectable, but keep the currently
+		// selected model visible even if it's deprecated (mirrors ModelPicker.tsx).
+		return Object.fromEntries(
+			Object.entries(allowedModels ?? {}).filter(
+				([modelId, modelInfo]) => modelId === selectedModelId || !modelInfo.deprecated,
+			),
+		)
+	}, [
+		modelConfig,
+		dynamicProvider,
+		routerModels.data,
+		provider,
+		apiConfiguration,
+		organizationAllowList,
+		selectedModelId,
+	])
+
+	const modelIds = useMemo(() => Object.keys(models), [models])
+
+	const isModelListLoading = !!dynamicProvider && routerModels.isLoading
+	const isSupported = !!modelConfig && (isModelListLoading || modelIds.length > 0)
+	const isDisabled = disabled || modelIds.length === 0
+
+	// Label shown for a model — prefers `ModelInfo.displayName` when present, falling back to
+	// the raw model id (mirrors ModelPicker.tsx's trigger/list label logic).
+	const getModelLabel = useCallback((modelId: string, info?: ModelInfo) => info?.displayName ?? modelId, [])
+
+	const selectedModelLabel = getModelLabel(selectedModelId, selectedModelInfo)
+
+	// Create searchable items for fuzzy search.
+	const searchableItems = useMemo(
+		() =>
+			modelIds.map((id) => {
+				const label = getModelLabel(id, models[id])
+				return { original: id, searchStr: label === id ? id : `${label} ${id}` }
+			}),
+		[modelIds, models, getModelLabel],
+	)
+
+	const fzfInstance = useMemo(
+		() => new Fzf(searchableItems, { selector: (item) => item.searchStr }),
+		[searchableItems],
+	)
+
+	const filteredModelIds = useMemo(() => {
+		if (!searchValue) {
+			return modelIds
+		}
+
+		return fzfInstance.find(searchValue).map((result) => result.item.original)
+	}, [modelIds, searchValue, fzfInstance])
+
+	const handleOpenChange = useCallback((next: boolean) => {
+		setOpen(next)
+		if (!next) {
+			setSearchValue("")
+		}
+	}, [])
+
+	const handleEditClick = useCallback(() => {
+		vscode.postMessage({ type: "switchTab", tab: "settings" })
+		setOpen(false)
+	}, [])
+
+	const handleSelect = useCallback(
+		(modelId: string) => {
+			const patch: ModelSelectionPatch = {}
+			const setField = <K extends keyof ProviderSettings>(field: K, value: ProviderSettings[K]) => {
+				patch[field] = typeof value === "string" || typeof value === "number" ? value : null
+			}
+			handleModelChangeSideEffects(provider, modelId, setField)
+			const modelField = modelConfig?.field ?? "apiModelId"
+			patch[modelField] = modelId
+
+			onChange({ expectedProvider: provider, patch })
+
+			setOpen(false)
+			setSearchValue("")
+		},
+		[modelConfig, provider, onChange],
+	)
+
+	const renderModelItem = useCallback(
+		(modelId: string) => {
+			const isCurrentModel = modelId === selectedModelId
+			const label = getModelLabel(modelId, models[modelId])
+
+			return (
+				<button
+					type="button"
+					disabled={isDisabled}
+					aria-pressed={isCurrentModel}
+					key={modelId}
+					onClick={() => handleSelect(modelId)}
+					className={cn(
+						"w-full border-0 bg-transparent text-left text-inherit px-3 py-1.5 text-sm cursor-pointer flex items-center group",
+						"hover:bg-vscode-list-hoverBackground",
+						isCurrentModel &&
+							"bg-vscode-list-activeSelectionBackground text-vscode-list-activeSelectionForeground",
+					)}>
+					<span className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
+					{isCurrentModel && (
+						<span className="size-5 p-1 flex items-center justify-center" aria-hidden="true">
+							<span className="codicon codicon-check text-xs" />
+						</span>
+					)}
+				</button>
+			)
+		},
+		[selectedModelId, models, getModelLabel, handleSelect, isDisabled],
+	)
+
+	if (!isSupported) {
+		return (
+			<StandardTooltip content={t("chat:selectModelUnsupported")}>
+				<button
+					type="button"
+					disabled={disabled}
+					data-testid="model-selector-disabled"
+					className={cn(
+						"min-w-0 inline-flex items-center relative whitespace-nowrap px-1.5 py-1 text-xs",
+						selectorTriggerClassName,
+						"opacity-50",
+						triggerClassName,
+					)}
+					onClick={handleEditClick}>
+					<span className="truncate">{selectedModelLabel || rawProvider}</span>
+				</button>
+			</StandardTooltip>
+		)
+	}
+
+	return (
+		<Popover open={open} onOpenChange={handleOpenChange} data-testid="model-selector-root">
+			<StandardTooltip content={title}>
+				<PopoverTrigger
+					disabled={isDisabled}
+					data-testid="model-selector-trigger"
+					className={cn(
+						"min-w-0 inline-flex items-center relative whitespace-nowrap px-1.5 py-1 text-xs",
+						selectorTriggerClassName,
+						isDisabled ? "opacity-50 cursor-not-allowed" : enabledSelectorTriggerClassName,
+						triggerClassName,
+					)}>
+					<span className="truncate">
+						{isLoading || isModelListLoading ? t("common:ui.loading") : selectedModelLabel}
+					</span>
+				</PopoverTrigger>
+			</StandardTooltip>
+			<PopoverContent
+				align="start"
+				sideOffset={4}
+				container={portalContainer}
+				className="p-0 overflow-hidden w-[300px]">
+				<div className="flex flex-col w-full">
+					{modelIds.length > SEARCH_THRESHOLD && (
+						<div className="relative p-2 border-b border-vscode-dropdown-border">
+							<input
+								aria-label={t("common:ui.search_placeholder")}
+								value={searchValue}
+								onChange={(e) => setSearchValue(e.target.value)}
+								placeholder={t("common:ui.search_placeholder")}
+								className="w-full h-8 px-2 py-1 text-xs bg-vscode-input-background text-vscode-input-foreground border border-vscode-input-border rounded"
+								autoFocus
+							/>
+							{searchValue.length > 0 && (
+								<div className="absolute right-4 top-0 bottom-0 flex items-center justify-center">
+									<button
+										type="button"
+										aria-label={t("common:ui.clear_search")}
+										className="border-0 bg-transparent p-0 codicon codicon-close text-vscode-input-foreground opacity-50 hover:opacity-100 text-xs cursor-pointer"
+										onClick={() => setSearchValue("")}
+									/>
+								</div>
+							)}
+						</div>
+					)}
+
+					{filteredModelIds.length === 0 ? (
+						<div role="status" className="py-2 px-3 text-sm text-vscode-foreground/70">
+							{t("common:ui.no_results")}
+						</div>
+					) : (
+						<div className="max-h-[300px] overflow-y-auto py-1">
+							{filteredModelIds.map(renderModelItem)}
+						</div>
+					)}
+
+					<div className="flex flex-row items-center justify-between px-2 py-2 border-t border-vscode-dropdown-border">
+						<h4 className="m-0 font-medium text-sm text-vscode-descriptionForeground">
+							{t("chat:selectModel")}
+						</h4>
+					</div>
+				</div>
+			</PopoverContent>
+		</Popover>
+	)
+}
