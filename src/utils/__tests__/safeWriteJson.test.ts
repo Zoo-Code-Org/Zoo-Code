@@ -682,6 +682,35 @@ describe("safeWriteJson", () => {
 		expect(left.filter((entry) => entry.includes(".new_") || entry.endsWith(".lock"))).toEqual([])
 	})
 
+	test.each([
+		["the confined scope itself", "EACCES", "scope-eacces"],
+		["an ancestor of a missing scope", "ELOOP", "scope-eloop"],
+	])(
+		"fails closed when canonicalizing the confined scope hits %s",
+		async (_label, code, dirName) => {
+			const target = path.join(tempDir, "scope-failure-target.json")
+			const scope = path.join(tempDir, dirName)
+			// _resolveScopeRoot walks up to the nearest existing ancestor only for ENOENT. Any
+			// other errno means the scope cannot be canonicalized, and continuing would decide
+			// the confinement from a partly lexical guess - so the write must stop.
+			const spy = vi.spyOn(fs, "realpath").mockImplementation(async (p) => {
+				const text = String(p)
+				if (code === "EACCES" && text === scope) {
+					throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+				}
+				if (code === "ELOOP" && text === path.dirname(scope)) {
+					throw Object.assign(new Error("ELOOP: too many symbolic links"), { code: "ELOOP" })
+				}
+				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			})
+
+			await expect(safeWriteJson(target, { written: true }, { confineTo: scope })).rejects.toThrow(code)
+
+			spy.mockRestore()
+			// Nothing was staged or published: the scope failure is detected before any I/O.
+			expect(fsSyncActual.readdirSync(tempDir).filter(function (entry) { return entry.includes("scope-failure-target") })).toEqual([])
+	})
+
 	test.skipIf(process.platform === "win32")(
 		"rejects a confined write whose symlink resolves outside the confined directory",
 		async () => {
