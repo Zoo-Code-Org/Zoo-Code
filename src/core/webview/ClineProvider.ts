@@ -2612,6 +2612,19 @@ export class ClineProvider
 				)
 			}
 
+			// The queue advances on the timeout-bounded caller result, so a cancelled deletion
+			// must stop touching durable state here. Everything below rewrites the shared
+			// selection, the shared provider settings, and other views' pins - any of those
+			// landing after the next queued mutation has run would overwrite that mutation.
+			if (signal.aborted) {
+				this.log(
+					`deleteProviderProfile: cancelled before the selection/settings rewrite; the deletion stopped with the profile list already updated.`,
+				)
+				throw new Error(
+					"Profile deletion was cancelled before the selection and settings rewrite",
+				)
+			}
+
 			// Capture this view's pin before any rewrite: a view pinned to the
 			// deleted profile while the global selection points elsewhere must still be
 			// reconfigured, or getState() would keep the deleted profile's settings under
@@ -2655,6 +2668,17 @@ export class ClineProvider
 			// deleted profile's name and configuration.
 			await this.rePinViewLocalStateForDeletedProfile(profileToDelete.name, profileToActivate, survivingSettings)
 		} catch (error: unknown) {
+			// A cancelled (timed-out) deletion has already yielded its place in the queue: the next
+			// mutation may have written these stores since, so replaying this operation's rollback
+			// would overwrite IT. Stop at the cancellation point and report the partial state
+			// instead of compensating.
+			if (signal.aborted) {
+				this.log(
+					`deleteProviderProfile: cancelled by the mutation timeout (${error instanceof Error ? error.message : String(error)}); skipping compensation so it cannot overlap the next queued mutation. Durable state reflects the steps that had already landed.`,
+				)
+				throw error
+			}
+
 			// Compensate every store that already landed, each awaited on its own so one
 			// failing restore cannot skip the next one. The deletion simply did not happen:
 			// the settings, the profile list, the shared selection, and this view's pin must

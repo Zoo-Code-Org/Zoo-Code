@@ -3514,6 +3514,72 @@ const provider = new ClineProvider(
 			await sibling.dispose()
 		})
 
+		it("stops writing durable state once the deletion's abort signal fires", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			const controller = new AbortController()
+			const saveConfig = vi.fn().mockResolvedValue("doomed-id")
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig,
+				getProfile: vi.fn().mockImplementation(async ({ name }) => {
+					// The cancellation lands on the survivor lookup, i.e. after the settings commit
+					// and the profile-list write - the point where the queue has already handed
+					// the turn to the next mutation.
+					if (name === "keeper-profile") {
+						controller.abort()
+					}
+					return name === "doomed-profile"
+						? {
+							name: "doomed-profile",
+							id: "doomed-id",
+							apiProvider: providerIdentifiers.openrouter,
+							openRouterApiKey: "doomed-secret",
+						}
+						: {
+							name: "keeper-profile",
+							id: "keeper-id",
+							apiProvider: providerIdentifiers.anthropic,
+							apiKey: "keeper-secret",
+						}
+				}),
+			}
+
+			await expect(
+				provider["deleteProviderProfileUnlocked"](doomedProfile, controller.signal),
+			).rejects.toThrow("Profile deletion was cancelled before the selection and settings rewrite")
+
+			// The list write landed before the cancellation point...
+			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([keeperProfile])
+			// ...but the shared selection, the shared provider settings and any sibling view's pin
+			// must not be rewritten afterwards, and the rollback must not replay either: the next
+			// queued mutation owns those stores now.
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("doomed-profile")
+			expect(provider.contextProxy.getValue("apiProvider")).not.toBe(providerIdentifiers.anthropic)
+			expect(saveConfig).not.toHaveBeenCalled()
+			await provider.dispose()
+		})
+
 
 		it("leaves the view buffer untouched when the deleted profile is neither globally active nor view-pinned", async () => {
 const provider = new ClineProvider(
