@@ -373,6 +373,19 @@ describe("safeWriteText", () => {
 			expect(fs.rename).not.toHaveBeenCalled()
 		})
 
+		it("fails closed when the dump is a regular file but empty", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// A zero-byte dump is not a captured security descriptor: icacls can create the file and
+			// write nothing into it. Accepting it would publish with a restore that carries no data.
+			vi.mocked(execFile).mockImplementation(((_c: string, _a: string[], _o: unknown, cb?: (e?: Error | null) => void) => { cb?.(null); return undefined }) as never)
+			vi.mocked(fsSync.statSync).mockImplementation((() => ({ isFile: () => true, size: 0 })) as never)
+
+			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toThrow(/refus/)
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
+
 		it.each([["EACCES", "EACCES"], ["a code-less probe error", undefined]])("propagates a %s target-existence probe instead of treating the target as absent", async (_label, code) => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
