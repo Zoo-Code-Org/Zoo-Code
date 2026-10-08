@@ -342,9 +342,19 @@ export class ClineProvider
 
 	/**
 	 * Stable identifier for persisted per-view state keys.
-	 * Defaults to viewId until the webview reports its VS Code-persisted id.
+	 * Defaults to a session-unique temporary key until the webview reports its
+	 * VS Code-persisted id.
 	 */
 	private viewStateId: string
+
+	/**
+	 * Session-unique key this view writes under until the webview reports its
+	 * VS Code-persisted id. viewId is a counter that restarts at 0 in every window and
+	 * every extension host while globalState is shared, so a counter-derived temporary
+	 * key lets one window read - and re-key away - another window's pre-launch
+	 * selection.
+	 */
+	private readonly temporaryViewStateId: string
 
 	/**
 	 * Local state buffer for this specific view instance.
@@ -380,7 +390,10 @@ export class ClineProvider
 		// Initialize viewId based on renderContext and monotonically increasing instance identifier for uniqueness.
 		// activeInstances is used for visibility/iteration checks, so we keep tracking instances separately.
 		this.viewId = `${renderContext}-${ClineProvider.nextViewId++}`
-		this.viewStateId = this.viewId
+		// Unique per provider instance: the counter in viewId collides across windows and
+		// reloads that share globalState.
+		this.temporaryViewStateId = `${this.viewId}-${crypto.randomUUID()}`
+		this.viewStateId = this.temporaryViewStateId
 		ClineProvider.activeInstances.add(this)
 		this.currentWorkspacePath = getWorkspacePath()
 		this.pendingEditOperations = new PendingEditOperationStore(
@@ -669,12 +682,12 @@ export class ClineProvider
 	 * instead of orphaning under a session-local temporary id. Only the provider's own
 	 * temporary id is eligible: an entry under a previously registered stable id belongs
 	 * to that webview's storage and is left alone. When the stable entry already exists
-	 * it wins and the temporary entry is dropped, because temporary ids are session
-	 * counters that can collide across window reloads. Runs through the serialized write
+	 * it wins and the temporary entry is dropped, because a temporary entry written
+	 * by an earlier session can still be sitting in the shared map.
 	 * queue like every other viewStates mutation.
 	 */
 	private async rekeyPersistedViewStateEntry(nextViewStateId: string): Promise<void> {
-		const previousViewStateId = this.viewId
+		const previousViewStateId = this.temporaryViewStateId
 
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
 			const states = this.getPersistedViewStates({ fresh: true })
