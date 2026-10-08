@@ -321,6 +321,37 @@ describe("KimiCodeHandler", () => {
 		expect(mockForceRefreshAccessToken).not.toHaveBeenCalled()
 	})
 
+	it("stops before the completion request when the signal aborts during model preparation", async () => {
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
+		const controller = new AbortController()
+		// Cancellation lands WHILE model discovery is in flight. Discovery itself fails
+		// (it is best-effort and prepareRequest swallows it), so the contract under test is
+		// the observable one: no completion request may be issued once the caller has
+		// cancelled. The override's re-check after preparation is what stops it here; the
+		// inherited handler also guards, which is why removing only the override's check does
+		// not open a hole - the check keeps the cancellation from entering the base flow.
+		mockGetModels.mockImplementation(async () => {
+			controller.abort()
+			throw new Error("discovery cancelled")
+		})
+		const createCompletion = completionsCreate(handler)
+
+		const gen = handler.createMessage("system", [{ role: "user", content: "test" }], {
+			taskId: "test-task",
+			abortSignal: controller.signal,
+		})
+
+		await expect(async () => {
+			for await (const _ of gen) {
+				// consume
+			}
+		}).rejects.toMatchObject({ name: "AbortError", message: "This operation was aborted" })
+		// Preparation really ran (so this is not the already-aborted path), and the
+		// completion request was never issued after the cancellation landed.
+		expect(mockGetModels).toHaveBeenCalled()
+		expect(createCompletion).not.toHaveBeenCalled()
+	})
+
 	it("forwards completePrompt abort options and timeoutMs through the override on both 401 retry attempts", async () => {
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
 		const unauthorized = Object.assign(new Error("Unauthorized"), { status: 401 })
