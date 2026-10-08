@@ -159,37 +159,56 @@ describe("fetchRouterModels", () => {
 
 	it("rejects and cleans up when signal aborts while waiting", async () => {
 		const controller = new AbortController()
-		const removeEventListenerSpy = vi.spyOn(window, "removeEventListener")
+		const addWindowListenerSpy = vi.spyOn(window, "addEventListener")
+		const removeWindowListenerSpy = vi.spyOn(window, "removeEventListener")
+		const addSignalListenerSpy = vi.spyOn(controller.signal, "addEventListener")
+		const removeSignalListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
 
 		const promise = fetchRouterModels(providerIdentifiers.openrouter, controller.signal)
+		const addedMessageHandler = addWindowListenerSpy.mock.calls.find(([type]) => type === "message")?.[1]
+		const addedAbortHandler = addSignalListenerSpy.mock.calls.find(([type]) => type === "abort")?.[1]
 
 		controller.abort()
 
 		await expect(promise).rejects.toThrow("Router models request aborted")
-		expect(removeEventListenerSpy).toHaveBeenCalledWith("message", expect.any(Function))
+		expect(typeof addedMessageHandler).toBe("function")
+		expect(removeWindowListenerSpy).toHaveBeenCalledWith("message", addedMessageHandler)
+		expect(typeof addedAbortHandler).toBe("function")
+		expect(removeSignalListenerSpy).toHaveBeenCalledWith("abort", addedAbortHandler)
 	})
 
 	it("rejects and cleans up abort listener when timeout expires", async () => {
 		vi.useFakeTimers()
 		const controller = new AbortController()
-		const signalRemoveEventListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
-		const windowRemoveEventListenerSpy = vi.spyOn(window, "removeEventListener")
+		const addSignalListenerSpy = vi.spyOn(controller.signal, "addEventListener")
+		const removeSignalListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+		const addWindowListenerSpy = vi.spyOn(window, "addEventListener")
+		const removeWindowListenerSpy = vi.spyOn(window, "removeEventListener")
 
 		const promise = fetchRouterModels(providerIdentifiers.openrouter, controller.signal)
+		const addedAbortHandler = addSignalListenerSpy.mock.calls.find(([type]) => type === "abort")?.[1]
+		const addedMessageHandler = addWindowListenerSpy.mock.calls.find(([type]) => type === "message")?.[1]
 
 		vi.advanceTimersByTime(10000)
 
 		await expect(promise).rejects.toThrow("Router models request timed out")
-		expect(signalRemoveEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function))
-		expect(windowRemoveEventListenerSpy).toHaveBeenCalledWith("message", expect.any(Function))
+		expect(typeof addedAbortHandler).toBe("function")
+		expect(removeSignalListenerSpy).toHaveBeenCalledWith("abort", addedAbortHandler)
+		expect(typeof addedMessageHandler).toBe("function")
+		expect(removeWindowListenerSpy).toHaveBeenCalledWith("message", addedMessageHandler)
 	})
 
 	it("removes abort listener and cleans up timer on successful response", async () => {
 		vi.useFakeTimers()
 		const controller = new AbortController()
-		const signalRemoveEventListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+		const addSignalListenerSpy = vi.spyOn(controller.signal, "addEventListener")
+		const removeSignalListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+		const addWindowListenerSpy = vi.spyOn(window, "addEventListener")
+		const removeWindowListenerSpy = vi.spyOn(window, "removeEventListener")
 
 		const promise = fetchRouterModels(providerIdentifiers.openrouter, controller.signal)
+		const addedAbortHandler = addSignalListenerSpy.mock.calls.find(([type]) => type === "abort")?.[1]
+		const addedMessageHandler = addWindowListenerSpy.mock.calls.find(([type]) => type === "message")?.[1]
 
 		window.dispatchEvent(
 			new MessageEvent("message", {
@@ -203,7 +222,10 @@ describe("fetchRouterModels", () => {
 
 		const result = await promise
 		expect(result).toEqual(mockRouterModels)
-		expect(signalRemoveEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+		expect(typeof addedAbortHandler).toBe("function")
+		expect(removeSignalListenerSpy).toHaveBeenCalledWith("abort", addedAbortHandler)
+		expect(typeof addedMessageHandler).toBe("function")
+		expect(removeWindowListenerSpy).toHaveBeenCalledWith("message", addedMessageHandler)
 
 		// Advancing timers should not cause rejection or error
 		vi.advanceTimersByTime(15000)
