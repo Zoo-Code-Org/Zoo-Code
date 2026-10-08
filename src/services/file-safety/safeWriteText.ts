@@ -285,10 +285,10 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			// 0o664 target would be published as 0o644 and a shared repository would lose group
 			// write access on every save. Apply the exact target mode on the descriptor, which is
 			// also what the caller-staged branch below does.
-			if (targetExists) {
-				fsSync.fchmodSync(fd, targetMode)
-			}
 			try {
+				if (targetExists) {
+					fsSync.fchmodSync(fd, targetMode)
+				}
 				// Loop until every byte is written: writeSync can report a short
 				// (partial) write, and publishing a truncated staging file would
 				// commit corrupt content.
@@ -417,6 +417,11 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				}
 			}
 
+			// Tracked separately from durability: a committed file whose DACL could not be
+			// restored is only half-published, and the backup is the only copy that still carries
+			// the original security descriptor.
+			let daclRestoreFailed = false
+
 			// -- Step 5 (win32): restore DACL AFTER commit rename ---------
 			if (platform === "win32" && daclSaved && daclDumpPath !== null) {
 				const restoredDir = path.dirname(targetPath)
@@ -427,17 +432,21 @@ export async function safeWriteText(filePath: string, content: string, options?:
 					restored = await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
 				}
 				if (!restored) {
-					// Not fatal, for the same reason the save miss is not: on a non-elevated
-					// host /restore cannot succeed at all. The content is committed and the
-					// backup (when taken) is kept so the previous content and its permissions
-					// stay recoverable.
+					daclRestoreFailed = true
+					// Not fatal for the content: on a non-elevated host /restore cannot succeed at
+					// all, and the new content is already committed. It is fatal for the recovery
+					// state, so the backup is kept below and the situation is surfaced here.
+					console.warn(
+						`safeWriteText: ${targetPath} was published but its original DACL could not be restored from ${daclDumpPath ?? "the saved dump"}; the previous content and its permissions are only recoverable from the backup copy.`,
+					)
 				}
 			}
 
-			// -- Step 6 (backup:true): delete backup on success -----------
-			// Kept when durability is unconfirmed, so the previous content is still
-			// recoverable if the un-durable rename is lost on power loss.
-			if (backupCreated && backupPath && durabilityError === null) {
+			// -- Step 6 (backup:true): delete backup only on a fully successful publish --
+			// Kept when durability is unconfirmed (the rename may be lost on power loss) AND when
+			// the DACL restore failed: that backup is the only artifact still carrying the target's
+			// original security descriptor, so deleting it would destroy the recovery path.
+			if (backupCreated && backupPath && durabilityError === null && !daclRestoreFailed) {
 				try {
 					await fs.unlink(backupPath)
 				} catch {
