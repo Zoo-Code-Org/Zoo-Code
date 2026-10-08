@@ -3551,6 +3551,76 @@ const provider = new ClineProvider(
 			await sibling.dispose()
 		})
 
+		it("rolls back the sibling views whose re-pin write succeeded when another sibling fails", async () => {
+			const provider = new ClineProvider(
+				mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext), new WebviewFocusTracker(),
+			)
+		// healthySibling
+			// This sibling's writes all land: it is the one that has to be undone when the OTHER
+			// sibling's re-pin fails.
+			const healthySibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await healthySibling["setViewStateId"]("healthy-sibling-view")
+			await healthySibling.saveViewState("currentApiConfigName", "doomed-profile")
+		// failingSibling
+			const failingSiblingContext = {
+				...mockContext,
+				globalState: {
+					...mockContext.globalState,
+					update: (key: string, value: unknown) => {
+						const states = value as Record<string, { currentApiConfigName?: string }> | undefined
+						if ( key === "viewStates" && states?.["failing-sibling-view"]?.currentApiConfigName === "keeper-profile") {
+							return Promise.reject(new Error("sibling pin write failed"))
+						}
+						return mockContext.globalState.update(key, value)
+					},
+				},
+			}
+			const failingSibling = new ClineProvider(
+				failingSiblingContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(failingSiblingContext),
+				new WebviewFocusTracker(),
+			)
+			await failingSibling["setViewStateId"]("failing-sibling-view")
+			await failingSibling.saveViewState("currentApiConfigName", "doomed-profile")
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile", id: "doomed-id", apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile", id: "keeper-id", apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn().mockResolvedValue({ name: "keeper-profile", id: "keeper-id", apiProvider: providerIdentifiers.anthropic }),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue("doomed-id"),
+			}
+
+			await expect(provider.deleteProviderProfile(doomedProfile)).rejects.toThrow("sibling pin write failed")
+
+			// The sibling whose write LANDED must be put back too: the deletion as a whole did not
+			// happen, so leaving this view pinned to the survivor would name a profile that is
+			// still in the list but was never chosen for this view.
+			expect(healthySibling["viewLocalState"].currentApiConfigName).toBe("doomed-profile")
+			const cachedHealthy = healthySibling["getPersistedViewStates"]()["healthy-sibling-view"] ?? {}
+			expect(cachedHealthy.currentApiConfigName).toBe("doomed-profile")
+			expect(failingSibling["viewLocalState"].currentApiConfigName).toBe("doomed-profile")
+			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([doomedProfile, keeperProfile])
+			await provider.dispose()
+			await healthySibling.dispose()
+			await failingSibling.dispose()
+		})
+
 		it("stops writing durable state once the deletion's abort signal fires", async () => {
 			const provider = new ClineProvider(
 				mockContext,
