@@ -245,6 +245,10 @@ export async function safeWriteText(filePath: string, content: string, options?:
 
 	let backupPath: string | null = null
 	let backupCreated = false
+		// Set as soon as the backup destination is chosen, before the copy runs: a copyFile that
+		// fails part way can still leave a partial file at that path, and it has to be cleaned up
+		// like a completed backup would be.
+		let backupAttempted = false
 	// Set when the commit landed but its durability could not be confirmed. The
 	// content is in place, so there is nothing to roll back, but the caller must
 	// not be told the publish is durable.
@@ -371,6 +375,7 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				try {
 					await fs.access(targetPath)
 					backupPath = _tempName(dirPath, "safeWriteText.bak")
+					backupAttempted = true
 					await fs.copyFile(targetPath, backupPath)
 					backupCreated = true
 				} catch (err: unknown) {
@@ -485,12 +490,18 @@ export async function safeWriteText(filePath: string, content: string, options?:
 		// tempPath is now the committed file; no cleanup needed.
 	} catch (originalError: unknown) {
 		// -- Rollback / cleanup on failure ----------------------------------
-		if (backupCreated && backupPath) {
+		if ((backupCreated || backupAttempted) && backupPath) {
+			// Covers a copyFile that failed after creating the destination: the partial file
+			// would otherwise be orphaned next to the target.
 			// The target was never moved, so rollback is just removing the backup copy.
 			try {
 				await fs.unlink(backupPath)
-			} catch {
-				// cleanup failure is non-fatal
+			} catch (cleanupError: unknown) {
+				// Cleanup failure is non-fatal, but an invisible orphan is worse than a visible one:
+				// the original error is still the one that gets thrown.
+				console.warn(
+					`safeWriteText: the write to ${targetPath} failed and its backup copy at ${backupPath} could not be removed (${String(cleanupError)}).`,
+				)
 			}
 		}
 
