@@ -2019,15 +2019,31 @@ describe("DiffViewProvider", () => {
 		it("tolerates an already-deleted placeholder and directories (ENOENT) without throwing", async () => {
 			const callOrder: string[] = []
 			const document = makeAbandonedDocument(callOrder)
-			openAbandonedView(document, [`${mockCwd}/mock-dir`], callOrder)
+			// Two created directories: the tolerance has to hold for every one of them, so the
+			// rejection is keyed on the path rather than on which call comes first.
+			const dirA = `${mockCwd}/mock-dir-a`
+			const dirB = `${mockCwd}/nested/mock-dir-b`
+			openAbandonedView(document, [dirA, dirB], callOrder)
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
-			vi.mocked(fs.unlink).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
-			vi.mocked(fs.rmdir).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			const enoent = Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			// A single unlink call in this flow, so the placeholder stays Once-based.
+			vi.mocked(fs.unlink).mockRejectedValueOnce(enoent)
+			vi.mocked(fs.rmdir).mockImplementation(async (dir) => {
+				if (dir === dirA || dir === dirB) {
+					throw enoent
+				}
+			})
 			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
 			await expect(diffViewProvider.discardUnapprovedStream()).resolves.toBeUndefined()
 
+			// Both directories were attempted; the assertion is on the paths, not the order.
+			expect(fs.rmdir).toHaveBeenCalledWith(dirA)
+			expect(fs.rmdir).toHaveBeenCalledWith(dirB)
 			expect(errorSpy).not.toHaveBeenCalledWith("Error removing abandoned write_to_file artifacts:", expect.anything())
+
+			// beforeEach only clears call data, not implementations, so put the default back.
+			vi.mocked(fs.rmdir).mockResolvedValue(undefined)
 		})
 
 		it("reports the editor failure rather than the cleanup failure when both happen", async () => {
