@@ -6266,10 +6266,43 @@ describe("Cline", () => {
 			historySpy.mockRestore()
 		})
 
-		it("does not block teardown when a pending metadata repair has no initialized api config", async () => {
+		it("still retries for a task whose stored api config is legitimately absent", async () => {
+			// Tasks saved before the api config was recorded have apiConfigName undefined. Their
+			// initialization has completed, so the dispose-time repair must still run: gating it on
+			// the value rather than on the settled promise drops the retry for every such task.
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
+			fsReal.mkdirSync(taskDir, { recursive: true })
+			const historySpy = vi
+				.spyOn(mockProvider, "updateTaskHistory")
+				.mockRejectedValueOnce(new Error("history stage unavailable"))
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			// Bracket access for the private fields: wait for the async api-config
+			// initialization to settle, then drop the name - the shape of a task loaded from a
+			// history entry saved before the api config was recorded.
+			await task["taskApiConfigReady"]
+			task["_taskApiConfigName"] = undefined
+			expect(task["taskApiConfigReadySettled"]).toBe(true)
+
+			await expect(getTaskTestAccess(task).saveClineMessages()).resolves.toBe(true)
+			expect(historySpy).toHaveBeenCalledTimes(1)
+
+			await task.dispose()
+
+			expect(historySpy).toHaveBeenCalledTimes(2)
+			historySpy.mockRestore()
+		})
+
+		it("does not block teardown when a pending metadata repair has an unsettled api-config init", async () => {
 			// persistTaskMetadata() awaits taskApiConfigReady. For a task whose async api-config
 			// initialization never settles, an unconditional dispose-time retry would hang the
-			// teardown, so the retry is skipped when the config never initialized.
+			// teardown, so the retry is skipped until that promise settles.
 			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
 			fsReal.mkdirSync(taskDir, { recursive: true })
 			const task = new Task({

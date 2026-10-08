@@ -577,6 +577,35 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		})
+		it("does not finalize the ask or roll back twice when open() rejects after a cancellation", async () => {
+			// A cancellation during open() releases the stream state through the TaskAborted
+			// teardown (which also reverts or closes this diff view) AND rejects the call in
+			// flight. The catch used to mark the released state failed, finalize the ask and run
+			// the failed-stream cleanup again - a second rollback and a fresh ask row for a task
+			// the user already cancelled.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.update.mockClear()
+			mockCline.diffViewProvider.revertChanges.mockClear()
+			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			mockCline.ask.mockClear()
+			mockCline.diffViewProvider.open.mockImplementationOnce(async () => {
+				writeToFileTool.clearTaskState(mockCline)
+				throw new Error("EACCES: permission denied, open mock-file")
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+			// Only the partial ask this delta issued: no finalize on top of it.
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+			// The teardown that already ran owns the rollback: no second one from the catch.
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
 		it("does nothing when the task has no stream state to release", async () => {
 			await writeToFileTool.teardownAbandonedStream(mockCline)
 			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
@@ -1446,6 +1475,10 @@ describe("writeToFileTool", () => {
 			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
 			expect(mockCline.diffViewProvider.saveChanges).toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			// With fileExists false the rollback route is discardUnapprovedStream(), so asserting
+			// only revertChanges here would pass even if the writeApproved guard were dropped and
+			// the approved edit discarded. Assert the route that can actually fire.
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 		})
 
@@ -1703,6 +1736,9 @@ describe("writeToFileTool", () => {
 				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(undefined)
 				expect(mockCline.diffViewProvider.saveDirectly).toHaveBeenCalled()
 				expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+				// Same reason as the saveChanges case: with fileExists false the rollback route is
+				// discardUnapprovedStream(), so this is the assertion that can actually fail.
+				expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
 				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 				expect(mockCline.didEditFile).toBe(false)
 			} finally {

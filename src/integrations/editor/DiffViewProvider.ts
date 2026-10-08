@@ -33,6 +33,14 @@ export class DiffViewProvider {
 	isEditing = false
 	originalContent: string | undefined
 	private createdDirs: string[] = []
+	/**
+	 * Absolute path of the empty placeholder open() created for a new-file edit, or undefined
+	 * when no placeholder is outstanding. reset() does NOT clear relPath, and saveDirectly()
+	 * sets relPath for a file that was written with approval, so relPath alone cannot tell a
+	 * caller that a file on disk belongs to the abandoned edit. Only this field justifies an
+	 * unlink.
+	 */
+	private placeholderPath: string | undefined
 	private documentWasOpen = false
 	// Tracks whether the target file's tab was pinned before the diff session.
 	// Closing the tab to open the diff drops VS Code's pin state, so we restore
@@ -132,6 +140,10 @@ export class DiffViewProvider {
 		// Make sure the file exists before we open it.
 		if (!fileExists) {
 			await fs.writeFile(absolutePath, "")
+			// From here until the placeholder is removed, THIS edit owns that path. Set after
+			// the write succeeds, so a failed write does not claim ownership of a file we did
+			// not create.
+			this.placeholderPath = absolutePath
 		}
 
 		// If the file was already open, close it (must happen after showing the
@@ -336,6 +348,9 @@ export class DiffViewProvider {
 		}
 
 		const absolutePath = path.resolve(this.cwd, this.relPath)
+		// The write below is the approved one: whatever placeholder open() created at this path
+		// becomes real content, so it is no longer an artifact this edit may remove.
+		this.placeholderPath = undefined
 		const updatedDocument = this.activeDiffEditor.document
 		const editedContent = updatedDocument.getText()
 
@@ -535,6 +550,10 @@ export class DiffViewProvider {
 		// then the only chance to remove what the abandoned edit left on disk.
 		const createdDirs = this.createdDirs
 		this.createdDirs = []
+		// Same reason for the placeholder: an await below may reject and the caller then runs
+		// reset(), which drops this field too.
+		const placeholderPath = this.placeholderPath
+		this.placeholderPath = undefined
 
 		let editorFailure: unknown
 		// open() creates the directories and the empty placeholder BEFORE it assigns
@@ -571,13 +590,18 @@ export class DiffViewProvider {
 
 		let cleanupFailure: unknown
 		try {
-			await fs.unlink(absolutePath).catch((error: unknown) => {
-				// open() creates the placeholder; if it is already gone there is nothing
-				// left to remove and the discard did its job.
-				if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
-					throw error
-				}
-			})
+			// Only a placeholder THIS edit created may be removed. relPath survives reset(), and
+			// saveDirectly() sets it for a file that was written with approval, so unlinking
+			// absolutePath unconditionally can delete content the user approved.
+			if (placeholderPath) {
+				await fs.unlink(placeholderPath).catch((error: unknown) => {
+					// open() creates the placeholder; if it is already gone there is nothing
+					// left to remove and the discard did its job.
+					if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+						throw error
+					}
+				})
+			}
 
 			// Remove only the directories this edit created, in reverse order.
 			for (let i = createdDirs.length - 1; i >= 0; i--) {
@@ -624,6 +648,7 @@ export class DiffViewProvider {
 			// opened tab before deleting it from disk.
 			await this.closeFileTab(absolutePath)
 			await fs.unlink(absolutePath)
+			this.placeholderPath = undefined
 
 			// Remove only the directories we created, in reverse order.
 			for (let i = this.createdDirs.length - 1; i >= 0; i--) {
@@ -1200,6 +1225,7 @@ export class DiffViewProvider {
 		this.isEditing = false
 		this.originalContent = undefined
 		this.createdDirs = []
+		this.placeholderPath = undefined
 		this.documentWasOpen = false
 		this.documentWasPinned = false
 		this.activeDiffEditor = undefined

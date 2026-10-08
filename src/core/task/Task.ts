@@ -379,6 +379,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * @private
 	 */
 	private taskApiConfigReady: Promise<void>
+	/**
+	 * Whether taskApiConfigReady has settled. The dispose-time metadata retry needs this
+	 * rather than a check on _taskApiConfigName: a legacy history item legitimately has no
+	 * stored api config while its initialization completed, and that task still needs the
+	 * retry. Only a promise that never settles may suppress it, because
+	 * persistTaskMetadata() awaits it and teardown must not block on it.
+	 */
+	private taskApiConfigReadySettled = false
 
 	/**
 	 * Set when the derived metadata / task-history stage of a save failed while the message
@@ -706,12 +714,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this._taskApiConfigName = handoffExecutionContext.apiConfigName
 			this.taskModeReady = Promise.resolve()
 			this.taskApiConfigReady = Promise.resolve()
+			this.taskApiConfigReadySettled = true
 			TelemetryService.instance.captureTaskCreated(this.taskId)
 		} else if (historyItem) {
 			this._taskMode = historyItem.mode || defaultModeSlug
 			this._taskApiConfigName = historyItem.apiConfigName
 			this.taskModeReady = Promise.resolve()
 			this.taskApiConfigReady = Promise.resolve()
+			// historyItem.apiConfigName is undefined for tasks saved before the api config was
+			// recorded. That is a completed initialization, not a pending one.
+			this.taskApiConfigReadySettled = true
 			TelemetryService.instance.captureTaskRestarted(this.taskId)
 		} else {
 			// For new tasks, don't set the mode/apiConfigName yet - wait for async initialization.
@@ -719,6 +731,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this._taskApiConfigName = undefined
 			this.taskModeReady = this.initializeTaskMode(provider)
 			this.taskApiConfigReady = this.initializeTaskApiConfigName(provider)
+			// Observe settlement without replacing the promise: a rejection must still reach
+			// every other awaiter of taskApiConfigReady.
+			void this.taskApiConfigReady.then(
+				() => {
+					this.taskApiConfigReadySettled = true
+				},
+				() => {
+					this.taskApiConfigReadySettled = true
+				},
+			)
 			TelemetryService.instance.captureTaskCreated(this.taskId)
 		}
 
@@ -3426,10 +3448,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// A save whose metadata / task-history stage failed leaves the history entry behind
 		// the messages that are already on disk. Give that stage one awaited chance to catch
 		// up before the task stops serving, so shutdown does not persist a stale history item.
-		// Skipped when the api-config initialization never completed: persistTaskMetadata()
-		// awaits taskApiConfigReady, and a never-settling initialization would block teardown.
-		// Nothing was written for that save's metadata stage anyway, so there is nothing to repair.
-		if (this.pendingTaskMetadataRepair && this._taskApiConfigName !== undefined) {
+		// Skipped while taskApiConfigReady has not settled: persistTaskMetadata() awaits
+		// it, and an initialization that never settles would block teardown. A task that merely
+		// has no stored api config name (a history entry saved before it was recorded) HAS
+		// settled, and still gets its retry.
+		if (this.pendingTaskMetadataRepair && this.taskApiConfigReadySettled) {
 			try {
 				await this.persistTaskMetadata()
 			} catch (error) {

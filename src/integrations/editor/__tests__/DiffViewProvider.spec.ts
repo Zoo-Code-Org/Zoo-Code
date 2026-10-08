@@ -1871,6 +1871,8 @@ describe("DiffViewProvider", () => {
 				activeDiffEditor: { document },
 				editType: "create",
 				createdDirs,
+				// open() records the placeholder it wrote; the discard may only delete what it owns.
+				placeholderPath: `${mockCwd}/mock-target-file.ts`,
 				closeAllDiffViews: vi.fn(async () => {
 					callOrder.push("closeDiffViews")
 				}),
@@ -1969,6 +1971,9 @@ describe("DiffViewProvider", () => {
 				activeDiffEditor: undefined,
 				editType: "create",
 				createdDirs: [`${mockCwd}/mock-dir`],
+				// open() had already written the placeholder before openDiffEditor() rejected,
+				// so this edit owns the path.
+				placeholderPath: `${mockCwd}/mock-target-file.ts`,
 			})
 
 			await diffViewProvider.discardUnapprovedStream()
@@ -2036,6 +2041,32 @@ describe("DiffViewProvider", () => {
 			// The caller reports a rollback hazard from the thrown error, so the ORIGINAL failure
 			// is what must surface; the cleanup failure is still logged for the operator.
 			await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow("applyEdit rejected")
+		})
+
+		it("leaves a file this edit never created a placeholder for on disk", async () => {
+			// reset() does not clear relPath, and saveDirectly() sets it for an approved write.
+			// Without ownership tracking the discard would unlink that approved file: an approved
+			// write_to_file to A, then a new write_to_file whose block exits through a rollback
+			// path before open() ever ran, still sees relPath === A.
+			const callOrder: string[] = []
+			const document = makeAbandonedDocument(callOrder)
+			Object.assign(diffViewProvider, {
+				relPath: "previously-approved-file.ts",
+				activeDiffEditor: { document },
+				editType: undefined,
+				createdDirs: [],
+				placeholderPath: undefined,
+			})
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+
+			await expect(diffViewProvider.discardUnapprovedStream()).resolves.toBeUndefined()
+
+			expect(fs.unlink).not.toHaveBeenCalled()
+			expect(fs.rmdir).not.toHaveBeenCalled()
+			// The buffer is still blanked and the tab closed: the unapproved content is gone
+			// without touching a file the user approved.
+			expect(mockWorkspaceEdit.replace).toHaveBeenCalledTimes(1)
+			expect(mockWorkspaceEdit.replace.mock.calls[0][2]).toBe("")
 		})
 
 		it("does nothing when no abandoned view is open", async () => {
