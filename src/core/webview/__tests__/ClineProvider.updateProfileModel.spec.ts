@@ -102,6 +102,7 @@ vi.mock("../../task/Task", () => ({
 		this.overwriteClineMessages = vi.fn()
 		this.overwriteApiConversationHistory = vi.fn()
 		this.taskId = options?.historyItem?.id || "test-task-id"
+		this.instanceId = options?.historyItem?.id ? `${options.historyItem.id}-instance` : "test-instance-id"
 		this.emit = vi.fn()
 		this.setTaskApiConfigName = vi.fn()
 		this.updateApiConfiguration = vi.fn().mockImplementation((newConfig: ProviderSettings) => {
@@ -141,11 +142,15 @@ vi.mock("@roo-code/cloud", () => ({
 	},
 }))
 
+type StoredProfile = ProviderSettings & { name: string; id: string }
+
 describe("ClineProvider - updateProfileModel", () => {
 	let provider: ClineProvider
 	let mockContext: vscode.ExtensionContext
 	let mockOutputChannel: vscode.OutputChannel
 	let mockWebviewView: vscode.WebviewView
+
+	let storedProfiles: Record<string, StoredProfile> = {}
 
 	const manager = () => {
 		const settingsManager = provider["providerSettingsManager"]
@@ -158,14 +163,25 @@ describe("ClineProvider - updateProfileModel", () => {
 		}
 	}
 
-	const mockStoredProfile = (profile: ProviderSettings & { name?: string }) =>
-		manager().getProfile.mockResolvedValue({ name: "test-config", id: "test-id", ...profile })
+	const mockStoredProfile = (profile: ProviderSettings & { name?: string }) => {
+		const name = profile.name || "test-config"
+		storedProfiles[name] = { name, id: "test-id", ...profile }
+	}
 
 	beforeEach(async () => {
 		vi.clearAllMocks()
 		mockCloudInstance.isAuthenticated.mockReturnValue(false)
 		mockCloudInstance.getOrganizationSettings.mockReturnValue(undefined)
 		mockCloudInstance.getAllowList.mockReturnValue({ allowAll: true })
+
+		storedProfiles = {
+			"test-config": {
+				name: "test-config",
+				id: "test-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			},
+		}
 
 		if (!TelemetryService.hasInstance()) {
 			TelemetryService.createInstance([])
@@ -242,7 +258,10 @@ describe("ClineProvider - updateProfileModel", () => {
 		// Test double for providerSettingsManager
 		Object.defineProperty(provider, "providerSettingsManager", {
 			value: {
-				saveConfig: vi.fn().mockResolvedValue("test-id"),
+				saveConfig: vi.fn().mockImplementation(async (name: string, config: ProviderSettings) => {
+					storedProfiles[name] = { name, id: (config as Partial<StoredProfile>).id || "test-id", ...config }
+					return "test-id"
+				}),
 				listConfig: vi.fn().mockResolvedValue([
 					{
 						name: "test-config",
@@ -259,11 +278,16 @@ describe("ClineProvider - updateProfileModel", () => {
 					apiProvider: providerIdentifiers.openrouter,
 					openRouterModelId: "openai/gpt-4",
 				}),
-				getProfile: vi.fn().mockResolvedValue({
-					name: "test-config",
-					id: "test-id",
-					apiProvider: providerIdentifiers.openrouter,
-					openRouterModelId: "openai/gpt-4",
+				getProfile: vi.fn().mockImplementation(async (params: { name: string } | { id: string }) => {
+					const targetName = "name" in params ? params.name : "test-config"
+					return (
+						storedProfiles[targetName] || {
+							name: targetName,
+							id: "test-id",
+							apiProvider: providerIdentifiers.openrouter,
+							openRouterModelId: "openai/gpt-4",
+						}
+					)
 				}),
 			},
 			configurable: true,
@@ -550,7 +574,8 @@ describe("ClineProvider - updateProfileModel", () => {
 			return fn(controller.signal)
 		})
 
-		manager().saveConfig.mockImplementationOnce(async () => {
+		manager().saveConfig.mockImplementationOnce(async (name: string, config: ProviderSettings) => {
+			storedProfiles[name] = { name, id: (config as Partial<StoredProfile>).id || "test-id", ...config }
 			controller.abort()
 			return "test-id"
 		})
@@ -671,14 +696,211 @@ describe("ClineProvider - updateProfileModel", () => {
 		mockStoredProfile({
 			apiProvider: providerIdentifiers.openrouter,
 			openRouterModelId: "openai/gpt-4",
+			openRouterApiKey: "my-key",
 		})
 
+		const mockTask = new Task({} as unknown as ConstructorParameters<typeof Task>[0])
+		Object.defineProperty(mockTask, "taskApiConfigName", { value: "test-config" })
+		await provider.addClineToStack(mockTask)
+
+		let resolveBlockedMutation!: () => void
+		const mutationBlockedPromise = new Promise<void>((resolve) => {
+			resolveBlockedMutation = resolve
+		})
+
+		const originalSetProviderSettings = provider.contextProxy.setProviderSettings.bind(provider.contextProxy)
+		let setSettingsCalls = 0
+		vi.spyOn(provider.contextProxy, "setProviderSettings").mockImplementation(async (settings) => {
+			setSettingsCalls++
+			if (setSettingsCalls === 1) {
+				await mutationBlockedPromise
+			}
+			return originalSetProviderSettings(settings)
+		})
+
+		const postStateSpy = vi.spyOn(provider, "postStateToWebview")
+
+		// Start mutation 1 (will be blocked in setProviderSettings)
+		const mutation1 = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-4.5",
+		})
+
+		// Give mutation 1 a tick to enter setProviderSettings
+		await new Promise((resolve) => setTimeout(resolve, 10))
+
+		// Enqueue mutation 2 while mutation 1 is still blocked
+		const mutation2 = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-5",
+		})
+
+		// Dispose provider while mutation 1 is active and mutation 2 is queued
 		await provider.dispose()
+
+		// Release the blocked mutation 1
+		resolveBlockedMutation()
+
+		await Promise.all([mutation1, mutation2])
+
+		// Active mutation 1 aborted and rolled back to gpt-4
+		// Queued mutation 2 aborted without ever saving gpt-5
+		expect(storedProfiles["test-config"].openRouterModelId).toBe("openai/gpt-4")
+		expect(mockTask.updateApiConfiguration).not.toHaveBeenCalled()
+		expect(postStateSpy).not.toHaveBeenCalled()
+	})
+
+	it("serializes queued mutations behind timed-out in-flight mutation and its rollback", async () => {
+		vi.useFakeTimers()
+		try {
+			mockStoredProfile({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+				openRouterApiKey: "my-key",
+			})
+
+			let resolveStalledMutation!: () => void
+			const stalledMutationPromise = new Promise<void>((resolve) => {
+				resolveStalledMutation = resolve
+			})
+
+			const originalSetProviderSettings = provider.contextProxy.setProviderSettings.bind(provider.contextProxy)
+			let setSettingsCalls = 0
+			vi.spyOn(provider.contextProxy, "setProviderSettings").mockImplementation(async (settings) => {
+				setSettingsCalls++
+				if (setSettingsCalls === 1) {
+					await stalledMutationPromise
+				}
+				return originalSetProviderSettings(settings)
+			})
+
+			// Start mutation 1
+			const mutation1 = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "openai/gpt-4.5",
+			})
+
+			// Advance timers past PENDING_OPERATION_TIMEOUT_MS so mutation 1 caller times out
+			await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 100)
+			await mutation1
+
+			// At this point mutation 1 timed out, but its underlying run is STILL held by stalledMutationPromise.
+			// Start mutation 2:
+			let mutation2Started = false
+			const originalSaveConfig = manager().saveConfig.getMockImplementation()!
+			manager().saveConfig.mockImplementation(async (name: string, config: ProviderSettings) => {
+				if (config.openRouterModelId === "openai/gpt-5") {
+					mutation2Started = true
+				}
+				return originalSaveConfig(name, config)
+			})
+
+			const mutation2 = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "openai/gpt-5",
+			})
+
+			// Allow microtasks to run
+			await vi.advanceTimersByTimeAsync(10)
+
+			// Mutation 2 must NOT have entered saveConfig yet because mutation 1 has not settled!
+			expect(mutation2Started).toBe(false)
+
+			// Now release mutation 1, allowing it to rollback and settle
+			resolveStalledMutation()
+			await vi.advanceTimersByTimeAsync(100)
+			await mutation2
+
+			// Mutation 2 must have now executed and its save must be the final state!
+			expect(storedProfiles["test-config"].openRouterModelId).toBe("openai/gpt-5")
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("preserves newer profile saved by another provider instance and skips rollback", async () => {
+		mockStoredProfile({
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4",
+			openRouterApiKey: "my-key",
+		})
+
+		vi.spyOn(provider.contextProxy, "setProviderSettings").mockImplementation(async () => {
+			// Simulate another provider instance updating the stored profile to a newer model
+			storedProfiles["test-config"] = {
+				name: "test-config",
+				id: "test-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-5",
+				openRouterApiKey: "other-key",
+			}
+			throw new Error("Context secret storage write failed")
+		})
 
 		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
 			openRouterModelId: "openai/gpt-4.5",
 		})
 
-		expect(manager().saveConfig).not.toHaveBeenCalled()
+		// Since stored profile was updated by another instance to gpt-5,
+		// rollback must NOT overwrite it with gpt-4!
+		expect(storedProfiles["test-config"].openRouterModelId).toBe("openai/gpt-5")
+		expect(storedProfiles["test-config"].openRouterApiKey).toBe("other-key")
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.save_api_config")
+	})
+
+	it("does not update task handler or sticky profile if task changed during update", async () => {
+		mockStoredProfile({
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4",
+		})
+
+		const task1 = new Task({ historyItem: { id: "task-1" } } as unknown as ConstructorParameters<typeof Task>[0])
+		Object.defineProperty(task1, "taskApiConfigName", { value: "test-config" })
+		await provider.addClineToStack(task1)
+
+		const task2 = new Task({ historyItem: { id: "task-2" } } as unknown as ConstructorParameters<typeof Task>[0])
+		Object.defineProperty(task2, "taskApiConfigName", { value: "test-config" })
+
+		const originalSetProviderSettings = provider.contextProxy.setProviderSettings.bind(provider.contextProxy)
+		vi.spyOn(provider.contextProxy, "setProviderSettings").mockImplementationOnce(async (settings) => {
+			await originalSetProviderSettings(settings)
+			// Simulate task replacement (e.g. delegation child activation)
+			await provider.removeClineFromStack()
+			await provider.addClineToStack(task2)
+		})
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-4.5",
+		})
+
+		// Neither task1 nor task2 should have had updateApiConfiguration called with new model
+		expect(task1.updateApiConfiguration).not.toHaveBeenCalled()
+		expect(task2.updateApiConfiguration).not.toHaveBeenCalled()
+		expect(task2.setTaskApiConfigName).not.toHaveBeenCalled()
+	})
+
+	it("aborts queued upsertProviderProfile without saving after provider disposal", async () => {
+		let resolveFirstMutation!: () => void
+		const firstMutationBlocked = new Promise<void>((resolve) => {
+			resolveFirstMutation = resolve
+		})
+
+		// Block provider mutation queue with a long-running mutation
+		const firstMutation = provider["enqueueProviderProfileMutation"](async () => {
+			await firstMutationBlocked
+		})
+
+		// Queue an upsert behind the blocked mutation
+		const upsertPromise = provider.upsertProviderProfile("new-profile", {
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4",
+		} as ProviderSettings)
+
+		// Dispose the provider
+		await provider.dispose()
+
+		// Release first mutation
+		resolveFirstMutation()
+
+		await Promise.allSettled([firstMutation, upsertPromise])
+
+		// upsert should not have saved anything to new-profile
+		expect(storedProfiles["new-profile"]).toBeUndefined()
 	})
 })

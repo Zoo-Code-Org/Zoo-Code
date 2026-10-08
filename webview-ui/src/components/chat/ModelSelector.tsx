@@ -152,16 +152,13 @@ export const ModelSelector = ({
 
 	const handleSelect = useCallback(
 		(modelId: string) => {
-			if (!modelConfig) {
-				return
-			}
-
 			const patch: ModelSelectionPatch = {}
 			const setField = <K extends keyof ProviderSettings>(field: K, value: ProviderSettings[K]) => {
 				patch[field] = typeof value === "string" || typeof value === "number" ? value : null
 			}
 			handleModelChangeSideEffects(provider, modelId, setField)
-			patch[modelConfig.field] = modelId
+			const modelField = modelConfig?.field ?? "apiModelId"
+			patch[modelField] = modelId
 
 			onChange({ expectedProvider: provider, patch })
 

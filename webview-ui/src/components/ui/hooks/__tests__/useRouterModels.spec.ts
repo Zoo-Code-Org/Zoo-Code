@@ -232,6 +232,38 @@ describe("fetchRouterModels", () => {
 		// Aborting afterwards should not trigger rejection
 		controller.abort()
 	})
+
+	it("cleans up successfully when called without an abort signal", async () => {
+		const removeWindowListenerSpy = vi.spyOn(window, "removeEventListener")
+
+		const promise = fetchRouterModels(providerIdentifiers.openrouter)
+
+		window.dispatchEvent(
+			new MessageEvent("message", {
+				data: {
+					type: RouterModelsMessageType.routerModels,
+					values: { provider: providerIdentifiers.openrouter },
+					routerModels: mockRouterModels,
+				},
+			}),
+		)
+
+		const result = await promise
+		expect(result).toEqual(mockRouterModels)
+		expect(removeWindowListenerSpy).toHaveBeenCalledWith("message", expect.any(Function))
+	})
+
+	it("times out and cleans up when called without an abort signal", async () => {
+		vi.useFakeTimers()
+		const removeWindowListenerSpy = vi.spyOn(window, "removeEventListener")
+
+		const promise = fetchRouterModels(providerIdentifiers.openrouter)
+
+		vi.advanceTimersByTime(10000)
+
+		await expect(promise).rejects.toThrow("Router models request timed out")
+		expect(removeWindowListenerSpy).toHaveBeenCalledWith("message", expect.any(Function))
+	})
 })
 
 describe("useRouterModels", () => {

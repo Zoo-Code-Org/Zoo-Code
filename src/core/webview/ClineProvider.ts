@@ -275,15 +275,20 @@ export class ClineProvider
 		const onProviderDispose = () => controller.abort()
 		this.providerProfileMutationAbortController.signal.addEventListener("abort", onProviderDispose, { once: true })
 
+		const invoke = () => {
+			if (this._disposed) {
+				return Promise.reject(new Error("ClineProvider is disposed"))
+			}
+			if (controller.signal.aborted) {
+				return Promise.reject(new Error("Provider profile mutation aborted"))
+			}
+			return fn(controller.signal)
+		}
+
 		// Run fn after either outcome so a rejected mutation never poisons the queue.
-		const run = this.providerProfileMutationQueue
-			.then(
-				() => fn(controller.signal),
-				() => fn(controller.signal),
-			)
-			.finally(() => {
-				this.providerProfileMutationAbortController.signal.removeEventListener("abort", onProviderDispose)
-			})
+		const run = this.providerProfileMutationQueue.then(invoke, invoke).finally(() => {
+			this.providerProfileMutationAbortController.signal.removeEventListener("abort", onProviderDispose)
+		})
 		const callerResult = this.withProviderProfileMutationTimeout(run, () => {
 			controller.abort()
 			this.log("Provider profile mutation timed out; aborting in-flight mutation")
@@ -1898,6 +1903,9 @@ export class ClineProvider
 	): Promise<string | undefined> {
 		try {
 			return await this.enqueueProviderProfileMutation(async (signal) => {
+				if (signal.aborted || this._disposed) {
+					return undefined
+				}
 				// TODO: Do we need to be calling `activateProfile`? It's not
 				// clear to me what the source of truth should be; in some cases
 				// we rely on the `ContextProxy`'s data store and in other cases
@@ -1905,7 +1913,7 @@ export class ClineProvider
 				// be simpler to unify these two.
 				const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
 
-				if (signal.aborted) return id
+				if (signal.aborted || this._disposed) return id
 
 				if (activate) {
 					const { mode } = await this.getState()
@@ -1983,11 +1991,13 @@ export class ClineProvider
 			await this.enqueueProviderProfileMutation(async (signal) => {
 				if (signal.aborted || this._disposed) return
 
-				// Mirrors the profile name the webview is shown (see getStateToPostToWebview).
-				const task = this.getCurrentTask()
+				// Retain initial task identity to guard against task switches/delegation during async operations
+				const initialTask = this.getCurrentTask()
+				const initialTaskId = initialTask?.taskId
+				const initialInstanceId = initialTask?.instanceId
 				const { currentApiConfigName, organizationAllowList: stateOrganizationAllowList } =
 					await this.getState()
-				const visibleProfileName = task ? task.taskApiConfigName : currentApiConfigName
+				const visibleProfileName = initialTask ? initialTask.taskApiConfigName : currentApiConfigName
 
 				if (visibleProfileName !== name) {
 					this.log(`Ignoring model update for profile '${name}': active profile is '${visibleProfileName}'`)
@@ -2078,11 +2088,40 @@ export class ClineProvider
 				} catch (updateError) {
 					if (savedConfig) {
 						try {
-							await this.providerSettingsManager.saveConfig(name, originalContextSettings)
-							await this.updateGlobalState(
-								"listApiConfigMeta",
-								await this.providerSettingsManager.listConfig(),
+							const currentProfile = await this.providerSettingsManager
+								.getProfile({ name })
+								.catch(() => null)
+							// Check if stored profile still matches what this mutation saved.
+							// If another provider instance saved a newer profile in the meantime,
+							// do not overwrite it with originalContextSettings.
+							const matchesSavedSettings = Boolean(
+								currentProfile &&
+								currentProfile.apiProvider === storedProvider &&
+								(!providerModelKey ||
+									currentProfile[providerModelKey as keyof typeof currentProfile] ===
+										merged[providerModelKey]) &&
+								Object.entries(patch).every(([key, value]) => {
+									if (key === "apiProvider") return true
+									const actual = currentProfile[key as keyof typeof currentProfile]
+									const expected = value === null ? undefined : value
+									return actual === expected
+								}),
 							)
+
+							if (matchesSavedSettings) {
+								await this.providerSettingsManager.saveConfig(name, originalContextSettings)
+								await this.updateGlobalState(
+									"listApiConfigMeta",
+									await this.providerSettingsManager.listConfig(),
+								)
+								if (shouldRollbackContext) {
+									await this.contextProxy.setProviderSettings(originalContextSettings)
+								}
+							} else {
+								this.log(
+									`Preserving newer profile for '${name}' saved by another provider instance; skipping rollback`,
+								)
+							}
 						} catch (rollbackError) {
 							this.log(
 								`Failed to rollback profile '${name}' after update failure: ${
@@ -2090,8 +2129,7 @@ export class ClineProvider
 								}`,
 							)
 						}
-					}
-					if (shouldRollbackContext) {
+					} else if (shouldRollbackContext) {
 						try {
 							await this.contextProxy.setProviderSettings(originalContextSettings)
 						} catch (rollbackError) {
@@ -2109,8 +2147,19 @@ export class ClineProvider
 					return
 				}
 
-				this.updateTaskApiHandlerIfNeeded(merged as ProviderSettings, { forceRebuild: true })
-				await this.persistStickyProviderProfileToCurrentTask(name)
+				// Only update the task if it is still the same task that was active when this update started.
+				const currentTask = this.getCurrentTask()
+				const isSameTask =
+					initialTask &&
+					currentTask &&
+					currentTask === initialTask &&
+					currentTask.taskId === initialTaskId &&
+					currentTask.instanceId === initialInstanceId
+
+				if (isSameTask) {
+					this.updateTaskApiHandlerIfNeeded(merged as ProviderSettings, { forceRebuild: true })
+					await this.persistStickyProviderProfileToCurrentTask(name)
+				}
 				await this.postStateToWebview()
 			})
 		} catch (error) {
