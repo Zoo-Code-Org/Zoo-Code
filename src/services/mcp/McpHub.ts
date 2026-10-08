@@ -633,6 +633,23 @@ export class McpHub {
 		}
 	}
 
+	/**
+	 * The root a project-scoped MCP write has to stay inside.
+	 *
+	 * safeWriteJson resolves the publish target with realpath before staging beside it, so a
+	 * repository that ships .roo/mcp.json as a symlink to a file OUTSIDE the workspace would
+	 * have that outside file replaced as soon as the user edits a project MCP setting or
+	 * allowlist. Passing the canonical workspace root as confineTo makes the write fail closed
+	 * instead. Global writes are deliberately unconstrained: they target the user's own
+	 * settings directory, which is not under the workspace.
+	 */
+	private confineForMcpWrite(source: "global" | "project"): string | undefined {
+		if (source !== "project") {
+			return undefined
+		}
+		return this.providerRef.deref()?.cwd ?? getWorkspacePath()
+	}
+
 	// Initialize project-level MCP servers
 	private async initializeProjectMcpServers(): Promise<void> {
 		await this.initializeMcpServers("project")
@@ -2066,7 +2083,10 @@ export class McpHub {
 		}
 		this.isProgrammaticUpdate = true
 		try {
-			await safeWriteJson(configPath, updatedConfig, { prettyPrint: true })
+			await safeWriteJson(configPath, updatedConfig, {
+				prettyPrint: true,
+				confineTo: this.confineForMcpWrite(source),
+			})
 		} finally {
 			// Reset flag after watcher debounce period (non-blocking)
 			this.flagResetTimer = setTimeout(() => {
@@ -2151,7 +2171,10 @@ export class McpHub {
 					mcpServers: config.mcpServers,
 				}
 
-				await safeWriteJson(configPath, updatedConfig, { prettyPrint: true })
+				await safeWriteJson(configPath, updatedConfig, {
+					prettyPrint: true,
+					confineTo: this.confineForMcpWrite(serverSource),
+				})
 
 				// Update server connections with the correct source
 				await this.updateServerConnections(config.mcpServers, serverSource)
@@ -2360,7 +2383,10 @@ export class McpHub {
 		}
 		this.isProgrammaticUpdate = true
 		try {
-			await safeWriteJson(normalizedPath, config, { prettyPrint: true })
+			await safeWriteJson(normalizedPath, config, {
+				prettyPrint: true,
+				confineTo: this.confineForMcpWrite(source),
+			})
 		} finally {
 			// Reset flag after watcher debounce period (non-blocking)
 			this.flagResetTimer = setTimeout(() => {
