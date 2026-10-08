@@ -27,6 +27,7 @@ import {
 	LmStudioModelsMessageType,
 	OllamaModelsMessageType,
 	OpenAiModelsMessageType,
+	BedrockModelsMessageType,
 	RouterModelsMessageType,
 	VsCodeLmModelsMessageType,
 	isTelemetryOptedIn,
@@ -40,6 +41,7 @@ import { saveTaskMessages } from "../task-persistence"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
+import { getBedrockCatalog } from "../../api/providers/fetchers/bedrock"
 import { handleCheckpointRestoreOperation } from "./checkpointRestoreHandler"
 import { generateErrorDiagnostics } from "./diagnosticsHandler"
 import {
@@ -1106,6 +1108,44 @@ export const webviewMessageHandler = async (
 			// For providers that need credentials, use their specific handlers
 			await flushModels({ provider: routerNameFlush } as GetModelsOptions, true)
 			break
+		case BedrockModelsMessageType.cancelBedrockModels:
+			if (message.requestId) {
+				provider.bedrockCatalogRequests.get(message.requestId)?.abort()
+				provider.bedrockCatalogRequests.delete(message.requestId)
+			}
+			break
+		case BedrockModelsMessageType.requestBedrockModels: {
+			const { requestId } = message
+			if (!requestId) break
+			provider.bedrockCatalogRequests.get(requestId)?.abort()
+			const controller = new AbortController()
+			provider.bedrockCatalogRequests.set(requestId, controller)
+			try {
+				const bedrockModels = await getBedrockCatalog(message.apiConfiguration ?? {}, controller.signal)
+				if (controller.signal.aborted) break
+				await provider.postMessageToWebview({
+					type: BedrockModelsMessageType.bedrockModels,
+					requestId: message.requestId,
+					bedrockModels,
+				})
+			} catch (error) {
+				if (controller.signal.aborted) break
+				// Keep the underlying cause (IAM denial, network, wrong region) diagnosable in the output channel.
+				provider.log(
+					`Bedrock catalogue discovery failed: ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`,
+				)
+				await provider.postMessageToWebview({
+					type: BedrockModelsMessageType.bedrockModels,
+					requestId: message.requestId,
+					error: "Could not load the regional catalogue. Check IAM credentials/profile, network access, and listing permissions (bedrock:ListFoundationModels / bedrock:ListInferenceProfiles). This discovery flow requires IAM authentication.",
+				})
+			} finally {
+				if (provider.bedrockCatalogRequests.get(requestId) === controller) {
+					provider.bedrockCatalogRequests.delete(requestId)
+				}
+			}
+			break
+		}
 		case RouterModelsMessageType.requestRouterModels: {
 			const { apiConfiguration } = await provider.getState()
 

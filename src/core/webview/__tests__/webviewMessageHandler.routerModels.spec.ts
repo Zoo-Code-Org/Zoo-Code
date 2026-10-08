@@ -5,6 +5,7 @@ import {
 	providerIdentifiers,
 	retiredProviderIdentifiers,
 	RouterModelsMessageType,
+	BedrockModelsMessageType,
 } from "@roo-code/types"
 
 import { webviewMessageHandler } from "../webviewMessageHandler"
@@ -57,6 +58,10 @@ vi.mock("vscode", () => ({
 // Mock modelCache getModels/flushModels used by the handler
 const getModelsMock = vi.fn()
 const flushModelsMock = vi.fn()
+const getBedrockCatalogMock = vi.fn()
+vi.mock("../../../api/providers/fetchers/bedrock", () => ({
+	getBedrockCatalog: (...args: unknown[]) => getBedrockCatalogMock(...args),
+}))
 vi.mock("../../../api/providers/fetchers/modelCache", () => ({
 	getModels: (...args: any[]) => getModelsMock(...args),
 	flushModels: (...args: any[]) => flushModelsMock(...args),
@@ -75,6 +80,7 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 
 		mockProvider = {
 			// Only methods used by this code path
+			bedrockCatalogRequests: new Map<string, AbortController>(),
 			postMessageToWebview: vi.fn(),
 			getState: vi.fn().mockResolvedValue({ apiConfiguration: {} }),
 			contextProxy: {
@@ -100,6 +106,88 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 					return {}
 			}
 		})
+	})
+
+	it("discovers Bedrock models using unsaved settings and correlates the response without persisting credentials", async () => {
+		const apiConfiguration = { awsRegion: "eu-west-3", awsAccessKey: "draft-key", awsSecretKey: "draft-secret" }
+		const models = [{ arn: "profile", name: "EU model", kind: "geographic" }]
+		getBedrockCatalogMock.mockResolvedValue(models)
+		await webviewMessageHandler(mockProvider, {
+			type: BedrockModelsMessageType.requestBedrockModels,
+			requestId: "draft",
+			apiConfiguration,
+		})
+		expect(getBedrockCatalogMock).toHaveBeenCalledWith(apiConfiguration, expect.any(AbortSignal))
+		expect(mockProvider.bedrockCatalogRequests.size).toBe(0)
+		expect(mockProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: BedrockModelsMessageType.bedrockModels,
+			requestId: "draft",
+			bedrockModels: models,
+		})
+	})
+
+	it("logs the underlying Bedrock discovery failure for diagnosis", async () => {
+		const error = new Error("User is not authorized to perform: bedrock:ListInferenceProfiles")
+		error.name = "AccessDeniedException"
+		getBedrockCatalogMock.mockRejectedValue(error)
+		await webviewMessageHandler(mockProvider, {
+			type: BedrockModelsMessageType.requestBedrockModels,
+			requestId: "denied",
+		})
+		expect(mockProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining(
+				"AccessDeniedException: User is not authorized to perform: bedrock:ListInferenceProfiles",
+			),
+		)
+	})
+
+	it("returns a correlated, sanitized Bedrock discovery failure", async () => {
+		getBedrockCatalogMock.mockRejectedValue(new Error("secret credential detail"))
+		await webviewMessageHandler(mockProvider, {
+			type: BedrockModelsMessageType.requestBedrockModels,
+			requestId: "failed",
+		})
+		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: BedrockModelsMessageType.bedrockModels,
+				requestId: "failed",
+				error: expect.stringContaining("listing"),
+			}),
+		)
+		expect(JSON.stringify(mockProvider.postMessageToWebview.mock.calls)).not.toContain("secret credential detail")
+		expect(mockProvider.bedrockCatalogRequests.size).toBe(0)
+	})
+
+	it.each(["success", "failure"])("cancels only the correlated discovery and suppresses late %s", async (outcome) => {
+		let finish!: () => void
+		getBedrockCatalogMock.mockImplementationOnce(
+			() =>
+				new Promise((resolve, reject) => {
+					finish = () => (outcome === "success" ? resolve([]) : reject(new Error("aborted discovery")))
+				}),
+		)
+		const other = new AbortController()
+		mockProvider.bedrockCatalogRequests.set("other", other)
+		const pending = webviewMessageHandler(mockProvider, {
+			type: BedrockModelsMessageType.requestBedrockModels,
+			requestId: "cancelled",
+		})
+		await vi.waitFor(() => expect(getBedrockCatalogMock).toHaveBeenCalledOnce())
+		const signal: AbortSignal = getBedrockCatalogMock.mock.calls[0][1]
+		expect(signal.aborted).toBe(false)
+		await webviewMessageHandler(mockProvider, {
+			type: BedrockModelsMessageType.cancelBedrockModels,
+			requestId: "cancelled",
+		})
+		expect(signal.aborted).toBe(true)
+		expect(other.signal.aborted).toBe(false)
+		expect(mockProvider.bedrockCatalogRequests.has("cancelled")).toBe(false)
+		finish()
+		await pending
+		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+		expect(mockProvider.log).not.toHaveBeenCalled()
+		expect(mockProvider.bedrockCatalogRequests.get("other")).toBe(other)
 	})
 
 	it("returns explicit removal error for requestRooModels", async () => {

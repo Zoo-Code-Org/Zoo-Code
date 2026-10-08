@@ -542,6 +542,7 @@ const ApiOptions = ({
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 							selectedModelInfo={selectedModelInfo}
+							organizationAllowList={organizationAllowList}
 							simplifySettings={fromWelcomeView}
 						/>
 					)}

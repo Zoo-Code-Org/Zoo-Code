@@ -1275,6 +1275,19 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	test("aborts and forgets pending Bedrock discovery when webview resources are cleared", () => {
+		const first = new AbortController()
+		const second = new AbortController()
+		provider.bedrockCatalogRequests.set("first", first)
+		provider.bedrockCatalogRequests.set("second", second)
+
+		provider["clearWebviewResources"]()
+
+		expect(first.signal.aborted).toBe(true)
+		expect(second.signal.aborted).toBe(true)
+		expect(provider.bedrockCatalogRequests.size).toBe(0)
+	})
+
 	test("postStateToWebview does not force action navigation for non-compliant MDM state", async () => {
 		const mdmService = {
 			requiresCloudAuth: vi.fn().mockReturnValue(true),
