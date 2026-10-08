@@ -140,7 +140,7 @@ import { PendingActionSettlementError, Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
 import type { WebviewFocusTracker } from "./WebviewFocusTracker"
-import type { ClineMessage, TodoItem } from "@roo-code/types"
+import type { ClineMessage, ProviderSettingsWithId, TodoItem } from "@roo-code/types"
 import {
 	type ApiMessage,
 	readApiMessages,
@@ -3601,6 +3601,22 @@ export class ClineProvider
 		// delete the last remaining configuration) propagates. Matching message text
 		// instead would let a profile whose name contains "not found" swallow an
 		// unrelated failure.
+		// The settings-store commit and the profile-list write below are two separate
+		// durable writes. Capture the settings first so a failure after the commit can be
+		// compensated: without them the stored profile list would name a profile whose
+		// settings no longer exist, and a later selection or load could not recover them.
+		let deletedProfile: ProviderSettingsWithId | undefined
+		try {
+			const { name: _deletedName, ...profile } = await this.providerSettingsManager.getProfile({
+				name: profileToDelete.name,
+			})
+			deletedProfile = profile as ProviderSettingsWithId
+		} catch (error: unknown) {
+			if (!(error instanceof ProviderSettingsNotFoundError)) {
+				this.log(`deleteProviderProfile: could not read the settings for '${profileToDelete.name}'; a later failure of the list update cannot be compensated. ${error instanceof Error ? error.message : String(error)}`)
+			}
+		}
+
 		try {
 			await this.providerSettingsManager.deleteConfig(profileToDelete.name)
 		} catch (error) {
