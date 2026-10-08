@@ -96,6 +96,15 @@ export class DiffViewProvider {
 	 */
 	private placeholderVersion: string | undefined = undefined
 	/**
+	 * The (dev, ino) identity of the file open() created for a new file, taken from the
+	 * stat it performs right after the write. placeholderVersion needs a stat-matched
+	 * read of the content, and that can fail or disagree; ownership of the placeholder
+	 * must not depend on it, or a rejected save leaves behind a file this call created
+	 * that nobody can tell is theirs to remove. The identity is only ever used to remove
+	 * a file that is still EMPTY, so the worst it can act on is a 0-byte file.
+	 */
+	private placeholderIdentity: { dev: bigint; ino: bigint } | undefined = undefined
+	/**
 	 * The observation this path had BEFORE open() recorded the preview's own
 	 * version token: null when there was none, undefined when this provider never
 	 * opened a preview. open() observes the current on-disk version, so a file that
@@ -216,6 +225,10 @@ export class DiffViewProvider {
 				const placeholderContent = await fs.readFile(absolutePath, "utf-8").catch(() => undefined)
 				const placeholderPostStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 				const placeholderToken = versionTokenOfStat(placeholderPreStats)
+				// Ownership first, independent of whether the token below can be trusted:
+				// this is the file open() just created, and its identity is what a later
+				// cleanup re-checks when no stat-matched token is available.
+				this.placeholderIdentity = { dev: placeholderPreStats.dev, ino: placeholderPreStats.ino }
 				// Stat-matched (S2): the read is trusted only while the bracketing
 				// stats agree and the content is exactly the empty placeholder.
 				if (
@@ -282,6 +295,7 @@ export class DiffViewProvider {
 			this.isEditing = false
 			this.createdDirs = []
 			this.placeholderVersion = undefined
+			this.placeholderIdentity = undefined
 			throw error
 		}
 		this.fadedOverlayController = new DecorationController("fadedOverlay", this.activeDiffEditor)
@@ -369,16 +383,37 @@ export class DiffViewProvider {
 	 * path uses; the directories this call created then go, innermost first, stopping
 	 * at the first directory another writer populated in the meantime.
 	 */
+	/**
+	 * Whether the path still holds the placeholder this provider created.
+	 * The stat-matched token is the strongest proof; when open() could not produce one
+	 * (a failed or disagreeing bracketing read), ownership falls back to the identity
+	 * captured at creation plus "still empty". A file that carries content is never
+	 * removed on the fallback, so a peer that wrote through the placeholder keeps it.
+	 */
+	private async _placeholderStillOurs(absolutePath: string): Promise<boolean> {
+		const stats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+		if (!stats) {
+			return false
+		}
+		if (this.placeholderVersion !== undefined) {
+			return versionTokenOfStat(stats) === this.placeholderVersion
+		}
+		const identity = this.placeholderIdentity
+		if (!identity) {
+			return false
+		}
+		return stats.dev === identity.dev && stats.ino === identity.ino && stats.size === 0n
+	}
+
 	private async undoPartialOpen(absolutePath: string): Promise<void> {
 		if (this.editType !== "create") {
 			return
 		}
-		const placeholderVersion = this.placeholderVersion
+		const ownsPlaceholder = this.placeholderVersion !== undefined || this.placeholderIdentity !== undefined
 		try {
 			await withFileLock(await resolveLockKey(absolutePath), async () => {
-				if (placeholderVersion) {
-					const stats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
-					if (!stats || versionTokenOfStat(stats) !== placeholderVersion) {
+				if (ownsPlaceholder) {
+					if (!(await this._placeholderStillOurs(absolutePath))) {
 						// Another writer owns the path now: leave their file alone.
 						return
 					}
@@ -694,19 +729,17 @@ export class DiffViewProvider {
 						if (updatedDocument.isDirty) {
 							discardSucceeded = await this.revertDocument(updatedDocument)
 						}
-						if (discardSucceeded && this.editType === "create" && this.placeholderVersion) {
+						if (
+							discardSucceeded &&
+							this.editType === "create" &&
+							(this.placeholderVersion !== undefined || this.placeholderIdentity !== undefined)
+						) {
 							// Cleanup has to be serialized with the same resolved-path advisory lock
 							// every other writer to this file uses. A token check and an unlink in
 							// separate steps let a peer writer commit in the gap and lose its write.
 							// A differing token, or a lock that cannot be taken, leaves the file in place.
 							await withFileLock(await resolveLockKey(absolutePath), async () => {
-								const placeholderStats = await fs
-									.stat(absolutePath, { bigint: true })
-									.catch(() => undefined)
-								if (
-									!placeholderStats ||
-									versionTokenOfStat(placeholderStats) !== this.placeholderVersion
-								) {
+								if (!(await this._placeholderStillOurs(absolutePath))) {
 									return
 								}
 								let unlinked = false
@@ -1618,6 +1651,7 @@ export class DiffViewProvider {
 		this.userTouchedDiffEditor = false
 		this.snapshotPreviewTabs = []
 		this.placeholderVersion = undefined
+		this.placeholderIdentity = undefined
 		this.preOpenObservation = undefined
 		this.openToken = undefined
 	}
