@@ -731,12 +731,16 @@ describe("safeWriteJson", () => {
 	)
 
 	test.skipIf(process.platform === "win32")(
-		"refuses a confined write whose link is swapped after the confinement check",
+		"refuses the publish when the authorized referent is repointed outside after the check",
 		async () => {
-			// The race the under-lock confinement check cannot see on its own: the link is
-			// inside the scope when the check runs, and a local process repoints it outside
-			// before the commit. The merge callback runs under the lock, after the check and
-			// before anything is staged, so it stands in for that process deterministically.
+			// The race the under-lock confinement check cannot see on its own. safeWriteJson
+			// resolves the alias under the lock and hands THAT path to the publish, so a link
+			// swapped onto the alias afterwards is never followed. What an attacker can do is
+			// repoint the authorized path itself: the file the check looked at becomes a link
+			// to somewhere outside the scope before the commit. The publish re-resolves it,
+			// finds a different file than the one that was authorized, and refuses.
+			// The merge callback runs under the lock, after the check and before anything is
+			// staged, so it stands in for that local process deterministically.
 			const projectDir = path.join(tempDir, "project-race")
 			await fs.mkdir(projectDir)
 			const inside = path.join(projectDir, "inside.json")
@@ -753,20 +757,64 @@ describe("safeWriteJson", () => {
 					{
 						confineTo: projectDir,
 						merge: (existing) => {
-							// Same name, different referent: exactly what the check above
-							// cannot observe after it has run.
-							fsSyncActual.unlinkSync(projectConfig)
-							fsSyncActual.symlinkSync(outside, projectConfig)
+							// Same path, different file: the authorized referent is replaced by a
+							// link to a target the scope check never authorized.
+							fsSyncActual.unlinkSync(inside)
+							fsSyncActual.symlinkSync(outside, inside)
 							return existing
 						},
 					},
 				),
 			).rejects.toThrow(TargetMovedError)
 
-			// Neither the new referent nor the original one was written, and no staging or
-			// lock artifact survives in either directory.
+			// The file behind the planted link was not written, and no staging or lock
+			// artifact survives in either directory.
 			expect(JSON.parse(await fsSyncActual.promises.readFile(outside, "utf8"))).toEqual({ secret: "original" })
-			expect(JSON.parse(await fsSyncActual.promises.readFile(inside, "utf8"))).toEqual({ mcpServers: {} })
+			for (const dir of [tempDir, projectDir]) {
+				const entries = await fs.readdir(dir)
+				expect(
+					entries.filter(
+						(entry) => entry.includes(".new_") || entry.includes("safeWriteText") || entry.endsWith(".lock"),
+					),
+				).toEqual([])
+			}
+		},
+	)
+	test.skipIf(process.platform === "win32")(
+		"publishes to the referent it authorized when the alias is repointed after the check",
+		async () => {
+			// The other half of the same race, and the reason the pin is the publish's own
+			// spelling: safeWriteJson resolved the alias to its referent under the lock, so a
+			// link swapped onto the alias afterwards is not followed - the write lands on the
+			// file that was actually authorized, and the new referent is left alone.
+			const projectDir = path.join(tempDir, "project-swap")
+			await fs.mkdir(projectDir)
+			const inside = path.join(projectDir, "inside.json")
+			await fsSyncActual.promises.writeFile(inside, JSON.stringify({ mcpServers: {} }), "utf8")
+			const outside = path.join(tempDir, "outside-swap.json")
+			await fsSyncActual.promises.writeFile(outside, JSON.stringify({ secret: "original" }), "utf8")
+			const projectConfig = path.join(projectDir, "mcp.json")
+			await fs.symlink(inside, projectConfig)
+
+			await safeWriteJson(
+				projectConfig,
+				{ mcpServers: { swapped: { url: "http://localhost" } } },
+				{
+					confineTo: projectDir,
+					merge: (_existing, incoming) => {
+						// The alias is repointed AFTER safeWriteJson resolved it under the lock.
+						// The publish must still go to the file that was authorized.
+						fsSyncActual.unlinkSync(projectConfig)
+						fsSyncActual.symlinkSync(outside, projectConfig)
+						return incoming
+					},
+				},
+			)
+
+			expect(JSON.parse(await fsSyncActual.promises.readFile(inside, "utf8"))).toEqual({
+				mcpServers: { swapped: { url: "http://localhost" } },
+			})
+			expect(JSON.parse(await fsSyncActual.promises.readFile(outside, "utf8"))).toEqual({ secret: "original" })
 			for (const dir of [tempDir, projectDir]) {
 				const entries = await fs.readdir(dir)
 				expect(
@@ -869,9 +917,15 @@ describe("safeWriteJson", () => {
 
 			expect(publishSpy).toHaveBeenCalledTimes(1)
 			const options = publishSpy.mock.calls[0][2] as Record<string, unknown>
-			// The exact path the scope check authorized...
-			expect(options.expectedResolvedPath).toBe(path.join(await fs.realpath(nested), "mcp.json"))
-			// ...and the identity of every directory that check walked through, from the
+			// The pin must be the SAME string the publish primitive is handed: that is the
+			// path it re-resolves and compares the pin against. A differently canonicalized
+			// spelling of the same file (canonicalizing an aliased ancestor) would refuse a
+			// write whose ancestors are aliases - the macOS /var -> /private/var shape. That
+			// case only reproduces where symlinks can be created, so the invariant itself is
+			// asserted here, on every lane.
+			expect(options.expectedResolvedPath).toBe(target)
+			expect(options.expectedResolvedPath).toBe(publishSpy.mock.calls[0][0])
+			// The identity of every directory that check walked through, from the
 			// scope root down to the target's parent.
 			const ancestors = options.expectedAncestorIdentities as { dir: string; dev: bigint; ino: bigint }[]
 			const pinnedDirs = ancestors.map((entry) => entry.dir)

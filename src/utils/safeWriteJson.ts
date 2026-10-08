@@ -277,10 +277,17 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		const textOptions: SafeWriteTextOptions = {
 			tempPath: actualTempNewFilePath,
 			backup: true,
-			// Pin the confinement decision onto the publish: the target must still resolve
-			// to what was authorized, and every directory the confined walk went through
-			// must still be the same directory, or nothing is committed.
-			expectedResolvedPath: confinedTarget,
+			// Pin the confinement decision onto the publish: the path handed to the publish
+			// primitive must still resolve to what this check authorized, and every
+			// directory the confined walk went through must still be the same directory,
+			// or nothing is committed.
+			// The pin is the path the publish will itself re-resolve - resolvedTargetPath,
+			// which is what is passed below - not the canonicalized scope form. Pinning
+			// the canonical form would refuse a target whose ANCESTORS are aliases (the
+			// /var -> /private/var shape): the publish resolves only its final component, so
+			// the two spellings differ even though nothing moved. The containment decision
+			// still uses confinedTarget; only the drift check needs the publish's spelling.
+			expectedResolvedPath: resolvedTargetPath,
 			expectedAncestorIdentities: confinedAncestors,
 		}
 
