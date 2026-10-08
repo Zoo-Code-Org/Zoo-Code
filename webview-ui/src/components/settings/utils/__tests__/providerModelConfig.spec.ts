@@ -295,6 +295,7 @@ describe("providerModelConfig", () => {
 			handleModelChangeSideEffects(providerIdentifiers.bedrock, "anthropic.claude", setApiConfigurationField)
 
 			expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArn", "")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArnBaseModelId", "")
 			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxThinkingTokens", undefined)
@@ -306,6 +307,7 @@ describe("providerModelConfig", () => {
 			handleModelChangeSideEffects(providerIdentifiers.bedrock, "custom-arn", setApiConfigurationField)
 
 			expect(setApiConfigurationField).not.toHaveBeenCalledWith("awsCustomArn", expect.anything())
+			expect(setApiConfigurationField).not.toHaveBeenCalledWith("awsCustomArnBaseModelId", expect.anything())
 			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxThinkingTokens", undefined)
@@ -328,6 +330,7 @@ describe("providerModelConfig", () => {
 			handleModelChangeSideEffects(providerIdentifiers.bedrock, ` ${appProfileArn}\n`, setApiConfigurationField)
 
 			expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArn", appProfileArn)
+			expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArnBaseModelId", "")
 			expect(setApiConfigurationField).not.toHaveBeenCalledWith("awsCustomArn", "")
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
 		})

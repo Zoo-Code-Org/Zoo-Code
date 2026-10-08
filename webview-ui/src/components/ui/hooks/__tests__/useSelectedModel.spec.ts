@@ -855,6 +855,34 @@ describe("useSelectedModel", () => {
 			).toBe(1_000_000)
 		})
 
+		it("uses the 1M pricing tier for a custom ARN base model when 1M context is enabled", () => {
+			const opus48: ModelInfo = bedrockModels["anthropic.claude-opus-4-8"]
+			const tier = opus48.tiers?.[0]
+			expect(tier?.inputPrice).toBeGreaterThan(opus48.inputPrice ?? 0)
+
+			expect(
+				renderCustomArn({ awsCustomArnBaseModelId: "anthropic.claude-opus-4-8", awsBedrock1MContext: true })
+					.info,
+			).toMatchObject({
+				inputPrice: tier?.inputPrice,
+				outputPrice: tier?.outputPrice,
+				cacheWritesPrice: tier?.cacheWritesPrice,
+				cacheReadsPrice: tier?.cacheReadsPrice,
+			})
+			expect(renderCustomArn({ awsCustomArnBaseModelId: "anthropic.claude-opus-4-8" }).info?.inputPrice).toBe(
+				opus48.inputPrice,
+			)
+		})
+
+		it("applies a configured context window to a listed custom ARN base model", () => {
+			expect(
+				renderCustomArn({
+					awsCustomArnBaseModelId: "anthropic.claude-opus-5-5",
+					awsModelContextWindow: 400_000,
+				}).info?.contextWindow,
+			).toBe(400_000)
+		})
+
 		it("detects the base model from an inference profile ARN that names it", () => {
 			const { info } = renderCustomArn({
 				awsCustomArn: "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-opus-4-8",

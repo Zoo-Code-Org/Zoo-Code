@@ -31,6 +31,15 @@ describe("resolveBedrockCustomArnBaseModelId", () => {
 		).toBe("anthropic.claude-3-5-sonnet-20241022-v2:0")
 	})
 
+	it("falls back to the model named in the ARN when the saved base model is unknown", () => {
+		expect(
+			resolveBedrockCustomArnBaseModelId(
+				"arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-opus-4-8",
+				"anthropic.claude-retired-model",
+			),
+		).toBe("anthropic.claude-opus-4-8")
+	})
+
 	it("returns undefined when neither the setting nor the ARN identifies a model", () => {
 		expect(resolveBedrockCustomArnBaseModelId(appProfileArn, undefined)).toBeUndefined()
 		expect(resolveBedrockCustomArnBaseModelId(appProfileArn, "")).toBeUndefined()

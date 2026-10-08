@@ -259,11 +259,22 @@ function getSelectedModel({
 					}
 				}
 
+				const baseInfo: ModelInfo = bedrockModels[customArnBaseModelId]
+				// Mirror the provider: the 1M context beta switches to the first pricing tier.
+				const use1MContext =
+					(BEDROCK_1M_CONTEXT_MODEL_IDS as readonly string[]).includes(customArnBaseModelId) &&
+					!!apiConfiguration.awsBedrock1MContext
+				const tier = use1MContext ? baseInfo.tiers?.[0] : undefined
 				const customArnInfo: ModelInfo = {
-					...bedrockModels[customArnBaseModelId],
-					...((BEDROCK_1M_CONTEXT_MODEL_IDS as readonly string[]).includes(customArnBaseModelId) &&
-					apiConfiguration.awsBedrock1MContext
-						? { contextWindow: 1_000_000 }
+					...baseInfo,
+					...(use1MContext
+						? {
+								contextWindow: tier?.contextWindow ?? 1_000_000,
+								inputPrice: tier?.inputPrice ?? baseInfo.inputPrice,
+								outputPrice: tier?.outputPrice ?? baseInfo.outputPrice,
+								cacheWritesPrice: tier?.cacheWritesPrice ?? baseInfo.cacheWritesPrice,
+								cacheReadsPrice: tier?.cacheReadsPrice ?? baseInfo.cacheReadsPrice,
+							}
 						: {}),
 					...(apiConfiguration.awsModelContextWindow
 						? { contextWindow: apiConfiguration.awsModelContextWindow }
