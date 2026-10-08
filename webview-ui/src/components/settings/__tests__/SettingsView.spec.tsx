@@ -889,18 +889,30 @@ describe("SettingsView - Blanket Auto-Deny", () => {
 	// value to the extension host.
 	it("saves the blanket auto-deny toggle when clicking Save", () => {
 		const { activateTab, getSettingsContent } = renderSettingsView()
+
+		// Activate the autoApprove tab
 		activateTab("autoApprove")
+
 		const content = getSettingsContent()
+		// Enable always allow execute to reveal the execute section
 		const executeCheckbox = within(content).getByTestId("always-allow-execute-toggle")
 		fireEvent.click(executeCheckbox)
+
+		// Enable blanket auto-deny
 		const autoDenyCheckbox = within(content).getByTestId("auto-deny-unapproved-checkbox")
 		fireEvent.click(autoDenyCheckbox)
 		expect(autoDenyCheckbox).toBeChecked()
-		fireEvent.click(screen.getByTestId("save-button"))
+
+		// Click Save to save settings
+		const saveButton = screen.getByTestId("save-button")
+		fireEvent.click(saveButton)
+
 		expect(vscode.postMessage).toHaveBeenCalledWith(
 			expect.objectContaining({
 				type: "updateSettings",
-				updatedSettings: expect.objectContaining({ alwaysDenyUnapprovedCommands: true }),
+				updatedSettings: expect.objectContaining({
+					alwaysDenyUnapprovedCommands: true,
+				}),
 			}),
 		)
 	})
@@ -912,16 +924,27 @@ describe("SettingsView - Blanket Auto-Deny", () => {
 		const { activateTab, getSettingsContent } = renderSettingsView({
 			alwaysDenyUnapprovedCommands: undefined,
 		})
+
+		// Activate the autoApprove tab
 		activateTab("autoApprove")
+
 		const content = getSettingsContent()
+		// Enable always allow execute to reveal the execute section; the
+		// auto-deny toggle stays un-checked.
 		const executeCheckbox = within(content).getByTestId("always-allow-execute-toggle")
 		fireEvent.click(executeCheckbox)
 		expect(within(content).getByTestId("auto-deny-unapproved-checkbox")).not.toBeChecked()
-		fireEvent.click(screen.getByTestId("save-button"))
+
+		// Click Save to save settings
+		const saveButton = screen.getByTestId("save-button")
+		fireEvent.click(saveButton)
+
 		expect(vscode.postMessage).toHaveBeenCalledWith(
 			expect.objectContaining({
 				type: "updateSettings",
-				updatedSettings: expect.objectContaining({ alwaysDenyUnapprovedCommands: false }),
+				updatedSettings: expect.objectContaining({
+					alwaysDenyUnapprovedCommands: false,
+				}),
 			}),
 		)
 	})
