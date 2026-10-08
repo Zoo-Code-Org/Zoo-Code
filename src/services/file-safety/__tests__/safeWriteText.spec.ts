@@ -519,6 +519,87 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
 		})
 
+		it("a failed staging-file flush rejects and publishes nothing", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// The staged file's own fsync fails. The bytes are not known to have reached the
+			// disk, so the commit rename must not happen at all - this is the durability gate
+			// the staging fsync exists for.
+			vi.mocked(fsSync.fsyncSync).mockImplementation(() => {
+				throw new Error("EIO")
+			})
+
+			await expect(safeWriteText(targetPath, "new data", { platform: "linux" })).rejects.toThrow("EIO")
+
+			expect(fs.rename).not.toHaveBeenCalled()
+			// The fd is closed despite the throw, and neither the staged file nor its private
+			// staging directory survives the failure.
+			expect(fsSync.closeSync).toHaveBeenCalledWith(1)
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
+		})
+
+		it("retries a failed backup cleanup and removes the copy", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const warnings: string[] = []
+			let backupUnlinkAttempts = 0
+			// Windows commonly reports EPERM for a file whose handle has not been released yet,
+			// so the first failure must not end the cleanup.
+			vi.mocked(fs.unlink).mockImplementation(async (p: unknown) => {
+				if (String(p).includes("safeWriteText.bak_")) {
+					backupUnlinkAttempts++
+					if (backupUnlinkAttempts === 1) {
+						throw Object.assign(new Error("EPERM"), { code: "EPERM" })
+					}
+				}
+			})
+
+			await safeWriteText(targetPath, "new data", {
+				backup: true,
+				platform: "linux",
+				onWarning: (message: string) => {
+					warnings.push(message)
+				},
+			})
+
+			expect(backupUnlinkAttempts).toBe(2)
+			expect(warnings).toHaveLength(0)
+		})
+
+		it("reports a backup it cannot remove instead of dropping the path", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const warnings: string[] = []
+			let backupUnlinkAttempts = 0
+			vi.mocked(fs.unlink).mockImplementation(async (p: unknown) => {
+				if (String(p).includes("safeWriteText.bak_")) {
+					backupUnlinkAttempts++
+					throw Object.assign(new Error("EPERM"), { code: "EPERM" })
+				}
+			})
+
+			// The publish succeeded, so a leftover backup must not fail the write; but the copy
+			// of the previous content is still on disk, so its path has to be reported rather
+			// than dropped where no caller can act on it.
+			await safeWriteText(targetPath, "new data", {
+				backup: true,
+				platform: "linux",
+				onWarning: (message: string) => {
+					warnings.push(message)
+				},
+			})
+
+			expect(fs.rename).toHaveBeenCalledTimes(1)
+			expect(backupUnlinkAttempts).toBe(2)
+			expect(warnings).toHaveLength(1)
+			expect(warnings[0]).toContain("safeWriteText.bak_")
+			expect(warnings[0]).toContain("EPERM")
+		})
+
 		it("backup:true when target does not exist: no backup created, just commit", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
