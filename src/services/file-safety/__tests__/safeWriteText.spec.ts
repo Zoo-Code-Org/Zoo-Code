@@ -525,6 +525,25 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
 		})
 
+		it("a backup copy that fails part-way is removed, not left as a usable-looking backup", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// The destination is seeded with openSync("wx") BEFORE any content exists at it,
+			// and the copy then fails part-way: the name is there, holding a partial copy of
+			// nothing usable. Cleanup has to key off the attempt, not off a copy that
+			// succeeded, or this file outlives the failed write beside the target.
+			vi.mocked(fs.copyFile).mockRejectedValue(Object.assign(new Error("EIO"), { code: "EIO" }))
+
+			await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).rejects.toThrow("EIO")
+
+			// Nothing was published, and the half-written copy is removed rather than left
+			// next to the target looking like a backup someone could restore.
+			expect(fs.rename).not.toHaveBeenCalled()
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		})
+
 		it("backup:true when target does not exist: no backup created, just commit", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
