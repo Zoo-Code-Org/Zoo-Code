@@ -3609,6 +3609,19 @@ export class ClineProvider
 	}
 
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {
+		// Deletion snapshots and compensates the same durable stores that upsert,
+		// activation, and mode switch mutate, so it has to run serialized against them:
+		// an overlapping mutation could otherwise land between the snapshot and the
+		// rollback, and the compensation would restore a stale copy over the newer write.
+		return this.enqueueProviderProfileMutation((signal) =>
+			this.deleteProviderProfileUnlocked(profileToDelete, signal),
+		)
+	}
+
+	private async deleteProviderProfileUnlocked(
+		profileToDelete: ProviderSettingsEntry,
+		signal: AbortSignal,
+		): Promise<void> {
 		const globalSettings = this.contextProxy.getValues()
 		let profileToActivate: string | undefined = globalSettings.currentApiConfigName
 
@@ -3682,6 +3695,13 @@ export class ClineProvider
 			}
 			// A typed not-found is the idempotent case: the secret is already gone, so there is
 			// nothing to compensate and the stale list entry is still pruned below.
+		}
+
+		if (signal.aborted) {
+			// Queue contract: check the signal before the first destructive write, so a
+			// deletion that timed out while queued behind another mutation does not destroy
+			// settings that no caller is waiting for any more.
+			throw new Error("Profile deletion was cancelled before the settings commit")
 		}
 
 		try {
