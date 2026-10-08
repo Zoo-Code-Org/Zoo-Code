@@ -156,20 +156,21 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 * reset() clears the provider's state but leaves the diff document dirty with the
 	 * streamed content; a user save would then persist a write the task never completed
 	 * (denied or failed before approval). Must run BEFORE resetDiffViewAfterWrite(),
-	 * since reset() clears the state revertChanges() relies on. No-op when no diff view
-	 * is open. Failures are logged and reported through the return value: the caller
-	 * must not treat the teardown as complete when this returns false, because the
-	 * document may still hold the unapproved content, but the remaining cleanup (reset,
-	 * per-task state teardown) still runs so the task is not left half-torn-down.
+	 * since reset() clears the state the rollback relies on. No-op when no diff view is
+	 * open. Failures are logged and reported through the return value: the caller must
+	 * not treat the teardown as complete when this returns false, because the document
+	 * may still hold the unapproved content, but the remaining cleanup (reset, per-task
+	 * state teardown) still runs so the task is not left half-torn-down.
 	 */
 	private async revertDiffChangesBeforeReset(task: Task): Promise<boolean> {
-		try {
-			await task.diffViewProvider.revertChanges()
-			return true
-		} catch (revertError) {
-			console.error("Error reverting write_to_file diff view changes:", revertError)
-			return false
-		}
+		// Every caller of this restores content the user never approved, so a new-file
+		// edit must NOT go through revertChanges(): its new-file branch saves the dirty
+		// buffer - unapproved partial model output - before deleting the file, so a
+		// failed delete leaves that content on disk (for a .rooignore-denied path that
+		// is a write the policy forbids). releaseAbandonedDiffView() keeps revertChanges()
+		// for modify edits, which restores the original content and is safe, and discards
+		// a new-file buffer without ever persisting it.
+		return this.releaseAbandonedDiffView(task)
 	}
 
 	private async finalizePartialToolAskAfterFailure(task: Task, text?: string): Promise<void> {
