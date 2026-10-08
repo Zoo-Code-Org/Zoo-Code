@@ -2846,6 +2846,46 @@ export class ClineProvider
 			throw error
 		}
 
+		// The durable write can settle AFTER the mutation timeout has already aborted this
+		// run and handed the caller a timeout rejection. Nothing below may then run:
+		// emitting TaskModeSwitched/ModeChanged or loading the mode profile would publish a
+		// switch the caller was told had been cancelled, and the next queued mutation could
+		// start against a half-applied mode. Undo everything that landed and keep the
+		// cancellation result; each restore is awaited on its own so one failing write
+		// cannot skip the next.
+		if (signal?.aborted) {
+			try {
+				await this.contextProxy.setValue("mode", previousSharedMode)
+			} catch (rollbackError) {
+				this.log(
+					`[handleModeSwitch] Failed to roll back shared mode after cancellation: ${
+						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+					}`,
+				)
+			}
+			try {
+				await this._saveViewLocalStateFromMutation({ mode: previousViewMode })
+			} catch (rollbackError) {
+				this.log(
+					`[handleModeSwitch] Failed to roll back the view mode pin after cancellation: ${
+						rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+					}`,
+				)
+			}
+			if (undoHistoryWrite) {
+				try {
+					await undoHistoryWrite()
+				} catch (rollbackError) {
+					this.log(
+						`[handleModeSwitch] Failed to roll back task-history mode after cancellation: ${
+							rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+						}`,
+					)
+				}
+			}
+			return
+		}
+
 		// Both durable writes succeeded: this is the point of no return for the task
 		// side. Emitting and updating _taskMode here (rather than before the durable
 		// write) keeps listeners and in-memory task state from observing a switch that
@@ -2869,18 +2909,34 @@ export class ClineProvider
 						)
 					}
 				}
+				// Each restore is awaited on its own: a failed shared-mode write must not skip the
+				// pin restore (or the reverse), because one store left on the new mode while the
+				// other is back on the old one is exactly the split state this rollback exists to
+				// prevent. A rollback that itself failed is reported, not just logged.
+				const rollbackFailures: string[] = []
+				const describeModeRollbackFailure = (e: unknown) => (e instanceof Error ? e.message : String(e))
 				try {
-					// Restore the shared value through the proxy only, then restore the pin
-					// from its own pre-switch value. When the view had no pin, the forward
-					// setValue created one; clearing it (mode: undefined) is what returns this
-					// view to its pre-switch state instead of leaving the shared mode pinned.
+					// Restore the shared value through the proxy only.
 					await this.contextProxy.setValue("mode", previousSharedMode)
+				} catch (rollbackError) {
+					rollbackFailures.push(`shared mode: ${describeModeRollbackFailure(rollbackError)}`)
+				}
+				try {
+					// Then the pin from its own pre-switch value. When the view had no pin, the forward
+					// setValue created one; clearing it (mode: undefined) is what returns this view to
+					// its pre-switch state instead of leaving the shared mode pinned.
 					await this._saveViewLocalStateFromMutation({ mode: previousViewMode })
 				} catch (rollbackError) {
+					rollbackFailures.push(`view mode pin: ${describeModeRollbackFailure(rollbackError)}`)
+				}
+				if (rollbackFailures.length > 0) {
+					// Unrepaired partial state must not be reported as a clean rollback: the caller
+					// needs to know the durable mode may still name the mode this switch abandoned.
 					this.log(
-						`[handleModeSwitch] Failed to roll back shared mode after the emit failed: ${
-							rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-						}`,
+						`[handleModeSwitch] Mode rollback left persisted state inconsistent (${rollbackFailures.join(", ")}).`,
+					)
+					throw new Error(
+						`Mode switch left persisted mode state inconsistent: ${rollbackFailures.join(", ")}. Original failure: ${error instanceof Error ? error.message : String(error)}`,
 					)
 				}
 				throw error
@@ -3613,8 +3669,19 @@ export class ClineProvider
 			deletedProfile = profile as ProviderSettingsWithId
 		} catch (error: unknown) {
 			if (!(error instanceof ProviderSettingsNotFoundError)) {
-				this.log(`deleteProviderProfile: could not read the settings for '${profileToDelete.name}'; a later failure of the list update cannot be compensated. ${error instanceof Error ? error.message : String(error)}`)
+				// Abort BEFORE the destructive delete. Without the captured settings there is no
+				// way to put them back if a later durable write fails, so continuing here would
+				// turn a transient read error into permanent profile loss while the persisted list
+				// still named the profile.
+				this.log(
+					`deleteProviderProfile: could not read the settings for '${profileToDelete.name}'; aborting before the deletion because a later failure could not be compensated. ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+				throw error
 			}
+			// A typed not-found is the idempotent case: the secret is already gone, so there is
+			// nothing to compensate and the stale list entry is still pruned below.
 		}
 
 		try {
@@ -3636,6 +3703,7 @@ export class ClineProvider
 			// which ClineProvider mutates directly in storage for concurrent views)
 			// with this view's stale cached copy.
 			await this.contextProxy.setValue("listApiConfigMeta", entries)
+			listWriteLanded = true
 
 			// Two views in this extension host share the ContextProxy while their provider queues
 			// and their settings-manager locks stay per instance, so a sibling view can move the
@@ -3702,11 +3770,14 @@ export class ClineProvider
 				// survivor to the shared store, which covers the deleted-was-global case
 				// for every other view as well as this one.
 				await this.setValue("currentApiConfigName", profileToActivate)
+				selectionWriteLanded = true
+				viewPinWriteLanded = true
 			} else if (deletedWasGlobal) {
 				// The shared selection changed, but this view's own pin still names a
 				// surviving profile: update the shared store only, leaving the
 				// view-local pin untouched.
 				await this.contextProxy.setValue("currentApiConfigName", profileToActivate)
+				selectionWriteLanded = true
 			}
 
 			if ((deletedWasGlobal || viewWasPinnedToDeleted) && survivingSettings) {
@@ -3721,6 +3792,7 @@ export class ClineProvider
 					// replace it with the survivor's so the re-pointed pin serves matching
 					// settings. A view pinned to another profile keeps its own overlay.
 					await this._saveViewLocalStateFromMutation({ apiConfiguration: survivingSettings })
+					viewPinWriteLanded = true
 				}
 			}
 
