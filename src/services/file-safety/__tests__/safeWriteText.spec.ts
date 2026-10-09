@@ -6,6 +6,7 @@ import * as path from "path"
 
 import {
 	AncestorReplacedError,
+	DaclPreservationError,
 	PostCommitDurabilityError,
 	resolveLockKey,
 	safeWriteText,
@@ -295,8 +296,14 @@ describe("safeWriteText", () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		// The capture succeeds and only the restore after the commit rename fails, which stays an
+		// advisory notice because the content is already committed.
+		let icaclsCalls = 0
 		vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
-			if (typeof cb === "function") cb(new Error("icacls error"), "", "")
+			icaclsCalls++
+			if (typeof cb === "function") {
+				cb(icaclsCalls === 2 ? new Error("icacls restore error") : null, "", "")
+			}
 			return fakeChild
 		})
 		const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {})
@@ -593,7 +600,11 @@ describe("safeWriteText", () => {
 			expect(execFile).not.toHaveBeenCalled()
 		})
 
-		it("win32 DACL failure falls back to plain rename (never fails the write)", async () => {
+		it("win32: an existing target whose DACL cannot be captured is not replaced", async () => {
+			// A failed icacls /save used to warn and commit anyway, so a secret file with a
+			// restrictive explicit DACL could be replaced by one that inherits the directory's
+			// broader rights. Without the capture the guard has no evidence it can reproduce the
+			// access boundary, so it publishes nothing.
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
@@ -603,15 +614,16 @@ describe("safeWriteText", () => {
 				return fakeChild
 			})
 
-			await safeWriteText(targetPath, "data", { platform: "win32" })
+			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toThrow(DaclPreservationError)
 
-			// write succeeded despite icacls failure (fallback to plain rename)
-			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
-			// one icacls attempt only: a failed DACL apply must not try to restore
+			// Nothing was committed, and no restore was attempted from a dump that does not exist.
+			expect(fs.rename).not.toHaveBeenCalled()
 			expect(execFile).toHaveBeenCalledTimes(1)
+			// A partial dump left behind by the failed save is still cleaned up.
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))
 		})
 
-	it("win32: reports that access rights may change when the DACL cannot be saved", async () => {
+	it("win32: a failed DACL capture is an error, not an advisory warning", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 		vi.mocked(fsSync.openSync).mockReturnValue(1)
@@ -621,20 +633,22 @@ describe("safeWriteText", () => {
 		})
 		const warnings: string[] = []
 
-		await safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) })
+		await expect(
+			safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) }),
+		).rejects.toThrow(/could not be captured/)
 
-		// The write still commits - a failing icacls must not leave the user unable to save -
-		// but the caller is told the replacement may not carry the old ACL.
-		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
-		expect(warnings.filter((m) => m.includes("different access rights"))).toHaveLength(1)
+		// The access boundary is a precondition, not a notice: the caller gets a failure it cannot
+		// ignore instead of a line in a log it may never read.
+		expect(warnings).toHaveLength(0)
+		expect(fs.rename).not.toHaveBeenCalled()
 	})
 
-	it("win32: reports when the target cannot be checked for DACL preservation", async () => {
+	it("win32: a target that cannot be checked for DACL preservation is not replaced", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 		vi.mocked(fsSync.openSync).mockReturnValue(1)
-		// The target exists but is not readable: that is not "absent", and skipping DACL
-		// preservation has to be visible.
+		// The target exists but is not readable: that is not "absent", so this write cannot show
+		// that the target has no access rights to preserve.
 		vi.mocked(fs.access).mockImplementation(async (p) => {
 			if (String(p) === targetPath) {
 				throw Object.assign(new Error("EACCES"), { code: "EACCES" })
@@ -642,13 +656,16 @@ describe("safeWriteText", () => {
 		})
 		const warnings: string[] = []
 
-		await safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) })
+		await expect(
+			safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) }),
+		).rejects.toThrow(DaclPreservationError)
 
 		expect(execFile).not.toHaveBeenCalled()
-		expect(warnings.filter((m) => m.includes("Could not check"))).toHaveLength(1)
+		expect(warnings).toHaveLength(0)
+		expect(fs.rename).not.toHaveBeenCalled()
 	})
 
-	it("win32: reports through onWarning when the saved DACL cannot be restored", async () => {
+	it("win32: reports through onWarning when the saved DACL cannot be restored after the commit", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 		vi.mocked(fsSync.openSync).mockReturnValue(1)
@@ -670,7 +687,9 @@ describe("safeWriteText", () => {
 
 		await safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) })
 
-		// The content is committed and the caller is told about the access-rights change.
+		// The content is committed and the caller is told about the access-rights change. Failing
+		// here would discard a write that already succeeded; the boundary gate is the capture
+		// before the commit, which is fatal.
 		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
 		expect(icaclsCalls).toBe(2)
 		expect(warnings.filter((m) => m.includes("could not be restored"))).toHaveLength(1)
@@ -681,8 +700,14 @@ describe("safeWriteText", () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		// Only the post-commit restore fails: that notice is the advisory path that is left, and
+		// a throwing sink must not un-commit a published file.
+		let icaclsCalls = 0
 		vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
-			if (typeof cb === "function") cb(new Error("icacls error"), "", "")
+			icaclsCalls++
+			if (typeof cb === "function") {
+				cb(icaclsCalls === 2 ? new Error("icacls restore error") : null, "", "")
+			}
 			return fakeChild
 		})
 
@@ -710,11 +735,10 @@ describe("safeWriteText", () => {
 				return fakeChild
 			})
 
-			await safeWriteText(targetPath, "data", { platform: "win32" })
+			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toThrow(DaclPreservationError)
 
-			// write committed; only the save was attempted (no restore from a failed dump)
-			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
-			expect(fs.rename).toHaveBeenCalledTimes(1)
+			// Nothing was committed; only the save was attempted (no restore from a failed dump).
+			expect(fs.rename).not.toHaveBeenCalled()
 			expect(execFile).toHaveBeenCalledTimes(1)
 			const saveArgs = vi.mocked(execFile).mock.calls[0]?.[1]
 			expect(saveArgs?.[1]).toBe("/save")
@@ -738,9 +762,9 @@ describe("safeWriteText", () => {
 			expect(firstCall[1]).toEqual([targetPath, "/save", expect.stringContaining("safeWriteText.acl"), "/T"])
 
 			// Second call: restore DACL onto directory after commit rename
-			const secondCall = vi.mocked(execFile).mock.calls[1]
-			expect(secondCall[0]).toBe("icacls")
-			expect(secondCall[1]).toEqual([
+			const restoreCall = vi.mocked(execFile).mock.calls[1]
+			expect(restoreCall[0]).toBe("icacls")
+			expect(restoreCall[1]).toEqual([
 				expect.stringContaining("/tmp/test-dir"),
 				"/restore",
 				expect.stringContaining("safeWriteText.acl"),
@@ -779,12 +803,12 @@ describe("safeWriteText", () => {
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
-			// icacls save succeeds, restore fails
+			// icacls save succeeds, the post-commit restore fails
 			let callCount = 0
 			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
 				callCount++
 				if (typeof cb === "function") {
-					cb(callCount === 1 ? null : new Error("icacls restore error"), "", "")
+					cb(callCount === 2 ? new Error("icacls restore error") : null, "", "")
 				}
 				return fakeChild
 			})
