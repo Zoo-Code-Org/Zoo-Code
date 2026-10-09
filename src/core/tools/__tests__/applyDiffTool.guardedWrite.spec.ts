@@ -290,4 +290,64 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(observation?.version).toBe("1:2:9:9:9")
 		expect(observation?.complete).toBe(true)
 	})
+
+	it("keeps the edit alive when the stat before its read fails, and records no observation", async () => {
+		// The bracketing stats are best-effort: a stat that fails must not take the whole edit
+		// down with it. What it must not do is leave an authorization the tool never earned -
+		// with no pre-read stats there is no version to compare, so nothing is observed.
+		const stat = vi.mocked((await import("fs/promises")).default.stat)
+		stat.mockRejectedValueOnce(Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }))
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockTask.observationRegistry.get(path.resolve(mockTask.cwd, "src/thing.ts"))).toBeUndefined()
+		// The tool did not treat a stat failure as its own failure...
+		expect(mockHandleError).not.toHaveBeenCalled()
+		// ...and the edit the model asked for still reached the guarded save.
+		expect(mockSaveDirectly).toHaveBeenCalledWith(
+			"src/thing.ts",
+			"modified file content\n",
+			false,
+			true,
+			1000,
+			"edit",
+		)
+		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
+		expect(stat).toHaveBeenCalledTimes(2)
+	})
+
+	it("keeps the edit alive when the stat after its read fails, and records no observation", async () => {
+		// The post-read stat is the other half of the bracket. If it fails the read cannot be
+		// shown to be stable, so no observation may be recorded - but the edit still runs and the
+		// stat failure is not reported as a tool error.
+		const stat = vi.mocked((await import("fs/promises")).default.stat)
+		// Queue the pre-read stat as a success and reject only the second one, so the branch this
+		// test is about - the post-read bracket - is the one that fails.
+		stat
+			.mockResolvedValueOnce({ dev: 1n, ino: 2n, size: 22n, mtimeNs: 100n, ctimeNs: 100n } as unknown as BigIntStats)
+			.mockRejectedValueOnce(Object.assign(new Error("EBUSY: resource busy"), { code: "EBUSY" }))
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockTask.observationRegistry.get(path.resolve(mockTask.cwd, "src/thing.ts"))).toBeUndefined()
+		expect(mockHandleError).not.toHaveBeenCalled()
+		expect(mockSaveDirectly).toHaveBeenCalledWith(
+			"src/thing.ts",
+			"modified file content\n",
+			false,
+			true,
+			1000,
+			"edit",
+		)
+		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
+		expect(stat).toHaveBeenCalledTimes(2)
+	})
 })
