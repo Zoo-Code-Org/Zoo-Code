@@ -4,6 +4,7 @@ import { RooCodeEventName } from "@roo-code/types"
 
 import { API } from "../api"
 import { ClineProvider } from "../../core/webview/ClineProvider"
+import { makeClineProviderFactory } from "../../test-utils/provider"
 
 vi.mock("vscode")
 vi.mock("../../core/webview/ClineProvider")
@@ -38,7 +39,7 @@ describe("API#getTaskApiConversationHistoryLength", () => {
 			}),
 		} as unknown as ClineProvider
 
-		api = new API(mockOutputChannel, mockProvider, undefined, true)
+		api = new API(mockOutputChannel, mockProvider, makeClineProviderFactory(), undefined, true)
 	})
 
 	it("returns the persisted api conversation history length", async () => {
