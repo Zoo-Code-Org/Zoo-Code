@@ -619,7 +619,7 @@ export class DiffViewProvider {
 					this.disposeActiveEditorListener()
 					this.cancelDeferredScroll()
 
-					await this.runTeardown(async () => {
+					const ownedTeardown = await this.runTeardown(async () => {
 						let discardSucceeded = !updatedDocument.isDirty
 						if (updatedDocument.isDirty) {
 							discardSucceeded = await this.revertDocument(updatedDocument)
@@ -666,6 +666,14 @@ export class DiffViewProvider {
 						}
 						await this.closeOwnDiffView(absolutePath)
 					})
+
+					if (ownedTeardown) {
+						// Opening the diff evicted any preview tab the file had. This path closes its own diff
+						// view and rethrows, so this pass is the only one that can put that preview state back;
+						// a caller that merely waited for it must not restore the tabs a second time. reset()
+						// stays with the tool caller's error handling, which owns the provider lifecycle.
+						await this.restorePreviewTabs()
+					}
 				} catch {
 					// cleanup is best-effort; the guard verdict below is the outcome
 				}
