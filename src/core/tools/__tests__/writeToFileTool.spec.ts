@@ -484,6 +484,7 @@ describe("writeToFileTool", () => {
 				true,
 				1000,
 				"create",
+				undefined,
 				false,
 			)
 			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
@@ -492,6 +493,24 @@ describe("writeToFileTool", () => {
 			expect(mockCline.consecutiveMistakeCount).toBe(0)
 			expect(result).toBe("Tool result message")
 			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("forwards an approved outside-workspace write as approved, not as completeness", async () => {
+			// Both trailing parameters are boolean | undefined, so only an assertion on the
+
+			// positions catches a swap: seventh is completeOverride, eighth is the approval
+
+			// flag.
+
+			mockedIsPathOutsideWorkspace.mockReturnValue(true)
+			await executeWriteFileTool({}, { fileExists: true, experiments: focusDisruption })
+			const args = mockCline.diffViewProvider.saveDirectly.mock.calls.at(-1)!
+			expect(args[6]).toBeUndefined()
+			expect(args[7]).toBe(true)
+
+				// Reset: the flag is a module mock, and later tests in this file assume an
+				// in-workspace target.
+				mockedIsPathOutsideWorkspace.mockReturnValue(false)
 		})
 
 		it("surfaces the unobserved-existing remediation as a tool error and publishes nothing", async () => {

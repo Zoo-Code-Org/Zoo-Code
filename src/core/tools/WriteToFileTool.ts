@@ -142,6 +142,9 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					diagnosticsEnabled,
 					writeDelayMs,
 					"create",
+					// Seventh parameter is completeOverride (this call claims no completeness of its
+					// own); the eighth is the approval flag for a target outside every workspace root.
+					undefined,
 					isOutsideWorkspace,
 				)
 			} else {
