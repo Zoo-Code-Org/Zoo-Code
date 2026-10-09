@@ -1628,3 +1628,93 @@ describe("resolveLockKey when the parent directory does not exist yet", () => {
 		await expect(resolveLockKey(target)).rejects.toThrow("EACCES")
 	})
 })
+
+// The backup seed descriptor already goes through _closeDescriptor: a close that fails is
+// retried once, the second failure is logged rather than allowed to replace the operation's
+// own error, and the descriptor is not abandoned. The four descriptors below are the ones the
+// review row names as not doing that yet - one test per descriptor.
+describe("descriptor release retries and reports", () => {
+	const targetPath = "/tmp/test-dir/target.txt"
+	const dirPath = path.resolve("/tmp/test-dir")
+	const closeErr = () => Object.assign(new Error("EBADF close"), { code: "EBADF" })
+
+	beforeEach(() => {
+		mockDefaults()
+		// The staging write reports every requested byte as written.
+		vi.mocked(fsSync.writeSync).mockImplementation((...args: unknown[]) => (typeof args[3] === "number" ? args[3] : 0))
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+	})
+
+	it("a close failure on the staging descriptor is retried and logged", async () => {
+		vi.mocked(fsSync.openSync).mockReturnValue(3)
+		vi.mocked(fsSync.closeSync).mockImplementation(() => {
+			throw closeErr()
+		})
+		const errSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		await expect(safeWriteText(targetPath, "data", { platform: "linux" })).rejects.toThrow("EBADF close")
+
+		// Retried once, and the second failure reported instead of swallowed.
+		expect(fsSync.closeSync).toHaveBeenCalledTimes(2)
+		// _closeDescriptor reports the label together with the error it swallowed.
+	expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("staging descriptor for"), expect.anything())
+		errSpy.mockRestore()
+	})
+
+	it("a close failure on a caller-supplied temp descriptor is retried and logged", async () => {
+		const callerTemp = path.join(dirPath, "caller-staged.tmp")
+		vi.mocked(fsSync.openSync).mockReturnValue(4)
+		vi.mocked(fsSync.closeSync).mockImplementation(() => {
+			throw closeErr()
+		})
+		const errSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		await expect(safeWriteText(targetPath, "data", { platform: "linux", tempPath: callerTemp })).rejects.toThrow("EBADF close")
+
+		expect(fsSync.closeSync).toHaveBeenCalledTimes(2)
+		// _closeDescriptor reports the label together with the error it swallowed.
+	expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("staged temp descriptor for"), expect.anything())
+		errSpy.mockRestore()
+	})
+
+	it("a close failure on the backup fsync descriptor is retried and logged", async () => {
+		// The seed and the fsync handle open the same backup path, so the flags tell them
+		// apart: only the fsync handle (r+) gets the descriptor whose close fails.
+		vi.mocked(fsSync.openSync).mockImplementation((target, flags) =>
+			String(target).includes("safeWriteText.bak") && String(flags) === "r+" ? 5 : 3,
+		)
+		vi.mocked(fsSync.closeSync).mockImplementation((fd) => {
+			if (fd === 5) {
+				throw closeErr()
+			}
+		})
+		const errSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		await expect(safeWriteText(targetPath, "data", { platform: "linux", backup: true })).rejects.toThrow("EBADF close")
+
+		expect(vi.mocked(fsSync.closeSync).mock.calls.filter((c) => c[0] === 5)).toHaveLength(2)
+		// _closeDescriptor reports the label together with the error it swallowed.
+	expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("backup fsync descriptor for"), expect.anything())
+		errSpy.mockRestore()
+	})
+
+	it("a close failure on the parent directory descriptor is retried, logged, and still reported as a durability failure", async () => {
+		// The parent directory is the only descriptor opened read-only.
+		vi.mocked(fsSync.openSync).mockImplementation((_target, flags) => (String(flags) === "r" ? 7 : 3))
+		vi.mocked(fsSync.closeSync).mockImplementation((fd) => {
+			if (fd === 7) {
+				throw closeErr()
+			}
+		})
+		const errSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		// The rename committed, so this is the post-commit durability path: the close failure is
+		// retried and logged, and the caller still gets the durability error it needs.
+		await expect(safeWriteText(targetPath, "data", { platform: "linux" })).rejects.toThrow(PostCommitDurabilityError)
+
+		expect(vi.mocked(fsSync.closeSync).mock.calls.filter((c) => c[0] === 7)).toHaveLength(2)
+		// _closeDescriptor reports the label together with the error it swallowed.
+	expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("parent directory descriptor for"), expect.anything())
+		errSpy.mockRestore()
+	})
+})
