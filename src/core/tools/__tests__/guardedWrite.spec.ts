@@ -417,6 +417,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "/elsewhere/outside.txt", "data", "create", undefined, {
 				approvedOutsideWorkspace: true,
+				approvedCanonicalTarget: abs("/elsewhere/outside.txt"),
 			})
 
 			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("/elsewhere/outside.txt"), "data")
@@ -452,10 +453,49 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await expect(
 				guardedWrite(task, "/elsewhere/outside.txt", "data", "create", undefined, {
 					approvedOutsideWorkspace: true,
+					approvedCanonicalTarget: "/real/approved/outside.txt",
 				}),
 			).rejects.toThrow("no longer resolves to the path that was approved")
 
 			expect(targetLookups).toBeGreaterThan(1)
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("refuses an approved write whose name was repointed before the guard ran", async () => {
+			// The user approved /elsewhere/approved.txt. Before the guarded publish the name is
+			// repointed at a link to /elsewhere/victim.txt, so EVERY lookup the guard performs
+			// sees the swapped identity. A baseline taken from any lookup would accept this
+			// write; the identity captured before the approval does not.
+			mockedFsRealpath.mockImplementation(async (p) =>
+				String(p).startsWith("/elsewhere") ? "/elsewhere/victim.txt" : String(p))
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			const task = createMockTask()
+
+			await expect(
+				guardedWrite(task, "/elsewhere/approved.txt", "data", "create", undefined, {
+					approvedOutsideWorkspace: true,
+					approvedCanonicalTarget: "/elsewhere/approved.txt",
+				}),
+			).rejects.toThrow("no longer resolves to the path that was approved")
+
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("refuses an approved write that carries no identity captured before the approval", async () => {
+			// Without the pre-approval identity there is nothing to bind the publish to, so the
+			// approved path cannot be taken at all: fail closed rather than trusting a lookup
+			// performed after the approval.
+			mockedFsRealpath.mockImplementation(async (p) => String(p))
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			const task = createMockTask()
+
+			await expect(
+				guardedWrite(task, "/elsewhere/outside.txt", "data", "create", undefined, {
+					approvedOutsideWorkspace: true,
+				}),
+			).rejects.toThrow("was not captured before approval")
+
+			expect(mockedWithFileLock).not.toHaveBeenCalled()
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
 

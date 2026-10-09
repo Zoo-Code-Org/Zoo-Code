@@ -12,7 +12,7 @@ import { fileExistsAtPath } from "../../utils/fs"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { sanitizeUnifiedDiff, computeDiffStats } from "../diff/stats"
 import { versionTokenOfStat } from "../../utils/versionToken"
-import { GuardRejectedError, errorCode } from "./guardedWrite"
+import { canonicalizeForApproval, GuardRejectedError, errorCode } from "./guardedWrite"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import type { ToolUse } from "../../shared/tools"
 import { parsePatch, ParseError, processAllHunks } from "./apply-patch"
@@ -187,6 +187,12 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 		const newContent = change.newContent || ""
 		const isOutsideWorkspace = isPathOutsideWorkspace(absolutePath)
+		// Captured before the approval is asked: guardedWrite binds the publish to this
+		// identity, so a name repointed between the approval and the publish is refused
+		// instead of publishing to whatever the name points at by then.
+		const approvedCanonicalTarget = isOutsideWorkspace
+			? await canonicalizeForApproval(absolutePath, relPath)
+			: undefined
 
 		// Initialize diff view for new file
 		task.diffViewProvider.editType = "create"
@@ -254,6 +260,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					// own); the eighth is the approval flag for a target outside every workspace root.
 					undefined,
 				isOutsideWorkspace,
+				approvedCanonicalTarget,
 			)
 		} else {
 			// The add path publishes a whole new file, so create-guard semantics
@@ -263,6 +270,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				writeDelayMs,
 				"create",
 				isOutsideWorkspace,
+				approvedCanonicalTarget,
 			)
 		}
 
@@ -357,6 +365,12 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		const originalContent = change.originalContent || ""
 		const newContent = change.newContent || ""
 		const isOutsideWorkspace = isPathOutsideWorkspace(absolutePath)
+		// Captured before the approval is asked: guardedWrite binds the publish to this
+		// identity, so a name repointed between the approval and the publish is refused
+		// instead of publishing to whatever the name points at by then.
+		const approvedCanonicalTarget = isOutsideWorkspace
+			? await canonicalizeForApproval(absolutePath, relPath)
+			: undefined
 
 		// Initialize diff view
 		task.diffViewProvider.editType = "modify"
@@ -443,6 +457,12 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 			// Check if destination path is outside workspace
 			const isMoveOutsideWorkspace = isPathOutsideWorkspace(moveAbsolutePath)
+			// Bound at classification time: the patch approval covers the whole patch, so the
+			// destination's identity is captured here - before the publish and before the FIFO
+			// queue - and the guard refuses a destination that no longer resolves to it.
+			const moveCanonicalTarget = isMoveOutsideWorkspace
+				? await canonicalizeForApproval(moveAbsolutePath, change.movePath)
+				: undefined
 			if (isMoveOutsideWorkspace) {
 				task.consecutiveMistakeCount++
 				task.recordToolError("apply_patch")
@@ -510,6 +530,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					sourceComplete,
 					// The user approved the whole patch, which names this destination.
 					isPathOutsideWorkspace(moveAbsolutePath),
+					moveCanonicalTarget,
 				)
 			} else {
 				// Write to new path and delete old file
@@ -543,6 +564,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					// own); the eighth is the approval flag for a target outside every workspace root.
 					undefined,
 					isOutsideWorkspace,
+					approvedCanonicalTarget,
 				)
 			} else {
 				// The diff-view save is the same targeted hunk as the guarded save above:
@@ -553,6 +575,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					writeDelayMs,
 					"edit",
 					isOutsideWorkspace,
+					approvedCanonicalTarget,
 				)
 			}
 
