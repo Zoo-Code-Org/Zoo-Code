@@ -66,6 +66,18 @@ export interface SafeWriteTextOptions {
 	 * window to the commit itself rather than the whole write.
 	 */
 	expectedAncestorIdentities?: DirectoryIdentity[]
+
+	/**
+	 * Publish onto the requested path itself instead of onto the referent of a symlink found
+	 * there.
+	 *
+	 * Following a link is only safe once somebody has decided that the referent is an
+	 * acceptable destination - by declaring a confinement scope, or by checking the resolved path
+	 * some other way. A caller that did neither must keep the rename-over-link behavior: a link
+	 * planted inside the workspace would otherwise move the write to a file outside it, and the
+	 * caller would never learn that its bytes landed somewhere else.
+	 */
+	publishOverLink?: boolean
 }
 
 /** One directory's on-disk identity, read with bigint stats so NTFS 64-bit values survive. */
@@ -368,8 +380,10 @@ export async function safeWriteText(
 ): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 
-	// Resolve the symlink referent (see resolvePublishTarget).
-	const targetPath = await resolvePublishTarget(absoluteFilePath)
+	// Resolve the symlink referent (see resolvePublishTarget), unless the caller asked to
+	// replace the link instead of writing through it. The link is then the target, so a referent
+	// outside the caller's view cannot receive these bytes.
+	const targetPath = options?.publishOverLink ? absoluteFilePath : await resolvePublishTarget(absoluteFilePath)
 
 	// The caller authorized a specific resolved path; publishing at a different one
 	// would act on a decision that was never made about this file.

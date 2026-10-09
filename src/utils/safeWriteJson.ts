@@ -220,7 +220,13 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// the strict dangling-link rejection still applies to a real dangling link. It
 		// must stay inside the protected block, otherwise a rejection here leaves the
 		// advisory lock held until the stale timeout for every other writer.
-		resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
+		// Only a caller that declared a confinement scope has looked at the referent, so only such
+		// a caller may publish through it. Following a link for every writer lets a workspace file
+		// that happens to be a symlink - .roo/mcp.json pointing at a file outside the workspace -
+		// redirect a default write (McpHub passes no scope) onto a file nobody authorized, which is
+		// the boundary the confined callers exist to protect. A default write therefore replaces the
+		// link itself, as this primitive did before it resolved links at all.
+		resolvedTargetPath = options?.confineTo ? await resolvePublishTarget(absoluteFilePath) : absoluteFilePath
 
 		// Confinement, if the caller declared a scope. Both sides are canonicalized the
 		// same way: the publish target is resolved through symlinks, and a target that
@@ -289,6 +295,9 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			// still uses confinedTarget; only the drift check needs the publish's spelling.
 			expectedResolvedPath: resolvedTargetPath,
 			expectedAncestorIdentities: confinedAncestors,
+			// A write with no declared scope replaces the link rather than writing through it, so the
+			// publish must not re-resolve the path it is handed below.
+			publishOverLink: options?.confineTo === undefined,
 		}
 
 		await safeWriteText(resolvedTargetPath, "", textOptions)
