@@ -1967,6 +1967,25 @@ export class ClineProvider
 					return undefined
 				}
 
+				const previousApiConfigName = this.contextProxy.getValues().currentApiConfigName
+				const previousProviderSettings = this.contextProxy.getProviderSettings()
+				let previousMode: Mode | undefined
+				let previousModeConfigId: string | undefined
+
+				if (activate) {
+					try {
+						const state = await this.getState()
+						previousMode = state.mode
+						previousModeConfigId = await this.providerSettingsManager.getModeConfigId(state.mode)
+					} catch {
+						// Ignore lookup failures during pre-save capture
+					}
+				}
+
+				if (!this.isProfileMutationActive(epoch, signal)) {
+					return undefined
+				}
+
 				const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
 				const savedProfile: ProviderSettingsWithId = { ...providerSettings, id }
 
@@ -1982,6 +2001,17 @@ export class ClineProvider
 								"listApiConfigMeta",
 								await this.providerSettingsManager.listConfig(),
 							)
+							if (activate) {
+								if (previousApiConfigName !== undefined) {
+									await this.updateGlobalState("currentApiConfigName", previousApiConfigName)
+								}
+								if (previousMode && previousModeConfigId !== undefined) {
+									await this.providerSettingsManager.setModeConfig(previousMode, previousModeConfigId)
+								}
+								if (previousProviderSettings) {
+									await this.contextProxy.setProviderSettings(previousProviderSettings)
+								}
+							}
 						}
 					} catch (rollbackError) {
 						this.log(
@@ -1999,7 +2029,7 @@ export class ClineProvider
 
 				try {
 					if (activate) {
-						const { mode } = await this.getState()
+						const mode = previousMode ?? (await this.getState()).mode
 
 						if (!this.isProfileMutationActive(epoch, signal)) {
 							await rollback()
@@ -2017,7 +2047,8 @@ export class ClineProvider
 						])
 
 						if (!this.isProfileMutationActive(epoch, signal)) {
-							return id
+							await rollback()
+							return undefined
 						}
 
 						// Change the provider for the current task.
@@ -2036,7 +2067,10 @@ export class ClineProvider
 					throw updateError
 				}
 
-				if (!this.isProfileMutationActive(epoch, signal)) return id
+				if (!this.isProfileMutationActive(epoch, signal)) {
+					await rollback()
+					return undefined
+				}
 
 				await this.postStateToWebview()
 				return id
@@ -2174,7 +2208,14 @@ export class ClineProvider
 								"listApiConfigMeta",
 								await this.providerSettingsManager.listConfig(),
 							)
-							if (shouldRollbackContext && (epoch === undefined || epoch === this.profileMutationEpoch)) {
+							const currentConfigName = this.contextProxy.getValues().currentApiConfigName
+							const currentContextModel = getModelId(this.contextProxy.getProviderSettings())
+							const isNewerModelSet =
+								currentConfigName !== name ||
+								(currentContextModel !== undefined &&
+									currentContextModel !== getModelId(updatedProfile as ProviderSettings) &&
+									currentContextModel !== getModelId(previousProfile as ProviderSettings))
+							if (shouldRollbackContext && !isNewerModelSet) {
 								await this.contextProxy.setProviderSettings(previousProfile as ProviderSettings)
 							}
 						} else {

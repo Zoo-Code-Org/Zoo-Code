@@ -1761,6 +1761,33 @@ describe("ProviderSettingsManager", () => {
 			expect(storedConfig.apiConfigs.default).toBeDefined()
 		})
 
+		it("does not delete profile when it is the only remaining profile and restoredConfig is undefined", async () => {
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "single",
+				apiConfigs: {
+					single: {
+						id: "single-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-7-sonnet",
+					},
+				},
+			}
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+
+			const expectedConfig: ProviderSettingsWithId = {
+				id: "single-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-3-7-sonnet",
+			}
+
+			const result = await providerSettingsManager.restoreConfigIfMatches("single", expectedConfig)
+
+			expect(result).toBe(true)
+			const storedConfig = JSON.parse(mockSecrets.store.mock.calls[mockSecrets.store.mock.calls.length - 1][1])
+			expect(storedConfig.apiConfigs.single).toBeDefined()
+			expect(storedConfig.apiConfigs.single.apiModelId).toBe("claude-3-7-sonnet")
+		})
+
 		it("returns false if config name does not exist", async () => {
 			const existingConfig: ProviderProfiles = {
 				currentApiConfigName: "default",

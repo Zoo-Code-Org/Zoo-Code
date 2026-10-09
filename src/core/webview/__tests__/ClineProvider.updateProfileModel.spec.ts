@@ -894,6 +894,7 @@ describe("ClineProvider - updateProfileModel", () => {
 		// Active mutation 1 aborted and rolled back to gpt-4
 		// Queued mutation 2 aborted without ever saving gpt-5
 		expect(storedProfiles["test-config"].openRouterModelId).toBe("openai/gpt-4")
+		expect(provider.contextProxy.getValues().openRouterModelId).toBe("openai/gpt-4")
 		expect(mockTask.updateApiConfiguration).not.toHaveBeenCalled()
 		expect(postStateSpy).not.toHaveBeenCalled()
 	})
