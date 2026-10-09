@@ -350,10 +350,12 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(reg.has(key)).toBe(true)
 	})
 
-	it("update: does not carry completeness across a version the model never read", async () => {
-		// The model earned completeness on a different version than the one the patch
-		// helper read: the intervening change was never seen, so a later full-file
-		// replacement must still fail closed.
+	it("update: leaves an observation earned on an older version untouched so the guarded save fails stale", async () => {
+		// The model earned completeness on a version the patch helper never read: an external
+		// writer published in between. Refreshing the entry to the version this tool read would
+		// hand the guarded save a compare-and-swap token for content the model never saw, so the
+		// stale observation is left exactly as the model earned it (ApplyDiffTool's policy) and
+		// every later publish - this patch included - fails with the re-read remediation.
 		const key = path.resolve("/workspace/project", "src/thing.ts")
 		const reg = mockTask.observationRegistry
 		reg.observe(key, "7:4242:1234:1700000000123456789:1700000000789999998", true)
@@ -364,11 +366,18 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			pushToolResult: mockPushToolResult,
 		})
 
-		expect(reg.get(key)?.complete).toBe(false)
+		// The seeded version survives the hunk read: the tool did not authorize a version the
+		// model never read, and it did not downgrade the completeness the model earned.
+		const observation = reg.get(key)
+		expect(observation?.version).toBe("7:4242:1234:1700000000123456789:1700000000789999998")
+		expect(observation?.complete).toBe(true)
 
+		// The save rejects STALE, not merely partial: the compare-and-swap runs against the
+		// version the model actually read.
 		await expect(guardedWrite(mockTask as Task, "src/thing.ts", "full replacement", "update")).rejects.toThrow(
-			"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
-				"a full-file replacement needs the complete content; re-read the whole file, then retry.",
+			"Stale version -- the file changed since you read it (expected " +
+				"7:4242:1234:1700000000123456789:1700000000789999998, " +
+				"current 7:4242:1234:1700000000123456789:1700000000789999999); re-read the file, then retry.",
 		)
 	})
 
