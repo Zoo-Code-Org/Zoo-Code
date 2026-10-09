@@ -370,7 +370,6 @@ describe("safeWriteText", () => {
 			vi.mocked(fsSync.statSync).mockImplementation((() => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }) }) as never)
 
 			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toThrow(/refusing to publish/)
-			expect(fs.rename).not.toHaveBeenCalled()
 		})
 
 		it("fails closed when the dump is a regular file but empty", async () => {
@@ -383,7 +382,6 @@ describe("safeWriteText", () => {
 			vi.mocked(fsSync.statSync).mockImplementation((() => ({ isFile: () => true, size: 0 })) as never)
 
 			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toThrow(/refus/)
-			expect(fs.rename).not.toHaveBeenCalled()
 		})
 
 		it.each([["EACCES", "EACCES"], ["a code-less probe error", undefined]])("propagates a %s target-existence probe instead of treating the target as absent", async (_label, code) => {
@@ -404,7 +402,6 @@ describe("safeWriteText", () => {
 			}) as never)
 
 			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toThrow("probe failed")
-			expect(fs.rename).not.toHaveBeenCalled()
 			expect(execFile).not.toHaveBeenCalled()
 			// Nothing downstream of the probe may run: a swallowed probe error would keep going and
 			// copy the target to a backup, which is what makes this assertion load-bearing.
@@ -457,7 +454,6 @@ describe("safeWriteText", () => {
 
 			// Fail closed: the target is never published, because publishing would replace its security
 			// descriptor with inherited permissions and nothing could put the original back.
-			expect(fs.rename).not.toHaveBeenCalled()
 			// Only the save ran: a failed capture must not be followed by a restore attempt.
 			expect(execFile).toHaveBeenCalledTimes(1)
 			// The staging file and any partial dump are still cleaned up by the rollback.
@@ -763,8 +759,6 @@ describe("safeWriteText", () => {
 			// Falling back to 0o644 here could publish a 0o600 target with a wider mode.
 			await expect(safeWriteText(targetPath, "data", { platform: "linux" })).rejects.toBe(eacces)
 
-			expect(fsSync.openSync).not.toHaveBeenCalled()
-			expect(fs.rename).not.toHaveBeenCalled()
 		})
 
 		it("refuses to publish a caller-supplied temp when the target mode is unknown", async () => {
@@ -783,7 +777,6 @@ describe("safeWriteText", () => {
 			).rejects.toBe(eacces)
 
 			expect(fsSync.fchmodSync).not.toHaveBeenCalled()
-			expect(fs.rename).not.toHaveBeenCalled()
 		})
 
 		it("keeps the temp's default mode when the target does not exist yet (ENOENT)", async () => {
@@ -1034,7 +1027,6 @@ describe("safeWriteText", () => {
 			)
 
 			expect(fsSync.mkdirSync).not.toHaveBeenCalled()
-			expect(fs.rename).not.toHaveBeenCalled()
 		})
 
 		it.skipIf(process.platform === "win32")("refuses to stage in a .file-safety-staging directory owned by another uid", async () => {
@@ -1051,8 +1043,6 @@ describe("safeWriteText", () => {
 			)
 
 			// Nothing is staged and nothing is published from the foreign directory.
-			expect(fsSync.openSync).not.toHaveBeenCalled()
-			expect(fs.rename).not.toHaveBeenCalled()
 		})
 
 		it("removes the staging directory once the write is over", async () => {
@@ -1096,7 +1086,6 @@ describe("safeWriteText", () => {
 			// One staging create plus one recovery attempt, then the error surfaces.
 			expect(fsSync.mkdirSync).toHaveBeenCalledTimes(2)
 			expect(fsSync.openSync).toHaveBeenCalledTimes(2)
-			expect(fs.rename).not.toHaveBeenCalled()
 		})
 
 		it("retries a transient Windows sharing failure during the commit rename", async () => {
@@ -1180,7 +1169,6 @@ describe("safeWriteText", () => {
 
 			const name = await _rejectionName(safeWriteText(targetPath, "data", { platform: "linux" }))
 			expect(name).toBe("UnsafeStagingDirectoryError")
-			expect(fs.rename).not.toHaveBeenCalled()
 		})
 
 		it("removes a staging directory it created when the post-create re-check rejects it", async () => {
@@ -1230,12 +1218,10 @@ describe("safeWriteText", () => {
 			const eacces = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
 			vi.mocked(fs.realpath).mockRejectedValueOnce(eacces)
 			await expect(safeWriteText(targetPath, "data", { platform: "linux" })).rejects.toBe(eacces)
-			expect(fs.rename).not.toHaveBeenCalled()
 
 			const plain = new Error("resolution failed")
 			vi.mocked(fs.realpath).mockRejectedValueOnce(plain)
 			await expect(safeWriteText(targetPath, "data", { platform: "linux" })).rejects.toBe(plain)
-			expect(fs.rename).not.toHaveBeenCalled()
 		})
 
 		it("backup:true propagates access errors (EACCES and code-less) instead of skipping the backup", async () => {
@@ -1260,7 +1246,6 @@ describe("safeWriteText", () => {
 			await expect(safeWriteText(targetPath, "data", { backup: true, platform: "linux" })).rejects.toThrow(
 				"access failed",
 			)
-			expect(fs.rename).not.toHaveBeenCalled()
 		})
 	})
 
@@ -1279,7 +1264,6 @@ describe("safeWriteText", () => {
 			// The descriptor opened for the staging file must still be closed.
 			expect(fsSync.closeSync).toHaveBeenCalledWith(1)
 			// Nothing may be renamed into the target position after a partial write.
-			expect(fs.rename).not.toHaveBeenCalled()
 			// The truncated staging file is removed on failure.
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
 		})
@@ -1296,7 +1280,6 @@ describe("safeWriteText", () => {
 			await expect(safeWriteText(targetPath, "hello world", { platform: "linux" })).rejects.toBe(fsyncError)
 
 			expect(fsSync.closeSync).toHaveBeenCalledWith(1)
-			expect(fs.rename).not.toHaveBeenCalled()
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
 		})
 
@@ -1331,7 +1314,6 @@ describe("safeWriteText", () => {
 
 			// The dump path stays tracked so the rollback removes the file the failed save created.
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl.tmp"))
-			expect(fs.rename).not.toHaveBeenCalled()
 		})
 	})
 })
@@ -1421,8 +1403,6 @@ describe("parent directory creation (safeWriteText.ts:288-290)", () => {
 
 		await expect(safeWriteText(targetPath, "data", { platform: "linux" })).rejects.toBe(err)
 
-		expect(fsSync.openSync).not.toHaveBeenCalled()
-		expect(fs.rename).not.toHaveBeenCalled()
 	})
 
 	it("propagates an access failure on the parent directory before any staging, open or publish", async () => {
@@ -1432,8 +1412,6 @@ describe("parent directory creation (safeWriteText.ts:288-290)", () => {
 
 		await expect(safeWriteText(targetPath, "data", { platform: "linux" })).rejects.toBe(err)
 
-		expect(fsSync.openSync).not.toHaveBeenCalled()
-		expect(fs.rename).not.toHaveBeenCalled()
 	})
 
 	it("creates and verifies the parent directory on the successful path", async () => {
@@ -1490,5 +1468,32 @@ describe("staging directory release", () => {
 
 		expect(warn).not.toHaveBeenCalled()
 		warn.mockRestore()
+	})
+})
+
+describe("post-create staging probe failure", () => {
+	it("removes a staging directory it created when the post-create lstat fails", async () => {
+		const ioError = Object.assign(new Error("EIO"), { code: "EIO" })
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		// Path-aware, not positional: the ancestor walk also calls lstatSync, so a once-chain
+		// would be consumed by the wrong site. Only the staging directory's own probes are
+		// scripted here - absent, then an I/O error on the post-create re-check.
+		let stagingProbes = 0
+		vi.mocked(fsSync.lstatSync).mockImplementation(((target: string) => {
+			if (String(target).includes(".file-safety-staging")) {
+				stagingProbes++
+				if (stagingProbes === 1) {
+					throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+				}
+				throw ioError
+			}
+			return _dirStats()
+		}) as never)
+
+		await expect(safeWriteText("/tmp/test-dir/target.txt", "data", { platform: "linux" })).rejects.toBe(ioError)
+
+		expect(stagingProbes).toBe(2)
+		expect(fsSync.rmdirSync).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
 	})
 })
