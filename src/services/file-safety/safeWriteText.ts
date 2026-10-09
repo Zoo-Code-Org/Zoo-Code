@@ -42,6 +42,18 @@ export interface SafeWriteTextOptions {
 	 * already written data to a temp file via a custom stream.
 	 */
 	tempPath?: string
+
+	/**
+	 * Publish onto the requested path itself instead of onto the referent of a symlink found
+	 * there.
+	 *
+	 * Following a link is only safe once somebody has decided that the referent is an
+	 * acceptable destination - by declaring a confinement scope, or by checking the resolved path
+	 * some other way. A caller that did neither must keep the rename-over-link behavior: a link
+	 * planted inside the workspace would otherwise move the write to a file outside it, and the
+	 * caller would never learn that its bytes landed somewhere else.
+	 */
+	publishOverLink?: boolean
 }
 
 /**
@@ -268,8 +280,10 @@ export async function safeWriteText(
 ): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 
-	// Resolve the symlink referent (see resolvePublishTarget).
-	const targetPath = await resolvePublishTarget(absoluteFilePath)
+	// Resolve the symlink referent (see resolvePublishTarget), unless the caller asked to
+	// replace the link instead of writing through it. The link is then the target, so a referent
+	// outside the caller's view cannot receive these bytes.
+	const targetPath = options?.publishOverLink ? absoluteFilePath : await resolvePublishTarget(absoluteFilePath)
 	const dirPath = path.dirname(targetPath)
 
 	// Ensure parent directory exists (mirrors safeWriteJson behaviour).
