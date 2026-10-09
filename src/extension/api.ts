@@ -26,17 +26,16 @@ import { IpcServer } from "@roo-code/ipc"
 
 import { Package } from "../shared/package"
 import type { Mode } from "../shared/modes"
-import { ClineProvider } from "../core/webview/ClineProvider"
+import type { ClineProvider } from "../core/webview/ClineProvider"
+import type { ClineProviderFactory } from "../core/webview/ClineProviderFactory"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
-import { openClineInNewTab } from "../activate/registerCommands"
 import { getCommands } from "../services/command/commands"
 import { getModels } from "../api/providers/fetchers/modelCache"
 
 export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	private readonly outputChannel: vscode.OutputChannel
 	private readonly sidebarProvider: ClineProvider
-	private readonly context: vscode.ExtensionContext
 	private readonly ipc?: IpcServer
 	private readonly log: (...args: unknown[]) => void
 	private logfile?: string
@@ -44,6 +43,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	constructor(
 		outputChannel: vscode.OutputChannel,
 		provider: ClineProvider,
+		private readonly providerFactory: ClineProviderFactory,
 		socketPath?: string,
 		enableLogging = false,
 	) {
@@ -51,7 +51,6 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 		this.outputChannel = outputChannel
 		this.sidebarProvider = provider
-		this.context = provider.context
 
 		if (enableLogging) {
 			this.log = (...args: unknown[]) => {
@@ -198,7 +197,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			await vscode.commands.executeCommand("workbench.action.files.revert")
 			await vscode.commands.executeCommand("workbench.action.closeAllEditors")
 
-			provider = await openClineInNewTab({ context: this.context, outputChannel: this.outputChannel })
+			provider = await this.providerFactory.createInNewTab()
 			this.registerListeners(provider)
 		} else {
 			await vscode.commands.executeCommand(`${Package.name}.SidebarProvider.focus`)

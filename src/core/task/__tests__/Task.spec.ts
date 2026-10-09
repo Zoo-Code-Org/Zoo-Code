@@ -1,3 +1,4 @@
+import { WebviewFocusTracker } from "../../webview/WebviewFocusTracker"
 // npx vitest core/task/__tests__/Task.spec.ts
 
 import * as os from "os"
@@ -399,6 +400,7 @@ describe("Cline", () => {
 			mockOutputChannel,
 			"sidebar",
 			new ContextProxy(mockExtensionContext),
+			new WebviewFocusTracker(),
 		)
 
 		// Setup mock API configuration
@@ -6182,6 +6184,7 @@ describe("Queued message processing after condense", () => {
 			output as unknown as vscode.OutputChannel,
 			"sidebar",
 			new ContextProxy(ctx),
+			new WebviewFocusTracker(),
 		)
 		provider.postMessageToWebview = vi.fn().mockResolvedValue(undefined)
 		provider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
@@ -6483,6 +6486,7 @@ describe("Telemetry installments (idle/shutdown flush)", () => {
 			} as unknown as vscode.OutputChannel,
 			"sidebar",
 			new ContextProxy(mockExtensionContext),
+			new WebviewFocusTracker(),
 		)
 		mockProvider.postMessageToWebview = vi.fn().mockResolvedValue(undefined)
 		mockProvider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
@@ -6737,6 +6741,7 @@ describe("pushToolResultToUserContent", () => {
 			mockOutputChannel,
 			"sidebar",
 			new ContextProxy(mockExtensionContext),
+			new WebviewFocusTracker(),
 		)
 
 		mockProvider.postMessageToWebview = vi.fn().mockResolvedValue(undefined)
