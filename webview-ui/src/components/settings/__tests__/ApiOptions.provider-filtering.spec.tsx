@@ -215,6 +215,7 @@ describe("ApiOptions Provider Filtering", () => {
 		expect(providerValues).toContain("ollama")
 		expect(providerValues).toContain("lmstudio")
 		expect(providerValues).toContain("litellm")
+		expect(providerValues).toContain("io-intelligence")
 		expect(providerValues).toContain("requesty")
 	})
 

@@ -44,6 +44,7 @@ vi.mock("fs", () => ({
 vi.mock("../litellm")
 vi.mock("../openrouter")
 vi.mock("../requesty")
+vi.mock("../io-intelligence")
 vi.mock("../kenari")
 vi.mock("../nanogpt")
 vi.mock("../moonshot")
@@ -72,6 +73,7 @@ import { getModels, getModelsFromCache } from "../modelCache"
 import { getLiteLLMModels } from "../litellm"
 import { getOpenRouterModels } from "../openrouter"
 import { getRequestyModels } from "../requesty"
+import { getIOIntelligenceModels } from "../io-intelligence"
 import { getKenariModels } from "../kenari"
 import { getNanoGptModels } from "../nanogpt"
 import { getMoonshotModels } from "../moonshot"
@@ -80,12 +82,14 @@ import { getZooGatewayModels } from "../zoo-gateway"
 const mockGetLiteLLMModels = getLiteLLMModels as Mock<typeof getLiteLLMModels>
 const mockGetOpenRouterModels = getOpenRouterModels as Mock<typeof getOpenRouterModels>
 const mockGetRequestyModels = getRequestyModels as Mock<typeof getRequestyModels>
+const mockGetIOIntelligenceModels = getIOIntelligenceModels as Mock<typeof getIOIntelligenceModels>
 const mockGetKenariModels = getKenariModels as Mock<typeof getKenariModels>
 const mockGetNanoGptModels = getNanoGptModels as Mock<typeof getNanoGptModels>
 const mockGetMoonshotModels = getMoonshotModels as Mock<typeof getMoonshotModels>
 const mockGetZooGatewayModels = getZooGatewayModels as Mock<typeof getZooGatewayModels>
 
 const DUMMY_REQUESTY_KEY = "requesty-key-for-testing"
+const DUMMY_IOINTELLIGENCE_KEY = "io-intelligence-key-for-testing"
 
 describe("getModels with new GetModelsOptions", () => {
 	beforeEach(() => {
@@ -224,6 +228,25 @@ describe("getModels with new GetModelsOptions", () => {
 		const result = await getModels({ provider: providerIdentifiers.nanogpt, apiKey: "nanogpt-key" })
 
 		expect(mockGetNanoGptModels).toHaveBeenCalledWith("nanogpt-key", { signal: expect.any(AbortSignal) })
+		expect(result).toEqual(mockModels)
+	})
+
+	it("calls getIOIntelligenceModels for the io-intelligence provider", async () => {
+		const mockModels = {
+			"meta-llama/Llama-3.3-70B-Instruct": {
+				maxTokens: 8192,
+				contextWindow: 128000,
+				supportsPromptCache: false,
+			},
+		}
+		mockGetIOIntelligenceModels.mockResolvedValue(mockModels)
+
+		const result = await getModels({
+			provider: providerIdentifiers.ioIntelligence,
+			apiKey: DUMMY_IOINTELLIGENCE_KEY,
+		})
+
+		expect(mockGetIOIntelligenceModels).toHaveBeenCalledWith(DUMMY_IOINTELLIGENCE_KEY)
 		expect(result).toEqual(mockModels)
 	})
 
@@ -1133,6 +1156,31 @@ describe("NanoGPT key-scoped cache isolation", () => {
 		expect(new Set(cacheKeys).size).toBe(3)
 		expect(cacheKeys).toContain("nanogpt")
 		expect(cacheKeys.every((key) => !key.includes("nano-key-a") && !key.includes("nano-key-b"))).toBe(true)
+	})
+})
+
+describe("IO Intelligence key-scoped cache isolation", () => {
+	const ioIntelligenceModels = {
+		"meta-llama/Llama-3.3-70B-Instruct": { maxTokens: 8_192, contextWindow: 128_000, supportsPromptCache: false },
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockGetIOIntelligenceModels.mockResolvedValue(ioIntelligenceModels)
+	})
+
+	it("separates public, key A, and key B cache identities without exposing raw keys", async () => {
+		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+		mockCache.get.mockReturnValue(undefined)
+
+		await getModels({ provider: providerIdentifiers.ioIntelligence })
+		await getModels({ provider: providerIdentifiers.ioIntelligence, apiKey: "ionet-key-a" })
+		await getModels({ provider: providerIdentifiers.ioIntelligence, apiKey: "ionet-key-b" })
+
+		const cacheKeys = mockCache.set.mock.calls.map(([key]) => key as string)
+		expect(new Set(cacheKeys).size).toBe(3)
+		expect(cacheKeys).toContain("io-intelligence")
+		expect(cacheKeys.every((key) => !key.includes("ionet-key-a") && !key.includes("ionet-key-b"))).toBe(true)
 	})
 })
 

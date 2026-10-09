@@ -556,6 +556,8 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		)
 		// Kenari's /models endpoint is public, so it is fetched like the other no-auth routers.
 		expect(mockGetModels).toHaveBeenCalledWith(expect.objectContaining({ provider: providerIdentifiers.kenari }))
+		// IO Intelligence's /models catalog is public and may optionally be scoped by a key.
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.ioIntelligence, apiKey: undefined })
 		// NanoGPT's detailed catalog is public and may optionally be scoped by a key.
 		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.nanogpt, apiKey: undefined })
 
@@ -576,6 +578,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
@@ -824,6 +827,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
@@ -851,6 +855,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm
 			.mockResolvedValueOnce(mockModels) // opencode-go
 			.mockResolvedValueOnce(mockModels) // kenari
+			.mockResolvedValueOnce(mockModels) // io-intelligence
 			.mockResolvedValueOnce(mockModels) // nanogpt
 
 		await webviewMessageHandler(mockClineProvider, {
@@ -889,6 +894,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},

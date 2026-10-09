@@ -78,6 +78,8 @@ export class ProfileValidator {
 				return profile.ollamaModelId
 			case providerIdentifiers.requesty:
 				return profile.requestyModelId
+			case providerIdentifiers.ioIntelligence:
+				return profile.ioIntelligenceModelId
 			case providerIdentifiers.unbound:
 				return profile.unboundModelId
 			case providerIdentifiers.fakeAi:

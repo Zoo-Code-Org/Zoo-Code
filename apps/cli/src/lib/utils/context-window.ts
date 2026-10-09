@@ -50,6 +50,8 @@ function getModelIdForProvider(config: ProviderSettings): string | undefined {
 			return config.unboundModelId
 		case providerIdentifiers.litellm:
 			return config.litellmModelId
+		case providerIdentifiers.ioIntelligence:
+			return config.ioIntelligenceModelId
 		case providerIdentifiers.vercelAiGateway:
 			return config.vercelAiGatewayModelId
 		case providerIdentifiers.opencodeGo:
@@ -88,7 +90,6 @@ function getModelIdForProvider(config: ProviderSettings): string | undefined {
 		case retiredProviderIdentifiers.featherless:
 		case retiredProviderIdentifiers.groq:
 		case retiredProviderIdentifiers.huggingface:
-		case retiredProviderIdentifiers.ioIntelligence:
 		case retiredProviderIdentifiers.roo:
 		case providerIdentifiers.vscodeLm:
 		case providerIdentifiers.fakeAi:

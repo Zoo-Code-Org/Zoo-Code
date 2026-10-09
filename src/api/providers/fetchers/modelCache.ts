@@ -23,6 +23,7 @@ import { getOpenRouterModels } from "./openrouter"
 import { getVercelAiGatewayModels } from "./vercel-ai-gateway"
 import { getOpencodeGoModels } from "./opencode-go"
 import { getKenariModels } from "./kenari"
+import { getIOIntelligenceModels } from "./io-intelligence"
 import { getNanoGptModels } from "./nanogpt"
 import { getRequestyModels } from "./requesty"
 import { getUnboundModels } from "./unbound"
@@ -126,6 +127,7 @@ const KEY_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	providerIdentifiers.zooGateway, // Per-session-token account identity
 	providerIdentifiers.kimiCode, // Per-session-token account identity
 	providerIdentifiers.nanogpt, // Public catalog can still vary by API-key allowlist
+	providerIdentifiers.ioIntelligence, // Public catalog can still vary by API-key allowlist
 ])
 
 // Providers whose model lists are scoped to the signed-in user (e.g. per-account
@@ -291,6 +293,10 @@ async function fetchModelsFromProvider(options: GetModelsOptions, signal?: Abort
 			break
 		case providerIdentifiers.kenari:
 			models = await getKenariModels(options.apiKey, ...fetchOpts)
+			break
+		case providerIdentifiers.ioIntelligence:
+			// Public catalog; an optional key can scope the visible model set.
+			models = await getIOIntelligenceModels(options.apiKey)
 			break
 		case providerIdentifiers.nanogpt:
 			models = await getNanoGptModels(options.apiKey, ...fetchOpts)
@@ -623,6 +629,10 @@ export async function initializeModelCacheRefresh(): Promise<void> {
 			{
 				provider: providerIdentifiers.nanogpt,
 				options: { provider: providerIdentifiers.nanogpt },
+			},
+			{
+				provider: providerIdentifiers.ioIntelligence,
+				options: { provider: providerIdentifiers.ioIntelligence },
 			},
 		]
 
