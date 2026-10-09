@@ -444,12 +444,13 @@ export class ProviderSettingsManager {
 	/**
 	 * Restores a stored profile to `restoredConfig` if and only if
 	 * the currently stored profile still matches `expectedConfig`.
+	 * If `restoredConfig` is omitted or undefined, deletes the profile (for rollback of newly created configs).
 	 * Serialized through the process-wide persistence lock.
 	 */
 	public async restoreConfigIfMatches(
 		name: string,
 		expectedConfig: ProviderSettingsWithId,
-		restoredConfig: ProviderSettingsWithId,
+		restoredConfig?: ProviderSettingsWithId,
 	): Promise<boolean> {
 		try {
 			return await this.lock(async () => {
@@ -468,10 +469,16 @@ export class ProviderSettingsManager {
 					return false
 				}
 
-				providerProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(
-					restoredConfig,
-					restoredConfig.id || currentId,
-				)
+				if (restoredConfig) {
+					providerProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(
+						restoredConfig,
+						restoredConfig.id || currentId,
+					)
+				} else {
+					if (Object.keys(providerProfiles.apiConfigs).length > 1) {
+						delete providerProfiles.apiConfigs[name]
+					}
+				}
 				await this.store(providerProfiles)
 				return true
 			})

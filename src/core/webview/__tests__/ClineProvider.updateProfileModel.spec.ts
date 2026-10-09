@@ -725,10 +725,29 @@ describe("ClineProvider - updateProfileModel", () => {
 		)
 	})
 
-	it("aborts model update without writing profile when user is authenticated but organization settings are undefined", async () => {
+	it("allows model update when user is authenticated but organization settings are undefined (personal account fallback)", async () => {
 		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
 		mockCloudInstance.isAuthenticated.mockReturnValue(true)
 		mockCloudInstance.getOrganizationSettings.mockReturnValue(undefined)
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-4.5",
+		})
+
+		expect(manager().saveConfig).toHaveBeenCalledTimes(1)
+		expect(manager().saveConfig).toHaveBeenCalledWith(
+			"test-config",
+			expect.objectContaining({ openRouterModelId: "openai/gpt-4.5" }),
+		)
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+	})
+
+	it("aborts model update without writing profile when reading organization settings throws an error (fail closed)", async () => {
+		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
+		mockCloudInstance.isAuthenticated.mockReturnValue(true)
+		mockCloudInstance.getOrganizationSettings.mockImplementation(() => {
+			throw new Error("Network error reading organization policy")
+		})
 
 		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
 			openRouterModelId: "openai/gpt-4.5",
@@ -1147,5 +1166,90 @@ describe("ClineProvider - updateProfileModel", () => {
 		resolveFirstMutation()
 		await Promise.all([firstMutation, secondMutation])
 		expect(secondMutationStarted).toBe(true)
+	})
+
+	it("allows subsequent mutations to proceed when a prior mutation never settles and ignores abort", async () => {
+		vi.useFakeTimers()
+		try {
+			mockStoredProfile({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			})
+
+			// Stalled mutation that never settles and ignores abort
+			const stalledMutationPromise = new Promise<never>(() => {})
+			manager().updateProfileModel.mockImplementationOnce(async () => stalledMutationPromise)
+
+			const firstMutation = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "openai/gpt-hung",
+			})
+
+			// Advance fake timers past timeout + drain window so first mutation times out and queue drains
+			await vi.advanceTimersByTimeAsync(
+				ClineProvider.PENDING_OPERATION_TIMEOUT_MS + ClineProvider.MUTATION_DRAIN_TIMEOUT_MS + 100,
+			)
+			await firstMutation
+
+			// Now run a second mutation that succeeds
+			const secondMutation = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "openai/gpt-4.5",
+			})
+
+			await vi.advanceTimersByTimeAsync(100)
+			await secondMutation
+
+			expect(manager().saveConfig).toHaveBeenCalledWith(
+				"test-config",
+				expect.objectContaining({ openRouterModelId: "openai/gpt-4.5" }),
+			)
+			expect(provider.contextProxy.getValues().openRouterModelId).toBe("openai/gpt-4.5")
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("rolls back saved config in upsertProviderProfile when aborted after saveConfig", async () => {
+		manager().getProfile.mockResolvedValueOnce({
+			id: "orig-id",
+			name: "existing-profile",
+			apiProvider: providerIdentifiers.anthropic,
+			apiModelId: "claude-3-5-sonnet",
+		} as ProviderSettingsWithId & { name: string })
+
+		manager().saveConfig.mockImplementationOnce(async () => {
+			provider["providerProfileMutationAbortController"].abort()
+			return "new-id"
+		})
+
+		await provider.upsertProviderProfile("existing-profile", {
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4",
+		})
+
+		expect(manager().restoreConfigIfMatches).toHaveBeenCalledWith(
+			"existing-profile",
+			expect.objectContaining({ id: "new-id" }),
+			expect.objectContaining({ id: "orig-id" }),
+		)
+	})
+
+	it("removes newly created profile in upsertProviderProfile when aborted after saveConfig", async () => {
+		manager().getProfile.mockRejectedValueOnce(new Error("Config with name 'brand-new' not found"))
+
+		manager().saveConfig.mockImplementationOnce(async () => {
+			provider["providerProfileMutationAbortController"].abort()
+			return "brand-new-id"
+		})
+
+		await provider.upsertProviderProfile("brand-new", {
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4",
+		})
+
+		expect(manager().restoreConfigIfMatches).toHaveBeenCalledWith(
+			"brand-new",
+			expect.objectContaining({ id: "brand-new-id" }),
+			undefined,
+		)
 	})
 })

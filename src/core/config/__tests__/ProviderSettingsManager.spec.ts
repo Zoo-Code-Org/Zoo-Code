@@ -1729,6 +1729,38 @@ describe("ProviderSettingsManager", () => {
 			expect(mockSecrets.store).not.toHaveBeenCalled()
 		})
 
+		it("removes newly created profile when restoredConfig is undefined and profile matches expected config", async () => {
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "default",
+				apiConfigs: {
+					default: {
+						id: "default-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-7-sonnet",
+					},
+					"new-profile": {
+						id: "new-id",
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openai/gpt-4",
+					},
+				},
+			}
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+
+			const expectedConfig: ProviderSettingsWithId = {
+				id: "new-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			}
+
+			const result = await providerSettingsManager.restoreConfigIfMatches("new-profile", expectedConfig)
+
+			expect(result).toBe(true)
+			const storedConfig = JSON.parse(mockSecrets.store.mock.calls[mockSecrets.store.mock.calls.length - 1][1])
+			expect(storedConfig.apiConfigs["new-profile"]).toBeUndefined()
+			expect(storedConfig.apiConfigs.default).toBeDefined()
+		})
+
 		it("returns false if config name does not exist", async () => {
 			const existingConfig: ProviderProfiles = {
 				currentApiConfigName: "default",
