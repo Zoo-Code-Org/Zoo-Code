@@ -100,8 +100,14 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// regular-file check on the temp file this write created, and the identity check
 		// that the staging path is not the target. Both run after the key was resolved
 		// and the lock was taken, so neither changes which lock the caller queued behind.
-		expect(order).toEqual(["resolve-failed", "lstat", "resolve", "resolve", "lock", "resolve", "resolve", "lstat", "lstat"])
-		expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ id: "task-1" })
+		// A write that declares no confinement scope no longer resolves the publish target at all,
+		// so the two post-lock resolutions this used to record are gone; the lock key still comes
+		// from the referent, which is what the test is about.
+		expect(order).toEqual(["resolve-failed", "lstat", "resolve", "resolve", "lock", "lstat", "lstat"])
+		// The bytes replaced the link rather than travelling through it to the referent: nobody
+		// authorized the referent here, because no scope was declared.
+		expect(JSON.parse(await fs.readFile(currentLink, "utf8"))).toEqual({ id: "task-1" })
+		await expect(fs.readFile(referent, "utf8")).rejects.toThrow()
 	})
 
 	it("releases the lock when the resolution under the lock rejects", async () => {
@@ -133,7 +139,10 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			}
 		})
 
-		await expect(safeWriteJson(currentLink, { id: "task-1" })).rejects.toThrow(enoent)
+		// The in-lock resolution only happens for a caller that declared a scope, so the scope is
+		// declared here: what this test pins is that a rejection inside the protected block still
+		// releases the lock, and that path is reached through the confined resolution.
+		await expect(safeWriteJson(currentLink, { id: "task-1" }, { confineTo: dir })).rejects.toThrow(enoent)
 		expect(released).toBe(true)
 		// The strict rejection is reached through the ENOENT + symlink branch, not
 		// through a synchronous throw that skips it.

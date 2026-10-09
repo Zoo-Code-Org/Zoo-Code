@@ -563,7 +563,9 @@ describe("safeWriteJson", () => {
 			target === callerPath ? referentPath : String(target),
 		)
 
-		await safeWriteJson(callerPath, { after: true })
+		// The scope is declared because this test is about publishing THROUGH a link: a write with
+		// no declared scope replaces the link instead, which is covered by its own test below.
+		await safeWriteJson(callerPath, { after: true }, { confineTo: tempDir })
 
 		// the temp file was created next to the resolved referent, NOT beside the link
 		const tempPaths = vi.mocked(fsSyncActual.createWriteStream).mock.calls.map((call) => String(call[0]))
@@ -637,7 +639,9 @@ describe("safeWriteJson", () => {
 		// Capture the compromise + release-failure logs.
 		const consoleErrorSpy = vi.spyOn(console, "error")
 		try {
-			await mockedSafeWriteJson(callerPath, { added: true }, { merge: mergeFn })
+			// confineTo is declared so this write still publishes through the link: the lock key
+			// follows the link either way, and this test is about that key and the merge it orders.
+			await mockedSafeWriteJson(callerPath, { added: true }, { merge: mergeFn, confineTo: tempDir })
 
 			// The lock was keyed by the resolved referent — every alias shares it.
 			expect(lockMock).toHaveBeenCalledTimes(1)
@@ -729,6 +733,49 @@ describe("safeWriteJson", () => {
 			})
 		},
 	)
+
+	test("does not follow an untrusted symlink for a write that declares no confinement scope", async () => {
+		const projectDir = path.join(tempDir, "project-untrusted")
+		await fs.mkdir(projectDir)
+		const outside = path.join(tempDir, "outside-untrusted.json")
+		await fsSyncActual.promises.writeFile(outside, JSON.stringify({ secret: "original" }), "utf8")
+		const projectConfig = path.join(projectDir, "mcp.json")
+		// Real symlinks are unavailable on the Windows lane, so the link is simulated the way the
+		// lock-key spec does: the configured path reports itself a link to a file outside the
+		// workspace. Nothing here passes confineTo, which is how production writes (McpHub) call
+		// this primitive - the caller picked projectConfig from the workspace and said no more.
+		const enoent = Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+		const realpathSpy = vi.spyOn(fs, "realpath").mockImplementation(async (target) => {
+			if (String(target) === projectConfig) throw enoent
+			return fsSyncActual.promises.realpath(String(target))
+		})
+		const lstatSpy = vi.spyOn(fs, "lstat").mockImplementation(async (target) => {
+			if (String(target) === projectConfig) {
+				return { isSymbolicLink: () => true } as unknown as import("fs").Stats
+			}
+			return fsSyncActual.promises.lstat(String(target))
+		})
+		const readlinkSpy = vi.spyOn(fs, "readlink").mockImplementation(async (target) => {
+			if (String(target) === projectConfig) return outside
+			throw new Error("not a symbolic link")
+		})
+		try {
+			await safeWriteJson(projectConfig, { mcpServers: { local: { url: "http://localhost" } } })
+		} finally {
+			realpathSpy.mockRestore()
+			lstatSpy.mockRestore()
+			readlinkSpy.mockRestore()
+		}
+
+		// The outside file is unchanged: a workspace file that happens to be a link to somewhere
+		// else must not receive a write the caller asked for inside the workspace.
+		expect(JSON.parse(await fsSyncActual.promises.readFile(outside, "utf8"))).toEqual({ secret: "original" })
+		// The link itself was replaced, which is what this primitive did before it resolved links.
+		expect(JSON.parse(await fsSyncActual.promises.readFile(projectConfig, "utf8"))).toEqual({
+			mcpServers: { local: { url: "http://localhost" } },
+		})
+	})
+
 
 	test.skipIf(process.platform === "win32")(
 		"refuses the publish when the authorized referent is repointed outside after the check",
