@@ -534,6 +534,8 @@
 		"apiKey": "API 키",
 		"openAiApiKey": "OpenAI API 키",
 		"openAiBaseUrl": "기본 URL",
+		"openAiStrictToolSchemas": "엄격한 도구 스키마 (strict: true)",
+		"openAiStrictToolSchemasDescription": "스키마를 엄격하게 준수하도록 하려면 도구 스키마에 strict: true를 포함해 보냅니다. 비엄격 도구 호출을 사용하려면 비활성화하세요.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure 배포 이름",
 		"azureOpenAiDeploymentNameDescription": "기반 모델 이름이 아닌 Azure AI Studio의 배포 이름을 입력하세요.",
