@@ -1465,3 +1465,30 @@ describe("partial backup after a failed copy (backup:true)", () => {
 		expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak"))
 	})
 })
+
+describe("staging directory release", () => {
+	it("retries a transient release failure once and then surfaces it", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.rmdir).mockRejectedValue(Object.assign(new Error("EBUSY"), { code: "EBUSY" }))
+
+		await safeWriteText("/tmp/test-dir/target.txt", "data", { platform: "linux" })
+
+		const messages = warn.mock.calls.map(function (c) { return String(c[0]) })
+		expect(messages.filter(function (m) { return m.indexOf("staging directory release failed") >= 0 }).length).toBe(1)
+		warn.mockRestore()
+	})
+
+	it("treats ENOTEMPTY as benign: no warning at all", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.rmdir).mockRejectedValue(Object.assign(new Error("ENOTEMPTY"), { code: "ENOTEMPTY" }))
+
+		await safeWriteText("/tmp/test-dir/target.txt", "data", { platform: "linux" })
+
+		expect(warn).not.toHaveBeenCalled()
+		warn.mockRestore()
+	})
+})

@@ -300,10 +300,23 @@ export async function safeWriteText(filePath: string, content: string, options?:
 	// still stages here, which is exactly the concurrency guard wanted.
 	async function _releaseStagingDir(): Promise<void> {
 		if (stagingDir === null) return
-		try {
-			await fs.rmdir(stagingDir)
-		} catch {
-			// non-empty (a concurrent write is still staging) or already gone
+		for (let attempt = 0; attempt < 2; attempt++) {
+			try {
+				await fs.rmdir(stagingDir)
+				return
+			} catch (error: unknown) {
+				const code = _errorCode(error)
+				// ENOENT: another writer already removed it. ENOTEMPTY: a concurrent write is still
+				// staging here, which is the concurrency guard this directory exists for. Both are
+				// benign - no retry, no warning.
+				if (code === "ENOENT" || code === "ENOTEMPTY") return
+				// Anything else (EBUSY, EPERM, EACCES, ...) is transient here: retry once, then
+				// surface the retained directory. A leftover staging directory is acceptable, an
+				// invisible one is not.
+				if (attempt === 1) {
+					console.warn(`safeWriteText: staging directory release failed: ${stagingDir} (${code ?? String(error)})`)
+				}
+			}
 		}
 	}
 
