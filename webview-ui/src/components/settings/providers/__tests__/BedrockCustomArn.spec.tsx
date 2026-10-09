@@ -151,6 +151,15 @@ describe("BedrockCustomArn base model", () => {
 		expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", undefined)
 	})
 
+	it("stores the first ARN entered when none is set yet", () => {
+		const setApiConfigurationField = renderCustomArn({ awsCustomArn: undefined })
+
+		fireEvent.input(screen.getByTestId("custom-arn-input"), { target: { value: appProfileArn } })
+
+		expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArn", appProfileArn)
+		expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArnBaseModelId", "")
+	})
+
 	it("keeps the base model when the ARN input doesn't change the ARN", () => {
 		const setApiConfigurationField = renderCustomArn({ awsCustomArnBaseModelId: "anthropic.claude-opus-5-5" })
 

@@ -44,6 +44,15 @@ describe("resolveBedrockCustomArnBaseModelId", () => {
 		).toBe("anthropic.claude-opus-4-8")
 	})
 
+	it("treats an empty base model, stored after an ARN change, as auto-detect", () => {
+		expect(
+			resolveBedrockCustomArnBaseModelId(
+				"arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-opus-4-8",
+				"",
+			),
+		).toBe("anthropic.claude-opus-4-8")
+	})
+
 	it("lets an explicit Other choice override a model named in the ARN", () => {
 		expect(
 			resolveBedrockCustomArnBaseModelId(
