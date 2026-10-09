@@ -28,10 +28,11 @@ export interface SafeWriteTextOptions {
 	execFileRunner?: typeof execFile
 
 	/**
-	 * Sink for non-fatal safety notices. A Windows DACL that could not be captured means the
-	 * committed file may inherit different access rights: the write still proceeds (a missing or
-	 * failing icacls must not block saving), but the caller is told instead of the change being
-	 * silent. Defaults to console.warn.
+	 * Sink for non-fatal safety notices. The DACL notices left are the ones after the commit
+	 * rename: the content is already published there, so failing the write would discard a
+	 * successful write while promising an access boundary it can no longer re-establish. Before
+	 * the commit, a target whose access rights cannot be captured is fatal
+	 * (DaclPreservationError) - a notice cannot preserve a boundary that has not been crossed yet.
 	 */
 	onWarning?: (message: string) => void
 
@@ -135,6 +136,32 @@ export class PostCommitDurabilityError extends Error {
 		this.targetPath = targetPath
 	}
 }
+/**
+ * An existing publish target whose access rights this write cannot account for. The commit
+ * rename replaces the target with a freshly created file, which inherits the directory's
+ * rights unless the target's own DACL is captured and re-applied; when that evidence is
+ * missing the rename would widen access silently, so nothing is published.
+ *
+ * - "existence": the target is there but could not be checked, so it cannot be shown to have
+ *   no rights to preserve.
+ * - "capture": icacls /save failed, so there is no DACL to re-apply.
+ */
+export class DaclPreservationError extends Error {
+	readonly targetPath: string
+	readonly stage: "existence" | "capture"
+
+	constructor(targetPath: string, stage: DaclPreservationError["stage"], cause?: unknown) {
+		const why = stage === "capture" ? "its DACL could not be captured" : "it could not be checked for DACL preservation"
+			super(
+				`The target ${targetPath} exists and ${why} -- nothing was published, because the commit rename would replace it with a file whose access rights this write cannot reproduce.`,
+				{ cause },
+			)
+		this.name = "DaclPreservationError"
+		this.targetPath = targetPath
+		this.stage = stage
+	}
+}
+
 // -- helpers ---------------------------------------------------------------
 
 /**
@@ -540,23 +567,31 @@ export async function safeWriteText(
 					// Only a successfully saved dump may be restored onto the
 					// committed file (step 5).
 					daclDumpPath = dumpPath
+					// Measured, not assumed: a pre-commit probe of the restore was tried and is not
+					// shippable here. Against a real filesystem icacls /restore returns 1300 for every
+					// invocation pairing this code can build (save with an absolute or a relative name,
+					// restore based on the target's directory, on ".", on the target itself, or on the
+					// drive root), so gating the commit on it would fail every Windows publish - this
+					// repository's own real-filesystem integration test among them - instead of
+					// protecting the boundary. What is enforced is the evidence this step can obtain: no
+					// capture, no publish. The save/restore pairing itself is a separate defect, filed
+					// rather than papered over here.
 				} else {
 					// A failed icacls may have left a partial dump behind;
 					// remove it now (best-effort) so no partial dump survives and
 					// no later step can restore from it.
 					await fs.unlink(dumpPath).catch(() => {})
 					// The target exists and its DACL could not be captured, so the commit rename
-					// replaces it with a file that inherits different access rights. The write still
-					// proceeds - a missing or failing icacls must not leave the user unable to save -
-					// but the replacement is no longer ACL-identical and that has to be visible
-					// instead of silent.
-					warn(`Could not save the DACL of ${targetPath}; the replacement may inherit different access rights.`)
+					// would replace it with a file that inherits the directory's broader rights. A
+					// warning does not preserve an access boundary: for a target that already has
+					// one, the capture is a precondition and nothing is published without it.
+					throw new DaclPreservationError(targetPath, "capture")
 				}
 			} else if (errorCode(accessError) !== "ENOENT") {
-				// Not "absent": the target is there but could not be checked (EACCES, ...), so
-				// DACL preservation was skipped for a reason the caller cannot infer from the
-				// successful write alone.
-				warn(`Could not check ${targetPath} for DACL preservation (${errorCode(accessError) ?? "unknown error"}); the replacement may inherit different access rights.`)
+				// Not "absent": the target is there but could not be checked (EACCES, ...), so this
+				// write cannot show that the target has no rights to preserve. Same rule as a failed
+				// capture: no evidence, no publish.
+				throw new DaclPreservationError(targetPath, "existence", accessError)
 			}
 		}
 		try {
@@ -658,11 +693,9 @@ export async function safeWriteText(
 				const restored = await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
 				if (!restored) {
 					// The content is committed, but the published file may carry a different DACL
-					// from the one that was saved. Failing the write here would break every
-					// publish on machines where icacls cannot reapply the saved ACEs (a plain
-					// temp directory restore fails with "Not all privileges or groups referenced
-					// are assigned to the caller"), so the change of access rights is reported
-					// rather than thrown.
+					// from the one that was saved. Failing the write here would discard a write
+					// that already succeeded while promising a boundary this step can no longer
+					// re-establish, so it is reported.
 					warn(`safeWriteText: content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`)
 				}
 			}
