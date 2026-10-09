@@ -50,6 +50,15 @@ export class DiffViewProvider {
 	 * diagnostics or read provider state that a cancellation is closing underneath it.
 	 */
 	private teardownCancellationRequested = false
+	/**
+	 * Whether this edit session has been closed (its reset has been claimed). A caller that
+	 * waited for someone else's teardown cannot decide this by reading provider state: isEditing
+	 * and activeDiffEditor are exactly what the finalization changes, so two callers that both
+	 * waited on a pass which never resets would each see the session still open and each close it.
+	 * The claim is what makes "exactly one of us finalizes" a fact rather than a race.
+	 */
+	private sessionFinalizationClaimed = false
+	private finalizationInFlight: Promise<void> | undefined
 	// Counts the teardown passes this provider has actually run; a caller that awaited an
 	// in-flight pass does not count. A save uses it to tell its own post-publish cleanup apart
 	// from a teardown a cancellation or disposal started underneath it: once any teardown has
@@ -144,6 +153,10 @@ export class DiffViewProvider {
 		// A new diff session may reuse this provider after a cancelled one, so the teardown marker
 		// starts clean: otherwise every later save would report itself cancelled without publishing.
 		this.teardownPasses = 0
+		// A new session has to be finalizable: a provider that was reset once would otherwise
+		// report its finalization as already claimed.
+		this.sessionFinalizationClaimed = false
+		this.finalizationInFlight = undefined
 
 		// Snapshot the authorization as it stands before this preview touches the
 		// registry; saveChanges(..., "edit") restores it below.
@@ -1084,22 +1097,21 @@ export class DiffViewProvider {
 		if (!ownedTeardown) {
 			// Another teardown started first and already ran the pass over this session's buffers,
 			// tabs and preview state, so restoring the preview tabs here would be that same work a
-			// second time. Finalizing the session is still this caller's responsibility when the
-			// owning pass is one that never resets - a save's post-publish cleanup, or a rejected
-			// save's discard cleanup, whose reset belongs to a tool caller that a cancellation or
-			// disposal may never let come back. The owning pass has returned, so the session is
-			// closed once and only once.
-			if (this.isEditing || this.activeDiffEditor !== undefined) {
-				await this.reset()
-			}
+			// second time. Finalizing the session is still owed when the owning pass is one that
+			// never resets - a save's post-publish cleanup, or a rejected save's discard cleanup,
+			// whose reset belongs to a tool caller that a cancellation or disposal may never let
+			// come back. Whoever gets here first claims it; a second waiter joins the claim
+			// instead of running a second reset.
+			await this.finalizeSession(() => this.reset())
 			return
 		}
 		// Restore any preview tabs the diff evicted, reconstructing the user's
 		// prior not-yet-edited tab state.
 		await this.restorePreviewTabs()
 
-		// Edit is done.
-		await this.reset()
+		// Edit is done. The owner of the pass claims the finalization too, so a caller that
+		// waited on this pass cannot also close the session behind it.
+		await this.finalizeSession(() => this.reset())
 	}
 
 	private async closeAllDiffViews(): Promise<void> {
@@ -1208,6 +1220,31 @@ export class DiffViewProvider {
 			this.teardownInFlight = undefined
 		}
 		return true
+	}
+
+	/**
+	 * Run the session's finalization exactly once. The first caller claims it and runs it;
+	 * anyone who arrives while it is running awaits that attempt rather than starting their own,
+	 * and anyone who arrives after it is done does nothing. A pass that owns its own teardown and
+	 * a caller that merely waited for one go through here, which is what keeps "only one caller
+	 * owns reset()" true regardless of how many cancellations piled onto the same pass.
+	 */
+	private async finalizeSession(finalize: () => Promise<void>): Promise<void> {
+		if (this.sessionFinalizationClaimed) {
+			return
+		}
+		if (this.finalizationInFlight) {
+			await this.finalizationInFlight
+			return
+		}
+		const inFlight = finalize()
+		this.finalizationInFlight = inFlight
+		try {
+			await inFlight
+			this.sessionFinalizationClaimed = true
+		} finally {
+			this.finalizationInFlight = undefined
+		}
 	}
 
 	// Stop tracking user activation of the target file. Called before any
@@ -1692,6 +1729,9 @@ export class DiffViewProvider {
 	}
 
 	async reset(): Promise<void> {
+		// A reset closes the session whoever calls it through, so the finalization is claimed
+		// here as well: a teardown waiter that arrives afterwards must not run a second one.
+		this.sessionFinalizationClaimed = true
 		// Dispose touch listeners and cancel any pending deferred scroll BEFORE any
 		// async editor manipulation. closeAllDiffViews() awaits tab-close operations,
 		// so leaving listeners/timers live across that await could let a stale handler
