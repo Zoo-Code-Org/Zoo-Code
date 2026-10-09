@@ -102,17 +102,20 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				if (preReadStats && postReadStats) {
 					const preReadToken = versionTokenOfStat(preReadStats)
 					if (preReadToken === versionTokenOfStat(postReadStats)) {
-						// The tool's own hunk read, not a model read. When the model already observed the
-						// file, keep the completeness it earned and only on the version it was earned on; a
-						// partial view stays partial. With no prior observation the model has seen only the
-						// patch's hunks, so this read stays incomplete: it must not become authority for a
-						// later full-file replacement.
+						// The tool's own hunk read, not a model read. With no prior observation the model has
+						// seen only the patch's hunks, so the read stays incomplete: it must not become authority
+						// for a later full-file replacement. A prior observation is carried - partial stays partial,
+						// complete stays complete - only while it still describes the version that was read. An
+						// OLDER observation is left exactly as the model earned it: refreshing it to the version this
+						// read published would hand the guarded save a compare-and-swap token for content the model
+						// never saw, so a patch built against v1 would overwrite an external v2 without the re-read
+						// remediation. Same stale policy as ApplyDiffTool's read.
 						const prior = task.observationRegistry.get(absolutePath)
-						// With no prior observation there is nothing to carry, and the read stays
-						// incomplete. Carry completeness only when a prior observation exists and still
-						// describes the version that was read.
-						const complete = prior === undefined ? false : prior.complete === true && prior.version === preReadToken
-						task.observationRegistry.observe(absolutePath, preReadToken, complete)
+						if (prior === undefined) {
+							task.observationRegistry.observe(absolutePath, preReadToken, false)
+						} else if (prior.version === preReadToken) {
+							task.observationRegistry.observe(absolutePath, preReadToken, prior.complete === true)
+						}
 					}
 				}
 				return content
