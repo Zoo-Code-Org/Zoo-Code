@@ -5,6 +5,7 @@ import { JsonStreamStringify } from "json-stream-stringify"
 
 import { acquireFileLock } from "./fileLock"
 import {
+	PostCommitDurabilityError,
 	resolveLockKey,
 	resolvePublishTarget,
 	safeWriteText,
@@ -257,7 +258,29 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			backup: true,
 		}
 
-		await safeWriteText(resolvedTargetPath, "", textOptions)
+		try {
+			await safeWriteText(resolvedTargetPath, "", textOptions)
+		} catch (error: unknown) {
+			// The commit rename already published the new JSON: only the durability of the
+			// directory entry is unproven. safeWriteText keeps the previous-content copy on this
+			// path and reports it on the error, so this caller - the one that always turns
+			// backup on - owns that copy. The write is reported as committed, because the content
+			// really is at the target and failing here would leave the caller's in-memory state
+			// diverging from what is on disk; the copy is released best-effort so no hidden
+			// .safeWriteText.bak_ file is left beside the target; and the durability caveat is
+			// logged instead of swallowed. Any other error keeps the existing failure path.
+			if (!(error instanceof PostCommitDurabilityError)) {
+				throw error
+			}
+			if (error.backupPath) {
+				await fs.unlink(error.backupPath).catch(() => {})
+			}
+			console.warn(
+				`safeWriteJson: ${resolvedTargetPath ?? absoluteFilePath} is committed, but its directory entry may not be durable: ${
+						error.cause instanceof Error ? error.cause.message : String(error.cause ?? error)
+				}`,
+			)
+		}
 
 		// If we reach here, the new file is successfully in place and any
 		// backup has already been handled by safeWriteText.
