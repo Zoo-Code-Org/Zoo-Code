@@ -216,6 +216,9 @@ export class SearchReplaceTool extends BaseTool<"search_replace"> {
 					diagnosticsEnabled,
 					writeDelayMs,
 					"edit",
+					// Seventh parameter is completeOverride (this call claims no completeness of its
+					// own); the eighth is the approval flag for a target outside every workspace root.
+					undefined,
 					isOutsideWorkspace,
 				)
 			} else {

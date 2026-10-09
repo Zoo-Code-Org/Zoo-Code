@@ -272,6 +272,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			true,
 			1000,
 			"edit",
+			undefined,
 			false,
 		)
 		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
@@ -302,6 +303,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			true,
 			1000,
 			"edit",
+			undefined,
 			false,
 		)
 
@@ -475,6 +477,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			true,
 			1000,
 			"create",
+			undefined,
 			false,
 		)
 		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
