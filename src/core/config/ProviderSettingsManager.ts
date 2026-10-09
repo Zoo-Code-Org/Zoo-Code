@@ -104,12 +104,8 @@ export class ProviderSettingsManager {
 	}
 
 	/**
-	 * Process-wide lock serializing readConfig/writeConfig operations across all instances
-	 * sharing secretsKey within the extension host process to guarantee persistence integrity.
-	 * Cross-context / external writers are unsupported as VS Code's SecretStorage interface
-	 * exposes only separate get, store, and delete operations without atomic compare-and-set
-	 * or versioned transaction support. All profile modifications must be routed through
-	 * this process-wide persistence owner.
+	 * Process-wide lock serializing profile reads and writes across all ProviderSettingsManager
+	 * instances sharing secretsKey within the extension host process to guarantee persistence integrity.
 	 */
 	private static readonly locks = new Map<string, Promise<void>>()
 	public static resetLocksForTesting(): void {
@@ -448,8 +444,7 @@ export class ProviderSettingsManager {
 	/**
 	 * Restores a stored profile to `restoredConfig` if and only if
 	 * the currently stored profile still matches `expectedConfig`.
-	 * Serialized through the process-wide persistence owner.
-	 * Cross-context / external writers are unsupported as SecretStorage lacks native atomic CAS.
+	 * Serialized through the process-wide persistence lock.
 	 */
 	public async restoreConfigIfMatches(
 		name: string,
@@ -458,8 +453,7 @@ export class ProviderSettingsManager {
 	): Promise<boolean> {
 		try {
 			return await this.lock(async () => {
-				const rawBefore = await this.context.secrets.get(this.secretsKey)
-				const providerProfiles = rawBefore ? (JSON.parse(rawBefore) as ProviderProfiles) : await this.load()
+				const providerProfiles = await this.load()
 				const current = providerProfiles.apiConfigs[name]
 				if (!current) {
 					return false
@@ -474,26 +468,11 @@ export class ProviderSettingsManager {
 					return false
 				}
 
-				const rawLatest = await this.context.secrets.get(this.secretsKey)
-				let targetProfiles = providerProfiles
-				if (rawLatest !== rawBefore) {
-					targetProfiles = rawLatest
-						? (JSON.parse(rawLatest) as ProviderProfiles)
-						: structuredClone(this.defaultProviderProfiles)
-					const latestCurrent = targetProfiles.apiConfigs?.[name]
-					const cleanLatest = latestCurrent
-						? (JSON.parse(JSON.stringify(latestCurrent)) as ProviderSettingsWithId)
-						: null
-					if (!cleanLatest || !deepEqual(cleanLatest, expectedTarget)) {
-						return false
-					}
-				}
-
-				targetProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(
+				providerProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(
 					restoredConfig,
 					restoredConfig.id || currentId,
 				)
-				await this.store(targetProfiles)
+				await this.store(providerProfiles)
 				return true
 			})
 		} catch (error) {
@@ -505,8 +484,7 @@ export class ProviderSettingsManager {
 	 * Updates a profile's model configuration if and only if the profile exists,
 	 * its stored provider matches expectedProvider, and any optional validator passes.
 	 * Applies only model-specific keys and resets, preserving other profile fields.
-	 * Serialized through the process-wide persistence owner.
-	 * Cross-context / external writers are unsupported as SecretStorage lacks native atomic CAS.
+	 * Serialized through the process-wide persistence lock.
 	 */
 	public async updateProfileModel(
 		name: string,
@@ -516,8 +494,7 @@ export class ProviderSettingsManager {
 	): Promise<UpdateProfileModelResult> {
 		try {
 			return await this.lock(async () => {
-				const rawBefore = await this.context.secrets.get(this.secretsKey)
-				const providerProfiles = rawBefore ? (JSON.parse(rawBefore) as ProviderProfiles) : await this.load()
+				const providerProfiles = await this.load()
 				const current = providerProfiles.apiConfigs[name]
 				if (!current) {
 					return { success: false, reason: "not_found" }
@@ -563,36 +540,13 @@ export class ProviderSettingsManager {
 					return { success: false, reason: "disallowed" }
 				}
 
-				const rawLatest = await this.context.secrets.get(this.secretsKey)
-				let targetProfiles = providerProfiles
-				let replacedProfile = current
-				if (rawLatest !== rawBefore) {
-					targetProfiles = rawLatest
-						? (JSON.parse(rawLatest) as ProviderProfiles)
-						: structuredClone(this.defaultProviderProfiles)
-					const latestCurrent = targetProfiles.apiConfigs?.[name]
-					if (
-						!latestCurrent ||
-						(latestCurrent.apiProvider ?? providerIdentifiers.openrouter) !== expectedProvider
-					) {
-						return { success: false, reason: "provider_mismatch" }
-					}
-					// Re-apply patch onto latestCurrent to preserve any newly updated API keys or fields
-					const reCandidate = applyPatchToProfile(latestCurrent)
-					if (validateProfileAllowed && !validateProfileAllowed(reCandidate)) {
-						return { success: false, reason: "disallowed" }
-					}
-					replacedProfile = latestCurrent
-					targetProfiles.apiConfigs[name] = reCandidate
-				} else {
-					targetProfiles.apiConfigs[name] = candidate
-				}
-
-				await this.store(targetProfiles)
+				const previousProfile = current
+				providerProfiles.apiConfigs[name] = candidate
+				await this.store(providerProfiles)
 				return {
 					success: true,
-					updatedProfile: targetProfiles.apiConfigs[name],
-					previousProfile: replacedProfile,
+					updatedProfile: candidate,
+					previousProfile,
 				}
 			})
 		} catch (error) {

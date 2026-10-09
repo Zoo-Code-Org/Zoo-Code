@@ -1691,7 +1691,7 @@ describe("ProviderSettingsManager", () => {
 			expect(mockSecrets.store.mock.calls.length).toBe(storeCallCountBefore)
 		})
 
-		it("preserves competing save from another manager instance interleaved after restore reads the profile", async () => {
+		it("returns false and does not restore when stored config does not match expectedConfig", async () => {
 			let storedRaw = JSON.stringify({
 				currentApiConfigName: "default",
 				apiConfigs: {
@@ -1699,40 +1699,11 @@ describe("ProviderSettingsManager", () => {
 						id: "test-id",
 						apiProvider: providerIdentifiers.anthropic,
 						apiModelId: "claude-3-7-sonnet",
-						apiKey: "test-key",
+						apiKey: "competing-api-key",
 					},
 				},
 			})
-
 			mockSecrets.get.mockImplementation(async () => storedRaw)
-			const managerA = new ProviderSettingsManager(mockContext)
-			const managerB = new ProviderSettingsManager(mockContext)
-			await managerA.initialize()
-			await managerB.initialize()
-
-			let readCount = 0
-			mockSecrets.get.mockImplementation(async () => {
-				readCount++
-				if (readCount === 1) {
-					// Return original profile on first read so initial comparison succeeds
-					return storedRaw
-				}
-				if (readCount === 2) {
-					// Simulate competing external storage update before second read (write-time recheck)
-					storedRaw = JSON.stringify({
-						currentApiConfigName: "default",
-						apiConfigs: {
-							test: {
-								id: "test-id",
-								apiProvider: providerIdentifiers.anthropic,
-								apiModelId: "claude-3-7-sonnet",
-								apiKey: "competing-api-key",
-							},
-						},
-					})
-				}
-				return storedRaw
-			})
 			mockSecrets.store.mockImplementation(async (_key, val) => {
 				storedRaw = val
 			})
@@ -1750,11 +1721,12 @@ describe("ProviderSettingsManager", () => {
 				apiKey: "test-key",
 			}
 
-			const result = await managerA.restoreConfigIfMatches("test", expectedConfig, restoredConfig)
+			const result = await providerSettingsManager.restoreConfigIfMatches("test", expectedConfig, restoredConfig)
 
 			expect(result).toBe(false)
 			const finalStored = JSON.parse(storedRaw)
 			expect(finalStored.apiConfigs.test.apiKey).toBe("competing-api-key")
+			expect(mockSecrets.store).not.toHaveBeenCalled()
 		})
 
 		it("returns false if config name does not exist", async () => {
@@ -1782,7 +1754,7 @@ describe("ProviderSettingsManager", () => {
 					{ apiProvider: providerIdentifiers.anthropic },
 					{ apiProvider: providerIdentifiers.anthropic },
 				),
-			).rejects.toThrow("Failed to restore config: Error: Disk I/O error")
+			).rejects.toThrow(/Failed to restore config: Error:.*Disk I\/O error/)
 
 			expect(mockSecrets.store).not.toHaveBeenCalled()
 		})
@@ -1941,63 +1913,13 @@ describe("ProviderSettingsManager", () => {
 			expect(mockSecrets.store).not.toHaveBeenCalled()
 		})
 
-		it("preserves concurrent API key changes across manager instances", async () => {
-			let storedRaw = JSON.stringify({
-				currentApiConfigName: "test",
-				apiConfigs: {
-					test: {
-						id: "test-id",
-						apiProvider: providerIdentifiers.openrouter,
-						openRouterModelId: "openai/gpt-4",
-						openRouterApiKey: "initial-key",
-					},
-				},
-			})
-
-			mockSecrets.get.mockImplementation(async () => storedRaw)
-			const managerA = new ProviderSettingsManager(mockContext)
-			const managerB = new ProviderSettingsManager(mockContext)
-			await managerA.initialize()
-			await managerB.initialize()
-
-			let readCount = 0
-			mockSecrets.get.mockImplementation(async () => {
-				readCount++
-				if (readCount === 1) {
-					return storedRaw
-				}
-				if (readCount === 2) {
-					// Simulate competing write to storage that updates the API key
-					const updated = JSON.parse(storedRaw)
-					updated.apiConfigs.test.openRouterApiKey = "concurrent-api-key"
-					storedRaw = JSON.stringify(updated)
-				}
-				return storedRaw
-			})
-			mockSecrets.store.mockImplementation(async (_key, val) => {
-				storedRaw = val
-			})
-
-			const result = await managerA.updateProfileModel("test", providerIdentifiers.openrouter, {
-				openRouterModelId: "openai/gpt-4.5",
-			})
-
-			expect(result.success).toBe(true)
-			expect(result.updatedProfile?.openRouterModelId).toBe("openai/gpt-4.5")
-			expect(result.updatedProfile?.openRouterApiKey).toBe("concurrent-api-key")
-			expect(result.previousProfile?.openRouterApiKey).toBe("concurrent-api-key")
-			const finalStored = JSON.parse(storedRaw)
-			expect(finalStored.apiConfigs.test.openRouterApiKey).toBe("concurrent-api-key")
-			expect(finalStored.apiConfigs.test.openRouterModelId).toBe("openai/gpt-4.5")
-		})
-
 		it("throws wrapped error when secrets get fails", async () => {
 			mockSecrets.get.mockRejectedValue(new Error("Keychain read failure"))
 			await expect(
 				providerSettingsManager.updateProfileModel("test", providerIdentifiers.anthropic, {
 					apiModelId: "claude-3-7-sonnet",
 				}),
-			).rejects.toThrow("Failed to update profile model: Error: Keychain read failure")
+			).rejects.toThrow(/Failed to update profile model: Error:.*Keychain read failure/)
 			expect(mockSecrets.store).not.toHaveBeenCalled()
 		})
 
@@ -2160,6 +2082,32 @@ describe("ProviderSettingsManager", () => {
 			const finalProfiles = JSON.parse(storedRaw)
 			expect(finalProfiles.apiConfigs.test.apiModelId).toBe("claude-3-7-sonnet")
 			expect(finalProfiles.apiConfigs.other.apiModelId).toBe("claude-3-5-haiku")
+		})
+
+		it("normalizes unknown stored provider to openrouter and succeeds when expectedProvider is openrouter", async () => {
+			const initialProfiles = {
+				currentApiConfigName: "test",
+				apiConfigs: {
+					test: {
+						id: "test-id",
+						apiProvider: "unknown-legacy-provider",
+						openRouterModelId: "openai/gpt-4",
+					},
+				},
+			}
+			let storedRaw = JSON.stringify(initialProfiles)
+			mockSecrets.get.mockImplementation(async () => storedRaw)
+			mockSecrets.store.mockImplementation(async (_key, val) => {
+				storedRaw = val
+			})
+
+			const result = await providerSettingsManager.updateProfileModel("test", providerIdentifiers.openrouter, {
+				openRouterModelId: "openai/gpt-5",
+			})
+
+			expect(result.success).toBe(true)
+			expect(result.updatedProfile?.apiProvider).toBe(providerIdentifiers.openrouter)
+			expect(result.updatedProfile?.openRouterModelId).toBe("openai/gpt-5")
 		})
 	})
 })

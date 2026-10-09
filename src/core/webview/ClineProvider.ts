@@ -306,23 +306,12 @@ export class ClineProvider
 			},
 		)
 
-		// Keep serialization in place until the timed-out mutation and its rollback settle,
-		// but cap the queue block with a secondary deadline so stalled mutations do not poison the queue indefinitely.
-		let queueTimeoutId: ReturnType<typeof setTimeout> | undefined
-		const queueDeadline = new Promise<void>((resolve) => {
-			queueTimeoutId = setTimeout(resolve, ClineProvider.PENDING_OPERATION_TIMEOUT_MS * 2)
-		})
-		const queueSettled = run
-			.then(
-				() => undefined,
-				() => undefined,
-			)
-			.finally(() => {
-				if (queueTimeoutId) {
-					clearTimeout(queueTimeoutId)
-				}
-			})
-		this.providerProfileMutationQueue = Promise.race([queueSettled, queueDeadline])
+		// Keep serialization in place until the mutation and any rollback settle before starting next mutation.
+		const queueSettled = run.then(
+			() => undefined,
+			() => undefined,
+		)
+		this.providerProfileMutationQueue = queueSettled
 		return callerResult
 	}
 
@@ -1982,7 +1971,7 @@ export class ClineProvider
 				return ORGANIZATION_ALLOW_ALL
 			}
 			const settings = cloudService.getOrganizationSettings()
-			return settings?.allowList ?? ORGANIZATION_ALLOW_ALL
+			return settings?.allowList
 		} catch (error) {
 			this.log(
 				`Unable to read organization allow-list for model update: ${error instanceof Error ? error.message : String(error)}`,

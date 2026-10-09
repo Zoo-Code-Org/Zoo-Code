@@ -725,10 +725,23 @@ describe("ClineProvider - updateProfileModel", () => {
 		)
 	})
 
-	it("allows model updates for authenticated user when organization settings are undefined", async () => {
+	it("aborts model update without writing profile when user is authenticated but organization settings are undefined", async () => {
 		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
 		mockCloudInstance.isAuthenticated.mockReturnValue(true)
 		mockCloudInstance.getOrganizationSettings.mockReturnValue(undefined)
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-4.5",
+		})
+
+		expect(manager().updateProfileModel).not.toHaveBeenCalled()
+		expect(manager().saveConfig).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.violated_organization_allowlist")
+	})
+
+	it("allows model updates when CloudService is not authenticated", async () => {
+		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
+		mockCloudInstance.isAuthenticated.mockReturnValue(false)
 
 		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
 			openRouterModelId: "openai/gpt-4.5",
@@ -1108,5 +1121,31 @@ describe("ClineProvider - updateProfileModel", () => {
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+
+	it("serializes mutations and does not allow a subsequent mutation to start until the first mutation has settled", async () => {
+		let resolveFirstMutation!: () => void
+		let firstMutationSettled = false
+		const firstMutationBlocked = new Promise<void>((resolve) => {
+			resolveFirstMutation = () => {
+				firstMutationSettled = true
+				resolve()
+			}
+		})
+
+		let secondMutationStarted = false
+		const firstMutation = provider["enqueueProviderProfileMutation"](async () => {
+			await firstMutationBlocked
+		})
+
+		const secondMutation = provider["enqueueProviderProfileMutation"](async () => {
+			secondMutationStarted = true
+			expect(firstMutationSettled).toBe(true)
+		})
+
+		expect(secondMutationStarted).toBe(false)
+		resolveFirstMutation()
+		await Promise.all([firstMutation, secondMutation])
+		expect(secondMutationStarted).toBe(true)
 	})
 })
