@@ -365,10 +365,10 @@
 		"title": "Zoo Code {{version}} 已發布",
 		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
 		"release": {
-			"heading": "新增功能：",
-			"highlight1": "✨ 支援新模型：使用 GPT-6.1 Sol、修正後的 Claude Opus 5.5 輸出 Token 上限，並在 OpenCode Go 選用 DeepSeek V4.1 Flash。",
-			"highlight2": "🧭 更可靠的工作中止與中斷：保留首次中止原因，針對每次請求重設串流中止狀態，並防止中斷的工作重新執行遭拒的子工作。",
-			"highlight3": "🛠️ 更可靠的工具、Prompt 與介面串流更新：完整保留串流傳送的工具參數、落實 MCP 工具政策、防止虛構行號，並讓聊天更新更流暢。"
+			"heading": "Zoo Code v3.88.0 新功能",
+			"highlight1": "✨ Provider 與模型支援：使用 Grok Build 與改進後的自訂模型支援。本版本也修正了 Bedrock 模型上限，並傳送 Codex verbosity 設定。",
+			"highlight2": "🧭 工作可靠性：本版本修正了取消處理、tool turn 續行與工作訊息保存。",
+			"highlight3": "⚡ 更快的編輯與聊天：檔案寫入預設不再使用人為延遲。聊天訊息攜帶更少的檔案資料，程式碼動作會送達最近活動的聊天。"
 		},
 		"cloudAgents": {
 			"heading": "雲端的新功能：",

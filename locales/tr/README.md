@@ -47,11 +47,11 @@ Zoo Code, Roo Code'un oluşturduğu temel üzerine inşa ediliyor ve bu temeli �
 - **Daha güvenilir terminal ve düzenleme iş akışları** — terminalin erken tamamlanması, görev durumu yarış koşulları, bağlam yönetimi, diff düzenleme ve sağlayıcıya özel araç kullanımı için düzeltmeler.
 - **Çalışma alanın üzerinde daha fazla kontrol** — kural yönetimi, mod başına MCP kısıtlamaları, çok köklü yol denetimleri, model reasoning seçenekleri ve tamamlanan değişiklikleri inceleme eylemleri.
 
-## v3.86.0'daki Yenilikler
+## v3.88.0'daki Yenilikler
 
-- ✨ **Yeni model desteği:** GPT-6.1 Sol kullan, Claude Opus 5.5'in düzeltilmiş çıktı sınırından yararlan ve OpenCode Go'da DeepSeek V4.1 Flash'ı seç.
-- 🧭 **Güvenilir görev iptalleri ve kesintiler:** İlk iptal nedenini koru, her istek için akış iptal durumunu sıfırla ve kesintiye uğrayan görevlerin reddedilen alt görevleri yeniden çalıştırmasını önle.
-- 🛠️ **Güvenilir araçlar, Prompt'lar ve arayüz akışı:** Akışla gelen araç argümanlarını eksiksiz koru, MCP araç politikasını uygula, uydurma satır numaralarını önle ve sohbet güncellemelerini akıcı hâle getir.
+- ✨ **Sağlayıcı ve model desteği:** Grok Build'i kullan ve geliştirilmiş özel model desteğinden yararlan. Bu sürüm ayrıca Bedrock model sınırlarını düzeltir ve Codex verbosity ayarını gönderir.
+- 🧭 **Görev güvenilirliği:** Bu sürüm iptal işlemeyi, araç turu devam ettirmeyi ve görev mesajı kaydetmeyi düzeltir.
+- ⚡ **Daha hızlı düzenleme ve sohbet:** Dosya yazmaları varsayılan olarak yapay gecikmeler kullanmaz. Sohbet mesajları daha az dosya verisi taşır ve kod eylemleri en son etkin sohbete ulaşır.
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 
