@@ -427,6 +427,46 @@ describe("safeWriteText", () => {
 			// left beside the target where no caller could find it.
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
 		})
+
+		it("a failed post-commit directory fsync never unlinks the committed target", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			const dirPath = path.dirname(targetPath)
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockImplementation((target) => {
+				if (String(target) === dirPath) throw new Error("EBADF")
+				return 1
+			})
+
+			await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).rejects.toThrow(PostCommitDurabilityError)
+
+			// The commit state is what cleanup is allowed to act on: the staging file may be
+			// unlinked only while it is still the staging file. Once the rename has committed,
+			// the only path this write owns at the target is the published content itself, and
+			// removing it would turn a durability warning into data loss.
+			expect(fs.unlink).not.toHaveBeenCalledWith(targetPath)
+		})
+
+		it("a failed post-commit directory fsync does not unlink the staging path this write no longer owns", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			const dirPath = path.dirname(targetPath)
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			// A caller-supplied staging file: the name is the caller's, not one this write made
+			// up, so after the commit it is a path another writer may already be using again.
+			const suppliedTemp = path.join(dirPath, "caller.new_data.json")
+			vi.mocked(fsSync.openSync).mockImplementation((target) => {
+				if (String(target) === dirPath) throw new Error("EBADF")
+				return 1
+			})
+
+			await expect(
+				safeWriteText(targetPath, "new data", { backup: true, platform: "linux", tempPath: suppliedTemp }),
+			).rejects.toThrow(PostCommitDurabilityError)
+
+			// The rename consumed the staging file; the commit is what says so. Unlinking the
+			// staging NAME afterwards is an unlink of whatever now answers to that name.
+			expect(fs.unlink).not.toHaveBeenCalledWith(suppliedTemp)
+			expect(fs.unlink).not.toHaveBeenCalledWith(targetPath)
+		})
 	})
 
 	// ── Test 4: backup:true keeps old safeWriteJson semantics, copy-based ──
