@@ -10,6 +10,9 @@ import { ToolUse, ToolResponse, AskApproval, HandleError, PushToolResult } from 
 import { editFileTool } from "../EditFileTool"
 
 vi.mock("fs/promises", () => ({
+	// guardedWrite resolves the target through a namespace import, so the double has
+	// to expose realpath as a named export as well as on the default object.
+	realpath: vi.fn(async (p: string) => String(p)),
 	default: {
 		readFile: vi.fn().mockResolvedValue(""),
 	},
@@ -566,7 +569,7 @@ describe("editFileTool", () => {
 
 			await executeEditFileTool()
 
-			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalledWith(true, 1000, "edit", false)
+			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalledWith(true, 1000, "edit", false, undefined)
 			expect(mockTask.didEditFile).toBe(true)
 		})
 
@@ -578,7 +581,7 @@ describe("editFileTool", () => {
 
 			await executeEditFileTool({ old_string: "", new_string: "New file content" }, { fileExists: false })
 
-			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalledWith(true, 1000, "create", false)
+			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalledWith(true, 1000, "create", false, undefined)
 			// Usage is recorded once at the central presentAssistantMessage
 			// attribution point, not locally by the handler.
 			expect(mockTask.recordToolUsage).not.toHaveBeenCalled()
@@ -724,6 +727,7 @@ describe("editFileTool", () => {
 				"edit",
 				undefined,
 				false,
+				undefined,
 			)
 			expect(mockTask.diffViewProvider.saveChanges).not.toHaveBeenCalled()
 			expect(mockTask.didEditFile).toBe(true)
@@ -746,6 +750,7 @@ describe("editFileTool", () => {
 				"create",
 				undefined,
 				false,
+				undefined,
 			)
 			expect(mockTask.didEditFile).toBe(true)
 			expect(mockHandleError).not.toHaveBeenCalled()

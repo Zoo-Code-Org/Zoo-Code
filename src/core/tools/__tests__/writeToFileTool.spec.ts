@@ -28,6 +28,9 @@ vi.mock("delay", () => ({
 
 // The focus-disruption save path reads the original file content via fs.readFile.
 vi.mock("fs/promises", () => ({
+	// guardedWrite resolves the target through a namespace import, so the double has
+	// to expose realpath as a named export as well as on the default object.
+	realpath: vi.fn(async (p: string) => String(p)),
 	default: {
 		readFile: vi.fn().mockResolvedValue("original content"),
 	},
@@ -486,6 +489,7 @@ describe("writeToFileTool", () => {
 				"create",
 				undefined,
 				false,
+				undefined,
 			)
 			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
 			expect(mockCline.fileContextTracker.trackFileContext).toHaveBeenCalledWith(testFilePath, "roo_edited")

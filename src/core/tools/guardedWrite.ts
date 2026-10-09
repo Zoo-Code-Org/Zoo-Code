@@ -48,6 +48,15 @@ export interface GuardedWriteOptions {
 	 */
 	approvedOutsideWorkspace?: boolean
 	/**
+	 * The canonical identity of the target, captured BEFORE the approval was asked,
+	 * for an approved outside-workspace write. The guard binds the publish to it, so a
+	 * name repointed between the approval and the publish resolves elsewhere and is
+	 * refused. The guard cannot derive it itself: any lookup it performs happens after
+	 * the approval, and would capture the swapped identity as the baseline. Required
+	 * whenever approvedOutsideWorkspace is set.
+	 */
+	approvedCanonicalTarget?: string
+	/**
 	 * Roots other than task.cwd that a write may be contained in - the other VS Code
 	 * workspace folders. The tool layer classifies paths against ALL workspace folders
 	 * (isPathOutsideWorkspace) and only asks for approval for paths outside every one
@@ -438,6 +447,18 @@ async function realpathNearest(target: string, displayPath: string): Promise<str
 }
 
 /**
+	 * The canonical identity of a write target, for a caller that needs to bind an
+	 * approval to it. Call this BEFORE asking the user: the guard compares its
+	 * pre-publish resolution against this value, so a name repointed in between is
+	 * refused. A target that does not exist yet is tolerated the way the guard tolerates
+	 * it (a create makes the missing components); any other resolution failure throws a
+	 * GuardRejectedError instead of falling back to the lexical path.
+	 */
+	export async function canonicalizeForApproval(target: string, displayPath?: string): Promise<string> {
+		return realpathNearest(target, displayPath ?? target)
+	}
+
+/**
  * Guarded write entry point.
  *
  * 1. Resolves the absolute path against task.cwd.
@@ -489,19 +510,30 @@ export async function guardedWrite(
 	// Bound to the task and the caller's spelling so the guard can re-run the same
 	// decision under the lock, immediately before the publish.
 	let authorizedTarget: string | undefined
+	if (approvedOutside) {
+		// The identity has to come from the caller, captured before the approval was
+		// asked. A lookup performed here runs after the approval, so a name repointed in
+		// between would be captured as the baseline and the swapped write accepted.
+		if (options?.approvedCanonicalTarget === undefined) {
+			throw new GuardRejectedError(
+				"The approved target was not captured before approval, so this write cannot be bound to the path that was approved -- re-approve the write, then retry.",
+				displayPath,
+			)
+		}
+		authorizedTarget = options.approvedCanonicalTarget
+	}
 	const verifyTarget = async (): Promise<void> => {
 		if (!approvedOutside) {
 			await assertCanonicalInsideWorkspace(roots, absolutePath, displayPath)
 			return
 		}
-		// For an approved outside-workspace write the re-check is an IDENTITY check:
-		// the path that resolves now must still be the path that was approved. A symlink
-		// swapped in while this link waited on the chain would otherwise move the write
-		// somewhere the user never saw.
+		// For an approved outside-workspace write the re-check is an IDENTITY check: what
+		// resolves now must still be what was approved. A symlink swapped in - before this
+		// call or while the link waited on the chain - moves the write somewhere the user
+		// never saw, so the comparison is against the identity captured before the
+		// approval, never against a lookup done here.
 		const resolved = await realpathNearest(absolutePath, displayPath)
-		if (authorizedTarget === undefined) {
-			authorizedTarget = resolved
-		} else if (authorizedTarget !== resolved) {
+		if (authorizedTarget !== resolved) {
 			throw new GuardRejectedError(
 				"The approved target no longer resolves to the path that was approved -- re-approve the write, then retry.",
 				displayPath,

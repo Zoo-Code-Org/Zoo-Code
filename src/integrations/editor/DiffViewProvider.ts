@@ -524,6 +524,10 @@ export class DiffViewProvider {
 		// for a target outside every workspace root. Only that post-approval path sets
 		// it; unapproved saves keep the guard's containment checks.
 		approvedOutsideWorkspace?: boolean,
+		// The canonical identity of the approved target, captured by the tool BEFORE it
+		// asked for approval. Threaded to guardedWrite, which refuses a publish whose name
+		// no longer resolves to it.
+		approvedCanonicalTarget?: string,
 	): Promise<{
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
@@ -580,6 +584,7 @@ export class DiffViewProvider {
 			}
 			await guardedWrite(saveTask, this.relPath, encodedContent, writeKind, undefined, {
 				approvedOutsideWorkspace: approvedOutsideWorkspace === true,
+				approvedCanonicalTarget,
 				additionalRoots: this.additionalWorkspaceRoots(),
 			})
 		} catch (error) {
@@ -1632,6 +1637,10 @@ export class DiffViewProvider {
 		completeOverride?: boolean,
 		// Approved by the user for a target outside every workspace root (see saveChanges).
 		approvedOutsideWorkspace?: boolean,
+		// The canonical identity of the approved target, captured by the tool BEFORE it
+		// asked for approval. Threaded to guardedWrite, which refuses a publish whose name
+		// no longer resolves to it.
+		approvedCanonicalTarget?: string,
 	): Promise<{
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
@@ -1658,6 +1667,7 @@ export class DiffViewProvider {
 		// workspace, where a rejected write must not leave a trace.
 		await guardedWrite(task, relPath, content, writeKind, completeOverride, {
 			approvedOutsideWorkspace: approvedOutsideWorkspace === true,
+			approvedCanonicalTarget,
 			additionalRoots: this.additionalWorkspaceRoots(),
 		})
 

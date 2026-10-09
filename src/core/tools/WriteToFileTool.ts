@@ -16,6 +16,7 @@ import { convertNewFileToUnifiedDiff, computeDiffStats, sanitizeUnifiedDiff } fr
 import type { ToolUse } from "../../shared/tools"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
+import { canonicalizeForApproval } from "./guardedWrite"
 
 interface WriteToFileParams {
 	path: string
@@ -86,6 +87,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 		const fullPath = relPath ? path.resolve(task.cwd, relPath) : ""
 		const isOutsideWorkspace = isPathOutsideWorkspace(fullPath)
+		// Captured before the approval is asked: guardedWrite binds the publish to this
+		// identity, so a name repointed between the approval and the publish is refused
+		// instead of publishing to whatever the name points at by then.
+		const approvedCanonicalTarget = isOutsideWorkspace
+			? await canonicalizeForApproval(absolutePath, relPath)
+			: undefined
 
 		const sharedMessageProps: ClineSayTool = {
 			tool: fileExists ? "editedExistingFile" : "newFileCreated",
@@ -145,6 +152,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					// own); the eighth is the approval flag for a target outside every workspace root.
 					undefined,
 					isOutsideWorkspace,
+					approvedCanonicalTarget,
 				)
 			} else {
 				if (!task.diffViewProvider.isEditing) {
@@ -182,6 +190,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					writeDelayMs,
 					undefined,
 					isOutsideWorkspace,
+					approvedCanonicalTarget,
 				)
 			}
 
