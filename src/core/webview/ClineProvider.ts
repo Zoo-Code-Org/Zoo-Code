@@ -250,6 +250,10 @@ export class ClineProvider
 	// bumps webviewRecoveryEpoch) never makes the replacement wait on the
 	// stale recovery's completion.
 	private webviewRecoveryInFlightEpoch: number | undefined = undefined
+	// Wall-clock reading of the previous watchdog tick; a tick arriving far
+	// later than scheduled means the host slept, so the grace window restarts
+	// instead of counting the suspended interval against a live renderer.
+	private lastWebviewWatchdogTickAt = 0
 	private static readonly WEBVIEW_WATCHDOG_TICK_MS = 60_000
 	private static readonly WEBVIEW_HEARTBEAT_STALE_MS = 90_000
 	private readonly _postStateToWebviewThrottled = debounce(
@@ -3398,14 +3402,25 @@ export class ClineProvider
 	 */
 	private startWebviewWatchdog(): void {
 		this.updateWebviewHeartbeat()
+		this.lastWebviewWatchdogTickAt = Date.now()
 		if (this.webviewWatchdogInterval) {
 			clearInterval(this.webviewWatchdogInterval)
 		}
 		this.webviewWatchdogInterval = setInterval(() => {
+			const now = Date.now()
+			const tickGap = now - this.lastWebviewWatchdogTickAt
+			this.lastWebviewWatchdogTickAt = now
+			// A tick far later than scheduled means the host was suspended or
+			// blocked; the wall clock jumped while both timers were paused.
+			// Grant a fresh grace window instead of reloading a live renderer.
+			if (tickGap > ClineProvider.WEBVIEW_WATCHDOG_TICK_MS * 1.5) {
+				this.updateWebviewHeartbeat()
+				return
+			}
 			if (this.view?.visible !== true) {
 				return
 			}
-			if (Date.now() - this.lastWebviewHeartbeatAt <= ClineProvider.WEBVIEW_HEARTBEAT_STALE_MS) {
+			if (now - this.lastWebviewHeartbeatAt <= ClineProvider.WEBVIEW_HEARTBEAT_STALE_MS) {
 				return
 			}
 			this.log("[Zoo Code] Webview heartbeat stale while visible; reloading webview (dead renderer?)")

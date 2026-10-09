@@ -1117,6 +1117,25 @@ describe("ClineProvider", () => {
 			expect(mockWebviewView.webview.html).not.toBe(htmlAfterBecomingVisible)
 		})
 
+		test("restarts the grace window when a tick gap shows the host slept", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const htmlAfterResolve = mockWebviewView.webview.html
+
+			// One ordinary tick, then a wall-clock jump past the stale
+			// threshold before the next tick. The gap means the host slept
+			// while both timers were paused, not that the renderer died.
+			await vi.advanceTimersByTimeAsync(60_000)
+			vi.setSystemTime(Date.now() + 120_000)
+			await vi.advanceTimersByTimeAsync(60_000)
+
+			expect(mockWebviewView.webview.html).toBe(htmlAfterResolve)
+
+			// The grace window restarted at the post-sleep tick, so the
+			// watchdog still reloads once the heartbeat genuinely goes stale.
+			await vi.advanceTimersByTimeAsync(120_000)
+			expect(mockWebviewView.webview.html).not.toBe(htmlAfterResolve)
+		})
+
 		test("stops watching after the provider is disposed", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			const htmlAfterResolve = mockWebviewView.webview.html
