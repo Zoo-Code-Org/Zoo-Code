@@ -346,6 +346,10 @@
 				"label": "破壊的コマンドガードを有効にする",
 				"description": "このプラットフォーム用の Destructive Command Guard（DCG）をダウンロードして使用します。DCG が許可したコマンドは自動的に実行されます。DCG がブロックしたコマンドの実行には承認が必要です。有効な間は Zoo のコマンドリストが無効になります。無効にしても、ダウンロードした実行ファイルは保持されます。"
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "許可された自動実行コマンド",
 			"allowedCommandsDescription": "「実行操作を常に承認」が有効な場合に自動実行できるコマンドプレフィックス。すべてのコマンドを許可するには * を追加します（注意して使用してください）。",
 			"deniedCommands": "拒否されたコマンド",
@@ -530,6 +534,8 @@
 		"openAiApiKey": "OpenAI APIキー",
 		"apiKey": "APIキー",
 		"openAiBaseUrl": "ベースURL",
+		"openAiStrictToolSchemas": "厳格なツールスキーマ（strict: true）",
+		"openAiStrictToolSchemasDescription": "スキーマの厳密な準拠を有効にするため、ツールスキーマに strict: true を付与して送信します。非厳密なツール呼び出しを使う場合は無効にしてください。",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure デプロイ名",
 		"azureOpenAiDeploymentNameDescription": "基盤モデル名ではなく、Azure AI Studio のデプロイ名を入力してください。",
