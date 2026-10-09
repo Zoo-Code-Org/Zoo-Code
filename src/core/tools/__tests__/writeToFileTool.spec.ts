@@ -517,6 +517,27 @@ describe("writeToFileTool", () => {
 				mockedIsPathOutsideWorkspace.mockReturnValue(false)
 		})
 
+		it("routes an outside-workspace target that cannot be resolved through the tool's error handling", async () => {
+			// The identity capture runs before the approval is asked, so a target whose
+			// resolution fails must not escape the write flow: it has to reach handleError and
+			// the diff-view reset like every other failure of this tool, and it must not get
+			// as far as asking the user about a path that cannot be checked.
+			const { realpath } = await import("fs/promises")
+			vi.mocked(realpath).mockRejectedValue({ code: "EPERM" })
+			mockedIsPathOutsideWorkspace.mockReturnValue(true)
+
+			await executeWriteFileTool({}, { fileExists: true, experiments: focusDisruption })
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
+
+			// Reset both doubles: later tests in this file assume an in-workspace target that
+			// resolves to itself.
+			vi.mocked(realpath).mockImplementation(async (p) => String(p))
+			mockedIsPathOutsideWorkspace.mockReturnValue(false)
+		})
+
 		it("surfaces the unobserved-existing remediation as a tool error and publishes nothing", async () => {
 			const guardError = new Error(
 				`File already exists at ${absoluteFilePath} and was not read before this write -- read the file first, then retry.`,
