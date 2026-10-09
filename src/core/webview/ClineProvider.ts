@@ -133,6 +133,7 @@ import {
 import { readTaskMessages } from "../task-persistence/taskMessages"
 import { getNonce } from "./getNonce"
 import { getUri } from "./getUri"
+import { omitOriginalContentFromExtensionMessage } from "./stripOriginalContent"
 import { REQUESTY_BASE_URL } from "../../shared/utils/requesty"
 import { validateAndFixToolResultIds } from "../task/validateToolResultIds"
 import { PendingEditOperationStore, type PendingEditOperationInput } from "./PendingEditOperationStore"
@@ -1473,7 +1474,7 @@ export class ClineProvider
 		}
 
 		try {
-			await this.view?.webview.postMessage(message)
+			await this.view?.webview.postMessage(omitOriginalContentFromExtensionMessage(message))
 		} catch {
 			// View disposed, drop message silently
 		}
