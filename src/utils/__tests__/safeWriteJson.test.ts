@@ -569,7 +569,10 @@ describe("safeWriteJson", () => {
 
 		// the temp file was created next to the resolved referent, NOT beside the link
 		const tempPaths = vi.mocked(fsSyncActual.createWriteStream).mock.calls.map((call) => String(call[0]))
-		expect(tempPaths.some((p) => p.startsWith(referentDir + path.sep) && p.includes(".new_"))).toBe(true)
+		// Contract change: the staging file now comes from createStagingFile, so it carries this
+		// module's own name inside a private staging directory beside the referent rather than the
+		// .new_ name safeWriteJson invented for itself.
+		expect(tempPaths.some((p) => p.startsWith(referentDir + path.sep) && p.includes(".file-safety-staging"))).toBe(true)
 		expect(tempPaths.some((p) => p.startsWith(linkDir + path.sep))).toBe(false)
 
 		// the content was committed onto the referent

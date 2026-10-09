@@ -5,6 +5,7 @@ import { JsonStreamStringify } from "json-stream-stringify"
 
 import { acquireFileLock } from "./fileLock"
 import {
+	createStagingFile,
 	PostCommitDurabilityError,
 	resolveLockKey,
 	resolvePublishTarget,
@@ -265,15 +266,18 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		}
 
 		// Step 1: Write data to a new temporary file via JSON streaming.
-		// Stage it beside the *resolved* target (the symlink referent when the path is
-		// a symlink; resolvedTargetPath above): safeWriteText commits by renaming
-		// onto that referent, and a rename across filesystems would fail with EXDEV.
-		actualTempNewFilePath = path.join(
-			path.dirname(resolvedTargetPath),
-			".new_" + Date.now() + "_" + Math.random().toString(36).substring(2) + ".tmp",
-		)
+		// The staging file comes from createStagingFile, which creates it exclusively
+		// (wx) inside a private staging directory beside the *resolved* target (the symlink
+		// referent when the path is a symlink; resolvedTargetPath above): safeWriteText
+		// commits by renaming onto that referent, and a rename across filesystems would
+		// fail with EXDEV. Taking the file from that API rather than naming one here is
+		// what lets the commit bind to the object this write created - a path this call
+		// invented could otherwise already exist, with content and access rights nobody
+		// here chose.
+		const staging = await createStagingFile(resolvedTargetPath)
+		actualTempNewFilePath = staging.tempPath
 
-		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
+		await _streamDataToFile(staging.tempPath, data, options?.prettyPrint)
 
 		// Step 2: Delegate backup + commit to safeWriteText with the pre-written
 		// temp path. backup:true keeps the old safeWriteJson semantics: a COPY of the
@@ -282,7 +286,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// DACL (safeWriteText dumps the DACL before taking the backup copy and
 		// restores it onto the directory after the commit rename).
 		const textOptions: SafeWriteTextOptions = {
-			tempPath: actualTempNewFilePath,
+			staging,
 			backup: true,
 			// Pin the confinement decision onto the publish: the path handed to the publish
 			// primitive must still resolve to what this check authorized, and every
