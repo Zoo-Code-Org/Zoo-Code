@@ -359,18 +359,17 @@ async function assertCanonicalInsideWorkspace(
 	displayPath: string,
 ): Promise<void> {
 	const resolvedRoots: string[] = []
+	const unresolvedRoots: string[] = []
 	for (const root of roots) {
 		try {
 			resolvedRoots.push(await fs.realpath(root))
 		} catch {
-			// ENOENT is not a safe fallback either: a workspace directory that is not on
-			// disk cannot contain anything, and the lexical check that already ran is the
-			// very check a planted symlink defeats. Every failure to canonicalize a root
-			// therefore refuses the write.
-			throw new GuardRejectedError(
-				"Workspace could not be resolved, so this write cannot be checked against it -- retry with a path inside the workspace.",
-				displayPath,
-			)
+			// A root that cannot be canonicalized is dropped from the ALLOW-LIST rather than
+			// refusing every write in a multi-root workspace. Containment only gets narrower:
+			// a target is still accepted only if a root that DID resolve contains it, so the
+			// broken root never vouches for anything. A write that lives only under the broken
+			// root falls through to the refusal below.
+			unresolvedRoots.push(root)
 		}
 	}
 	if (resolvedRoots.length === 0) {
@@ -382,7 +381,9 @@ async function assertCanonicalInsideWorkspace(
 	const target = await realpathNearest(absolutePath, displayPath)
 	if (!resolvedRoots.some((root) => isInside(root, target))) {
 		throw new GuardRejectedError(
-			`Path resolves through a link to outside the workspace -- write a real file inside the workspace, then retry.`,
+			unresolvedRoots.length > 0
+				? `Path is not inside any workspace folder that could be resolved -- retry with a path inside the workspace.`
+				: `Path resolves through a link to outside the workspace -- write a real file inside the workspace, then retry.`,
 			displayPath,
 		)
 	}
