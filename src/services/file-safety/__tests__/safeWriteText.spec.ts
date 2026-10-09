@@ -2,9 +2,12 @@ import * as fs from "fs/promises"
 import * as fsSync from "fs"
 import { execFile } from "child_process"
 import type { ChildProcess } from "child_process"
+import * as os from "os"
 import * as path from "path"
 
 import {
+	DaclCaptureError,
+	DaclRestoreError,
 	PostCommitDurabilityError,
 	resolveLockKey,
 	safeWriteText,
@@ -289,10 +292,20 @@ describe("safeWriteText", () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 		vi.mocked(fsSync.openSync).mockReturnValue(1)
-		vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
-			if (typeof cb === "function") cb(new Error("icacls error"), "", "")
-			return fakeChild
-		})
+					// Only the restore fails, so a warning is delivered and the restrictive fallback
+			// (drop inheritance, grant the current user, read the DACL back) verifies.
+			vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
+				const argv = args as unknown as string[]
+				const callback = cb as unknown as (err: unknown, stdout: string, stderr: string) => void
+				if (argv[1] === "/restore") {
+					callback(new Error("icacls restore error"), "", "")
+				} else if (argv[1] === undefined) {
+					callback(null, `${argv[0]} ${os.userInfo().username}:(F)`, "")
+				} else {
+					callback(null, "", "")
+				}
+				return fakeChild
+			})
 		const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {})
 
 		await expect(
@@ -638,7 +651,7 @@ describe("safeWriteText", () => {
 			expect(execFile).not.toHaveBeenCalled()
 		})
 
-		it("win32 DACL failure falls back to plain rename (never fails the write)", async () => {
+		it("win32: an existing target whose DACL could not be captured is not committed over", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
@@ -648,11 +661,14 @@ describe("safeWriteText", () => {
 				return fakeChild
 			})
 
-			await safeWriteText(targetPath, "data", { platform: "win32" })
+			// Contract change, stated explicitly: this test pinned the warn-and-publish behavior
+			// the review row calls a security defect. Publishing over a target whose access rights
+			// are unknown hands the file whatever the destination directory grants, decided by a
+			// helper that failed. The write is now refused before the commit rename.
+			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toThrow(DaclCaptureError)
 
-			// write succeeded despite icacls failure (fallback to plain rename)
-			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
-			// one icacls attempt only: a failed DACL apply must not try to restore
+			// Nothing was committed, and no restore was attempted from a dump that never saved.
+			expect(fs.rename).not.toHaveBeenCalled()
 			expect(execFile).toHaveBeenCalledTimes(1)
 		})
 
@@ -666,12 +682,13 @@ describe("safeWriteText", () => {
 		})
 		const warnings: string[] = []
 
-		await safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) })
-
-		// The write still commits - a failing icacls must not leave the user unable to save -
-		// but the caller is told the replacement may not carry the old ACL.
-		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
-		expect(warnings.filter((m) => m.includes("different access rights"))).toHaveLength(1)
+		// The refusal carries what the warning used to say: the caller learns why the save did
+		// not happen, and the target keeps the ACL it already had.
+		await expect(
+			safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) }),
+		).rejects.toThrow(DaclCaptureError)
+		expect(fs.rename).not.toHaveBeenCalled()
+		expect(warnings).toHaveLength(0)
 	})
 
 	it("win32: reports when the target cannot be checked for DACL preservation", async () => {
@@ -698,10 +715,20 @@ describe("safeWriteText", () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 		vi.mocked(fsSync.openSync).mockReturnValue(1)
-		vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
-			if (typeof cb === "function") cb(new Error("icacls error"), "", "")
-			return fakeChild
-		})
+					// Only the restore fails, so a warning is delivered and the restrictive fallback
+			// (drop inheritance, grant the current user, read the DACL back) verifies.
+			vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
+				const argv = args as unknown as string[]
+				const callback = cb as unknown as (err: unknown, stdout: string, stderr: string) => void
+				if (argv[1] === "/restore") {
+					callback(new Error("icacls restore error"), "", "")
+				} else if (argv[1] === undefined) {
+					callback(null, `${argv[0]} ${os.userInfo().username}:(F)`, "")
+				} else {
+					callback(null, "", "")
+				}
+				return fakeChild
+			})
 	
 		await expect(
 			safeWriteText(targetPath, "data", {
@@ -727,16 +754,99 @@ describe("safeWriteText", () => {
 				return fakeChild
 			})
 
-			await safeWriteText(targetPath, "data", { platform: "win32" })
+			// Contract change (see the capture test above): the write is refused, not committed.
+			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toThrow(DaclCaptureError)
 
-			// write committed; only the save was attempted (no restore from a failed dump)
-			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
-			expect(fs.rename).toHaveBeenCalledTimes(1)
+			// Nothing was committed and no restore was attempted from a failed dump.
+			expect(fs.rename).not.toHaveBeenCalled()
 			expect(execFile).toHaveBeenCalledTimes(1)
 			const saveArgs = vi.mocked(execFile).mock.calls[0]?.[1]
 			expect(saveArgs?.[1]).toBe("/save")
-			// the dump path (possibly partially created by icacls) was unlinked
+			// the dump path (possibly partially created by icacls) was unlinked, and so was the
+			// staging file this write had already created - a refused publish leaves nothing behind.
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		})
+
+
+		// The row's second half: "If DACL restoration fails after commit, restore a restrictive
+		// verified ACL before returning, or otherwise fail safely without exposing the committed
+		// content." These three cases are the two branches and the verification step.
+		it("win32 DACL: a failed restore narrows the committed file and reports the narrowing", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const warnings: string[] = []
+			vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
+				const argv = args as unknown as string[]
+				const callback = cb as unknown as (err: unknown, stdout: string, stderr: string) => void
+				if (argv[1] === "/restore") {
+					callback(new Error("icacls restore error"), "", "")
+				} else if (argv[1] === undefined) {
+					callback(null, `${argv[0]} ${os.userInfo().username}:(F)`, "")
+				} else {
+					callback(null, "", "")
+				}
+				return fakeChild
+			})
+
+			await expect(safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) })).resolves.toBeUndefined()
+
+			// The narrowing was actually applied to the committed file, not just reported.
+			const grant = vi.mocked(execFile).mock.calls.find(([, a]) => (a as unknown as string[])[1] === "/inheritance:r")
+			expect(grant).toBeDefined()
+			expect((grant?.[1] as unknown as string[]) ?? []).toEqual([
+				targetPath,
+				"/inheritance:r",
+				"/grant:r",
+				`${os.userInfo().username}:F`,
+			])
+			expect(warnings.filter((m) => m.includes("narrowed to the current user's full control and verified"))).toHaveLength(1)
+		})
+
+		it("win32 DACL: a restore failure the narrowing cannot recover from rolls the commit back", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
+				const argv = args as unknown as string[]
+				const callback = cb as unknown as (err: unknown, stdout: string, stderr: string) => void
+				if (argv[1] === "/restore" || argv[1] === "/inheritance:r") {
+					callback(new Error("icacls failed"), "", "")
+				} else {
+					callback(null, "", "")
+				}
+				return fakeChild
+			})
+
+			await expect(safeWriteText(targetPath, "data", { backup: true, platform: "win32" })).rejects.toThrow(DaclRestoreError)
+
+			// The committed bytes do not stay at the target under an unknown ACL: the retained
+			// backup is renamed back, so the second rename is the rollback.
+			expect(fs.rename).toHaveBeenCalledTimes(2)
+			expect(fs.rename).toHaveBeenLastCalledWith(expect.stringContaining("safeWriteText.bak"), targetPath)
+		})
+
+		it("win32 DACL: a narrowing that still shows an inherited ACE is not accepted as verified", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
+				const argv = args as unknown as string[]
+				const callback = cb as unknown as (err: unknown, stdout: string, stderr: string) => void
+				if (argv[1] === "/restore") {
+					callback(new Error("icacls restore error"), "", "")
+				} else if (argv[1] === undefined) {
+					// The grant "succeeded" but the DACL still carries an inherited entry.
+					callback(null, `${argv[0]} ${os.userInfo().username}:(F) DESKTOP\\users:(I)(RX)`, "")
+				} else {
+					callback(null, "", "")
+				}
+				return fakeChild
+			})
+
+			// "Verified" is what the row asks for; a grant that leaves inherited access is not it.
+			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toThrow(DaclRestoreError)
 		})
 
 		it("win32 DACL save args are [targetPath, /save, dumpPath, /T] before backup rename", async () => {
@@ -797,11 +907,19 @@ describe("safeWriteText", () => {
 			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
 			// icacls save succeeds, restore fails
-			let callCount = 0
-			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
-				callCount++
-				if (typeof cb === "function") {
-					cb(callCount === 1 ? null : new Error("icacls restore error"), "", "")
+			// Only the restore fails. The restrictive fallback - drop the inherited ACEs, grant
+			// the current user sole full control, read the DACL back - succeeds, which is the
+			// alternative to failing the publish that the review row asks for.
+			vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
+				const argv = args as unknown as string[]
+				const callback = cb as unknown as (err: unknown, stdout: string, stderr: string) => void
+				if (argv[1] === "/restore") {
+					callback(new Error("icacls restore error"), "", "")
+				} else if (argv[1] === undefined) {
+					// The verification read-back: an explicit grant and no (I) inherited marker.
+					callback(null, `${argv[0]} ${os.userInfo().username}:(F)`, "")
+				} else {
+					callback(null, "", "")
 				}
 				return fakeChild
 			})
@@ -832,11 +950,19 @@ describe("safeWriteText", () => {
 			const onWarning = vi.fn()
 
 			// icacls save succeeds, restore fails - the same shape as the default-sink case.
-			let callCount = 0
-			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
-				callCount++
-				if (typeof cb === "function") {
-					cb(callCount === 1 ? null : new Error("icacls restore error"), "", "")
+			// Only the restore fails. The restrictive fallback - drop the inherited ACEs, grant
+			// the current user sole full control, read the DACL back - succeeds, which is the
+			// alternative to failing the publish that the review row asks for.
+			vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
+				const argv = args as unknown as string[]
+				const callback = cb as unknown as (err: unknown, stdout: string, stderr: string) => void
+				if (argv[1] === "/restore") {
+					callback(new Error("icacls restore error"), "", "")
+				} else if (argv[1] === undefined) {
+					// The verification read-back: an explicit grant and no (I) inherited marker.
+					callback(null, `${argv[0]} ${os.userInfo().username}:(F)`, "")
+				} else {
+					callback(null, "", "")
 				}
 				return fakeChild
 			})
@@ -862,11 +988,19 @@ describe("safeWriteText", () => {
 			})
 
 			// icacls save succeeds, restore fails - the same shape as the other two cases.
-			let callCount = 0
-			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
-				callCount++
-				if (typeof cb === "function") {
-					cb(callCount === 1 ? null : new Error("icacls restore error"), "", "")
+			// Only the restore fails. The restrictive fallback - drop the inherited ACEs, grant
+			// the current user sole full control, read the DACL back - succeeds, which is the
+			// alternative to failing the publish that the review row asks for.
+			vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
+				const argv = args as unknown as string[]
+				const callback = cb as unknown as (err: unknown, stdout: string, stderr: string) => void
+				if (argv[1] === "/restore") {
+					callback(new Error("icacls restore error"), "", "")
+				} else if (argv[1] === undefined) {
+					// The verification read-back: an explicit grant and no (I) inherited marker.
+					callback(null, `${argv[0]} ${os.userInfo().username}:(F)`, "")
+				} else {
+					callback(null, "", "")
 				}
 				return fakeChild
 			})

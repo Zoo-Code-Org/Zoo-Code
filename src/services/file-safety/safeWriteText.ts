@@ -1,6 +1,7 @@
 import * as fs from "fs/promises"
 import * as fsSync from "fs"
 import * as path from "path"
+import * as os from "os"
 import { execFile } from "child_process"
 
 export interface SafeWriteTextOptions {
@@ -90,6 +91,45 @@ export class PostCommitDurabilityError extends Error {
 		this.targetPath = targetPath
 	}
 }
+/**
+ * Thrown when the DACL of an EXISTING Windows target could not be captured, so the commit
+ * rename would replace a file whose access rights are unknown with one that inherits whatever
+ * the destination directory grants. The write is refused before anything is committed: the
+ * alternative - publishing and warning - silently changes who can read a file the user could
+ * read before, which is a security boundary rather than a cosmetic difference.
+ */
+export class DaclCaptureError extends Error {
+	readonly targetPath: string
+
+	constructor(targetPath: string, cause?: unknown) {
+		super(
+			"Refusing to publish over the existing target: its DACL could not be captured, so the replacement would change the file's access rights without knowing what they were. The target is unchanged; the path is reported here.",
+			{ cause },
+		)
+		this.name = "DaclCaptureError"
+		this.targetPath = targetPath
+	}
+}
+
+/**
+ * Thrown when the saved DACL could not be restored onto the committed file AND the restrictive
+ * fallback (drop inherited ACEs, grant the current user sole full control) could not be applied
+ * and verified. The committed bytes are rolled back onto the retained backup first, so a
+ * rejection never leaves content at the target that nobody authorized an ACL for.
+ */
+export class DaclRestoreError extends Error {
+	readonly targetPath: string
+
+	constructor(targetPath: string, cause?: unknown) {
+		super(
+			"The saved DACL could not be restored onto the committed file and the restrictive fallback could not be verified; the previous content was rolled back onto the backup rather than published under an unknown ACL.",
+			{ cause },
+		)
+		this.name = "DaclRestoreError"
+		this.targetPath = targetPath
+	}
+}
+
 // -- helpers ---------------------------------------------------------------
 
 /** Generate a unique temp file name in the given directory. */
@@ -166,6 +206,37 @@ async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRu
 	} catch {
 		return false
 	}
+}
+
+/**
+ * Narrow a file's DACL to a single explicit grant for the current user, then verify it by
+ * reading the DACL back. Used when the saved DACL could not be reapplied: the row's alternative
+ * to failing is to publish under an ACL that is known to be restrictive, and "known" means
+ * read back - icacls reports an inherited ACE with an (I) flag, so a verified narrowing shows
+ * the grant and no inherited entry.
+ */
+async function _restrictDaclWindows(
+	filePath: string,
+	execFileRunner?: typeof execFile,
+	identity: string = os.userInfo().username,
+): Promise<boolean> {
+	const runner = execFileRunner ?? execFile
+	const applied = await new Promise<boolean>((resolve) => {
+		runner("icacls", [filePath, "/inheritance:r", "/grant:r", `${identity}:F`], { windowsHide: true }, (err) =>
+			resolve(!err),
+		)
+	})
+	if (!applied) {
+		return false
+	}
+	const readBack = await new Promise<string | null>((resolve) => {
+		runner("icacls", [filePath], { windowsHide: true }, (err, stdout) => (err ? resolve(null) : resolve(stdout ?? "")))
+	})
+	if (readBack === null) {
+		return false
+	}
+	// Verification: the grant is present and nothing is inherited any more.
+	return readBack.toLowerCase().includes(identity.toLowerCase()) && !readBack.includes("(I)")
 }
 
 // -- public API ------------------------------------------------------------
@@ -470,12 +541,17 @@ export async function safeWriteText(
 					// remove it now (best-effort) so no partial dump survives and
 					// no later step can restore from it.
 					await fs.unlink(dumpPath).catch(() => {})
-					// The target exists and its DACL could not be captured, so the commit rename
-					// replaces it with a file that inherits different access rights. The write still
-					// proceeds - a missing or failing icacls must not leave the user unable to save -
-					// but the replacement is no longer ACL-identical and that has to be visible
-					// instead of silent.
-					warn(`Could not save the DACL of ${targetPath}; the replacement may inherit different access rights.`)
+					// The target exists and its DACL could not be captured. Publishing anyway would
+					// replace a file whose access rights are unknown with one that inherits whatever
+					// the destination directory grants - a change in who can read the file, decided
+					// silently by a helper that failed. The refusal happens BEFORE the commit rename,
+					// so the target still holds its previous content under its previous ACL; the
+					// staging file this write created is removed with the refusal.
+					await fs.unlink(tempPath).catch(() => {})
+					if (stagingDir) {
+						await fs.rmdir(stagingDir).catch(() => {})
+					}
+					throw new DaclCaptureError(targetPath)
 				}
 			} else if (errorCode(accessError) !== "ENOENT") {
 				// Not "absent": the target is there but could not be checked (EACCES, ...), so
@@ -573,13 +649,27 @@ export async function safeWriteText(
 				const restoredDir = path.dirname(targetPath)
 				const restored = await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
 				if (!restored) {
-					// The content is committed, but the published file may carry a different DACL
-					// from the one that was saved. Failing the write here would break every
-					// publish on machines where icacls cannot reapply the saved ACEs (a plain
-					// temp directory restore fails with "Not all privileges or groups referenced
-					// are assigned to the caller"), so the change of access rights is reported
-					// rather than thrown.
-					warn(`safeWriteText: content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`)
+					// The saved ACEs could not be reapplied. On a plain temp directory that is the
+					// normal outcome rather than the exception - measured on this host, icacls
+					// /restore exits 1300 with "Not all privileges or groups referenced are assigned
+					// to the caller" for every pairing - so failing here would break every publish.
+					// The row's alternative is to publish under an ACL that is KNOWN to be
+					// restrictive: drop the inherited entries, grant the current user sole full
+					// control, and verify it by reading the DACL back.
+					const narrowed = await _restrictDaclWindows(targetPath, options?.execFileRunner)
+					if (!narrowed) {
+						// Neither the original ACL nor a verified restrictive one could be put on the
+						// committed file, so the bytes do not stay at the target under an unknown
+						// ACL: the retained backup - the pre-write content - is renamed back and the
+						// write is reported as failed.
+						if (backupPath !== null && releaseBackupOnSuccess) {
+							await fs.rename(backupPath, targetPath)
+							backupPath = null
+							releaseBackupOnSuccess = false
+						}
+						throw new DaclRestoreError(targetPath)
+					}
+					warn(`safeWriteText: content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file's access rights were narrowed to the current user's full control and verified.`)
 				}
 			}
 
