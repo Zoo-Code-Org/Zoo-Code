@@ -433,7 +433,7 @@ importers:
         version: 3.1078.0
       '@google/genai':
         specifier: ^1.29.1
-        version: 1.52.0(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))
+        version: 1.52.0(@modelcontextprotocol/sdk@1.31.0(zod@3.25.76))
       '@lmstudio/sdk':
         specifier: ^1.1.1
         version: 1.5.0
@@ -441,8 +441,8 @@ importers:
         specifier: ^1.9.18
         version: 1.15.1
       '@modelcontextprotocol/sdk':
-        specifier: 1.29.0
-        version: 1.29.0(zod@3.25.76)
+        specifier: 1.31.0
+        version: 1.31.0(zod@3.25.76)
       '@qdrant/js-client-rest':
         specifier: ^1.14.0
         version: 1.18.0(typescript@5.9.3)
@@ -2053,8 +2053,8 @@ packages:
   '@mistralai/mistralai@1.15.1':
     resolution: {integrity: sha512-fb995eiz3r0KsBGtRjFV+/iLbX+UpfalxpF+YitT3R6ukrPD4PN+FGwwmYcRFhNAzVzDUtTVxQYnjQWEnwV5nw==}
 
-  '@modelcontextprotocol/sdk@1.29.0':
-    resolution: {integrity: sha512-zo37mZA9hJWpULgkRpowewez1y6ML5GsXJPY8FI0tBBCd77HEvza4jDqRKOXgHNn867PVGCyTdzqpz0izu5ZjQ==}
+  '@modelcontextprotocol/sdk@1.31.0':
+    resolution: {integrity: sha512-UvTMgnNlnIBO/22ob2RcVGDlcvOslQs8T59+FTGdA0L27a39fdGF/EDETNtDVK4DZGpwomlsYpRdA8UXcVL/pw==}
     engines: {node: '>=18'}
     peerDependencies:
       '@cfworker/json-schema': ^4.1.1
@@ -10064,14 +10064,14 @@ snapshots:
 
   '@floating-ui/utils@0.2.11': {}
 
-  '@google/genai@1.52.0(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))':
+  '@google/genai@1.52.0(@modelcontextprotocol/sdk@1.31.0(zod@3.25.76))':
     dependencies:
       google-auth-library: 10.9.0
       p-retry: 4.6.2
       protobufjs: 7.6.4
       ws: 8.21.3
     optionalDependencies:
-      '@modelcontextprotocol/sdk': 1.29.0(zod@3.25.76)
+      '@modelcontextprotocol/sdk': 1.31.0(zod@3.25.76)
     transitivePeerDependencies:
       - bufferutil
       - supports-color
@@ -10359,7 +10359,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@modelcontextprotocol/sdk@1.29.0(zod@3.25.76)':
+  '@modelcontextprotocol/sdk@1.31.0(zod@3.25.76)':
     dependencies:
       '@hono/node-server': 1.19.14(hono@4.12.23)
       ajv: 8.20.0
