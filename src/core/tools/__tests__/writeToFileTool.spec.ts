@@ -507,14 +507,17 @@ describe("writeToFileTool", () => {
 			// flag.
 
 			mockedIsPathOutsideWorkspace.mockReturnValue(true)
-			await executeWriteFileTool({}, { fileExists: true, experiments: focusDisruption })
-			const args = mockCline.diffViewProvider.saveDirectly.mock.calls.at(-1)!
-			expect(args[6]).toBeUndefined()
-			expect(args[7]).toBe(true)
-
-				// Reset: the flag is a module mock, and later tests in this file assume an
-				// in-workspace target.
+			try {
+				await executeWriteFileTool({}, { fileExists: true, experiments: focusDisruption })
+				const args = mockCline.diffViewProvider.saveDirectly.mock.calls.at(-1)!
+				expect(args[6]).toBeUndefined()
+				expect(args[7]).toBe(true)
+			} finally {
+				// The flag is a module mock. A reset after the assertions only runs when they pass;
+				// a failing assertion would leave it true and the following tests would then fail for
+				// the wrong reason.
 				mockedIsPathOutsideWorkspace.mockReturnValue(false)
+			}
 		})
 
 		it("routes an outside-workspace target that cannot be resolved through the tool's error handling", async () => {
