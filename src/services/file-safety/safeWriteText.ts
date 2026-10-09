@@ -37,12 +37,25 @@ export interface SafeWriteTextOptions {
 	onWarning?: (message: string) => void
 
 	/**
-	 * Pre-written temp path to use for the commit phase.  When provided,
-	 * safeWriteText skips creating its own staging file and uses this path
-	 * instead (it still fsyncs before rename).  Useful when a caller has
-	 * already written data to a temp file via a custom stream.
+	 * Pre-written staging file to use for the commit phase. When provided, safeWriteText skips
+	 * creating its own staging file and uses this path instead (it still fsyncs before rename).
+ *
+	 * The path is not trusted as given: it must name a file inside a private staging directory
+	 * beside the target (the .file-safety-staging_* directories this module creates, mode 0700).
+	 * A caller that can name any existing file beside the target can otherwise publish an unrelated
+	 * file - a secret it did not write - onto the target. Callers that stream their own content
+	 * should get the path from createStagingFile, which also yields the staging capability below;
+	 * a bare path is accepted for compatibility and is checked, not trusted.
 	 */
 	tempPath?: string
+
+	/**
+	 * A staging file this API created, from createStagingFile. Unlike a bare tempPath, a handle is
+	 * trusted: the file was created exclusively inside this module's private staging directory,
+	 * and its identity (dev/ino) is re-checked against the handle before the commit rename, so a
+	 * file swapped in under the same name is refused.
+	 */
+	staging?: StagingHandle
 
 	/**
 	 * The publish target the caller already authorized.
@@ -238,6 +251,76 @@ function _fsyncFile(fd: number): void {
 	fsSync.fsyncSync(fd)
 }
 
+/**
+ * A staging file created by createStagingFile, safe to hand to safeWriteText.
+ *
+ * The value carries the file's identity, not just its name: a path can be renamed away and
+ * replaced by another file between the write and the commit, while an inode number identifies the
+ * exact object this call created. That is the difference between "somebody pointed me at a file"
+ * and "this write owns the file it is about to publish".
+ */
+export class StagingHandle {
+	readonly tempPath: string
+	readonly stagingDir: string
+	/**
+	 * The identity recorded at create time. Undefined when the platform or the caller's fs layer did
+	 * not report one, in which case the commit cannot bind to it (the same conditional the
+	 * target-identity check below already uses).
+	 */
+	readonly dev: bigint | undefined
+	readonly ino: bigint | undefined
+
+	constructor(tempPath: string, stagingDir: string, dev: bigint | undefined, ino: bigint | undefined) {
+		this.tempPath = tempPath
+		this.stagingDir = stagingDir
+		this.dev = dev
+		this.ino = ino
+	}
+}
+
+/**
+ * Create the staging file a caller streams into, inside a private staging directory beside
+ * targetPath, and return the capability safeWriteText requires for pre-streamed content.
+ *
+ * The file is created exclusively (wx): a name that already exists is an error rather than a
+ * file this write adopts, so no pre-existing content - and no pre-existing access rights - can
+ * reach the target through a staging path. The identity recorded here is what the commit binds to.
+ */
+export async function createStagingFile(targetPath: string): Promise<StagingHandle> {
+	const dirPath = path.dirname(path.resolve(targetPath))
+	const stagingDir = _stagingDir(dirPath)
+	const tempPath = _tempName(stagingDir, "safeWriteText")
+	let fd: number | undefined
+	try {
+		// Exclusive create: a name that already exists is an error, never a file adopted.
+		fd = fsSync.openSync(tempPath, "wx", 0o600)
+		fsSync.closeSync(fd)
+		fd = undefined
+		// The identity is read through the same call the commit binds against, so the two sides are
+		// comparable by construction. Typed structurally so a caller whose fs layer reports no
+		// identity (a test double, or a platform without inode numbers) flows through as undefined
+		// rather than a crash.
+		const stat: { dev?: bigint; ino?: bigint } | undefined = await fs.lstat(tempPath, { bigint: true })
+		return new StagingHandle(tempPath, stagingDir, stat?.dev, stat?.ino)
+	} finally {
+		// The descriptor is this call's own: a close that is still owed must not be abandoned, and
+		// must not replace the error the caller needs to see.
+		if (fd !== undefined) {
+			try {
+				fsSync.closeSync(fd)
+			} catch (error: unknown) {
+				console.error(`Failed to close the staging handle descriptor for ${tempPath}:`, error)
+			}
+		}
+	}
+}
+
+/** True when supplied names a file inside a private staging directory beside dirPath. */
+function _isPrivateStagingPath(supplied: string, dirPath: string): boolean {
+	const parent = path.dirname(supplied)
+	return path.dirname(parent) === path.resolve(dirPath) && path.basename(parent).startsWith(".file-safety-staging")
+}
+
 /** Save the DACL of *srcPath* to a dump file on Windows.
  * Returns true when the dump was written successfully; false otherwise.
  * Never throws — callers treat failure as "skip DACL handling". */
@@ -404,19 +487,56 @@ export async function safeWriteText(
 	// whatever is filed under it next, and a caller-supplied staging name is reused by the next
 	// write to the same target.
 	let stagingCommitted = false
-	if (options?.tempPath) {
-		// A caller-supplied staging file is only safe when it is the file this
-		// write is staging, not an arbitrary path. Two properties are checked:
-		// it must sit beside the resolved target (a rename across filesystems
-		// fails with EXDEV, and a path elsewhere lets a caller publish an
-		// unrelated file onto the target), and it must be a regular file rather
-		// than a link — renaming a link over the target publishes whatever the
-		// link points at, which is the same trust problem as writing through a
-		// dangling symlink in resolvePublishTarget.
-		const supplied = path.resolve(options.tempPath)
-		if (path.dirname(supplied) !== path.resolve(dirPath)) {
+	if (options?.staging) {
+		// A handle is trusted only as far as its recorded identity: the name can be reused by
+		// another file between the create and this commit, so the object filed under it is
+		// compared with the inode this write created before anything is fsynced or renamed.
+		const handle = options.staging
+		const supplied = path.resolve(handle.tempPath)
+		if (!_isPrivateStagingPath(supplied, dirPath)) {
 			throw new StagingPathError(
-				`Staging file must sit in the target's directory (${dirPath}), got ${supplied}`,
+				`Staging file must sit in a private staging directory beside ${dirPath}, got ${supplied}`,
+				supplied,
+			)
+		}
+		const stagedStat = await fs.lstat(supplied, { bigint: true })
+		if (stagedStat.isSymbolicLink() || !stagedStat.isFile()) {
+			throw new StagingPathError(
+				`Staging file must be a regular file, not ${stagedStat.isSymbolicLink() ? "a symlink" : "another file type"}`,
+				supplied,
+			)
+		}
+		// Bound only when both sides actually report an identity: a missing one is not evidence
+		// of a change, and treating it as one would refuse every write on a filesystem without
+		// inode numbers.
+		if (
+			typeof stagedStat.ino === "bigint" &&
+			typeof handle.ino === "bigint" &&
+			(stagedStat.ino !== handle.ino || stagedStat.dev !== handle.dev)
+		) {
+			throw new StagingPathError(
+				"Staging file is not the file this write created: its identity changed since createStagingFile",
+				supplied,
+			)
+		}
+		// The handle's own spelling is used; only the checks above are canonical. The staging
+		// directory travels with it, so this write cleans up what the handle's create made.
+		stagingDir = handle.stagingDir
+		tempPath = handle.tempPath
+	} else if (options?.tempPath) {
+		// A caller-supplied staging file is only safe when it is the file this
+		// write is staging, not an arbitrary path. It must sit inside one of this
+		// module's private staging directories beside the target: a rename across
+		// filesystems fails with EXDEV, and a bare path anywhere else - including an
+		// ordinary file that happens to live beside the target - lets a caller publish
+		// content it never staged, and never captured the access rights of, onto the
+		// target. It must also be a regular file rather than a link — renaming a link
+		// over the target publishes whatever the link points at, which is the same
+		// trust problem as writing through a dangling symlink in resolvePublishTarget.
+		const supplied = path.resolve(options.tempPath)
+		if (!_isPrivateStagingPath(supplied, dirPath)) {
+			throw new StagingPathError(
+				`Staging file must sit in a private staging directory beside ${dirPath}, got ${supplied}`,
 				supplied,
 			)
 		}
@@ -453,7 +573,7 @@ export async function safeWriteText(
 		) {
 			throw new StagingPathError("Staging file must not be the target itself", supplied)
 		}
-		// The caller's own path is used as given; only the check is canonical.
+		// The caller's own path is used as given; only the checks are canonical.
 		tempPath = options.tempPath
 	} else {
 		stagingDir = _stagingDir(dirPath)
@@ -480,7 +600,7 @@ export async function safeWriteText(
 		await fs.access(dirPath)
 
 		// -- Step 1: write content to staging temp file -------------------
-		if (!options?.tempPath) {
+		if (!options?.tempPath && !options?.staging) {
 			// Preserve the existing target's permissions: the staging file must
 			// not be published wider than the file it replaces (a 0o600 target
 			// must not become 0o644 through the atomic rename).

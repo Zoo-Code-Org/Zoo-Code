@@ -11,6 +11,8 @@ import {
 	resolveLockKey,
 	safeWriteText,
 	StagingPathError,
+	createStagingFile,
+	StagingHandle,
 	TargetMovedError,
 	type SafeWriteTextOptions,
 } from "../safeWriteText"
@@ -195,7 +197,10 @@ describe("safeWriteText", () => {
 
 		it("does not remove the staging directory when the caller supplies its own tempPath", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
-			const callerTemp = "/tmp/test-dir/caller-staged.txt"
+			// A caller-supplied staging file must live in one of this module's private staging
+			// directories beside the target; an ordinary file that happens to sit there does not
+			// qualify (it could be any pre-existing content, with any access rights).
+			const callerTemp = "/tmp/test-dir/.file-safety-staging_peer/caller-staged.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 
@@ -272,7 +277,10 @@ describe("safeWriteText", () => {
 
 		it("does not remove a staging directory it did not create when a caller-staged write fails", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
-			const callerTemp = "/tmp/test-dir/caller-staged.txt"
+			// A caller-supplied staging file must live in one of this module's private staging
+			// directories beside the target; an ordinary file that happens to sit there does not
+			// qualify (it could be any pre-existing content, with any access rights).
+			const callerTemp = "/tmp/test-dir/.file-safety-staging_peer/caller-staged.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 			vi.mocked(fs.rename).mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }))
@@ -452,7 +460,8 @@ describe("safeWriteText", () => {
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			// A caller-supplied staging file: the name is the caller's, not one this write made
 			// up, so after the commit it is a path another writer may already be using again.
-			const suppliedTemp = path.join(dirPath, "caller.new_data.json")
+			// The caller's staging file now lives in a private staging directory beside the target.
+		const suppliedTemp = path.join(dirPath, ".file-safety-staging_peer", "caller.new_data.json")
 			vi.mocked(fsSync.openSync).mockImplementation((target) => {
 				if (String(target) === dirPath) throw new Error("EBADF")
 				return 1
@@ -897,7 +906,7 @@ describe("safeWriteText", () => {
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 
-			const customTempPath = "/tmp/test-dir/custom-temp.tmp"
+			const customTempPath = "/tmp/test-dir/.file-safety-staging_peer/custom-temp.tmp"
 
 			// platform:linux skips DACL entirely so this test focuses on tempPath only
 			await safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" })
@@ -924,7 +933,7 @@ describe("safeWriteText", () => {
 			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o600))
 			vi.mocked(fsSync.openSync).mockReturnValue(2)
 
-			const customTempPath = "/tmp/test-dir/custom-temp.tmp"
+			const customTempPath = "/tmp/test-dir/.file-safety-staging_peer/custom-temp.tmp"
 
 			await safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" })
 
@@ -944,7 +953,7 @@ describe("safeWriteText", () => {
 			})
 			vi.mocked(fsSync.openSync).mockReturnValue(2)
 
-			const customTempPath = "/tmp/test-dir/custom-temp.tmp"
+			const customTempPath = "/tmp/test-dir/.file-safety-staging_peer/custom-temp.tmp"
 
 			await safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" })
 
@@ -962,7 +971,7 @@ describe("safeWriteText", () => {
 			})
 			vi.mocked(fsSync.openSync).mockReturnValue(2)
 
-			const customTempPath = "/tmp/test-dir/custom-temp.tmp"
+			const customTempPath = "/tmp/test-dir/.file-safety-staging_peer/custom-temp.tmp"
 
 			// A target that cannot be stat'd is not a fresh target: publishing with
 			// the default mode would widen a restrictive target through the rename.
@@ -994,7 +1003,7 @@ describe("safeWriteText", () => {
 			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o444))
 			vi.mocked(fsSync.openSync).mockReturnValue(3)
 
-			const customTempPath = "/tmp/test-dir/custom-temp.tmp"
+			const customTempPath = "/tmp/test-dir/.file-safety-staging_peer/custom-temp.tmp"
 
 			await safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" })
 
@@ -1348,7 +1357,12 @@ describe("caller-supplied staging path", () => {
 		vi.mocked(fs.lstat).mockResolvedValue(stats)
 
 		await expect(
-			safeWriteText(targetPath, "data", { tempPath: targetPath, platform: "linux" }),
+				// An alias of the target, spelled as a file in a private staging directory: the
+				// location check passes and the identity check is what must refuse it.
+				safeWriteText(targetPath, "data", {
+					tempPath: "/tmp/test-dir/.file-safety-staging_alias/alias.txt",
+					platform: "linux",
+				}),
 		).rejects.toThrow(StagingPathError)
 		expect(fsSync.openSync).not.toHaveBeenCalled()
 		expect(fs.rename).not.toHaveBeenCalled()
@@ -1380,7 +1394,10 @@ describe("caller-supplied staging path", () => {
 		})
 
 		await expect(
-			safeWriteText(targetPath, "data", { tempPath: "/tmp/test-dir/hardlink.txt", platform: "linux" }),
+			safeWriteText(targetPath, "data", {
+				tempPath: "/tmp/test-dir/.file-safety-staging_hard/hardlink.txt",
+				platform: "linux",
+			}),
 		).rejects.toThrow("Staging file could not be compared with the target")
 		expect(fsSync.openSync).not.toHaveBeenCalled()
 		expect(fs.rename).not.toHaveBeenCalled()
@@ -1584,5 +1601,132 @@ describe("parent directories created by safeWriteText", () => {
 		expect(removed).toContain(parent)
 		// Innermost outward: a parent may only be removed once its child is gone.
 		expect(removed.indexOf(dir)).toBeLessThan(removed.indexOf(parent))
+	})
+})
+// The staging capability: a file this API created, in a directory it owns, bound to the commit
+// by identity. These are the Security Boundaries row's requirements - "Create and exclusively
+// open the staging file inside a private staging directory owned by this write" and "bind the
+// handle to the exact staging inode before the rename".
+describe("staging capability", () => {
+	const targetPath = "/tmp/test-dir/target.txt"
+	const dirPath = path.resolve("/tmp/test-dir")
+
+	beforeEach(() => {
+		mockDefaults()
+		vi.mocked(fsSync.writeSync).mockImplementation((...args: unknown[]) => (typeof args[3] === "number" ? args[3] : 0))
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+	})
+
+	it("creates the staging file exclusively inside a private staging directory", async () => {
+		vi.mocked(fsSync.openSync).mockReturnValue(3)
+		vi.mocked(fs.lstat).mockResolvedValue(_fileStatsWithIdentity(42n, 7n))
+
+		const handle = await createStagingFile(targetPath)
+
+		// Private directory, private mode, and an exclusive create: an existing name is an error
+		// rather than a file this write adopts with somebody else's content and access rights.
+		expect(fsSync.mkdirSync).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), {
+			recursive: true,
+			mode: 0o700,
+		})
+		expect(fsSync.openSync).toHaveBeenCalledWith(expect.stringContaining("safeWriteText"), "wx", 0o600)
+		const parent = path.dirname(handle.tempPath)
+		expect(path.dirname(parent)).toBe(dirPath)
+		expect(path.basename(parent).startsWith(".file-safety-staging")).toBe(true)
+		// The identity the commit will be bound to is the one read at create time.
+		expect(handle.ino).toBe(42n)
+		expect(handle.dev).toBe(7n)
+	})
+
+	it("publishes a handle whose identity still matches the file it created", async () => {
+		vi.mocked(fsSync.openSync).mockReturnValue(3)
+		vi.mocked(fs.lstat).mockResolvedValue(_fileStatsWithIdentity(42n, 7n))
+		const stagingDir = path.join(dirPath, ".file-safety-staging_1")
+		const staging = new StagingHandle(path.join(stagingDir, "safeWriteText_1_a.tmp"), stagingDir, 7n, 42n)
+
+		await safeWriteText(targetPath, "data", { platform: "linux", staging })
+
+		// The supplied content is fsynced through the handle's own file and renamed from it.
+		expect(fsSync.openSync).toHaveBeenCalledWith(staging.tempPath, "r+")
+		expect(fs.rename).toHaveBeenCalledWith(staging.tempPath, targetPath)
+		// The staging directory the handle created is this write's to remove.
+		expect(fs.rmdir).toHaveBeenCalledWith(stagingDir)
+	})
+
+	it("refuses a handle whose name now files a different inode, before committing", async () => {
+		vi.mocked(fsSync.openSync).mockReturnValue(3)
+		// Somebody replaced the file under the same name between the create and the commit.
+		vi.mocked(fs.lstat).mockResolvedValue(_fileStatsWithIdentity(4242n, 7n))
+		const stagingDir = path.join(dirPath, ".file-safety-staging_1")
+		const staging = new StagingHandle(path.join(stagingDir, "safeWriteText_1_a.tmp"), stagingDir, 7n, 42n)
+
+		await expect(safeWriteText(targetPath, "data", { platform: "linux", staging })).rejects.toThrow(StagingPathError)
+
+		expect(fsSync.openSync).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("rejects a bare staging path that is not inside a private staging directory", async () => {
+		vi.mocked(fs.lstat).mockResolvedValue(_fileStatsWithIdentity(42n, 7n))
+
+		// The row's concrete hazard: any existing file beside the target could be published onto
+		// it - content nobody staged, with access rights nobody captured.
+		await expect(
+			safeWriteText(targetPath, "data", { platform: "linux", tempPath: path.join(dirPath, "someones-secret.txt") }),
+		).rejects.toThrow("private staging directory")
+
+		expect(fsSync.openSync).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+})
+
+// The Regression Evidence row: parent-directory setup (fs.mkdir / fs.access of the target's
+// directory) had no failure coverage. A filesystem error here must surface as itself, commit
+// nothing, and leave neither a staging file, a staging directory, nor a parent tree behind.
+describe("parent directory setup failures", () => {
+	const targetPath = "/tmp/test-dir/target.txt"
+	const dirPath = path.resolve("/tmp/test-dir")
+
+	beforeEach(() => {
+		mockDefaults()
+		vi.mocked(fsSync.writeSync).mockImplementation((...args: unknown[]) => (typeof args[3] === "number" ? args[3] : 0))
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(3)
+	})
+
+	it("propagates a non-ENOENT fs.mkdir rejection without committing, and cleans up", async () => {
+		const mkdirError = Object.assign(new Error("EACCES: permission denied, mkdir"), { code: "EACCES" })
+		vi.mocked(fs.mkdir).mockRejectedValue(mkdirError)
+
+		// The original error object, not a wrapper: the caller's own diagnosis is the code.
+		await expect(safeWriteText(targetPath, "data", { platform: "linux" })).rejects.toBe(mkdirError)
+
+		expect(fs.rename).not.toHaveBeenCalled()
+		expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
+	})
+
+	it("propagates a non-ENOENT fs.access rejection without committing, and cleans up", async () => {
+		const accessError = Object.assign(new Error("EACCES: permission denied, access"), { code: "EACCES" })
+		vi.mocked(fs.access).mockRejectedValue(accessError)
+
+		await expect(safeWriteText(targetPath, "data", { platform: "linux" })).rejects.toBe(accessError)
+
+		expect(fs.rename).not.toHaveBeenCalled()
+		expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
+	})
+
+	it("removes the parent directories it created when the write fails before the commit", async () => {
+		// The parent does not exist yet, so this write is the one that makes it.
+		vi.mocked(fs.stat).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+		vi.mocked(fs.rename).mockRejectedValue(Object.assign(new Error("EPERM: rename failed"), { code: "EPERM" }))
+
+		await expect(safeWriteText(targetPath, "data", { platform: "linux" })).rejects.toThrow("EPERM")
+
+		// Both the staging directory and the parent tree this write created are gone, innermost
+		// outward (the parent is spelled as the write derived it, not as path.resolve would).
+		expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
+		expect(fs.rmdir).toHaveBeenCalledWith("/tmp/test-dir")
 	})
 })
