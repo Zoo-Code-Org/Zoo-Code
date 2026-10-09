@@ -132,6 +132,7 @@ import {
 import { readTaskMessages } from "../task-persistence/taskMessages"
 import { getNonce } from "./getNonce"
 import { getUri } from "./getUri"
+import { omitOriginalContentFromExtensionMessage } from "./stripOriginalContent"
 import { REQUESTY_BASE_URL } from "../../shared/utils/requesty"
 import { validateAndFixToolResultIds } from "../task/validateToolResultIds"
 import { PendingEditOperationStore, type PendingEditOperationInput } from "./PendingEditOperationStore"
@@ -1914,14 +1915,20 @@ export class ClineProvider
 		// path (e.g. the trailing postStateToWebview in handleModeSwitchUnlocked gates the next
 		// turn after a mode switch). Message ordering is enforced by the message seq, not the ack.
 		// Promise.resolve() normalizes non-promise returns (e.g. test doubles) before the catch.
-		void Promise.resolve(webview.postMessage(message)).catch((error) => {
-			// Swallow: postMessage rejects when the webview is disposed in flight.
-			// Log the dropped message type so a wedged webview channel is diagnosable
-			// instead of silently losing state updates.
-			this.log(
-				`[postMessageToWebview] dropped message type=${message.type}: ${error instanceof Error ? error.message : String(error)}`,
-			)
-		})
+		try {
+			void Promise.resolve(
+				webview.postMessage(omitOriginalContentFromExtensionMessage(message)),
+			).catch((error) => {
+				// Swallow: postMessage rejects when the webview is disposed in flight.
+				// Log the dropped message type so a wedged webview channel is diagnosable
+				// instead of silently losing state updates.
+				this.log(
+					`[postMessageToWebview] dropped message type=${message.type}: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			})
+		} catch {
+			// View disposed, drop message silently
+		}
 	}
 
 	public requestWebviewThemeFixture(timeoutMs = 5_000): Promise<WebviewThemeFixture> {
