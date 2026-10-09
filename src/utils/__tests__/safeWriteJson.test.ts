@@ -812,4 +812,47 @@ describe("safeWriteJson", () => {
 		expect(entries).not.toContain("scope-missing-parent")
 		expect(entries.filter((entry) => entry.endsWith(".lock") || entry.includes(".new_"))).toEqual([])
 	})
+
+	// Same ordering rule, different failure: the scope itself cannot be canonicalized. A
+	// non-ENOENT realpath errno has to stop the write before the advisory lock instead of
+	// falling back to a lexical scope and continuing. The lock is the seam this harness can
+	// count; the realpath call order is not observable here (measured separately).
+	test("refuses a confined write before the advisory lock when the scope cannot be canonicalized", async () => {
+		vi.resetModules()
+		// The target sits one directory deeper than the scope: resolving the publish target
+		// never canonicalizes the scope itself, so the only code that can fail on the scope is
+		// the scope resolution under test.
+		const scope = path.join(tempDir, "unresolvable-scope-order")
+		const inner = path.join(scope, "nested")
+		await fs.mkdir(scope)
+		await fs.mkdir(inner)
+		const target = path.join(inner, "mcp.json")
+
+		const realLockfile = await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")
+		const lockMockFn = vi.fn(async () => {
+			throw new Error("lock taken after an uncanonicalizable scope (test)")
+		})
+		vi.doMock("proper-lockfile", () => ({ ...realLockfile, lock: lockMockFn }))
+		const { safeWriteJson: lockedSafeWriteJson } = await import("../safeWriteJson")
+		const realpathSpy = vi.spyOn(fs, "realpath").mockImplementation(async (candidate) => {
+			if (String(candidate) === scope) {
+				throw Object.assign(new Error("EACCES: permission denied, realpath"), { code: "EACCES" })
+			}
+			return String(candidate)
+		})
+
+		try {
+			await expect(lockedSafeWriteJson(target, { mcpServers: {} }, { confineTo: scope })).rejects.toThrow(
+				"EACCES: permission denied, realpath",
+			)
+			expect(lockMockFn).not.toHaveBeenCalled()
+			const entries = await fs.readdir(tempDir)
+			expect(entries.filter((entry) => entry.endsWith(".lock") || entry.includes(".new_"))).toEqual([])
+		} finally {
+			realpathSpy.mockRestore()
+			vi.doUnmock("proper-lockfile")
+			vi.resetModules()
+		}
+	})
+
 })
