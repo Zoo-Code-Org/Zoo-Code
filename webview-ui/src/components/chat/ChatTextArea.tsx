@@ -1097,7 +1097,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 								placeholder={placeholderText}
 								minRows={3}
 								maxRows={15}
-								autoFocus={true}
+								autoFocus={document.hasFocus()}
 								className={cn(
 									"w-full",
 									"text-vscode-input-foreground",

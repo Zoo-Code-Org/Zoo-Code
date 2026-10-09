@@ -2,6 +2,7 @@ import { DiffViewProvider, DIFF_VIEW_URI_SCHEME, DIFF_VIEW_LABEL_CHANGES } from 
 import * as vscode from "vscode"
 import * as path from "path"
 import delay from "delay"
+import { DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 
 import { makeRange, makeTextDocument, makeTextEditor, makeUri } from "../../../test-utils/vscode"
 
@@ -3020,10 +3021,16 @@ describe("DiffViewProvider", () => {
 
 			const result = await diffViewProvider.saveChanges()
 
-			// Verify default behavior (enabled=true, delay=2000ms)
-			expect(mockDelay).toHaveBeenCalledWith(1000)
+			// Verify default behavior (enabled=true, delay falls back to DEFAULT_WRITE_DELAY_MS)
+			expect(mockDelay).toHaveBeenCalledWith(0)
 			expect(vscode.languages.getDiagnostics).toHaveBeenCalled()
 			expect(result.newProblemsMessage).toBe("")
+		})
+
+		it("pins the default write delay to zero", () => {
+			// The tests above compare against the constant, so they would still pass if the
+			// default were changed back to 1000. Pin the value the write path actually uses.
+			expect(DEFAULT_WRITE_DELAY_MS).toBe(0)
 		})
 
 		it("should handle custom delay values", async () => {
