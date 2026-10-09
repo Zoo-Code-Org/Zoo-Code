@@ -454,21 +454,33 @@ export async function safeWriteText(
 			// existing 0o664 target would be published as 0o644 through the
 			// rename. Apply the existing target's exact mode on the fd, as the
 			// caller-staged branch does; a fresh target keeps the default mode.
-			const fd = fsSync.openSync(tempPath, "w", targetMode)
+			// Ownership of the descriptor follows the backup seed's model: it is released
+			// inside the try, and only a close that is still owed is retried through
+			// _closeDescriptor in the catch. A close that fails must not become the error this
+			// write reports when the write itself already failed - the operation's own failure
+			// is the one that explains what happened - and it must not be abandoned either.
+			let stagingFd: number | undefined
 			try {
+				const handle = fsSync.openSync(tempPath, "w", targetMode)
+				stagingFd = handle
 				if (targetExists) {
-					fsSync.fchmodSync(fd, targetMode)
+					fsSync.fchmodSync(handle, targetMode)
 				}
 				// Loop until every byte is written: writeSync can report a short
 				// (partial) write, and publishing a truncated staging file would
 				// commit corrupt content.
 				let offset = 0
 				while (offset < buffer.length) {
-					offset += fsSync.writeSync(fd, buffer, offset, buffer.length - offset)
+					offset += fsSync.writeSync(handle, buffer, offset, buffer.length - offset)
 				}
-				_fsyncFile(fd)
-			} finally {
-				fsSync.closeSync(fd)
+				_fsyncFile(handle)
+				fsSync.closeSync(handle)
+				stagingFd = undefined
+			} catch (error: unknown) {
+				if (stagingFd !== undefined) {
+					_closeDescriptor(stagingFd, `staging descriptor for ${tempPath}`)
+				}
+				throw error
 			}
 		} else {
 			// Preserve the existing target's mode (CWE-732): the caller-staged
@@ -484,14 +496,23 @@ export async function safeWriteText(
 				if (errorCode(error) !== "ENOENT") throw error
 				// target does not exist yet - keep the temp's default mode
 			}
-			const fd = fsSync.openSync(tempPath, "r+")
+			// Same ownership model as the self-staged branch above: the close is retried and
+			// reported through _closeDescriptor rather than replacing the write's own failure.
+			let stagedFd: number | undefined
 			try {
+				const handle = fsSync.openSync(tempPath, "r+")
+				stagedFd = handle
 				if (targetMode !== null) {
-					fsSync.fchmodSync(fd, targetMode)
+					fsSync.fchmodSync(handle, targetMode)
 				}
-				_fsyncFile(fd)
-			} finally {
-				fsSync.closeSync(fd)
+				_fsyncFile(handle)
+				fsSync.closeSync(handle)
+				stagedFd = undefined
+			} catch (error: unknown) {
+				if (stagedFd !== undefined) {
+					_closeDescriptor(stagedFd, `staged temp descriptor for ${tempPath}`)
+				}
+				throw error
 			}
 		}
 
@@ -572,6 +593,7 @@ export async function safeWriteText(
 					// keeps the target present, so the step 4 rename is the only change to the
 					// canonical path. The copy is flushed so the retained content survives a crash.
 					let seedFd: number | undefined
+					let backupFd: number | undefined
 					try {
 						// Create the destination BEFORE any content exists at it, with the mode fixed
 						// at open time. fs.copyFile picks the destination mode itself (the platform
@@ -591,12 +613,12 @@ export async function safeWriteText(
 						await fs.chmod(backupPath, 0o600)
 						// "r+" not "r": fsync on a read-only handle is EPERM on Windows, and the same
 						// flag the staged temp file uses above.
-						const backupFd = fsSync.openSync(backupPath, "r+")
-						try {
-							_fsyncFile(backupFd)
-						} finally {
-							fsSync.closeSync(backupFd)
-						}
+						backupFd = fsSync.openSync(backupPath, "r+")
+						_fsyncFile(backupFd)
+						fsSync.closeSync(backupFd)
+						// Owned no longer: only after the close succeeds is the descriptor somebody
+						// else's problem; until then the handler below retries it.
+						backupFd = undefined
 					} catch (backupError: unknown) {
 						if (seedFd !== undefined) {
 							// The seed descriptor is still owned here: its close failed, or an error landed
@@ -604,6 +626,10 @@ export async function safeWriteText(
 							// second close failure be logged rather than replace the backup failure this
 							// handler is about to rethrow.
 							_closeDescriptor(seedFd, `backup seed descriptor for ${backupPath}`)
+						}
+						if (backupFd !== undefined) {
+							// Same rule for the fsync descriptor of the backup copy.
+							_closeDescriptor(backupFd, `backup fsync descriptor for ${backupPath}`)
 						}
 						// A partial backup must not outlive this attempt: it is not a complete copy
 						// of anything, and once the write fails nothing else removes it.
@@ -623,14 +649,19 @@ export async function safeWriteText(
 			// -- Step 4b (POSIX): fsync the parent directory so the directory entry
 			// changed by the commit rename is durable, not just the file content.
 			if (platform !== "win32") {
+				let dirFd: number | undefined
 				try {
-					const dirFd = fsSync.openSync(dirPath, "r")
-					try {
-						_fsyncFile(dirFd)
-					} finally {
-						fsSync.closeSync(dirFd)
-					}
+					const handle = fsSync.openSync(dirPath, "r")
+					dirFd = handle
+					_fsyncFile(handle)
+					fsSync.closeSync(handle)
+					dirFd = undefined
 				} catch (error: unknown) {
+					if (dirFd !== undefined) {
+						// The close is retried and logged rather than replacing the durability
+						// failure this block is about to report.
+						_closeDescriptor(dirFd, `parent directory descriptor for ${dirPath}`)
+					}
 					// The content rename committed, but the directory entry that
 					// points at it is not known to be durable. Reporting success
 					// here would let a caller believe the write survives a crash,
