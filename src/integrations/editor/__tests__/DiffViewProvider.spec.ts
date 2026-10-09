@@ -3090,6 +3090,59 @@ describe("DiffViewProvider", () => {
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
 		})
 
+		it("revertChanges() holds the teardown through its finalization steps, not just the cleanup callback", async () => {
+			// The guard has to stay held until the owner's finalization - the preview-tab restore
+			// and reset() - settles as well. A cancellation that lands after the cleanup callback
+			// but before those steps finished sees no teardown in flight and runs the whole pass a
+			// second time: the document is reverted again, the same tabs are closed again, and the
+			// tabs are restored and the provider reset twice.
+			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
+			applyEdit.mockResolvedValue(true)
+			const closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
+			const editor = makeTextEditor({
+				document: makeTextDocument({
+					uri: makeUri(mockTargetPath),
+					getText: vi.fn().mockReturnValue("content"),
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				}),
+			})
+			diffViewProvider["activeDiffEditor"] = editor
+			// The finalization is held open on a gate: that is exactly the window a real
+			// cancellation lands in - the cleanup callback has settled, the tabs are not back yet.
+			let releaseFinalization!: () => void
+			const finalizationGate = new Promise<void>((resolve) => {
+				releaseFinalization = resolve
+			})
+			const restorePreviewTabs = vi.fn().mockImplementation(async () => {
+				await finalizationGate
+			})
+			const reset = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
+			diffViewProvider["reset"] = reset
+
+			const first = diffViewProvider.revertChanges()
+			// Join only once the owner is INSIDE its finalization, so the second caller is
+			// testing the window the guard used to release early on.
+			for (let i = 0; i < 100 && restorePreviewTabs.mock.calls.length === 0; i++) {
+				await new Promise((resolve) => setImmediate(resolve))
+			}
+			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
+			const second = diffViewProvider.revertChanges()
+			releaseFinalization()
+			await Promise.all([first, second])
+
+			expect(applyEdit).toHaveBeenCalledTimes(1)
+			expect(closeAllDiffViews).toHaveBeenCalledTimes(1)
+			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
+			expect(reset).toHaveBeenCalledTimes(1)
+		})
+
 		it("revertChanges() does not run a second teardown while one is already in flight", async () => {
 			// Cancellation can reach revertChanges() while a rejected save is still
 			// discarding the same buffer. Both paths acting on the document and the same
