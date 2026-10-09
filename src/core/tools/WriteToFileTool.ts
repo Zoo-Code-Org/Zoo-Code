@@ -580,6 +580,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		)
 
 		if (isPreventFocusDisruptionEnabled) {
+			// The preview is suppressed for this stream: release the entry registered above so the
+			// abort listener and any failure mark do not outlive a delta that never shows a diff
+			// view and never reaches execute()'s teardown.
+			super.resetPartialState()
+			this.resetTaskPartialState(task)
 			return
 		}
 
