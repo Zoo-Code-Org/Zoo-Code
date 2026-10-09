@@ -1,6 +1,7 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 
 import type { ClineAsk, ToolProgressStatus, ToolGroup, ToolName, GenerateImageParams } from "@roo-code/types"
+import { READ_FILES_TOOL_NAME } from "@roo-code/types"
 
 import type { DcgDecision } from "../services/destructive-command-guard/runner"
 
@@ -98,6 +99,7 @@ export const toolParamNames = [
 	"max_lines",
 	// read_file legacy format parameter (backward compatibility)
 	"files",
+	"entries",
 	"line_ranges",
 ] as const
 
@@ -110,6 +112,7 @@ export type ToolParamName = (typeof toolParamNames)[number]
 export type NativeToolArgs = {
 	access_mcp_resource: { server_name: string; uri: string }
 	read_file: import("@roo-code/types").ReadFileToolParams
+	[READ_FILES_TOOL_NAME]: import("@roo-code/types").ReadFilesParams
 	read_command_output: { artifact_id: string; search?: string; offset?: number; limit?: number }
 	attempt_completion: { result: string }
 	execute_command: { command: string; cwd?: string; timeout?: number | null }
@@ -286,6 +289,7 @@ export type ToolGroupConfig = {
 export const TOOL_DISPLAY_NAMES: Record<ToolName, string> = {
 	execute_command: "run commands",
 	read_file: "read files",
+	[READ_FILES_TOOL_NAME]: "read a batch of files",
 	read_command_output: "read command output",
 	write_to_file: "write files",
 	apply_diff: "apply changes",
@@ -314,7 +318,7 @@ export const TOOL_DISPLAY_NAMES: Record<ToolName, string> = {
 // Define available tool groups.
 export const TOOL_GROUPS: Record<ToolGroup, ToolGroupConfig> = {
 	read: {
-		tools: ["read_file", "search_files", "list_files", "codebase_search"],
+		tools: ["read_file", READ_FILES_TOOL_NAME, "search_files", "list_files", "codebase_search"],
 	},
 	edit: {
 		tools: ["apply_diff", "write_to_file", "generate_image"],

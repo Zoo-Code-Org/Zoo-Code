@@ -1,6 +1,6 @@
 import { parseJSON } from "partial-json"
 
-import { type ToolName, toolNames, type FileEntry } from "@roo-code/types"
+import { type ToolName, toolNames, type FileEntry, readFilesParamsSchema, READ_FILES_TOOL_NAME } from "@roo-code/types"
 import { customToolRegistry } from "@roo-code/core"
 
 import {
@@ -418,6 +418,10 @@ export class NativeToolCallParser {
 		let usedLegacyFormat = false
 
 		switch (name) {
+			case READ_FILES_TOOL_NAME:
+				// Partial arguments are display-only, never legacy reads.
+				nativeArgs = { entries: Array.isArray(partialArgs.entries) ? partialArgs.entries : [] }
+				break
 			case "read_file":
 				// Check for legacy format first: { files: [...] }
 				// Handle both array and stringified array (some models double-stringify)
@@ -749,6 +753,11 @@ export class NativeToolCallParser {
 			let usedLegacyFormat = false
 
 			switch (resolvedName) {
+				case READ_FILES_TOOL_NAME: {
+					const parsed = readFilesParamsSchema.safeParse(args)
+					if (parsed.success) nativeArgs = parsed.data as NativeArgsFor<TName>
+					break
+				}
 				case "read_file":
 					// Check for legacy format first: { files: [...] }
 					// Handle both array and stringified array (some models double-stringify)

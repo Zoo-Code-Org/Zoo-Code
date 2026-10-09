@@ -2,7 +2,7 @@ import { serializeError } from "serialize-error"
 import { Anthropic } from "@anthropic-ai/sdk"
 
 import type { ToolName, ClineAsk, ToolProgressStatus } from "@roo-code/types"
-import { ConsecutiveMistakeError, TelemetryEventName } from "@roo-code/types"
+import { ConsecutiveMistakeError, TelemetryEventName, READ_FILES_TOOL_NAME } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { customToolRegistry } from "@roo-code/core"
 
@@ -17,7 +17,8 @@ import { AskIgnoredError } from "../task/AskIgnoredError"
 import { Task } from "../task/Task"
 
 import { listFilesTool } from "../tools/ListFilesTool"
-import { readFileTool } from "../tools/ReadFileTool"
+import { ReadFileTool } from "../tools/file-reading/ReadFileTool"
+import { ReadFilesTool } from "../tools/file-reading/ReadFilesTool"
 import { readCommandOutputTool } from "../tools/ReadCommandOutputTool"
 import { writeToFileTool } from "../tools/WriteToFileTool"
 import { editTool } from "../tools/EditTool"
@@ -465,9 +466,11 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						// Prefer native typed args when available; fall back to legacy params
 						// Check if nativeArgs exists (native protocol)
 						if (block.nativeArgs) {
-							return readFileTool.getReadFileToolDescription(block.name, block.nativeArgs)
+							return new ReadFileTool().getReadFileToolDescription(block.name, block.nativeArgs)
 						}
-						return readFileTool.getReadFileToolDescription(block.name, block.params)
+						return new ReadFileTool().getReadFileToolDescription(block.name, block.params)
+					case READ_FILES_TOOL_NAME:
+						return `[${READ_FILES_TOOL_NAME} for ${block.nativeArgs?.entries.length ?? 0} entries]`
 					case "write_to_file":
 						return `[${block.name} for '${block.params.path}']`
 					case "apply_diff":
@@ -909,7 +912,14 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 					break
 				case "read_file":
 					// Type assertion is safe here because we're in the "read_file" case
-					await readFileTool.handle(cline, block as ToolUse<"read_file">, {
+					await new ReadFileTool().handle(cline, block as ToolUse<"read_file">, {
+						askApproval,
+						handleError,
+						pushToolResult,
+					})
+					break
+				case READ_FILES_TOOL_NAME:
+					await new ReadFilesTool().handle(cline, block as ToolUse<typeof READ_FILES_TOOL_NAME>, {
 						askApproval,
 						handleError,
 						pushToolResult,

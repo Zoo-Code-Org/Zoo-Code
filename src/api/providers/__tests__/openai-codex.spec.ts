@@ -9,10 +9,16 @@ vitest.mock("@roo-code/telemetry", () => ({
 }))
 
 import { Anthropic } from "@anthropic-ai/sdk"
-import { OPEN_AI_CODEX_SERVICE_TIER_KEY, OpenAiCodexServiceTier, SERVICE_TIER_KEY } from "@roo-code/types"
+import {
+	OPEN_AI_CODEX_SERVICE_TIER_KEY,
+	OpenAiCodexServiceTier,
+	SERVICE_TIER_KEY,
+	READ_FILES_TOOL_NAME,
+} from "@roo-code/types"
 import { OpenAiCodexHandler, transformResponsesLiteBody } from "../openai-codex"
 import { openAiCodexOAuthManager } from "../../../integrations/openai-codex/oauth"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import readFiles from "../../../core/prompts/tools/native-tools/read_files"
 
 function createCompletedStream() {
 	return asyncStreamFrom([
@@ -726,6 +732,36 @@ describe("OpenAiCodexHandler Responses Lite requests", () => {
 	afterEach(() => {
 		vitest.restoreAllMocks()
 		vitest.unstubAllGlobals()
+	})
+
+	it("advertises the strict batch reader on Sol Lite without relaxing single-call dispatch", async () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-6.1-sol" })
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+		const create = vitest.fn().mockResolvedValue(createCompletedStream())
+		Reflect.set(handler, "client", { responses: { create } })
+		await collectStream(
+			handler.createMessage("Read known files", [{ role: "user", content: "Compare source and tests" }], {
+				taskId: "batch-sol",
+				tools: [readFiles],
+				parallelToolCalls: true,
+			}),
+		)
+		expect(create).toHaveBeenCalledTimes(1)
+		const body: unknown = create.mock.calls[0][0]
+		expect(body).toMatchObject({
+			model: "gpt-6.1-sol",
+			parallel_tool_calls: false,
+			input: [
+				{
+					type: "additional_tools",
+					role: "developer",
+					tools: [{ name: READ_FILES_TOOL_NAME, strict: true, parameters: readFiles.function.parameters }],
+				},
+				expect.anything(),
+				expect.anything(),
+			],
+		})
 	})
 
 	it("uses Responses Lite with required reasoning for GPT-6 Astra", async () => {

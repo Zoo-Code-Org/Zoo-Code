@@ -26,6 +26,20 @@ const parseWorkflowStep = (name) => {
 }
 
 describe("platform unit-test workflow", () => {
+	it("builds runtime types before standalone model checks", () => {
+		const buildStep = "- name: Build runtime types for standalone model checks"
+		const modelStep = "- name: Model-check task lifecycle protocols"
+		assert.ok(workflow.indexOf(buildStep) >= 0, "missing runtime-types build step")
+		assert.ok(
+			workflow.indexOf(buildStep) < workflow.indexOf(modelStep),
+			"runtime types must be built before model checks",
+		)
+		assert.match(
+			workflowStep("Build runtime types for standalone model checks"),
+			/run: pnpm --filter @roo-code\/types build/,
+		)
+	})
+
 	it("keeps coverage authoritative on Ubuntu and runs equivalent uninstrumented Windows tests", () => {
 		assert.match(workflow, /name: ubuntu-latest[\s\S]*?collect-coverage: true/)
 		assert.match(workflow, /name: windows-latest[\s\S]*?collect-coverage: false/)

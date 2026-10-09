@@ -92,6 +92,8 @@ jobs:
               run: pnpm check-types
             - name: Validate Code QA workflow
               run: pnpm test:code-qa-ci
+            - name: Build runtime types for standalone model checks
+              run: pnpm --filter @roo-code/types build
             - name: Model-check task lifecycle protocols
               run: pnpm lifecycle:model-check
             - name: Validate MCP OAuth integration

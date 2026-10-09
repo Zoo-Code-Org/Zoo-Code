@@ -17,7 +17,7 @@ import {
 	DEFAULT_LINE_LIMIT,
 	DEFAULT_MAX_LEVELS,
 	MAX_LINE_LENGTH,
-} from "../../core/prompts/tools/native-tools/read_file"
+} from "../../core/tools/file-reading/readFileConstants"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -238,7 +238,11 @@ export function formatWithLineNumbers(lines: LineRecord[], maxLineLength: number
 
 			// Truncate long lines
 			if (content.length > maxLineLength) {
-				content = content.substring(0, maxLineLength - 3) + "..."
+				let end = maxLineLength - 3
+				// Never split a UTF-16 surrogate pair before encoding the model result.
+				const last = content.charCodeAt(end - 1)
+				if (last >= 0xd800 && last <= 0xdbff) end--
+				content = content.substring(0, end) + "..."
 			}
 
 			return `${lineNum} | ${content}`

@@ -1,6 +1,11 @@
 /**
  * Tool parameter type definitions for native protocol
  */
+import type { LegacyReadFileParams } from "./read-files/read-files.js"
+
+// Compatibility exports for existing imports; multiple-file reading lives in read-files.
+export { MAX_READ_FILES, readFilesParamsSchema, isLegacyReadFileParams } from "./read-files/read-files.js"
+export type { ReadFilesParams, LineRange, FileEntry, LegacyReadFileParams } from "./read-files/read-files.js"
 
 /**
  * Read mode for the read_file tool.
@@ -43,61 +48,11 @@ export interface ReadFileParams {
 	indentation?: IndentationParams
 }
 
-// ─── Legacy Format Types (Backward Compatibility) ─────────────────────────────
-
-/**
- * Line range specification for legacy read_file format.
- * Represents a contiguous range of lines [start, end] (1-based, inclusive).
- */
-export interface LineRange {
-	start: number
-	end: number
-}
-
-/**
- * File entry for legacy read_file format.
- * Supports reading multiple disjoint line ranges from a single file.
- */
-export interface FileEntry {
-	/** Path to the file, relative to workspace */
-	path: string
-	/** Optional list of line ranges to read (if omitted, reads entire file) */
-	lineRanges?: LineRange[]
-}
-
-/**
- * Legacy parameters for the read_file tool (pre-refactor format).
- * Supports reading multiple files in a single call with optional line ranges.
- *
- * @deprecated Use ReadFileParams instead. This format is maintained for
- * backward compatibility with existing chat histories.
- */
-export interface LegacyReadFileParams {
-	/** Array of file entries to read */
-	files: FileEntry[]
-	/** Discriminant flag for type narrowing */
-	_legacyFormat: true
-}
-
 /**
  * Union type for read_file tool parameters.
  * Supports both new single-file format and legacy multi-file format.
  */
 export type ReadFileToolParams = ReadFileParams | LegacyReadFileParams
-
-/**
- * Type guard to check if params are in legacy format.
- */
-export function isLegacyReadFileParams(params: ReadFileToolParams): params is LegacyReadFileParams {
-	// `NativeToolCallParser` always tags freshly parsed legacy calls with `_legacyFormat: true`.
-	// The bare-`files` fallback only matters for chat history persisted before that flag was
-	// introduced (commit cc86049f1) and re-hydrated on a later run. Note that params matched via
-	// that fallback narrow to `LegacyReadFileParams` but leave `_legacyFormat` `undefined`, so
-	// callers should branch on the presence of `files`, not on `_legacyFormat === true`.
-	const hasLegacyFlag = "_legacyFormat" in params && params._legacyFormat === true
-	const hasFilesArray = "files" in params && Array.isArray((params as unknown as Record<string, unknown>).files)
-	return hasLegacyFlag || hasFilesArray
-}
 
 export interface Coordinate {
 	x: number

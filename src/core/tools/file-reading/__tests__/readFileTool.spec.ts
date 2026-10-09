@@ -13,19 +13,24 @@
  */
 
 import path from "path"
+import type { Task } from "../../../task/Task"
 
 import { isBinaryFile } from "isbinaryfile"
 
-import { readFileTool, ReadFileTool } from "../ReadFileTool"
-import { formatResponse } from "../../prompts/responses"
+import { ReadFileTool } from "../ReadFileTool"
+import { formatResponse } from "../../../prompts/responses"
 import {
 	validateImageForProcessing,
 	processImageFile,
 	isSupportedImageFormat,
 	ImageMemoryTracker,
-} from "../helpers/imageHelpers"
-import { extractTextFromFile, addLineNumbers, getSupportedBinaryFormats } from "../../../integrations/misc/extract-text"
-import { readWithIndentation, readWithSlice } from "../../../integrations/misc/indentation-reader"
+} from "../../helpers/imageHelpers"
+import {
+	extractTextFromFile,
+	addLineNumbers,
+	getSupportedBinaryFormats,
+} from "../../../../integrations/misc/extract-text"
+import { readWithIndentation, readWithSlice } from "../../../../integrations/misc/indentation-reader"
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -47,7 +52,7 @@ vi.mock("fs/promises", () => ({
 
 vi.mock("isbinaryfile")
 
-vi.mock("../../../integrations/misc/extract-text", () => ({
+vi.mock("../../../../integrations/misc/extract-text", () => ({
 	extractTextFromFile: vi.fn(),
 	addLineNumbers: vi.fn().mockImplementation((text: string, startLine = 1) => {
 		if (!text) return ""
@@ -57,12 +62,12 @@ vi.mock("../../../integrations/misc/extract-text", () => ({
 	getSupportedBinaryFormats: vi.fn(() => [".pdf", ".docx", ".ipynb"]),
 }))
 
-vi.mock("../../../integrations/misc/indentation-reader", () => ({
+vi.mock("../../../../integrations/misc/indentation-reader", () => ({
 	readWithIndentation: vi.fn(),
 	readWithSlice: vi.fn(),
 }))
 
-vi.mock("../helpers/imageHelpers", () => ({
+vi.mock("../../helpers/imageHelpers", () => ({
 	DEFAULT_MAX_IMAGE_FILE_SIZE_MB: 5,
 	DEFAULT_MAX_TOTAL_IMAGE_SIZE_MB: 20,
 	isSupportedImageFormat: vi.fn(),
@@ -76,7 +81,7 @@ vi.mock("../helpers/imageHelpers", () => ({
 	}),
 }))
 
-vi.mock("../../prompts/responses", () => ({
+vi.mock("../../../prompts/responses", () => ({
 	formatResponse: {
 		toolDenied: vi.fn(() => "The user denied this operation."),
 		toolDeniedWithFeedback: vi.fn(
@@ -183,7 +188,9 @@ function createMockCallbacks() {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("ReadFileTool", () => {
+	let readFileTool: ReadFileTool
 	beforeEach(() => {
+		readFileTool = new ReadFileTool()
 		vi.clearAllMocks()
 
 		// Default mock implementations
@@ -1458,6 +1465,25 @@ describe("ReadFileTool", () => {
 	})
 
 	describe("error handling edge cases", () => {
+		it("returns structured range errors and marks the tool turn as failed", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+			mockedReadWithSlice.mockReturnValue({
+				content: "Error: offset 99 is beyond file end (2 lines)",
+				returnedLines: 0,
+				totalLines: 2,
+				wasTruncated: false,
+				includedRanges: [],
+			})
+			// Task lifecycle fields are irrelevant to this reader-boundary double.
+			await readFileTool.execute({ path: "test.ts", offset: 100 }, mockTask as unknown as Task, callbacks)
+			expect(mockTask.didToolFailInCurrentTurn).toBe(true)
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(
+				"File: test.ts\nError: offset 99 is beyond file end (2 lines)",
+			)
+			expect(mockTask.fileContextTracker.trackFileContext).not.toHaveBeenCalled()
+		})
+
 		it("should handle unknown error types (non-Error)", async () => {
 			const mockTask = createMockTask()
 			const callbacks = createMockCallbacks()

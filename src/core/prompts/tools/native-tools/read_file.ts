@@ -1,15 +1,10 @@
 import type OpenAI from "openai"
+import { READ_FILES_TOOL_NAME } from "@roo-code/types"
+import { DEFAULT_LINE_LIMIT, MAX_LINE_LENGTH } from "../../../tools/file-reading/readFileConstants"
+import { createReadFileParameters } from "./file-reading/readFileParameters"
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-/** Default maximum lines to return per file (Codex-inspired predictable limit) */
-export const DEFAULT_LINE_LIMIT = 2000
-
-/** Maximum characters per line before truncation */
-export const MAX_LINE_LENGTH = 2000
-
-/** Default indentation levels to include above anchor (0 = unlimited) */
-export const DEFAULT_MAX_LEVELS = 0
+// Preserve older imports without making runtime readers depend on this tool definition.
+export { DEFAULT_LINE_LIMIT, MAX_LINE_LENGTH, DEFAULT_MAX_LEVELS } from "../../../tools/file-reading/readFileConstants"
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
 
@@ -62,7 +57,9 @@ export function createReadFileTool(options: ReadFileToolOptions = {}): OpenAI.Ch
 
 	// Build description based on capabilities
 	const descriptionIntro =
-		"Read a file and return its contents with line numbers for diffing or discussion. IMPORTANT: This tool reads exactly one file per call. If you need multiple files, issue multiple parallel read_file calls. NOTE: Line-number prefixes (e.g. `137 | `) are for reference only and do NOT exist in the raw file. Do NOT copy them into `old_string`, SEARCH blocks, or other edit inputs."
+		"Read a file and return its contents with line numbers for diffing or discussion. This tool reads exactly one file per call. " +
+		`Use ${READ_FILES_TOOL_NAME} for already-known independent text/document reads in one bounded call; keep read_file for dependent exploration and images. ` +
+		"NOTE: Line-number prefixes (e.g. `137 | `) are for reference only and do NOT exist in the raw file. Do NOT copy them into `old_string`, SEARCH blocks, or other edit inputs."
 
 	const modeDescription =
 		` Supports two modes: 'slice' (default) reads lines sequentially with offset/limit; 'indentation' extracts complete semantic code blocks around an anchor line based on indentation hierarchy.` +
@@ -81,74 +78,13 @@ export function createReadFileTool(options: ReadFileToolOptions = {}): OpenAI.Ch
 		` Example: { path: 'src/app.ts' }` +
 		` Example (indentation mode): { path: 'src/app.ts', mode: 'indentation', indentation: { anchor_line: 42 } }`
 
-	const indentationProperties: Record<string, unknown> = {
-		anchor_line: {
-			type: "integer",
-			description:
-				"1-based line number to anchor the extraction. REQUIRED for meaningful indentation mode results. The extractor finds the semantic block (function, method, class) containing this line and returns it completely. Without anchor_line, indentation mode defaults to line 1 and returns only imports/header content. Obtain anchor_line from: search results, error stack traces, definition lookups, codebase_search results, or condensed file summaries (e.g., '14--28 | export class UserService' means anchor_line=14).",
-		},
-		max_levels: {
-			type: "integer",
-			description: `Maximum indentation levels to include above the anchor (indentation mode, 0 = unlimited (default)). Higher values include more parent context.`,
-		},
-		include_siblings: {
-			type: "boolean",
-			description:
-				"Include sibling blocks at the same indentation level as the anchor block (indentation mode, default: false). Useful for seeing related methods in a class.",
-		},
-		include_header: {
-			type: "boolean",
-			description:
-				"Include file header content (imports, module-level comments) at the top of output (indentation mode, default: true).",
-		},
-		max_lines: {
-			type: "integer",
-			description:
-				"Hard cap on lines returned for indentation mode. Acts as a separate limit from the top-level 'limit' parameter.",
-		},
-	}
-
-	const properties: Record<string, unknown> = {
-		path: {
-			type: "string",
-			description: "Path to the file to read, relative to the workspace",
-		},
-		mode: {
-			type: "string",
-			enum: ["slice", "indentation"],
-			description:
-				"Reading mode. 'slice' (default): read lines sequentially with offset/limit - use for general file exploration or when you don't have a target line number (may truncate code mid-function). 'indentation': extract complete semantic code blocks containing anchor_line - PREFERRED when you have a line number because it guarantees complete, valid code blocks. WARNING: Do not use indentation mode without specifying indentation.anchor_line, or you will only get header content.",
-		},
-		offset: {
-			type: "integer",
-			description: "1-based line offset to start reading from (slice mode, default: 1)",
-		},
-		limit: {
-			type: "integer",
-			description: `Maximum number of lines to return (slice mode, default: ${DEFAULT_LINE_LIMIT})`,
-		},
-		indentation: {
-			type: "object",
-			description:
-				"Indentation mode options. Only used when mode='indentation'. You MUST specify anchor_line for useful results - it determines which code block to extract.",
-			properties: indentationProperties,
-			required: [],
-			additionalProperties: false,
-		},
-	}
-
 	return {
 		type: "function",
 		function: {
 			name: "read_file",
 			description,
 			strict: true,
-			parameters: {
-				type: "object",
-				properties,
-				required: ["path"],
-				additionalProperties: false,
-			},
+			parameters: createReadFileParameters(),
 		},
 	} satisfies OpenAI.Chat.ChatCompletionTool
 }

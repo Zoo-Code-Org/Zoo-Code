@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { READ_FILES_TOOL_NAME } from "./read-files/read-files-tool-name.js"
 
 /**
  * ToolGroup
@@ -24,6 +25,7 @@ export type ToolGroup = z.infer<typeof toolGroupsSchema>
 export const toolNames = [
 	"execute_command",
 	"read_file",
+	READ_FILES_TOOL_NAME,
 	"read_command_output",
 	"write_to_file",
 	"apply_diff",

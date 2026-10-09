@@ -1,4 +1,5 @@
 import type OpenAI from "openai"
+import { READ_FILES_TOOL_NAME } from "@roo-code/types"
 import { createReadFileTool } from "../read_file"
 
 // Helper type to access function tools
@@ -9,12 +10,12 @@ const getFunctionDef = (tool: OpenAI.Chat.ChatCompletionTool) => (tool as Functi
 
 describe("createReadFileTool", () => {
 	describe("single-file-per-call documentation", () => {
-		it("should indicate single-file-per-call and suggest parallel tool calls", () => {
+		it("should retain single-file reading and suggest bounded batches for independent reads", () => {
 			const tool = createReadFileTool()
 			const description = getFunctionDef(tool).description
 
 			expect(description).toContain("exactly one file per call")
-			expect(description).toContain("multiple parallel read_file calls")
+			expect(description).toContain(`Use ${READ_FILES_TOOL_NAME}`)
 		})
 	})
 

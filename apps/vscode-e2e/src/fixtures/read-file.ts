@@ -1,4 +1,5 @@
 import { LLMock } from "@copilotkit/aimock"
+import { READ_FILES_TOOL_NAME } from "@roo-code/types"
 
 import {
 	isToolResultExpectation,
@@ -15,6 +16,51 @@ type ReadFileResultFixture = {
 }
 
 export function addReadFileResultFixtures(mock: InstanceType<typeof LLMock>) {
+	const batchCallId = "call_native_read_files_batch_001"
+	mock.addFixture({
+		match: { userMessage: "NATIVE_READ_FILES_BATCH_SMOKE" },
+		response: {
+			toolCalls: [
+				{
+					name: READ_FILES_TOOL_NAME,
+					id: batchCallId,
+					arguments: JSON.stringify({
+						entries: [
+							{ path: "batch-read-slice.txt", offset: 2, limit: 1 },
+							{
+								path: "batch-read-block.ts",
+								mode: "indentation",
+								indentation: { anchor_line: 2, include_header: false },
+							},
+						],
+					}),
+				},
+			],
+		},
+	})
+	mock.addFixture({
+		match: {
+			predicate: (req) =>
+				toolResultContains(req, batchCallId, [
+					'Entry 1: "batch-read-slice.txt"',
+					'Entry 2: "batch-read-block.ts"',
+					"2 | second",
+					"return 'hello'",
+				]),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					id: "call_native_read_files_batch_002",
+					arguments: JSON.stringify({
+						result: "NATIVE_READ_FILES_BATCH_OK: second and hello were returned in one batch result.",
+					}),
+				},
+			],
+		},
+	})
+
 	const fixtures: ReadFileResultFixture[] = [
 		{
 			toolCallId: "call_read_file_simple_001",
