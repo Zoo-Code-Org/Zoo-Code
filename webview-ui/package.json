@@ -50,7 +50,7 @@
 		"fzf": "^0.5.2",
 		"hast-util-to-jsx-runtime": "^2.3.6",
 		"i18next": "^25.0.0",
-		"katex": "^0.16.11",
+		"katex": "^0.18.0",
 		"lru-cache": "^11.1.0",
 		"lucide-react": "^1.18.0",
 		"mermaid": "^11.4.1",
