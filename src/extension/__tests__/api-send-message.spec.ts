@@ -4,6 +4,7 @@ import * as vscode from "vscode"
 import { API } from "../api"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 import { TaskCommandName } from "@roo-code/types"
+import { makeClineProviderFactory } from "../../test-utils/provider"
 
 vi.mock("vscode")
 vi.mock("../../core/webview/ClineProvider")
@@ -35,7 +36,7 @@ describe("API - SendMessage Command", () => {
 		mockLog = vi.fn<(...args: any[]) => void>()
 
 		// Create API instance with logging enabled for testing
-		api = new API(mockOutputChannel, mockProvider, undefined, true)
+		api = new API(mockOutputChannel, mockProvider, makeClineProviderFactory(), undefined, true)
 		// Override the log method to use our mock
 		;(api as any).log = mockLog
 	})
