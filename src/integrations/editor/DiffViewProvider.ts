@@ -532,6 +532,12 @@ export class DiffViewProvider {
 		const updatedDocument = this.activeDiffEditor.document
 		const editedContent = updatedDocument.getText()
 
+		// The teardown generation this save started in. A cancellation can reach teardown while
+		// the guarded publish is still queued, and then own the session; a rejected publish that ran
+		// a discard pass of its own afterwards would tear the same session down a second time, over
+		// buffers, tabs and preview state that the cancellation is (or already was) finalizing.
+		const teardownPassesAtSaveStart = this.teardownPasses
+
 		// S4b follow-up (#44 / epic #1375): the accepted diff is a full-file
 		// replacement, so publish it through the guarded-write API instead of
 		// saving the document raw. open() observed the on-disk version the
@@ -621,7 +627,7 @@ export class DiffViewProvider {
 					this.disposeActiveEditorListener()
 					this.cancelDeferredScroll()
 
-					const ownedTeardown = await this.runTeardown(async () => {
+					const ownedTeardown = await this.runTeardownUnlessCancelled(teardownPassesAtSaveStart, async () => {
 						let discardSucceeded = !updatedDocument.isDirty
 						if (updatedDocument.isDirty) {
 							discardSucceeded = await this.revertDocument(updatedDocument)
@@ -1062,6 +1068,31 @@ export class DiffViewProvider {
 	 * both would edit the document and close the same tabs. The second caller awaits the
 	 * cleanup already in flight instead of repeating it.
 	 */
+	/**
+	 * Run a teardown pass for a save that started in the given generation, unless a cancellation
+	 * reached teardown in the meantime. A cancellation that started while the guarded publish was
+	 * queued owns the session: its pass may still be running, in which case this caller joins it,
+	 * or it may already have finished and closed the session, in which case there is nothing left
+	 * for this caller to do. Starting a pass of its own would repeat the document revert, the tab
+	 * closing and the preview restore on a session that is not this save's to clean up.
+	 */
+	private async runTeardownUnlessCancelled(
+		teardownPassesAtStart: number,
+		cleanup: () => Promise<void>,
+	): Promise<boolean> {
+		if (this.teardownInFlight !== undefined) {
+			// A pass is running: it owns the session, and this caller only waits for it - the same
+			// contract runTeardown gives a caller that arrives during a pass.
+			await this.teardownInFlight
+			return false
+		}
+		if (this.teardownPasses !== teardownPassesAtStart) {
+			// A pass this save did not start has already run over the session and finished.
+			return false
+		}
+		return await this.runTeardown(cleanup)
+	}
+
 	private async runTeardown(cleanup: () => Promise<void>): Promise<boolean> {
 		if (this.teardownInFlight !== undefined) {
 			// Record the cancellation before waiting: the pass that owns the session has to know a
