@@ -1017,6 +1017,32 @@ describe("writeToFileTool", () => {
 				consoleErrorSpy.mockRestore()
 			}
 		})
+
+		it("releases the per-task stream state when provider state rejects during a partial delta", async () => {
+			// handlePartial() registers the entry and the TaskAborted listener, then awaits
+			// provider.getState(). A rejection there never reaches the diff view or execute(), so
+			// nothing else releases what the registration acquired: the entry and its listener would
+			// survive for the task's lifetime. The error still has to surface (BaseTool reports it).
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockRejectedValue(new Error("provider state unavailable")),
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			expect(mockHandleError).toHaveBeenCalledWith(
+				"handling partial write_to_file",
+				expect.objectContaining({ message: "provider state unavailable" }),
+			)
+		})
 	})
 
 	describe("path stabilization predicate", () => {

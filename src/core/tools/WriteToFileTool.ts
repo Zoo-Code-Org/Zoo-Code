@@ -564,58 +564,74 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			return
 		}
 
-		const provider = task.providerRef.deref()
-		const state = await provider?.getState()
+		// Hoisted out of the guarded setup: the diff-view catch further down finalizes the
+		// same partial ask, so the message has to stay in scope once the try block ends.
+		let partialMessage: string | undefined
 
-		// Cancelled while provider state was in flight: the teardown already
-		// released this task's stream state.
-		if (!this.isPartialStreamStillLive(task, partialStreamState)) {
-			return
-		}
-		const isPreventFocusDisruptionEnabled = experiments.isEnabled(
-			state?.experiments ?? {},
-			EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION,
-		)
+		try {
+			// Everything from here to the diff view is setup that can fail before
+			// execute() ever runs; the catch below owns the teardown for that window.
+			const provider = task.providerRef.deref()
+			const state = await provider?.getState()
 
-		if (isPreventFocusDisruptionEnabled) {
-			// The preview is suppressed for this stream: release the entry registered above so the
-			// abort listener and any failure mark do not outlive a delta that never shows a diff
-			// view and never reaches execute()'s teardown.
-			super.resetPartialState()
-			this.resetTaskPartialState(task)
-			return
-		}
-
-		// relPath is guaranteed non-null after hasPathStabilized
-		let fileExists: boolean
-		const absolutePath = path.resolve(task.cwd, relPath!)
-
-		if (task.diffViewProvider.editType !== undefined) {
-			fileExists = task.diffViewProvider.editType === "modify"
-		} else {
-			fileExists = await fileExistsAtPath(absolutePath)
+			// Cancelled while provider state was in flight: the teardown already
+			// released this task's stream state.
 			if (!this.isPartialStreamStillLive(task, partialStreamState)) {
 				return
 			}
-			task.diffViewProvider.editType = fileExists ? "modify" : "create"
-		}
+			const isPreventFocusDisruptionEnabled = experiments.isEnabled(
+				state?.experiments ?? {},
+				EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION,
+			)
 
-		const isWriteProtected = task.rooProtectedController?.isWriteProtected(relPath!) || false
-		const isOutsideWorkspace = isPathOutsideWorkspace(absolutePath)
+			if (isPreventFocusDisruptionEnabled) {
+				// The preview is suppressed for this stream: release the entry registered above so the
+				// abort listener and any failure mark do not outlive a delta that never shows a diff
+				// view and never reaches execute()'s teardown.
+				super.resetPartialState()
+				this.resetTaskPartialState(task)
+				return
+			}
 
-		const sharedMessageProps: ClineSayTool = {
-			tool: fileExists ? "editedExistingFile" : "newFileCreated",
-			path: getReadablePath(task.cwd, relPath!),
-			content: newContent || "",
-			isOutsideWorkspace,
-			isProtected: isWriteProtected,
-		}
+			// relPath is guaranteed non-null after hasPathStabilized
+			let fileExists: boolean
+			const absolutePath = path.resolve(task.cwd, relPath!)
 
-		const partialMessage = JSON.stringify(sharedMessageProps)
-		await task.ask("tool", partialMessage, block.partial).catch(() => {})
+			if (task.diffViewProvider.editType !== undefined) {
+				fileExists = task.diffViewProvider.editType === "modify"
+			} else {
+				fileExists = await fileExistsAtPath(absolutePath)
+				if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+					return
+				}
+				task.diffViewProvider.editType = fileExists ? "modify" : "create"
+			}
 
-		if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+			const isWriteProtected = task.rooProtectedController?.isWriteProtected(relPath!) || false
+			const isOutsideWorkspace = isPathOutsideWorkspace(absolutePath)
+
+			const sharedMessageProps: ClineSayTool = {
+				tool: fileExists ? "editedExistingFile" : "newFileCreated",
+				path: getReadablePath(task.cwd, relPath!),
+				content: newContent || "",
+				isOutsideWorkspace,
+				isProtected: isWriteProtected,
+			}
+
+				partialMessage = JSON.stringify(sharedMessageProps)
+			await task.ask("tool", partialMessage, block.partial).catch(() => {})
+
+			if (!this.isPartialStreamStillLive(task, partialStreamState)) {
 			return
+		}
+
+		} catch (error) {
+			// Unexpected failure in the pre-streaming setup (provider state, the filesystem probe, the
+			// partial ask): this delta never reaches the diff view or execute(), so nothing else
+			// releases what the registration above acquired. Drop this task's entry and its
+			// TaskAborted listener, then rethrow - BaseTool.handle() still reports the error once.
+			this.resetTaskPartialState(task)
+			throw error
 		}
 
 		if (newContent) {
@@ -664,7 +680,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				// onParameterParseFailure() can report this failure to the user.
 				partialStreamState.streamFailed = true
 				partialStreamState.streamError = error instanceof Error ? error : new Error(String(error))
-				await this.finalizePartialToolAskAfterFailure(task, partialMessage)
+				// The ask only exists once the setup above assigned its message; before that there
+				// is nothing to finalize.
+				if (partialMessage !== undefined) {
+					await this.finalizePartialToolAskAfterFailure(task, partialMessage)
+				}
 				// The write was never approved: restore the document so a user save cannot
 				// persist the failed streamed content (reset() alone leaves it dirty), and
 				// surface the hazard if that restore itself failed. The stream error is

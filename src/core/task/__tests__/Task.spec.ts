@@ -6809,6 +6809,40 @@ describe("Cline", () => {
 			expect(outcome).toBe("disposed")
 		})
 
+		it("runs the dispose-time metadata retry when the api-config name is already known even if init never settles", async () => {
+			// persistTaskMetadata() only awaits taskApiConfigReady while _taskApiConfigName is still
+			// undefined. Once the name is known (a handoff, a resumed history item, or an explicit
+			// setTaskApiConfigName), the retry cannot block teardown - so skipping it because the
+			// promise has not settled leaves the history entry stale for a task that was perfectly
+			// able to repair it.
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
+			fsReal.mkdirSync(taskDir, { recursive: true })
+			const historySpy = vi.spyOn(mockProvider, "updateTaskHistory").mockResolvedValue([])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			// Bracket access for the private fields: the pathological combination - a name that is
+			// already resolved while the initialization promise never settles - is not reachable
+			// through the public API.
+			task["_taskApiConfigName"] = "my-profile"
+			task["taskApiConfigReady"] = new Promise<void>(() => {})
+			task["taskApiConfigReadySettled"] = false
+			task["pendingTaskMetadataRepair"] = true
+
+			const outcome = await Promise.race([
+				task.dispose().then(() => "disposed"),
+				new Promise<string>((resolve) => setTimeout(() => resolve("timed out"), 2000)),
+			])
+
+			expect(outcome).toBe("disposed")
+			expect(historySpy).toHaveBeenCalledTimes(1)
+			historySpy.mockRestore()
+		})
+
 		it("finalizePartialToolAsk skips the webview update when the message write itself fails", async () => {
 			// Complements the later-stage-failure test above by failing the first save
 			// stage: with the real task directory removed, safeWriteJson's fs.access

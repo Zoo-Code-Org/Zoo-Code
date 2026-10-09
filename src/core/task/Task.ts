@@ -380,11 +380,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 */
 	private taskApiConfigReady: Promise<void>
 	/**
-	 * Whether taskApiConfigReady has settled. The dispose-time metadata retry needs this
-	 * rather than a check on _taskApiConfigName: a legacy history item legitimately has no
-	 * stored api config while its initialization completed, and that task still needs the
-	 * retry. Only a promise that never settles may suppress it, because
-	 * persistTaskMetadata() awaits it and teardown must not block on it.
+	 * Whether taskApiConfigReady has settled. The dispose-time metadata retry needs it only while
+	 * _taskApiConfigName is still undefined: persistTaskMetadata() awaits the promise in that case,
+	 * and teardown must not block on it. A legacy history item legitimately has no stored api
+	 * config while its initialization completed, and that task still needs the retry; once the
+	 * name IS known, persistTaskMetadata() skips the await, so an unsettled promise must not
+	 * suppress the repair either.
 	 */
 	private taskApiConfigReadySettled = false
 
@@ -3585,9 +3586,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// right after void dispose(), an abandoned stream can reach its finally while this await is
 		// in flight and leave the revert decision below false, and direct dispose() callers rely on
 		// the abort flag being set synchronously. Skipped while taskApiConfigReady has not settled -
-		// persistTaskMetadata() awaits it and teardown must not block on it. It reports its own
-		// failure and returns false, so there is nothing to catch here.
-		if (this.pendingTaskMetadataRepair && this.taskApiConfigReadySettled) {
+		// the abort flag being set synchronously. Skipped only when the retry could block: while
+		// taskApiConfigReady has not settled AND _taskApiConfigName is still undefined,
+		// persistTaskMetadata() awaits that promise and teardown must not wait on it. Once the name
+		// is known the await is skipped inside persistTaskMetadata(), so the repair is safe to run
+		// and skipping it would leave the history entry stale for a task that could repair it.
+		if (this.pendingTaskMetadataRepair && (this.taskApiConfigReadySettled || this._taskApiConfigName !== undefined)) {
 			await this.persistTaskMetadata()
 		}
 
