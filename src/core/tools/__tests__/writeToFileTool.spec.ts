@@ -1394,6 +1394,22 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
 		})
 
+		it("releases the per-task stream state when prevent-focus-disruption skips the partial preview", async () => {
+			// Delta 1 only pins the path, so the entry is still live afterwards (the stream is in
+			// flight). Delta 2 reaches the experiment check and returns without ever showing a
+			// preview: nothing else would release the entry or detach the TaskAborted listener.
+			enablePreventFocusDisruption()
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.ask).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+		})
+
 		it("clears the provider state when prevent-focus approval is denied", async () => {
 			// The prevent-focus branch stamps editType/originalContent on the provider before
 			// asking. On denial nothing was approved and no diff document was opened, so the
