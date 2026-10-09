@@ -889,7 +889,7 @@ export class DiffViewProvider {
 		this.disposeActiveEditorListener()
 		this.cancelDeferredScroll()
 
-		await this.runTeardown(async () => {
+		const ownedTeardown = await this.runTeardown(async () => {
 			if (!fileExists) {
 				if (updatedDocument.isDirty) {
 					await updatedDocument.save()
@@ -939,6 +939,14 @@ export class DiffViewProvider {
 				)
 			}
 		})
+
+		if (!ownedTeardown) {
+			// Another teardown started first and already ran the pass over this session's buffers,
+			// tabs and preview state. Restoring preview tabs or resetting here again would be that
+			// same work a second time, and the reset would clear state whose closing this provider
+			// does not own. The pass that started the teardown finalizes the session.
+			return
+		}
 		// Restore any preview tabs the diff evicted, reconstructing the user's
 		// prior not-yet-edited tab state.
 		await this.restorePreviewTabs()
@@ -1030,10 +1038,12 @@ export class DiffViewProvider {
 	 * both would edit the document and close the same tabs. The second caller awaits the
 	 * cleanup already in flight instead of repeating it.
 	 */
-	private async runTeardown(cleanup: () => Promise<void>): Promise<void> {
+	private async runTeardown(cleanup: () => Promise<void>): Promise<boolean> {
 		if (this.teardownInFlight !== undefined) {
 			await this.teardownInFlight
-			return
+			// The pass belongs to whoever started it; that caller also owns the finalization
+			// steps (preview tabs, reset), so the caller is told it did not own this pass.
+			return false
 		}
 		const inFlight = cleanup()
 		this.teardownPasses++
@@ -1043,6 +1053,7 @@ export class DiffViewProvider {
 		} finally {
 			this.teardownInFlight = undefined
 		}
+		return true
 	}
 
 	// Stop tracking user activation of the target file. Called before any
