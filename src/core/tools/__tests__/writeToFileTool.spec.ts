@@ -620,7 +620,8 @@ describe("writeToFileTool", () => {
 				type: "tool_use",
 				name: "write_to_file",
 				params: {},
-				// The fixture's whole point is a nativeArgs object whose content never arrived, which
+				// No nativeArgs at all: that is what drives BaseTool's parse-failure path, where
+				// execute() and all of its teardown are skipped.
 			} as ToolUse<"write_to_file">
 			await writeToFileTool.handle(mockCline, block, {
 				askApproval: mockAskApproval,
@@ -895,6 +896,127 @@ describe("writeToFileTool", () => {
 			)?.[1]
 			expect(abortListener).toBeInstanceOf(Function)
 			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+		})
+
+		it("stops the partial delta when the task aborts while directory creation is in flight", async () => {
+			// handlePartial() awaits createDirectoriesForFile() for a new file, then asks and streams
+			// the diff view. An abandonment that lands during that await has already released this
+			// task's stream state; without a re-check after the await the delta keeps going and puts a
+			// partial tool ask and a diff-view update on screen for a task that no longer exists.
+			let abortCleanup: (() => void) | undefined
+			mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+				if (event === RooCodeEventName.TaskAborted) {
+					abortCleanup = listener
+				}
+				return mockCline
+			})
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			let releaseGate: (() => void) | undefined
+			const gate = new Promise<void>((resolve) => {
+				releaseGate = resolve
+			})
+			mockedCreateDirectoriesForFile.mockImplementationOnce(() => gate.then(() => []))
+			const streaming = executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await new Promise<void>((resolve) => setImmediate(resolve))
+			expect(mockedCreateDirectoriesForFile).toHaveBeenCalledTimes(1)
+
+			abortCleanup?.()
+			releaseGate?.()
+			await streaming
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.ask).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+		})
+
+		it("releases the per-task stream state when provider state rejects during a partial delta", async () => {
+			// handlePartial() registers the entry and the TaskAborted listener, then awaits
+			// provider.getState(). A rejection there never reaches the diff view or execute(), so
+			// nothing else releases what the registration acquired. The error still has to surface,
+			// so the boundary rethrows and BaseTool.handle() reports it once.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockRejectedValue(new Error("provider state unavailable")),
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			expect(mockHandleError).toHaveBeenCalledWith(
+				"handling partial write_to_file",
+				expect.objectContaining({ message: "provider state unavailable" }),
+			)
+		})
+
+		it("reports the captured stream error once when the finalized block fails to parse", async () => {
+			// A streaming delta already hit a fatal filesystem error; the finalized block then fails
+			// to parse. The stream error is what the user can act on, so it takes the report slot and
+			// the incidental parse error is suppressed - reporting both would show two bubbles for one
+			// failure, reporting only the parse error would drop the actionable one.
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+			const streamError = new Error("EROFS: read-only file system, open '/ro/test.py'")
+			;[...writeToFileTool["taskPartialStreamState"].values()][0].streamError = streamError
+
+			const block = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: {},
+				// No nativeArgs at all: that is what drives BaseTool's parse-failure path.
+				partial: false,
+			} as ToolUse<"write_to_file">
+			await writeToFileTool.handle(mockCline, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockHandleError).toHaveBeenCalledTimes(1)
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", streamError)
+			expect(mockHandleError).not.toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("reports a failed rollback as the cleanup failure when the finalized block fails to parse", async () => {
+			// The rollback is what keeps unapproved streamed content off disk. When it fails, the
+			// debris is the more actionable failure: it takes the report slot with the stream error
+			// kept behind it as the cause, instead of being logged and continued past.
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+			const streamError = new Error("EACCES: permission denied, open '/ro/test.py'")
+			;[...writeToFileTool["taskPartialStreamState"].values()][0].streamError = streamError
+			mockCline.diffViewProvider.revertChanges.mockRejectedValue(
+				new Error("EACCES: could not remove the directory created for this write"),
+			)
+
+			const block = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: {},
+				partial: false,
+			} as ToolUse<"write_to_file">
+			await writeToFileTool.handle(mockCline, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockHandleError).toHaveBeenCalledTimes(1)
+			expect(mockHandleError).toHaveBeenCalledWith(
+				"writing file",
+				expect.objectContaining({ message: expect.stringContaining("rollback failed") }),
+			)
+			expect(mockHandleError.mock.calls[0]?.[1]).toHaveProperty("cause", streamError)
+			expect(mockHandleError).not.toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
 		})
 	})
 
