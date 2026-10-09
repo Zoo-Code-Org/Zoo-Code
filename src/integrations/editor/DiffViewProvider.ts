@@ -44,6 +44,12 @@ export class DiffViewProvider {
 	private documentWasPinned = false
 	private relPath?: string
 	private teardownInFlight: Promise<void> | undefined
+	/**
+	 * A cancellation (revertChanges) that arrived while another pass already owned this
+	 * session. The owning pass reads it when its cleanup returns, so a save does not run
+	 * diagnostics or read provider state that a cancellation is closing underneath it.
+	 */
+	private teardownCancellationRequested = false
 	// Counts the teardown passes this provider has actually run; a caller that awaited an
 	// in-flight pass does not count. A save uses it to tell its own post-publish cleanup apart
 	// from a teardown a cancellation or disposal started underneath it: once any teardown has
@@ -719,6 +725,15 @@ export class DiffViewProvider {
 			await this.restorePreviewTabs()
 		})
 
+		if (this.teardownCancellationRequested) {
+			// A cancellation or disposal reached revertChanges() while this save owned the post-publish
+			// pass. The publish is on disk, but the session is closing: the waiting caller finalizes
+			// it, and diagnostics or the EOL/patch tail below read provider state (newContent,
+			// relPath) that the finalization clears. Report no completed save instead.
+			this.teardownCancellationRequested = false
+			return { newProblemsMessage: undefined, userEdits: undefined, finalContent: undefined }
+		}
+
 
 		// Getting diagnostics before and after the file edit is a better approach than
 		// automatically tracking problems in real-time. This method ensures we only
@@ -933,9 +948,15 @@ export class DiffViewProvider {
 
 		if (!ownedTeardown) {
 			// Another teardown started first and already ran the pass over this session's buffers,
-			// tabs and preview state. Restoring preview tabs or resetting here again would be that
-			// same work a second time, and the reset would clear state whose closing this provider
-			// does not own. The pass that started the teardown finalizes the session.
+			// tabs and preview state, so restoring the preview tabs here would be that same work a
+			// second time. Finalizing the session is still this caller's responsibility when the
+			// owning pass is one that never resets - a save's post-publish cleanup, or a rejected
+			// save's discard cleanup, whose reset belongs to a tool caller that a cancellation or
+			// disposal may never let come back. The owning pass has returned, so the session is
+			// closed once and only once.
+			if (this.isEditing || this.activeDiffEditor !== undefined) {
+				await this.reset()
+			}
 			return
 		}
 		// Restore any preview tabs the diff evicted, reconstructing the user's
@@ -1031,11 +1052,18 @@ export class DiffViewProvider {
 	 */
 	private async runTeardown(cleanup: () => Promise<void>): Promise<boolean> {
 		if (this.teardownInFlight !== undefined) {
+			// Record the cancellation before waiting: the pass that owns the session has to know a
+			// cancellation is waiting on it, and the waiting caller must not leave the session
+			// mid-edit if that pass turns out not to finalize it.
+			this.teardownCancellationRequested = true
 			await this.teardownInFlight
 			// The pass belongs to whoever started it; that caller also owns the finalization
 			// steps (preview tabs, reset), so the caller is told it did not own this pass.
 			return false
 		}
+		// A pass starts clean: a cancellation recorded for an earlier pass must not leak into
+		// this one.
+		this.teardownCancellationRequested = false
 		const inFlight = cleanup()
 		this.teardownPasses++
 		this.teardownInFlight = inFlight
