@@ -3433,9 +3433,7 @@ describe("DiffViewProvider", () => {
 			expect(applyEdit).not.toHaveBeenCalled()
 		})
 
-		// A rejected publish closes its own diff view and rethrows, so the preview tabs the diff
-		// evicted are restored by that pass - and only by that pass.
-// The pre-merge row this covers: a cancellation or disposal that lands while the save owns
+		// The pre-merge row this covers: a cancellation or disposal that lands while the save owns
 		// its post-publish teardown used to leave the provider mid-edit. The save's pass closes the
 		// views and restores the tabs but never resets, the waiting revertChanges() returned without
 		// finalizing, and Task.disposeOnce() only awaits the reversion promise - so isEditing and the
@@ -3567,6 +3565,8 @@ describe("DiffViewProvider", () => {
 			expect(applyEdit).not.toHaveBeenCalled()
 		})
 
+		// A rejected publish closes its own diff view and rethrows, so the preview tabs the diff
+		// evicted are restored by that pass - and only by that pass.
 		it("saveChanges() restores preview tabs when a rejected publish tears the session down", async () => {
 			const restorePreviewTabs = vi.fn().mockResolvedValue(undefined)
 			const closeOwnDiffView = vi.fn().mockResolvedValue(undefined)
