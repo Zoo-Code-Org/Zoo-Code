@@ -510,6 +510,99 @@ describe("writeToFileTool", () => {
 			expect(mockCline.ask).toHaveBeenCalledTimes(2)
 		})
 
+		it("stops before the filesystem probe when the state is released while provider state is in flight", async () => {
+			// handlePartial() awaits provider.getState() before any side effect. A cancellation
+			// during that await runs the TaskAborted teardown; the delta already in flight must
+			// stop there instead of probing, asking and opening a diff view for a dead task.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.diffViewProvider.open.mockClear()
+			// Clear the cached editType so the filesystem probe branch is the one that would run:
+			// the check after provider.getState() is the only thing that can keep it from running.
+			mockCline.diffViewProvider.editType = undefined
+			mockedFileExistsAtPath.mockClear()
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn(async () => {
+					writeToFileTool.clearTaskState(mockCline)
+					return {}
+				}),
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			// The probe is the first side effect after getState(): the check above is what keeps it
+			// from running for a cancelled task.
+			expect(mockedFileExistsAtPath).not.toHaveBeenCalled()
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("stops before the partial ask when the state is released during the filesystem probe", async () => {
+			// Same teardown, one await later. The first delta pins editType, so clear it to take
+			// the fileExistsAtPath branch again and abort inside it.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.editType = undefined
+			// mockImplementationOnce: executeWriteFileTool re-arms the default resolved value on
+			// every call, so a plain mockImplementation would be overwritten.
+			mockedFileExistsAtPath.mockImplementationOnce(async () => {
+				writeToFileTool.clearTaskState(mockCline)
+				return false
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("stops before touching the diff view when the stream state is released during an in-flight ask", async () => {
+			// A cancellation while task.ask() is in flight runs the TaskAborted teardown. The delta
+			// that was already in flight must not then re-open the diff view for a task the user
+			// cancelled - that resurrects the state the teardown just released.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.update.mockClear()
+			mockCline.ask.mockImplementation(async () => {
+				writeToFileTool.clearTaskState(mockCline)
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("stops before updating the diff view when the task is cancelled while open() is in flight", async () => {
+			// open() is the first provider await after the partial ask. If TaskAborted lands while
+			// it is in flight, the teardown has already released this task's stream state (and may
+			// have reverted or closed this very view), so the delta that is already in flight must
+			// not stream partial content into a cancelled task's view.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(1)
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.update.mockClear()
+			mockCline.diffViewProvider.open.mockImplementationOnce(async () => {
+				writeToFileTool.clearTaskState(mockCline)
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
 		it("does not treat a changed path between deltas as stabilized", async () => {
 			// Delta 1 streams "alpha.txt"; delta 2 streams "beta.txt" for the same task. The path changed
 			// between deltas, so it must not count as stabilized and no partial `tool` ask may be issued for
@@ -774,6 +867,41 @@ describe("writeToFileTool", () => {
 			})
 
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+		})
+
+		it("releases the per-task stream state when content is missing", async () => {
+			// The missing-content return sits before execute()'s guarded scope, so it needs its own
+			// release. The state is seeded first so the assertion proves a release happened rather
+			// than an empty map.
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			const toolUse = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: { path: testFilePath },
+				nativeArgs: { path: testFilePath, content: undefined },
+				// The fixture's point is a nativeArgs object whose content never arrived, which the
+				// typed params cannot express - hence the double assertion.
+				partial: false,
+			} as unknown as ToolUse<"write_to_file">
+			const pushToolResult = vi.fn()
+			await writeToFileTool.handle(mockCline, toolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult,
+			})
+
+			expect(mockCline.sayAndCreateMissingParamError).toHaveBeenCalledWith("write_to_file", "content")
+			expect(pushToolResult).toHaveBeenCalledWith("Missing param error")
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			// A stream may have opened a diff view for this call; the early return still closes it.
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 		})
 	})
