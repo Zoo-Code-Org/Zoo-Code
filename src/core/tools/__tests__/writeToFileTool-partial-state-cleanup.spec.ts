@@ -49,6 +49,10 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 		const task = buildTask("cleanup-task", "inst-1")
 		const state = writeToFileTool["getTaskPartialStreamState"](task)
 		expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+		// The registration side of the pairing, asserted BEFORE the cleanup runs: the off()
+		// assertion below only proves the right listener was deregistered if this one pins which
+		// listener was registered in the first place.
+		expect((task as unknown as CleanupTask).once).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, state.abortCleanup)
 
 		writeToFileTool.clearTaskState(task)
 

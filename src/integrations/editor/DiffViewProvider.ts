@@ -567,13 +567,18 @@ export class DiffViewProvider {
 			if (this.activeDiffEditor) {
 				const updatedDocument = this.activeDiffEditor.document
 				if (updatedDocument.isDirty) {
-					await updatedDocument.save()
+					// The buffer holds the streamed content of a write that was never approved. Saving
+					// it here persisted exactly what this rollback is undoing - local history, file
+					// watchers, and, if the delete below fails, the content itself. Discard the buffer
+					// (force-close the tab) instead; the file goes away a moment later anyway.
+					await this.discardFileTab(absolutePath)
+					await this.closeAllDiffViews()
+				} else {
+					await this.closeAllDiffViews()
+					// The file was newly created for this edit; close its transiently
+					// opened tab before deleting it from disk.
+					await this.closeFileTab(absolutePath)
 				}
-
-				await this.closeAllDiffViews()
-				// The file was newly created for this edit; close its transiently
-				// opened tab before deleting it from disk.
-				await this.closeFileTab(absolutePath)
 			}
 
 			await this.removeCreatedFile(absolutePath)
@@ -894,6 +899,30 @@ export class DiffViewProvider {
 	// Close the plain (non-diff) editor tab for the target file. Used when the
 	// file was opened transiently for the diff and the user never interacted
 	// with it, so it should not linger after accept/deny.
+	/**
+	 * Close the tab for this path WITHOUT saving. Used by the new-file rollback, where the
+	 * buffer holds unapproved streamed content that must never reach disk; closeFileTab()
+	 * deliberately skips dirty tabs, so a dirty buffer needs the forced close.
+	 */
+	private async discardFileTab(absolutePath: string): Promise<void> {
+		const tabs = vscode.window.tabGroups.all
+			.flatMap((group) => group.tabs)
+			.filter(
+				(tab) =>
+					tab.input instanceof vscode.TabInputText &&
+					tab.input.uri.scheme === "file" &&
+					arePathsEqual(tab.input.uri.fsPath, absolutePath),
+			)
+
+		for (const tab of tabs) {
+			try {
+				await vscode.window.tabGroups.close(tab, true)
+			} catch (err) {
+				console.error(`Failed to discard file tab ${tab.label}`, err)
+			}
+		}
+	}
+
 	private async closeFileTab(absolutePath: string): Promise<void> {
 		const tabs = vscode.window.tabGroups.all
 			.flatMap((group) => group.tabs)

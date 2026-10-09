@@ -653,7 +653,13 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({}, { accessAllowed: false })
 
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
-			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+			// The exact listener this task registered, not just any function: a mismatched
+			// off() argument would leave the real listener attached.
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
 		})
 	})
 	describe("per-task stream state isolation", () => {
@@ -766,7 +772,75 @@ describe("writeToFileTool", () => {
 
 			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
-			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+			// The exact listener this task registered, not just any function: a mismatched
+			// off() argument would leave the real listener attached.
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+		})
+
+		it("releases the per-task stream state when the user rejects the diff-view approval", async () => {
+			// The diff-view denial returns from inside execute()'s try. Without a release on that
+			// path the entry and its TaskAborted listener survive a rejected write, and a
+			// streamFailed mark armed by an earlier delta keeps suppressing this task's later
+			// diff previews.
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never).streamFailed = true
+			mockAskApproval.mockResolvedValueOnce(false)
+
+			await executeWriteFileTool({})
+
+			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			// The exact listener this task registered, not just any function: a mismatched
+			// off() argument would leave the real listener attached.
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+		})
+
+		it("releases the per-task stream state when the prevent-focus-disruption approval is rejected", async () => {
+			// Same leak on the experiment branch: the denial returns without a teardown, so the
+			// listener stays attached for the rest of the task's life.
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockResolvedValue({
+					diagnosticsEnabled: true,
+					writeDelayMs: 1000,
+					experiments: { preventFocusDisruption: true },
+				}),
+			})
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never).streamFailed = true
+			mockAskApproval.mockResolvedValueOnce(false)
+
+			await executeWriteFileTool({})
+
+			expect(mockAskApproval).toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			// The exact listener this task registered, not just any function: a mismatched
+			// off() argument would leave the real listener attached.
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+		})
+
+		it("releases the per-task stream state when the preflight directory creation throws", async () => {
+			// The preflight filesystem work sits before execute()'s guarded scope today: when it
+			// throws, nothing reports the failure and the stream state leaks. It has to be handled
+			// like any other write failure - reported once, teardown run.
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never).streamFailed = true
+			mockedCreateDirectoriesForFile.mockRejectedValueOnce(
+				Object.assign(new Error("EACCES: permission denied, mkdir '/new-parent'"), { code: "EACCES" }),
+			)
+
+			await executeWriteFileTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		})
 
 	})
@@ -860,6 +934,31 @@ describe("writeToFileTool", () => {
 			// state revertChanges() relies on.
 			expect(diffViewCallOrder).toEqual(["revert", "reset"])
 			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("keeps a failed rollback as the stream failure instead of dropping it", async () => {
+			// Streaming failed (open() rejected) and the rollback that follows failed too: the
+			// placeholder and any created directories are still on disk. Logging the revert failure
+			// and dropping it leaves the next execute() to treat that debris as an existing file, so
+			// the rollback failure has to become the failure this stream reports.
+			mockCline.diffViewProvider.open.mockRejectedValue(
+				Object.assign(new Error("EACCES: permission denied, open '/ro/test.py'"), { code: "EACCES" }),
+			)
+			mockCline.diffViewProvider.revertChanges.mockRejectedValue(
+				Object.assign(new Error("EACCES: rollback failed"), { code: "EACCES" }),
+			)
+
+			// First delta pins the path, second reaches open().
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+
+			const state = writeToFileTool["taskPartialStreamState"].get(`${mockCline.taskId}.${mockCline.instanceId}`)
+			expect(state?.streamFailed).toBe(true)
+			expect(state?.streamError?.message).toContain("rollback failed")
+			// The original streaming error must stay reachable behind the reported one.
+			expect((state?.streamError?.cause as Error | undefined)?.message).toBe(
+				"EACCES: permission denied, open '/ro/test.py'",
+			)
 		})
 
 		it("finalizes partial tool message and resets diff view when handlePartial update() fails", async () => {

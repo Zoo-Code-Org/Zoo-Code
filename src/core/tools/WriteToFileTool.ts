@@ -143,13 +143,18 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 * streamed content; a user save would then persist a write the task never completed
 	 * (denied or failed before approval). Must run BEFORE resetDiffViewAfterWrite(),
 	 * since reset() clears the state revertChanges() relies on. No-op when no diff view
-	 * is open. Failures are logged and swallowed so the remaining cleanup (reset,
-	 * per-task state teardown) always continues.
+	 * is open. A revert failure is RETURNED rather than dropped: the caller records it as the
+	 * failure this stream produced, so debris left on disk is reported instead of being
+	 * silently continued past.
 	 */
-	private async revertDiffChangesBeforeReset(task: Task): Promise<void> {
-		await task.diffViewProvider.revertChanges().catch((revertError) => {
+	private async revertDiffChangesBeforeReset(task: Task): Promise<Error | undefined> {
+		try {
+			await task.diffViewProvider.revertChanges()
+		} catch (revertError) {
 			console.error("Error reverting write_to_file diff view changes:", revertError)
-		})
+			return revertError instanceof Error ? revertError : new Error(String(revertError))
+		}
+		return undefined
 	}
 
 	private async finalizePartialToolAskAfterFailure(task: Task, text?: string): Promise<void> {
@@ -182,15 +187,27 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		}
 
 		this.resetTaskPartialState(task)
-		await this.revertDiffChangesBeforeReset(task)
+		const rollbackError = await this.revertDiffChangesBeforeReset(task)
 		await this.resetDiffViewAfterWrite(task)
 
-		if (!state.streamError) {
-			return false
+		// A failed rollback is the more actionable failure (debris is still on disk), so it takes
+		// the report slot when present; the streaming error is kept behind it as the cause.
+		if (rollbackError) {
+			await callbacks.handleError(
+				"writing file",
+				new Error(`write_to_file rollback failed after a streaming error: ${rollbackError.message}`, {
+					cause: state.streamError ?? rollbackError,
+				}),
+			)
+			return true
 		}
 
-		await callbacks.handleError("writing file", state.streamError)
-		return true
+		if (state.streamError) {
+			await callbacks.handleError("writing file", state.streamError)
+			return true
+		}
+
+		return false
 	}
 
 	override resetPartialState(): void {
@@ -244,46 +261,50 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 		const isWriteProtected = task.rooProtectedController?.isWriteProtected(relPath) || false
 
-		let fileExists: boolean
-		const absolutePath = path.resolve(task.cwd, relPath)
-
-		if (task.diffViewProvider.editType !== undefined) {
-			fileExists = task.diffViewProvider.editType === "modify"
-		} else {
-			fileExists = await fileExistsAtPath(absolutePath)
-			task.diffViewProvider.editType = fileExists ? "modify" : "create"
-		}
-
-		// Create parent directories early for new files to prevent ENOENT errors
-		// in subsequent operations (e.g., diffViewProvider.open, fs.readFile)
-		if (!fileExists) {
-			await createDirectoriesForFile(absolutePath)
-		}
-
-		if (newContent.startsWith("```")) {
-			newContent = newContent.split("\n").slice(1).join("\n")
-		}
-
-		if (newContent.endsWith("```")) {
-			newContent = newContent.split("\n").slice(0, -1).join("\n")
-		}
-
-		if (!task.api.getModel().id.includes("claude")) {
-			newContent = unescapeHtmlEntities(newContent)
-		}
-
-		const fullPath = relPath ? path.resolve(task.cwd, relPath) : ""
-		const isOutsideWorkspace = isPathOutsideWorkspace(fullPath)
-
-		const sharedMessageProps: ClineSayTool = {
-			tool: fileExists ? "editedExistingFile" : "newFileCreated",
-			path: getReadablePath(task.cwd, relPath),
-			content: newContent,
-			isOutsideWorkspace,
-			isProtected: isWriteProtected,
-		}
-
 		try {
+			// The preflight filesystem work sits inside the guarded scope on purpose: a throw from
+			// fileExistsAtPath / createDirectoriesForFile must be reported like any other write
+			// failure, and the per-task stream state must still be released.
+
+			let fileExists: boolean
+			const absolutePath = path.resolve(task.cwd, relPath)
+
+			if (task.diffViewProvider.editType !== undefined) {
+				fileExists = task.diffViewProvider.editType === "modify"
+			} else {
+				fileExists = await fileExistsAtPath(absolutePath)
+				task.diffViewProvider.editType = fileExists ? "modify" : "create"
+			}
+
+			// Create parent directories early for new files to prevent ENOENT errors
+			// in subsequent operations (e.g., diffViewProvider.open, fs.readFile)
+			if (!fileExists) {
+				await createDirectoriesForFile(absolutePath)
+			}
+
+			if (newContent.startsWith("```")) {
+				newContent = newContent.split("\n").slice(1).join("\n")
+			}
+
+			if (newContent.endsWith("```")) {
+				newContent = newContent.split("\n").slice(0, -1).join("\n")
+			}
+
+			if (!task.api.getModel().id.includes("claude")) {
+				newContent = unescapeHtmlEntities(newContent)
+			}
+
+			const fullPath = relPath ? path.resolve(task.cwd, relPath) : ""
+			const isOutsideWorkspace = isPathOutsideWorkspace(fullPath)
+
+			const sharedMessageProps: ClineSayTool = {
+				tool: fileExists ? "editedExistingFile" : "newFileCreated",
+				path: getReadablePath(task.cwd, relPath),
+				content: newContent,
+				isOutsideWorkspace,
+				isProtected: isWriteProtected,
+			}
+
 			task.consecutiveMistakeCount = 0
 
 			const provider = task.providerRef.deref()
@@ -369,10 +390,10 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			await task.diffViewProvider.reset()
 			// BaseTool's reset only clears this instance's lastSeenPartialPath; the
 			// stream state added here is keyed per task. Clearing the whole map from
-			// one task's execute() would drop another task's streamFailed/streamError
-			// while it is still streaming, so tear down only this task's entry.
-			super.resetPartialState()
-			this.resetTaskPartialState(task)
+			// BaseTool's reset only clears this instance's lastSeenPartialState; the per-task
+			// entry is released by the finally below (clearing the whole map from one task's
+			// execute() would drop another task's streamFailed/streamError while it is still
+			// streaming).
 
 			task.processQueuedMessages()
 
@@ -387,8 +408,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			await handleError("writing file", error as Error)
 			await task.diffViewProvider.reset()
 			super.resetPartialState()
-			this.resetTaskPartialState(task)
 			return
+		} finally {
+			// One teardown covers every exit of the guarded scope: success, both approval denials,
+			// the catch, and any throw from the preflight filesystem work. Idempotent, so the
+			// explicit releases on the early returns above stay correct.
+			this.resetTaskPartialState(task)
 		}
 	}
 
@@ -484,7 +509,18 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				await this.finalizePartialToolAskAfterFailure(task, partialMessage)
 				// The write was never approved: restore the document so a user save cannot
 				// persist the failed streamed content (reset() alone leaves it dirty).
-				await this.revertDiffChangesBeforeReset(task)
+				const rollbackError = await this.revertDiffChangesBeforeReset(task)
+				if (rollbackError) {
+					// The rollback did not finish: the placeholder and any created directories are still
+					// on disk, and the next execute() would treat that debris as an existing file. A
+					// logged-only revert failure hides exactly that, so the rollback failure becomes the
+					// failure this stream reports - the original streaming error stays reachable as the
+					// cause, and the report still happens exactly once (on the parse-failure path).
+					partialStreamState.streamError = new Error(
+						`write_to_file rollback failed after a streaming error: ${rollbackError.message}`,
+						{ cause: partialStreamState.streamError },
+					)
+				}
 				await this.resetDiffViewAfterWrite(task)
 			}
 		}
