@@ -5931,7 +5931,15 @@ describe("Cline", () => {
 				.mockImplementation(async (message) => {
 					updateSnapshot = { ...message }
 				})
-			const saveSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(true)
+			// Capture the message as it is when the save runs: this is the payload that
+			// reaches disk, so the flags must already be set before the save.
+			let savedSnapshot: Record<string, unknown> | undefined
+			const saveSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages")
+				.mockImplementation(async () => {
+					savedSnapshot = structuredClone(task.clineMessages[0])
+					return true
+				})
 
 			const task = new Task({
 				provider: mockProvider,
@@ -5965,7 +5973,10 @@ describe("Cline", () => {
 			// The ask is resolved by the system, not the user: stamp isAnswered so ChatView
 			// does not keep Save/Reject armed for a write that already failed.
 			expect(task.clineMessages[0].isAnswered).toBe(true)
-			expect(saveSpy).toHaveBeenCalled()
+			expect(saveSpy).toHaveBeenCalledTimes(1)
+			expect(savedSnapshot?.partial).toBe(false)
+			expect(savedSnapshot?.progressStatus).toBeUndefined()
+			expect(savedSnapshot?.isAnswered).toBe(true)
 			expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
 			expect(updateSnapshot?.partial).toBe(false)
 			expect(updateSnapshot?.progressStatus).toBeUndefined()
