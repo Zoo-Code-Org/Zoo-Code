@@ -206,6 +206,12 @@ export class ClineProvider
 	private static activeInstances: Set<ClineProvider> = new Set()
 	private disposables: vscode.Disposable[] = []
 	private webviewDisposables: vscode.Disposable[] = []
+	// Subscriptions tied to the currently resolved view (message, visibility,
+	// active-editor, and configuration listeners plus the view's disposal
+	// registration). Replacing the view disposes the previous entries before
+	// the replacement's are installed, so a stale view can neither dispatch
+	// messages nor refresh the provider-wide heartbeat.
+	private resolvedViewDisposables: vscode.Disposable[] = []
 	private pendingThemeFixtureProbes = new Map<
 		string,
 		{
@@ -229,6 +235,27 @@ export class ClineProvider
 	private taskEventListeners: WeakMap<Task, Array<() => void>> = new WeakMap()
 	private currentWorkspacePath: string | undefined
 	private _disposed = false
+	private lastWebviewHeartbeatAt = 0
+	// Bumped on every accepted heartbeat, including multiple heartbeats in the
+	// same millisecond; the recovery reload compares revisions around its
+	// awaited HTML generation so no accepted heartbeat is missed.
+	private webviewHeartbeatRevision = 0
+	private webviewWatchdogInterval: ReturnType<typeof setInterval> | null = null
+	// Bumped to invalidate an in-flight recovery reload when the provider or
+	// the watched view is disposed; the reload must not reassign webview.html
+	// afterwards.
+	private webviewRecoveryEpoch = 0
+	// Epoch that owns an in-flight recovery reload, if any. Only a recovery
+	// from the same epoch is blocked, so disposing/replacing the view (which
+	// bumps webviewRecoveryEpoch) never makes the replacement wait on the
+	// stale recovery's completion.
+	private webviewRecoveryInFlightEpoch: number | undefined = undefined
+	// Wall-clock reading of the previous watchdog tick; a tick arriving far
+	// later than scheduled means the host slept, so the grace window restarts
+	// instead of counting the suspended interval against a live renderer.
+	private lastWebviewWatchdogTickAt = 0
+	private static readonly WEBVIEW_WATCHDOG_TICK_MS = 60_000
+	private static readonly WEBVIEW_HEARTBEAT_STALE_MS = 90_000
 	private readonly _postStateToWebviewThrottled = debounce(
 		async () => {
 			try {
@@ -814,8 +841,23 @@ export class ClineProvider
 	*/
 	private clearWebviewResources() {
 		this.rejectPendingThemeFixtureProbes(new Error("Webview was disposed before the theme fixture probe completed"))
+		this.stopWebviewWatchdog()
+		// Invalidate any recovery reload still awaiting its HTML so it cannot
+		// reassign webview.html on the disposed view.
+		this.webviewRecoveryEpoch++
+		this.disposeResolvedViewResources()
 		while (this.webviewDisposables.length) {
 			const x = this.webviewDisposables.pop()
+			if (x) {
+				x.dispose()
+			}
+		}
+	}
+
+	/** Disposes the subscriptions registered for the previously resolved view. */
+	private disposeResolvedViewResources() {
+		while (this.resolvedViewDisposables.length) {
+			const x = this.resolvedViewDisposables.pop()
 			if (x) {
 				x.dispose()
 			}
@@ -840,6 +882,7 @@ export class ClineProvider
 
 		this._disposed = true
 		this._postStateToWebviewThrottled.cancel()
+		this.stopWebviewWatchdog()
 		this.log("Disposing ClineProvider...")
 
 		// Reject any tasks still waiting for a scheduler permit so they don't
@@ -1015,6 +1058,19 @@ export class ClineProvider
 	}
 
 	async resolveWebviewView(webviewView: vscode.WebviewView | vscode.WebviewPanel) {
+		// Replacing the watched view invalidates a recovery reload still
+		// awaiting its HTML (same epoch bump as clearWebviewResources), so the
+		// stale recovery can neither block nor reassign the replacement view's
+		// recovery. Re-resolving the same view, or the first resolve, leaves
+		// the epoch alone.
+		if (this.view && this.view !== webviewView) {
+			this.webviewRecoveryEpoch++
+			// The replaced view's listeners must not outlive it: dispose them
+			// before the replacement's subscriptions are installed below so no
+			// duplicate message/visibility/editor/configuration listeners
+			// accumulate across A-to-B replacements.
+			this.disposeResolvedViewResources()
+		}
 		this.view = webviewView
 		const inTabMode = "onDidChangeViewState" in webviewView
 
@@ -1037,11 +1093,15 @@ export class ClineProvider
 			localResourceRoots: resourceRoots,
 		}
 
-		webviewView.webview.html =
-			this.contextProxy.extensionMode === vscode.ExtensionMode.Development &&
-			process.env.ROO_CODE_THEME_FIXTURE_PROBE !== "1"
-				? await this.getHMRHtmlContent(webviewView.webview)
-				: await this.getHtmlContent(webviewView.webview)
+		const html = await this.getWebviewHtml(webviewView.webview)
+		// The await yields; a disposal or replacement that landed mid-generation
+		// must not receive this HTML. The VS Code API throws when assigning to a
+		// destroyed webview, and a stale resolve must not touch the obsolete
+		// view it no longer owns.
+		if (this._disposed || this.view !== webviewView) {
+			return
+		}
+		webviewView.webview.html = html
 
 		// Initialize out-of-scope variables that need to receive persistent
 		// global state values.
@@ -1073,10 +1133,22 @@ export class ClineProvider
 			},
 		)
 
+		// The awaits above yield; disposal or a view replacement may have
+		// landed while this resolve was pending. Installing listeners or the
+		// watchdog now would leak an interval on a disposed provider (the
+		// recovery path's _disposed check cannot stop the interval itself) or
+		// duplicate the replacement view's subscriptions.
+		if (this._disposed || this.view !== webviewView) {
+			return
+		}
+
 		// Sets up an event listener to listen for messages passed from the webview view context
 		// and executes code based on the message that is received.
-		this.setWebviewMessageListener(webviewView.webview)
+		this.setWebviewMessageListener(webviewView)
 		this.webviewDisposables.push(this.webviewFocusTracker.init(this, webviewView))
+
+		// Detect a dead webview renderer process (gray screen) via heartbeat timeout.
+		this.startWebviewWatchdog()
 
 		// Listen for when the panel becomes visible.
 		// https://github.com/microsoft/vscode-discussions/discussions/840
@@ -1084,25 +1156,41 @@ export class ClineProvider
 			// WebviewView and WebviewPanel have all the same properties except
 			// for this visibility listener panel.
 			const viewStateDisposable = webviewView.onDidChangeViewState(() => {
+				if (this.view !== webviewView) {
+					// A replaced view must not refresh the provider-wide
+					// heartbeat the current view's watchdog relies on.
+					return
+				}
 				if (this.view?.visible) {
+					// Hidden webviews throttle timers, so grant a fresh grace
+					// window instead of counting throttled heartbeats as a crash.
+					this.updateWebviewHeartbeat()
 					void this.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
 				} else {
 					this.logWebviewHiddenDiagnostics()
 				}
 			})
 
-			this.webviewDisposables.push(viewStateDisposable)
+			this.resolvedViewDisposables.push(viewStateDisposable)
 		} else if ("onDidChangeVisibility" in webviewView) {
 			// sidebar
 			const visibilityDisposable = webviewView.onDidChangeVisibility(() => {
+				if (this.view !== webviewView) {
+					// A replaced view must not refresh the provider-wide
+					// heartbeat the current view's watchdog relies on.
+					return
+				}
 				if (this.view?.visible) {
+					// Hidden webviews throttle timers, so grant a fresh grace
+					// window instead of counting throttled heartbeats as a crash.
+					this.updateWebviewHeartbeat()
 					void this.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
 				} else {
 					this.logWebviewHiddenDiagnostics()
 				}
 			})
 
-			this.webviewDisposables.push(visibilityDisposable)
+			this.resolvedViewDisposables.push(visibilityDisposable)
 		}
 
 		// Listen for when the view is disposed
@@ -1113,12 +1201,17 @@ export class ClineProvider
 					this.log("Disposing ClineProvider instance for tab view")
 					await this.dispose()
 				} else {
-					this.log("Clearing webview resources for sidebar view")
-					this.clearWebviewResources()
+					if (this.view === webviewView) {
+						this.log("Clearing webview resources for sidebar view")
+						this.clearWebviewResources()
+						// Drop the disposed view so nothing keeps polling it
+						// (e.g. the recovery watchdog) for the provider's lifetime.
+						this.view = undefined
+					}
 				}
 			},
 			null,
-			this.disposables,
+			this.resolvedViewDisposables,
 		)
 
 		// Listen for when color changes
@@ -1128,7 +1221,7 @@ export class ClineProvider
 				await this.postMessageToWebview({ type: "theme", text: JSON.stringify(await getTheme()) })
 			}
 		})
-		this.webviewDisposables.push(configDisposable)
+		this.resolvedViewDisposables.push(configDisposable)
 
 		// If the extension is starting a new session, clear previous task state.
 		// But don't clear if there's already an active task (e.g., resumed via IPC/bridge).
@@ -1695,14 +1788,20 @@ export class ClineProvider
 	 * Sets up an event listener to listen for messages passed from the webview context and
 	 * executes code based on the message that is received.
 	 *
-	 * @param webview A reference to the extension webview
+	 * @param webviewView The resolved webview view or panel
 	 */
-	private setWebviewMessageListener(webview: vscode.Webview) {
-		const onReceiveMessage = async (message: WebviewMessage) =>
-			webviewMessageHandler(this, message, this.marketplaceManager)
+	private setWebviewMessageListener(webviewView: vscode.WebviewView | vscode.WebviewPanel) {
+		const onReceiveMessage = async (message: WebviewMessage) => {
+			// A replaced view's listener stays registered until the provider
+			// clears its subscriptions; never let a stale renderer dispatch.
+			if (this.view !== webviewView) {
+				return
+			}
+			await webviewMessageHandler(this, message, this.marketplaceManager)
+		}
 
-		const messageDisposable = webview.onDidReceiveMessage(onReceiveMessage)
-		this.webviewDisposables.push(messageDisposable)
+		const messageDisposable = webviewView.webview.onDidReceiveMessage(onReceiveMessage)
+		this.resolvedViewDisposables.push(messageDisposable)
 	}
 
 	/**
@@ -3288,6 +3387,113 @@ export class ClineProvider
 				`  timestamp:    ${new Date().toISOString()}\n` +
 				`If the panel appears gray after this, share this log with support@zoocode.dev`,
 		)
+	}
+
+	/** Records that the webview renderer is alive; called on every webviewHeartbeat message. */
+	public updateWebviewHeartbeat(): void {
+		this.lastWebviewHeartbeatAt = Date.now()
+		this.webviewHeartbeatRevision++
+	}
+
+	/**
+	 * Starts (or restarts) the watchdog that detects a dead webview renderer
+	 * process. Hidden webviews throttle timers, so becoming visible resets the
+	 * grace window instead of counting throttled heartbeats as a crash.
+	 */
+	private startWebviewWatchdog(): void {
+		this.updateWebviewHeartbeat()
+		this.lastWebviewWatchdogTickAt = Date.now()
+		if (this.webviewWatchdogInterval) {
+			clearInterval(this.webviewWatchdogInterval)
+		}
+		this.webviewWatchdogInterval = setInterval(() => {
+			const now = Date.now()
+			const tickGap = now - this.lastWebviewWatchdogTickAt
+			this.lastWebviewWatchdogTickAt = now
+			// A tick far later than scheduled means the host was suspended or
+			// blocked; the wall clock jumped while both timers were paused.
+			// Grant a fresh grace window instead of reloading a live renderer.
+			if (tickGap > ClineProvider.WEBVIEW_WATCHDOG_TICK_MS * 1.5) {
+				this.updateWebviewHeartbeat()
+				return
+			}
+			if (this.view?.visible !== true) {
+				return
+			}
+			if (now - this.lastWebviewHeartbeatAt <= ClineProvider.WEBVIEW_HEARTBEAT_STALE_MS) {
+				return
+			}
+			this.log("[Zoo Code] Webview heartbeat stale while visible; reloading webview (dead renderer?)")
+			void this.reloadWebviewForRecovery()
+		}, ClineProvider.WEBVIEW_WATCHDOG_TICK_MS)
+	}
+
+	/** Stops the renderer heartbeat watchdog; the webview it watches is gone. */
+	private stopWebviewWatchdog(): void {
+		if (this.webviewWatchdogInterval) {
+			clearInterval(this.webviewWatchdogInterval)
+			this.webviewWatchdogInterval = null
+		}
+	}
+
+	/**
+	 * Reloads only this provider's own webview by regenerating its HTML (fresh
+	 * nonce) and reassigning `webview.html`, which forces VS Code to reload that
+	 * webview. Works for both sidebar (WebviewView) and tab (WebviewPanel) shapes.
+	 */
+	private async reloadWebviewForRecovery(): Promise<void> {
+		const view = this.view
+		if (!view?.webview) {
+			return
+		}
+		// Capture the epoch so a disposal or view replacement can invalidate
+		// this operation while the HTML is being generated.
+		const epoch = this.webviewRecoveryEpoch
+		// A recovery already awaiting its HTML generation owns this view; a
+		// second one would only pile another forced reload onto it. Ownership
+		// is scoped to the epoch so a stale recovery (its view disposed or
+		// replaced, epoch bumped) never blocks the replacement view's recovery.
+		if (this.webviewRecoveryInFlightEpoch === epoch) {
+			return
+		}
+		this.webviewRecoveryInFlightEpoch = epoch
+		// A heartbeat that arrives while the HTML is being generated means the
+		// renderer is alive again; comparing revisions (not timestamps) lets the
+		// post-await check catch heartbeats that land in the same millisecond.
+		const heartbeatRevision = this.webviewHeartbeatRevision
+		try {
+			const html = await this.getWebviewHtml(view.webview)
+			// The await yields; assigning html now that the provider is disposed,
+			// the watched view was disposed/replaced, the renderer heartbeat
+			// recovered, or the view hid again would either touch a dead or
+			// unrelated webview or reload one that no longer needs recovery.
+			if (
+				this._disposed ||
+				this.webviewRecoveryEpoch !== epoch ||
+				this.view !== view ||
+				this.webviewHeartbeatRevision !== heartbeatRevision ||
+				view.visible !== true
+			) {
+				return
+			}
+			view.webview.html = html
+		} catch (error) {
+			this.log(`[Zoo Code] Failed to reload webview: ${error instanceof Error ? error.message : String(error)}`)
+		} finally {
+			// Clear ownership only while this completion still holds it; a
+			// stale recovery must not release the replacement's in-flight state.
+			if (this.webviewRecoveryInFlightEpoch === epoch) {
+				this.webviewRecoveryInFlightEpoch = undefined
+			}
+		}
+	}
+
+	/** Builds the webview HTML using the same path as resolveWebviewView (HMR in development). */
+	private async getWebviewHtml(webview: vscode.Webview): Promise<string> {
+		return this.contextProxy.extensionMode === vscode.ExtensionMode.Development &&
+			process.env.ROO_CODE_THEME_FIXTURE_PROBE !== "1"
+			? await this.getHMRHtmlContent(webview)
+			: await this.getHtmlContent(webview)
 	}
 
 	public getRecentTasks(): string[] {
