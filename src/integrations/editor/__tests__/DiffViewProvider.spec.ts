@@ -3279,6 +3279,156 @@ describe("DiffViewProvider", () => {
 			expect(applyEdit).not.toHaveBeenCalled()
 		})
 
+		// A rejected publish closes its own diff view and rethrows, so the preview tabs the diff
+		// evicted are restored by that pass - and only by that pass.
+		it("saveChanges() restores preview tabs when a rejected publish tears the session down", async () => {
+			const restorePreviewTabs = vi.fn().mockResolvedValue(undefined)
+			const closeOwnDiffView = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
+			diffViewProvider["closeOwnDiffView"] = closeOwnDiffView
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({
+				document: makeTextDocument({
+					uri: makeUri(mockTargetPath),
+					getText: vi.fn().mockReturnValue("content"),
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				}),
+			})
+
+			// The publish is rejected, so the discard-only cleanup runs and the guard verdict is
+			// rethrown. Restore the publish mock afterwards: a queued rejection would fail every
+			// later save in this file.
+			vi.mocked(safeWriteText).mockRejectedValue(new Error("guard rejected for test"))
+			try {
+				await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("guard rejected for test")
+			} finally {
+				vi.mocked(safeWriteText).mockReset()
+				vi.mocked(safeWriteText).mockResolvedValue(undefined)
+			}
+
+			expect(closeOwnDiffView).toHaveBeenCalledTimes(1)
+			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
+		})
+
+		it("saveChanges() restores preview tabs once when a revert waits for the rejected save", async () => {
+			let release: () => void = () => {}
+			const gate = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			let cleanupEntered = false
+			const closeOwnDiffView = vi.fn().mockImplementation(async () => {
+				cleanupEntered = true
+				await gate
+			})
+			const restorePreviewTabs = vi.fn().mockResolvedValue(undefined)
+			const reset = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeOwnDiffView"] = closeOwnDiffView
+			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
+			diffViewProvider["reset"] = reset
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
+			applyEdit.mockResolvedValue(true)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({
+				document: makeTextDocument({
+					uri: makeUri(mockTargetPath),
+					getText: vi.fn().mockReturnValue("content"),
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				}),
+			})
+
+			vi.mocked(safeWriteText).mockRejectedValue(new Error("guard rejected for test"))
+			let save: Promise<unknown> = Promise.resolve()
+			try {
+				save = diffViewProvider.saveChanges(false)
+				while (!cleanupEntered) {
+					await new Promise((resolve) => setImmediate(resolve))
+				}
+				// The revert joins the rejected save's pass instead of starting its own.
+				const revert = diffViewProvider.revertChanges()
+				await new Promise((resolve) => setImmediate(resolve))
+				release()
+				await expect(save).rejects.toThrow("guard rejected for test")
+				await revert
+			} finally {
+				vi.mocked(safeWriteText).mockReset()
+				vi.mocked(safeWriteText).mockResolvedValue(undefined)
+			}
+
+			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
+			expect(reset).not.toHaveBeenCalled()
+		})
+
+		// The other direction: the rejected save is the one that joins an existing pass. It then
+		// runs no cleanup of its own, and the pass that started the teardown restores the tabs once.
+		it("saveChanges() restores no preview tabs when a revert already owns the teardown", async () => {
+			let release: () => void = () => {}
+			const gate = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			let cleanupEntered = false
+			const closeAllDiffViews = vi.fn().mockImplementation(async () => {
+				cleanupEntered = true
+				await gate
+			})
+			const restorePreviewTabs = vi.fn().mockResolvedValue(undefined)
+			const closeOwnDiffView = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
+			diffViewProvider["closeOwnDiffView"] = closeOwnDiffView
+			// reset() closes this provider's diff tab; stub it so closeOwnDiffView counts only the
+			// save's own cleanup pass.
+			diffViewProvider["reset"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
+			applyEdit.mockResolvedValue(true)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({
+				document: makeTextDocument({
+					uri: makeUri(mockTargetPath),
+					getText: vi.fn().mockReturnValue("content"),
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				}),
+			})
+
+			// The revert starts its pass first and is held inside it.
+			const revert = diffViewProvider.revertChanges()
+			while (!cleanupEntered) {
+				await new Promise((resolve) => setImmediate(resolve))
+			}
+
+			vi.mocked(safeWriteText).mockRejectedValue(new Error("guard rejected for test"))
+			let save: Promise<unknown> = Promise.resolve()
+			try {
+				save = diffViewProvider.saveChanges(false)
+				await new Promise((resolve) => setImmediate(resolve))
+				release()
+				await expect(save).rejects.toThrow("guard rejected for test")
+				await revert
+			} finally {
+				vi.mocked(safeWriteText).mockReset()
+				vi.mocked(safeWriteText).mockResolvedValue(undefined)
+			}
+
+			// The save's cleanup never ran, so it restored nothing; the owning revert pass did the
+			// restoring exactly once.
+			expect(closeOwnDiffView).not.toHaveBeenCalled()
+			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
+		})
+
 		it("saveChanges() keeps the file open when the user touched it", async () => {
 			const closeFileTab = vi.fn().mockResolvedValue(undefined)
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue({ revealRange: vi.fn() } as any)
