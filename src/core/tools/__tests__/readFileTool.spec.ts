@@ -25,7 +25,6 @@ import { isBinaryFile } from "isbinaryfile"
 
 
 import { readFileTool, ReadFileTool } from "../ReadFileTool"
-import type { Task } from "../../task/Task"
 import { ObservationRegistry } from "../../task/observationRegistry"
 import { formatResponse } from "../../prompts/responses"
 import { validateImageForProcessing, processImageFile, isSupportedImageFormat } from "../helpers/imageHelpers"
