@@ -112,7 +112,12 @@ const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 // map that ClineProvider owns. The generic settings loop below writes straight into
 // the shared store and into this view's local buffer - and getState() prefers the
 // buffer - so a webview payload must not be allowed to carry them.
-const HOST_OWNED_SETTINGS = new Set(["apiConfiguration", "listApiConfigMeta", "viewStates"])
+const HOST_OWNED_SETTINGS = new Set([
+	"apiConfiguration",
+	"listApiConfigMeta",
+	"viewStates",
+	"currentApiConfigName",
+])
 
 // Serializes handling of "telemetrySetting" messages. Each invocation reads the previous
 // setting, awaits a persistence write, then applies the new live telemetry state -- with no
@@ -2732,7 +2737,7 @@ export const webviewMessageHandler = async (
 				const oldName = message.text
 
 				const profileToDelete = (await provider.providerSettingsManager.listConfig()).find(
-					(c) => c.name === oldName,
+					(profile) => profile.name === oldName,
 				)
 
 				if (!profileToDelete) {
@@ -2748,6 +2753,11 @@ export const webviewMessageHandler = async (
 				// that no longer exists, and the survivor's settings are never written to the
 				// shared store.
 				try {
+					// Route through the provider: deleteProviderProfile serialises against the other
+					// profile mutations, snapshots and compensates the shared stores, and re-pins every
+					// sibling view still pinned to the deleted profile. Calling
+					// providerSettingsManager.deleteConfig here bypasses all of that and leaves those
+					// views with stale in-memory and persisted state.
 					await provider.deleteProviderProfile(profileToDelete)
 				} catch (error) {
 					provider.log(
