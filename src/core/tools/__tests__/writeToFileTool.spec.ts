@@ -116,6 +116,12 @@ describe("writeToFileTool", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		writeToFileTool.resetPartialState()
+		// Per-task entries are released by the tool's own teardown paths (execute() exits, the
+		// handle() parse-failure hook, clearTaskState). The suite clears them explicitly so no
+		// test inherits another test's stream state or abort listener.
+		for (const state of [...writeToFileTool["taskPartialStreamState"].values()]) {
+			writeToFileTool.clearTaskState(state.task)
+		}
 
 		mockedPathResolve.mockReturnValue(absoluteFilePath)
 		mockedFileExistsAtPath.mockResolvedValue(false)
@@ -507,7 +513,11 @@ describe("writeToFileTool", () => {
 	})
 
 	describe("resetPartialState", () => {
-		it("resets the base partial path and detaches every task's abort listener", async () => {
+		it("resets only the singleton path and leaves every task's stream state alone", async () => {
+			// The tool instance is a module-level singleton shared by concurrent tasks, so the
+			// base-class reset owns only lastSeenPartialPath. Clearing every task's entry from here
+			// would drop another task's streamFailed/streamError while it is still streaming; the
+			// per-task teardown (execute() exits, the parse-failure hook, clearTaskState) owns those.
 			let abortCleanup: (() => void) | undefined
 			mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
 				if (event === RooCodeEventName.TaskAborted) {
@@ -522,17 +532,22 @@ describe("writeToFileTool", () => {
 			expect(mockCline.ask).toHaveBeenCalledTimes(1)
 			expect(abortCleanup).toBeTypeOf("function")
 
-			// The base-class singleton field is reset by super.resetPartialState().
 			writeToFileTool["lastSeenPartialPath"] = "stale-path"
 			writeToFileTool.resetPartialState()
 
 			expect(writeToFileTool["lastSeenPartialPath"]).toBeUndefined()
-			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
-
-			// The per-task map was cleared too: a fresh delta sequence starts un-stabilized, so no
-			// second partial ask is issued.
+			expect(mockCline.off).not.toHaveBeenCalled()
+			// The entry survives, and with it the per-task path stabilization: the next delta is
+			// still the same live stream, so it goes straight to the partial ask instead of
+			// restarting an un-stabilized sequence.
 			await executeWriteFileTool({}, { isPartial: true })
-			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+			expect(mockCline.ask).toHaveBeenCalledTimes(2)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			// The task-scoped teardown is what releases it.
+			writeToFileTool.clearTaskState(mockCline)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
 		})
 	})
 
@@ -591,6 +606,109 @@ describe("writeToFileTool", () => {
 	})
 
 	describe("early-exit stream state cleanup", () => {
+
+		it("releases this task's stream state when the completed block fails to parse", async () => {
+			// The streaming deltas registered this task's entry; the finalized block then arrives
+			// without nativeArgs, so execute() never runs and none of its teardown runs either.
+			// Without a parse-failure boundary the entry and its TaskAborted listener survive for
+			// the rest of the task's life, and the diff view keeps unapproved partial content.
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			const block = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: {},
+				// The fixture's whole point is a nativeArgs object whose content never arrived, which
+			} as ToolUse<"write_to_file">
+			await writeToFileTool.handle(mockCline, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			// The stream may have left a diff view open with content that was never approved.
+			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			// Nothing was captured from the stream, so the parse error is still what the user sees.
+			expect(mockHandleError).toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
+		})
+
+		it("releases the per-task stream state when content is missing", async () => {
+			// The missing-content return sits before execute()'s guarded scope, so it needs its own
+			// release. The state is seeded first so the assertion proves a release happened rather
+			// than an empty map.
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			const toolUse = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: { path: testFilePath },
+				nativeArgs: { path: testFilePath, content: undefined },
+				// The fixture's point is a nativeArgs object whose content never arrived, which the
+				// typed params cannot express - hence the double assertion.
+				partial: false,
+			} as unknown as ToolUse<"write_to_file">
+			const pushToolResult = vi.fn()
+			await writeToFileTool.handle(mockCline, toolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult,
+			})
+
+			expect(mockCline.sayAndCreateMissingParamError).toHaveBeenCalledWith("write_to_file", "content")
+			expect(pushToolResult).toHaveBeenCalledWith("Missing param error")
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			// A stream may have opened a diff view for this call; the early return still closes it.
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+		})
+
+		it("releases the per-task stream state when the write completes", async () => {
+			// Seed first: without the seed the map is empty either way and the assertion is vacuous.
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			await executeWriteFileTool({})
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+		})
+
+		it("releases the per-task stream state when the write itself fails", async () => {
+			// The catch path tears down too: a failed write must not leave the entry (and its
+			// streamFailed guard) attached to the task.
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
+
+			await executeWriteFileTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+		})
 		it("releases the per-task stream state when a rooignore denial returns early", async () => {
 			// A partial delta creates the per-task state and registers the abort listener; the
 			// denial then returns before the cleanup, which used to leave both behind for the
@@ -601,7 +719,13 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({}, { accessAllowed: false })
 
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
-			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+			// The exact listener this task registered, not just any function: a mismatched
+			// off() argument would leave the real listener attached.
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
 		})
 
 		it("releases the per-task stream state when a missing parameter returns early", async () => {
@@ -714,7 +838,13 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({})
 			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
-			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+			// The exact listener this task registered, not just any function: a mismatched
+			// off() argument would leave the real listener attached.
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
 		})
 		it("releases the per-task stream state when the prevent-focus-disruption approval is rejected", async () => {
 			// The experiment branch asks for approval without ever opening a diff view, so the
@@ -734,7 +864,13 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({})
 			expect(mockCline.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
-			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+			// The exact listener this task registered, not just any function: a mismatched
+			// off() argument would leave the real listener attached.
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
 		})
 		it("releases the per-task stream state when prevent-focus-disruption skips the partial preview", async () => {
 			// The first delta only pins the path, so the entry is still live after it (the stream
@@ -752,7 +888,13 @@ describe("writeToFileTool", () => {
 
 			expect(mockCline.ask).not.toHaveBeenCalled()
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
-			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+			// The exact listener this task registered, not just any function: a mismatched
+			// off() argument would leave the real listener attached.
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
 		})
 	})
 

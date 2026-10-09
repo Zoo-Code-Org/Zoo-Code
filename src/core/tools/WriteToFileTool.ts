@@ -137,8 +137,9 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 * success-path teardown has to call this. Without it a rejected approval leaves the
 	 * entry attached for the rest of the task's life: the listener is only ever removed
 	 * by a teardown, and a retained streamFailed keeps suppressing this task's later
-	 * diff previews. Kept separate from resetPartialState(), which clears every task's
-	 * entry and is only correct for the parse-failure boundary in handle().
+	 * diff previews. Task-scoped by design: BaseTool's resetPartialState() only owns the
+	 * singleton last-seen path, and a global teardown would clobber another task that is
+	 * still streaming through this singleton.
 	 */
 	private releasePartialStreamBookkeeping(task: Task): void {
 		super.resetPartialState()
@@ -187,26 +188,38 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	}
 
 	/**
-	 * Teardown boundary for the handle() parse-failure path, where execute() never
-	 * runs and therefore its finally (resetTaskPartialState) never runs either.
+	 * Override of BaseTool's teardown boundary for the handle() parse-failure path, where
+	 * execute() never runs and therefore none of execute()'s teardown runs either.
 	 *
-	 * Tears down the per-task stream state: otherwise the abort listener leaks for
-	 * the task's lifetime, and when a streaming delta had failed, the streamFailed
-	 * guard would suppress the diff preview of every later write_to_file in this
-	 * task. Restores the diff document: streaming may have opened it with
-	 * unapproved partial content, and execute()'s error cleanup (revert + reset)
-	 * never fires on this path, so a user save could persist the content without
-	 * the teardown here. When a streaming delta already hit a fatal filesystem
-	 * error, that error is what the user can act on, so report it with the same
-	 * "writing file" context execute()'s catch uses, and suppress the incidental
-	 * parse error.
+	 * Releases THIS task's stream state: otherwise the abort listener leaks for the task's
+	 * lifetime, and when a streaming delta had failed, the streamFailed guard would suppress
+	 * the diff preview of every later write_to_file in this task. Restores the diff document:
+	 * streaming may have opened it with unapproved partial content, and execute()'s error
+	 * cleanup (revert + reset) never fires on this path, so a user save could persist the
+	 * content without the teardown here. When a streaming delta already hit a fatal filesystem
+	 * error, that error is what the user can act on, so report it with the same "writing file"
+	 * context execute()'s catch uses, and return true to suppress the incidental parse error -
+	 * the failure then surfaces exactly once.
 	 */
-	override resetPartialState(): void {
-		super.resetPartialState()
-		for (const state of this.taskPartialStreamState.values()) {
-			state.task.off(RooCodeEventName.TaskAborted, state.abortCleanup)
+	protected override async releaseStreamStateOnParseFailure(
+		task: Task,
+		callbacks: ToolCallbacks,
+	): Promise<boolean> {
+		const state = this.taskPartialStreamState.get(this.getPartialStreamFailureKey(task))
+		if (!state) {
+			return false
 		}
-		this.taskPartialStreamState.clear()
+
+		this.resetTaskPartialState(task)
+		await this.revertDiffChangesBeforeReset(task)
+		await this.resetDiffViewAfterWrite(task)
+
+		if (state.streamError) {
+			await callbacks.handleError("writing file", state.streamError)
+			return true
+		}
+
+		return false
 	}
 
 	async execute(params: WriteToFileParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
