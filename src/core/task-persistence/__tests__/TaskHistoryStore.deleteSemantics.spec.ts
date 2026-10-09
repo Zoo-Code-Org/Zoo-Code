@@ -556,9 +556,10 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			expect(cache.has("all-b")).toBe(true)
 			// taskFileMtimes is only populated by the reconcile path (external-change
 			// detection), so a store that never reconciled has an empty map here - asserting
-			// presence without seeding it would assert something that was never true. Seed it
-			// through the same internals the store uses, then require that a failed delete left
-			// it alone.
+			// presence without seeding it would assert something that was never true. That is what
+			// the two set() calls above the delete are for: they seed the map through the same
+			// internals the store uses. What is asserted here is only that a failed delete left
+			// that seeding alone.
 			expect(taskFileMtimes.has("all-a")).toBe(true)
 			expect(taskFileMtimes.has("all-b")).toBe(true)
 			await expect(fs.access(historyFilePath(storagePath, "all-a"))).resolves.toBeUndefined()
