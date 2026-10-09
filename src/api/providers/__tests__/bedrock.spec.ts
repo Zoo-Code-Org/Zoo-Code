@@ -60,6 +60,7 @@ import {
 	bedrockModels,
 	SERVICE_TIER_KEY,
 	ApiProviderError,
+	BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL,
 	BEDROCK_DEFAULT_CONTEXT,
 	BEDROCK_MAX_TOKENS,
 	type ProviderSettings,
@@ -2081,6 +2082,40 @@ describe("AwsBedrockHandler", () => {
 				})
 
 				expect(handler.getModel().id).toBe("anthropic.claude-3-5-sonnet-20241022-v2:0")
+			})
+
+			it("uses the generic fallback for an explicit Other choice even when the ARN names a model", async () => {
+				const profileArn =
+					"arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-opus-4-8"
+				const handler = createCustomArnHandler({
+					awsCustomArn: profileArn,
+					awsRegion: "us-east-1",
+					awsCustomArnBaseModelId: BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL,
+					awsBedrock1MContext: true,
+				})
+
+				expect(handler.getModel().info).toMatchObject({
+					contextWindow: BEDROCK_DEFAULT_CONTEXT,
+					maxTokens: BEDROCK_MAX_TOKENS,
+				})
+				const input = await sendFirstRequest(handler)
+				expect(input.modelId).toBe(profileArn)
+				expect(input.additionalModelRequestFields).toBeUndefined()
+				expect(input.inferenceConfig?.temperature).toBeDefined()
+			})
+
+			it("keeps the named model for a foundation-model ARN even with an explicit Other choice", () => {
+				const handler = createCustomArnHandler({
+					awsCustomArn:
+						"arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsRegion: "us-east-1",
+					awsCustomArnBaseModelId: BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL,
+				})
+
+				expect(handler.getModel()).toMatchObject({
+					id: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					info: { contextWindow: bedrockModels["anthropic.claude-3-5-sonnet-20241022-v2:0"].contextWindow },
+				})
 			})
 		})
 

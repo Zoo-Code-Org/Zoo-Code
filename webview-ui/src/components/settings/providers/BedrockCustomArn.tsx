@@ -3,9 +3,11 @@ import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
 import {
 	type ProviderSettings,
+	BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL,
 	BEDROCK_DEFAULT_CONTEXT,
 	BEDROCK_MAX_TOKENS,
 	bedrockModels,
+	isBedrockFoundationModelArn,
 	resolveBedrockCustomArnBaseModelId,
 } from "@roo-code/types"
 
@@ -13,7 +15,6 @@ import { validateBedrockArn } from "@src/utils/validate"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@src/components/ui"
 
-const OTHER_BASE_MODEL = "other"
 const baseModelIds = Object.keys(bedrockModels).sort((a, b) => a.localeCompare(b))
 
 const toPositiveInteger = (value: string): number | undefined => {
@@ -36,24 +37,41 @@ export const BedrockCustomArn = ({ apiConfiguration, setApiConfigurationField }:
 
 	const baseModelId =
 		resolveBedrockCustomArnBaseModelId(apiConfiguration.awsCustomArn, apiConfiguration.awsCustomArnBaseModelId) ??
-		OTHER_BASE_MODEL
+		BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL
+	// A foundation-model ARN invokes the model it names, so the underlying model can't be changed.
+	const isFoundationModelArn = isBedrockFoundationModelArn(apiConfiguration.awsCustomArn)
 
-	const onBaseModelChange = (value: string) => {
-		setApiConfigurationField("awsCustomArnBaseModelId", value === OTHER_BASE_MODEL ? "" : value)
-		// Different models have different output, thinking and context defaults.
+	// Different models have different output, thinking and context defaults.
+	const resetModelSettings = () => {
 		setApiConfigurationField("modelMaxTokens", undefined)
 		setApiConfigurationField("modelMaxThinkingTokens", undefined)
 		setApiConfigurationField("reasoningEffort", undefined)
 		setApiConfigurationField("awsModelContextWindow", undefined)
 	}
 
+	const onBaseModelChange = (value: string) => {
+		setApiConfigurationField("awsCustomArnBaseModelId", value)
+		resetModelSettings()
+	}
+
+	// The underlying model and limits belong to one ARN, so a different ARN starts from detection again.
+	const onArnInput = (value: string) => {
+		if (value === (apiConfiguration.awsCustomArn ?? "")) {
+			return
+		}
+		setApiConfigurationField("awsCustomArn", value)
+		setApiConfigurationField("awsCustomArnBaseModelId", "")
+		resetModelSettings()
+	}
+
 	return (
 		<>
 			<VSCodeTextField
 				value={apiConfiguration?.awsCustomArn || ""}
-				onInput={(e) => setApiConfigurationField("awsCustomArn", (e.target as HTMLInputElement).value)}
+				onInput={(e) => onArnInput((e.target as HTMLInputElement).value)}
 				placeholder={t("settings:placeholders.customArn")}
-				className="w-full">
+				className="w-full"
+				data-testid="custom-arn-input">
 				<label className="block font-medium mb-1">{t("settings:labels.customArn")}</label>
 			</VSCodeTextField>
 			<div className="text-sm text-vscode-descriptionForeground -mt-2">
@@ -78,12 +96,12 @@ export const BedrockCustomArn = ({ apiConfiguration, setApiConfigurationField }:
 			)}
 			<div data-testid="custom-arn-base-model">
 				<label className="block font-medium mb-1">{t("settings:providers.awsCustomArnBaseModel")}</label>
-				<Select value={baseModelId} onValueChange={onBaseModelChange}>
+				<Select value={baseModelId} onValueChange={onBaseModelChange} disabled={isFoundationModelArn}>
 					<SelectTrigger className="w-full">
 						<SelectValue placeholder={t("settings:common.select")} />
 					</SelectTrigger>
 					<SelectContent>
-						<SelectItem value={OTHER_BASE_MODEL}>
+						<SelectItem value={BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL}>
 							{t("settings:providers.awsCustomArnBaseModelOther")}
 						</SelectItem>
 						{baseModelIds.map((id) => (
@@ -97,7 +115,7 @@ export const BedrockCustomArn = ({ apiConfiguration, setApiConfigurationField }:
 					{t("settings:providers.awsCustomArnBaseModelDesc")}
 				</div>
 			</div>
-			{baseModelId === OTHER_BASE_MODEL && (
+			{baseModelId === BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL && (
 				<>
 					<VSCodeTextField
 						value={apiConfiguration.awsModelContextWindow?.toString() ?? ""}

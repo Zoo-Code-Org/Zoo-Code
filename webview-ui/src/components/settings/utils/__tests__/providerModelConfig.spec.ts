@@ -296,6 +296,7 @@ describe("providerModelConfig", () => {
 
 			expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArn", "")
 			expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArnBaseModelId", "")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("awsModelContextWindow", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxThinkingTokens", undefined)
@@ -308,7 +309,9 @@ describe("providerModelConfig", () => {
 
 			expect(setApiConfigurationField).not.toHaveBeenCalledWith("awsCustomArn", expect.anything())
 			expect(
-				setApiConfigurationField.mock.calls.filter(([field]) => field === "awsCustomArnBaseModelId"),
+				setApiConfigurationField.mock.calls.filter(
+					([field]) => field === "awsCustomArnBaseModelId" || field === "awsModelContextWindow",
+				),
 			).toHaveLength(0)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", undefined)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
@@ -333,6 +336,7 @@ describe("providerModelConfig", () => {
 
 			expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArn", appProfileArn)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArnBaseModelId", "")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("awsModelContextWindow", undefined)
 			expect(setApiConfigurationField).not.toHaveBeenCalledWith("awsCustomArn", "")
 			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
 		})

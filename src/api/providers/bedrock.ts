@@ -37,6 +37,7 @@ import {
 	SERVICE_TIER_KEY,
 	ApiProviderError,
 	resolveBedrockCustomArnBaseModelId,
+	BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
@@ -1139,8 +1140,26 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		}
 	}
 
-	private getCustomArnBaseModelId(): BedrockModelId | undefined {
-		return resolveBedrockCustomArnBaseModelId(this.options.awsCustomArn, this.options.awsCustomArnBaseModelId)
+	/**
+	 * Model ID used to look up model info for a custom ARN. Foundation-model ARNs use the model they name;
+	 * an explicit "Other" choice uses the generic fallback instead of a model named in the ARN.
+	 */
+	private getCustomArnLookupModelId(): string {
+		if (this.arnInfo.modelType === "foundation-model") {
+			return this.arnInfo.modelId
+		}
+
+		const baseModelId = resolveBedrockCustomArnBaseModelId(
+			this.options.awsCustomArn,
+			this.options.awsCustomArnBaseModelId,
+		)
+		if (baseModelId) {
+			return baseModelId
+		}
+
+		return this.options.awsCustomArnBaseModelId === BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL
+			? BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL
+			: this.arnInfo.modelId
 	}
 
 	/**
@@ -1149,7 +1168,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 	 */
 	private getCapabilityModelId(modelId: string): string {
 		if (this.options.awsCustomArn && modelId === this.options.awsCustomArn) {
-			return this.getCustomArnBaseModelId() ?? this.arnInfo?.modelId ?? modelId
+			return this.getCustomArnLookupModelId()
 		}
 
 		return this.parseBaseModelId(modelId)
@@ -1242,10 +1261,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 		// If custom ARN is provided, use it
 		if (this.options.awsCustomArn) {
-			// A foundation-model ARN already names the model that will be invoked.
-			const baseModelId =
-				this.arnInfo.modelType === "foundation-model" ? undefined : this.getCustomArnBaseModelId()
-			modelConfig = this.getModelById(baseModelId ?? this.arnInfo.modelId, this.arnInfo.modelType)
+			modelConfig = this.getModelById(this.getCustomArnLookupModelId(), this.arnInfo.modelType)
 
 			//If the user entered an ARN for a foundation-model they've done the same thing as picking from our list of options.
 			//We leave the model data matching the same as if a drop-down input method was used by not overwriting the model ID with the user input ARN

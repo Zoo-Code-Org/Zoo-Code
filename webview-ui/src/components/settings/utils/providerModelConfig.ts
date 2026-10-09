@@ -254,13 +254,12 @@ export const handleModelChangeSideEffects = <K extends keyof ProviderSettings>(
 	setApiConfigurationField: (field: K, value: ProviderSettings[K]) => void,
 ): void => {
 	if (provider === providerIdentifiers.bedrock) {
-		// The base model belongs to a specific ARN, so reset it whenever the ARN is replaced or cleared.
-		if (isArn(modelId)) {
-			setApiConfigurationField("awsCustomArn" as K, modelId.trim() as ProviderSettings[K])
+		// The base model and context window belong to a specific ARN (the provider applies the context
+		// window to every Bedrock model), so reset them whenever the ARN is replaced or cleared.
+		if (modelId !== "custom-arn") {
+			setApiConfigurationField("awsCustomArn" as K, (isArn(modelId) ? modelId.trim() : "") as ProviderSettings[K])
 			setApiConfigurationField("awsCustomArnBaseModelId" as K, "" as ProviderSettings[K])
-		} else if (modelId !== "custom-arn") {
-			setApiConfigurationField("awsCustomArn" as K, "" as ProviderSettings[K])
-			setApiConfigurationField("awsCustomArnBaseModelId" as K, "" as ProviderSettings[K])
+			setApiConfigurationField("awsModelContextWindow" as K, undefined as ProviderSettings[K])
 		}
 	}
 

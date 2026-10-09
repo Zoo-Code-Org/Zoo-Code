@@ -909,6 +909,24 @@ describe("useSelectedModel", () => {
 			expect(info?.maxTokens).toBe(bedrockModels["anthropic.claude-opus-4-8"].maxTokens)
 		})
 
+		it("uses the provider fallback for an explicit Other choice even when the ARN names a model", () => {
+			const { info } = renderCustomArn({
+				awsCustomArn: "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-opus-4-8",
+				awsCustomArnBaseModelId: "other",
+			})
+
+			expect(info).toMatchObject({ contextWindow: BEDROCK_DEFAULT_CONTEXT, maxTokens: BEDROCK_MAX_TOKENS })
+		})
+
+		it("uses the named model of a foundation-model ARN regardless of the selected base model", () => {
+			const { info } = renderCustomArn({
+				awsCustomArn: "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
+				awsCustomArnBaseModelId: "anthropic.claude-opus-5-5",
+			})
+
+			expect(info?.maxTokens).toBe(bedrockModels["anthropic.claude-3-5-sonnet-20241022-v2:0"].maxTokens)
+		})
+
 		it("uses the provider fallback and user limits when the base model is not listed", () => {
 			expect(renderCustomArn({}).info).toMatchObject({
 				contextWindow: BEDROCK_DEFAULT_CONTEXT,
