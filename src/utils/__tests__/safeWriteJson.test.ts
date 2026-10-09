@@ -855,4 +855,61 @@ describe("safeWriteJson", () => {
 		}
 	})
 
+
+	// The walk-up branch, pinned through the shape CR suggested: the target sits under the same
+	// existing ancestor but OUTSIDE the missing scope. That matters because the two outcomes then
+	// carry different errors - propagating the errno from the ancestor, versus falling back to a
+	// higher ancestor and rejecting on confinement - so a swallowed errno cannot hide behind an
+	// identical message (which is exactly what made the sibling PR's tests unable to pin this).
+	test("propagates a non-ENOENT errno from the scope walk instead of widening to a higher ancestor", async () => {
+		const real = path.join(tempDir, "walk-real")
+		await fs.mkdir(real)
+		const other = path.join(real, "other")
+		await fs.mkdir(other)
+		const scope = path.join(real, "nested")
+		const target = path.join(other, "mcp.json")
+
+		const realpathSpy = vi.spyOn(fs, "realpath").mockImplementation(async (candidate) => {
+			const given = String(candidate)
+			if (given === scope) {
+				throw Object.assign(new Error("ENOENT: no such file or directory, realpath"), { code: "ENOENT" })
+			}
+			if (given === real) {
+				throw Object.assign(new Error("ELOOP: too many symbolic links encountered, realpath"), {
+					code: "ELOOP",
+				})
+			}
+			return given
+		})
+
+		try {
+			await expect(safeWriteJson(target, { mcpServers: {} }, { confineTo: scope })).rejects.toThrow(
+				"ELOOP: too many symbolic links encountered, realpath",
+			)
+			const entries = await fs.readdir(other)
+			expect(entries.filter((entry) => entry.endsWith(".lock") || entry.includes(".new_"))).toEqual([])
+			await expect(fs.readFile(path.join(other, "mcp.json"), "utf8")).rejects.toThrow()
+		} finally {
+			realpathSpy.mockRestore()
+		}
+	})
+
+	// Same shape for the reconstruction: the missing components have to be re-appended to the
+	// canonicalized ancestor. If the scope silently widened to the ancestor, this target would be
+	// inside it and the write would go through.
+	test("keeps a missing nested confineTo scoped to its reconstructed path when the ancestor resolves", async () => {
+		const real = path.join(tempDir, "reconstruct-real")
+		await fs.mkdir(real)
+		const other = path.join(real, "other")
+		await fs.mkdir(other)
+		const scope = path.join(real, "nested")
+		const target = path.join(other, "mcp.json")
+
+		await expect(safeWriteJson(target, { mcpServers: {} }, { confineTo: scope })).rejects.toThrow(
+			/resolves outside the confined directory/,
+		)
+		const entries = await fs.readdir(other)
+		expect(entries.filter((entry) => entry.endsWith(".lock") || entry.includes(".new_"))).toEqual([])
+		await expect(fs.readFile(path.join(other, "mcp.json"), "utf8")).rejects.toThrow()
+	})
 })
