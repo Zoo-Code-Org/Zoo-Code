@@ -402,7 +402,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	abandoned = false
 	abortReason?: ClineApiReqCancelReason
 	isInitialized = false
-	isPaused: boolean = false
 
 	// API
 	apiConfiguration: ProviderSettings
@@ -562,6 +561,48 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 		this.userMessageContent.push(toolResult)
 		return true
+	}
+
+	/**
+	 * Derives terminal tool-turn readiness from the protocol state instead of
+	 * relying exclusively on the presenter's one-shot boolean latch.
+	 *
+	 * A re-entrant presenter can lose the latch update after every tool has
+	 * already completed. At that point the assistant turn is safe to continue
+	 * when the stream is closed, presentation is idle, every content block is
+	 * final, and every tool call has its matching result.
+	 */
+	private hasCompleteToolResultsForCurrentTurn(): boolean {
+		// Do not require currentStreamingContentIndex to reach the end here.
+		// A non-abort presenter rejection releases the lock and is logged, but
+		// nothing schedules another presentation pass. Gating on the index would
+		// strand this wait after exactly that failure.
+		if (!this.didCompleteReadingStream || this.presentAssistantMessageLocked) {
+			return false
+		}
+
+		const toolResultIds = new Set(
+			this.userMessageContent
+				.filter((block): block is Anthropic.ToolResultBlockParam => block.type === "tool_result")
+				.map((block) => block.tool_use_id),
+		)
+		let toolUseCount = 0
+
+		for (const block of this.assistantMessageContent) {
+			if (block.partial) {
+				return false
+			}
+			if (block.type !== "tool_use" && block.type !== "mcp_tool_use") {
+				continue
+			}
+
+			toolUseCount++
+			if (!block.id || !toolResultIds.has(sanitizeToolUseId(block.id))) {
+				return false
+			}
+		}
+
+		return toolUseCount > 0
 	}
 	didRejectTool = false
 	didAlreadyUseTool = false
@@ -1835,6 +1876,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				})
 		const isAutoAnswered = approval.decision === "approve" || approval.decision === "deny"
 		const autoApprovalDecision = isAutoAnswered ? approval.decision : undefined
+
+		// Re-check: an abort during the getState/checkAutoApproval awaits must not post an ask row.
+		if (this.abort) {
+			if (queuedMessage) {
+				this.messageQueueService.releaseMessage(queuedMessage.id)
+			}
+			throw new Error(`[RooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
+		}
 
 		if (partial !== undefined) {
 			const lastMessage = this.clineMessages.at(-1)
@@ -4715,7 +4764,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// 	this.userMessageContentReady = true
 					// }
 
-					await pWaitFor(() => this.userMessageContentReady || this.abort || this.abandoned)
+					await pWaitFor(
+						() =>
+							this.userMessageContentReady ||
+							this.hasCompleteToolResultsForCurrentTurn() ||
+							this.abort ||
+							this.abandoned,
+					)
 
 					if (this.abort || this.abandoned) {
 						throw new Error(
@@ -4750,9 +4805,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						this.consecutiveNoToolUseCount = 0
 					}
 
-					// Push to stack if there's content OR if we're paused waiting for a subtask.
-					// When paused, we push an empty item so the loop continues to the pause check.
-					if (this.userMessageContent.length > 0 || this.isPaused) {
+					if (this.userMessageContent.length > 0) {
 						stack.push({
 							userContent: [...this.userMessageContent], // Create a copy to avoid mutation issues
 							includeFileDetails: false, // Subsequent iterations don't need file details

@@ -1,9 +1,10 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 
-import type { ModelInfo } from "@roo-code/types"
+import { DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS, type ModelInfo } from "@roo-code/types"
 
 import type { ApiHandler, ApiHandlerCreateMessageMetadata } from "../index"
 import { ApiStream } from "../transform/stream"
+import { sanitizeSurrogates, sanitizeSurrogatesDeep } from "../transform/sanitize-surrogates"
 import { countTokens } from "../../utils/countTokens"
 import { isMcpTool } from "../../utils/mcp-name"
 import { getApiRequestTimeout } from "./utils/timeout-config"
@@ -25,9 +26,16 @@ export abstract class BaseProvider implements ApiHandler {
 	/**
 	 * Converts an array of tools to be compatible with OpenAI's strict mode.
 	 * Filters for function tools, applies schema conversion to their parameters,
-	 * and ensures all tools have consistent strict: true values.
+	 * and ensures all tools have consistent strict values.
+	 *
+	 * Pass strict=false to serve endpoints that reject strict: true (e.g.
+	 * strict-unaware OpenAI-compatible proxies): non-MCP tools are then sent
+	 * with strict: false and their declared schemas are preserved as-is.
 	 */
-	protected convertToolsForOpenAI(tools: any[] | undefined): any[] | undefined {
+	protected convertToolsForOpenAI(
+		tools: any[] | undefined,
+		strict: boolean = DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS,
+	): any[] | undefined {
 		if (!tools) {
 			return undefined
 		}
@@ -41,14 +49,25 @@ export abstract class BaseProvider implements ApiHandler {
 			// to preserve optional parameters from the MCP server schema
 			const isMcp = isMcpTool(tool.function.name)
 
+			// Strict mode also rewrites the schema (all properties become
+			// required). When disabled, the declared schema is preserved as-is,
+			// retaining every original required constraint (e.g. nanogpt).
+			const useStrict = !isMcp && strict
+
 			return {
 				...tool,
 				function: {
 					...tool.function,
-					strict: !isMcp,
-					parameters: isMcp
-						? tool.function.parameters
-						: this.convertToolSchemaForOpenAI(tool.function.parameters),
+					// Sanitize lone UTF-16 surrogates: providers validating the JSON body
+					// (e.g. DeepSeek) reject the whole request otherwise. See #461.
+					name: sanitizeSurrogates(tool.function.name),
+					description: sanitizeSurrogates(tool.function.description),
+					strict: useStrict,
+					parameters: sanitizeSurrogatesDeep(
+						useStrict
+							? this.convertToolSchemaForOpenAI(tool.function.parameters)
+							: tool.function.parameters,
+					),
 				},
 			}
 		})
@@ -86,19 +105,28 @@ export abstract class BaseProvider implements ApiHandler {
 			for (const key of allKeys) {
 				const prop = newProps[key]
 
-				// Handle nullable types by removing null
-				if (prop && Array.isArray(prop.type) && prop.type.includes("null")) {
-					const nonNullTypes = prop.type.filter((t: string) => t !== "null")
-					prop.type = nonNullTypes.length === 1 ? nonNullTypes[0] : nonNullTypes
-				}
+				// Clone each property before normalizing so strict conversion never
+				// mutates caller-owned tool metadata: a later request with strict
+				// disabled must still send the declared (nullable) schema.
+				if (prop && typeof prop === "object" && !Array.isArray(prop)) {
+					const normalizedProp = { ...prop }
 
-				// Recursively process nested objects
-				if (prop && prop.type === "object") {
-					newProps[key] = this.convertToolSchemaForOpenAI(prop)
-				} else if (prop && prop.type === "array" && prop.items?.type === "object") {
-					newProps[key] = {
-						...prop,
-						items: this.convertToolSchemaForOpenAI(prop.items),
+					// Handle nullable types by removing null
+					if (Array.isArray(normalizedProp.type) && normalizedProp.type.includes("null")) {
+						const nonNullTypes = normalizedProp.type.filter((t: string) => t !== "null")
+						normalizedProp.type = nonNullTypes.length === 1 ? nonNullTypes[0] : nonNullTypes
+					}
+
+					// Recursively process nested objects
+					if (normalizedProp.type === "object") {
+						newProps[key] = this.convertToolSchemaForOpenAI(normalizedProp)
+					} else if (normalizedProp.type === "array" && normalizedProp.items?.type === "object") {
+						newProps[key] = {
+							...normalizedProp,
+							items: this.convertToolSchemaForOpenAI(normalizedProp.items),
+						}
+					} else {
+						newProps[key] = normalizedProp
 					}
 				}
 			}
