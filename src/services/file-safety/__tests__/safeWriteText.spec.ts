@@ -798,6 +798,39 @@ describe("safeWriteText", () => {
 			warnSpy.mockRestore()
 		})
 
+		it("win32 DACL: a warning sink that throws does not fail the committed write", async () => {
+			// The notice describes a publish that already committed. A caller whose sink throws
+			// (a UI sink, a logger mid-restart) must not turn that into a failed save, and the
+			// delivery failure itself has to be reported rather than swallowed.
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			const onWarning = vi.fn(() => {
+				throw new Error("sink failed")
+			})
+
+			// icacls save succeeds, restore fails - the same shape as the other two cases.
+			let callCount = 0
+			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+				callCount++
+				if (typeof cb === "function") {
+					cb(callCount === 1 ? null : new Error("icacls restore error"), "", "")
+				}
+				return fakeChild
+			})
+
+			await safeWriteText(targetPath, "data", { platform: "win32", onWarning })
+
+			// The write still committed.
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+			expect(fs.rename).toHaveBeenCalledTimes(1)
+			// The sink was tried once, and its failure is reported through the fallback.
+			expect(onWarning).toHaveBeenCalledTimes(1)
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("onWarning callback failed: sink failed"))
+			warnSpy.mockRestore()
+		})
+
 		it("win32 DACL: when target does not exist, no save/restore/dump", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
