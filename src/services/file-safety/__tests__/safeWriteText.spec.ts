@@ -561,7 +561,7 @@ describe("safeWriteText", () => {
 			expect(vi.mocked(fsSync.closeSync).mock.calls.filter((call) => Number(call[0]) === 7)).toHaveLength(1)
 		})
 
-		it("a failing seed-descriptor close is retried and never leaves the descriptor unreleased", async () => {
+		it("a failing seed-descriptor close is reported once and does not fail the backup", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			// The backup destination is seeded with openSync("wx") and released immediately. Give
@@ -569,9 +569,12 @@ describe("safeWriteText", () => {
 			// seed's close fail: at that moment the descriptor is still owned by this call, while
 			// the error this write ends up reporting is the backup failure.
 			let backupOpens = 0
+			let otherFd = 100
 			const openedFds: number[] = []
 			vi.mocked(fsSync.openSync).mockImplementation((target: unknown) => {
-				const fd = String(target).includes("safeWriteText.bak_") ? (backupOpens++ === 0 ? 7 : 8) : 1
+				// Distinct numbers per open, so "no descriptor is closed twice" can be checked
+				// against the numbers themselves.
+				const fd = String(target).includes("safeWriteText.bak_") ? (backupOpens++ === 0 ? 7 : 8) : otherFd++
 				openedFds.push(fd)
 				return fd
 			})
@@ -583,21 +586,28 @@ describe("safeWriteText", () => {
 				}
 			})
 
-			await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).rejects.toThrow("EBADF")
+			// A close that has been attempted is never attempted again: the first close(2) may have
+			// released the descriptor even while reporting EBADF, and a second close could then
+			// release a descriptor a concurrent open has meanwhile been handed. The failure is
+			// reported where it happened, and the backup - which is what this descriptor was for -
+			// is complete, so the write itself is not failed by it.
+			await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).resolves.toBeUndefined()
 
-			// The close is attempted again by the backup failure handler rather than the descriptor
-			// being abandoned, and that retry's failure is reported without replacing the error the
-			// write fails with.
 			const seedAttempts = vi.mocked(fsSync.closeSync).mock.calls.filter((call) => Number(call[0]) === seedFd).length
-			expect(seedAttempts).toBe(2)
+			expect(seedAttempts).toBe(1)
+			expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("backup seed descriptor for"), expect.anything())
 			expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("backup seed descriptor"), expect.anything())
 			// Every descriptor this write opened was handed to closeSync: no handle outlives the
 			// failed backup.
 			for (const fd of openedFds) {
 				expect(vi.mocked(fsSync.closeSync).mock.calls.some((call) => Number(call[0]) === fd)).toBe(true)
 			}
-			// The partial backup and the staging temp are still cleaned up.
-			expect(fs.rename).not.toHaveBeenCalled()
+			// The backup itself is complete - the seed descriptor was only ever a mode-fixed
+			// placeholder - so the write goes on to commit and then discards the backup it no longer
+			// needs.
+			const closedFds = vi.mocked(fsSync.closeSync).mock.calls.map((call) => Number(call[0]))
+			expect(new Set(closedFds).size).toBe(closedFds.length)
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
 			consoleError.mockRestore()
 		})
@@ -672,7 +682,7 @@ describe("safeWriteText", () => {
 			expect(execFile).toHaveBeenCalledTimes(1)
 		})
 
-	it("win32: reports that access rights may change when the DACL cannot be saved", async () => {
+	it("win32: refuses the write without an onWarning notice when the DACL cannot be saved", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 		vi.mocked(fsSync.openSync).mockReturnValue(1)
@@ -1633,7 +1643,7 @@ describe("resolveLockKey when the parent directory does not exist yet", () => {
 // retried once, the second failure is logged rather than allowed to replace the operation's
 // own error, and the descriptor is not abandoned. The four descriptors below are the ones the
 // review row names as not doing that yet - one test per descriptor.
-describe("descriptor release retries and reports", () => {
+describe("descriptor release is attempted once and reported", () => {
 	const targetPath = "/tmp/test-dir/target.txt"
 	const dirPath = path.resolve("/tmp/test-dir")
 	const closeErr = () => Object.assign(new Error("EBADF close"), { code: "EBADF" })
@@ -1645,39 +1655,44 @@ describe("descriptor release retries and reports", () => {
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 	})
 
-	it("a close failure on the staging descriptor is retried and logged", async () => {
-		vi.mocked(fsSync.openSync).mockReturnValue(3)
+	it("a close failure on the staging descriptor is attempted once and logged", async () => {
+		let nextFd = 20
+		vi.mocked(fsSync.openSync).mockImplementation(() => nextFd++)
 		vi.mocked(fsSync.closeSync).mockImplementation(() => {
 			throw closeErr()
 		})
 		const errSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
-		await expect(safeWriteText(targetPath, "data", { platform: "linux" })).rejects.toThrow("EBADF close")
+		// The content was staged and fsynced before the close, so a close that fails is a leak to
+		// report, not a reason to fail the write.
+		await expect(safeWriteText(targetPath, "data", { platform: "linux" })).resolves.toBeUndefined()
 
-		// Retried once, and the second failure reported instead of swallowed.
-		expect(fsSync.closeSync).toHaveBeenCalledTimes(2)
-		// _closeDescriptor reports the label together with the error it swallowed.
-	expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("staging descriptor for"), expect.anything())
+		// The invariant is that no descriptor number is closed twice, whatever else this write
+		// opened with the same number.
+		const closedFds = vi.mocked(fsSync.closeSync).mock.calls.map((c) => Number(c[0]))
+		expect(new Set(closedFds).size).toBe(closedFds.length)
+		expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("staging descriptor for"), expect.anything())
 		errSpy.mockRestore()
 	})
 
-	it("a close failure on a caller-supplied temp descriptor is retried and logged", async () => {
+	it("a close failure on a caller-supplied temp descriptor is attempted once and logged", async () => {
 		const callerTemp = path.join(dirPath, "caller-staged.tmp")
-		vi.mocked(fsSync.openSync).mockReturnValue(4)
+		let nextFd = 30
+		vi.mocked(fsSync.openSync).mockImplementation(() => nextFd++)
 		vi.mocked(fsSync.closeSync).mockImplementation(() => {
 			throw closeErr()
 		})
 		const errSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
-		await expect(safeWriteText(targetPath, "data", { platform: "linux", tempPath: callerTemp })).rejects.toThrow("EBADF close")
+		await expect(safeWriteText(targetPath, "data", { platform: "linux", tempPath: callerTemp })).resolves.toBeUndefined()
 
-		expect(fsSync.closeSync).toHaveBeenCalledTimes(2)
-		// _closeDescriptor reports the label together with the error it swallowed.
-	expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("staged temp descriptor for"), expect.anything())
+		const closedFds = vi.mocked(fsSync.closeSync).mock.calls.map((c) => Number(c[0]))
+		expect(new Set(closedFds).size).toBe(closedFds.length)
+		expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("staged temp descriptor for"), expect.anything())
 		errSpy.mockRestore()
 	})
 
-	it("a close failure on the backup fsync descriptor is retried and logged", async () => {
+	it("a close failure on the backup fsync descriptor is attempted once and logged", async () => {
 		// The seed and the fsync handle open the same backup path, so the flags tell them
 		// apart: only the fsync handle (r+) gets the descriptor whose close fails.
 		vi.mocked(fsSync.openSync).mockImplementation((target, flags) =>
@@ -1690,15 +1705,14 @@ describe("descriptor release retries and reports", () => {
 		})
 		const errSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
-		await expect(safeWriteText(targetPath, "data", { platform: "linux", backup: true })).rejects.toThrow("EBADF close")
+		await expect(safeWriteText(targetPath, "data", { platform: "linux", backup: true })).resolves.toBeUndefined()
 
-		expect(vi.mocked(fsSync.closeSync).mock.calls.filter((c) => c[0] === 5)).toHaveLength(2)
-		// _closeDescriptor reports the label together with the error it swallowed.
-	expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("backup fsync descriptor for"), expect.anything())
+		expect(vi.mocked(fsSync.closeSync).mock.calls.filter((c) => c[0] === 5)).toHaveLength(1)
+		expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("backup fsync descriptor for"), expect.anything())
 		errSpy.mockRestore()
 	})
 
-	it("a close failure on the parent directory descriptor is retried, logged, and still reported as a durability failure", async () => {
+	it("a close failure on the parent directory descriptor is logged without failing the durable write", async () => {
 		// The parent directory is the only descriptor opened read-only.
 		vi.mocked(fsSync.openSync).mockImplementation((_target, flags) => (String(flags) === "r" ? 7 : 3))
 		vi.mocked(fsSync.closeSync).mockImplementation((fd) => {
@@ -1708,13 +1722,115 @@ describe("descriptor release retries and reports", () => {
 		})
 		const errSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
-		// The rename committed, so this is the post-commit durability path: the close failure is
-		// retried and logged, and the caller still gets the durability error it needs.
-		await expect(safeWriteText(targetPath, "data", { platform: "linux" })).rejects.toThrow(PostCommitDurabilityError)
+		// The durability question this block answers belongs to the fsync, which succeeded. A close
+		// that fails afterwards is a leak to report: turning it into PostCommitDurabilityError would
+		// tell the caller its directory entry may not be durable when the evidence says it is.
+		await expect(safeWriteText(targetPath, "data", { platform: "linux" })).resolves.toBeUndefined()
 
-		expect(vi.mocked(fsSync.closeSync).mock.calls.filter((c) => c[0] === 7)).toHaveLength(2)
-		// _closeDescriptor reports the label together with the error it swallowed.
-	expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("parent directory descriptor for"), expect.anything())
+		expect(vi.mocked(fsSync.closeSync).mock.calls.filter((c) => c[0] === 7)).toHaveLength(1)
+		expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("parent directory descriptor for"), expect.anything())
 		errSpy.mockRestore()
+	})
+})
+
+describe("windows ACL failure leaves no unauthorized content", () => {
+	const targetPath = "/tmp/test-dir/target.txt"
+
+	beforeEach(() => {
+		mockDefaults()
+		vi.mocked(fsSync.writeSync).mockImplementation((...args: unknown[]) => (typeof args[3] === "number" ? args[3] : 0))
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(3)
+	})
+
+	// icacls is dispatched by its arguments so only the operation under test can be made to fail.
+	const icacls = (handler: (argv: string[]) => { error?: unknown; stdout?: string }) =>
+		vi.mocked(execFile).mockImplementation(((_cmd: string, argv: string[], _opts: unknown, cb: (err: unknown, stdout?: string) => void) => {
+			const outcome = handler(argv)
+			return void cb(outcome.error ?? null, outcome.stdout ?? "")
+		}) as never)
+
+	it("rolls the previous content back even when the caller asked for no backup", async () => {
+		// Without a copy to roll back onto, a DACL that can be neither restored nor narrowed would
+		// leave the new bytes at the target under an inherited ACL - content published under access
+		// rights nobody authorized, reported as a failed save. So a publish that captures a DACL also
+		// retains the pre-write content privately, whatever the caller asked for.
+		const grants: string[][] = []
+		icacls((argv) => {
+			grants.push(argv)
+			if (argv.includes("/save")) {
+				return { stdout: "" }
+			}
+			if (argv.includes("/restore")) {
+				return { error: Object.assign(new Error("icacls 1300"), { code: 1300 }) }
+			}
+			if (argv.includes("/grant:r")) {
+				return { error: Object.assign(new Error("icacls 5"), { code: 5 }) }
+			}
+			return { stdout: "no access-control entries in this report" }
+		})
+
+		await expect(safeWriteText(targetPath, "new data", { platform: "win32" })).rejects.toThrow(DaclRestoreError)
+
+		// The pre-write content is renamed back over the target, and the copy that made it possible
+		// exists even though this caller passed no backup option.
+		expect(fs.copyFile).toHaveBeenCalledWith(targetPath, expect.stringContaining("safeWriteText.bak_"))
+		expect(
+			vi.mocked(fs.rename).mock.calls.some((call) => String(call[0]).includes("safeWriteText.bak_") && call[1] === targetPath),
+		).toBe(true)
+		// The rolled-back file is the backup, whose access rights came from its directory rather than
+		// from the original target, so the verified narrowing runs on it too.
+		expect(grants.filter((argv) => argv[0] === targetPath && argv.includes("/grant:r")).length).toBeGreaterThanOrEqual(2)
+	})
+
+	it("keeps the retained backup when the rollback rename itself fails", async () => {
+		// Once the commit has replaced the target, the backup is the only copy of the pre-write
+		// content. A cleanup that unlinks it because the write is failing turns a failed save into
+		// lost data - the same shape as a finally block swallowing the error it follows.
+		icacls((argv) => {
+			if (argv.includes("/save")) {
+				return { stdout: "" }
+			}
+			if (argv.includes("/restore")) {
+				return { error: Object.assign(new Error("icacls 1300"), { code: 1300 }) }
+			}
+			if (argv.includes("/grant:r")) {
+				return { error: Object.assign(new Error("icacls 5"), { code: 5 }) }
+			}
+			return { stdout: "no access-control entries in this report" }
+		})
+		vi.mocked(fs.rename).mockImplementation((async (from: unknown) => {
+			if (String(from).includes("safeWriteText.bak_")) {
+				throw Object.assign(new Error("EPERM rollback"), { code: "EPERM" })
+			}
+		}) as never)
+		const warn = vi.fn()
+
+		await expect(safeWriteText(targetPath, "new data", { platform: "win32", onWarning: warn })).rejects.toThrow(
+			DaclRestoreError,
+		)
+
+		expect(fs.unlink).not.toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
+		expect(warn).toHaveBeenCalledWith(expect.stringContaining("retained at"))
+	})
+
+	it("refuses a read-back whose only mention of the user is the file path", async () => {
+		// icacls prints the path first, and a workspace path normally contains the user name
+		// (C:\Users\<user>\...), so a substring match would accept a file that grants that user
+		// nothing at all.
+		icacls((argv) => {
+			if (argv.includes("/save")) {
+				return { stdout: "" }
+			}
+			if (argv.includes("/restore")) {
+				return { error: Object.assign(new Error("icacls 1300"), { code: 1300 }) }
+			}
+			if (argv.includes("/grant:r")) {
+				return { stdout: "" }
+			}
+			return { stdout: "C:\\Users\\eason\\Documents\\target.txt NT AUTHORITY\\SYSTEM:(F)" }
+		})
+
+		await expect(safeWriteText(targetPath, "new data", { platform: "win32" })).rejects.toThrow(DaclRestoreError)
 	})
 })
