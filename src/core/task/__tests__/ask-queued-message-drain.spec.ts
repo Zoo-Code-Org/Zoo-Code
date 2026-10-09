@@ -646,6 +646,45 @@ describe("Task.ask queued message drain", () => {
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
+	it("returns success when the user deletes the queue entry during a failed-save backoff", async () => {
+		const task = await createTask({ getState: async () => ({}) })
+
+		const askPromise = task.ask("completion_result", "Done", false)
+		await new Promise((resolve) => setTimeout(resolve, 150))
+
+		task.messageQueueService.addMessage("deleted during ack")
+		const drain = task.processQueuedMessages()
+
+		const result = await askPromise
+		await drain
+		const messageId = result.queuedMessageId!
+
+		const taskAccess = getQueueTaskTestAccess(task)
+		taskAccess.addToClineMessages = async (message) => {
+			taskAccess.clineMessages.push(message!)
+			return true
+		}
+		const saveClineMessages = vi.fn().mockResolvedValue(false)
+		taskAccess.saveClineMessages = saveClineMessages
+
+		vi.useFakeTimers()
+		try {
+			const persistence = task.persistQueuedFeedbackAndAcknowledge(messageId, result.text, result.images)
+			// The first save fails and the retry backoff starts; while it runs,
+			// the user deletes the entry from the queue UI (the webview remove
+			// handler ignores claims). The next save succeeds, so the feedback
+			// row is durable even though the cleanup removal no-ops.
+			await vi.advanceTimersByTimeAsync(1)
+			task.messageQueueService.removeMessage(messageId)
+			saveClineMessages.mockResolvedValue(true)
+			await vi.runAllTimersAsync()
+			await expect(persistence).resolves.toBe(true)
+		} finally {
+			vi.useRealTimers()
+		}
+		expect(taskAccess.clineMessages.filter((message) => message.say === "user_feedback")).toHaveLength(1)
+	})
+
 	it("associates the feedback row before the append so a throwing listener cannot strand it", async () => {
 		const task = await createTask({ getState: async () => ({}) })
 		task.messageQueueService.addMessage("dedupe me")
@@ -948,17 +987,25 @@ describe("Task.ask queued message drain", () => {
 		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
 	})
 
-	it("refuses to submit while an approval-gating ask is in flight", async () => {
+	it("refuses a queued submission during an approval-gating ask but lets a direct one deny it", async () => {
 		const task = await createTask({ getState: async () => ({}) })
 
 		const askPromise = task.ask("command", "npm test", false)
 		await new Promise((resolve) => setTimeout(resolve, 150))
 
-		await expect(task.submitUserMessage("queued note")).resolves.toBe(false)
+		// A queued submission carries no user intent and must never answer an
+		// approval ask on its own.
+		await expect(task.submitUserMessage("queued note", undefined, undefined, undefined, "queued-1")).resolves.toBe(
+			false,
+		)
 
-		setTimeout(() => task.approveAsk(), 0)
+		// A direct submission is explicit user intent: it answers the approval
+		// ask as deny-with-feedback, matching the pre-drain behavior the
+		// headless API relies on.
+		await expect(task.submitUserMessage("no, do not run it")).resolves.toBe(true)
+
 		const result = await askPromise
-		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
+		expect(result).toMatchObject({ response: "messageResponse", text: "no, do not run it" })
 	})
 
 	it.each([

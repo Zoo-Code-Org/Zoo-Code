@@ -1186,7 +1186,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						}
 						if (confirmed) {
 							this.queuedFeedbackRows.delete(messageId)
-							return this.messageQueueService.removeMessage(messageId)
+							// The row is durably saved. A missing entry means the
+							// user deleted it during the ack (the webview remove
+							// handler ignores claims); that is not a save failure.
+							this.messageQueueService.removeMessage(messageId)
+							return true
 						}
 					}
 					if (attempt < QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length) {
@@ -2821,13 +2825,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					return false
 				}
 
-				// Never overwrite a response an ask is blocked waiting on: an
-				// approval-gating ask must not be answered by the queue, and a
+				// Never overwrite a response an ask is blocked waiting on: a
 				// direct response that already landed in the slot must not be
 				// replaced (an approval would become a conversational answer).
+				// A queued (drain) submission must additionally never answer an
+				// approval ask or a failure gate on its own — a raw conversational
+				// post carries no user intent for those — while a direct
+				// submission is exactly that intent and may answer an approval
+				// ask (deny-with-feedback), matching the pre-drain behavior.
 				// Queue drains treat the returned false as "leave the message
 				// queued".
-				if (this.inFlightAskBlocksQueuedSubmission()) {
+				const inFlightAskGates = this.inFlightAskGates
+				const directAskBlocksSubmission =
+					inFlightAskGates !== undefined &&
+					[...inFlightAskGates].some(({ type, text }) => queuedResponseForAsk(type, text) === undefined)
+				const inFlightAskHasResponse = (inFlightAskGates?.size ?? 0) > 0 && this.askResponse !== undefined
+				if (
+					inFlightAskHasResponse ||
+					(sourceQueuedMessageId === undefined && directAskBlocksSubmission) ||
+					(sourceQueuedMessageId !== undefined && this.inFlightAskBlocksQueuedSubmission())
+				) {
 					return false
 				}
 
