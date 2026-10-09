@@ -743,6 +743,88 @@ describe("ProviderSettingsManager", () => {
 			expect(storedConfig.apiConfigs.retired.groqApiKey).toBe("legacy-groq-specific-key")
 			expect(storedConfig.apiConfigs.retired.id).toBeTruthy()
 		})
+
+		it("saveConfigWithPrevious returns existed: false and previousProfile: undefined for new profile", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						default: { id: "default-id", apiProvider: providerIdentifiers.anthropic },
+					},
+					modeApiConfigs: {},
+				}),
+			)
+
+			const result = await providerSettingsManager.saveConfigWithPrevious("brand-new", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			})
+
+			expect(result.existed).toBe(false)
+			expect(result.previousProfile).toBeUndefined()
+			expect(result.id).toBeTruthy()
+		})
+
+		it("saveConfigWithPrevious returns existed: true and previousProfile snapshot for existing profile", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						existing: {
+							id: "orig-id",
+							apiProvider: providerIdentifiers.anthropic,
+							apiModelId: "claude-3-5-sonnet",
+						},
+					},
+					modeApiConfigs: {},
+				}),
+			)
+
+			const result = await providerSettingsManager.saveConfigWithPrevious("existing", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			})
+
+			expect(result.existed).toBe(true)
+			expect(result.previousProfile).toEqual({
+				id: "orig-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-3-5-sonnet",
+			})
+			expect(result.id).toBe("orig-id")
+		})
+
+		it("findProfile returns profile when found and undefined when not found", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						found: {
+							id: "found-id",
+							apiProvider: providerIdentifiers.anthropic,
+						},
+					},
+					modeApiConfigs: {},
+				}),
+			)
+
+			const foundByName = await providerSettingsManager.findProfile({ name: "found" })
+			expect(foundByName).toEqual(expect.objectContaining({ name: "found", id: "found-id" }))
+
+			const notFoundByName = await providerSettingsManager.findProfile({ name: "absent" })
+			expect(notFoundByName).toBeUndefined()
+
+			const notFoundById = await providerSettingsManager.findProfile({ id: "missing-id" })
+			expect(notFoundById).toBeUndefined()
+		})
+
+		it("findProfile throws and propagates storage errors", async () => {
+			mockSecrets.get.mockRejectedValue(new Error("Storage disk read failed"))
+
+			await expect(providerSettingsManager.findProfile({ name: "any" })).rejects.toThrow(
+				/Failed to find profile:.*Storage disk read failed/,
+			)
+		})
 	})
 
 	describe("DeleteConfig", () => {

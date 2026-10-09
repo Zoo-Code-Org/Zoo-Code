@@ -243,6 +243,15 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 		// Mock providerSettingsManager
 		;(provider as any).providerSettingsManager = {
+			saveConfigWithPrevious: vi.fn().mockResolvedValue({
+				id: "test-id",
+				existed: true,
+				previousProfile: {
+					id: "test-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4",
+				},
+			}),
 			saveConfig: vi.fn().mockResolvedValue("test-id"),
 			listConfig: vi.fn().mockResolvedValue([
 				{

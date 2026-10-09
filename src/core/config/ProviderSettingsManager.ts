@@ -3,6 +3,7 @@ import { z, ZodError } from "zod"
 import deepEqual from "fast-deep-equal"
 
 import {
+	type ProviderSettings,
 	type ProviderSettingsWithId,
 	providerSettingsWithIdSchema,
 	discriminatedProviderSettingsWithIdSchema,
@@ -422,23 +423,37 @@ export class ProviderSettingsManager {
 	/**
 	 * Save a config with the given name.
 	 * Preserves the ID from the input 'config' object if it exists,
-	 * otherwise generates a new one (for creation scenarios).
-	 * Serialized through the process-wide persistence owner.
+	/**
+	 * Atomically saves a configuration under the persistence lock, returning the assigned ID,
+	 * whether the profile existed before this save, and a snapshot of the previous configuration.
 	 */
-	public async saveConfig(name: string, config: ProviderSettingsWithId): Promise<string> {
+	public async saveConfigWithPrevious(
+		name: string,
+		config: ProviderSettingsWithId,
+	): Promise<{ id: string; existed: boolean; previousProfile?: ProviderSettingsWithId }> {
 		try {
 			return await this.lock(async () => {
 				const providerProfiles = await this.load()
+				const existing = providerProfiles.apiConfigs[name]
+				const existed = !!existing
+				const previousProfile = existing
+					? (JSON.parse(JSON.stringify(existing)) as ProviderSettingsWithId)
+					: undefined
 				// Preserve the existing ID if this is an update to an existing config.
-				const existingId = providerProfiles.apiConfigs[name]?.id
+				const existingId = existing?.id
 				const id = config.id || existingId || this.generateId()
 				providerProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(config, id)
 				await this.store(providerProfiles)
-				return id
+				return { id, existed, previousProfile }
 			})
 		} catch (error) {
 			throw new Error(`Failed to save config: ${error}`)
 		}
+	}
+
+	public async saveConfig(name: string, config: ProviderSettingsWithId): Promise<string> {
+		const { id } = await this.saveConfigWithPrevious(name, config)
+		return id
 	}
 
 	/**
@@ -561,9 +576,14 @@ export class ProviderSettingsManager {
 		}
 	}
 
-	public async getProfile(
+	/**
+	 * Looks up a profile by name or ID.
+	 * Returns the profile if found, or undefined if not found in valid storage.
+	 * Propagates storage and parse errors instead of treating them as not found.
+	 */
+	public async findProfile(
 		params: { name: string } | { id: string },
-	): Promise<ProviderSettingsWithId & { name: string }> {
+	): Promise<(ProviderSettingsWithId & { name: string }) | undefined> {
 		try {
 			return await this.lock(async () => {
 				const providerProfiles = await this.load()
@@ -574,7 +594,7 @@ export class ProviderSettingsManager {
 					name = params.name
 
 					if (!providerProfiles.apiConfigs[name]) {
-						throw new Error(`Config with name '${name}' not found`)
+						return undefined
 					}
 
 					providerSettings = providerProfiles.apiConfigs[name]
@@ -586,7 +606,7 @@ export class ProviderSettingsManager {
 					)
 
 					if (!entry) {
-						throw new Error(`Config with ID '${id}' not found`)
+						return undefined
 					}
 
 					name = entry[0]
@@ -596,8 +616,19 @@ export class ProviderSettingsManager {
 				return { name, ...providerSettings }
 			})
 		} catch (error) {
-			throw new Error(`Failed to get profile: ${error instanceof Error ? error.message : error}`)
+			throw new Error(`Failed to find profile: ${error instanceof Error ? error.message : error}`)
 		}
+	}
+
+	public async getProfile(
+		params: { name: string } | { id: string },
+	): Promise<ProviderSettingsWithId & { name: string }> {
+		const profile = await this.findProfile(params)
+		if (!profile) {
+			const identifier = "name" in params ? `name '${params.name}'` : `ID '${params.id}'`
+			throw new Error(`Failed to get profile: Config with ${identifier} not found`)
+		}
+		return profile
 	}
 
 	/**

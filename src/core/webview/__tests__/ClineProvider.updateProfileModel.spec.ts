@@ -163,7 +163,9 @@ describe("ClineProvider - updateProfileModel", () => {
 		const settingsManager = provider["providerSettingsManager"]
 		return {
 			getProfile: vi.mocked(settingsManager.getProfile),
+			findProfile: vi.mocked(settingsManager.findProfile),
 			saveConfig: vi.mocked(settingsManager.saveConfig),
+			saveConfigWithPrevious: vi.mocked(settingsManager.saveConfigWithPrevious),
 			updateProfileModel: vi.mocked(settingsManager.updateProfileModel),
 			restoreConfigIfMatches: vi.mocked(settingsManager.restoreConfigIfMatches),
 			activateProfile: vi.mocked(settingsManager.activateProfile),
@@ -267,9 +269,24 @@ describe("ClineProvider - updateProfileModel", () => {
 		// Test double for providerSettingsManager
 		Object.defineProperty(provider, "providerSettingsManager", {
 			value: {
+				saveConfigWithPrevious: vi.fn().mockImplementation(async (name: string, config: ProviderSettings) => {
+					const existing = storedProfiles[name]
+					const existed = !!existing
+					const previousProfile = existing ? { ...existing } : undefined
+					const id = (config as Partial<StoredProfile>).id || existing?.id || "test-id"
+					storedProfiles[name] = { name, id, ...config }
+					return { id, existed, previousProfile }
+				}),
 				saveConfig: vi.fn().mockImplementation(async (name: string, config: ProviderSettings) => {
 					storedProfiles[name] = { name, id: (config as Partial<StoredProfile>).id || "test-id", ...config }
 					return "test-id"
+				}),
+				findProfile: vi.fn().mockImplementation(async (params: { name: string } | { id: string }) => {
+					const targetName =
+						"name" in params
+							? params.name
+							: Object.keys(storedProfiles).find((k) => storedProfiles[k].id === params.id)
+					return targetName ? storedProfiles[targetName] : undefined
 				}),
 				updateProfileModel: vi
 					.fn()
@@ -1210,16 +1227,17 @@ describe("ClineProvider - updateProfileModel", () => {
 	})
 
 	it("rolls back saved config in upsertProviderProfile when aborted after saveConfig", async () => {
-		manager().getProfile.mockResolvedValueOnce({
-			id: "orig-id",
-			name: "existing-profile",
-			apiProvider: providerIdentifiers.anthropic,
-			apiModelId: "claude-3-5-sonnet",
-		} as ProviderSettingsWithId & { name: string })
-
-		manager().saveConfig.mockImplementationOnce(async () => {
+		manager().saveConfigWithPrevious.mockImplementationOnce(async () => {
 			provider["providerProfileMutationAbortController"].abort()
-			return "new-id"
+			return {
+				id: "new-id",
+				existed: true,
+				previousProfile: {
+					id: "orig-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "claude-3-5-sonnet",
+				},
+			}
 		})
 
 		await provider.upsertProviderProfile("existing-profile", {
@@ -1235,11 +1253,13 @@ describe("ClineProvider - updateProfileModel", () => {
 	})
 
 	it("removes newly created profile in upsertProviderProfile when aborted after saveConfig", async () => {
-		manager().getProfile.mockRejectedValueOnce(new Error("Config with name 'brand-new' not found"))
-
-		manager().saveConfig.mockImplementationOnce(async () => {
+		manager().saveConfigWithPrevious.mockImplementationOnce(async () => {
 			provider["providerProfileMutationAbortController"].abort()
-			return "brand-new-id"
+			return {
+				id: "brand-new-id",
+				existed: false,
+				previousProfile: undefined,
+			}
 		})
 
 		await provider.upsertProviderProfile("brand-new", {
@@ -1252,5 +1272,52 @@ describe("ClineProvider - updateProfileModel", () => {
 			expect.objectContaining({ id: "brand-new-id" }),
 			undefined,
 		)
+	})
+
+	it("does not write context state or update task when provider is disposed while activateProfile is in flight", async () => {
+		const mockTask = new Task({} as unknown as ConstructorParameters<typeof Task>[0])
+		Object.defineProperty(mockTask, "taskApiConfigName", { value: "test-config" })
+		await provider.addClineToStack(mockTask)
+
+		let resolveBlockedActivation!: () => void
+		const activationBlockedPromise = new Promise<void>((resolve) => {
+			resolveBlockedActivation = resolve
+		})
+
+		manager().activateProfile.mockImplementationOnce(async () => {
+			await activationBlockedPromise
+			return {
+				name: "disposed-profile",
+				id: "disposed-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4.5",
+			}
+		})
+
+		const postStateSpy = vi.spyOn(provider, "postStateToWebview")
+		const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
+		const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
+
+		// Start activateProviderProfile (will block in activateProfile)
+		const activationPromise = provider.activateProviderProfile({ name: "disposed-profile" })
+
+		// Give activation a tick to enter activateProfile
+		await new Promise((resolve) => setTimeout(resolve, 10))
+
+		// Dispose provider while activateProfile is in flight
+		await provider.dispose()
+
+		// Release the blocked activateProfile
+		resolveBlockedActivation()
+
+		await activationPromise
+
+		// Verify no context state, postMessage, or task updates occurred after disposal
+		expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "disposed-profile")
+		expect(setProviderSettingsSpy).not.toHaveBeenCalledWith(
+			expect.objectContaining({ openRouterModelId: "openai/gpt-4.5" }),
+		)
+		expect(mockTask.updateApiConfiguration).not.toHaveBeenCalled()
+		expect(postStateSpy).not.toHaveBeenCalled()
 	})
 })
