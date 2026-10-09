@@ -545,6 +545,32 @@ describe("writeToFileTool", () => {
 		})
 
 
+
+		it("releases the per-task stream state when provider state rejects during a partial delta", async () => {
+			// handlePartial() registers the entry and the TaskAborted listener, then awaits
+			// provider.getState(). A rejection there never reaches the diff view or execute(), so
+			// nothing else released what the registration acquired. The error still has to surface,
+			// so the boundary rethrows and BaseTool.handle() reports it once.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockRejectedValue(new Error("provider state unavailable")),
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			expect(mockHandleError).toHaveBeenCalledWith(
+				"handling partial write_to_file",
+				expect.objectContaining({ message: "provider state unavailable" }),
+			)
+		})
 	})
 
 	describe("path stabilization predicate", () => {
@@ -620,6 +646,8 @@ describe("writeToFileTool", () => {
 			// the same filesystem operation never happens either. The captured error is the one
 			// the user can act on, and it must surface exactly once.
 			const state = writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			// The stream opened a diff view: that is what makes the rollback meaningful.
+			mockCline.diffViewProvider.isEditing = true
 			state.streamFailed = true
 			const streamFailure = new Error("EACCES: stream open failed")
 			state.streamError = streamFailure
@@ -655,6 +683,92 @@ describe("writeToFileTool", () => {
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 			// The exact listener this task registered, not just any function: a mismatched
 			// off() argument would leave the real listener attached.
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+		})
+
+		it("does not revert the diff view when the parse-failure teardown has no edit in progress", async () => {
+			// One unstabilized delta registers this task's stream state without ever opening a diff
+			// view; the finalized block then arrives without nativeArgs. DiffViewProvider keeps the
+			// PREVIOUS edit's relPath, so reverting here would roll back - and for a new file delete -
+			// a file this write never opened. The teardown still resets the view and releases state.
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.diffViewProvider.isEditing = false
+
+			const block = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: {},
+				// No nativeArgs: this drives BaseTool's parse-failure path.
+				partial: false,
+			} as ToolUse<"write_to_file">
+			await writeToFileTool.handle(mockCline, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("releases the per-task stream state when the path is missing", async () => {
+			// The missing-path return sits before execute()'s guarded scope, so it needs its own
+			// release. The state is seeded first so the assertion proves a release happened rather
+			// than an empty map.
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			const toolUse = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: { content: testContent },
+				nativeArgs: { path: "", content: testContent },
+				// An empty path is what the streaming parser produces for a not-yet-complete
+				// argument object; the typed params cannot express it - hence the double assertion.
+				partial: false,
+			} as unknown as ToolUse<"write_to_file">
+			await writeToFileTool.handle(mockCline, toolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockCline.recordToolError).toHaveBeenCalledWith("write_to_file")
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+		})
+
+		it("releases the per-task stream state when content is missing", async () => {
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			const toolUse = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: { path: testFilePath },
+				nativeArgs: { path: testFilePath, content: undefined },
+				// The fixture's point is a nativeArgs object whose content never arrived, which the
+				// typed params cannot express - hence the double assertion.
+				partial: false,
+			} as unknown as ToolUse<"write_to_file">
+			await writeToFileTool.handle(mockCline, toolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockCline.sayAndCreateMissingParamError).toHaveBeenCalledWith("write_to_file", "content")
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 			const abortListener = mockCline.once.mock.calls.find(
 				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
 			)?.[1]
@@ -1008,6 +1122,8 @@ describe("writeToFileTool", () => {
 			const captured = state?.streamError
 			expect(captured?.message).toBe("EACCES: stream open failed")
 
+			// The stream had a diff view open - that is the state a rollback is for.
+			mockCline.diffViewProvider.isEditing = true
 			mockCline.diffViewProvider.revertChanges.mockRejectedValue(new Error("EACCES: rollback failed"))
 
 			const block = {

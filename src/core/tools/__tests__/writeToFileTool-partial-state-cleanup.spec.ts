@@ -80,13 +80,14 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 		expect(errorSpy).toHaveBeenCalledWith("Error resetting write_to_file diff view:", expect.any(Error))
 	})
 
-	it("logs and continues when reverting the diff document fails", async () => {
+	it("returns the revert failure so the caller can report the rollback failure", async () => {
 		const task = buildTask("revert-fails", "inst-4")
 		const t = task as unknown as CleanupTask
-		t.diffViewProvider.revertChanges = vi.fn().mockRejectedValue(new Error("revert failed"))
+		const revertError = new Error("revert failed")
+		t.diffViewProvider.revertChanges = vi.fn().mockRejectedValue(revertError)
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
-		await writeToFileTool["revertDiffChangesBeforeReset"](task)
+		await expect(writeToFileTool["revertDiffChangesBeforeReset"](task)).resolves.toBe(revertError)
 
 		expect(errorSpy).toHaveBeenCalledWith("Error reverting write_to_file diff view changes:", expect.any(Error))
 	})
