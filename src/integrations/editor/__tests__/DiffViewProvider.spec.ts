@@ -5,7 +5,7 @@ import * as path from "path"
 import delay from "delay"
 import { DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 
-import { makeRange, makeTextDocument, makeTextEditor, makeUri } from "../../../test-utils/vscode"
+import { makeDisposable, makeRange, makeTextDocument, makeTextEditor, makeUri } from "../../../test-utils/vscode"
 
 // Mock delay
 vi.mock("delay", () => ({
@@ -363,29 +363,21 @@ describe("DiffViewProvider", () => {
 			// WriteToFileTool.execute() creates the parent directories before the diff view
 			// exists, so the provider's own mkdir records nothing. Without the adoption
 			// createdDirs stayed empty and a rolled-back new-file write left them on disk.
-			const mockEditor = {
-				document: {
-					uri: { fsPath: `${mockCwd}/adopt.md`, scheme: "file" },
-					getText: vi.fn().mockReturnValue(""),
-					lineCount: 0,
-				},
-				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
-				edit: vi.fn().mockResolvedValue(true),
-				revealRange: vi.fn(),
-			}
-			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor as any)
+			const mockDocument = makeTextDocument({ uri: makeUri(`${mockCwd}/adopt.md`) })
+			const mockEditor = makeTextEditor({ document: mockDocument })
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
 			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
 			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
-				setTimeout(() => callback({ uri: { fsPath: `${mockCwd}/adopt.md`, scheme: "file" } } as any), 0)
-				return { dispose: vi.fn() }
+				setTimeout(() => callback(mockDocument), 0)
+				return makeDisposable()
 			})
-			vi.mocked(vscode.window).visibleTextEditors = [mockEditor as any]
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
 			diffViewProvider.adoptCreatedDirs([`${mockCwd}/new-parent`])
-			;(diffViewProvider as any).editType = "create"
+			diffViewProvider.editType = "create"
 
 			await diffViewProvider.open("adopt.md")
 
-			expect((diffViewProvider as any).createdDirs).toEqual([`${mockCwd}/new-parent`])
+			expect(diffViewProvider["createdDirs"]).toEqual([`${mockCwd}/new-parent`])
 		})
 
 	})
@@ -1354,7 +1346,7 @@ describe("DiffViewProvider", () => {
 
 			await diffViewProvider.reset()
 
-			expect((diffViewProvider as any).adoptedCreatedDirs).toEqual([])
+			expect(diffViewProvider["adoptedCreatedDirs"]).toEqual([])
 		})
 		it("revertChanges() restores the streamed buffer before closing it for a new file", async () => {
 			// tabGroups.close()'s second argument is preserveFocus, not a force-discard flag: closing
