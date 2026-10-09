@@ -5,6 +5,7 @@ import { JsonStreamStringify } from "json-stream-stringify"
 
 import { acquireFileLock } from "./fileLock"
 import {
+	PostCommitDurabilityError,
 	resolveLockKey,
 	resolvePublishTarget,
 	safeWriteText,
@@ -311,7 +312,11 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			originalError,
 		)
 
-		const newFileToCleanupWithinCatch = actualTempNewFilePath
+		// A PostCommitDurabilityError is raised AFTER the delegated commit rename: the staging file
+		// has been consumed and the target holds the new bytes. Unlinking the staging NAME at that
+		// point is an unlink of whatever answers to the name now, not of this write's staging file,
+		// and the published content must not be touched either.
+		const newFileToCleanupWithinCatch = originalError instanceof PostCommitDurabilityError ? null : actualTempNewFilePath
 
 // A failed safeWriteText left the target alone, with ONE exception: a
 // PostCommitDurabilityError is raised AFTER the commit rename, when the

@@ -4,7 +4,7 @@ import * as path from "path"
 import * as os from "os"
 
 import { ConfinedPathEscapeError, safeWriteJson } from "../safeWriteJson"
-import { TargetMovedError } from "../../services/file-safety/safeWriteText"
+import { PostCommitDurabilityError, TargetMovedError } from "../../services/file-safety/safeWriteText"
 import * as lockfile from "proper-lockfile"
 
 // Capture actual implementations before the vi.mock factory runs,
@@ -774,6 +774,42 @@ describe("safeWriteJson", () => {
 		expect(JSON.parse(await fsSyncActual.promises.readFile(projectConfig, "utf8"))).toEqual({
 			mcpServers: { local: { url: "http://localhost" } },
 		})
+	})
+
+	test("a post-commit durability failure leaves the committed bytes at the target and unlinks nothing else", async () => {
+		const dir = path.join(tempDir, "post-commit")
+		await fs.mkdir(dir, { recursive: true })
+		const target = path.join(dir, "state.json")
+		await fsSyncActual.promises.writeFile(target, JSON.stringify({ generation: 1 }), "utf8")
+		// The parent-directory fsync is the step that fails, and only on platforms that fsync the
+		// directory entry at all; the platform is read from process.platform by the primitive, so
+		// the failure is reached here rather than skipped on this Windows lane.
+		const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("linux")
+		const realOpenSync = fsSyncActual.openSync
+		const openSyncSpy = vi
+			.spyOn(fsSyncActual, "openSync")
+			.mockImplementation(((target: Parameters<typeof realOpenSync>[0], ...rest: unknown[]) => {
+				// Only the parent-directory open fails; every other open (the staged file, the backup)
+				// goes to the real implementation so its descriptor is a real one.
+				if (String(target) === dir) throw Object.assign(new Error("EBADF"), { code: "EBADF" })
+				return (realOpenSync as unknown as (t: unknown, r: unknown) => number)(target, rest[0])
+			}) as typeof fsSyncActual.openSync)
+		// fs.unlink is already a vi.fn() in this spec's module mock; the file's idiom is to read
+		// calls through vi.mocked rather than wrapping it again with vi.spyOn.
+		vi.mocked(fs.unlink).mockClear()
+		try {
+			await expect(safeWriteJson(target, { generation: 2 })).rejects.toThrow(PostCommitDurabilityError)
+		} finally {
+			platformSpy.mockRestore()
+			openSyncSpy.mockRestore()
+		}
+
+		// The rename committed: the target still holds the NEW bytes, not the previous ones.
+		expect(JSON.parse(await fsSyncActual.promises.readFile(target, "utf8"))).toEqual({ generation: 2 })
+		// And cleanup touched nothing: neither the published target nor the staging name the
+		// commit consumed.
+		const unlinked = vi.mocked(fs.unlink).mock.calls.map((call) => String(call[0]))
+		expect(unlinked.filter((p) => p === target || p.includes(".new_"))).toEqual([])
 	})
 
 
