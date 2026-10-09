@@ -338,27 +338,18 @@ export class ClineProvider
 				() => undefined,
 				() => undefined,
 			)
-
 			const drainOnAbort = new Promise<void>((resolve) => {
 				let drainTimer: ReturnType<typeof setTimeout> | undefined
 				const startDrain = () => {
 					drainTimer = setTimeout(resolve, ClineProvider.MUTATION_DRAIN_TIMEOUT_MS)
 				}
-
-				if (controller.signal.aborted) {
-					startDrain()
-				} else {
-					controller.signal.addEventListener("abort", startDrain, { once: true })
-				}
-
+				if (controller.signal.aborted) startDrain()
+				else controller.signal.addEventListener("abort", startDrain, { once: true })
 				void runSettled.then(() => {
-					if (drainTimer) {
-						clearTimeout(drainTimer)
-					}
+					if (drainTimer) clearTimeout(drainTimer)
 					resolve()
 				})
 			})
-
 			await Promise.race([runSettled, drainOnAbort])
 		})()
 
@@ -1994,11 +1985,7 @@ export class ClineProvider
 
 				const rollback = async () => {
 					try {
-						// Safety guard: if the profile existed before this upsert, ensure we restore it rather than delete it.
-						// Only if the manager confirmed the profile did not exist previously do we allow deletion on rollback.
-						if (existed && !previousProfile) {
-							return
-						}
+						if (existed && !previousProfile) return
 						const restored = await this.providerSettingsManager.restoreConfigIfMatches(
 							name,
 							savedProfile,
@@ -2010,22 +1997,17 @@ export class ClineProvider
 								await this.providerSettingsManager.listConfig(),
 							)
 							if (activate) {
-								if (previousApiConfigName !== undefined) {
+								if (previousApiConfigName !== undefined)
 									await this.updateGlobalState("currentApiConfigName", previousApiConfigName)
-								}
-								if (previousMode && previousModeConfigId !== undefined) {
+								if (previousMode && previousModeConfigId !== undefined)
 									await this.providerSettingsManager.setModeConfig(previousMode, previousModeConfigId)
-								}
-								if (previousProviderSettings) {
+								if (previousProviderSettings)
 									await this.contextProxy.setProviderSettings(previousProviderSettings)
-								}
 							}
 						}
 					} catch (rollbackError) {
 						this.log(
-							`Failed to rollback upsert for profile '${name}': ${
-								rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-							}`,
+							`Failed to rollback upsert for profile '${name}': ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
 						)
 					}
 				}
@@ -2154,15 +2136,13 @@ export class ClineProvider
 							candidate as ProviderSettings,
 							authoritativeOrganizationAllowList,
 						)
-					) {
+					)
 						return false
-					}
 					if (
 						!stateOrganizationAllowList.allowAll &&
 						!ProfileValidator.isProfileAllowed(candidate as ProviderSettings, stateOrganizationAllowList)
-					) {
+					)
 						return false
-					}
 					return true
 				}
 
@@ -2191,9 +2171,8 @@ export class ClineProvider
 				const previousProfile = result.previousProfile!
 				let shouldRollbackContext = false
 				try {
-					if (!this.isProfileMutationActive(epoch, signal)) {
+					if (!this.isProfileMutationActive(epoch, signal))
 						throw new Error("Provider profile mutation aborted")
-					}
 
 					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
 					if (name === currentApiConfigName) {
@@ -2201,9 +2180,8 @@ export class ClineProvider
 						await this.contextProxy.setProviderSettings(updatedProfile as ProviderSettings)
 					}
 
-					if (!this.isProfileMutationActive(epoch, signal)) {
+					if (!this.isProfileMutationActive(epoch, signal))
 						throw new Error("Provider profile mutation aborted")
-					}
 				} catch (updateError) {
 					try {
 						const restored = await this.providerSettingsManager.restoreConfigIfMatches(
@@ -2233,17 +2211,13 @@ export class ClineProvider
 						}
 					} catch (rollbackError) {
 						this.log(
-							`Failed to rollback profile '${name}' after update failure: ${
-								rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-							}`,
+							`Failed to rollback profile '${name}' after update failure: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
 						)
 					}
 					throw updateError
 				}
 
-				if (!this.isProfileMutationActive(epoch, signal)) {
-					return
-				}
+				if (!this.isProfileMutationActive(epoch, signal)) return
 
 				// Only update the task if it is still the same task that was active when this update started.
 				const currentTask = this.getCurrentTask()
@@ -2259,10 +2233,7 @@ export class ClineProvider
 					await this.persistStickyProviderProfileToCurrentTask(name)
 				}
 
-				if (!this.isProfileMutationActive(epoch, signal)) {
-					return
-				}
-
+				if (!this.isProfileMutationActive(epoch, signal)) return
 				await this.postStateToWebview()
 			})
 		} catch (error) {

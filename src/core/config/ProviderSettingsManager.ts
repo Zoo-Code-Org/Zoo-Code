@@ -471,28 +471,22 @@ export class ProviderSettingsManager {
 			return await this.lock(async () => {
 				const providerProfiles = await this.load()
 				const current = providerProfiles.apiConfigs[name]
-				if (!current) {
-					return false
-				}
+				if (!current) return false
 
 				const currentId = current.id || this.generateId()
 				const expectedTarget = JSON.parse(
 					JSON.stringify(this.normalizeAndFilterConfig(expectedConfig, expectedConfig.id || currentId)),
 				) as ProviderSettingsWithId
 				const cleanCurrent = JSON.parse(JSON.stringify(current)) as ProviderSettingsWithId
-				if (!deepEqual(cleanCurrent, expectedTarget)) {
-					return false
-				}
+				if (!deepEqual(cleanCurrent, expectedTarget)) return false
 
 				if (restoredConfig) {
 					providerProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(
 						restoredConfig,
 						restoredConfig.id || currentId,
 					)
-				} else {
-					if (Object.keys(providerProfiles.apiConfigs).length > 1) {
-						delete providerProfiles.apiConfigs[name]
-					}
+				} else if (Object.keys(providerProfiles.apiConfigs).length > 1) {
+					delete providerProfiles.apiConfigs[name]
 				}
 				await this.store(providerProfiles)
 				return true
@@ -518,14 +512,10 @@ export class ProviderSettingsManager {
 			return await this.lock(async () => {
 				const providerProfiles = await this.load()
 				const current = providerProfiles.apiConfigs[name]
-				if (!current) {
-					return { success: false, reason: "not_found" }
-				}
+				if (!current) return { success: false, reason: "not_found" }
 
 				const storedProvider = current.apiProvider ?? providerIdentifiers.openrouter
-				if (storedProvider !== expectedProvider) {
-					return { success: false, reason: "provider_mismatch" }
-				}
+				if (storedProvider !== expectedProvider) return { success: false, reason: "provider_mismatch" }
 
 				const applyPatchToProfile = (base: ProviderSettingsWithId) => {
 					const baseProvider = base.apiProvider ?? providerIdentifiers.openrouter
@@ -539,37 +529,27 @@ export class ProviderSettingsManager {
 
 					const merged: Record<string, unknown> = { ...base, apiProvider: baseProvider }
 					for (const [key, value] of Object.entries(patch)) {
-						if (key === "apiProvider" || !allowedKeys.has(key)) {
-							continue
-						}
-						if (value !== null && typeof value !== "string" && typeof value !== "number") {
-							continue
-						}
+						if (key === "apiProvider" || !allowedKeys.has(key)) continue
+						if (value !== null && typeof value !== "string" && typeof value !== "number") continue
 						if (
 							RESET_ONLY_KEYS.includes(key) &&
 							value !== null &&
 							!(key === "awsCustomArn" && value === "")
-						) {
+						)
 							continue
-						}
 						merged[key] = value === null ? undefined : value
 					}
 					return this.normalizeAndFilterConfig(merged as ProviderSettingsWithId, base.id || this.generateId())
 				}
 
 				const candidate = applyPatchToProfile(current)
-				if (validateProfileAllowed && !validateProfileAllowed(candidate)) {
+				if (validateProfileAllowed && !validateProfileAllowed(candidate))
 					return { success: false, reason: "disallowed" }
-				}
 
 				const previousProfile = current
 				providerProfiles.apiConfigs[name] = candidate
 				await this.store(providerProfiles)
-				return {
-					success: true,
-					updatedProfile: candidate,
-					previousProfile,
-				}
+				return { success: true, updatedProfile: candidate, previousProfile }
 			})
 		} catch (error) {
 			throw new Error(`Failed to update profile model: ${error}`)
@@ -592,23 +572,14 @@ export class ProviderSettingsManager {
 
 				if ("name" in params) {
 					name = params.name
-
-					if (!providerProfiles.apiConfigs[name]) {
-						return undefined
-					}
-
+					if (!providerProfiles.apiConfigs[name]) return undefined
 					providerSettings = providerProfiles.apiConfigs[name]
 				} else {
 					const id = params.id
-
 					const entry = Object.entries(providerProfiles.apiConfigs).find(
 						([_, apiConfig]) => apiConfig.id === id,
 					)
-
-					if (!entry) {
-						return undefined
-					}
-
+					if (!entry) return undefined
 					name = entry[0]
 					providerSettings = entry[1]
 				}
