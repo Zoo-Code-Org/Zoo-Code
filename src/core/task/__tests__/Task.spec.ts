@@ -649,6 +649,33 @@ describe("Cline", () => {
 			expect(readiness()).toBe(true)
 		})
 
+		it("requires a result for every tool call in the turn", () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "multi tool readiness test",
+				startTask: false,
+			})
+			const readiness = () => getTaskTestAccess(task).hasCompleteToolResultsForCurrentTurn()
+			task.didCompleteReadingStream = true
+			task.assistantMessageContent = [
+				{ type: "tool_use", id: "call_first", name: "read_file", params: {}, partial: false },
+				{ type: "tool_use", id: "call_middle", name: "read_file", params: {}, partial: false },
+				{ type: "tool_use", id: "call_last", name: "read_file", params: {}, partial: false },
+			]
+			const resultsFor = (...ids: string[]): Anthropic.ToolResultBlockParam[] =>
+				ids.map((id) => ({ type: "tool_result", tool_use_id: id, content: "finished" }))
+
+			task.userMessageContent = resultsFor("call_first")
+			expect(readiness()).toBe(false)
+			task.userMessageContent = resultsFor("call_last")
+			expect(readiness()).toBe(false)
+			task.userMessageContent = resultsFor("call_first", "call_last")
+			expect(readiness()).toBe(false)
+			task.userMessageContent = resultsFor("call_first", "call_middle", "call_last")
+			expect(readiness()).toBe(true)
+		})
+
 		it("does not strand a paired tool turn after a presenter failure", () => {
 			const task = new Task({
 				provider: mockProvider,
@@ -687,6 +714,8 @@ describe("Cline", () => {
 			task.assistantMessageContent = [{ type: "text", content: "finished", partial: false }]
 			expect(readiness()).toBe(false)
 
+			// An empty result ID must not satisfy a tool call that has no ID.
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "", content: "finished" }]
 			task.assistantMessageContent = [
 				{
 					type: "tool_use",
@@ -781,15 +810,13 @@ describe("Cline", () => {
 			try {
 				await task.recursivelyMakeClineRequests([{ type: "text", text: "read a file, then continue" }])
 				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
-				expect(continuationUserContent).toEqual(
-					expect.arrayContaining([
-						expect.objectContaining({
-							type: "tool_result",
-							tool_use_id: "call_read",
-							content: "File: README.md\nfinished",
-						}),
-					]),
-				)
+				expect(continuationUserContent?.filter((block) => block.type === "tool_result")).toEqual([
+					expect.objectContaining({
+						type: "tool_result",
+						tool_use_id: "call_read",
+						content: "File: README.md\nfinished",
+					}),
+				])
 			} finally {
 				vi.mocked(pWaitFor).mockImplementation(async () => {})
 			}
@@ -869,7 +896,6 @@ describe("Cline", () => {
 						content: "File: package.json\nfinished",
 					}),
 				])
-				expect(task.userMessageContentReady).toBe(false)
 				expect(task.presentAssistantMessageLocked).toBe(false)
 				expect(sawCompleteToolTurn).toBe(true)
 			} finally {
@@ -877,6 +903,68 @@ describe("Cline", () => {
 				readinessSpy.mockRestore()
 				readFileHandleSpy.mockRestore()
 				saySpy.mockRestore()
+			}
+		})
+
+		it("waits for a running tool handler even when its result is already pushed", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "running handler continuation test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			let releaseHandler: (() => void) | undefined
+			const handlerGate = new Promise<void>((resolve) => {
+				releaseHandler = resolve
+			})
+			let handlerPushedResult: (() => void) | undefined
+			const resultPushed = new Promise<void>((resolve) => {
+				handlerPushedResult = resolve
+			})
+			const readFileHandleSpy = vi
+				.spyOn(readFileTool, "handle")
+				.mockImplementation(async (_task, block, callbacks) => {
+					if (block.partial) return
+					callbacks.pushToolResult("File: README.md\nfinished")
+					handlerPushedResult?.()
+					// The handler keeps running after it pushes the result, for example while it waits for approval.
+					await handlerGate
+				})
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() =>
+					asyncStreamFrom<ApiStreamChunk>([
+						{ type: "tool_call_partial", index: 0, id: "call_read", name: "read_file" },
+						{ type: "tool_call_partial", index: 0, arguments: '{"path":"README.md"}' },
+					]),
+				)
+				.mockImplementationOnce(() => {
+					throw new Error("continuation request reached")
+				})
+
+			const { default: realPWaitFor } = await vi.importActual<typeof import("p-wait-for")>("p-wait-for")
+			vi.mocked(pWaitFor).mockImplementation((condition) =>
+				realPWaitFor(condition, { interval: 1, timeout: 1_000 }),
+			)
+			try {
+				const run = task.recursivelyMakeClineRequests([{ type: "text", text: "read a file, then wait" }])
+				await resultPushed
+				// Give the request loop several poll intervals to continue early.
+				await new Promise((resolve) => setTimeout(resolve, 50))
+				expect(task.presentAssistantMessageLocked).toBe(true)
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(1)
+
+				releaseHandler?.()
+				await run
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
+				expect(task.presentAssistantMessageLocked).toBe(false)
+			} finally {
+				releaseHandler?.()
+				vi.mocked(pWaitFor).mockImplementation(async () => {})
+				readFileHandleSpy.mockRestore()
 			}
 		})
 
