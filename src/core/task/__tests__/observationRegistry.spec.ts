@@ -105,4 +105,31 @@ describe("ObservationRegistry", () => {
 			expect(obs.complete).toBe(false)
 		})
 	})
+
+	it("forget() removes exactly the given path and reports it", () => {
+		// DiffViewProvider revokes the observation for the preview path it published. Removing
+		// a neighbour's entry would make that neighbour's later write look untouched.
+		const reg = new ObservationRegistry()
+		reg.observe("/a/b/c.ts", "v1")
+		reg.observe("/a/b/d.ts", "v2")
+
+		expect(reg.forget("/a/b/c.ts")).toBe(true)
+
+		expect(reg.get("/a/b/c.ts")).toBeUndefined()
+		expect(reg.get("/a/b/d.ts")?.version).toBe("v2")
+		expect(reg.size).toBe(1)
+	})
+
+	it("forget() reports false and changes nothing for a path that was never observed", () => {
+		// A cancellation can forget a path whose observation was already dropped. The caller
+		// distinguishes the two cases through this return value, so it must not throw and must
+		// leave the other entries alone.
+		const reg = new ObservationRegistry()
+		reg.observe("/a/b/c.ts", "v1")
+
+		expect(reg.forget("/a/b/absent.ts")).toBe(false)
+
+		expect(reg.get("/a/b/c.ts")?.version).toBe("v1")
+		expect(reg.size).toBe(1)
+	})
 })
