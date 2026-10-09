@@ -3380,6 +3380,57 @@ describe("DiffViewProvider", () => {
 			expect(applyEdit).not.toHaveBeenCalled()
 		})
 
+		// Finalization belongs to the teardown pass that started, not to every caller that waited
+		// for it: a second restorePreviewTabs()/reset() pair is the same cleanup running twice.
+		it("revertChanges() does not restore preview tabs or reset when it waited for another teardown", async () => {
+			let release: () => void = () => {}
+			const gate = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			let cleanupEntered = false
+			const closeAllDiffViews = vi.fn().mockImplementation(async () => {
+				cleanupEntered = true
+				await gate
+			})
+			const restorePreviewTabs = vi.fn().mockResolvedValue(undefined)
+			const reset = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
+			diffViewProvider["reset"] = reset
+			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
+			applyEdit.mockResolvedValue(true)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({
+				document: makeTextDocument({
+					uri: makeUri(mockTargetPath),
+					getText: vi.fn().mockReturnValue("content"),
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				}),
+			})
+
+			const save = diffViewProvider.saveChanges(false)
+			while (!cleanupEntered) {
+				await new Promise((resolve) => setImmediate(resolve))
+			}
+
+			// The revert waits for the save's pass instead of starting one of its own.
+			const revert = diffViewProvider.revertChanges()
+			await new Promise((resolve) => setImmediate(resolve))
+			release()
+			await Promise.all([save, revert])
+
+			// The owning pass restored the preview tabs exactly once, and the waiting caller did
+			// not finalize the session a second time.
+			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
+			expect(reset).not.toHaveBeenCalled()
+			expect(applyEdit).not.toHaveBeenCalled()
+		})
+
 		it("saveChanges() keeps the file open when the user touched it", async () => {
 			const closeFileTab = vi.fn().mockResolvedValue(undefined)
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue({ revealRange: vi.fn() } as any)
