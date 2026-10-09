@@ -3380,9 +3380,10 @@ describe("DiffViewProvider", () => {
 			expect(applyEdit).not.toHaveBeenCalled()
 		})
 
-		// Finalization belongs to the teardown pass that started, not to every caller that waited
-		// for it: a second restorePreviewTabs()/reset() pair is the same cleanup running twice.
-		it("revertChanges() does not restore preview tabs or reset when it waited for another teardown", async () => {
+		// The pass that started the teardown owns the tab work, so a waiting caller must not
+		// restore the preview tabs twice. It still has to leave the session closed: the owning
+		// pass here is a save's post-publish cleanup, which never resets on its own.
+		it("revertChanges() restores no preview tabs twice but finalizes the session the owning pass left open", async () => {
 			let release: () => void = () => {}
 			const gate = new Promise<void>((resolve) => {
 				release = resolve
@@ -3424,15 +3425,148 @@ describe("DiffViewProvider", () => {
 			release()
 			await Promise.all([save, revert])
 
-			// The owning pass restored the preview tabs exactly once, and the waiting caller did
-			// not finalize the session a second time.
+			// The owning pass restored the preview tabs exactly once, and the waiting caller
+			// finalized the session exactly once - the pass that ran the tabs does not reset, so
+			// the cancellation that waited on it closes the session instead of leaving it active.
 			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
-			expect(reset).not.toHaveBeenCalled()
+			expect(reset).toHaveBeenCalledTimes(1)
 			expect(applyEdit).not.toHaveBeenCalled()
 		})
 
 		// A rejected publish closes its own diff view and rethrows, so the preview tabs the diff
 		// evicted are restored by that pass - and only by that pass.
+// The pre-merge row this covers: a cancellation or disposal that lands while the save owns
+		// its post-publish teardown used to leave the provider mid-edit. The save's pass closes the
+		// views and restores the tabs but never resets, the waiting revertChanges() returned without
+		// finalizing, and Task.disposeOnce() only awaits the reversion promise - so isEditing and the
+		// active editor survived the task that owned them.
+		it("saveChanges() finalizes the session when a cancellation lands during its post-publish teardown", async () => {
+			let release: () => void = () => {}
+			const gate = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			let cleanupEntered = false
+			const closeAllDiffViews = vi.fn().mockImplementation(async () => {
+				cleanupEntered = true
+				await gate
+			})
+			const restorePreviewTabs = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+			diffViewProvider["closeOwnDiffView"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
+			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
+			applyEdit.mockResolvedValue(true)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider.isEditing = true
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({
+				document: makeTextDocument({
+					uri: makeUri(mockTargetPath),
+					getText: vi.fn().mockReturnValue("content"),
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				}),
+			})
+			const listener = { dispose: vi.fn() }
+			diffViewProvider["activeEditorListener"] = listener
+			diffViewProvider["deferredScrollTimer"] = setTimeout(() => {}, 10_000)
+
+			const save = diffViewProvider.saveChanges(false)
+			while (!cleanupEntered) {
+				await new Promise((resolve) => setImmediate(resolve))
+			}
+
+			// Task.disposeOnce() reaches revertChanges() while the save's pass owns the session.
+			const revert = diffViewProvider.revertChanges()
+			await new Promise((resolve) => setImmediate(resolve))
+			release()
+			const [saveResult] = await Promise.all([save, revert])
+
+			// The session is closed: no edit flag, no retained editor, listeners and timer gone.
+			expect(diffViewProvider.isEditing).toBe(false)
+			expect(diffViewProvider["activeDiffEditor"]).toBeUndefined()
+			expect(listener.dispose).toHaveBeenCalledTimes(1)
+			expect(diffViewProvider["activeEditorListener"]).toBeUndefined()
+			expect(diffViewProvider["deferredScrollTimer"]).toBeUndefined()
+
+			// One pass over the tabs and buffers: the waiting cancellation repeated neither the
+			// document revert nor the preview-tab restoration.
+			expect(applyEdit).not.toHaveBeenCalled()
+			expect(closeAllDiffViews).toHaveBeenCalledTimes(1)
+			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
+
+			// A session a cancellation is closing reports no completed save, so no caller can present
+			// diagnostics or user-edit output for provider state that is already gone.
+			expect(saveResult).toEqual({
+				newProblemsMessage: undefined,
+				userEdits: undefined,
+				finalContent: undefined,
+			})
+		})
+
+		// The same gap on the other teardown owner: a rejected publish's discard cleanup never resets
+		// (the tool caller's error handling owns that), so a cancellation that only waited for it left
+		// the session mid-edit with nobody finalizing it.
+		it("a cancellation that waits for a rejected save's discard cleanup still finalizes the session", async () => {
+			let release: () => void = () => {}
+			const gate = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			let cleanupEntered = false
+			const closeOwnDiffView = vi.fn().mockImplementation(async () => {
+				cleanupEntered = true
+				await gate
+			})
+			diffViewProvider["closeOwnDiffView"] = closeOwnDiffView
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["restorePreviewTabs"] = vi.fn().mockResolvedValue(undefined)
+			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
+			applyEdit.mockResolvedValue(true)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider.isEditing = true
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({
+				document: makeTextDocument({
+					uri: makeUri(mockTargetPath),
+					getText: vi.fn().mockReturnValue("content"),
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				}),
+			})
+
+			// Restore the publish mock afterwards: a queued rejection would fail every later save.
+			vi.mocked(safeWriteText).mockRejectedValue(new Error("guard rejected for test"))
+			type SaveResult = Awaited<ReturnType<DiffViewProvider["saveChanges"]>>
+			let settled: PromiseSettledResult<unknown>[] | undefined
+			try {
+				const save: Promise<SaveResult> = diffViewProvider.saveChanges(false)
+				while (!cleanupEntered) {
+					await new Promise((resolve) => setImmediate(resolve))
+				}
+				const revert = diffViewProvider.revertChanges()
+				await new Promise((resolve) => setImmediate(resolve))
+				release()
+				settled = await Promise.allSettled([save, revert])
+			} finally {
+				vi.mocked(safeWriteText).mockReset()
+				vi.mocked(safeWriteText).mockResolvedValue(undefined)
+			}
+
+			// The guard verdict still surfaces...
+			expect(settled?.[0].status).toBe("rejected")
+			// ...and the session that cancellation was waiting on is finalized.
+			expect(diffViewProvider.isEditing).toBe(false)
+			expect(diffViewProvider["activeDiffEditor"]).toBeUndefined()
+			// The waiting cancellation did not repeat the document revert.
+			expect(applyEdit).not.toHaveBeenCalled()
+		})
+
 		it("saveChanges() restores preview tabs when a rejected publish tears the session down", async () => {
 			const restorePreviewTabs = vi.fn().mockResolvedValue(undefined)
 			const closeOwnDiffView = vi.fn().mockResolvedValue(undefined)
@@ -3467,7 +3601,10 @@ describe("DiffViewProvider", () => {
 			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
 		})
 
-		it("saveChanges() restores preview tabs once when a revert waits for the rejected save", async () => {
+		// The rejected save's discard cleanup restores the tabs once, and it never resets - the
+		// tool caller's error handling owns that reset. A cancellation that only waited for that
+		// pass still has to leave the session closed, so it performs the finalization.
+		it("saveChanges() restores preview tabs once and the waiting revert finalizes the session it left open", async () => {
 			let release: () => void = () => {}
 			const gate = new Promise<void>((resolve) => {
 				release = resolve
@@ -3517,7 +3654,7 @@ describe("DiffViewProvider", () => {
 			}
 
 			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
-			expect(reset).not.toHaveBeenCalled()
+			expect(reset).toHaveBeenCalledTimes(1)
 		})
 
 		// The other direction: the rejected save is the one that joins an existing pass. It then
