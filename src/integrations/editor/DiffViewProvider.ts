@@ -624,7 +624,7 @@ export class DiffViewProvider {
 					this.disposeActiveEditorListener()
 					this.cancelDeferredScroll()
 
-					const ownedTeardown = await this.runTeardown(async () => {
+					await this.runTeardown(async () => {
 						let discardSucceeded = !updatedDocument.isDirty
 						if (updatedDocument.isDirty) {
 							discardSucceeded = await this.revertDocument(updatedDocument)
@@ -670,15 +670,18 @@ export class DiffViewProvider {
 							})
 						}
 						await this.closeOwnDiffView(absolutePath)
-					})
-
-					if (ownedTeardown) {
+					},
+					// The tail of the pass belongs to the same guard: a caller that joined this teardown
+					// must not repeat it, and a caller that lands while these steps are still running must
+					// not start a new pass.
+					async () => {
 						// Opening the diff evicted any preview tab the file had. This path closes its own diff
 						// view and rethrows, so this pass is the only one that can put that preview state back;
 						// a caller that merely waited for it must not restore the tabs a second time. reset()
 						// stays with the tool caller's error handling, which owns the provider lifecycle.
 						await this.restorePreviewTabs()
-					}
+					},
+					)
 				} catch {
 					// cleanup is best-effort; the guard verdict below is the outcome
 				}
@@ -902,7 +905,7 @@ export class DiffViewProvider {
 		this.disposeActiveEditorListener()
 		this.cancelDeferredScroll()
 
-		const ownedTeardown = await this.runTeardown(async () => {
+		await this.runTeardown(async () => {
 			if (!fileExists) {
 				if (updatedDocument.isDirty) {
 					await updatedDocument.save()
@@ -951,21 +954,22 @@ export class DiffViewProvider {
 					revertState?.autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
 				)
 			}
-		})
-
-		if (!ownedTeardown) {
+		},
+		// The tail of the pass belongs to the same guard: a caller that joined this teardown
+		// must not repeat it, and a caller that lands while these steps are still running must
+		// not start a new pass.
+		async () => {
 			// Another teardown started first and already ran the pass over this session's buffers,
 			// tabs and preview state. Restoring preview tabs or resetting here again would be that
 			// same work a second time, and the reset would clear state whose closing this provider
 			// does not own. The pass that started the teardown finalizes the session.
-			return
-		}
-		// Restore any preview tabs the diff evicted, reconstructing the user's
-		// prior not-yet-edited tab state.
-		await this.restorePreviewTabs()
-
-		// Edit is done.
-		await this.reset()
+			// Restore any preview tabs the diff evicted, reconstructing the user's
+			// prior not-yet-edited tab state.
+			// Edit is done.
+			await this.restorePreviewTabs()
+			await this.reset()
+		},
+		)
 	}
 
 	private async closeAllDiffViews(): Promise<void> {
@@ -1051,20 +1055,37 @@ export class DiffViewProvider {
 	 * both would edit the document and close the same tabs. The second caller awaits the
 	 * cleanup already in flight instead of repeating it.
 	 */
-	private async runTeardown(cleanup: () => Promise<void>): Promise<boolean> {
+	private async runTeardown(
+		cleanup: () => Promise<void>,
+		// Steps that belong to the same teardown pass but run after the cleanup callback: the
+		// preview-tab restore and reset(). They have to sit inside the tracked promise, or a
+		// cancellation landing after the callback settled and before these finished would see
+		// no teardown in flight and run the whole pass - document revert, tab closing, restore,
+		// reset - a second time.
+		finalize?: () => Promise<void>,
+	): Promise<boolean> {
 		if (this.teardownInFlight !== undefined) {
 			await this.teardownInFlight
-			// The pass belongs to whoever started it; that caller also owns the finalization
-			// steps (preview tabs, reset), so the caller is told it did not own this pass.
+			// Not ours: the caller that started this teardown owns everything that
+			// belongs to it, including the steps that follow the callback.
 			return false
 		}
-		const inFlight = cleanup()
+		// A gate, not the cleanup promise itself: the tracked promise stays in place until
+		// the finalization settles, so a late caller waits for the whole pass.
+		let release!: () => void
+		const tracked = new Promise<void>((resolve) => {
+			release = resolve
+		})
+		this.teardownInFlight = tracked
 		this.teardownPasses++
-		this.teardownInFlight = inFlight
 		try {
-			await inFlight
+			await cleanup()
+			if (finalize) {
+				await finalize()
+			}
 		} finally {
 			this.teardownInFlight = undefined
+			release()
 		}
 		return true
 	}
