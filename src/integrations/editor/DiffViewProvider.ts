@@ -796,14 +796,15 @@ export class DiffViewProvider {
 							})
 						}
 						await this.closeOwnDiffView(absolutePath)
-					})
-					if (ownedTeardown) {
 						// Opening the diff evicted any preview tab the file had. This path closes its own diff
 						// view and rethrows, so this pass is the only one that can put that preview state back;
-						// a caller that merely waited for it must not restore the tabs a second time. reset()
-						// stays with the tool caller's error handling, which owns the provider lifecycle.
+						// a caller that merely waited for it must not restore the tabs a second time. It runs
+						// INSIDE the pass rather than after it: the pass is what owns the session, and a
+						// cancellation that arrives while the tabs are being put back has to wait for that
+						// pass instead of starting a second teardown over the same tabs. reset() stays with
+						// the tool caller's error handling, which owns the provider lifecycle.
 						await this.restorePreviewTabs()
-					}
+					})
 				} catch {
 					// cleanup is best-effort; the guard verdict below is the outcome
 				}

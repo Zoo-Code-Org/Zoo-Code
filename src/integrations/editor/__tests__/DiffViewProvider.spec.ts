@@ -3664,6 +3664,66 @@ describe("DiffViewProvider", () => {
 			expect(reset).toHaveBeenCalledTimes(1)
 		})
 
+
+		// The row: the rejected save's pass ended at closeOwnDiffView(), and the preview tabs were
+		// restored after the pass was over. A cancellation that landed in that window started a
+		// second teardown pass over a session the first pass had already closed, and restored the
+		// preview tabs a second time. The pass now owns the session through preview restoration.
+		it("saveChanges() keeps the teardown pass occupied while it restores the preview tabs of a rejected save", async () => {
+			let release: () => void = () => {}
+			const gate = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			let restoreEntered = false
+			const restorePreviewTabs = vi.fn().mockImplementation(async () => {
+				restoreEntered = true
+				await gate
+			})
+			const closeOwnDiffView = vi.fn().mockResolvedValue(undefined)
+			const reset = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
+			diffViewProvider["closeOwnDiffView"] = closeOwnDiffView
+			diffViewProvider["reset"] = reset
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({
+				document: makeTextDocument({
+					uri: makeUri(mockTargetPath),
+					getText: vi.fn().mockReturnValue("content"),
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				}),
+			})
+
+			vi.mocked(safeWriteText).mockRejectedValue(new Error("guard rejected for test"))
+			let save: Promise<unknown> = Promise.resolve()
+			try {
+				save = diffViewProvider.saveChanges(false)
+				while (!restoreEntered) {
+					await new Promise((resolve) => setImmediate(resolve))
+				}
+				// The cancellation arrives while preview restoration is still running - the
+				// window in which the pass used to have already ended.
+				const revert = diffViewProvider.revertChanges()
+				await new Promise((resolve) => setImmediate(resolve))
+				release()
+				await expect(save).rejects.toThrow("guard rejected for test")
+				await revert
+			} finally {
+				vi.mocked(safeWriteText).mockReset()
+				vi.mocked(safeWriteText).mockResolvedValue(undefined)
+			}
+
+			// One pass, one preview restoration, one finalization.
+			expect(closeOwnDiffView).toHaveBeenCalledTimes(1)
+			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
+			expect(reset).toHaveBeenCalledTimes(1)
+		})
+
 		it("revertChanges() finalizes the session once when two cancellations wait on the same pass", async () => {
 			let release: () => void = () => {}
 			const gate = new Promise<void>((resolve) => {
