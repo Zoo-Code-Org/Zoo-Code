@@ -264,6 +264,69 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(await canonicalKey(referentPath), expect.any(Function))
 			expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith(aliasPath)
 		})
+
+		it("keeps the item when the lock key cannot be resolved, instead of calling it deleted", async () => {
+			// The canonicalization inside resolveLockKey fails, so no lock key exists and no lock is
+			// ever attempted. Whatever the errno says, this call has not touched the file, and the
+			// item must stay in the store with a reason that names the stage that failed.
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "alias-unresolvable" }))
+			const aliasPath = historyFilePath(storagePath, "alias-unresolvable")
+			const dirPath = path.dirname(aliasPath)
+			// The unlink, lock and write-through mocks are shared across cases, and the upsert
+			// above wrote through once, so clear them to make the assertions below about this delete.
+			vi.mocked(fs.unlink).mockClear()
+			vi.mocked(withFileLock).mockClear()
+			onWrite.mockClear()
+			// Not ENOENT: canonicalDirKey walks up to the nearest existing ancestor for a
+			// missing directory, so "not there" is a key it can still compute. Any other failure says
+			// nothing about the canonical form and is propagated, which is the resolution failure this
+			// path has to report rather than read as a deletion.
+			const eacces = Object.assign(new Error("EACCES"), { code: "EACCES" })
+			const realpathSpy = vi.spyOn(fs, "realpath").mockImplementation(async (target) => {
+				const targetPath = String(target)
+				if (targetPath === aliasPath || targetPath === dirPath) throw eacces
+				return actualFs.realpath(targetPath)
+			})
+			let rejection: unknown
+			try {
+				await store.delete("alias-unresolvable")
+			} catch (error: unknown) {
+				rejection = error
+			} finally {
+				realpathSpy.mockRestore()
+			}
+
+			expect(rejection).toBeInstanceOf(TaskHistoryDeleteError)
+			// No lock key, so no lock and no unlink: nothing this call did can account for the file
+			// being gone, and the reported reason has to say which stage failed.
+			expect(vi.mocked(withFileLock)).not.toHaveBeenCalled()
+			expect(fs.unlink).not.toHaveBeenCalled()
+			expect((rejection as TaskHistoryDeleteError).reason).toContain("lock key could not be resolved")
+			// The entry and its write-through state stay put: a later reconcile still sees the file.
+			expect(storeInternals(store).cache.has("alias-unresolvable")).toBe(true)
+			expect(onWrite).not.toHaveBeenCalled()
+			expect((rejection as TaskHistoryDeleteError).taskIds).toEqual(["alias-unresolvable"])
+		})
+
+		it("does not treat an ENOENT from lock acquisition as a completed deletion", async () => {
+			// proper-lockfile creates <key>.lock with mkdir and reports ENOENT when the directory
+			// that would hold it is missing. That is a failure to take the lock, not a report about
+			// the task file, so the named file has to be asked directly before anything is evicted.
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "lock-enoent" }))
+			vi.mocked(fs.unlink).mockClear()
+			onWrite.mockClear()
+			vi.mocked(withFileLock).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+			await expect(store.delete("lock-enoent")).rejects.toThrow(TaskHistoryDeleteError)
+
+			expect(fs.unlink).not.toHaveBeenCalled()
+			expect(storeInternals(store).cache.has("lock-enoent")).toBe(true)
+			expect(onWrite).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("reconcile()", () => {
