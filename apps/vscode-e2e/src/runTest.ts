@@ -18,6 +18,7 @@ import { addTerminalProfileResultFixtures } from "./fixtures/terminal-profile"
 import { addListFilesResultFixtures } from "./fixtures/list-files"
 import { addReadFileResultFixtures } from "./fixtures/read-file"
 import { addSearchFilesResultFixtures } from "./fixtures/search-files"
+import { addQueuedApiInputFixtures } from "./fixtures/queued-api-input"
 import { addSubtaskFixtures } from "./fixtures/subtasks"
 import { addUseMcpToolResultFixtures } from "./fixtures/use-mcp-tool"
 import { addWriteToFileResultFixtures } from "./fixtures/write-to-file"
@@ -140,6 +141,7 @@ async function main() {
 				addReadFileResultFixtures(mock)
 				addSearchFilesResultFixtures(mock)
 				addSubtaskFixtures(mock)
+				addQueuedApiInputFixtures(mock)
 				addUseMcpToolResultFixtures(mock)
 				addWriteToFileResultFixtures(mock)
 				addDeepSeekV4Fixtures(mock)

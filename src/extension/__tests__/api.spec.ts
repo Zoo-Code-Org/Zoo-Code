@@ -5,6 +5,7 @@ import { API } from "../api"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
 import { MessageQueueService } from "../../core/message-queue/MessageQueueService"
 import { Task } from "../../core/task/Task"
+import { makeClineProviderFactory } from "../../test-utils/provider"
 
 vi.mock("vscode")
 vi.mock("../../core/webview/ClineProvider")
@@ -68,7 +69,7 @@ describe("API.sendMessage", () => {
 			postMessageToWebview,
 			on: vi.fn(),
 		} as unknown as ClineProvider
-		const api = new API({} as vscode.OutputChannel, provider)
+		const api = new API({} as vscode.OutputChannel, provider, makeClineProviderFactory())
 		const images = ["data:image/png;base64,image1data"]
 
 		await api.sendMessage("Use this before completing", images)
@@ -94,7 +95,7 @@ describe("API.sendMessage", () => {
 			postMessageToWebview,
 			on: vi.fn(),
 		} as unknown as ClineProvider
-		const api = new API({} as vscode.OutputChannel, provider)
+		const api = new API({} as vscode.OutputChannel, provider, makeClineProviderFactory())
 
 		await api.sendMessage("Done with the follow-up")
 
@@ -117,7 +118,7 @@ describe("API.sendMessage", () => {
 			postMessageToWebview,
 			on: vi.fn(),
 		} as unknown as ClineProvider
-		const api = new API({} as vscode.OutputChannel, provider)
+		const api = new API({} as vscode.OutputChannel, provider, makeClineProviderFactory())
 
 		await api.sendMessage("Start over")
 
@@ -143,7 +144,7 @@ describe("API.sendMessage", () => {
 		} as unknown as ClineProvider
 		const task = createStreamingTask(provider)
 		vi.mocked(provider.getCurrentTask).mockReturnValue(task)
-		const api = new API({} as vscode.OutputChannel, provider)
+		const api = new API({} as vscode.OutputChannel, provider, makeClineProviderFactory())
 		const images = ["data:image/png;base64,image1data"]
 
 		await api.sendMessage("Steer the next turn", images)
@@ -177,7 +178,13 @@ describe("API.sendMessage", () => {
 		} as unknown as ClineProvider
 		const task = createStreamingTask(provider)
 		vi.mocked(provider.getCurrentTask).mockReturnValue(task)
-		new API({ appendLine } as unknown as vscode.OutputChannel, provider, "/tmp/roo-test.sock", true)
+		new API(
+			{ appendLine } as unknown as vscode.OutputChannel,
+			provider,
+			makeClineProviderFactory(),
+			"/tmp/roo-test.sock",
+			true,
+		)
 		const images = ["data:image/png;base64,image1data"]
 		const executeProtectedTool = vi.fn()
 		const ask = task.ask(askType, askText, false)
@@ -207,7 +214,13 @@ describe("API.sendMessage", () => {
 			getCurrentTaskStack: vi.fn().mockReturnValue([]),
 			on: vi.fn(),
 		} as unknown as ClineProvider
-		const api = new API({ appendLine } as unknown as vscode.OutputChannel, provider, "/tmp/roo-test.sock", true)
+		const api = new API(
+			{ appendLine } as unknown as vscode.OutputChannel,
+			provider,
+			makeClineProviderFactory(),
+			"/tmp/roo-test.sock",
+			true,
+		)
 		vi.spyOn(api, "sendMessage").mockRejectedValue(new Error("invalid input"))
 
 		await expect(
