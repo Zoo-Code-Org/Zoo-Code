@@ -215,6 +215,17 @@ const App = () => {
 		return () => clearInterval(interval)
 	}, [])
 
+	useEffect(() => {
+		// Window activation and programmatic focus do not identify a chat interaction.
+		const onInteraction = () => vscode.postMessage({ type: "webviewDidFocus" })
+		document.addEventListener("pointerdown", onInteraction, true)
+		document.addEventListener("keydown", onInteraction, true)
+		return () => {
+			document.removeEventListener("pointerdown", onInteraction, true)
+			document.removeEventListener("keydown", onInteraction, true)
+		}
+	}, [])
+
 	// Initialize source map support for better error reporting
 	useEffect(() => {
 		// Initialize source maps for better error reporting in production

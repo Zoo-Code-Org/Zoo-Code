@@ -474,6 +474,7 @@ export interface WebviewMessage {
 		| "customInstructions"
 		| "webviewDidLaunch"
 		| "webviewHeartbeat"
+		| "webviewDidFocus"
 		| "newTask"
 		| "askResponse"
 		| "terminalOperation"

@@ -534,6 +534,8 @@
 		"openAiApiKey": "OpenAI APIキー",
 		"apiKey": "APIキー",
 		"openAiBaseUrl": "ベースURL",
+		"openAiStrictToolSchemas": "厳格なツールスキーマ（strict: true）",
+		"openAiStrictToolSchemasDescription": "スキーマの厳密な準拠を有効にするため、ツールスキーマに strict: true を付与して送信します。非厳密なツール呼び出しを使う場合は無効にしてください。",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure デプロイ名",
 		"azureOpenAiDeploymentNameDescription": "基盤モデル名ではなく、Azure AI Studio のデプロイ名を入力してください。",
