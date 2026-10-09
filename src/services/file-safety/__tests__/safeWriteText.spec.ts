@@ -681,6 +681,32 @@ describe("safeWriteText", () => {
 		expect(fs.unlink).not.toHaveBeenCalledWith(expect.stringContaining(".bak"))
 	})
 
+	it("win32 DACL: a failed first restore is retried and the backup is then removed", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+		// /save succeeds (call 1), the first /restore fails (call 2), the retry succeeds (call 3).
+		let callCount = 0
+		vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+			callCount++
+			if (typeof cb === "function") {
+				cb(callCount === 2 ? new Error("icacls transient error") : null, "", "")
+			}
+			return fakeChild
+		})
+
+		await safeWriteText(targetPath, "data", { platform: "win32", backup: true })
+
+		const saves = vi.mocked(execFile).mock.calls.filter(function (call) { return String(call[1]).includes("/save") })
+		const restores = vi.mocked(execFile).mock.calls.filter(function (call) { return String(call[1]).includes("/restore") })
+		expect(saves.length).toBe(1)
+		expect(restores.length).toBe(2)
+		expect(fs.rename).toHaveBeenCalled()
+		// The descriptor is back, so the backup is no longer the recovery artifact and is removed.
+		expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".bak"))
+	})
+
 		it("win32 DACL: when target does not exist, no save/restore/dump", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
