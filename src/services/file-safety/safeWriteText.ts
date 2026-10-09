@@ -158,10 +158,12 @@ function _stagingDir(dir: string): string {
 }
 
 /**
- * Release a descriptor this call still owns. A close that fails must not become the error a
- * failed write reports - the operation's own failure is the one that explains what happened -
- * but the descriptor must not be abandoned either, so the caller retries through here and the
- * second failure is reported.
+ * Release a descriptor this call still owns, meaning one whose close has not been attempted yet.
+ * A close that has already been attempted is never retried: the first close(2) may have released
+ * the descriptor even while reporting an error, and closing the same number again can then release
+ * a descriptor a concurrent open has meanwhile been handed. Such a failure is logged where it
+ * happens instead. This helper only reports its own failure, so it can never replace the error a
+ * failed write is about to throw.
  */
 function _closeDescriptor(fd: number, label: string): void {
 	try {
@@ -209,6 +211,45 @@ async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRu
 }
 
 /**
+ * Decide whether an `icacls <file>` report describes a DACL narrowed to one principal.
+ *
+ * The report is a header line naming the file followed by one line per access-control entry, e.g.
+ * "NT AUTHORITY\\SY:\\Users:(RX)" or "DESKTOP\\bob:(I)(F)". Entries are taken from the lines after
+ * the header, so the path - which usually contains the user's own name - can never satisfy the
+ * check on its own. An entry is accepted only when it carries no "(I)" inherited component and its
+ * principal is exactly the identity the narrowing granted.
+ */
+function _aclEntriesAreNarrowedTo(report: string, identity: string): boolean {
+	// Every "principal:(flags)" pair in the report is an entry; the file path that icacls prints
+	// ahead of the first entry is stripped below so it cannot satisfy the check by containing the
+	// user's name.
+	const pattern = /([^:()]+):\(([^()]*)\)/g
+	const wanted = identity.toLowerCase()
+	let count = 0
+	for (const match of report.matchAll(pattern)) {
+		let principal = match[1].trim()
+		// The first entry shares its line with the path. Only a leading token that looks like a
+		// path is dropped: a principal such as "NT AUTHORITY\\SYSTEM" legitimately contains a space
+		// and must survive intact.
+		const parts = principal.split(/\s+/)
+		if (parts.length > 1 && /^[A-Za-z]:[\\/]|^[\\/]/.test(parts[0])) {
+			principal = parts.slice(1).join(" ").trim()
+		}
+		const flags = match[2]
+		if (flags.includes("(I)")) {
+			return false
+		}
+		const lower = principal.toLowerCase()
+		const isWanted = lower === wanted || lower === `${wanted}` || lower.endsWith(`\\${wanted}`) || lower.endsWith(`/${wanted}`)
+		if (!isWanted) {
+			return false
+		}
+		count++
+	}
+	return count > 0
+}
+
+/**
  * Narrow a file's DACL to a single explicit grant for the current user, then verify it by
  * reading the DACL back. Used when the saved DACL could not be reapplied: the row's alternative
  * to failing is to publish under an ACL that is known to be restrictive, and "known" means
@@ -235,8 +276,12 @@ async function _restrictDaclWindows(
 	if (readBack === null) {
 		return false
 	}
-	// Verification: the grant is present and nothing is inherited any more.
-	return readBack.toLowerCase().includes(identity.toLowerCase()) && !readBack.includes("(I)")
+	// Verification reads the access-control entries, not the whole output: icacls prints the file
+	// path first, and a workspace path normally contains the user's name (C:\Users\<user>\...),
+	// so a substring match would pass on a file that grants that user nothing. Every entry must be
+	// an explicit grant to the current user with no inherited component, which is the only state
+	// this helper claims to have verified.
+	return _aclEntriesAreNarrowedTo(readBack, identity)
 }
 
 // -- public API ------------------------------------------------------------
@@ -474,8 +519,13 @@ export async function safeWriteText(
 					offset += fsSync.writeSync(handle, buffer, offset, buffer.length - offset)
 				}
 				_fsyncFile(handle)
-				fsSync.closeSync(handle)
+				// Ownership ends when the close is attempted, not when it succeeds.
 				stagingFd = undefined
+				try {
+					fsSync.closeSync(handle)
+				} catch (closeError: unknown) {
+					console.error(`Failed to close the staging descriptor for ${tempPath}:`, closeError)
+				}
 			} catch (error: unknown) {
 				if (stagingFd !== undefined) {
 					_closeDescriptor(stagingFd, `staging descriptor for ${tempPath}`)
@@ -506,8 +556,13 @@ export async function safeWriteText(
 					fsSync.fchmodSync(handle, targetMode)
 				}
 				_fsyncFile(handle)
-				fsSync.closeSync(handle)
+				// Ownership ends when the close is attempted, not when it succeeds.
 				stagedFd = undefined
+				try {
+					fsSync.closeSync(handle)
+				} catch (closeError: unknown) {
+					console.error(`Failed to close the staged temp descriptor for ${tempPath}:`, closeError)
+				}
 			} catch (error: unknown) {
 				if (stagedFd !== undefined) {
 					_closeDescriptor(stagedFd, `staged temp descriptor for ${tempPath}`)
@@ -582,8 +637,14 @@ export async function safeWriteText(
 			}
 		}
 		try {
-			// -- Step 3 (backup:true): durable copy target -> backup ----
-			if (options?.backup) {
+			// -- Step 3 (backup:true, or any win32 publish that captured a DACL): durable copy ----
+			// A caller that asked for no backup still gets a private copy whenever step 2 saved a
+			// DACL dump, because step 5's only safe failure mode is a rollback onto the pre-write
+			// content: without it, a DACL that could be neither restored nor narrowed would leave
+			// new bytes at the target under an ACL nobody authorized - the exact condition the
+			// security row refuses. The copy is unlinked on success, so a caller that did not ask
+			// for a backup never sees one.
+			if (options?.backup || daclDumpPath !== null) {
 				try {
 					await fs.access(targetPath)
 					backupPath = _tempName(dirPath, "safeWriteText.bak")
@@ -605,20 +666,29 @@ export async function safeWriteText(
 						// the chmod afterwards is what clears a copied read-only attribute on Windows
 						// and keeps a backup of a permissive file private.
 						seedFd = fsSync.openSync(backupPath, "wx", 0o600)
-						fsSync.closeSync(seedFd)
-						// Owned no longer: only after the close succeeds is the descriptor somebody
-						// else's problem. If the close throws, the handler below still holds it.
+						// Owned no longer the moment the close is attempted: a retried close could
+						// release a descriptor somebody else has been handed in the meantime.
+						const seedHandle = seedFd
 						seedFd = undefined
+						try {
+							fsSync.closeSync(seedHandle)
+						} catch (closeError: unknown) {
+							console.error(`Failed to close the backup seed descriptor for ${backupPath}:`, closeError)
+						}
 						await fs.copyFile(targetPath, backupPath)
 						await fs.chmod(backupPath, 0o600)
 						// "r+" not "r": fsync on a read-only handle is EPERM on Windows, and the same
 						// flag the staged temp file uses above.
 						backupFd = fsSync.openSync(backupPath, "r+")
 						_fsyncFile(backupFd)
-						fsSync.closeSync(backupFd)
-						// Owned no longer: only after the close succeeds is the descriptor somebody
-						// else's problem; until then the handler below retries it.
+						// Same rule for the backup's fsync descriptor.
+						const backupHandle = backupFd
 						backupFd = undefined
+						try {
+							fsSync.closeSync(backupHandle)
+						} catch (closeError: unknown) {
+							console.error(`Failed to close the backup fsync descriptor for ${backupPath}:`, closeError)
+						}
 					} catch (backupError: unknown) {
 						if (seedFd !== undefined) {
 							// The seed descriptor is still owned here: its close failed, or an error landed
@@ -654,12 +724,21 @@ export async function safeWriteText(
 					const handle = fsSync.openSync(dirPath, "r")
 					dirFd = handle
 					_fsyncFile(handle)
-					fsSync.closeSync(handle)
+					// The question this block answers is whether the directory entry reached the
+					// disk, which the fsync above has already answered. A close that fails after it
+					// is therefore reported rather than turned into a durability failure, and it is
+					// not retried: the descriptor is released as far as the kernel is concerned, and
+					// a second close could release a number a concurrent open has been handed.
 					dirFd = undefined
+					try {
+						fsSync.closeSync(handle)
+					} catch (closeError: unknown) {
+						console.error(`Failed to close the parent directory descriptor for ${dirPath}:`, closeError)
+					}
 				} catch (error: unknown) {
 					if (dirFd !== undefined) {
-						// The close is retried and logged rather than replacing the durability
-						// failure this block is about to report.
+						// Only an error that arrived before any close was attempted can still find
+						// this descriptor owned - the fsync failing, for instance.
 						_closeDescriptor(dirFd, `parent directory descriptor for ${dirPath}`)
 					}
 					// The content rename committed, but the directory entry that
@@ -694,9 +773,27 @@ export async function safeWriteText(
 						// ACL: the retained backup - the pre-write content - is renamed back and the
 						// write is reported as failed.
 						if (backupPath !== null && releaseBackupOnSuccess) {
-							await fs.rename(backupPath, targetPath)
+							// Ownership of the backup transfers before the rename, not after it. If the
+							// rename itself fails the backup is still the only copy of the pre-write
+							// content, and the outer handler must not unlink it just because this call
+							// is failing - that is how a cleanup swallows the user's data.
+							const rollbackPath = backupPath
 							backupPath = null
 							releaseBackupOnSuccess = false
+							try {
+								await fs.rename(rollbackPath, targetPath)
+							} catch (rollbackError: unknown) {
+								warn(`safeWriteText: the DACL of ${targetPath} could not be restored and its content could not be rolled back; the pre-write content is retained at ${rollbackPath}.`)
+								throw new DaclRestoreError(targetPath, rollbackError)
+							}
+							// The rolled-back file is the backup, whose access rights came from the
+							// directory rather than from the original target, so the same verification
+							// runs on it: a rollback that restores content under an unknown ACL has not
+							// finished its job either.
+							const rolledBackAcl = await _restrictDaclWindows(targetPath, options?.execFileRunner)
+							if (!rolledBackAcl) {
+								warn(`safeWriteText: the previous content is back at ${targetPath}, but its access rights could not be narrowed or verified; the file carries the access rights of its directory.`)
+							}
 						}
 						throw new DaclRestoreError(targetPath)
 					}
