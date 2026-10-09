@@ -681,6 +681,24 @@ describe("safeWriteText", () => {
 		expect(fs.unlink).not.toHaveBeenCalledWith(expect.stringContaining(".bak"))
 	})
 
+	it("win32 DACL: a non-regular dump file fails closed even when it is non-empty", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+			if (typeof cb === "function") { cb(null, "", "") }
+			return fakeChild
+		})
+		// The dump exists with bytes in it, but it is not a regular file (a directory, a FIFO or a
+		// device left behind by another process). icacls /restore against it is not a restore of our
+		// descriptor, so the write has to fail closed instead of publishing.
+		vi.mocked(fsSync.statSync).mockReturnValue({ isFile: () => false, size: 4096 } as never)
+
+		await expect(safeWriteText(targetPath, "data", { platform: "win32", backup: true })).rejects.toThrow(/DaclCaptureError|refus/i)
+
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
 	it("win32 DACL: a failed first restore is retried and the backup is then removed", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
