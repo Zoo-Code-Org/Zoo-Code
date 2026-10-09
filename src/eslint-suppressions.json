@@ -159,11 +159,6 @@
 			"count": 1
 		}
 	},
-	"api/providers/__tests__/kimi-code.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"api/providers/__tests__/lite-llm.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 36
@@ -286,7 +281,7 @@
 	},
 	"api/providers/base-openai-compatible-provider.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 6
+			"count": 5
 		}
 	},
 	"api/providers/base-provider.ts": {

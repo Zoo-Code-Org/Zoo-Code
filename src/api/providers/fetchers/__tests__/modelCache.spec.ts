@@ -48,6 +48,7 @@ vi.mock("../kenari")
 vi.mock("../nanogpt")
 vi.mock("../moonshot")
 vi.mock("../zoo-gateway")
+vi.mock("../kimi-code")
 
 // Mock ContextProxy with a simple static instance
 vi.mock("../../../core/config/ContextProxy", () => ({
@@ -76,6 +77,7 @@ import { getKenariModels } from "../kenari"
 import { getNanoGptModels } from "../nanogpt"
 import { getMoonshotModels } from "../moonshot"
 import { getZooGatewayModels } from "../zoo-gateway"
+import { getKimiCodeModels } from "../kimi-code"
 
 const mockGetLiteLLMModels = getLiteLLMModels as Mock<typeof getLiteLLMModels>
 const mockGetOpenRouterModels = getOpenRouterModels as Mock<typeof getOpenRouterModels>
@@ -405,6 +407,28 @@ describe("empty cache protection", () => {
 	})
 
 	describe("getModels", () => {
+
+		it("forwards the caller abort signal to the kimi-code fetcher on the auth-scoped cache miss", async () => {
+			const controller = new AbortController()
+			vi.mocked(getKimiCodeModels).mockResolvedValue({})
+
+			await getModels({ provider: providerIdentifiers.kimiCode, apiKey: "kimi-key", signal: controller.signal })
+
+			// Kimi is auth-scoped: the cache-miss arm runs WITHOUT the single-flight controller,
+			// so the caller signal is the only thing tying the discovery fetch to a cancelled
+			// request. Dropping the fallback would leave every other test in this file green.
+			expect(vi.mocked(getKimiCodeModels)).toHaveBeenCalledWith("kimi-key", { signal: controller.signal })
+		})
+
+		it("calls the kimi-code fetcher with one argument when no signal is set", async () => {
+			vi.mocked(getKimiCodeModels).mockResolvedValue({})
+
+			await getModels({ provider: providerIdentifiers.kimiCode, apiKey: "kimi-key" })
+
+			// No signal must not fabricate an options object: the fetcher keeps its single-argument
+			// call shape, which is what the spread-less branch guarantees.
+			expect(vi.mocked(getKimiCodeModels)).toHaveBeenCalledWith("kimi-key")
+		})
 		it("does not cache empty API responses", async () => {
 			// API returns empty object (simulating failure)
 			mockGetOpenRouterModels.mockResolvedValue({})

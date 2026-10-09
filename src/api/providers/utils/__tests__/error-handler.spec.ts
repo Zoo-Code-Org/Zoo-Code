@@ -1,4 +1,6 @@
-import { handleProviderError, handleOpenAIError } from "../error-handler"
+import { APIUserAbortError } from "openai"
+
+import { handleProviderError, handleOpenAIError, handleOpenAIRequestError } from "../error-handler"
 
 describe("handleProviderError", () => {
 	const providerName = "TestProvider"
@@ -279,5 +281,84 @@ describe("handleOpenAIError (backward compatibility)", () => {
 
 		expect(result.message).toBe("Roo Code Cloud completion error: Authentication failed")
 		expect((result as any).status).toBe(401)
+	})
+})
+
+describe("handleOpenAIRequestError (abort awareness)", () => {
+	it("normalizes a generic error to a fresh AbortError when the caller signal aborted", () => {
+		const controller = new AbortController()
+		controller.abort()
+		const original = new Error("network failure")
+
+		const result = handleOpenAIRequestError(original, "OpenAI", controller.signal)
+
+		expect(result).not.toBe(original)
+		expect(result.name).toBe("AbortError")
+		expect(result.message).toBe("OpenAI request aborted")
+		expect((result as Error & { cause?: unknown }).cause).toBe(original)
+	})
+
+	it("normalizes the SDK user-abort error when no signal was passed", () => {
+		const result = handleOpenAIRequestError(new APIUserAbortError(), "Zai")
+
+		expect(result.name).toBe("AbortError")
+		expect(result.message).toBe("Zai request aborted")
+	})
+
+	it("keeps a timeout-triggered SDK abort classified as a timeout when the caller did not abort", () => {
+		const original = new APIUserAbortError()
+		const requestSignal = AbortSignal.abort(new DOMException("The operation was aborted", "TimeoutError"))
+
+		const result = handleOpenAIRequestError(original, "OpenAI", undefined, requestSignal)
+
+		expect(result.name).toBe("TimeoutError")
+		expect(result.message).toBe("OpenAI request timed out")
+		expect((result as Error & { cause?: unknown }).cause).toBe(original)
+	})
+
+	it("keeps the abort contract when the request signal has not aborted", () => {
+		// The guard must not assume a reason exists: an SDK abort can arrive while the
+		// merged request signal is still live, and reading .name on an undefined reason
+		// would turn a cancellation into a TypeError.
+		const result = handleOpenAIRequestError(new APIUserAbortError(), "OpenAI", undefined, new AbortController().signal)
+
+		expect(result.name).toBe("AbortError")
+		expect(result.message).toBe("OpenAI request aborted")
+	})
+	it("keeps a caller cancellation classified as an abort even when the request signal timed out", () => {
+		const controller = new AbortController()
+		controller.abort()
+		const requestSignal = AbortSignal.abort(new DOMException("The operation was aborted", "TimeoutError"))
+
+		const result = handleOpenAIRequestError(new APIUserAbortError(), "OpenAI", controller.signal, requestSignal)
+
+		expect(result.name).toBe("AbortError")
+		expect(result.message).toBe("OpenAI request aborted")
+	})
+
+	it("normalizes a native fetch-level AbortError when no signal was passed", () => {
+		const result = handleOpenAIRequestError(
+			Object.assign(new Error("aborted"), { name: "AbortError" }),
+			"Fireworks",
+		)
+
+		expect(result.name).toBe("AbortError")
+		expect(result.message).toBe("Fireworks request aborted")
+	})
+
+	it("keeps the provider-prefix wrap for a non-abort failure", () => {
+		const original = new Error("rate limited")
+
+		const result = handleOpenAIRequestError(original, "OpenAI", new AbortController().signal)
+
+		expect(result).not.toBe(original)
+		expect(result.name).toBe("Error")
+		expect(result.message).toBe("OpenAI completion error: rate limited")
+	})
+
+	it("falls back to the provider-prefix wrap when no signal is available", () => {
+		const result = handleOpenAIRequestError(new Error("boom"), "Kimi Code")
+
+		expect(result.message).toBe("Kimi Code completion error: boom")
 	})
 })

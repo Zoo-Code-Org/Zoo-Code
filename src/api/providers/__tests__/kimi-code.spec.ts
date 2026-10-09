@@ -2,7 +2,10 @@ import { buildApiHandler } from "../../index"
 import { KimiCodeHandler } from "../kimi-code"
 
 import { clearAllMocks } from "../../../test-utils/reset"
+import { captureError } from "../../../test-utils/errors"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
+import OpenAI from "openai"
+import { Stream } from "openai/streaming"
 
 const { mockGetAccessToken, mockForceRefreshAccessToken, mockGetModels } = vi.hoisted(() => ({
 	mockGetAccessToken: vi.fn(),
@@ -21,6 +24,19 @@ vi.mock("../fetchers/modelCache", () => ({
 	getModels: mockGetModels,
 	refreshModels: mockGetModels,
 }))
+
+/**
+ * Spies on the inherited OpenAI client's chat.completions.create. `client` is
+ * protected on the OpenAiHandler base (not on the public interface), so it is
+ * reached through a documented `as unknown as` projection onto the real SDK
+ * client type (AGENTS.md last resort; no `as any`). The spy keeps the SDK
+ * method's own signature, so the mock values below use full SDK response
+ * shapes (ChatCompletion / Stream of ChatCompletionChunk).
+ */
+function completionsCreate(handler: KimiCodeHandler) {
+	const client = (handler as unknown as { client: OpenAI }).client
+	return vi.spyOn(client.chat.completions, "create")
+}
 
 describe("KimiCodeHandler", () => {
 	beforeEach(() => {
@@ -121,10 +137,22 @@ describe("KimiCodeHandler", () => {
 	it("force-refreshes and retries exactly once after a non-streaming OAuth 401", async () => {
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
 		const unauthorized = Object.assign(new Error("Unauthorized"), { status: 401 })
-		const createCompletion = vi
-			.spyOn((handler as any).client.chat.completions, "create")
+		const createCompletion = completionsCreate(handler)
 			.mockRejectedValueOnce(unauthorized)
-			.mockResolvedValueOnce({ choices: [{ message: { content: "retried" } }] })
+			.mockResolvedValueOnce({
+				id: "cmpl-1",
+				object: "chat.completion",
+				created: 0,
+				model: "kimi-for-coding",
+				choices: [
+					{
+						index: 0,
+						message: { role: "assistant", content: "retried", refusal: null },
+						logprobs: null,
+						finish_reason: "stop",
+					},
+				],
+			})
 
 		await expect(handler.completePrompt("test")).resolves.toBe("retried")
 		expect(mockForceRefreshAccessToken).toHaveBeenCalledOnce()
@@ -238,5 +266,172 @@ describe("KimiCodeHandler", () => {
 			reasoningEffort: "medium",
 		})
 		expect(handler.getModel().reasoning).toEqual({ reasoning_effort: "max" })
+	})
+
+	it("forwards the metadata abort signal to the inherited OpenAI SDK request", async () => {
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })
+		const controller = new AbortController()
+		const streamChunks = new Stream<OpenAI.Chat.Completions.ChatCompletionChunk>(
+			() =>
+				(async function* (): AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk> {
+					yield {
+						id: "cmpl-1",
+						object: "chat.completion.chunk",
+						created: 0,
+						model: "kimi-for-coding",
+						choices: [{ index: 0, delta: { content: "hi" }, finish_reason: null }],
+					}
+				})()[Symbol.asyncIterator](),
+			new AbortController(),
+		)
+		const createCompletion = completionsCreate(handler).mockResolvedValueOnce(streamChunks)
+
+		const gen = handler.createMessage("system", [{ role: "user", content: "test" }], {
+			taskId: "test-task",
+			abortSignal: controller.signal,
+		})
+		const first = await gen.next()
+
+		expect(first.value).toEqual({ type: "text", text: "hi" })
+		expect(createCompletion).toHaveBeenCalledWith(expect.anything(), { signal: controller.signal })
+	})
+
+	it("rejects before any request when the createMessage abort signal is already aborted", async () => {
+		// OAuth auth so the token assertions below are not vacuous: without the
+		// cancellation guard, resolveAccessToken would invoke the OAuth mocks.
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
+		const controller = new AbortController()
+		controller.abort()
+		const createCompletion = completionsCreate(handler)
+
+		const gen = handler.createMessage("system", [{ role: "user", content: "test" }], {
+			taskId: "test-task",
+			abortSignal: controller.signal,
+		})
+
+		await expect(async () => {
+			for await (const _ of gen) {
+				// consume
+			}
+		}).rejects.toMatchObject({ name: "AbortError", message: "This operation was aborted" })
+		expect(createCompletion).not.toHaveBeenCalled()
+		// Cancellation must also skip model discovery and OAuth token work.
+		expect(mockGetModels).not.toHaveBeenCalled()
+		expect(mockGetAccessToken).not.toHaveBeenCalled()
+		expect(mockForceRefreshAccessToken).not.toHaveBeenCalled()
+	})
+
+	it("stops before the completion request when the signal aborts during model preparation", async () => {
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
+		const controller = new AbortController()
+		// Cancellation lands WHILE model discovery is in flight. Discovery itself fails
+		// (it is best-effort and prepareRequest swallows it), so the contract under test is
+		// the observable one: no completion request may be issued once the caller has
+		// cancelled. The override's re-check after preparation is what stops it here; the
+		// inherited handler also guards, which is why removing only the override's check does
+		// not open a hole - the check keeps the cancellation from entering the base flow.
+		mockGetModels.mockImplementation(async () => {
+			controller.abort()
+			throw new Error("discovery cancelled")
+		})
+		const createCompletion = completionsCreate(handler)
+
+		const gen = handler.createMessage("system", [{ role: "user", content: "test" }], {
+			taskId: "test-task",
+			abortSignal: controller.signal,
+		})
+
+		await expect(async () => {
+			for await (const _ of gen) {
+				// consume
+			}
+		}).rejects.toMatchObject({ name: "AbortError", message: "This operation was aborted" })
+		// Preparation really ran (so this is not the already-aborted path), and the
+		// completion request was never issued after the cancellation landed.
+		expect(mockGetModels).toHaveBeenCalled()
+		expect(createCompletion).not.toHaveBeenCalled()
+	})
+
+	it("forwards completePrompt abort options and timeoutMs through the override on both 401 retry attempts", async () => {
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
+		const unauthorized = Object.assign(new Error("Unauthorized"), { status: 401 })
+		const createCompletion = completionsCreate(handler)
+			.mockRejectedValueOnce(unauthorized)
+			.mockResolvedValueOnce({
+				id: "cmpl-1",
+				object: "chat.completion",
+				created: 0,
+				model: "kimi-for-coding",
+				choices: [
+					{
+						index: 0,
+						message: { role: "assistant", content: "retried", refusal: null },
+						logprobs: null,
+						finish_reason: "stop",
+					},
+				],
+			})
+		const controller = new AbortController()
+
+		await expect(
+			handler.completePrompt("test", { abortSignal: controller.signal, timeoutMs: 30_000 }),
+		).resolves.toBe("retried")
+		expect(mockForceRefreshAccessToken).toHaveBeenCalledOnce()
+		expect(createCompletion).toHaveBeenCalledTimes(2)
+		for (const call of createCompletion.mock.calls) {
+			// A positive timeoutMs must reach the per-request config on both
+			// attempts: the external signal is merged in (never passed raw) and
+			// the SDK-level timeout is set, so a retry that dropped either would
+			// be caught here.
+			const options = call[1]
+			expect(options).toBeDefined()
+			expect(options?.timeout).toBe(30_000)
+			expect(options?.signal).toBeInstanceOf(AbortSignal)
+			expect(options?.signal).not.toBe(controller.signal)
+			expect(options?.signal?.aborted).toBe(false)
+		}
+		// The merged signals follow the external abort on both attempts.
+		controller.abort()
+		for (const call of createCompletion.mock.calls) {
+			expect(call[1]?.signal?.aborted).toBe(true)
+		}
+	})
+
+	it("rejects before any request when the completePrompt signal is already aborted", async () => {
+		// OAuth auth so the token assertions below are not vacuous: without the
+		// cancellation guard, resolveAccessToken would invoke the OAuth mocks.
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
+		const controller = new AbortController()
+		controller.abort()
+		const createCompletion = completionsCreate(handler)
+
+		await expect(handler.completePrompt("test", { abortSignal: controller.signal })).rejects.toMatchObject({
+			name: "AbortError",
+			message: "This operation was aborted",
+		})
+		expect(createCompletion).not.toHaveBeenCalled()
+		// Cancellation must also skip model discovery and OAuth token work.
+		expect(mockGetModels).not.toHaveBeenCalled()
+		expect(mockGetAccessToken).not.toHaveBeenCalled()
+		expect(mockForceRefreshAccessToken).not.toHaveBeenCalled()
+	})
+
+	it("surfaces a normalized AbortError when the SDK aborts a streaming request", async () => {
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })
+		// The real SDK class: this spec does not mock the openai module.
+		const { APIUserAbortError } = await import("openai")
+		completionsCreate(handler).mockRejectedValueOnce(new APIUserAbortError())
+
+		const gen = handler.createMessage("system", [{ role: "user", content: "test" }], { taskId: "test-task" })
+		const result = await captureError(
+			(async () => {
+				for await (const _ of gen) {
+					// consume
+				}
+			})(),
+		)
+
+		expect(result.name).toBe("AbortError")
+		expect(result.message).toBe("OpenAI request aborted")
 	})
 })

@@ -3,7 +3,7 @@
 import { OpenAiHandler, getOpenAiModels } from "../openai"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI, { AzureOpenAI } from "openai"
+import OpenAI, { AzureOpenAI, APIUserAbortError } from "openai"
 import {
 	openAiModelInfoSaneDefaults,
 	DEEP_SEEK_DEFAULT_TEMPERATURE,
@@ -13,6 +13,8 @@ import {
 import { Package } from "../../../shared/package"
 import { makeApiHandlerOptions, makeCreateMessageMetadata } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { captureError } from "../../../test-utils/errors"
+
 import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
 import axios from "axios"
 
@@ -27,8 +29,10 @@ const mockCreate = vitest.fn()
 vitest.mock("openai", () => {
 	const mockConstructor = vitest.fn()
 	const mockAzureConstructor = vitest.fn()
+	const APIUserAbortError = class extends Error {}
 	return {
 		__esModule: true,
+		APIUserAbortError,
 		default: mockConstructor.mockImplementation(function () {
 			return {
 				chat: {
@@ -275,6 +279,71 @@ describe("OpenAiHandler", () => {
 			const textChunks = chunks.filter((chunk) => chunk.type === "text")
 			expect(textChunks).toHaveLength(1)
 			expect(textChunks[0].text).toBe("Test response")
+		})
+
+		it("should treat a streaming chunk without a delta as an empty delta", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { content: "hello " }, index: 0 }] },
+					// Some providers emit a final chunk with no delta field at all; the
+					// iteration must fall back to an empty object and not throw.
+					{ choices: [{ finish_reason: "stop", index: 0 }] },
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			const textChunks = chunks.filter((chunk) => chunk.type === "text")
+			expect(textChunks).toEqual([{ type: "text", text: "hello " }])
+		})
+
+		it("should treat a streaming chunk without choices as an empty delta", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ usage: { prompt_tokens: 1, completion_tokens: 2 } },
+					{ choices: [{ delta: { content: "tail" }, index: 0 }] },
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			// A usage-only chunk has no choices at all; the optional chaining must
+			// resolve to the empty-delta fallback instead of throwing.
+			const textChunks = chunks.filter((chunk) => chunk.type === "text")
+			expect(textChunks).toEqual([{ type: "text", text: "tail" }])
+		})
+
+		it("should treat a streaming chunk with an empty choices array as an empty delta", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([{ choices: [] }, { choices: [{ delta: { content: "tail" }, index: 0 }] }]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			// With no first choice, delta and finish_reason resolve to undefined;
+			// the optional chaining must keep the iteration alive for the next chunk.
+			const textChunks = chunks.filter((chunk) => chunk.type === "text")
+			expect(textChunks).toEqual([{ type: "text", text: "tail" }])
+		})
+
+		it("should keep the last usage when a later chunk carries none", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "hi" }, index: 0 }],
+						usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 },
+					},
+					{ choices: [{ delta: {}, index: 0 }] },
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			// The recorded usage is only replaced by a chunk that actually carries
+			// usage; a later usage-less chunk must not wipe out the metrics.
+			const usageChunks = chunks.filter((chunk) => chunk.type === "usage")
+			expect(usageChunks).toHaveLength(1)
+			expect(usageChunks[0]).toMatchObject({ type: "usage", inputTokens: 7, outputTokens: 3 })
 		})
 
 		it("should forward the task abortSignal to streaming requests", async () => {
@@ -985,6 +1054,447 @@ describe("OpenAiHandler", () => {
 			}))
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("")
+		})
+	})
+
+	describe("abort signal wiring", () => {
+		it("should pass the metadata abort signal to the streaming createMessage request", async () => {
+			const controller = new AbortController()
+			const metadata = { taskId: "test-task", abortSignal: controller.signal }
+			const gen = handler.createMessage("system prompt", [], metadata)
+			const first = await gen.next()
+			expect(first.value).toEqual({ type: "text", text: "Test response" })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: mockOptions.openAiModelId, stream: true }),
+				{ signal: controller.signal },
+			)
+		})
+
+		it("should pass the metadata abort signal to the non-streaming createMessage request", async () => {
+			const nonStreamingHandler = new OpenAiHandler({ ...mockOptions, openAiStreamingEnabled: false })
+			const controller = new AbortController()
+			const metadata = { taskId: "test-task", abortSignal: controller.signal }
+			const gen = nonStreamingHandler.createMessage("system prompt", [], metadata)
+			const first = await gen.next()
+			expect(first.value).toEqual({ type: "text", text: "Test response" })
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: mockOptions.openAiModelId }), {
+				signal: controller.signal,
+			})
+		})
+
+		it("should pass the metadata abort signal to the o3-family streaming request", async () => {
+			const o3Handler = new OpenAiHandler({ ...mockOptions, openAiModelId: "o3-mini" })
+			const controller = new AbortController()
+			const metadata = { taskId: "test-task", abortSignal: controller.signal }
+			const gen = o3Handler.createMessage("system prompt", [], metadata)
+			const first = await gen.next()
+			expect(first.value).toEqual({ type: "text", text: "Test response" })
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: "o3-mini", stream: true }), {
+				signal: controller.signal,
+			})
+		})
+
+		it("should pass the metadata abort signal to the o3-family non-streaming request", async () => {
+			const o3Handler = new OpenAiHandler({
+				...mockOptions,
+				openAiModelId: "o3-mini",
+				openAiStreamingEnabled: false,
+			})
+			const controller = new AbortController()
+			const metadata = { taskId: "test-task", abortSignal: controller.signal }
+			const gen = o3Handler.createMessage("system prompt", [], metadata)
+			const first = await gen.next()
+			expect(first.value).toEqual({ type: "text", text: "Test response" })
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: "o3-mini" }), {
+				signal: controller.signal,
+			})
+		})
+
+		it("should keep the Azure AI Inference path while passing the abort signal", async () => {
+			const azureHandler = new OpenAiHandler({
+				...mockOptions,
+				openAiBaseUrl: "https://test.services.ai.azure.com",
+				openAiModelId: "deepseek-v3",
+			})
+			const controller = new AbortController()
+			const metadata = { taskId: "test-task", abortSignal: controller.signal }
+			const gen = azureHandler.createMessage("system prompt", [], metadata)
+			await gen.next()
+			expect(mockCreate).toHaveBeenCalledWith(expect.anything(), {
+				path: "/models/chat/completions",
+				signal: controller.signal,
+			})
+		})
+
+
+		// The Azure path test above covers createMessage and the completePrompt signal test
+		// uses a non-Azure handler; neither pins both options in one request config, which is
+		// what the Azure completePrompt branch composes (path + merged signal).
+		it("should keep the Azure AI Inference path while passing the completePrompt abort signal", async () => {
+			const azureHandler = new OpenAiHandler({
+				...mockOptions,
+				openAiBaseUrl: "https://test.services.ai.azure.com",
+				openAiModelId: "deepseek-v3",
+			})
+			const controller = new AbortController()
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			await expect(azureHandler.completePrompt("test prompt", { abortSignal: controller.signal })).resolves.toBe(
+				"response",
+			)
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.anything(), {
+				path: "/models/chat/completions",
+				signal: controller.signal,
+			})
+		})
+		it("should pass the completePrompt abort signal to the request", async () => {
+			const controller = new AbortController()
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			const result = await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			expect(result).toBe("response")
+			expect(mockCreate).toHaveBeenCalledWith(expect.anything(), { signal: controller.signal })
+		})
+
+		it("should merge the completePrompt abort signal and timeout into a single request signal", async () => {
+			const controller = new AbortController()
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
+			const requestOptions = mockCreate.mock.calls.at(-1)?.[1]
+			expect(requestOptions?.signal).toBeInstanceOf(AbortSignal)
+			expect(requestOptions?.signal.aborted).toBe(false)
+			// The merged signal must follow the caller's controller: a regression
+			// that drops options.abortSignal (keeping only the timeout signal)
+			// would stop aborting here and fail the test.
+			controller.abort()
+			expect(requestOptions?.signal.aborted).toBe(true)
+			// A positive timeoutMs must be forwarded as the per-request SDK timeout.
+			expect(requestOptions?.timeout).toBe(5000)
+		})
+
+		it("should pass a timeout-only request signal when completePrompt timeoutMs is positive", async () => {
+			// The request must actually observe the merged signal firing: resolving the mock
+			// immediately only proves a signal was passed, not that a live (non-aborted)
+			// one aborts on timeout. Keep the request parked until its signal aborts, then
+			// assert the abort plus the retained timeout and error contract.
+			let capturedOptions: { signal?: AbortSignal; timeout?: number } | undefined
+			mockCreate.mockImplementationOnce(
+				async (_params: unknown, options?: { signal?: AbortSignal; timeout?: number }) => {
+					capturedOptions = options
+					await new Promise<void>((resolve) => {
+						if (options?.signal?.aborted) {
+							resolve()
+						} else {
+							options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+					throw new APIUserAbortError()
+				},
+			)
+
+			const requestPromise = handler.completePrompt("test prompt", { timeoutMs: 50 })
+			const resultPromise = captureError(requestPromise)
+
+			await vi.waitFor(() => expect(capturedOptions?.signal?.aborted).toBe(true))
+			expect(capturedOptions?.timeout).toBe(50)
+
+			const result = await resultPromise
+			// The timeout classification must survive the outer catch, which otherwise
+			// re-normalizes every abort as a user cancellation.
+			expect(result.name).toBe("TimeoutError")
+			expect(result.message).toBe("OpenAI request timed out")
+		})
+
+		it("should not pass a request signal for zero timeoutMs in completePrompt", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			await handler.completePrompt("test prompt", { timeoutMs: 0 })
+			expect(mockCreate).toHaveBeenCalledWith(expect.anything(), {})
+		})
+
+		it("should reject before issuing any request when the abort signal is already aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+			const metadata = { taskId: "test-task", abortSignal: controller.signal }
+			await expect(
+				(async () => {
+					for await (const _ of handler.createMessage("system prompt", [], metadata)) {
+						// consume
+					}
+				})(),
+			).rejects.toMatchObject({ name: "AbortError", message: "This operation was aborted" })
+			expect(mockCreate).not.toHaveBeenCalled()
+
+			mockCreate.mockClear()
+			await expect(
+				handler.completePrompt("test prompt", { abortSignal: controller.signal }),
+			).rejects.toMatchObject({
+				name: "AbortError",
+				message: "This operation was aborted",
+			})
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("should normalize the SDK APIUserAbortError from the streaming path into the abort contract", async () => {
+			const controller = new AbortController()
+			mockCreate.mockImplementationOnce(() => {
+				throw new APIUserAbortError()
+			})
+			const metadata = { taskId: "test-task", abortSignal: controller.signal }
+			const result = await captureError(
+				(async () => {
+					for await (const _ of handler.createMessage("system prompt", [], metadata)) {
+						// consume
+					}
+				})(),
+			)
+			// The SDK error has name "Error" and a message ending in a period; the
+			// provider must rethrow the Task.ts contract shape instead.
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("OpenAI request aborted")
+			expect(result.message.endsWith("aborted")).toBe(true)
+		})
+
+		it("should normalize an abort error raised during stream iteration into the abort contract", async () => {
+			const controller = new AbortController()
+			mockCreate.mockImplementationOnce(() =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "partial" } }] }
+					throw new APIUserAbortError()
+				})(),
+			)
+			const metadata = { taskId: "test-task", abortSignal: controller.signal }
+			const result = await captureError(
+				(async () => {
+					for await (const _ of handler.createMessage("system prompt", [], metadata)) {
+						// consume
+					}
+				})(),
+			)
+
+			// The iterator rejects after the first chunk; the provider must normalize
+			// it to the Task.ts contract shape instead of leaking the raw SDK error.
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("OpenAI request aborted")
+			expect(result.message.endsWith("aborted")).toBe(true)
+		})
+
+		it("should stop yielding buffered chunks and reject with the abort contract when aborted mid-stream", async () => {
+			let releaseSecond = () => {}
+			const secondGate = new Promise<void>((resolve) => {
+				releaseSecond = resolve
+			})
+			// The second chunk is deferred: it only becomes available after the caller
+			// aborts, so the loop's next for-await pull is a suspension point only the
+			// top-of-loop break can decide on. Removing the break leaks "world"; removing
+			// the post-loop check ends the stream normally instead of rejecting.
+			mockCreate.mockImplementationOnce(() =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "hello " } }] }
+					await secondGate
+					yield { choices: [{ delta: { content: "world" } }] }
+				})(),
+			)
+
+			const controller = new AbortController()
+			const metadata = { taskId: "test-task", abortSignal: controller.signal }
+			const gen = handler.createMessage("system prompt", [], metadata)
+
+			const first = await gen.next()
+			expect(first.value).toEqual({ type: "text", text: "hello " })
+
+			controller.abort()
+			releaseSecond()
+
+			// Anything yielded after the abort is a leak: the deferred second chunk
+			// must not come through an aborted stream — only the top-of-loop break
+			// stops the loop from processing content pulled after the abort.
+			const leaked: string[] = []
+			const result = await captureError(
+				(async () => {
+					for await (const chunk of gen) {
+						if (chunk.type === "text") {
+							leaked.push(chunk.text)
+						}
+					}
+				})(),
+			)
+
+			expect(leaked).toEqual([])
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("OpenAI request aborted")
+			expect(result.message.endsWith("aborted")).toBe(true)
+		})
+
+		it("should stop yielding buffered chunks and reject with the abort contract when aborted mid-stream (o3 family)", async () => {
+			let releaseSecond = () => {}
+			const secondGate = new Promise<void>((resolve) => {
+				releaseSecond = resolve
+			})
+			mockCreate.mockImplementationOnce(() =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "hello " } }] }
+					await secondGate
+					yield { choices: [{ delta: { content: "world" } }] }
+				})(),
+			)
+
+			const controller = new AbortController()
+			const metadata = { taskId: "test-task", abortSignal: controller.signal }
+			const o3Handler = new OpenAiHandler({ ...mockOptions, openAiModelId: "o3-mini" })
+			const gen = o3Handler.createMessage("system prompt", [], metadata)
+
+			const first = await gen.next()
+			expect(first.value).toEqual({ type: "text", text: "hello " })
+
+			controller.abort()
+			releaseSecond()
+
+			// Anything yielded after the abort is a leak: the deferred second chunk
+			// must not come through an aborted stream — only the top-of-loop break
+			// stops the loop from processing content pulled after the abort.
+			const leaked: string[] = []
+			const result = await captureError(
+				(async () => {
+					for await (const chunk of gen) {
+						if (chunk.type === "text") {
+							leaked.push(chunk.text)
+						}
+					}
+				})(),
+			)
+
+			expect(leaked).toEqual([])
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("OpenAI request aborted")
+			expect(result.message.endsWith("aborted")).toBe(true)
+		})
+
+		it("should wrap a non-abort stream error with the provider prefix when no metadata is passed", async () => {
+			mockCreate.mockImplementationOnce(() =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "partial" } }] }
+					throw new Error("mid-stream boom")
+				})(),
+			)
+
+			const result = await captureError(
+				(async () => {
+					for await (const _ of handler.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+
+			// Without metadata there is no abort signal to consult; the raw error
+			// must still be normalized through the completion-error wrapper.
+			expect(result.name).toBe("Error")
+			expect(result.message).toBe("OpenAI completion error: mid-stream boom")
+		})
+
+		it("should normalize the SDK APIUserAbortError from completePrompt without an external signal", async () => {
+			mockCreate.mockImplementationOnce(() => {
+				throw new APIUserAbortError()
+			})
+			const result = await captureError(handler.completePrompt("test prompt"))
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("OpenAI request aborted")
+		})
+
+		it("should normalize a fetch-level AbortError from completePrompt into the abort contract", async () => {
+			const fetchAbort = new Error("The operation was aborted.")
+			fetchAbort.name = "AbortError"
+			mockCreate.mockImplementationOnce(() => {
+				throw fetchAbort
+			})
+			const result = await captureError(handler.completePrompt("test prompt"))
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("OpenAI request aborted")
+			expect(result.cause).toBe(fetchAbort)
+		})
+
+		it("should normalize the SDK APIUserAbortError from the non-streaming createMessage path", async () => {
+			mockCreate.mockImplementationOnce(() => {
+				throw new APIUserAbortError()
+			})
+			const noStreamHandler = new OpenAiHandler({ ...mockOptions, openAiStreamingEnabled: false })
+			const result = await captureError(
+				(async () => {
+					for await (const _ of noStreamHandler.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("OpenAI request aborted")
+		})
+
+		it("should normalize the SDK APIUserAbortError from the o3-family streaming path", async () => {
+			mockCreate.mockImplementationOnce(() => {
+				throw new APIUserAbortError()
+			})
+			const o3Handler = new OpenAiHandler({ ...mockOptions, openAiModelId: "o3-mini" })
+			const result = await captureError(
+				(async () => {
+					for await (const _ of o3Handler.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("OpenAI request aborted")
+		})
+
+		it("should normalize an abort error raised during o3-family stream iteration into the abort contract", async () => {
+			mockCreate.mockImplementationOnce(() =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "partial" } }] }
+					throw new APIUserAbortError()
+				})(),
+			)
+			const o3Handler = new OpenAiHandler({ ...mockOptions, openAiModelId: "o3-mini" })
+			const result = await captureError(
+				(async () => {
+					for await (const _ of o3Handler.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+
+			// handleStreamResponse consumes the iterator; a mid-stream abort must be
+			// normalized to the Task.ts contract shape, not leak as the raw SDK error.
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("OpenAI request aborted")
+		})
+
+		it("should normalize the SDK APIUserAbortError from the o3-family non-streaming path", async () => {
+			mockCreate.mockImplementationOnce(() => {
+				throw new APIUserAbortError()
+			})
+			const o3Handler = new OpenAiHandler({
+				...mockOptions,
+				openAiModelId: "o3-mini",
+				openAiStreamingEnabled: false,
+			})
+			const result = await captureError(
+				(async () => {
+					for await (const _ of o3Handler.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("OpenAI request aborted")
+		})
+
+		it("should still wrap non-abort completion errors with the provider prefix", async () => {
+			mockCreate.mockImplementationOnce(() => {
+				throw new Error("boom")
+			})
+			const result = await captureError(handler.completePrompt("test prompt"))
+			expect(result.name).toBe("Error")
+			// The inner catch already wraps with the provider prefix and the outer
+			// catch wraps again (pre-existing double-wrap of openai.ts completePrompt).
+			expect(result.message).toBe("OpenAI completion error: OpenAI completion error: boom")
 		})
 	})
 

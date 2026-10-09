@@ -307,9 +307,14 @@ async function fetchModelsFromProvider(options: GetModelsOptions, signal?: Abort
 		case providerIdentifiers.zooGateway:
 			models = await getZooGatewayModels({ zooSessionToken: options.apiKey, zooGatewayBaseUrl: options.baseUrl })
 			break
-		case providerIdentifiers.kimiCode:
-			models = await getKimiCodeModels(options.apiKey)
+		case providerIdentifiers.kimiCode: {
+			// Kimi is auth-scoped, so the cache-miss path calls this arm without the
+			// single-flight's controller signal; fall back to the caller's own signal so a
+			// cancelled request stops the discovery fetch instead of leaking it.
+			const kimiSignal = signal ?? options.signal
+			models = await getKimiCodeModels(options.apiKey, ...(kimiSignal ? [{ signal: kimiSignal }] : []))
 			break
+		}
 		default: {
 			// Ensures router is exhaustively checked if RouterName is a strict union.
 			const exhaustiveCheck: never = provider

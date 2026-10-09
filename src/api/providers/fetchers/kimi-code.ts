@@ -1,5 +1,7 @@
 import { z } from "zod"
 
+import { mergeAbortSignals, throwIfAborted } from "../utils/abort-signal"
+
 import {
 	KIMI_CODE_BASE_URL,
 	kimiCodeDefaultModelInfo,
@@ -37,8 +39,13 @@ export function mapKimiCodeModel(model: z.infer<typeof kimiCodeModelSchema>): Mo
 	}
 }
 
-export async function getKimiCodeModels(apiKey?: string): Promise<ModelRecord> {
+export async function getKimiCodeModels(
+	apiKey?: string,
+	opts?: { signal?: AbortSignal },
+): Promise<ModelRecord> {
 	if (!apiKey) throw new Error("Kimi Code authentication is required to fetch models")
+	// A caller that already cancelled must not start a discovery request at all.
+	throwIfAborted(opts?.signal)
 	const controller = new AbortController()
 	const timeout = setTimeout(
 		() => controller.abort(new Error("Kimi Code models request timed out")),
@@ -47,7 +54,10 @@ export async function getKimiCodeModels(apiKey?: string): Promise<ModelRecord> {
 	try {
 		const response = await fetch(`${KIMI_CODE_BASE_URL}/models`, {
 			headers: { Accept: "application/json", Authorization: `Bearer ${apiKey}` },
-			signal: controller.signal,
+			// The 10s bound is a ceiling, not the cancellation contract: the caller's signal
+			// (a Task abort) has to stop this fetch too, otherwise discovery keeps running
+			// after the request that triggered it was cancelled.
+			signal: mergeAbortSignals(controller.signal, opts?.signal),
 		})
 		if (!response.ok) {
 			const error = new Error(`Kimi Code models request failed: ${response.status} ${response.statusText}`)
