@@ -681,6 +681,46 @@ describe("safeWriteText", () => {
 		expect(fs.unlink).not.toHaveBeenCalledWith(expect.stringContaining(".bak"))
 	})
 
+	it("staging temp release: a transient unlink failure on the rollback path is retried", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.rename).mockRejectedValue(Object.assign(new Error("EBUSY rename"), { code: "EBUSY" }))
+		let stagingUnlinks = 0
+		vi.mocked(fs.unlink).mockImplementation((async (path: string) => {
+			if (String(path).includes(".file-safety-staging")) {
+				stagingUnlinks++
+				if (stagingUnlinks === 1) { throw Object.assign(new Error("EBUSY unlink"), { code: "EBUSY" }) }
+			}
+		}) as never)
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+		await expect(safeWriteText(targetPath, "data")).rejects.toThrow("EBUSY rename")
+		expect(stagingUnlinks).toBe(2)
+		expect(warn.mock.calls.filter(function (call) { return String(call[0]).includes("staging temp release failed") }).length).toBe(0)
+		warn.mockRestore()
+	})
+
+	it("staging temp release: a persistent failure names the retained path exactly once", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.rename).mockRejectedValue(Object.assign(new Error("EBUSY rename"), { code: "EBUSY" }))
+		let stagingUnlinks = 0
+		vi.mocked(fs.unlink).mockImplementation((async (path: string) => {
+			if (String(path).includes(".file-safety-staging")) {
+				stagingUnlinks++
+				throw Object.assign(new Error("EBUSY unlink"), { code: "EBUSY" })
+			}
+		}) as never)
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+		await expect(safeWriteText(targetPath, "data")).rejects.toThrow("EBUSY rename")
+		expect(stagingUnlinks).toBe(2)
+		expect(warn.mock.calls.filter(function (call) { return String(call[0]).includes("staging temp release failed") }).length).toBe(1)
+		warn.mockRestore()
+	})
+
 	it("win32 DACL: a non-regular dump file fails closed even when it is non-empty", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
