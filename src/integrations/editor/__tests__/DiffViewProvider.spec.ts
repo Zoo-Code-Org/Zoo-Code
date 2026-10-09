@@ -1208,6 +1208,57 @@ describe("DiffViewProvider", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(`${mockCwd}/mock-target-file.ts`)
 		})
 
+		it("revertChanges() stops before the document work for an existing file when no editor exists", async () => {
+			// The modify branch used to dereference activeDiffEditor unconditionally. When open()
+			// never produced an editor there is no document to restore, and the old code threw a
+			// TypeError out of the denial path instead of finishing the teardown.
+			Object.assign(diffViewProvider, {
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "modify",
+				createdDirs: [],
+			})
+
+			await expect(diffViewProvider.revertChanges()).resolves.toBeUndefined()
+
+			expect(vscode.workspace.applyEdit).not.toHaveBeenCalled()
+			expect(fs.unlink).not.toHaveBeenCalled()
+			expect(fs.rmdir).not.toHaveBeenCalled()
+		})
+
+		it("revertChanges() keeps rolling back the remaining directories when one rmdir hits ENOENT", async () => {
+			// Same tolerance as the placeholder, for the created dirs: a directory that never
+			// landed must not abort the rest of the rollback and must not surface as a new failure.
+			const createdDirs = [`${mockCwd}/new-parent`, `${mockCwd}/new-parent/nested`]
+			Object.assign(diffViewProvider, {
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "create",
+				createdDirs,
+			})
+			vi.mocked(fs.rmdir).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+			await expect(diffViewProvider.revertChanges()).resolves.toBeUndefined()
+
+			expect(fs.rmdir).toHaveBeenCalledTimes(2)
+			expect(fs.rmdir).toHaveBeenNthCalledWith(1, createdDirs[1])
+			expect(fs.rmdir).toHaveBeenNthCalledWith(2, createdDirs[0])
+		})
+
+		it("revertChanges() surfaces a non-ENOENT directory failure instead of swallowing it", async () => {
+			// The tolerance is scoped to ENOENT: a directory that exists but could not be removed
+			// is a real rollback failure and must reach the caller rather than be hidden.
+			Object.assign(diffViewProvider, {
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "create",
+				createdDirs: [`${mockCwd}/new-parent`],
+			})
+			vi.mocked(fs.rmdir).mockRejectedValueOnce(Object.assign(new Error("EBUSY"), { code: "EBUSY" }))
+
+			await expect(diffViewProvider.revertChanges()).rejects.toThrow("EBUSY")
+		})
+
 		it("revertChanges() closes the file tab when the file was not open and untouched", async () => {
 			const closeFileTab = vi.fn().mockResolvedValue(undefined)
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)

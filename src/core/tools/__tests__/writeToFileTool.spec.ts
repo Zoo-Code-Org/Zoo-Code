@@ -729,6 +729,46 @@ describe("writeToFileTool", () => {
 			// ...and the cleanup must stay scoped: the other task is still streaming.
 			expect(writeToFileTool["taskPartialStreamState"].get("task-2.instance-2")?.streamFailed).toBe(true)
 		})
+		it("releases this task's stream state when prevent-focus-disruption skips the partial preview", async () => {
+			// handlePartial() registers the per-task entry (and its TaskAborted listener) before it
+			// checks the experiment. With the experiment on, the delta returns without ever opening a
+			// preview and never reaches execute()'s teardown, so the entry and the listener would stay
+			// attached for the rest of the task's life - and a streamFailed mark armed by an earlier
+			// delta would keep suppressing this task's later diff previews.
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockResolvedValue({
+					diagnosticsEnabled: true,
+					writeDelayMs: 1000,
+					experiments: { preventFocusDisruption: true },
+				}),
+			})
+
+			const delta = (content: string) =>
+				writeToFileTool.handle(
+					mockCline,
+					{
+						type: "tool_use",
+						name: "write_to_file",
+						params: { path: testFilePath, content },
+						nativeArgs: { path: testFilePath, content },
+						partial: true,
+					} as ToolUse<"write_to_file">,
+					{
+						askApproval: mockAskApproval,
+						handleError: mockHandleError,
+						pushToolResult: mockPushToolResult,
+					},
+				)
+
+			// The first delta only pins the path; the second is the one that reaches the check.
+			await delta("Line 1")
+			await delta("Line 1\nLine 2")
+
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+		})
+
 	})
 
 	describe("user interaction", () => {
