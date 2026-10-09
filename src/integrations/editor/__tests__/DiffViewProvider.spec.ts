@@ -3569,6 +3569,66 @@ describe("DiffViewProvider", () => {
 			expect(resetCalls).toBe(1)
 		})
 
+		it("saveChanges() does not tear the session down again when a cancellation finished before the publish rejected", async () => {
+			let release: (error?: Error) => void = () => {}
+			const gate = new Promise<void>((resolve, reject) => {
+				release = (error) => {
+					if (error) reject(error)
+					else resolve()
+				}
+			})
+			gate.catch(() => {})
+			let publishEntered = false
+			vi.mocked(safeWriteText).mockImplementation(async () => {
+				publishEntered = true
+				await gate
+				throw new Error("guard rejected for test")
+			})
+			const closeOwnDiffView = vi.fn().mockResolvedValue(undefined)
+			const restorePreviewTabs = vi.fn().mockResolvedValue(undefined)
+			const reset = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeOwnDiffView"] = closeOwnDiffView
+			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
+			diffViewProvider["reset"] = reset
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["revertDocument"] = vi.fn().mockResolvedValue(true)
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({
+				document: makeTextDocument({
+					uri: makeUri(mockTargetPath),
+					getText: vi.fn().mockReturnValue("content"),
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				}),
+			})
+
+			let save: Promise<unknown> = Promise.resolve()
+			try {
+				save = diffViewProvider.saveChanges(false)
+				while (!publishEntered) {
+					await new Promise((resolve) => setImmediate(resolve))
+				}
+				// The task is aborted while the publish is still queued: disposeOnce() reaches
+				// revertChanges(), and that cancellation teardown finishes BEFORE the queued
+				// publish learns it was rejected.
+				await diffViewProvider.revertChanges()
+				release(new Error("guard rejected for test"))
+				await expect(save).rejects.toThrow("guard rejected for test")
+			} finally {
+				vi.mocked(safeWriteText).mockReset()
+				vi.mocked(safeWriteText).mockResolvedValue(undefined)
+			}
+
+			// The cancellation already closed the diff views and restored the preview state. The
+			// rejected publish joins that ownership instead of running its own discard pass.
+			expect(closeOwnDiffView).toHaveBeenCalledTimes(1)
+			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
+		})
+
 		// The other direction: the rejected save is the one that joins an existing pass. It then
 		// runs no cleanup of its own, and the pass that started the teardown restores the tabs once.
 		it("saveChanges() restores no preview tabs when a revert already owns the teardown", async () => {
