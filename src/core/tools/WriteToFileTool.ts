@@ -88,13 +88,6 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 		const fullPath = relPath ? path.resolve(task.cwd, relPath) : ""
 		const isOutsideWorkspace = isPathOutsideWorkspace(fullPath)
-		// Captured before the approval is asked: guardedWrite binds the publish to this
-		// identity, so a name repointed between the approval and the publish is refused
-		// instead of publishing to whatever the name points at by then.
-		const approvedCanonicalTarget = isOutsideWorkspace
-			? await canonicalizeForApproval(absolutePath, relPath)
-			: undefined
-
 		const sharedMessageProps: ClineSayTool = {
 			tool: fileExists ? "editedExistingFile" : "newFileCreated",
 			path: getReadablePath(task.cwd, relPath),
@@ -104,6 +97,14 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		}
 
 		try {
+			// Captured before the approval is asked: guardedWrite binds the publish to this
+			// identity, so a name repointed between the approval and the publish is refused
+			// instead of publishing to whatever the name points at by then. Inside the try so a
+			// target that cannot be resolved goes through the tool's normal error handling
+			// (handleError and the diff-view reset) instead of escaping the write flow.
+			const approvedCanonicalTarget = isOutsideWorkspace
+				? await canonicalizeForApproval(absolutePath, relPath)
+				: undefined
 			task.consecutiveMistakeCount = 0
 
 			const provider = task.providerRef.deref()
