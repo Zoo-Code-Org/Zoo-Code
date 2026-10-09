@@ -313,46 +313,49 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 		const isWriteProtected = task.rooProtectedController?.isWriteProtected(relPath) || false
 
-		let fileExists: boolean
-		const absolutePath = path.resolve(task.cwd, relPath)
-
-		if (task.diffViewProvider.editType !== undefined) {
-			fileExists = task.diffViewProvider.editType === "modify"
-		} else {
-			fileExists = await fileExistsAtPath(absolutePath)
-			task.diffViewProvider.editType = fileExists ? "modify" : "create"
-		}
-
-		// Create parent directories early for new files to prevent ENOENT errors
-		// in subsequent operations (e.g., diffViewProvider.open, fs.readFile)
-		if (!fileExists) {
-			await createDirectoriesForFile(absolutePath)
-		}
-
-		if (newContent.startsWith("```")) {
-			newContent = newContent.split("\n").slice(1).join("\n")
-		}
-
-		if (newContent.endsWith("```")) {
-			newContent = newContent.split("\n").slice(0, -1).join("\n")
-		}
-
-		if (!task.api.getModel().id.includes("claude")) {
-			newContent = unescapeHtmlEntities(newContent)
-		}
-
-		const fullPath = relPath ? path.resolve(task.cwd, relPath) : ""
-		const isOutsideWorkspace = isPathOutsideWorkspace(fullPath)
-
-		const sharedMessageProps: ClineSayTool = {
-			tool: fileExists ? "editedExistingFile" : "newFileCreated",
-			path: getReadablePath(task.cwd, relPath),
-			content: newContent,
-			isOutsideWorkspace,
-			isProtected: isWriteProtected,
-		}
-
 		try {
+			// The guarded scope starts before the preflight filesystem work: a throw from
+			// fileExistsAtPath or createDirectoriesForFile must report and tear down like any other
+			// write failure, not escape into BaseTool.handle() with this task's stream state attached.
+			let fileExists: boolean
+			const absolutePath = path.resolve(task.cwd, relPath)
+
+			if (task.diffViewProvider.editType !== undefined) {
+				fileExists = task.diffViewProvider.editType === "modify"
+			} else {
+				fileExists = await fileExistsAtPath(absolutePath)
+				task.diffViewProvider.editType = fileExists ? "modify" : "create"
+			}
+
+			// Create parent directories early for new files to prevent ENOENT errors
+			// in subsequent operations (e.g., diffViewProvider.open, fs.readFile)
+			if (!fileExists) {
+				await createDirectoriesForFile(absolutePath)
+			}
+
+			if (newContent.startsWith("```")) {
+				newContent = newContent.split("\n").slice(1).join("\n")
+			}
+
+			if (newContent.endsWith("```")) {
+				newContent = newContent.split("\n").slice(0, -1).join("\n")
+			}
+
+			if (!task.api.getModel().id.includes("claude")) {
+				newContent = unescapeHtmlEntities(newContent)
+			}
+
+			const fullPath = relPath ? path.resolve(task.cwd, relPath) : ""
+			const isOutsideWorkspace = isPathOutsideWorkspace(fullPath)
+
+			const sharedMessageProps: ClineSayTool = {
+				tool: fileExists ? "editedExistingFile" : "newFileCreated",
+				path: getReadablePath(task.cwd, relPath),
+				content: newContent,
+				isOutsideWorkspace,
+				isProtected: isWriteProtected,
+			}
+
 			task.consecutiveMistakeCount = 0
 
 			const provider = task.providerRef.deref()
@@ -391,7 +394,6 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					// task, which suppresses the diff preview of every later write_to_file, and
 					// the TaskAborted listener leaks.
 					super.resetPartialState()
-					this.resetTaskPartialState(task)
 					return
 				}
 
@@ -428,7 +430,6 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					// Same exit contract as the saveDirectly branch above: the per-task stream
 					// state and its abort listener belong to this execute() call.
 					super.resetPartialState()
-					this.resetTaskPartialState(task)
 					return
 				}
 
@@ -451,7 +452,6 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			// one task's execute() would drop another task's streamFailed/streamError
 			// while it is still streaming, so tear down only this task's entry.
 			super.resetPartialState()
-			this.resetTaskPartialState(task)
 
 			task.processQueuedMessages()
 
@@ -464,10 +464,19 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				await this.finalizePartialToolAskAfterFailure(task, pendingPartialAsk)
 			}
 			await handleError("writing file", error as Error)
+
+			// A failed diff-open is not the end of the story: open() creates the parent directories
+			// and an empty placeholder BEFORE it awaits openDiffEditor(), so a rejection leaves that
+			// debris behind. Revert first - with no active editor the rollback still unlinks the
+			// placeholder and removes only the directories this operation created - then reset.
+			await this.revertDiffChangesBeforeReset(task)
 			await task.diffViewProvider.reset()
 			super.resetPartialState()
-			this.resetTaskPartialState(task)
 			return
+		} finally {
+			// Unconditional: every exit from the guarded scope - success, denial, or a
+			// throw - releases this task's stream entry and its TaskAborted listener.
+			this.resetTaskPartialState(task)
 		}
 	}
 

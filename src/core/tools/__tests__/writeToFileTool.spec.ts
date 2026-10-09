@@ -935,6 +935,111 @@ describe("writeToFileTool", () => {
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
 		})
+
+		it("releases the per-task stream state when content is missing", async () => {
+			// The missing-content return sits before execute()'s guarded scope, so it needs its own
+			// release. The state is seeded first so the assertion proves a release happened rather
+			// than an empty map.
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			const toolUse = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: { path: testFilePath },
+				nativeArgs: { path: testFilePath, content: undefined },
+				// The fixture's point is a nativeArgs object whose content never arrived, which the
+				// typed params cannot express - hence the double assertion.
+				partial: false,
+			} as unknown as ToolUse<"write_to_file">
+			const pushToolResult = vi.fn()
+			await writeToFileTool.handle(mockCline, toolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult,
+			})
+
+			expect(mockCline.sayAndCreateMissingParamError).toHaveBeenCalledWith("write_to_file", "content")
+			expect(pushToolResult).toHaveBeenCalledWith("Missing param error")
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			// A stream may have opened a diff view for this call; the early return still closes it.
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+		})
+
+		it("releases the per-task stream state when the write completes", async () => {
+			// Seed first: without the seed the map is empty either way and the assertion is vacuous.
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			await executeWriteFileTool({})
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+		})
+
+		it("releases the per-task stream state when the write itself fails", async () => {
+			// The catch path tears down too: a failed write must not leave the entry (and its
+			// streamFailed guard) attached to the task.
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
+
+			await executeWriteFileTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+		})
+
+		it("releases the per-task stream state when the preflight directory creation throws", async () => {
+			// The preflight filesystem work sits before execute()'s guarded scope today: when it
+			// throws, nothing reports the failure and the stream state leaks. It has to be handled
+			// like any other write failure - reported once, teardown run.
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never).streamFailed = true
+			mockedCreateDirectoriesForFile.mockRejectedValueOnce(
+				Object.assign(new Error("EACCES: permission denied, mkdir '/new-parent'"), { code: "EACCES" }),
+			)
+
+			await executeWriteFileTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("rolls the diff-view debris back when open() fails mid-execute", async () => {
+			// open() creates the parent directories and an empty placeholder before it awaits
+			// openDiffEditor(). When it rejects, the write failed but the debris did not: the catch
+			// has to await the rollback (which removes the placeholder and only the directories this
+			// operation created) before resetting the view, or the next execute() mistakes the
+			// placeholder for an existing file.
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			mockCline.diffViewProvider.open.mockRejectedValue(
+				Object.assign(new Error("EACCES: permission denied, open '/ro/test.py'"), { code: "EACCES" }),
+			)
+
+			await executeWriteFileTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalled()
+			const revertOrder = mockCline.diffViewProvider.revertChanges.mock.invocationCallOrder[0]
+			const resetOrder = mockCline.diffViewProvider.reset.mock.invocationCallOrder.at(-1)
+			expect(resetOrder).toBeGreaterThan(revertOrder)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
 	})
 
 	describe("user interaction", () => {
