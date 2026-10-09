@@ -961,6 +961,76 @@ describe("writeToFileTool", () => {
 			)
 		})
 
+		it("reports only the execute() failure when the write is retried after a failed stream", async () => {
+			// Combined path: a streaming delta failed (the failure is captured, not reported), then
+			// the completed block arrives with valid nativeArgs, so execute() runs and retries the
+			// same operation. Its failure is the single failure the user hears about - the captured
+			// streaming error must not also surface, or the same write reports twice.
+			mockCline.diffViewProvider.open.mockRejectedValue(
+				Object.assign(new Error("EACCES: permission denied, open '/ro/test.py'"), { code: "EACCES" }),
+			)
+
+			// First delta pins the path, second reaches open() and captures the failure.
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(mockHandleError).not.toHaveBeenCalled()
+			const state = writeToFileTool["taskPartialStreamState"].get(`${mockCline.taskId}.${mockCline.instanceId}`)
+			expect(state?.streamFailed).toBe(true)
+			expect(state?.streamError?.message).toBe("EACCES: permission denied, open '/ro/test.py'")
+
+			// The completed block: open() works now, the write itself fails.
+			mockCline.diffViewProvider.open.mockResolvedValue(undefined)
+			mockCline.diffViewProvider.saveChanges.mockRejectedValue(new Error("EROFS: read-only file system, write"))
+
+			await executeWriteFileTool({})
+
+			expect(mockHandleError).toHaveBeenCalledTimes(1)
+			expect(mockHandleError).toHaveBeenCalledWith(
+				"writing file",
+				expect.objectContaining({ message: "EROFS: read-only file system, write" }),
+			)
+			expect(mockHandleError).not.toHaveBeenCalledWith(
+				"writing file",
+				expect.objectContaining({ message: "EACCES: permission denied, open '/ro/test.py'" }),
+			)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("reports the rollback failure once when the parse-failure cleanup cannot revert the diff", async () => {
+			// A streaming delta captured a fatal error; the finalized block then fails to parse, so
+			// the parse-failure cleanup runs - and its revertChanges() fails too. The rollback
+			// failure is the actionable one: it must be reported exactly once, with the captured
+			// streaming error kept as its cause, and the incidental parse error must stay silent.
+			mockCline.diffViewProvider.open.mockRejectedValue(new Error("EACCES: stream open failed"))
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+			const state = writeToFileTool["taskPartialStreamState"].get(`${mockCline.taskId}.${mockCline.instanceId}`)
+			const captured = state?.streamError
+			expect(captured?.message).toBe("EACCES: stream open failed")
+
+			mockCline.diffViewProvider.revertChanges.mockRejectedValue(new Error("EACCES: rollback failed"))
+
+			const block = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: {},
+				partial: false,
+			} as ToolUse<"write_to_file">
+			await writeToFileTool.handle(mockCline, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockHandleError).toHaveBeenCalledTimes(1)
+			const [context, reported] = mockHandleError.mock.calls[0]
+			expect(context).toBe("writing file")
+			expect(reported.message).toContain("rollback failed")
+			expect(reported.cause).toBe(captured)
+			expect(mockHandleError).not.toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
 		it("finalizes partial tool message and resets diff view when handlePartial update() fails", async () => {
 			// Same regression as above but for the streaming update() call failing after open() succeeds.
 			mockCline.diffViewProvider.update.mockRejectedValue(

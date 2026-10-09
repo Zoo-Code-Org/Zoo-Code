@@ -57,7 +57,7 @@ vi.mock("vscode", () => ({
 		onDidChangeTextEditorVisibleRanges: vi.fn(() => ({ dispose: vi.fn() })),
 		tabGroups: {
 			all: [],
-			close: vi.fn(),
+			close: vi.fn().mockResolvedValue(true),
 			activeTabGroup: { activeTab: undefined },
 		},
 		visibleTextEditors: [],
@@ -1319,6 +1319,69 @@ describe("DiffViewProvider", () => {
 			expect(editor.document.save).not.toHaveBeenCalled()
 			expect(vscode.window.tabGroups.close).toHaveBeenCalledWith(dirtyTab, true)
 			expect(fs.unlink).toHaveBeenCalledWith(mockTargetPath)
+		})
+
+		it("revertChanges() reports a discard the editor refused instead of leaving the buffer open", async () => {
+			// A forced close can still fail (a vetoing editor). Swallowing that left the unapproved
+			// streamed content in an open, saveable buffer while the rollback kept deleting the
+			// file underneath it. The failure must propagate, and the buffer must be put back to
+			// its pre-stream state so nothing saveable survives.
+			const editor = buildActiveDiffEditor()
+			editor.document.isDirty = true
+			const streamedBuffer = {
+				uri: makeUri(mockTargetPath),
+				getText: vi.fn().mockReturnValue("streamed content"),
+				isDirty: true,
+				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
+			}
+			const dirtyTab = {
+				input: Object.assign(new vscode.TabInputText(makeUri(mockTargetPath)), {
+					uri: makeUri(mockTargetPath),
+				}),
+				isDirty: true,
+				label: "mock-target-file.ts",
+			}
+			const originalTabs = Object.getOwnPropertyDescriptor(vscode.window.tabGroups, "all")
+			const originalDocuments = Object.getOwnPropertyDescriptor(vscode.workspace, "textDocuments")
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: () => [{ tabs: [dirtyTab] }],
+				configurable: true,
+			})
+			Object.defineProperty(vscode.workspace, "textDocuments", {
+				value: [streamedBuffer],
+				configurable: true,
+			})
+			Object.assign(diffViewProvider, {
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "create",
+				createdDirs: [],
+				originalContent: "",
+			})
+			vi.mocked(vscode.window.tabGroups.close).mockRejectedValueOnce(new Error("close vetoed"))
+
+			try {
+				await expect(diffViewProvider.revertChanges()).rejects.toThrow("could not discard the buffer")
+			} finally {
+				if (originalTabs) {
+					Object.defineProperty(vscode.window.tabGroups, "all", originalTabs)
+				}
+				if (originalDocuments) {
+					Object.defineProperty(vscode.workspace, "textDocuments", originalDocuments)
+				}
+			}
+
+			// The buffer went back to its pre-stream state, and the rollback stopped rather than
+			// deleting the file out from under a buffer it could not discard.
+			expect(vscode.workspace.applyEdit).toHaveBeenCalled()
+			// The buffer was put back to its pre-stream state (empty for a new file): the edit that
+			// was applied replaces the streamed text with originalContent.
+			const appliedEdit = vi.mocked(vscode.WorkspaceEdit).mock.results[0].value
+			expect(appliedEdit.replace).toHaveBeenCalledWith(
+				expect.objectContaining({ fsPath: mockTargetPath }),
+				expect.anything(),
+				"",
+			)
 		})
 
 		it("revertChanges() closes the file tab when the file was not open and untouched", async () => {

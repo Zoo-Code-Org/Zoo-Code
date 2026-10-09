@@ -903,6 +903,11 @@ export class DiffViewProvider {
 	 * Close the tab for this path WITHOUT saving. Used by the new-file rollback, where the
 	 * buffer holds unapproved streamed content that must never reach disk; closeFileTab()
 	 * deliberately skips dirty tabs, so a dirty buffer needs the forced close.
+	 *
+	 * A close that fails or is refused is a rollback failure: the buffer would still hold the
+	 * content the user never approved, one save away from disk. Put the pre-stream content back
+	 * so nothing saveable survives, and propagate - the caller must not keep deleting around a
+	 * buffer it could not discard.
 	 */
 	private async discardFileTab(absolutePath: string): Promise<void> {
 		const tabs = vscode.window.tabGroups.all
@@ -915,12 +920,42 @@ export class DiffViewProvider {
 			)
 
 		for (const tab of tabs) {
+			let closed: boolean
+			let closeError: Error | undefined
 			try {
-				await vscode.window.tabGroups.close(tab, true)
-			} catch (err) {
-				console.error(`Failed to discard file tab ${tab.label}`, err)
+				closed = await vscode.window.tabGroups.close(tab, true)
+			} catch (error) {
+				closed = false
+				closeError = error instanceof Error ? error : new Error(String(error))
+			}
+			if (!closed) {
+				await this.restorePreStreamBuffer(absolutePath)
+				throw new Error(
+					`Rollback could not discard the buffer for ${absolutePath}; its unapproved content was restored to the pre-stream state instead.`,
+					{ cause: closeError },
+				)
 			}
 		}
+	}
+
+	/**
+	 * Replace an open buffer's content with what it held before streaming started, so a buffer
+	 * that could not be closed never keeps unapproved content available to save.
+	 */
+	private async restorePreStreamBuffer(absolutePath: string): Promise<void> {
+		const document = vscode.workspace.textDocuments.find(
+			(document) => document.uri.scheme === "file" && arePathsEqual(document.uri.fsPath, absolutePath),
+		)
+		if (!document) {
+			return
+		}
+		const edit = new vscode.WorkspaceEdit()
+		const range = new vscode.Range(
+			document.positionAt(0),
+			document.positionAt(document.getText().length),
+		)
+		edit.replace(document.uri, range, this.originalContent ?? "")
+		await vscode.workspace.applyEdit(edit)
 	}
 
 	private async closeFileTab(absolutePath: string): Promise<void> {
