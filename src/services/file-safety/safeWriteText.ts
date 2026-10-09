@@ -105,6 +105,20 @@ function _stagingDir(dir: string): string {
 	return sd
 }
 
+/**
+ * Release a descriptor this call still owns. A close that fails must not become the error a
+ * failed write reports - the operation's own failure is the one that explains what happened -
+ * but the descriptor must not be abandoned either, so the caller retries through here and the
+ * second failure is reported.
+ */
+function _closeDescriptor(fd: number, label: string): void {
+	try {
+		fsSync.closeSync(fd)
+	} catch (error: unknown) {
+		console.error(`Failed to close the ${label}:`, error)
+	}
+}
+
 function _fsyncFile(fd: number): void {
 	fsSync.fsyncSync(fd)
 }
@@ -467,6 +481,7 @@ export async function safeWriteText(
 					// writer can create a new target that a later rollback would destroy. A copy
 					// keeps the target present, so the step 4 rename is the only change to the
 					// canonical path. The copy is flushed so the retained content survives a crash.
+					let seedFd: number | undefined
 					try {
 						// Create the destination BEFORE any content exists at it, with the mode fixed
 						// at open time. fs.copyFile picks the destination mode itself (the platform
@@ -477,8 +492,11 @@ export async function safeWriteText(
 						// mode argument for an existing file, so this 0o600 survives the copy on POSIX;
 						// the chmod afterwards is what clears a copied read-only attribute on Windows
 						// and keeps a backup of a permissive file private.
-						const seedFd = fsSync.openSync(backupPath, "wx", 0o600)
+						seedFd = fsSync.openSync(backupPath, "wx", 0o600)
 						fsSync.closeSync(seedFd)
+						// Owned no longer: only after the close succeeds is the descriptor somebody
+						// else's problem. If the close throws, the handler below still holds it.
+						seedFd = undefined
 						await fs.copyFile(targetPath, backupPath)
 						await fs.chmod(backupPath, 0o600)
 						// "r+" not "r": fsync on a read-only handle is EPERM on Windows, and the same
@@ -490,6 +508,13 @@ export async function safeWriteText(
 							fsSync.closeSync(backupFd)
 						}
 					} catch (backupError: unknown) {
+						if (seedFd !== undefined) {
+							// The seed descriptor is still owned here: its close failed, or an error landed
+							// between the open and that close. Retry the release before reporting, and let a
+							// second close failure be logged rather than replace the backup failure this
+							// handler is about to rethrow.
+							_closeDescriptor(seedFd, `backup seed descriptor for ${backupPath}`)
+						}
 						// A partial backup must not outlive this attempt: it is not a complete copy
 						// of anything, and once the write fails nothing else removes it.
 						await fs.unlink(backupPath).catch(() => {})

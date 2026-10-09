@@ -522,7 +522,12 @@ describe("safeWriteText", () => {
 		it("a backup copy that fails part-way is removed, not left as a usable-looking backup", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// Distinct fds so the seed descriptor can be told apart from the backup's fsync
+			// handle and the staging temp: the seed is the first open of the backup path.
+			let backupOpens = 0
+			vi.mocked(fsSync.openSync).mockImplementation((target: unknown) => {
+				return String(target).includes("safeWriteText.bak_") ? (backupOpens++ === 0 ? 7 : 8) : 1
+			})
 			// The destination is seeded with openSync("wx") BEFORE any content exists at it,
 			// and the copy then fails part-way: the name is there, holding a partial copy of
 			// nothing usable. Cleanup has to key off the attempt, not off a copy that
@@ -536,6 +541,52 @@ describe("safeWriteText", () => {
 			expect(fs.rename).not.toHaveBeenCalled()
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+
+			// The seed descriptor was released successfully before the copy failed, so the failure
+			// handler must not close it a second time: another open may already own that number, and
+			// closing it here would pull a live handle out from under its new owner.
+			expect(vi.mocked(fsSync.closeSync).mock.calls.filter((call) => Number(call[0]) === 7)).toHaveLength(1)
+		})
+
+		it("a failing seed-descriptor close is retried and never leaves the descriptor unreleased", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			// The backup destination is seeded with openSync("wx") and released immediately. Give
+			// every open its own fd so the closes can be matched to the opens, and make the
+			// seed's close fail: at that moment the descriptor is still owned by this call, while
+			// the error this write ends up reporting is the backup failure.
+			let backupOpens = 0
+			const openedFds: number[] = []
+			vi.mocked(fsSync.openSync).mockImplementation((target: unknown) => {
+				const fd = String(target).includes("safeWriteText.bak_") ? (backupOpens++ === 0 ? 7 : 8) : 1
+				openedFds.push(fd)
+				return fd
+			})
+			const seedFd = 7
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+			vi.mocked(fsSync.closeSync).mockImplementation((fd: unknown) => {
+				if (Number(fd) === seedFd) {
+					throw Object.assign(new Error("EBADF"), { code: "EBADF" })
+				}
+			})
+
+			await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).rejects.toThrow("EBADF")
+
+			// The close is attempted again by the backup failure handler rather than the descriptor
+			// being abandoned, and that retry's failure is reported without replacing the error the
+			// write fails with.
+			const seedAttempts = vi.mocked(fsSync.closeSync).mock.calls.filter((call) => Number(call[0]) === seedFd).length
+			expect(seedAttempts).toBe(2)
+			expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("backup seed descriptor"), expect.anything())
+			// Every descriptor this write opened was handed to closeSync: no handle outlives the
+			// failed backup.
+			for (const fd of openedFds) {
+				expect(vi.mocked(fsSync.closeSync).mock.calls.some((call) => Number(call[0]) === fd)).toBe(true)
+			}
+			// The partial backup and the staging temp are still cleaned up.
+			expect(fs.rename).not.toHaveBeenCalled()
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
+			consoleError.mockRestore()
 		})
 
 		it("backup:true when target does not exist: no backup created, just commit", async () => {
