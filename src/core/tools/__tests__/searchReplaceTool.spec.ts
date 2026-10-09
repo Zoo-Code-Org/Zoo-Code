@@ -10,6 +10,9 @@ import { ToolUse, ToolResponse, AskApproval, HandleError, PushToolResult } from 
 import { searchReplaceTool } from "../SearchReplaceTool"
 
 vi.mock("fs/promises", () => ({
+	// guardedWrite resolves the target through a namespace import, so the double has
+	// to expose realpath as a named export as well as on the default object.
+	realpath: vi.fn(async (p: string) => String(p)),
 	default: {
 		readFile: vi.fn().mockResolvedValue(""),
 	},
@@ -320,7 +323,7 @@ describe("searchReplaceTool", () => {
 
 			await executeSearchReplaceTool()
 
-			expect(mockCline.diffViewProvider.saveChanges).toHaveBeenCalledWith(true, 1000, "edit", false)
+			expect(mockCline.diffViewProvider.saveChanges).toHaveBeenCalledWith(true, 1000, "edit", false, undefined)
 			expect(mockCline.didEditFile).toBe(true)
 			// Usage is recorded once at the central presentAssistantMessage
 			// attribution point, not locally by the handler.
@@ -466,6 +469,7 @@ describe("searchReplaceTool", () => {
 				"edit",
 				undefined,
 				false,
+				undefined,
 			)
 			expect(mockCline.didEditFile).toBe(true)
 			expect(result).toBe("Tool result message")

@@ -1087,7 +1087,7 @@ describe("DiffViewProvider", () => {
 			vi.mocked(fs.access).mockRejectedValue({ code: "ENOENT" })
 			vi.mocked(computeVersionToken).mockResolvedValue("v1")
 
-			await diffViewProvider.saveDirectly("../outside.ts", "new content", false, true, 1000, "create", undefined, true)
+			await diffViewProvider.saveDirectly("../outside.ts", "new content", false, true, 1000, "create", undefined, true, path.resolve(mockCwd, "../outside.ts"))
 
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
 			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/../outside.ts`, "new content")
