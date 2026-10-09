@@ -622,11 +622,24 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			}
 		}
 
-		// Always clean up the staging temp file on failure.
-		try {
-			await fs.unlink(tempPath).catch(() => {})
-		} catch {
-			// cleanup failure is non-fatal
+		// Always clean up the staging temp file on failure. A single swallowed unlink is not enough:
+		// a transient EBUSY/EPERM would silently leave the temp inside the staging directory, and nothing
+		// would ever report the retained path. Bounded retry, same shape as the DACL and backup cleanup.
+		for (let attempt = 0; attempt < 2; attempt++) {
+			try {
+				await fs.unlink(tempPath)
+				break
+			} catch (cleanupError: unknown) {
+				const code = _errorCode(cleanupError)
+				if (code === "ENOENT") {
+					break
+				}
+				if (attempt === 1) {
+					console.warn(
+						`safeWriteText: staging temp release failed: ${tempPath} (${code ?? String(cleanupError)})`
+					)
+				}
+			}
 		}
 
 		if (daclDumpPath !== null) {
