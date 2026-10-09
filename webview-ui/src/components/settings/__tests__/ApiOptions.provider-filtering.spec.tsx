@@ -2,7 +2,14 @@ import { screen } from "@testing-library/react"
 
 import { renderWithExtensionState } from "@/utils/test-utils"
 
-import { providerIdentifiers, type ProviderSettings, type OrganizationAllowList } from "@roo-code/types"
+import {
+	providerIdentifiers,
+	geminiDefaultModelId,
+	vertexDefaultModelId,
+	type ModelInfo,
+	type ProviderSettings,
+	type OrganizationAllowList,
+} from "@roo-code/types"
 
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { useRouterModels } from "@src/components/ui/hooks/useRouterModels"
@@ -11,13 +18,26 @@ import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 import ApiOptions from "../ApiOptions"
 import { MODELS_BY_PROVIDER, PROVIDERS } from "../constants"
 
-// Mock the extension state context
+// Mock the extension state context. The hoisted state holder lets the dynamic
+// catalog suite reset the allow list to the unfiltered default without
+// re-typing the full ExtensionStateContextType (previous suites pin
+// mockReturnValue via `as any`, and vi.clearAllMocks() does not undo that).
+const { useExtensionStateMock, setOrganizationAllowList } = vi.hoisted(() => {
+	const mock = vi.fn(() => ({
+		organizationAllowList: undefined as OrganizationAllowList | undefined,
+		cloudIsAuthenticated: false,
+	}))
+	return {
+		useExtensionStateMock: mock,
+		setOrganizationAllowList: (list: OrganizationAllowList | undefined) => {
+			mock.mockReturnValue({ organizationAllowList: list, cloudIsAuthenticated: false })
+		},
+	}
+})
+
 vi.mock("@src/context/ExtensionStateContext", () => ({
 	ExtensionStateContextProvider: ({ children }: any) => children,
-	useExtensionState: vi.fn(() => ({
-		organizationAllowList: undefined,
-		cloudIsAuthenticated: false,
-	})),
+	useExtensionState: useExtensionStateMock,
 }))
 
 // Mock the translation hook
@@ -34,12 +54,20 @@ vi.mock("@src/utils/vscode", () => ({
 	},
 }))
 
-// Mock the router models hook
+// Mock the router models hook. The hoisted state holder lets tests drive `data`
+// without re-typing the full react-query UseQueryResult at each call site.
+const { useRouterModelsMock, setRouterModelsData } = vi.hoisted(() => {
+	const state = { data: undefined as Record<string, Record<string, unknown>> | undefined }
+	return {
+		useRouterModelsMock: vi.fn(() => ({ data: state.data, refetch: vi.fn() })),
+		setRouterModelsData: (data: typeof state.data) => {
+			state.data = data
+		},
+	}
+})
+
 vi.mock("@src/components/ui/hooks/useRouterModels", () => ({
-	useRouterModels: vi.fn(() => ({
-		data: null,
-		refetch: vi.fn(),
-	})),
+	useRouterModels: useRouterModelsMock,
 }))
 
 // Mock the selected model hook
@@ -146,6 +174,29 @@ describe("ApiOptions Provider Filtering", () => {
 
 		expect(useRouterModels).toHaveBeenCalledWith({ enabled: true, provider: providerIdentifiers.kenari })
 	})
+
+	it.each([providerIdentifiers.gemini, providerIdentifiers.vertex])(
+		"requests router models for the dynamic catalog provider %s",
+		(provider) => {
+			vi.mocked(useSelectedModel).mockReturnValue({
+				provider,
+				id: "model",
+				info: undefined,
+				isLoading: false,
+				isError: false,
+			})
+
+			renderWithProviders({
+				...defaultProps,
+				apiConfiguration: { apiProvider: provider } as ProviderSettings,
+			})
+
+			// Both the automatic fetch gate and the readiness gate in useSelectedModel
+			// key off isDynamicProvider, so no wiring change is needed here; this pins
+			// the gating now that these providers are dynamic.
+			expect(useRouterModels).toHaveBeenCalledWith({ enabled: true, provider })
+		},
+	)
 
 	it.each([providerIdentifiers.ollama, providerIdentifiers.lmstudio])(
 		"does not make an aggregate router request for local provider %s",
@@ -342,5 +393,78 @@ describe("ApiOptions Provider Filtering", () => {
 		// Cleanup
 		delete (MODELS_BY_PROVIDER as any).testEmptyProvider
 		PROVIDERS.pop()
+	})
+
+	describe.each([
+		[providerIdentifiers.gemini, geminiDefaultModelId],
+		[providerIdentifiers.vertex, vertexDefaultModelId],
+	] as const)("dynamic model catalog (ApiOptions -> ModelPicker wiring) for %s", (provider, defaultModelId) => {
+		// Regression guard: the generic ModelPicker must receive the host-fetched router
+		// catalog for this provider merged on top of the static MODELS_BY_PROVIDER fallback
+		// in ApiOptions. ModelPicker itself performs no router merging, so if the merge in
+		// ApiOptions regressed to static-only, router-only models newer than the shipped
+		// catalog would silently become unselectable and no other suite would catch it.
+		const routerOnlyModelId = `${provider}-router-only-preview`
+
+		const routerOnlyModelInfo: ModelInfo = {
+			maxTokens: 131_072,
+			contextWindow: 262_144,
+			supportsPromptCache: false,
+		}
+
+		const renderWithProviderSelected = (routerData: Record<string, Record<string, ModelInfo>> | undefined) => {
+			// Earlier allow-list suites leave a restrictive organizationAllowList on this
+			// mock (clearAllMocks keeps mockReturnValue); reset to the unfiltered default
+			// so the catalog reaches the picker in full.
+			setOrganizationAllowList(undefined)
+			setRouterModelsData(routerData)
+			vi.mocked(useSelectedModel).mockReturnValue({
+				provider,
+				id: defaultModelId,
+				info: undefined,
+				isLoading: false,
+				isError: false,
+			})
+
+			return renderWithProviders({
+				...defaultProps,
+				apiConfiguration: {
+					apiProvider: provider,
+					apiModelId: defaultModelId,
+				} as ProviderSettings,
+			})
+		}
+
+		afterEach(() => {
+			// Restore the default (no fetched models) for any suites that run later.
+			setRouterModelsData(undefined)
+		})
+
+		it("passes both static and router-fetched models to the generic ModelPicker", () => {
+			// The router payload contains ONLY a model id that does not exist in the
+			// shipped static catalog; it can reach the picker solely via the merge.
+			renderWithProviderSelected({ [provider]: { [routerOnlyModelId]: routerOnlyModelInfo } })
+
+			// Static default from getStaticModelsForProvider(provider) / MODELS_BY_PROVIDER.
+			expect(screen.getByTestId(`model-option-${defaultModelId}`)).toBeInTheDocument()
+			// Router-only model: present in the picker only if ApiOptions merged routerModels[provider].
+			expect(screen.getByTestId(`model-option-${routerOnlyModelId}`)).toBeInTheDocument()
+		})
+
+		it("keeps the static catalog selectable when no router models are available", () => {
+			// useRouterModels data is undefined while the fetch is pending/failed; the
+			// spread of routerModels?.[provider] must not crash or drop the static defaults.
+			renderWithProviderSelected(undefined)
+
+			expect(screen.getByTestId(`model-option-${defaultModelId}`)).toBeInTheDocument()
+			expect(screen.queryByTestId(`model-option-${routerOnlyModelId}`)).not.toBeInTheDocument()
+		})
+
+		it("keeps the static catalog selectable when the router catalog is empty", () => {
+			renderWithProviderSelected({})
+
+			expect(screen.getByTestId(`model-option-${defaultModelId}`)).toBeInTheDocument()
+			expect(screen.queryByTestId(`model-option-${routerOnlyModelId}`)).not.toBeInTheDocument()
+		})
 	})
 })
