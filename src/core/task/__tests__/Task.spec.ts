@@ -1,3 +1,4 @@
+import { WebviewFocusTracker } from "../../webview/WebviewFocusTracker"
 // npx vitest core/task/__tests__/Task.spec.ts
 
 import * as fsReal from "fs"
@@ -35,6 +36,7 @@ import type { ApiMessage } from "../../task-persistence"
 import { asyncStreamFrom } from "../../../test-utils/stream"
 import { McpHub } from "../../../services/mcp/McpHub"
 import { McpServerManager } from "../../../services/mcp/McpServerManager"
+import { readFileTool } from "../../tools/ReadFileTool"
 import { writeToFileTool } from "../../tools/WriteToFileTool"
 
 type TaskTestAccess = {
@@ -45,6 +47,7 @@ type TaskTestAccess = {
 	startTask: (task?: string, images?: string[]) => Promise<void>
 	resumeTaskFromHistory: () => Promise<void>
 	presentAssistantMessageSafe: () => void
+	hasCompleteToolResultsForCurrentTurn: () => boolean
 	addToClineMessages: (message: import("@roo-code/types").ClineMessage) => Promise<void>
 	updateClineMessage: (message: import("@roo-code/types").ClineMessage) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
@@ -400,6 +403,7 @@ describe("Cline", () => {
 			mockOutputChannel,
 			"sidebar",
 			new ContextProxy(mockExtensionContext),
+			new WebviewFocusTracker(),
 		)
 
 		// Setup mock API configuration
@@ -612,6 +616,422 @@ describe("Cline", () => {
 	})
 
 	describe("native tool-call request isolation", () => {
+		it("derives readiness only from a closed, idle, fully paired tool turn", () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "tool turn readiness test",
+				startTask: false,
+			})
+			const readiness = () => getTaskTestAccess(task).hasCompleteToolResultsForCurrentTurn()
+			task.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "call_ready",
+					name: "read_file",
+					params: {},
+					nativeArgs: { path: "README.md" },
+					partial: false,
+				},
+			]
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "call_ready", content: "finished" }]
+			task.currentStreamingContentIndex = task.assistantMessageContent.length
+
+			expect(readiness()).toBe(false)
+			task.didCompleteReadingStream = true
+			expect(readiness()).toBe(true)
+			task.presentAssistantMessageLocked = true
+			expect(readiness()).toBe(false)
+			task.presentAssistantMessageLocked = false
+			expect(readiness()).toBe(true)
+			task.assistantMessageContent[0].partial = true
+			expect(readiness()).toBe(false)
+			task.assistantMessageContent[0].partial = false
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "different_call", content: "finished" }]
+			expect(readiness()).toBe(false)
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "call_ready", content: "finished" }]
+			expect(readiness()).toBe(true)
+		})
+
+		it("requires a result for every tool call in the turn", () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "multi tool readiness test",
+				startTask: false,
+			})
+			const readiness = () => getTaskTestAccess(task).hasCompleteToolResultsForCurrentTurn()
+			task.didCompleteReadingStream = true
+			task.assistantMessageContent = [
+				{ type: "tool_use", id: "call_first", name: "read_file", params: {}, partial: false },
+				{ type: "tool_use", id: "call_middle", name: "read_file", params: {}, partial: false },
+				{ type: "tool_use", id: "call_last", name: "read_file", params: {}, partial: false },
+			]
+			const resultsFor = (...ids: string[]): Anthropic.ToolResultBlockParam[] =>
+				ids.map((id) => ({ type: "tool_result", tool_use_id: id, content: "finished" }))
+
+			task.userMessageContent = resultsFor("call_first")
+			expect(readiness()).toBe(false)
+			task.userMessageContent = resultsFor("call_last")
+			expect(readiness()).toBe(false)
+			task.userMessageContent = resultsFor("call_first", "call_last")
+			expect(readiness()).toBe(false)
+			task.userMessageContent = resultsFor("call_first", "call_middle", "call_last")
+			expect(readiness()).toBe(true)
+		})
+
+		it("does not strand a paired tool turn after a presenter failure", () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "presenter failure readiness test",
+				startTask: false,
+			})
+			task.didCompleteReadingStream = true
+			task.presentAssistantMessageLocked = false
+			task.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "call_ready",
+					name: "read_file",
+					params: {},
+					partial: false,
+				},
+				{ type: "text", content: "presenter failed here", partial: false },
+			]
+			task.currentStreamingContentIndex = 1
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "call_ready", content: "finished" }]
+
+			expect(getTaskTestAccess(task).hasCompleteToolResultsForCurrentTurn()).toBe(true)
+		})
+
+		it("requires an identifiable tool call and matches sanitized result IDs", () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "tool turn identity test",
+				startTask: false,
+			})
+			const readiness = () => getTaskTestAccess(task).hasCompleteToolResultsForCurrentTurn()
+			task.didCompleteReadingStream = true
+
+			task.assistantMessageContent = [{ type: "text", content: "finished", partial: false }]
+			expect(readiness()).toBe(false)
+
+			// An empty result ID must not satisfy a tool call that has no ID.
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "", content: "finished" }]
+			task.assistantMessageContent = [
+				{
+					type: "tool_use",
+					name: "read_file",
+					params: {},
+					partial: false,
+				},
+			]
+			expect(readiness()).toBe(false)
+
+			task.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					id: "",
+					name: "mcp_server_tool",
+					serverName: "server",
+					toolName: "tool",
+					arguments: {},
+					partial: false,
+				},
+			]
+			expect(readiness()).toBe(false)
+
+			const mcpToolUse = task.assistantMessageContent[0]
+			if (mcpToolUse.type !== "mcp_tool_use") {
+				throw new Error("Expected MCP tool use fixture")
+			}
+			mcpToolUse.id = "functions.read_file:0"
+			task.userMessageContent = [
+				{ type: "tool_result", tool_use_id: "functions.read_file:0", content: "finished" },
+			]
+			expect(readiness()).toBe(false)
+
+			task.userMessageContent = [
+				{ type: "tool_result", tool_use_id: "functions_read_file_0", content: "finished" },
+			]
+			expect(readiness()).toBe(true)
+		})
+
+		it("continues after a complete read_file result when the readiness flag update is lost", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "read file continuation test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {
+				const completedRead = task.assistantMessageContent.find(
+					(block) => block.type === "tool_use" && block.name === "read_file" && !block.partial,
+				)
+				if (!completedRead || completedRead.type !== "tool_use" || !completedRead.id) return
+
+				task.pushToolResultToUserContent({
+					type: "tool_result",
+					tool_use_id: completedRead.id,
+					content: "File: README.md\nfinished",
+				})
+				// Reproduce the persisted field symptom: the tool result exists and
+				// presentation consumed the completed block, but the one-shot readiness
+				// latch never flips, so the old loop waits forever before the next request.
+				task.currentStreamingContentIndex = task.assistantMessageContent.length
+				task.userMessageContentReady = false
+			})
+
+			let continuationUserContent: Anthropic.Messages.ContentBlockParam[] | undefined
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() =>
+					asyncStreamFrom<ApiStreamChunk>([
+						{ type: "tool_call_partial", index: 0, id: "call_read", name: "read_file" },
+						{ type: "tool_call_partial", index: 0, arguments: '{"path":"README.md"}' },
+					]),
+				)
+				.mockImplementationOnce(() => {
+					const continuationMessage = task.apiConversationHistory.at(-1)
+					continuationUserContent =
+						continuationMessage?.role === "user" && Array.isArray(continuationMessage.content)
+							? continuationMessage.content
+							: undefined
+					throw new Error("continuation request reached")
+				})
+
+			vi.mocked(pWaitFor).mockImplementation(async (condition) => {
+				if (!(await condition())) {
+					throw new Error("read_file continuation would stall")
+				}
+			})
+
+			try {
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "read a file, then continue" }])
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
+				expect(continuationUserContent?.filter((block) => block.type === "tool_result")).toEqual([
+					expect.objectContaining({
+						type: "tool_result",
+						tool_use_id: "call_read",
+						content: "File: README.md\nfinished",
+					}),
+				])
+			} finally {
+				vi.mocked(pWaitFor).mockImplementation(async () => {})
+			}
+		})
+
+		it("continues after the real presenter leaves a complete tool result behind a non-abort failure", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "real presenter continuation test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			const readFileHandleSpy = vi
+				.spyOn(readFileTool, "handle")
+				.mockImplementation(async (_task, block, callbacks) => {
+					if (!block.partial) callbacks.pushToolResult(`File: ${block.params.path}\nfinished`)
+				})
+			const say = task.say.bind(task)
+			const saySpy = vi.spyOn(task, "say").mockImplementation(async (...args) => {
+				const [type, _text, _images, partial] = args
+				if (type === "text" && partial === false) {
+					throw new Error("presenter text failed")
+				}
+				return say(...args)
+			})
+			const readiness = getTaskTestAccess(task).hasCompleteToolResultsForCurrentTurn.bind(task)
+			let sawCompleteToolTurn = false
+			const readinessSpy = vi
+				.spyOn(getTaskTestAccess(task), "hasCompleteToolResultsForCurrentTurn")
+				.mockImplementation(() => {
+					const ready = readiness()
+					if (ready) sawCompleteToolTurn = true
+					return ready
+				})
+
+			let continuationUserContent: Anthropic.Messages.ContentBlockParam[] | undefined
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() =>
+					asyncStreamFrom<ApiStreamChunk>([
+						{ type: "tool_call_partial", index: 0, id: "call_read_first", name: "read_file" },
+						{ type: "tool_call_partial", index: 0, arguments: '{"path":"README.md"}' },
+						{ type: "tool_call_partial", index: 1, id: "call_read_second", name: "read_file" },
+						{ type: "tool_call_partial", index: 1, arguments: '{"path":"package.json"}' },
+						{ type: "text", text: "present this after the tool" },
+					]),
+				)
+				.mockImplementationOnce(() => {
+					const continuationMessage = task.apiConversationHistory.at(-1)
+					continuationUserContent =
+						continuationMessage?.role === "user" && Array.isArray(continuationMessage.content)
+							? continuationMessage.content
+							: undefined
+					throw new Error("continuation request reached")
+				})
+
+			const { default: realPWaitFor } = await vi.importActual<typeof import("p-wait-for")>("p-wait-for")
+			vi.mocked(pWaitFor).mockImplementation((condition) =>
+				realPWaitFor(condition, { interval: 1, timeout: 1_000 }),
+			)
+			try {
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "read a file, then continue" }])
+
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
+				expect(continuationUserContent?.filter((block) => block.type === "tool_result")).toEqual([
+					expect.objectContaining({
+						type: "tool_result",
+						tool_use_id: "call_read_first",
+						content: "File: README.md\nfinished",
+					}),
+					expect.objectContaining({
+						type: "tool_result",
+						tool_use_id: "call_read_second",
+						content: "File: package.json\nfinished",
+					}),
+				])
+				expect(task.presentAssistantMessageLocked).toBe(false)
+				expect(sawCompleteToolTurn).toBe(true)
+			} finally {
+				vi.mocked(pWaitFor).mockImplementation(async () => {})
+				readinessSpy.mockRestore()
+				readFileHandleSpy.mockRestore()
+				saySpy.mockRestore()
+			}
+		})
+
+		it("waits for a running tool handler even when its result is already pushed", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "running handler continuation test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			let releaseHandler: (() => void) | undefined
+			const handlerGate = new Promise<void>((resolve) => {
+				releaseHandler = resolve
+			})
+			let handlerPushedResult: (() => void) | undefined
+			const resultPushed = new Promise<void>((resolve) => {
+				handlerPushedResult = resolve
+			})
+			const readFileHandleSpy = vi
+				.spyOn(readFileTool, "handle")
+				.mockImplementation(async (_task, block, callbacks) => {
+					if (block.partial) return
+					callbacks.pushToolResult("File: README.md\nfinished")
+					handlerPushedResult?.()
+					// The handler keeps running after it pushes the result, for example while it waits for approval.
+					await handlerGate
+				})
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() =>
+					asyncStreamFrom<ApiStreamChunk>([
+						{ type: "tool_call_partial", index: 0, id: "call_read", name: "read_file" },
+						{ type: "tool_call_partial", index: 0, arguments: '{"path":"README.md"}' },
+					]),
+				)
+				.mockImplementationOnce(() => {
+					throw new Error("continuation request reached")
+				})
+
+			const { default: realPWaitFor } = await vi.importActual<typeof import("p-wait-for")>("p-wait-for")
+			vi.mocked(pWaitFor).mockImplementation((condition) =>
+				realPWaitFor(condition, { interval: 1, timeout: 1_000 }),
+			)
+			try {
+				const run = task.recursivelyMakeClineRequests([{ type: "text", text: "read a file, then wait" }])
+				await resultPushed
+				// Give the request loop several poll intervals to continue early.
+				await new Promise((resolve) => setTimeout(resolve, 50))
+				expect(task.presentAssistantMessageLocked).toBe(true)
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(1)
+
+				releaseHandler?.()
+				await run
+				expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
+				expect(task.presentAssistantMessageLocked).toBe(false)
+			} finally {
+				releaseHandler?.()
+				vi.mocked(pWaitFor).mockImplementation(async () => {})
+				readFileHandleSpy.mockRestore()
+			}
+		})
+
+		it("lets abort win when the real presenter leaves a complete tool result", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "real presenter abort test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			const readFileHandleSpy = vi
+				.spyOn(readFileTool, "handle")
+				.mockImplementation(async (_task, block, callbacks) => {
+					if (!block.partial) callbacks.pushToolResult("File: README.md\nfinished")
+				})
+			const say = task.say.bind(task)
+			const saySpy = vi.spyOn(task, "say").mockImplementation(async (...args) => {
+				const [type, _text, _images, partial] = args
+				if (type === "text" && partial === false) {
+					task.abort = true
+					throw new Error("presenter text failed while aborting")
+				}
+				return say(...args)
+			})
+
+			const readiness = getTaskTestAccess(task).hasCompleteToolResultsForCurrentTurn.bind(task)
+			let sawReadyWhileAborted = false
+			const readinessSpy = vi
+				.spyOn(getTaskTestAccess(task), "hasCompleteToolResultsForCurrentTurn")
+				.mockImplementation(() => {
+					const ready = readiness()
+					if (ready && task.abort) sawReadyWhileAborted = true
+					return ready
+				})
+			const attemptApiRequestSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([
+					{ type: "tool_call_partial", index: 0, id: "call_read", name: "read_file" },
+					{ type: "tool_call_partial", index: 0, arguments: '{"path":"README.md"}' },
+					{ type: "text", text: "present this after the tool" },
+				]),
+			)
+
+			const { default: realPWaitFor } = await vi.importActual<typeof import("p-wait-for")>("p-wait-for")
+			vi.mocked(pWaitFor).mockImplementation((condition) =>
+				realPWaitFor(condition, { interval: 1, timeout: 1_000 }),
+			)
+			try {
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "read a file, then abort" }])
+
+				expect(attemptApiRequestSpy).toHaveBeenCalledOnce()
+				expect(sawReadyWhileAborted).toBe(true)
+				expect(task.presentAssistantMessageLocked).toBe(false)
+			} finally {
+				vi.mocked(pWaitFor).mockImplementation(async () => {})
+				readinessSpy.mockRestore()
+				readFileHandleSpy.mockRestore()
+				saySpy.mockRestore()
+			}
+		})
+
 		it("keeps overlapping Task parser state scoped to each request", async () => {
 			const firstTask = new Task({
 				provider: mockProvider,
@@ -5965,7 +6385,15 @@ describe("Cline", () => {
 				.mockImplementation(async (message) => {
 					updateSnapshot = { ...message }
 				})
-			const saveSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(true)
+			// Capture the message as it is when the save runs: this is the payload that
+			// reaches disk, so the flags must already be set before the save.
+			let savedSnapshot: Record<string, unknown> | undefined
+			const saveSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages")
+				.mockImplementation(async () => {
+					savedSnapshot = structuredClone(task.clineMessages[0])
+					return true
+				})
 
 			const task = new Task({
 				provider: mockProvider,
@@ -5999,7 +6427,10 @@ describe("Cline", () => {
 			// The ask is resolved by the system, not the user: stamp isAnswered so ChatView
 			// does not keep Save/Reject armed for a write that already failed.
 			expect(task.clineMessages[0].isAnswered).toBe(true)
-			expect(saveSpy).toHaveBeenCalled()
+			expect(saveSpy).toHaveBeenCalledTimes(1)
+			expect(savedSnapshot?.partial).toBe(false)
+			expect(savedSnapshot?.progressStatus).toBeUndefined()
+			expect(savedSnapshot?.isAnswered).toBe(true)
 			expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
 			expect(updateSnapshot?.partial).toBe(false)
 			expect(updateSnapshot?.progressStatus).toBeUndefined()
@@ -6192,42 +6623,50 @@ describe("Cline", () => {
 			// task directory to exist (uuid v7 is mocked to the fixed id below).
 			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
 			fsReal.mkdirSync(taskDir, { recursive: true })
+			// Declared outside the try so the finally block can restore them.
 			const updateSpy = vi
 				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
 				.mockResolvedValue(undefined)
-			const metadataFailure = new Error("task history stage failed")
-			const historySpy = vi.spyOn(mockProvider, "updateTaskHistory").mockRejectedValueOnce(metadataFailure)
+			const historySpy = vi.spyOn(mockProvider, "updateTaskHistory")
+			try {
+				historySpy.mockRejectedValueOnce(new Error("task history stage failed"))
 
-			const task = new Task({
-				provider: mockProvider,
-				apiConfiguration: mockApiConfig,
-				task: "test task",
-				startTask: false,
-			})
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
 
-			const partialToolAsk = {
-				ts: Date.now() - 1,
-				type: "ask" as const,
-				ask: "tool" as const,
-				text: "partial tool message",
-				partial: true,
+				const partialToolAsk = {
+					ts: Date.now() - 1,
+					type: "ask" as const,
+					ask: "tool" as const,
+					text: "partial tool message",
+					partial: true,
+				}
+
+				task.clineMessages.push(partialToolAsk)
+
+				await expect(task.finalizePartialToolAsk("partial tool message")).resolves.toBeUndefined()
+				await flushMicrotasks()
+
+				expect(partialToolAsk.partial).toBe(false)
+				expect(task.clineMessages[0].isAnswered).toBe(true)
+				// The message array persisted, so the webview update must run even though a
+				// later save stage failed...
+				expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
+				// ...and the later-stage failure is observed instead of silently swallowed.
+				expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to save task metadata:", expect.any(Error))
+			} finally {
+				// The task uuid is mocked to a fixed value, so the record this save writes outlives
+				// the test. Later saves run with merge = true and would fold a stale
+				// ui_messages.json into their own message arrays, so drop it here instead of
+				// leaving it for whichever test cleans up next.
+				fsReal.rmSync(path.join(taskDir, "ui_messages.json"), { force: true })
+				updateSpy.mockRestore()
+				historySpy.mockRestore()
 			}
-
-			task.clineMessages.push(partialToolAsk)
-
-			await expect(task.finalizePartialToolAsk("partial tool message")).resolves.toBeUndefined()
-			await flushMicrotasks()
-
-			expect(partialToolAsk.partial).toBe(false)
-			expect(task.clineMessages[0].isAnswered).toBe(true)
-			// The message array persisted, so the webview update must run even though a
-			// later save stage failed...
-			expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
-			// ...and the later-stage failure is observed instead of silently swallowed.
-			expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to save task metadata:", expect.any(Error))
-
-			updateSpy.mockRestore()
-			historySpy.mockRestore()
 		})
 
 		it("retries the failed metadata / task-history stage once, awaited, during dispose", async () => {
@@ -6609,6 +7048,7 @@ describe("Queued message processing after condense", () => {
 			output as unknown as vscode.OutputChannel,
 			"sidebar",
 			new ContextProxy(ctx),
+			new WebviewFocusTracker(),
 		)
 		provider.postMessageToWebview = vi.fn().mockResolvedValue(undefined)
 		provider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
@@ -6746,6 +7186,7 @@ describe("Telemetry installments (idle/shutdown flush)", () => {
 			} as unknown as vscode.OutputChannel,
 			"sidebar",
 			new ContextProxy(mockExtensionContext),
+			new WebviewFocusTracker(),
 		)
 		mockProvider.postMessageToWebview = vi.fn().mockResolvedValue(undefined)
 		mockProvider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
@@ -7000,6 +7441,7 @@ describe("pushToolResultToUserContent", () => {
 			mockOutputChannel,
 			"sidebar",
 			new ContextProxy(mockExtensionContext),
+			new WebviewFocusTracker(),
 		)
 
 		mockProvider.postMessageToWebview = vi.fn().mockResolvedValue(undefined)
