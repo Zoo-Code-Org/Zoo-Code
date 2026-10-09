@@ -703,6 +703,57 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		})
+		it("releases the per-task stream state when the user rejects the diff-view approval", async () => {
+			// A partial delta registers the entry and the TaskAborted listener. The denial then
+			// returns from inside the try block, skipping the success-path teardown, so both stay
+			// attached for the rest of the task's life (and a retained streamFailed would keep
+			// suppressing this task's later diff previews).
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockAskApproval.mockResolvedValue(false)
+			await executeWriteFileTool({})
+			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+		})
+		it("releases the per-task stream state when the prevent-focus-disruption approval is rejected", async () => {
+			// The experiment branch asks for approval without ever opening a diff view, so the
+			// only teardown for this call is the one at the end of the try block - which the
+			// denial return skips.
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockResolvedValue({
+					diagnosticsEnabled: true,
+					writeDelayMs: 1000,
+					experiments: { preventFocusDisruption: true },
+				}),
+			})
+			mockCline.diffViewProvider.saveDirectly = vi.fn().mockResolvedValue(undefined)
+			mockAskApproval.mockResolvedValue(false)
+			await executeWriteFileTool({})
+			expect(mockCline.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+		})
+		it("releases the per-task stream state when prevent-focus-disruption skips the partial preview", async () => {
+			// The first delta only pins the path, so the entry is still live after it (the stream
+			// is in flight). The second delta reaches the experiment check: handlePartial() then
+			// returns without ever showing a preview, and nothing else would ever release the
+			// entry or detach the TaskAborted listener for this task.
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockResolvedValue({ experiments: { preventFocusDisruption: true } }),
+			})
+
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			await executeWriteFileTool({}, { isPartial: true })
+
+			expect(mockCline.ask).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+		})
 	})
 
 	describe("user interaction", () => {

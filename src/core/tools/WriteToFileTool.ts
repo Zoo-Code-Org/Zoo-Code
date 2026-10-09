@@ -131,6 +131,21 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	}
 
 	/**
+	 * Release everything the current tool call owns of the partial-stream bookkeeping:
+	 * BaseTool's last-seen path plus THIS task's per-task entry (and its TaskAborted
+	 * listener). Every exit of execute() and every handlePartial() return that skips the
+	 * success-path teardown has to call this. Without it a rejected approval leaves the
+	 * entry attached for the rest of the task's life: the listener is only ever removed
+	 * by a teardown, and a retained streamFailed keeps suppressing this task's later
+	 * diff previews. Kept separate from resetPartialState(), which clears every task's
+	 * entry and is only correct for the parse-failure boundary in handle().
+	 */
+	private releasePartialStreamBookkeeping(task: Task): void {
+		super.resetPartialState()
+		this.resetTaskPartialState(task)
+	}
+
+	/**
 	 * Whether this task's partial stream is still the live one. handlePartial() awaits
 	 * provider state, a filesystem probe and task.ask() before it touches the diff view; a
 	 * cancellation during any of those awaits runs the TaskAborted teardown (or a direct
@@ -210,7 +225,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			// Returning here skips the try/catch teardown below: release THIS task's stream
 			// state (and only this task's) so the abort listener and any streamFailed guard do
 			// not outlive the call.
-			this.resetTaskPartialState(task)
+			this.releasePartialStreamBookkeeping(task)
 			await task.diffViewProvider.reset()
 			return
 		}
@@ -223,7 +238,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			// Returning here skips the try/catch teardown below: release THIS task's stream
 			// state (and only this task's) so the abort listener and any streamFailed guard do
 			// not outlive the call.
-			this.resetTaskPartialState(task)
+			this.releasePartialStreamBookkeeping(task)
 			await task.diffViewProvider.reset()
 			return
 		}
@@ -237,7 +252,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			// Returning here skips the try/catch teardown below: release THIS task's stream
 			// state (and only this task's) so the abort listener and any streamFailed guard do
 			// not outlive the call.
-			this.resetTaskPartialState(task)
+			this.releasePartialStreamBookkeeping(task)
 			return
 		}
 
@@ -316,6 +331,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				const didApprove = await askApproval("tool", completeMessage, undefined, isWriteProtected)
 
 				if (!didApprove) {
+					this.releasePartialStreamBookkeeping(task)
 					return
 				}
 
@@ -349,6 +365,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 				if (!didApprove) {
 					await task.diffViewProvider.revertChanges()
+					this.releasePartialStreamBookkeeping(task)
 					return
 				}
 
@@ -371,7 +388,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			// one task's execute() would drop another task's streamFailed/streamError
 			// while it is still streaming, so tear down only this task's entry.
 			super.resetPartialState()
-			this.resetTaskPartialState(task)
+			this.releasePartialStreamBookkeeping(task)
 
 			task.processQueuedMessages()
 
@@ -386,7 +403,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			await handleError("writing file", error as Error)
 			await task.diffViewProvider.reset()
 			super.resetPartialState()
-			this.resetTaskPartialState(task)
+			this.releasePartialStreamBookkeeping(task)
 			return
 		}
 	}
@@ -419,6 +436,10 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		)
 
 		if (isPreventFocusDisruptionEnabled) {
+			// The preview is suppressed for this stream: release the entry registered above so
+			// the abort listener and any failure mark do not outlive a delta that never shows
+			// a diff view and never reaches execute()'s teardown.
+			this.releasePartialStreamBookkeeping(task)
 			return
 		}
 
