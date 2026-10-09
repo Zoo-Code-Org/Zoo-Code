@@ -661,6 +661,30 @@ describe("writeToFileTool", () => {
 				consoleErrorSpy.mockRestore()
 			}
 		})
+
+		it("leaves the teardown in charge when the stream state is cleared while update() is in flight", async () => {
+			// The path is stabilized, so this delta streams. The task is disposed while update()
+			// awaits: the TaskAborted handler releases this task's state (and reverts or closes the
+			// diff view itself), and the in-flight update then rejects. Marking the released state
+			// failed, finalizing the ask, or running the failed-stream cleanup again would resurrect
+			// UI and roll back twice for a task the user cancelled.
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.diffViewProvider.revertChanges.mockClear()
+			mockCline.diffViewProvider.update.mockImplementationOnce(async () => {
+				writeToFileTool["resetTaskPartialState"](mockCline as never)
+				throw new Error("update rejected after the task was disposed")
+			})
+
+			await executeWriteFileTool({}, { isPartial: true })
+
+			// The cleanup did not run: no revert, no finalize, and the released state stayed gone.
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(mockCline.finalizePartialToolAsk).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("path stabilization predicate", () => {
@@ -784,7 +808,13 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({}, { accessAllowed: false })
 
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
-			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+			// The exact listener this task registered, not just any function: a mismatched off()
+			// argument would leave the real listener attached.
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
 		})
 
 		it("releases the per-task stream state when a missing parameter returns early", async () => {
@@ -933,7 +963,13 @@ describe("writeToFileTool", () => {
 
 			expect(mockCline.ask).not.toHaveBeenCalled()
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
-			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+			// The exact listener this task registered, not just any function: a mismatched off()
+			// argument would leave the real listener attached.
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
 		})
 
 		it("releases the per-task stream state when content is missing", async () => {
@@ -1039,6 +1075,23 @@ describe("writeToFileTool", () => {
 			const resetOrder = mockCline.diffViewProvider.reset.mock.invocationCallOrder.at(-1)
 			expect(resetOrder).toBeGreaterThan(revertOrder)
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("reports the rollback hazard when execute()'s own cleanup cannot revert the diff", async () => {
+			// execute() failed after the diff view was opened, and the rollback that follows the
+			// catch failed too. The debris (placeholder, created directories) is still on disk and the
+			// editor may still hold unapproved content, so the user has to be told - the same report
+			// the parse-failure teardown and cleanupFailedPartialStream() make.
+			mockCline.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
+			mockCline.diffViewProvider.revertChanges.mockRejectedValue(new Error("rollback failed"))
+
+			await executeWriteFileTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			expect(mockCline.say).toHaveBeenCalledWith(
+				"error",
+				expect.stringContaining("could not be restored after the failed tool call"),
+			)
 		})
 	})
 

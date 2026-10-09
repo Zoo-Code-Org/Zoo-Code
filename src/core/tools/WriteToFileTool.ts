@@ -469,9 +469,18 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			// and an empty placeholder BEFORE it awaits openDiffEditor(), so a rejection leaves that
 			// debris behind. Revert first - with no active editor the rollback still unlinks the
 			// placeholder and removes only the directories this operation created - then reset.
-			await this.revertDiffChangesBeforeReset(task)
+			// A rollback that did not finish is a second, actionable failure: the placeholder and the
+			// created directories are still on disk, and the next execute() would treat that debris as
+			// an existing file. Report it the same way the parse-failure teardown and
+			// cleanupFailedPartialStream() do - after the reset, so the report is the last thing the
+			// failed write leaves behind.
+			const reverted = await this.revertDiffChangesBeforeReset(task)
 			await task.diffViewProvider.reset()
 			super.resetPartialState()
+
+			if (!reverted) {
+				await this.reportRevertFailure(task)
+			}
 			return
 		} finally {
 			// Unconditional: every exit from the guarded scope - success, denial, or a
