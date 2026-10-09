@@ -33,7 +33,7 @@ export interface UpdateProfileModelResult {
 	success: boolean
 	updatedProfile?: ProviderSettingsWithId
 	previousProfile?: ProviderSettingsWithId
-	reason?: "not_found" | "provider_mismatch" | "disallowed" | "cas_failed"
+	reason?: "not_found" | "provider_mismatch" | "disallowed"
 }
 
 // Type-safe model migrations mapping
@@ -103,7 +103,14 @@ export class ProviderSettingsManager {
 		return Math.random().toString(36).substring(2, 15)
 	}
 
-	// Synchronize readConfig/writeConfig operations across instances sharing secretsKey to avoid data loss.
+	/**
+	 * Process-wide lock serializing readConfig/writeConfig operations across all instances
+	 * sharing secretsKey within the extension host process to guarantee persistence integrity.
+	 * Cross-context / external writers are unsupported as VS Code's SecretStorage interface
+	 * exposes only separate get, store, and delete operations without atomic compare-and-set
+	 * or versioned transaction support. All profile modifications must be routed through
+	 * this process-wide persistence owner.
+	 */
 	private static readonly locks = new Map<string, Promise<void>>()
 	public static resetLocksForTesting(): void {
 		ProviderSettingsManager.locks.clear()
@@ -420,30 +427,18 @@ export class ProviderSettingsManager {
 	 * Save a config with the given name.
 	 * Preserves the ID from the input 'config' object if it exists,
 	 * otherwise generates a new one (for creation scenarios).
+	 * Serialized through the process-wide persistence owner.
 	 */
 	public async saveConfig(name: string, config: ProviderSettingsWithId): Promise<string> {
 		try {
 			return await this.lock(async () => {
-				const maxAttempts = 5
-				let id = config.id || ""
-
-				for (let attempt = 0; attempt < maxAttempts; attempt++) {
-					const rawBefore = await this.context.secrets.get(this.secretsKey)
-					const providerProfiles = rawBefore
-						? (JSON.parse(rawBefore) as ProviderProfiles)
-						: structuredClone(this.defaultProviderProfiles)
-					const existingId = providerProfiles.apiConfigs[name]?.id
-					if (!id) {
-						id = config.id || existingId || this.generateId()
-					}
-					providerProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(config, id)
-
-					const stored = await this.storeWithCas(providerProfiles, rawBefore)
-					if (stored) {
-						return id
-					}
-				}
-				throw new Error("Concurrent write conflict: failed to save config after multiple retries")
+				const providerProfiles = await this.load()
+				// Preserve the existing ID if this is an update to an existing config.
+				const existingId = providerProfiles.apiConfigs[name]?.id
+				const id = config.id || existingId || this.generateId()
+				providerProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(config, id)
+				await this.store(providerProfiles)
+				return id
 			})
 		} catch (error) {
 			throw new Error(`Failed to save config: ${error}`)
@@ -451,9 +446,10 @@ export class ProviderSettingsManager {
 	}
 
 	/**
-	 * Atomically restores a stored profile to `restoredConfig` if and only if
-	 * the currently stored profile still matches `expectedConfig` (atomic compare-and-swap).
-	 * Returns true if restored; returns false if the stored profile was updated by a competing write.
+	 * Restores a stored profile to `restoredConfig` if and only if
+	 * the currently stored profile still matches `expectedConfig`.
+	 * Serialized through the process-wide persistence owner.
+	 * Cross-context / external writers are unsupported as SecretStorage lacks native atomic CAS.
 	 */
 	public async restoreConfigIfMatches(
 		name: string,
@@ -478,11 +474,8 @@ export class ProviderSettingsManager {
 					return false
 				}
 
-				// Storage-level compare-and-swap: verify the profile still matches at write time
-				// to guard against competing writes from other manager instances
 				const rawLatest = await this.context.secrets.get(this.secretsKey)
 				let targetProfiles = providerProfiles
-				let expectedWriteRaw = rawBefore
 				if (rawLatest !== rawBefore) {
 					targetProfiles = rawLatest
 						? (JSON.parse(rawLatest) as ProviderProfiles)
@@ -494,14 +487,14 @@ export class ProviderSettingsManager {
 					if (!cleanLatest || !deepEqual(cleanLatest, expectedTarget)) {
 						return false
 					}
-					expectedWriteRaw = rawLatest
 				}
 
 				targetProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(
 					restoredConfig,
 					restoredConfig.id || currentId,
 				)
-				return await this.storeWithCas(targetProfiles, expectedWriteRaw)
+				await this.store(targetProfiles)
+				return true
 			})
 		} catch (error) {
 			throw new Error(`Failed to restore config: ${error}`)
@@ -509,11 +502,11 @@ export class ProviderSettingsManager {
 	}
 
 	/**
-	 * Atomically updates a profile's model configuration if and only if the profile exists,
+	 * Updates a profile's model configuration if and only if the profile exists,
 	 * its stored provider matches expectedProvider, and any optional validator passes.
-	 * Applies only model-specific keys and resets, preserving other profile fields (such as
-	 * API keys or base URLs) that may have been updated concurrently by another manager instance.
-	 * Performs a compare-and-swap write to guard against clobbering concurrent storage changes.
+	 * Applies only model-specific keys and resets, preserving other profile fields.
+	 * Serialized through the process-wide persistence owner.
+	 * Cross-context / external writers are unsupported as SecretStorage lacks native atomic CAS.
 	 */
 	public async updateProfileModel(
 		name: string,
@@ -570,11 +563,9 @@ export class ProviderSettingsManager {
 					return { success: false, reason: "disallowed" }
 				}
 
-				// Storage-level compare-and-swap:
 				const rawLatest = await this.context.secrets.get(this.secretsKey)
 				let targetProfiles = providerProfiles
 				let replacedProfile = current
-				let expectedWriteRaw = rawBefore
 				if (rawLatest !== rawBefore) {
 					targetProfiles = rawLatest
 						? (JSON.parse(rawLatest) as ProviderProfiles)
@@ -584,7 +575,7 @@ export class ProviderSettingsManager {
 						!latestCurrent ||
 						(latestCurrent.apiProvider ?? providerIdentifiers.openrouter) !== expectedProvider
 					) {
-						return { success: false, reason: "cas_failed" }
+						return { success: false, reason: "provider_mismatch" }
 					}
 					// Re-apply patch onto latestCurrent to preserve any newly updated API keys or fields
 					const reCandidate = applyPatchToProfile(latestCurrent)
@@ -593,15 +584,11 @@ export class ProviderSettingsManager {
 					}
 					replacedProfile = latestCurrent
 					targetProfiles.apiConfigs[name] = reCandidate
-					expectedWriteRaw = rawLatest
 				} else {
 					targetProfiles.apiConfigs[name] = candidate
 				}
 
-				const stored = await this.storeWithCas(targetProfiles, expectedWriteRaw)
-				if (!stored) {
-					return { success: false, reason: "cas_failed" }
-				}
+				await this.store(targetProfiles)
 				return {
 					success: true,
 					updatedProfile: targetProfiles.apiConfigs[name],
@@ -907,19 +894,6 @@ export class ProviderSettingsManager {
 		}
 
 		return apiConfig
-	}
-
-	private async storeWithCas(providerProfiles: ProviderProfiles, expectedRaw: string | undefined): Promise<boolean> {
-		try {
-			const currentRaw = await this.context.secrets.get(this.secretsKey)
-			if (currentRaw !== expectedRaw) {
-				return false
-			}
-			await this.context.secrets.store(this.secretsKey, JSON.stringify(providerProfiles, null, 2))
-			return true
-		} catch (error) {
-			throw new Error(`Failed to write provider profiles to secrets: ${error}`)
-		}
 	}
 
 	private async store(providerProfiles: ProviderProfiles) {

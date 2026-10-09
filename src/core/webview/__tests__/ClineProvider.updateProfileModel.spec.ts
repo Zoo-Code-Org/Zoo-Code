@@ -461,9 +461,9 @@ describe("ClineProvider - updateProfileModel", () => {
 		)
 	})
 
-	it("handles cas_failed result from providerSettingsManager without updating context or showing allowlist error", async () => {
+	it("handles not_found result from providerSettingsManager without updating context or showing allowlist error", async () => {
 		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
-		manager().updateProfileModel.mockResolvedValueOnce({ success: false, reason: "cas_failed" })
+		manager().updateProfileModel.mockResolvedValueOnce({ success: false, reason: "not_found" })
 		const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
 
 		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
