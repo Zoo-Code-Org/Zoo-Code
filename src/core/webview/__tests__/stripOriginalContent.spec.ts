@@ -188,10 +188,19 @@ describe("findOriginalContent", () => {
 			say: "text",
 			text: JSON.stringify({ originalContent: "x" }),
 		}
+		const editPayload = JSON.stringify({ tool: "appliedDiff", originalContent: "x" })
+		const sayText: ClineMessage = { ts: ++ts, type: "say", say: "text", text: editPayload }
+		const askCommand: ClineMessage = {
+			ts: ++ts,
+			type: "ask",
+			ask: "command",
+			isAnswered: true,
+			text: editPayload,
+		}
 		const unparsable = toolAsk('{"originalContent":"cut off')
 		const notAString = toolAsk({ tool: "appliedDiff", originalContent: 42 })
 		const noText: ClineMessage = { ts: ++ts, type: "ask", ask: "tool" }
-		const all = [noOriginal, notTool, unparsable, notAString, noText]
+		const all = [noOriginal, notTool, sayText, askCommand, unparsable, notAString, noText]
 
 		for (const message of all) {
 			expect(findOriginalContent(all, { ts: message.ts })).toBeNull()

@@ -247,6 +247,17 @@ describe("FileChangesPanel", () => {
 			])
 		})
 
+		it("keeps an empty inline original (new file) without requesting it", () => {
+			renderPanel([createEditWithOriginal({ tool: "newFileCreated", originalContent: "" })])
+			expandRow()
+
+			respond({ type: "fileContent", fileContent: { path: "src/foo.ts", content: "new line\n" } })
+
+			expect(requestsOfType("readOriginalContent")).toEqual([])
+			expect(screen.getByTestId("accordian-code")).toHaveTextContent("+new line")
+			expect(screen.getByTestId("accordian-code")).not.toHaveTextContent("the recorded diff")
+		})
+
 		it("shows the merged diff once both the original and the final content arrive", () => {
 			renderPanel([createEditWithOriginal({ originalContentLength: 5000 })])
 			expandRow()
