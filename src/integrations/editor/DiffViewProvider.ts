@@ -44,6 +44,20 @@ export class DiffViewProvider {
 	private documentWasPinned = false
 	private relPath?: string
 	private teardownInFlight: Promise<void> | undefined
+	/**
+	 * A cancellation (revertChanges) that arrived while another pass already owned this
+	 * session. The owning pass reads it when its cleanup returns, so a save does not run
+	 * diagnostics or read provider state that a cancellation is closing underneath it.
+	 */
+	private teardownCancellationRequested = false
+	/**
+	 * Whether the teardown pass in flight closes the session itself. revertChanges() sets it
+	 * inside its finalize step; every pass starts with it cleared. A caller that joined a pass
+	 * that already reset must not reset again, while a pass that only closed views and restored
+	 * tabs - a save's post-publish cleanup, a rejected save's discard cleanup - leaves the
+	 * session open for the waiting caller to close.
+	 */
+	private teardownPassResets = false
 	// Counts the teardown passes this provider has actually run; a caller that awaited an
 	// in-flight pass does not count. A save uses it to tell its own post-publish cleanup apart
 	// from a teardown a cancellation or disposal started underneath it: once any teardown has
@@ -744,6 +758,15 @@ export class DiffViewProvider {
 			await this.restorePreviewTabs()
 		})
 
+		if (this.teardownCancellationRequested) {
+			// A cancellation or disposal reached revertChanges() while this save owned the post-publish
+			// pass. The publish is on disk, but the session is closing: the waiting caller finalizes
+			// it, and diagnostics or the EOL/patch tail below read provider state (newContent,
+			// relPath) that the finalization clears. Report no completed save instead.
+			this.teardownCancellationRequested = false
+			return { newProblemsMessage: undefined, userEdits: undefined, finalContent: undefined }
+		}
+
 
 		// Getting diagnostics before and after the file edit is a better approach than
 		// automatically tracking problems in real-time. This method ensures we only
@@ -905,7 +928,7 @@ export class DiffViewProvider {
 		this.disposeActiveEditorListener()
 		this.cancelDeferredScroll()
 
-		await this.runTeardown(async () => {
+		const ownedTeardown = await this.runTeardown(async () => {
 			if (!fileExists) {
 				if (updatedDocument.isDirty) {
 					await updatedDocument.save()
@@ -966,10 +989,23 @@ export class DiffViewProvider {
 			// Restore any preview tabs the diff evicted, reconstructing the user's
 			// prior not-yet-edited tab state.
 			// Edit is done.
+			// Record that this pass closes the session, so a caller that joined it does not reset
+			// a second time.
+			this.teardownPassResets = true
 			await this.restorePreviewTabs()
 			await this.reset()
 		},
 		)
+
+		if (!ownedTeardown && !this.teardownPassResets) {
+			// The pass that started the teardown owns the tab work, so this caller must not repeat
+			// it. A pass that carries its own finalization (revertChanges passes do) has already
+			// closed the session. A pass without one - a save's post-publish cleanup, or a rejected
+			// save's discard cleanup - leaves the session open, and the tool caller whose error
+			// handling owns that reset may never come back after a cancellation or disposal. The
+			// owning pass has returned, so the session is closed once and only once.
+			await this.reset()
+		}
 	}
 
 	private async closeAllDiffViews(): Promise<void> {
@@ -1065,6 +1101,10 @@ export class DiffViewProvider {
 		finalize?: () => Promise<void>,
 	): Promise<boolean> {
 		if (this.teardownInFlight !== undefined) {
+			// Record the cancellation before waiting: the pass that owns the session has to know a
+			// cancellation is waiting on it, and the waiting caller must not leave the session
+			// mid-edit if that pass turns out not to finalize it.
+			this.teardownCancellationRequested = true
 			await this.teardownInFlight
 			// Not ours: the caller that started this teardown owns everything that
 			// belongs to it, including the steps that follow the callback.
@@ -1072,6 +1112,10 @@ export class DiffViewProvider {
 		}
 		// A gate, not the cleanup promise itself: the tracked promise stays in place until
 		// the finalization settles, so a late caller waits for the whole pass.
+		// A pass starts clean: a cancellation recorded for an earlier pass must not leak into
+		// this one.
+		this.teardownCancellationRequested = false
+		this.teardownPassResets = false
 		let release!: () => void
 		const tracked = new Promise<void>((resolve) => {
 			release = resolve
