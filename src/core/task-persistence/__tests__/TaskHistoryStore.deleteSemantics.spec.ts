@@ -533,7 +533,8 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			await store.upsert(makeHistoryItem({ id: "all-b", ts: 2000 }))
 			onWrite.mockClear()
 
-			const before = storeInternals(store)
+			storeInternals(store).taskFileMtimes.set("all-a", 1000)
+			storeInternals(store).taskFileMtimes.set("all-b", 2000)
 			// One id fails at the lock, the other at the unlink: both outcomes count as
 			// "not deleted", and neither may be treated as gone.
 			vi.mocked(withFileLock).mockRejectedValueOnce(new Error("lock acquisition timed out"))
@@ -547,10 +548,19 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			expect((failure as TaskHistoryDeleteError).taskIds).toEqual(["all-a", "all-b"])
 
 			const { cache, taskFileMtimes } = storeInternals(store)
-			expect(cache.has("all-a")).toBe(before.cache.has("all-a"))
-			expect(cache.has("all-b")).toBe(before.cache.has("all-b"))
-			expect(taskFileMtimes.has("all-a")).toBe(before.taskFileMtimes.has("all-a"))
-			expect(taskFileMtimes.has("all-b")).toBe(before.taskFileMtimes.has("all-b"))
+			// storeInternals returns the live maps, so comparing them against 'before' compared
+			// a map with itself and passed no matter what deleteMany did. A failed delete must
+			// leave both ids in both maps, so assert that directly.
+			// The cache is the store's own view: a failed delete must leave both ids in it.
+			expect(cache.has("all-a")).toBe(true)
+			expect(cache.has("all-b")).toBe(true)
+			// taskFileMtimes is only populated by the reconcile path (external-change
+			// detection), so a store that never reconciled has an empty map here - asserting
+			// presence without seeding it would assert something that was never true. Seed it
+			// through the same internals the store uses, then require that a failed delete left
+			// it alone.
+			expect(taskFileMtimes.has("all-a")).toBe(true)
+			expect(taskFileMtimes.has("all-b")).toBe(true)
 			await expect(fs.access(historyFilePath(storagePath, "all-a"))).resolves.toBeUndefined()
 			await expect(fs.access(historyFilePath(storagePath, "all-b"))).resolves.toBeUndefined()
 
