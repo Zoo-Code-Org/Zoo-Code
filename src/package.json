@@ -531,7 +531,7 @@
 		"semver-compare": "^1.0.0",
 		"serialize-error": "^12.0.0",
 		"shell-quote": "^1.8.2",
-		"simple-git": "^3.27.0",
+		"simple-git": "^4.0.0",
 		"strip-bom": "^5.0.0",
 		"tiktoken": "^1.0.21",
 		"tree-sitter-wasms": "^0.1.13",
