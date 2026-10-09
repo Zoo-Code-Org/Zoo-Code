@@ -102,6 +102,7 @@ describe("API.sendMessage", () => {
 		expect(postMessageToWebview).toHaveBeenCalledWith({
 			type: "invoke",
 			invoke: "sendMessage",
+			origin: "api",
 			text: "Done with the follow-up",
 			images: undefined,
 		})
@@ -123,6 +124,7 @@ describe("API.sendMessage", () => {
 		expect(postMessageToWebview).toHaveBeenCalledWith({
 			type: "invoke",
 			invoke: "sendMessage",
+			origin: "api",
 			text: "Start over",
 			images: undefined,
 		})

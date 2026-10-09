@@ -351,7 +351,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			return
 		}
 
-		await this.sidebarProvider.postMessageToWebview({ type: "invoke", invoke: "sendMessage", text, images })
+		await this.sidebarProvider.postMessageToWebview({
+			type: "invoke",
+			invoke: "sendMessage",
+			text,
+			images,
+			origin: "api",
+		})
 	}
 
 	public deleteQueuedMessage(messageId: string) {
