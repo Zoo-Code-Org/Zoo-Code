@@ -70,6 +70,43 @@ describe("ObservationRegistry", () => {
 		expect(regB.get("/shared.ts")!.version).toBe("v2")
 	})
 
+	describe("forget", () => {
+		it("removes the entry and reports that it removed one", () => {
+			const registry = new ObservationRegistry()
+			registry.observe("/a.ts", "1:1:1:1:1", true)
+
+			expect(registry.forget("/a.ts")).toBe(true)
+			expect(registry.has("/a.ts")).toBe(false)
+			expect(registry.get("/a.ts")).toBeUndefined()
+			expect(registry.size).toBe(0)
+		})
+
+		it("reports false for a path it never observed, and changes nothing", () => {
+			const registry = new ObservationRegistry()
+			registry.observe("/a.ts", "1:1:1:1:1", true)
+
+			expect(registry.forget("/missing.ts")).toBe(false)
+			expect(registry.size).toBe(1)
+			expect(registry.get("/a.ts")?.version).toBe("1:1:1:1:1")
+		})
+
+		it("leaves the other entries alone - that is why a caller uses forget and not clear", () => {
+			// A caller revoking an authorization it did not earn must not discard the
+			// observations other reads of the same task still rely on.
+			const registry = new ObservationRegistry()
+			registry.observe("/a.ts", "1:1:1:1:1", true)
+			registry.observe("/b.ts", "2:2:2:2:2", false)
+
+			expect(registry.forget("/a.ts")).toBe(true)
+			expect(registry.get("/b.ts")).toEqual({
+				version: "2:2:2:2:2",
+				observedAt: expect.any(Number),
+				complete: false,
+			})
+			expect(registry.size).toBe(1)
+		})
+	})
+
 	describe("completeness scope (S4b follow-up #46)", () => {
 		it("defaults to a complete observation when the read scope is not given", () => {
 			const reg = new ObservationRegistry()
