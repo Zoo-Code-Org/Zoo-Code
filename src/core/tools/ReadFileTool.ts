@@ -321,8 +321,8 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				output = `IMPORTANT: File content truncated.
 	Status: Showing lines ${start}-${end} of ${result.totalLines} total lines.
 	To read more: Use the read_file tool with offset=${nextOffset} and limit=${effectiveLimit}.
-	
-	${result.content}`
+
+${result.content}`
 			} else if (result.includedRanges.length > 0) {
 				const rangeStr = result.includedRanges.map(([s, e]) => `${s}-${e}`).join(", ")
 				output += `\n\nIncluded ranges: ${rangeStr} (total: ${result.totalLines} lines)`
@@ -350,8 +350,8 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 			output = `IMPORTANT: File content truncated.
 	Status: Showing lines ${startLine}-${endLine} of ${result.totalLines} total lines.
 	To read more: Use the read_file tool with offset=${nextOffset} and limit=${limit}.
-	
-	${result.content}`
+
+${result.content}`
 			if (result.hasClippedLines) {
 				// The slice cut lines off and also clipped long lines inside it, so both
 				// notices belong to the response.
@@ -362,7 +362,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 			// clipping without a next-offset hint, and keep the read incomplete so a
 			// full-file replacement cannot be built from a clipped line.
 			output = `IMPORTANT: Some lines exceed ${MAX_LINE_LENGTH} characters and were clipped in this view. The file was read in full, but the clipped lines were not shown in full.
-				${result.content}`
+${result.content}`
 		} else if (result.returnedLines === 0) {
 			output = "Note: File is empty"
 		}

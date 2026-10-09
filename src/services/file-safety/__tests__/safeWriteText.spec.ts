@@ -770,6 +770,34 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))
 		})
 
+		it("win32 DACL: a failed restore reaches a caller-supplied onWarning", async () => {
+			// Watching console.warn cannot tell the routed warning from the default sink - the
+			// default sink also prints - so this case supplies its own sink and requires that the
+			// message lands there and NOT on console.warn.
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			const onWarning = vi.fn()
+
+			// icacls save succeeds, restore fails - the same shape as the default-sink case.
+			let callCount = 0
+			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+				callCount++
+				if (typeof cb === "function") {
+					cb(callCount === 1 ? null : new Error("icacls restore error"), "", "")
+				}
+				return fakeChild
+			})
+
+			await safeWriteText(targetPath, "data", { platform: "win32", onWarning })
+
+			expect(onWarning).toHaveBeenCalledTimes(1)
+			expect(onWarning.mock.calls[0][0]).toContain("could not be restored")
+			expect(warnSpy).not.toHaveBeenCalled()
+			warnSpy.mockRestore()
+		})
+
 		it("win32 DACL: when target does not exist, no save/restore/dump", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)

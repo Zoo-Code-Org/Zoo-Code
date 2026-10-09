@@ -1933,7 +1933,10 @@ describe("ReadFileTool", () => {
 				expect(pushed).toContain("clipped in this view")
 				expect(pushed).not.toContain("To read more")
 				// The notice is added on top of the read, it does not replace it.
-				expect(pushed).toContain("1 | a")
+				// The notice is added on top of the read, it does not replace it - and the first
+				// numbered line must not arrive indented: a model that copies the view into a SEARCH
+				// block would be copying whitespace the file does not have.
+				expect(pushed).toContain("\n1 | a")
 			})
 
 			it("native: a truncated slice that also clipped a line reports both notices", async () => {

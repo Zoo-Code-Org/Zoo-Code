@@ -175,6 +175,13 @@ it("does not log a cleanup error when the safety net finds the temp file already
 
 	await expect(safeWriteJson(target, { id: "task-1" })).rejects.toThrow("commit rename failed")
 
+	// The safety net really ran, and ran on the staged .new_ file it was supposed to remove.
+	// The safety net really ran, and ran on the staged .new_ file it was supposed to remove.
+	// Two unlinks of that path are expected: safeWriteText cleans up the tempPath it was
+	// handed, and then safeWriteJson runs its own safety net on the same path. Dropping the
+	// net would leave one, which is exactly what this checks.
+	const stagedUnlinks = unlinkSpy.mock.calls.filter((c: unknown[]) => String(c[0]).includes(".new_"))
+	expect(stagedUnlinks).toHaveLength(2)
 	// Only the original failure is reported.
 	expect(consoleError).toHaveBeenCalledTimes(1)
 
