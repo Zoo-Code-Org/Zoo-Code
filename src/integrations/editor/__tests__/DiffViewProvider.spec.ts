@@ -359,6 +359,35 @@ describe("DiffViewProvider", () => {
 			expect((diffViewProvider as any).documentWasPinned).toBe(true)
 			expect((diffViewProvider as any).documentWasOpen).toBe(true)
 		})
+		it("folds directories the caller created into createdDirs so a rollback can remove them", async () => {
+			// WriteToFileTool.execute() creates the parent directories before the diff view
+			// exists, so the provider's own mkdir records nothing. Without the adoption
+			// createdDirs stayed empty and a rolled-back new-file write left them on disk.
+			const mockEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/adopt.md`, scheme: "file" },
+					getText: vi.fn().mockReturnValue(""),
+					lineCount: 0,
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			}
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor as any)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback({ uri: { fsPath: `${mockCwd}/adopt.md`, scheme: "file" } } as any), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor as any]
+			diffViewProvider.adoptCreatedDirs([`${mockCwd}/new-parent`])
+			;(diffViewProvider as any).editType = "create"
+
+			await diffViewProvider.open("adopt.md")
+
+			expect((diffViewProvider as any).createdDirs).toEqual([`${mockCwd}/new-parent`])
+		})
+
 	})
 
 	describe("scrollToFirstDiff method", () => {
@@ -1317,6 +1346,16 @@ describe("DiffViewProvider", () => {
 			expect(diffViewProvider["relPath"]).toBeUndefined()
 		})
 
+
+		it("reset() drops adopted directories so a later transaction cannot remove a previous one's", async () => {
+			// Adoption is per transaction: a stale list would make the next rollback rmdir
+			// directories belonging to a file the user has since accepted.
+			diffViewProvider.adoptCreatedDirs([`${mockCwd}/new-parent`])
+
+			await diffViewProvider.reset()
+
+			expect((diffViewProvider as any).adoptedCreatedDirs).toEqual([])
+		})
 		it("revertChanges() restores the streamed buffer before closing it for a new file", async () => {
 			// tabGroups.close()'s second argument is preserveFocus, not a force-discard flag: closing
 			// a dirty tab prompts or is refused, which is how unapproved streamed content survived a

@@ -120,6 +120,17 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		this.resetTaskPartialState(task)
 	}
 
+	/**
+	 * Release this task's stream entry only while the map still holds THIS object.
+	 * A newer stream for the same task must not be dropped by an older failure's
+	 * cleanup, which would also deregister the newer stream's abort listener.
+	 */
+	private releaseTaskPartialStateByIdentity(state: TaskPartialStreamState): void {
+		if (this.taskPartialStreamState.get(this.getPartialStreamFailureKey(state.task)) === state) {
+			this.resetTaskPartialState(state.task)
+		}
+	}
+
 	private resetTaskPartialState(task: Task): void {
 		const key = this.getPartialStreamFailureKey(task)
 		const state = this.taskPartialStreamState.get(key)
@@ -330,7 +341,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			// Create parent directories early for new files to prevent ENOENT errors
 			// in subsequent operations (e.g., diffViewProvider.open, fs.readFile)
 			if (!fileExists) {
-				await createDirectoriesForFile(absolutePath)
+				const createdDirs = await createDirectoriesForFile(absolutePath)
+				// The rollback lives in DiffViewProvider.revertChanges(), which removes only the
+				// directories recorded there - and its own mkdir returns nothing once these exist.
+				// Hand this call's directories over, or a failed new-file write leaves them on disk
+				// and the next execute() treats the leftover placeholder as an existing file.
+				task.diffViewProvider.adoptCreatedDirs(createdDirs)
 			}
 
 			if (newContent.startsWith("```")) {
@@ -506,120 +522,130 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		// once, so abandoned streams are torn down even if execute() never runs.
 		const partialStreamState = this.getTaskPartialStreamState(task)
 
-		// Wait for path to stabilize before showing UI (prevents truncated paths)
-		if (!this.hasPathStabilizedForTask(partialStreamState, relPath) || newContent === undefined) {
-			return
-		}
+		// Anything below that throws must not leave this task's stream entry and its
+		// TaskAborted listener registered: the stream is over, a stale streamFailed flag
+		// suppresses every later preview for the task, and the listener can never fire
+		// for a stream that already ended. Release by identity so a newer stream for the
+		// same task survives, then rethrow - the caller owns reporting.
+		try {
+			// Wait for path to stabilize before showing UI (prevents truncated paths)
+			if (!this.hasPathStabilizedForTask(partialStreamState, relPath) || newContent === undefined) {
+				return
+			}
 
-		const provider = task.providerRef.deref()
-		const state = await provider?.getState()
+			const provider = task.providerRef.deref()
+			const state = await provider?.getState()
 
-		// Cancelled while provider state was in flight: the teardown already
-		// released this task's stream state.
-		if (!this.isPartialStreamStillLive(task, partialStreamState)) {
-			return
-		}
-
-		const isPreventFocusDisruptionEnabled = experiments.isEnabled(
-			state?.experiments ?? {},
-			EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION,
-		)
-
-		if (isPreventFocusDisruptionEnabled) {
-			// The preview is suppressed for this stream: release the entry registered above so the
-			// abort listener and any failure mark do not outlive a delta that never shows a diff
-			// view and never reaches execute()'s teardown.
-			super.resetPartialState()
-			this.resetTaskPartialState(task)
-			return
-		}
-
-		// relPath is guaranteed non-null after hasPathStabilized
-		let fileExists: boolean
-		const absolutePath = path.resolve(task.cwd, relPath!)
-
-		if (task.diffViewProvider.editType !== undefined) {
-			fileExists = task.diffViewProvider.editType === "modify"
-		} else {
-			fileExists = await fileExistsAtPath(absolutePath)
+			// Cancelled while provider state was in flight: the teardown already
+			// released this task's stream state.
 			if (!this.isPartialStreamStillLive(task, partialStreamState)) {
 				return
 			}
-			task.diffViewProvider.editType = fileExists ? "modify" : "create"
-		}
 
-		const isWriteProtected = task.rooProtectedController?.isWriteProtected(relPath!) || false
-		const isOutsideWorkspace = isPathOutsideWorkspace(absolutePath)
+			const isPreventFocusDisruptionEnabled = experiments.isEnabled(
+				state?.experiments ?? {},
+				EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION,
+			)
 
-		const sharedMessageProps: ClineSayTool = {
-			tool: fileExists ? "editedExistingFile" : "newFileCreated",
-			path: getReadablePath(task.cwd, relPath!),
-			content: newContent || "",
-			isOutsideWorkspace,
-			isProtected: isWriteProtected,
-		}
-
-		const partialMessage = JSON.stringify(sharedMessageProps)
-		await task.ask("tool", partialMessage, block.partial).catch(() => {})
-
-		if (!this.isPartialStreamStillLive(task, partialStreamState)) {
-			return
-		}
-
-		if (newContent) {
-			try {
-				if (!task.diffViewProvider.isEditing) {
-					await task.diffViewProvider.open(relPath!)
-				}
-
-				// Cancellation may land while open() is in flight: its abort handler has
-				// already torn the stream down (and may have reverted or closed this very
-				// diff view), so streaming the partial content into it now would resurrect a
-				// view for a task that no longer exists.
-				if (!this.isPartialStreamStillLive(task, partialStreamState)) {
-					return
-				}
-
-				await task.diffViewProvider.update(
-					everyLineHasLineNumbers(newContent) ? stripLineNumbers(newContent) : newContent,
-					false,
-				)
-			} catch (error) {
-				// A cancellation that lands while open() or update() is in flight runs the
-				// TaskAborted teardown - which releases this task's stream state, reverts or
-				// closes this very diff view, and reports the failure itself - and it can also
-				// reject the call in flight. Marking the already-released state failed, finalizing
-				// the ask, or running the failed-stream cleanup a second time would resurrect UI
-				// and roll back twice for a task the user cancelled, so the teardown owns the
-				// outcome here.
-				if (!this.isPartialStreamStillLive(task, partialStreamState)) {
-					console.error(`Error streaming write_to_file diff view:`, error)
-					return
-				}
-
-				// Opening or updating the diff view can throw on filesystem errors
-				// (EACCES/EROFS on read-only paths). Finalize the partial tool message
-				// so the UI spinner doesn't get stuck and reset the diff view. Do NOT
-				// rethrow: the same filesystem operation is retried in execute() once the
-				// block completes, and that authoritative non-partial path reports the
-				// error to the user. Surfacing it here too would show the same error twice.
-				// Swallowing it here is safe because the agent loop advances naturally when
-				// the non-partial block arrives (it does not depend on this throw).
-				console.error(`Error streaming write_to_file diff view:`, error)
-				// Mark the stream as failed so later deltas don't re-attempt and spawn a new
-				// partial tool message each time. Retain the original error: if the final
-				// block later fails to parse, execute() never runs and only
-				// onParameterParseFailure() can report this failure to the user.
-				partialStreamState.streamFailed = true
-				partialStreamState.streamError = error instanceof Error ? error : new Error(String(error))
-				await this.finalizePartialToolAskAfterFailure(task, partialMessage)
-				// The write was never approved: restore the document so a user save cannot
-				// persist the failed streamed content (reset() alone leaves it dirty), and
-				// surface the hazard if that restore itself failed. The stream error is
-				// reported by the authoritative non-partial path in execute(); the rollback
-				// hazard is a different failure and nothing else in this path says so.
-				await this.cleanupFailedPartialStream(task)
+			if (isPreventFocusDisruptionEnabled) {
+				// The preview is suppressed for this stream: release the entry registered above so the
+				// abort listener and any failure mark do not outlive a delta that never shows a diff
+				// view and never reaches execute()'s teardown.
+				super.resetPartialState()
+				this.resetTaskPartialState(task)
+				return
 			}
+
+			// relPath is guaranteed non-null after hasPathStabilized
+			let fileExists: boolean
+			const absolutePath = path.resolve(task.cwd, relPath!)
+
+			if (task.diffViewProvider.editType !== undefined) {
+				fileExists = task.diffViewProvider.editType === "modify"
+			} else {
+				fileExists = await fileExistsAtPath(absolutePath)
+				if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+					return
+				}
+				task.diffViewProvider.editType = fileExists ? "modify" : "create"
+			}
+
+			const isWriteProtected = task.rooProtectedController?.isWriteProtected(relPath!) || false
+			const isOutsideWorkspace = isPathOutsideWorkspace(absolutePath)
+
+			const sharedMessageProps: ClineSayTool = {
+				tool: fileExists ? "editedExistingFile" : "newFileCreated",
+				path: getReadablePath(task.cwd, relPath!),
+				content: newContent || "",
+				isOutsideWorkspace,
+				isProtected: isWriteProtected,
+			}
+
+			const partialMessage = JSON.stringify(sharedMessageProps)
+			await task.ask("tool", partialMessage, block.partial).catch(() => {})
+
+			if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+				return
+			}
+
+			if (newContent) {
+				try {
+					if (!task.diffViewProvider.isEditing) {
+						await task.diffViewProvider.open(relPath!)
+					}
+
+					// Cancellation may land while open() is in flight: its abort handler has
+					// already torn the stream down (and may have reverted or closed this very
+					// diff view), so streaming the partial content into it now would resurrect a
+					// view for a task that no longer exists.
+					if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+						return
+					}
+
+					await task.diffViewProvider.update(
+						everyLineHasLineNumbers(newContent) ? stripLineNumbers(newContent) : newContent,
+						false,
+					)
+				} catch (error) {
+					// A cancellation that lands while open() or update() is in flight runs the
+					// TaskAborted teardown - which releases this task's stream state, reverts or
+					// closes this very diff view, and reports the failure itself - and it can also
+					// reject the call in flight. Marking the already-released state failed, finalizing
+					// the ask, or running the failed-stream cleanup a second time would resurrect UI
+					// and roll back twice for a task the user cancelled, so the teardown owns the
+					// outcome here.
+					if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+						console.error(`Error streaming write_to_file diff view:`, error)
+						return
+					}
+
+					// Opening or updating the diff view can throw on filesystem errors
+					// (EACCES/EROFS on read-only paths). Finalize the partial tool message
+					// so the UI spinner doesn't get stuck and reset the diff view. Do NOT
+					// rethrow: the same filesystem operation is retried in execute() once the
+					// block completes, and that authoritative non-partial path reports the
+					// error to the user. Surfacing it here too would show the same error twice.
+					// Swallowing it here is safe because the agent loop advances naturally when
+					// the non-partial block arrives (it does not depend on this throw).
+					console.error(`Error streaming write_to_file diff view:`, error)
+					// Mark the stream as failed so later deltas don't re-attempt and spawn a new
+					// partial tool message each time. Retain the original error: if the final
+					// block later fails to parse, execute() never runs and only
+					// onParameterParseFailure() can report this failure to the user.
+					partialStreamState.streamFailed = true
+					partialStreamState.streamError = error instanceof Error ? error : new Error(String(error))
+					await this.finalizePartialToolAskAfterFailure(task, partialMessage)
+					// The write was never approved: restore the document so a user save cannot
+					// persist the failed streamed content (reset() alone leaves it dirty), and
+					// surface the hazard if that restore itself failed. The stream error is
+					// reported by the authoritative non-partial path in execute(); the rollback
+					// hazard is a different failure and nothing else in this path says so.
+					await this.cleanupFailedPartialStream(task)
+				}
+			}
+		} catch (error) {
+			this.releaseTaskPartialStateByIdentity(partialStreamState)
+			throw error
 		}
 	}
 }

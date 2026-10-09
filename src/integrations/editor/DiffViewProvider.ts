@@ -38,6 +38,10 @@ export class DiffViewProvider {
 	isEditing = false
 	originalContent: string | undefined
 	private createdDirs: string[] = []
+	// Directories a caller (WriteToFileTool.execute) created before this transaction.
+	// open() folds them into createdDirs so revertChanges() removes them too: without
+	// them the caller's preflight mkdir left parent directories on disk after a rollback.
+	private adoptedCreatedDirs: string[] = []
 	private documentWasOpen = false
 	// Tracks whether the target file's tab was pinned before the diff session.
 	// Closing the tab to open the diff drops VS Code's pin state, so we restore
@@ -95,6 +99,15 @@ export class DiffViewProvider {
 		this.taskRef = new WeakRef(task)
 	}
 
+	/**
+	 * Record directories a caller created before this diff transaction so the rollback
+	 * removes them too. revertChanges() only deletes what createdDirs holds, and a
+	 * pre-created directory makes the provider's own mkdir return nothing.
+	 */
+	adoptCreatedDirs(createdDirs: string[]): void {
+		this.adoptedCreatedDirs.push(...createdDirs)
+	}
+
 	async open(relPath: string): Promise<void> {
 		this.relPath = relPath
 		const fileExists = this.editType === "modify"
@@ -132,7 +145,7 @@ export class DiffViewProvider {
 
 		// For new files, create any necessary directories and keep track of new
 		// directories to delete if the user denies the operation.
-		this.createdDirs = await createDirectoriesForFile(absolutePath)
+		this.createdDirs = [...this.adoptedCreatedDirs, ...(await createDirectoriesForFile(absolutePath))]
 
 		// Make sure the file exists before we open it.
 		if (!fileExists) {
@@ -1253,6 +1266,7 @@ export class DiffViewProvider {
 		this.isEditing = false
 		this.originalContent = undefined
 		this.createdDirs = []
+		this.adoptedCreatedDirs = []
 		this.documentWasOpen = false
 		this.documentWasPinned = false
 		this.activeDiffEditor = undefined

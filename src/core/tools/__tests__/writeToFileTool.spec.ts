@@ -168,6 +168,7 @@ describe("writeToFileTool", () => {
 			originalContent: "",
 			open: vi.fn().mockResolvedValue(undefined),
 			update: vi.fn().mockResolvedValue(undefined),
+		adoptCreatedDirs: vi.fn(),
 			reset: vi.fn().mockResolvedValue(undefined),
 			revertChanges: vi.fn().mockResolvedValue(undefined),
 			saveChanges: vi.fn().mockResolvedValue({
@@ -1389,5 +1390,67 @@ describe("writeToFileTool", () => {
 
 
 
+	})
+
+	describe("partial-stream failure teardown and directory ownership", () => {
+		it("hands the directories it created to the diff view so a rollback removes them", async () => {
+			// revertChanges() removes only the directories the provider recorded, and its own
+			// mkdir returns nothing once execute() has made them. Without the hand-off a
+			// rolled-back new-file write left the parent directories on disk.
+			const created = ["/new-parent", "/new-parent/nested"]
+			mockedCreateDirectoriesForFile.mockResolvedValue(created)
+
+			await executeWriteFileTool({}, { fileExists: false })
+
+			expect(mockCline.diffViewProvider.adoptCreatedDirs).toHaveBeenCalledWith(created)
+		})
+
+		it("does not hand directories over when the file already exists", async () => {
+			// An existing file has no directories to roll back; adopting an empty list from
+			// an unrelated mkdir would still be wrong, but adopting a populated one would
+			// make a denial rmdir directories the user already had.
+			await executeWriteFileTool({}, { fileExists: true })
+
+			expect(mockCline.diffViewProvider.adoptCreatedDirs).not.toHaveBeenCalled()
+		})
+
+		it("releases the per-task stream state when a partial-stream await throws", async () => {
+			// An uncaught failure below the state creation used to leave the entry and its
+			// TaskAborted listener registered: the stale streamFailed flag then suppressed
+			// every later preview for the task, and the listener could never fire for a
+			// stream that had already ended.
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockRejectedValue(new Error("state read failed")),
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("keeps a newer stream entry when an older partial failure releases by identity", async () => {
+			// Identity, not presence: dropping whatever sits under the key would detach the
+			// live stream's abort listener while cleaning up after a superseded one.
+			const stale = writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			const newer = { ...stale }
+			mockCline.providerRef.deref.mockImplementation(() => ({
+				getState: async () => {
+					writeToFileTool["taskPartialStreamState"].set("task-1.instance-1", newer)
+					throw new Error("state read failed")
+				},
+			}))
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(writeToFileTool["taskPartialStreamState"].get("task-1.instance-1")).toBe(newer)
+			expect(mockCline.off).not.toHaveBeenCalled()
+		})
 	})
 })
