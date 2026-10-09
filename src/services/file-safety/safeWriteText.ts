@@ -132,7 +132,16 @@ function _stagingDir(dir: string): string {
 	fsSync.mkdirSync(sd, { recursive: true, mode: 0o700 })
 	// Re-check after the create: the path can be swapped for a symlink between the
 	// check above and mkdirSync.
-	const created = fsSync.lstatSync(sd)
+	let created: fsSync.Stats
+	try {
+		created = fsSync.lstatSync(sd)
+	} catch (error: unknown) {
+		// The directory exists at this point and this call may have just created it. Letting the
+		// probe error propagate would strand it: the caller never receives the path, so nothing
+		// else can remove it. Abandon first, then rethrow the original error.
+		_abandonIfCreated()
+		throw error
+	}
 	if (!created.isDirectory()) {
 		_abandonIfCreated()
 		throw new UnsafeStagingDirectoryError(sd, "it was replaced by a non-directory")
