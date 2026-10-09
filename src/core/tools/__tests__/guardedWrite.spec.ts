@@ -299,6 +299,47 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(mockedWithFileLock).not.toHaveBeenCalled()
 		})
 
+		it("accepts a write in a workspace folder that does resolve when another folder cannot", async () => {
+			// A second workspace folder that cannot be canonicalized must not veto every guarded
+			// write. It is dropped from the allow-list, which only narrows what is admitted:
+			// this write is inside a folder that DID resolve.
+			mockedFsRealpath.mockImplementation(async (p) => {
+				if (String(p) === path.resolve(WORKSPACE)) {
+					throw Object.assign(new Error("EACCES"), { code: "EACCES" })
+				}
+				return String(p)
+			})
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask()
+
+			await guardedWrite(task, "/other-folder/in.txt", "data", "create", undefined, {
+				additionalRoots: ["/other-folder"],
+			})
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("/other-folder/in.txt"), "data")
+		})
+
+		it("still refuses a write that lives only under the folder that cannot be resolved", async () => {
+			// Dropping the broken root narrows the allow-list, it does not widen it: a target
+			// that only the broken root could have vouched for is still refused.
+			mockedFsRealpath.mockImplementation(async (p) => {
+				if (String(p) === path.resolve(WORKSPACE)) {
+					throw Object.assign(new Error("EACCES"), { code: "EACCES" })
+				}
+				return String(p)
+			})
+			const task = createMockTask()
+
+			await expect(
+				guardedWrite(task, "inside.txt", "data", "create", undefined, {
+					additionalRoots: ["/other-folder"],
+				}),
+			).rejects.toThrow("not inside any workspace folder that could be resolved")
+
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
 		it("refuses a target that runs through a dangling symlink ancestor", async () => {
 			// A component of the path exists as a symlink whose referent is gone. realpath
 			// reports ENOENT for it, which is also what a not-yet-created directory
