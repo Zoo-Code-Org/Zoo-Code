@@ -733,7 +733,7 @@ export class DiffViewProvider {
 					this.disposeActiveEditorListener()
 					this.cancelDeferredScroll()
 
-					await this.runTeardown(async () => {
+					const ownedTeardown = await this.runTeardown(async () => {
 						let discardSucceeded = !updatedDocument.isDirty
 						if (updatedDocument.isDirty) {
 							discardSucceeded = await this.revertDocument(updatedDocument)
@@ -778,6 +778,13 @@ export class DiffViewProvider {
 						}
 						await this.closeOwnDiffView(absolutePath)
 					})
+					if (ownedTeardown) {
+						// Opening the diff evicted any preview tab the file had. This path closes its own diff
+						// view and rethrows, so this pass is the only one that can put that preview state back;
+						// a caller that merely waited for it must not restore the tabs a second time. reset()
+						// stays with the tool caller's error handling, which owns the provider lifecycle.
+						await this.restorePreviewTabs()
+					}
 				} catch {
 					// cleanup is best-effort; the guard verdict below is the outcome
 				}
@@ -808,7 +815,7 @@ export class DiffViewProvider {
 		// The post-publish cleanup is a teardown pass like any other, so it goes through the same
 		// serialization revertChanges() uses: a cancellation that lands while it runs waits for it
 		// instead of closing the same tabs underneath it.
-		await this.runTeardown(async () => {
+		const ownedTeardown = await this.runTeardown(async () => {
 			this.disposeActiveEditorListener()
 			this.cancelDeferredScroll()
 
@@ -839,6 +846,13 @@ export class DiffViewProvider {
 			// prior not-yet-edited tab state.
 			await this.restorePreviewTabs()
 		})
+
+		if (!ownedTeardown) {
+			// A teardown that started first owns this session: it closed the diff views and applied the
+			// auto-close preferences. Reporting diagnostics and a completed-save result for a session
+			// that was torn down underneath this save would present a save that never finished.
+			return { newProblemsMessage: undefined, userEdits: undefined, finalContent: undefined }
+		}
 
 
 		// Getting diagnostics before and after the file edit is a better approach than
