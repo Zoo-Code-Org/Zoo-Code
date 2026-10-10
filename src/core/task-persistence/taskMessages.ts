@@ -65,6 +65,24 @@ export type SaveTaskMessagesOptions = {
 	merge?: boolean
 }
 
+/** Update the current disk snapshot under the same lock used by every message writer. */
+export async function updateTaskMessages({
+	taskId,
+	globalStoragePath,
+	update,
+}: ReadTaskMessagesOptions & { update: (messages: ClineMessage[]) => ClineMessage[] }): Promise<void> {
+	const taskDir = await getTaskDirectoryPath(globalStoragePath, taskId)
+	const filePath = path.join(taskDir, GlobalFileNames.uiMessages)
+	await safeWriteJson(filePath, null, {
+		merge: (existing) => {
+			if (!Array.isArray(existing)) {
+				throw new TaskMessagesReadError("invalid", `Cannot update missing or invalid messages for ${taskId}`)
+			}
+			return ensureMessageIdentifiers(update(ensureMessageIdentifiers(existing)))
+		},
+	})
+}
+
 export async function saveTaskMessages({
 	messages,
 	taskId,
