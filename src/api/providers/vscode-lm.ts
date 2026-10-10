@@ -96,7 +96,11 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
  * contain bare markup, so passing it through is the safer default rather than a security boundary.
  * Widening to the bare case needs a reproduction first.
  */
-/** Upper bound on an incomplete `<invoke ...` tail held back between chunks. */
+// Latching on a bare `<invoke` would let any prose mentioning the tag stop real-time streaming for
+// the rest of the response, so the marker only counts once the `name="` attribute has arrived.
+const LEAKED_TOOL_CALL_START = /<\/?(?:antml:)?function_calls(?:\s|>)|<(?:antml:)?invoke\s+name="/i
+
+/** Bounds generic tag fragments, not prefixes that can still become valid recovery markup. */
 const MAX_PARTIAL_INVOKE_CARRY = 64
 
 /**
@@ -223,12 +227,30 @@ function stripTagsCompletely(text: string): string {
  * be detected intact.
  */
 export function trailingPartialToolMarkerLength(text: string): number {
+	const tailStart = text.lastIndexOf("<")
+	const tail = text.slice(tailStart).toLowerCase()
+	if (
+		tailStart !== -1 &&
+		[
+			"<function_calls",
+			"</function_calls",
+			"<antml:function_calls",
+			"</antml:function_calls",
+			"<invoke",
+			"<antml:invoke",
+		].some((marker) => marker.startsWith(tail))
+	) {
+		return tail.length
+	}
+	// Whitespace in a valid unfinished opener has no length limit in the whole-input parser.
+	if (/<(?:antml:)?invoke\s+(?:n(?:a(?:m(?:e(?:=)?)?)?)?)?$/i.test(text)) {
+		return text.length - tailStart
+	}
 	const partialTag = text.match(/<(?:antml:)?[a-zA-Z_]*$/)
 	if (partialTag) {
 		return partialTag[0].length <= MAX_PARTIAL_INVOKE_CARRY ? partialTag[0].length : 0
 	}
-	// An `<invoke` whose `name="` attribute hasn't arrived yet: hold it back so the marker can
-	// latch on the next chunk, bounded so ordinary prose is never swallowed.
+	// Non-matching invoke fragments remain bounded so ordinary prose can resume streaming.
 	const partialInvoke = text.match(/<(?:antml:)?invoke\b[^<>]*$/i)
 	return partialInvoke && partialInvoke[0].length <= MAX_PARTIAL_INVOKE_CARRY ? partialInvoke[0].length : 0
 }
@@ -669,6 +691,16 @@ export function extractLeakedToolCalls(
 	validTools: ReadonlySet<string> | LeakedToolSchemas,
 	precedingText = "",
 ): { calls: Array<{ name: string; input: Record<string, unknown> }>; leftoverText: string } {
+	const scan = new QuotingScanState()
+	scan.advance(precedingText)
+	return extractLeakedToolCallsWithState(text, validTools, scan)
+}
+
+function extractLeakedToolCallsWithState(
+	text: string,
+	validTools: ReadonlySet<string> | LeakedToolSchemas,
+	scan: QuotingScanState,
+): { calls: Array<{ name: string; input: Record<string, unknown> }>; leftoverText: string } {
 	const schemaFor = (name: string) =>
 		validTools instanceof Map ? (validTools.get(name) as Record<string, unknown> | undefined) : undefined
 	const calls: Array<{ name: string; input: Record<string, unknown> }> = []
@@ -676,10 +708,6 @@ export function extractLeakedToolCalls(
 	let leftover = ""
 	let lastIndex = 0
 
-	// Quote detection needs the text streamed before the buffer, since a fence may have opened
-	// there. Scanned once by state that only ever moves forward, not re-scanned per candidate.
-	const scan = new QuotingScanState()
-	scan.advance(precedingText)
 	let scannedUpTo = 0
 
 	const openPattern = /<(?:antml:)?invoke\s+name="([^"]+)"\s*>/gi
@@ -715,6 +743,7 @@ export function extractLeakedToolCalls(
 		openPattern.lastIndex = blockEnd
 	}
 	leftover += text.slice(lastIndex)
+	scan.advance(text.slice(scannedUpTo))
 
 	// Once a call is recovered its `<function_calls>` wrapper is spent markup, so drop every wrapper
 	// tag (cosmetic; also avoids re-teaching the model this format when the turn replays as history).
@@ -1103,6 +1132,66 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		// Accumulate the text and count at the end of the stream to reduce token counting overhead.
 		let accumulatedText: string = ""
 
+		// Only offered tools may be recovered; their schemas keep recovered parameters typed
+		// rather than passing every value through as a string.
+		const providedToolSchemas: LeakedToolSchemas = new Map(
+			(metadata?.tools ?? [])
+				.filter((tool) => tool.type === "function")
+				.filter((tool) => tool.function.name.length > 0)
+				.map((tool) => [tool.function.name, tool.function.parameters as Record<string, unknown> | undefined]),
+		)
+		const salvageLeakedToolCalls = providedToolSchemas.size > 0
+		let salvageBuffer: string[] | undefined
+		let salvageCarry = ""
+		let salvageCarryIsInvokeWhitespace = false
+		let salvagePrecedingText: string[] = []
+		const salvageScan = new QuotingScanState()
+		let salvagedToolCallIndex = 0
+
+		const parseSalvage = (span: string): ApiStreamChunk[] => {
+			const drained: ApiStreamChunk[] = []
+			const { calls, leftoverText } = extractLeakedToolCallsWithState(span, providedToolSchemas, salvageScan)
+			if (leftoverText) {
+				drained.push({ type: "text", text: leftoverText })
+			}
+			for (const call of calls) {
+				console.warn(
+					"Zoo Code <Language Model API>: Recovered a tool call the model emitted as text instead of a structured tool call:",
+					{ name: call.name, params: Object.keys(call.input) },
+				)
+				drained.push({
+					type: "tool_call",
+					id: `vscodelm-salvaged-${Date.now()}-${salvagedToolCallIndex++}`,
+					name: call.name,
+					arguments: JSON.stringify(call.input),
+				})
+			}
+			return drained
+		}
+
+		// Only EOF or a native call ends a text segment: even closed invokes cannot settle global
+		// wrapper stripping or text-before-call ordering while more text may arrive. No size cap is safe.
+		// Native boundaries finalize markup, but retain quote/wrapper state outside completed bodies.
+		const flushSalvage = (): ApiStreamChunk[] => {
+			if (!salvageLeakedToolCalls) {
+				return []
+			}
+
+			salvageScan.advance(salvagePrecedingText.join(""))
+			salvagePrecedingText = []
+			if (!salvageBuffer) {
+				const carried = salvageCarry
+				salvageCarry = ""
+				salvageCarryIsInvokeWhitespace = false
+				salvageScan.advance(carried)
+				return carried ? [{ type: "text", text: carried }] : []
+			}
+
+			const buffered = salvageBuffer.join("")
+			salvageBuffer = undefined
+			return parseSalvage(buffered)
+		}
+
 		try {
 			// Create the response stream with required options
 			const requestOptions: vscode.LanguageModelChatRequestOptions = {
@@ -1126,11 +1215,50 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 					}
 
 					accumulatedText += chunk.value
-					yield {
-						type: "text",
-						text: chunk.value,
+
+					// Fast path: when we didn't offer any tools there is nothing to salvage, so
+					// stream the text straight through exactly as before.
+					if (!salvageLeakedToolCalls) {
+						yield { type: "text", text: chunk.value }
+						continue
+					}
+
+					if (salvageBuffer) {
+						salvageBuffer.push(chunk.value)
+						continue
+					}
+
+					// An unfinished invoke can carry unlimited whitespace; do not rescan it for every chunk.
+					if (salvageCarryIsInvokeWhitespace && /^\s*$/.test(chunk.value)) {
+						salvageCarry += chunk.value
+						continue
+					}
+					salvageCarryIsInvokeWhitespace = false
+
+					// Watch for the start of a leaked tool-call block, carrying a small tail across
+					// chunks so a marker split across chunk boundaries is still detected.
+					const combined = salvageCarry + chunk.value
+					const markerMatch = combined.match(LEAKED_TOOL_CALL_START)
+					if (markerMatch) {
+						const before = combined.slice(0, markerMatch.index)
+						if (before) {
+							salvagePrecedingText.push(before)
+							yield { type: "text", text: before }
+						}
+						salvageBuffer = [combined.slice(markerMatch.index)]
+						salvageCarry = ""
+					} else {
+						const carryLength = trailingPartialToolMarkerLength(combined)
+						const emit = carryLength > 0 ? combined.slice(0, combined.length - carryLength) : combined
+						salvageCarry = carryLength > 0 ? combined.slice(combined.length - carryLength) : ""
+						salvageCarryIsInvokeWhitespace = /^<(?:antml:)?invoke\s+$/i.test(salvageCarry)
+						if (emit) {
+							salvagePrecedingText.push(emit)
+							yield { type: "text", text: emit }
+						}
 					}
 				} else if (chunk instanceof vscode.LanguageModelToolCallPart) {
+					yield* flushSalvage()
 					try {
 						// Validate tool call parameters
 						if (!chunk.name || typeof chunk.name !== "string") {
@@ -1177,6 +1305,9 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 					console.warn("Zoo Code <Language Model API>: Unknown chunk type received:", chunk)
 				}
 			}
+
+			// Flush any leaked tool-call recovery state accumulated during streaming.
+			yield* flushSalvage()
 
 			// Count tokens in the accumulated text after stream completion
 			const totalOutputTokens: number = await this.internalCountTokens(accumulatedText)
