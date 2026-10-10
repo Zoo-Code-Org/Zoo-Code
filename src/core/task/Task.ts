@@ -1113,8 +1113,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
-	 * An interrupted task cannot legally delegate, so a staged create-subtask
-	 * action is a durable rejection marker rather than replayable work. The
+	 * An interrupted task can delegate after live approval, but persisted actions
+	 * cannot distinguish an unattempted approval from a rejected attempt whose
+	 * settlement failed. Conservatively settle them instead of replaying. The
 	 * constructor-injected history item can be stale, so the persisted record
 	 * is refreshed first and the refreshed action is the one settled. A failed
 	 * refresh, lookup, or settlement stops replay instead of risking another
@@ -3289,6 +3290,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		let { response, text, images, queuedMessageId } = await this.ask("tool", action.approvalText, false)
+		if (this.abort || this.abandoned) {
+			return
+		}
 
 		if (response === "yesButtonClicked") {
 			if (action.kind === "create_subtask") {

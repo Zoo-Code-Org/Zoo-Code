@@ -3,7 +3,11 @@ import assert from "node:assert/strict"
 import type { HistoryItem, ProviderSettings } from "@roo-code/types"
 
 import { selectHandoffExecutionContext } from "../src/core/task/providerHandoff"
-import { completeDelegatedChild, delegateTaskToChild } from "../src/core/task-persistence/taskLifecycle"
+import {
+	completeDelegatedChild,
+	delegateTaskToChild,
+	interruptDelegatedChild,
+} from "../src/core/task-persistence/taskLifecycle"
 
 const PROVIDERS = ["a", "b"] as const
 type Provider = (typeof PROVIDERS)[number]
@@ -18,9 +22,11 @@ type Policy = {
 	emptyPublication?: boolean
 	staleConcurrentCommits?: boolean
 	releaseParentTransitionAfterPublication?: boolean
+	startAfterCancellation?: boolean
 }
 
 type ModelState = {
+	cancelled?: boolean
 	generation: Generation
 	parent: HistoryItem
 	children: Partial<Record<PublishedTask, HistoryItem>>
@@ -62,8 +68,11 @@ const EXPECTED_ACTIONS = [
 	"resume-parent",
 	"settle-parent",
 	"redelegate",
+	"cancel-handoff",
 ] as const
 const LANDMARKS = {
+	"cancelled-before-commit": (state: ModelState) => state.cancelled === true && state.commitOwner === undefined,
+	"cancelled-after-commit": (state: ModelState) => state.cancelled === true && state.commitOwner !== undefined,
 	"competing-claims": (state: ModelState) => Object.keys(state.claims).length === 2,
 	"prepared-before-commit": (state: ModelState) => state.prepared !== undefined && state.commitOwner === undefined,
 	"committed-before-start": (state: ModelState) =>
@@ -84,6 +93,11 @@ const LANDMARKS = {
 
 const FIXED_POLICY: Policy = { name: "fixed" }
 const LEGACY_POLICIES: Array<Policy & { expectedViolation: string }> = [
+	{
+		name: "start-after-cancellation",
+		startAfterCancellation: true,
+		expectedViolation: "child started after cancellation",
+	},
 	{ name: "start-before-commit", startBeforeCommit: true, expectedViolation: "child started without exact commit" },
 	{
 		name: "resume-before-permit-release",
@@ -251,6 +265,33 @@ function explore(
 
 function transitions(state: ModelState, policy: Policy): Transition[] {
 	const result: Transition[] = []
+	if (state.cancelled) {
+		if (policy.startAfterCancellation && state.commitOwner) {
+			return [
+				action("start-cancelled-child", "start", state, (next) => {
+					next.startedProviders = [state.commitOwner!]
+					next.childPermit = "held"
+				}),
+			]
+		}
+		return result
+	}
+	if (state.startedProviders.length === 0 && !state.parentQueued) {
+		result.push(
+			action("cancel-handoff", "cancel-handoff", state, (next) => {
+				next.cancelled = true
+				next.publishedTask = undefined
+				if (state.commitOwner) {
+					const childId = childIdFor(state.generation, state.commitOwner)
+					next.children[childId] = interruptDelegatedChild(state.parent, state.children[childId]!)
+				}
+				if (state.prepared) {
+					delete next.children[childIdFor(state.generation, state.prepared.provider)]
+					next.prepared = undefined
+				}
+			}),
+		)
+	}
 	for (const provider of PROVIDERS) {
 		if (!state.parentQueued && !state.claims[provider] && state.commitOwner === undefined) {
 			result.push(
@@ -407,7 +448,11 @@ function transitions(state: ModelState, policy: Policy): Transition[] {
 
 function invariantViolations(state: ModelState): string[] {
 	const violations: string[] = []
-	if (!state.publishedTask) violations.push("observable current task is empty")
+	if (state.cancelled && state.startedProviders.length > 0) violations.push("child started after cancellation")
+	if (state.cancelled && Object.values(state.children).some((child) => child?.status === "active")) {
+		violations.push("cancelled handoff retained an active child")
+	}
+	if (!state.publishedTask && !state.cancelled) violations.push("observable current task is empty")
 	if (state.startedProviders.length > 1) violations.push("multiple child starts for one parent generation")
 	if (state.committedProviders.length > 1) violations.push("multiple provider commits for one parent generation")
 	for (const provider of state.parentQueued ? [] : state.startedProviders) {

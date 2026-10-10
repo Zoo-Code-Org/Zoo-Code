@@ -1365,6 +1365,22 @@ describe("Task persistence", () => {
 			todos: [],
 		}
 
+		it.each(["abort", "dispose"] as const)(
+			"does not delegate when %s wins pending approval",
+			async (cancellation) => {
+				const task = new Task({ provider: mockProvider, apiConfiguration: mockApiConfig, startTask: false })
+				const approval = createDeferred<{ response: "yesButtonClicked" }>()
+				vi.spyOn(task, "ask").mockReturnValue(approval.promise)
+				mockProvider.delegateParentAndOpenChild = vi.fn()
+				const resume = task["resumePendingTaskAction"](createSubtaskAction)
+				if (cancellation === "dispose") await task.dispose()
+				else task.abort = true
+				approval.resolve({ response: "yesButtonClicked" })
+				await resume
+				expect(mockProvider.delegateParentAndOpenChild).not.toHaveBeenCalled()
+			},
+		)
+
 		it("replays an unresolved pending action instead of a generic resume ask", async () => {
 			const messages: ClineMessage[] = [
 				{ ts: 1, type: "say", say: "text", text: "Child" },
@@ -1406,6 +1422,58 @@ describe("Task persistence", () => {
 			)
 			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
 		})
+
+		it.each(["finish_subtask", "create_subtask"] as const)(
+			"reconciles an active task's durable %s error before generic resume",
+			async (kind) => {
+				const action: PendingTaskAction =
+					kind === "finish_subtask"
+						? pendingAction
+						: {
+								kind,
+								actionId: "create-action",
+								approvalText: JSON.stringify({ tool: "newTask" }),
+								mode: "code",
+								message: "Delegate",
+								todos: [],
+							}
+				mockReadTaskMessages.mockResolvedValue([{ ts: 1, type: "say", say: "text", text: "Child" }])
+				mockReadApiMessages.mockResolvedValue([
+					{
+						role: "user",
+						content: [
+							{ type: "tool_result", tool_use_id: action.actionId, content: "Failed", is_error: true },
+						],
+					},
+				])
+				mockProvider.clearPendingTaskAction = vi.fn().mockResolvedValue(true)
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					historyItem: {
+						id: "child-1",
+						number: 1,
+						ts: 1,
+						task: "Child",
+						tokensIn: 0,
+						tokensOut: 0,
+						totalCost: 0,
+						status: "active",
+						pendingAction: action,
+					},
+					startTask: false,
+				})
+				vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" })
+				vi.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop").mockResolvedValue(undefined)
+				const replay = vi.spyOn(getTaskPersistenceAccess(task), "resumePendingTaskAction")
+
+				await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+
+				expect(mockProvider.clearPendingTaskAction).toHaveBeenCalledWith("child-1", action.actionId)
+				expect(replay).not.toHaveBeenCalled()
+				expect(task.ask).toHaveBeenCalledWith("resume_task")
+			},
+		)
 
 		it("replays a create-subtask action for an active historical task without restart settlement", async () => {
 			mockReadTaskMessages.mockResolvedValue([
