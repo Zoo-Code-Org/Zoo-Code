@@ -338,9 +338,7 @@ function resolveAbsolutePath(task: Task, relPathOrAbsolute: string): string {
  */
 function isInside(root: string, target: string): boolean {
 	const relative = path.relative(root, target)
-	return !(
-		relative === "" || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)
-	)
+	return !(relative === "" || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative))
 }
 
 function assertInsideWorkspace(roots: string[], absolutePath: string, displayPath: string): void {
@@ -447,16 +445,16 @@ async function realpathNearest(target: string, displayPath: string): Promise<str
 }
 
 /**
-	 * The canonical identity of a write target, for a caller that needs to bind an
-	 * approval to it. Call this BEFORE asking the user: the guard compares its
-	 * pre-publish resolution against this value, so a name repointed in between is
-	 * refused. A target that does not exist yet is tolerated the way the guard tolerates
-	 * it (a create makes the missing components); any other resolution failure throws a
-	 * GuardRejectedError instead of falling back to the lexical path.
-	 */
-	export async function canonicalizeForApproval(target: string, displayPath?: string): Promise<string> {
-		return realpathNearest(target, displayPath ?? target)
-	}
+ * The canonical identity of a write target, for a caller that needs to bind an
+ * approval to it. Call this BEFORE asking the user: the guard compares its
+ * pre-publish resolution against this value, so a name repointed in between is
+ * refused. A target that does not exist yet is tolerated the way the guard tolerates
+ * it (a create makes the missing components); any other resolution failure throws a
+ * GuardRejectedError instead of falling back to the lexical path.
+ */
+export async function canonicalizeForApproval(target: string, displayPath?: string): Promise<string> {
+	return realpathNearest(target, displayPath ?? target)
+}
 
 /**
  * Guarded write entry point.
@@ -599,10 +597,22 @@ export async function guardedWrite(
 
 			if (obs === undefined) {
 				// Never read: only an absent target may be created.
-				publishedToken = await createIfAbsent(absolutePath, content, displayPath, () => task.abort, verifyTarget)
+				publishedToken = await createIfAbsent(
+					absolutePath,
+					content,
+					displayPath,
+					() => task.abort,
+					verifyTarget,
+				)
 			} else if (absent) {
 				// A "create" on a file that vanished after the read recreates it.
-				publishedToken = await createIfAbsent(absolutePath, content, displayPath, () => task.abort, verifyTarget)
+				publishedToken = await createIfAbsent(
+					absolutePath,
+					content,
+					displayPath,
+					() => task.abort,
+					verifyTarget,
+				)
 			} else {
 				// The version recorded at read time must still match the on-disk
 				// token.
