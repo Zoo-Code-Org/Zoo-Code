@@ -1,9 +1,14 @@
+import { RooCodeEventName } from "@roo-code/types"
+
 import { Task } from "../Task"
 
 type QueueTaskTestAccess = {
 	say: Task["say"]
 	saveClineMessages: () => Promise<boolean>
-	addToClineMessages: () => Promise<void>
+	addToClineMessages: (message?: unknown) => Promise<void>
+	clineMessages: unknown[]
+	taskId: string
+	emit: (event: string, ...args: unknown[]) => boolean
 	lastMessageTs?: number
 	abort: boolean
 }
@@ -378,6 +383,162 @@ describe("Task.ask queued message drain", () => {
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+
+	describe("API-origin queued input", () => {
+		it.each([
+			["command", "npm publish"],
+			["use_mcp_server", '{"server_name":"fs","tool_name":"write_file"}'],
+			["tool", JSON.stringify({ tool: "readFile", path: "src/a.ts" })],
+			["tool", "not-json"],
+		] as const)(
+			"does not approve a protected %s ask from API-origin input queued before the ask",
+			async (type, text) => {
+				const task = await createTask()
+				task.messageQueueService.addMessage("Steer the next turn", undefined, { origin: "api" })
+
+				const askPromise = task.ask(type, text, false)
+				setTimeout(() => task.denyAsk(), 0)
+				const result = await askPromise
+
+				expect(result.response).not.toBe("yesButtonClicked")
+				expect(result.response).toBe("noButtonClicked")
+				expect(task.messageQueueService.messages).toHaveLength(1)
+				expect(task.messageQueueService.claimNextMessage()?.text).toBe("Steer the next turn")
+			},
+		)
+
+		it("does not approve a protected ask from API-origin input arriving while the ask waits", async () => {
+			const task = await createTask()
+			const askPromise = task.ask("command", "npm publish", false)
+			await vi.waitFor(() => expect(getQueueTaskTestAccess(task).lastMessageTs).toBeDefined())
+
+			task.messageQueueService.addMessage("Late steering", undefined, { origin: "api" })
+			setTimeout(() => task.denyAsk(), 150)
+			const result = await askPromise
+
+			expect(result.response).toBe("noButtonClicked")
+			expect(task.messageQueueService.messages).toHaveLength(1)
+			expect(task.messageQueueService.claimNextMessage()?.text).toBe("Late steering")
+		})
+
+		it("still answers conversational asks from API-origin input", async () => {
+			const task = await createTask()
+			task.messageQueueService.addMessage("Use the queue module", undefined, { origin: "api" })
+
+			const result = await task.ask("followup", "Where should this go?", false)
+
+			expect(result).toMatchObject({ response: "messageResponse", text: "Use the queue module" })
+			expect(task.messageQueueService.isEmpty()).toBe(true)
+		})
+
+		it("emits TaskInteractive after the status delay when API-origin input cannot answer a protected ask", async () => {
+			vi.useFakeTimers()
+			try {
+				const task = await createTask()
+				const access = getQueueTaskTestAccess(task)
+				const taskId = "status-regression"
+				access.taskId = taskId
+				access.addToClineMessages = vi.fn(async (message: unknown) => {
+					access.clineMessages.push(message)
+				})
+				const emit = access.emit
+				task.messageQueueService.addMessage("Steer the next turn", undefined, { origin: "api" })
+
+				const askPromise = task.ask("command", "npm publish", false)
+				await vi.advanceTimersByTimeAsync(2_000)
+
+				expect(emit).toHaveBeenCalledTimes(1)
+				expect(emit).toHaveBeenCalledWith(RooCodeEventName.TaskInteractive, taskId)
+				expect(task.messageQueueService.messages).toMatchObject([
+					{ text: "Steer the next turn", origin: "api" },
+				])
+
+				task.denyAsk()
+				await vi.advanceTimersByTimeAsync(1_000)
+				const result = await askPromise
+
+				expect(result.response).toBe("noButtonClicked")
+				expect(result.text).toBeUndefined()
+				expect(task.messageQueueService.messages).toMatchObject([
+					{ text: "Steer the next turn", origin: "api" },
+				])
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("emits TaskInteractive when API-origin input precedes a webview message that could answer", async () => {
+			vi.useFakeTimers()
+			try {
+				const task = await createTask()
+				const access = getQueueTaskTestAccess(task)
+				const taskId = "status-regression-fifo"
+				access.taskId = taskId
+				access.addToClineMessages = vi.fn(async (message: unknown) => {
+					access.clineMessages.push(message)
+				})
+				const emit = access.emit
+				task.messageQueueService.addMessage("Steer the next turn", undefined, { origin: "api" })
+				task.messageQueueService.addMessage("Approve this one")
+
+				const askPromise = task.ask("command", "npm publish", false)
+				await vi.advanceTimersByTimeAsync(2_000)
+
+				expect(emit).toHaveBeenCalledWith(RooCodeEventName.TaskInteractive, taskId)
+
+				task.denyAsk()
+				await vi.advanceTimersByTimeAsync(1_000)
+				const result = await askPromise
+
+				expect(result.response).toBe("noButtonClicked")
+				expect(task.messageQueueService.messages.map((message) => message.text)).toEqual([
+					"Steer the next turn",
+					"Approve this one",
+				])
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("does not emit TaskInteractive when webview-origin input answers the protected ask", async () => {
+			const task = await createTask()
+			const access = getQueueTaskTestAccess(task)
+			const taskId = "status-drained"
+			access.taskId = taskId
+			const emit = access.emit
+			task.messageQueueService.addMessage("Approval context")
+
+			const result = await task.ask("command", "npm publish", false)
+
+			expect(result).toMatchObject({ response: "yesButtonClicked", text: "Approval context" })
+			expect(task.messageQueueService.isEmpty()).toBe(true)
+			expect(emit).not.toHaveBeenCalledWith(RooCodeEventName.TaskInteractive, taskId)
+		})
+
+		it.each([
+			["resume_task", RooCodeEventName.TaskResumable],
+			["completion_result", RooCodeEventName.TaskIdle],
+		] as const)(
+			"still answers %s from API-origin input without emitting its status event",
+			async (type, statusEvent) => {
+				const task = await createTask()
+				const access = getQueueTaskTestAccess(task)
+				const taskId = "status-mapping"
+				access.taskId = taskId
+				const emit = access.emit
+				task.messageQueueService.addMessage("Continue with this", undefined, { origin: "api" })
+
+				const result = await task.ask(type, "Done", false)
+
+				expect(result).toMatchObject({ response: "messageResponse", text: "Continue with this" })
+				expect(emit).not.toHaveBeenCalledWith(statusEvent, taskId)
+				if (result.queuedMessageId) {
+					task.messageQueueService.removeMessage(result.queuedMessageId)
+				}
+				expect(task.messageQueueService.isEmpty()).toBe(true)
+			},
+		)
 	})
 
 	it("releases durable queued feedback when the task aborts during retry backoff", async () => {

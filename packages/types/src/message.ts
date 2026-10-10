@@ -372,6 +372,12 @@ export const queuedMessageSchema = z.object({
 	id: z.string(),
 	text: z.string(),
 	images: z.array(z.string()).optional(),
+	/**
+	 * Where the message was queued from. Absent means the interactive
+	 * webview, whose queued input may answer approval asks. "api" input is
+	 * conversational steering and never answers an approval ask.
+	 */
+	origin: z.enum(["webview", "api"]).optional(),
 })
 
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>

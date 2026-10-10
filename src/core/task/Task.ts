@@ -210,7 +210,16 @@ export function isBlanketDenyEngaged(
 	)
 }
 
-function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolution | undefined {
+function queuedResponseForAsk(
+	type: ClineAsk,
+	text: string | undefined,
+	origin: QueuedMessage["origin"],
+): QueuedAskResolution | undefined {
+	// API-origin queued input is conversational steering, not an approval.
+	// Returning undefined keeps the message queued for the next turn and
+	// leaves the ask to auto-approval settings or an explicit decision.
+	const canApprove = origin !== "api"
+
 	if (type === "command_output") {
 		return undefined
 	}
@@ -223,12 +232,13 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 			}
 		} catch {
 			// Malformed tool asks retain the existing approve-with-feedback behavior.
+			return canApprove ? { response: "yesButtonClicked", requiresDurableAck: false } : undefined
 		}
 
-		return { response: "yesButtonClicked", requiresDurableAck: false }
+		return canApprove ? { response: "yesButtonClicked", requiresDurableAck: false } : undefined
 	}
 	if (type === "command" || type === "use_mcp_server") {
-		return { response: "yesButtonClicked", requiresDurableAck: false }
+		return canApprove ? { response: "yesButtonClicked", requiresDurableAck: false } : undefined
 	}
 
 	return { response: "messageResponse", requiresDurableAck: type === "completion_result" }
@@ -1319,9 +1329,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * blanket-denied (it answers that denial, not the current ask), and
 	 * `hasUnclaimed()` replaces the length-only `isEmpty()`, which reports a
 	 * queue containing nothing but claims as available for a new consumer.
-	 * `isMessageQueued`/`isStatusMutable` keep `isEmpty()` semantics on purpose:
-	 * flipping those would re-enable interactive prompt timers whenever a claim
-	 * is outstanding.
+	 * `isStatusMutable` does not read queue length: it keys on whether a claimed
+	 * message will answer the ask, so a claim that answers suppresses the
+	 * interactive prompt timers and a released claim leaves them armed.
 	 */
 	private mayDrainQueuedMessageForAsk(): boolean {
 		return !this.blanketDeniedCommandThisTurn && this.messageQueueService.hasUnclaimed()
@@ -1864,7 +1874,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			!this.mayDrainQueuedMessageForAsk()
 				? undefined
 				: this.messageQueueService.claimNextMessage()
-		const queuedAskResolution = queuedMessage ? queuedResponseForAsk(type, text) : undefined
+		const queuedAskResolution = queuedMessage ? queuedResponseForAsk(type, text, queuedMessage.origin) : undefined
+
+		if (queuedMessage && !queuedAskResolution) {
+			// API-origin input cannot answer this ask. Release the claim so the
+			// message stays queued as the next conversational turn.
+			this.messageQueueService.releaseMessage(queuedMessage.id)
+		}
+
 		// `this.cwd`, not `provider.cwd`:
 		// The path inside `text` was made relative to this task's workspace,
 		// which for a resumed or child task need not be the one the provider
@@ -2037,20 +2054,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// The state is mutable if the message is complete and the task will
 		// block (via the `pWaitFor`).
 		const isBlocking = !(this.askResponse !== undefined || this.lastMessageTs !== askTs)
-		const isMessageQueued = !this.messageQueueService.isEmpty()
 		// Keep queued user messages intact during command_output asks. Those asks
 		// are terminal flow-control, not conversational turns.
 		const shouldDrainQueuedMessageForAsk = type !== "command_output"
-		const isStatusMutable = !partial && isBlocking && !isMessageQueued && approval.decision === "ask"
+		// The FIFO drain answers this ask only from the claimed head message.
+		// API-origin steering released above stays queued for the next turn, so
+		// queue emptiness cannot decide whether the ask waits for a response.
+		const isStatusMutable =
+			!partial && isBlocking && !(queuedMessage && queuedAskResolution) && approval.decision === "ask"
 
 		let queuedMessageId: string | undefined
 		// Arm the interactive/resumable/idle status timers for this ask: the
 		// single source of that arm, shared between the queue-free case and the
 		// claim-gated and queued-release paths below. A gated or released claim
-		// keeps the message in the queue, so `isMessageQueued` stays true and
-		// `isStatusMutable` — which requires an empty queue — stays false while
-		// the ask waits for the user; arming only from `isStatusMutable` would
-		// leave hands-free/API consumers seeing `Running` with no
+		// keeps the message in the queue, but `isStatusMutable` no longer reads
+		// queue length: with no claimed message answering the ask it stays true
+		// while the ask waits for the user, and arming only from the drain sites
+		// would leave hands-free/API consumers seeing `Running` with no
 		// `TaskInteractive`/`interactionRequired` for a prompt that is in fact
 		// pending. Idempotent: several arm sites can fire for one ask (e.g. the
 		// queue-free arm, then a drain-site release), and a second arm would
@@ -2188,13 +2208,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			} else {
 				queuedMessageId = this.handleQueuedAskResponse(queuedMessage, queuedAskResolution)
 			}
-		} else if (shouldDrainQueuedMessageForAsk && isMessageQueued) {
-			// The claim gate (per-turn latch, or blanket deny engaged for a command
-			// ask) left the queued message untouched. If the policy still leaves the
-			// prompt pending, the non-empty queue keeps `isStatusMutable` false, so
-			// the interactive arm must run from here — the same reason a release
-			// re-arms. For an auto-answered ask the arm's pending check declines.
-			armAskStatusTimers()
 		}
 
 		// At most one drain-site policy re-check is in flight per ask; the
@@ -2230,9 +2243,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				)
 				if (!this.abort && this.askResponse === undefined && this.lastMessageTs === askTs) {
 					queuedMessageId = this.applyQueuedCommandPolicyAction(action, message, resolution)
-					// A "release" outcome leaves the ask pending while the queue stays
-					// non-empty, so the arm that `isStatusMutable` gates — computed
-					// once, before the claim — must run here.
+					// A "release" outcome leaves the ask pending, and `isStatusMutable`
+					// — computed once, before the claim — still counts the message as
+					// answering the ask, so the arm must run here.
 					armAskStatusTimers()
 				}
 			} finally {
@@ -2271,7 +2284,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						this.mayDrainQueuedMessageForAsk()
 					) {
 						const message = this.messageQueueService.claimNextMessage()
-						const resolution = message ? queuedResponseForAsk(type, text) : undefined
+						const resolution = message ? queuedResponseForAsk(type, text, message.origin) : undefined
 						if (message && resolution) {
 							if (type === "command") {
 								// Claim first, then verify the policy off-predicate: a
@@ -2291,6 +2304,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							} else {
 								queuedMessageId = this.handleQueuedAskResponse(message, resolution)
 							}
+						} else if (message) {
+							// API-origin input cannot answer this ask. Release the
+							// claim so the message stays queued for the next turn.
+							this.messageQueueService.releaseMessage(message.id)
 						}
 					}
 

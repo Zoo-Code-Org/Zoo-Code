@@ -129,6 +129,8 @@ export interface ExtensionMessage {
 		| "switchTab"
 		| "toggleAutoApprove"
 	invoke?: "newChat" | "sendMessage" | "primaryButtonClick" | "secondaryButtonClick" | "setChatBoxMessage"
+	/** Origin of an `invoke: "sendMessage"` request. Absent means the interactive webview. */
+	origin?: QueuedMessage["origin"]
 	/**
 	 * Partial state updates are allowed to reduce message size (e.g. omit large fields like taskHistory).
 	 * The webview is responsible for merging.
@@ -662,6 +664,8 @@ export interface WebviewMessage {
 	askResponse?: ClineAskResponse
 	apiConfiguration?: ProviderSettings
 	images?: string[]
+	/** Origin of a `queueMessage` request. Absent means the interactive webview. */
+	origin?: QueuedMessage["origin"]
 	bool?: boolean
 	value?: number
 	stepIndex?: number
