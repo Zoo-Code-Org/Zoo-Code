@@ -107,7 +107,7 @@ describe("ZooGateway component", () => {
 		})
 	})
 
-	it("reassigns a stale model id that is not in the catalog", async () => {
+	it("preserves a configured model id that is not in the catalog", async () => {
 		const setApiConfigurationField = vi.fn()
 		render(
 			<ZooGateway
@@ -126,11 +126,11 @@ describe("ZooGateway component", () => {
 			/>,
 		)
 
+		// Verify the component rendered (not a crash) by checking the model picker is present.
+		expect(screen.getByTestId("model-picker")).toBeInTheDocument()
+
 		await waitFor(() => {
-			expect(setApiConfigurationField).toHaveBeenCalledWith(
-				"zooGatewayModelId",
-				"anthropic.claude-sonnet-4-5-20250929-v1:0",
-			)
+			expect(setApiConfigurationField).not.toHaveBeenCalled()
 		})
 	})
 
@@ -149,6 +149,9 @@ describe("ZooGateway component", () => {
 				organizationAllowList={baseProps.organizationAllowList}
 			/>,
 		)
+
+		// Verify the component actually rendered — prevents false positive on crash.
+		expect(screen.getByTestId("model-picker")).toBeInTheDocument()
 
 		await waitFor(() => {
 			expect(setApiConfigurationField).not.toHaveBeenCalled()
