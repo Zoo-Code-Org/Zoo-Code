@@ -16,13 +16,14 @@ import type { ReadFileParams, ReadFileMode, ReadFileToolParams, FileEntry, LineR
 import { isLegacyReadFileParams, type ClineSayTool } from "@roo-code/types"
 
 import { Task } from "../task/Task"
+import { versionTokenOfStat } from "../../utils/versionToken"
 import { formatResponse } from "../prompts/responses"
 import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import { getReadablePath } from "../../utils/path"
 import { extractTextFromFile, addLineNumbers, getSupportedBinaryFormats } from "../../integrations/misc/extract-text"
 import { readWithIndentation, readWithSlice } from "../../integrations/misc/indentation-reader"
-import { DEFAULT_LINE_LIMIT } from "../prompts/tools/native-tools/read_file"
+import { DEFAULT_LINE_LIMIT, MAX_LINE_LENGTH } from "../prompts/tools/native-tools/read_file"
 import type { ToolUse, PushToolResult } from "../../shared/tools"
 
 import {
@@ -214,14 +215,49 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					// Read text file content with lossy UTF-8 conversion
 					// Reading as Buffer first allows graceful handling of non-UTF8 bytes
 					// (they become U+FFFD replacement characters instead of throwing)
+					// A2 (epic #1375): capture the on-disk token before the read so a mutation
+					// landing mid-read is detected by the post-read stat below.
+					const preReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
 					const buffer = await fs.readFile(fullPath)
 					const fileContent = buffer.toString("utf-8")
-					const result = this.processTextFile(fileContent, entry)
+					// A lossy decode is not the whole file: the model never saw those bytes.
+					const lossyDecode = !Buffer.from(fileContent).equals(buffer)
+					// S4b follow-up (#46 / epic #1375): processTextFile reports whether the
+					// returned content is the whole file; the observation below records that
+					// scope so the write guard can deny full-file updates built on a partial view.
+					const processed = this.processTextFile(fileContent, entry)
 
 					await task.fileContextTracker.trackFileContext(relPath, "read_tool" as RecordSource)
 
+					// A2 (plan #33 / epic #1375): record the observed on-disk version for the future write guard.
+					// The token is captured before AND after the read; the target is observed only
+					// when both match — a mutation between the two stats means the content the model
+					// received is not the on-disk state, and observing it would let a later write
+					// match a token the model never saw. A stat failure leaves the target
+					// unobserved and never fails the read.
+					// A task that was cancelled or disposed while this read was awaiting I/O must
+					// not record an observation: disposeOnce() has retired the registry, and the
+					// content this turn produced will never be acted on. Skipping also drops the
+					// post-read stat work for a task that no longer has a consumer.
+					if (!task.abort) {
+						const postReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
+						// Re-checked after the await: the guard above cannot see a cancellation
+						// that lands while the stat is in flight, and that read belongs to a run
+						// that will never act on it.
+						if (preReadStats && postReadStats && !task.abort) {
+							const preReadToken = versionTokenOfStat(preReadStats)
+							if (preReadToken === versionTokenOfStat(postReadStats)) {
+								task.observationRegistry.observe(
+									fullPath,
+									preReadToken,
+									processed.complete && !lossyDecode,
+								)
+							}
+						}
+					}
+
 					updateFileResult(relPath, {
-						nativeContent: `File: ${relPath}\n${result}`,
+						nativeContent: `File: ${relPath}\n${processed.content}`,
 					})
 				} catch (error) {
 					const errorMsg = error instanceof Error ? error.message : String(error)
@@ -265,8 +301,14 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 
 	/**
 	 * Process a text file according to the requested mode.
+	 *
+	 * Returns the content string plus whether that content is the complete
+	 * file (S4b follow-up #46 / epic #1375): slice mode is complete only
+	 * when it starts at line 1, returns every line, and was not truncated;
+	 * indentation mode is never complete because it returns semantic blocks
+	 * of the file, not the file itself.
 	 */
-	private processTextFile(content: string, entry: InternalFileEntry): string {
+	private processTextFile(content: string, entry: InternalFileEntry): { content: string; complete: boolean } {
 		const mode = entry.mode || "slice"
 
 		if (mode === "indentation") {
@@ -299,7 +341,8 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				output += `\n\nIncluded ranges: ${rangeStr} (total: ${result.totalLines} lines)`
 			}
 
-			return output
+			// Indentation mode returns semantic blocks: never a complete file view.
+			return { content: output, complete: false }
 		}
 
 		// Slice mode (default): simple offset/limit reading
@@ -322,11 +365,27 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 	To read more: Use the read_file tool with offset=${nextOffset} and limit=${limit}.
 	
 	${result.content}`
+			if (result.hasClippedLines) {
+				// The slice cut lines off and also clipped long lines inside it, so both
+				// notices belong to the response.
+				output += `\nNote: Some lines in this view exceed ${MAX_LINE_LENGTH} characters and were clipped in this view.`
+			}
+		} else if (result.hasClippedLines) {
+			// Every line was returned, so there is no later offset to read: report the
+			// clipping without a next-offset hint, and keep the read incomplete so a
+			// full-file replacement cannot be built from a clipped line.
+			output = `IMPORTANT: Some lines exceed ${MAX_LINE_LENGTH} characters and were clipped in this view. ${offset1 === 1 ? "The file was read in full" : `The returned slice starts at line ${offset1} and reaches the end of the file`}, but the clipped lines were not shown in full.\n${result.content}`
 		} else if (result.returnedLines === 0) {
 			output = "Note: File is empty"
 		}
 
-		return output
+		// Complete only when the slice starts at line 1, returned every line, and
+		// showed every line in full (returnedLines === totalLines follows from the
+		// first two conditions): a partial start, a truncated tail, or a clipped
+		// line means the model did not see the whole file.
+		const complete = offset0 === 0 && !result.wasTruncated && !result.hasClippedLines
+
+		return { content: output, complete }
 	}
 
 	/**
@@ -768,9 +827,20 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				}
 
 				// Read text file
-				const rawContent = await fs.readFile(fullPath, "utf8")
+				// A2 (epic #1375): capture the on-disk token before the read so a mutation
+				// landing mid-read is detected by the post-read stat below.
+				const preReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
+				const rawBuffer = await fs.readFile(fullPath)
+				const rawContent = rawBuffer.toString("utf-8")
+				// Same contract: a lossy decode is a partial view.
+				const lossyDecode = !Buffer.from(rawContent).equals(rawBuffer)
 
 				// Handle line ranges if specified
+				// S4b follow-up (#46 / epic #1375): a line-range read returns only the requested
+				// ranges, and a slice truncated to DEFAULT_LINE_LIMIT returns only the head of
+				// the file — record such observations as partial so the write guard denies a
+				// full-file update built on them.
+				let readComplete = false
 				let content: string
 				if (entry.lineRanges && entry.lineRanges.length > 0) {
 					const lines = rawContent.split("\n")
@@ -790,8 +860,16 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					// Read with default limits using slice mode
 					const result = readWithSlice(rawContent, 0, DEFAULT_LINE_LIMIT)
 					content = result.content
+					readComplete = !result.wasTruncated && !result.hasClippedLines
 					if (result.wasTruncated) {
 						content += `\n\n[File truncated: showing ${result.returnedLines} of ${result.totalLines} total lines]`
+						if (result.hasClippedLines) {
+							// Both notices: the slice was truncated and a line inside it was
+							// clipped.
+							content += `\n\n[Some lines exceed the per-line length cap and were clipped in this view]`
+						}
+					} else if (result.hasClippedLines) {
+						content += `\n\n[Some lines exceed the per-line length cap and were clipped in this view]`
 					}
 				}
 
@@ -799,6 +877,24 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 
 				// Track file in context
 				await task.fileContextTracker.trackFileContext(relPath, "read_tool")
+
+				// A2 (plan #33 / epic #1375): mirror the native path — record the observed
+				// on-disk version so legacy-format reads also feed the future write guard.
+				// Observe only when the pre-read and post-read tokens match (a mutation between
+				// them means the returned content is not the on-disk state). A stat failure
+				// leaves the target unobserved and never fails the read.
+				// Same contract as the native path: an aborted or disposed task records nothing.
+				if (!task.abort) {
+					const postReadStats = await fs.stat(fullPath, { bigint: true }).catch(() => undefined)
+					// Re-checked after the await, as on the native path: a cancel landing
+					// during the stat must still record nothing.
+					if (preReadStats && postReadStats && !task.abort) {
+						const preReadToken = versionTokenOfStat(preReadStats)
+						if (preReadToken === versionTokenOfStat(postReadStats)) {
+							task.observationRegistry.observe(fullPath, preReadToken, readComplete && !lossyDecode)
+						}
+					}
+				}
 			} catch (error) {
 				const errorMsg = error instanceof Error ? error.message : String(error)
 				results.push(`File: ${relPath}\nError: ${errorMsg}`)

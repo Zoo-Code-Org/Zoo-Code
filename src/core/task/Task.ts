@@ -111,6 +111,7 @@ import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
 import { ToolRepetitionDetector } from "../tools/ToolRepetitionDetector"
 import { restoreTodoListForTask } from "../tools/UpdateTodoListTool"
 import { FileContextTracker } from "../context-tracking/FileContextTracker"
+import { ObservationRegistry } from "./observationRegistry"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
@@ -285,6 +286,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	readonly instanceId: string
 	readonly metadata: TaskMetadata
+
+	// The observed on-disk version of each file this task has read. Declared here so the
+	// read tools can record it; a write guard later compares a token against this registry.
+	readonly observationRegistry = new ObservationRegistry()
 
 	todoList?: TodoItem[]
 
@@ -3490,6 +3495,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		} catch (error) {
 			console.error("Error removing event listeners:", error)
 		}
+
+		// A disposed task is no longer authoritative for what it read. The registry holds
+		// version tokens captured while the task was alive, and a disposed task can still be
+		// reachable through a parent/subtask reference; a guarded write must not accept one of
+		// those tokens for a file this task has not re-read since. Clearing also stops a long
+		// task from pinning every file it ever read.
+		this.observationRegistry.close()
 
 		// Release any terminals associated with this task.
 		try {
