@@ -710,9 +710,9 @@ describe("ClineProvider - Sticky Mode", () => {
 				return Promise.resolve()
 			})
 
-			await expect(provider["handleModeSwitchUnlocked"]("architect", mockTask, controller.signal)).rejects.toThrow(
-				/ModeSwitchInconsistentError|could not restore the previous mode/,
-			)
+			await expect(
+				provider["handleModeSwitchUnlocked"]("architect", mockTask, controller.signal),
+			).rejects.toThrow(/ModeSwitchInconsistentError|could not restore the previous mode/)
 		})
 
 		it("keeps the cancellation result when the abort rollback write itself fails", async () => {
