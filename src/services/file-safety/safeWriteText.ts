@@ -143,12 +143,7 @@ export class OrphanedBackupError extends Error {
 	}
 }
 
-function _orphanedBackupMessage(
-	targetPath: string,
-	backupPath: string,
-	cause: unknown,
-	cleanupError: unknown,
-): string {
+function _orphanedBackupMessage(targetPath: string, backupPath: string, cause: unknown, cleanupError: unknown): string {
 	const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 	return (
 		`safeWriteText: could not create the backup of ${targetPath} (${reason(cause)}), and the ` +
@@ -206,7 +201,11 @@ async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunne
 
 /** Restore a DACL dump onto *dirPath* on Windows.
  * Returns whether icacls succeeded; the caller reports a failure. */
-async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<boolean> {
+async function _restoreDaclWindows(
+	dirPath: string,
+	dumpPath: string,
+	execFileRunner?: typeof execFile,
+): Promise<boolean> {
 	const runner = execFileRunner ?? execFile
 	try {
 		await new Promise<void>((resolve, reject) => {
@@ -351,7 +350,9 @@ export async function safeWriteText(
 	// handler reports a leftover backup copy, so both sides can reach it.
 	const warn = (message: string) => {
 		const report = (label: string, error: unknown) => {
-			console.warn(`safeWriteText: onWarning callback ${label}: ${error instanceof Error ? error.message : String(error)}`)
+			console.warn(
+				`safeWriteText: onWarning callback ${label}: ${error instanceof Error ? error.message : String(error)}`,
+			)
 		}
 		try {
 			const sink = options?.onWarning ?? ((m: string) => console.warn(m))
@@ -369,7 +370,6 @@ export async function safeWriteText(
 			report("failed", error)
 		}
 	}
-
 
 	// Resolve the symlink referent (see resolvePublishTarget).
 	const targetPath = await resolvePublishTarget(absoluteFilePath)
