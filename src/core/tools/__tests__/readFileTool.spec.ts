@@ -23,7 +23,6 @@ import type { Task } from "../../task/Task"
 import { isBinaryFile } from "isbinaryfile"
 
 import { readFileTool, ReadFileTool } from "../ReadFileTool"
-import type { Task } from "../../task/Task"
 import { ObservationRegistry } from "../../task/observationRegistry"
 import { computeVersionToken } from "../../../utils/versionToken"
 import { formatResponse } from "../../prompts/responses"
