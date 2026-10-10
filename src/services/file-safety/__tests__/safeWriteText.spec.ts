@@ -292,20 +292,20 @@ describe("safeWriteText", () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 		vi.mocked(fsSync.openSync).mockReturnValue(1)
-					// Only the restore fails, so a warning is delivered and the restrictive fallback
-			// (drop inheritance, grant the current user, read the DACL back) verifies.
-			vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
-				const argv = args as unknown as string[]
-				const callback = cb as unknown as (err: unknown, stdout: string, stderr: string) => void
-				if (argv[1] === "/restore") {
-					callback(new Error("icacls restore error"), "", "")
-				} else if (argv[1] === undefined) {
-					callback(null, `${argv[0]} ${os.userInfo().username}:(F)`, "")
-				} else {
-					callback(null, "", "")
-				}
-				return fakeChild
-			})
+		// Only the restore fails, so a warning is delivered and the restrictive fallback
+		// (drop inheritance, grant the current user, read the DACL back) verifies.
+		vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
+			const argv = args as unknown as string[]
+			const callback = cb as unknown as (err: unknown, stdout: string, stderr: string) => void
+			if (argv[1] === "/restore") {
+				callback(new Error("icacls restore error"), "", "")
+			} else if (argv[1] === undefined) {
+				callback(null, `${argv[0]} ${os.userInfo().username}:(F)`, "")
+			} else {
+				callback(null, "", "")
+			}
+			return fakeChild
+		})
 		const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {})
 
 		await expect(
@@ -320,9 +320,7 @@ describe("safeWriteText", () => {
 		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
 		// The rejection is reported through the fallback sink rather than surfacing as an
 		// unhandled rejection.
-		expect(consoleWarn).toHaveBeenCalledWith(
-			expect.stringContaining("onWarning callback rejected"),
-		)
+		expect(consoleWarn).toHaveBeenCalledWith(expect.stringContaining("onWarning callback rejected"))
 		consoleWarn.mockRestore()
 	})
 
@@ -415,7 +413,9 @@ describe("safeWriteText", () => {
 				return 1
 			})
 
-			await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).rejects.toThrow(PostCommitDurabilityError)
+			await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).rejects.toThrow(
+				PostCommitDurabilityError,
+			)
 
 			// The commit rename already published the new content, and the backup was only
 			// ever a copy: the target was never moved, so there is nothing to rename back.
@@ -490,7 +490,9 @@ describe("safeWriteText", () => {
 			})
 			expect(seedOpen).toBeDefined()
 			expect(seedOpen?.[2]).toBe(0o600)
-			const seedOrder = vi.mocked(fsSync.openSync).mock.invocationCallOrder[vi.mocked(fsSync.openSync).mock.calls.indexOf(seedOpen!)]
+			const seedOrder = vi.mocked(fsSync.openSync).mock.invocationCallOrder[
+				vi.mocked(fsSync.openSync).mock.calls.indexOf(seedOpen!)
+			]
 			expect(seedOrder).toBeLessThan(vi.mocked(fs.copyFile).mock.invocationCallOrder[0])
 
 			// The chmod keeps a copied read-only attribute (Windows) from breaking the fsync
@@ -516,14 +518,18 @@ describe("safeWriteText", () => {
 			// known to be durable, so the write must not proceed on a half-written backup.
 			// The staged temp is fsynced earlier with a different handle, so target the
 			// backup's fd specifically.
-			vi.mocked(fsSync.openSync).mockImplementation((p: unknown) => (String(p).includes("safeWriteText.bak_") ? 7 : 1))
+			vi.mocked(fsSync.openSync).mockImplementation((p: unknown) =>
+				String(p).includes("safeWriteText.bak_") ? 7 : 1,
+			)
 			vi.mocked(fsSync.fsyncSync).mockImplementation((fd: unknown) => {
 				if (fd === 7) {
 					throw new Error("EIO")
 				}
 			})
 
-			await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).rejects.toThrow("EIO")
+			await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).rejects.toThrow(
+				"EIO",
+			)
 
 			// Nothing was published, and the incomplete copy is removed rather than left
 			// next to the target looking like a usable backup.
@@ -547,7 +553,9 @@ describe("safeWriteText", () => {
 			// succeeded, or this file outlives the failed write beside the target.
 			vi.mocked(fs.copyFile).mockRejectedValue(Object.assign(new Error("EIO"), { code: "EIO" }))
 
-			await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).rejects.toThrow("EIO")
+			await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).rejects.toThrow(
+				"EIO",
+			)
 
 			// Nothing was published, and the half-written copy is removed rather than left
 			// next to the target looking like a backup someone could restore.
@@ -591,12 +599,22 @@ describe("safeWriteText", () => {
 			// release a descriptor a concurrent open has meanwhile been handed. The failure is
 			// reported where it happened, and the backup - which is what this descriptor was for -
 			// is complete, so the write itself is not failed by it.
-			await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).resolves.toBeUndefined()
+			await expect(
+				safeWriteText(targetPath, "new data", { backup: true, platform: "linux" }),
+			).resolves.toBeUndefined()
 
-			const seedAttempts = vi.mocked(fsSync.closeSync).mock.calls.filter((call) => Number(call[0]) === seedFd).length
+			const seedAttempts = vi
+				.mocked(fsSync.closeSync)
+				.mock.calls.filter((call) => Number(call[0]) === seedFd).length
 			expect(seedAttempts).toBe(1)
-			expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("backup seed descriptor for"), expect.anything())
-			expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("backup seed descriptor"), expect.anything())
+			expect(consoleError).toHaveBeenCalledWith(
+				expect.stringContaining("backup seed descriptor for"),
+				expect.anything(),
+			)
+			expect(consoleError).toHaveBeenCalledWith(
+				expect.stringContaining("backup seed descriptor"),
+				expect.anything(),
+			)
 			// Every descriptor this write opened was handed to closeSync: no handle outlives the
 			// failed backup.
 			for (const fd of openedFds) {
@@ -682,50 +700,50 @@ describe("safeWriteText", () => {
 			expect(execFile).toHaveBeenCalledTimes(1)
 		})
 
-	it("win32: refuses the write without an onWarning notice when the DACL cannot be saved", async () => {
-		const targetPath = "/tmp/test-dir/target.txt"
-		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-		vi.mocked(fsSync.openSync).mockReturnValue(1)
-		vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
-			if (typeof cb === "function") cb(new Error("icacls error"), "", "")
-			return fakeChild
+		it("win32: refuses the write without an onWarning notice when the DACL cannot be saved", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+				if (typeof cb === "function") cb(new Error("icacls error"), "", "")
+				return fakeChild
+			})
+			const warnings: string[] = []
+
+			// The refusal carries what the warning used to say: the caller learns why the save did
+			// not happen, and the target keeps the ACL it already had.
+			await expect(
+				safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) }),
+			).rejects.toThrow(DaclCaptureError)
+			expect(fs.rename).not.toHaveBeenCalled()
+			expect(warnings).toHaveLength(0)
 		})
-		const warnings: string[] = []
 
-		// The refusal carries what the warning used to say: the caller learns why the save did
-		// not happen, and the target keeps the ACL it already had.
-		await expect(
-			safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) }),
-		).rejects.toThrow(DaclCaptureError)
-		expect(fs.rename).not.toHaveBeenCalled()
-		expect(warnings).toHaveLength(0)
-	})
+		it("win32: reports when the target cannot be checked for DACL preservation", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// The target exists but is not readable: that is not "absent", and skipping DACL
+			// preservation has to be visible.
+			vi.mocked(fs.access).mockImplementation(async (p) => {
+				if (String(p) === targetPath) {
+					throw Object.assign(new Error("EACCES"), { code: "EACCES" })
+				}
+			})
+			const warnings: string[] = []
 
-	it("win32: reports when the target cannot be checked for DACL preservation", async () => {
-		const targetPath = "/tmp/test-dir/target.txt"
-		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-		vi.mocked(fsSync.openSync).mockReturnValue(1)
-		// The target exists but is not readable: that is not "absent", and skipping DACL
-		// preservation has to be visible.
-		vi.mocked(fs.access).mockImplementation(async (p) => {
-			if (String(p) === targetPath) {
-				throw Object.assign(new Error("EACCES"), { code: "EACCES" })
-			}
+			await safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) })
+
+			expect(execFile).not.toHaveBeenCalled()
+			expect(warnings.filter((m) => m.includes("Could not check"))).toHaveLength(1)
 		})
-		const warnings: string[] = []
 
-		await safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) })
-
-		expect(execFile).not.toHaveBeenCalled()
-		expect(warnings.filter((m) => m.includes("Could not check"))).toHaveLength(1)
-	})
-
-	// Warning delivery is advisory: it must not be able to fail the save it is reporting on.
-	it("win32: a throwing onWarning does not abort the write", async () => {
-		const targetPath = "/tmp/test-dir/target.txt"
-		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-		vi.mocked(fsSync.openSync).mockReturnValue(1)
-					// Only the restore fails, so a warning is delivered and the restrictive fallback
+		// Warning delivery is advisory: it must not be able to fail the save it is reporting on.
+		it("win32: a throwing onWarning does not abort the write", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// Only the restore fails, so a warning is delivered and the restrictive fallback
 			// (drop inheritance, grant the current user, read the DACL back) verifies.
 			vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
 				const argv = args as unknown as string[]
@@ -739,18 +757,18 @@ describe("safeWriteText", () => {
 				}
 				return fakeChild
 			})
-	
-		await expect(
-			safeWriteText(targetPath, "data", {
-				platform: "win32",
-				onWarning: () => {
-					throw new Error("callback down")
-				},
-			}),
-		).resolves.toBeUndefined()
-	
-		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
-	})
+
+			await expect(
+				safeWriteText(targetPath, "data", {
+					platform: "win32",
+					onWarning: () => {
+						throw new Error("callback down")
+					},
+				}),
+			).resolves.toBeUndefined()
+
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
+		})
 
 		it("win32 DACL: a partial dump left by a failed save is removed and never restored", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
@@ -778,7 +796,6 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
 		})
 
-
 		// The row's second half: "If DACL restoration fails after commit, restore a restrictive
 		// verified ACL before returning, or otherwise fail safely without exposing the committed
 		// content." These three cases are the two branches and the verification step.
@@ -800,10 +817,14 @@ describe("safeWriteText", () => {
 				return fakeChild
 			})
 
-			await expect(safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) })).resolves.toBeUndefined()
+			await expect(
+				safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) }),
+			).resolves.toBeUndefined()
 
 			// The narrowing was actually applied to the committed file, not just reported.
-			const grant = vi.mocked(execFile).mock.calls.find(([, a]) => (a as unknown as string[])[1] === "/inheritance:r")
+			const grant = vi
+				.mocked(execFile)
+				.mock.calls.find(([, a]) => (a as unknown as string[])[1] === "/inheritance:r")
 			expect(grant).toBeDefined()
 			expect((grant?.[1] as unknown as string[]) ?? []).toEqual([
 				targetPath,
@@ -811,7 +832,9 @@ describe("safeWriteText", () => {
 				"/grant:r",
 				`${os.userInfo().username}:F`,
 			])
-			expect(warnings.filter((m) => m.includes("narrowed to the current user's full control and verified"))).toHaveLength(1)
+			expect(
+				warnings.filter((m) => m.includes("narrowed to the current user's full control and verified")),
+			).toHaveLength(1)
 		})
 
 		it("win32 DACL: a restore failure the narrowing cannot recover from rolls the commit back", async () => {
@@ -829,7 +852,9 @@ describe("safeWriteText", () => {
 				return fakeChild
 			})
 
-			await expect(safeWriteText(targetPath, "data", { backup: true, platform: "win32" })).rejects.toThrow(DaclRestoreError)
+			await expect(safeWriteText(targetPath, "data", { backup: true, platform: "win32" })).rejects.toThrow(
+				DaclRestoreError,
+			)
 
 			// The committed bytes do not stay at the target under an unknown ACL: the retained
 			// backup is renamed back, so the second rename is the rollback.
@@ -1551,9 +1576,9 @@ describe("caller-supplied staging path", () => {
 		const stats = _fileStatsWithIdentity(42n, 7n)
 		vi.mocked(fs.lstat).mockResolvedValue(stats)
 
-		await expect(
-			safeWriteText(targetPath, "data", { tempPath: targetPath, platform: "linux" }),
-		).rejects.toThrow(StagingPathError)
+		await expect(safeWriteText(targetPath, "data", { tempPath: targetPath, platform: "linux" })).rejects.toThrow(
+			StagingPathError,
+		)
 		expect(fsSync.openSync).not.toHaveBeenCalled()
 		expect(fs.rename).not.toHaveBeenCalled()
 		// The comparison is only sound when both stats are read as bigint: on NTFS/ReFS the file
@@ -1567,7 +1592,6 @@ describe("caller-supplied staging path", () => {
 		}
 		expect(fs.unlink).not.toHaveBeenCalled()
 	})
-
 
 	it("rejects when the target identity cannot be compared for a reason other than a missing target", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
@@ -1595,7 +1619,8 @@ describe("caller-supplied staging path", () => {
 		for (const c of identityLookups) {
 			expect(c[1]).toEqual({ bigint: true })
 		}
-	})})
+	})
+})
 
 describe("cleanup when a backed-up write fails before commit", () => {
 	beforeEach(() => mockDefaults())
@@ -1690,7 +1715,9 @@ describe("resolveLockKey when the parent directory does not exist yet", () => {
 		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(false))
 		// Not a link: the walk must reach the canonicalization step, which is where the
 		// non-ENOENT failure has to surface.
-		vi.mocked(fs.readlink).mockRejectedValue(Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }))
+		vi.mocked(fs.readlink).mockRejectedValue(
+			Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+		)
 		vi.mocked(fs.realpath).mockImplementation(async (p) => {
 			if (String(p) === target) return target
 			throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
@@ -1712,7 +1739,9 @@ describe("descriptor release is attempted once and reported", () => {
 	beforeEach(() => {
 		mockDefaults()
 		// The staging write reports every requested byte as written.
-		vi.mocked(fsSync.writeSync).mockImplementation((...args: unknown[]) => (typeof args[3] === "number" ? args[3] : 0))
+		vi.mocked(fsSync.writeSync).mockImplementation((...args: unknown[]) =>
+			typeof args[3] === "number" ? args[3] : 0,
+		)
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 	})
 
@@ -1745,7 +1774,9 @@ describe("descriptor release is attempted once and reported", () => {
 		})
 		const errSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
-		await expect(safeWriteText(targetPath, "data", { platform: "linux", tempPath: callerTemp })).resolves.toBeUndefined()
+		await expect(
+			safeWriteText(targetPath, "data", { platform: "linux", tempPath: callerTemp }),
+		).resolves.toBeUndefined()
 
 		const closedFds = vi.mocked(fsSync.closeSync).mock.calls.map((c) => Number(c[0]))
 		expect(new Set(closedFds).size).toBe(closedFds.length)
@@ -1789,7 +1820,10 @@ describe("descriptor release is attempted once and reported", () => {
 		await expect(safeWriteText(targetPath, "data", { platform: "linux" })).resolves.toBeUndefined()
 
 		expect(vi.mocked(fsSync.closeSync).mock.calls.filter((c) => c[0] === 7)).toHaveLength(1)
-		expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("parent directory descriptor for"), expect.anything())
+		expect(errSpy).toHaveBeenCalledWith(
+			expect.stringContaining("parent directory descriptor for"),
+			expect.anything(),
+		)
 		errSpy.mockRestore()
 	})
 })
@@ -1799,14 +1833,21 @@ describe("windows ACL failure leaves no unauthorized content", () => {
 
 	beforeEach(() => {
 		mockDefaults()
-		vi.mocked(fsSync.writeSync).mockImplementation((...args: unknown[]) => (typeof args[3] === "number" ? args[3] : 0))
+		vi.mocked(fsSync.writeSync).mockImplementation((...args: unknown[]) =>
+			typeof args[3] === "number" ? args[3] : 0,
+		)
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 		vi.mocked(fsSync.openSync).mockReturnValue(3)
 	})
 
 	// icacls is dispatched by its arguments so only the operation under test can be made to fail.
 	const icacls = (handler: (argv: string[]) => { error?: unknown; stdout?: string }) =>
-		vi.mocked(execFile).mockImplementation(((_cmd: string, argv: string[], _opts: unknown, cb: (err: unknown, stdout?: string) => void) => {
+		vi.mocked(execFile).mockImplementation(((
+			_cmd: string,
+			argv: string[],
+			_opts: unknown,
+			cb: (err: unknown, stdout?: string) => void,
+		) => {
 			const outcome = handler(argv)
 			return void cb(outcome.error ?? null, outcome.stdout ?? "")
 		}) as never)
@@ -1837,11 +1878,15 @@ describe("windows ACL failure leaves no unauthorized content", () => {
 		// exists even though this caller passed no backup option.
 		expect(fs.copyFile).toHaveBeenCalledWith(targetPath, expect.stringContaining("safeWriteText.bak_"))
 		expect(
-			vi.mocked(fs.rename).mock.calls.some((call) => String(call[0]).includes("safeWriteText.bak_") && call[1] === targetPath),
+			vi
+				.mocked(fs.rename)
+				.mock.calls.some((call) => String(call[0]).includes("safeWriteText.bak_") && call[1] === targetPath),
 		).toBe(true)
 		// The rolled-back file is the backup, whose access rights came from its directory rather than
 		// from the original target, so the verified narrowing runs on it too.
-		expect(grants.filter((argv) => argv[0] === targetPath && argv.includes("/grant:r")).length).toBeGreaterThanOrEqual(2)
+		expect(
+			grants.filter((argv) => argv[0] === targetPath && argv.includes("/grant:r")).length,
+		).toBeGreaterThanOrEqual(2)
 	})
 
 	it("keeps the retained backup when the rollback rename itself fails", async () => {

@@ -33,26 +33,23 @@ describe("safeWriteText against a real filesystem", () => {
 		expect(await fs.readdir(dir)).toEqual(["target.txt"])
 	})
 
-	it.each([false, true])(
-		"leaves the target bytes untouched when the publish fails (backup: %s)",
-		async (backup) => {
-			// backup:false reaches the commit rename, which cannot replace a directory with
-			// a regular file (EISDIR on POSIX, EPERM on Windows). backup:true fails earlier,
-			// at the copy of the directory made for the backup. Both must leave the target
-			// exactly as it was, with no residue.
-			const targetPath = path.join(dir, "target-dir")
-			await fs.mkdir(targetPath)
-			const inside = path.join(targetPath, "payload.txt")
-			await fs.writeFile(inside, "original bytes")
+	it.each([false, true])("leaves the target bytes untouched when the publish fails (backup: %s)", async (backup) => {
+		// backup:false reaches the commit rename, which cannot replace a directory with
+		// a regular file (EISDIR on POSIX, EPERM on Windows). backup:true fails earlier,
+		// at the copy of the directory made for the backup. Both must leave the target
+		// exactly as it was, with no residue.
+		const targetPath = path.join(dir, "target-dir")
+		await fs.mkdir(targetPath)
+		const inside = path.join(targetPath, "payload.txt")
+		await fs.writeFile(inside, "original bytes")
 
-			await expect(safeWriteText(targetPath, "new data", { backup })).rejects.toThrow()
+		await expect(safeWriteText(targetPath, "new data", { backup })).rejects.toThrow()
 
-			// The directory and its content are exactly as they were, and no backup copy
-			// or staging directory was left behind next to them.
-			expect(await fs.readFile(inside, "utf8")).toBe("original bytes")
-			expect(await fs.readdir(dir)).toEqual(["target-dir"])
-		},
-	)
+		// The directory and its content are exactly as they were, and no backup copy
+		// or staging directory was left behind next to them.
+		expect(await fs.readFile(inside, "utf8")).toBe("original bytes")
+		expect(await fs.readdir(dir)).toEqual(["target-dir"])
+	})
 
 	// The row asks for an integration case: what a real icacls leaves on a real file when the
 	// saved DACL cannot be reapplied. A throwaway temp directory is exactly where that happens -

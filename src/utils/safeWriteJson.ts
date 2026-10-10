@@ -108,12 +108,7 @@ async function _resolveScopeRoot(confineTo: string): Promise<string> {
  */
 function _assertWithinScope(requestedPath: string, candidatePath: string, scopeRoot: string): void {
 	const relative = path.relative(scopeRoot, candidatePath)
-	if (
-		relative === "" ||
-		relative === ".." ||
-		relative.startsWith(".." + path.sep) ||
-		path.isAbsolute(relative)
-	) {
+	if (relative === "" || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)) {
 		throw new ConfinedPathEscapeError(requestedPath, candidatePath, scopeRoot)
 	}
 }
@@ -206,8 +201,6 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		throw dirError
 	}
 
-
-
 	// immediately, and releaseLock stays a no-op so the finally block does not try
 	// to release an unacquired lock.
 	// Acquired in sorted key order, so two writers approaching the same pair of identities from
@@ -269,7 +262,10 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 				} catch (linkError: unknown) {
 					// An absent target is not a link: the read below reports ENOENT and the merge sees no
 					// document, which is the behaviour callers rely on.
-					const code = linkError && typeof linkError === "object" && "code" in linkError ? (linkError as { code?: string }).code : undefined
+					const code =
+						linkError && typeof linkError === "object" && "code" in linkError
+							? (linkError as { code?: string }).code
+							: undefined
 					if (code !== "ENOENT") {
 						throw linkError
 					}
