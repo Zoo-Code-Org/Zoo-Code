@@ -572,7 +572,9 @@ describe("safeWriteJson", () => {
 		// Contract change: the staging file now comes from createStagingFile, so it carries this
 		// module's own name inside a private staging directory beside the referent rather than the
 		// .new_ name safeWriteJson invented for itself.
-		expect(tempPaths.some((p) => p.startsWith(referentDir + path.sep) && p.includes(".file-safety-staging"))).toBe(true)
+		expect(tempPaths.some((p) => p.startsWith(referentDir + path.sep) && p.includes(".file-safety-staging"))).toBe(
+			true,
+		)
 		expect(tempPaths.some((p) => p.startsWith(linkDir + path.sep))).toBe(false)
 
 		// the content was committed onto the referent
@@ -687,7 +689,12 @@ describe("safeWriteJson", () => {
 
 		const left = await fs.readdir(tempDir)
 		expect(left).not.toContain("elsewhere.json")
-		expect(left.filter((entry) => entry.includes(".new_") || entry.startsWith(".file-safety-staging") || entry.endsWith(".lock"))).toEqual([])
+		expect(
+			left.filter(
+				(entry) =>
+					entry.includes(".new_") || entry.startsWith(".file-safety-staging") || entry.endsWith(".lock"),
+			),
+		).toEqual([])
 	})
 
 	test.skipIf(process.platform === "win32")(
@@ -703,16 +710,22 @@ describe("safeWriteJson", () => {
 			const projectConfig = path.join(projectDir, "mcp.json")
 			await fs.symlink(outside, projectConfig)
 
-			await expect(
-				safeWriteJson(projectConfig, { mcpServers: {} }, { confineTo: projectDir }),
-			).rejects.toThrow(ConfinedPathEscapeError)
+			await expect(safeWriteJson(projectConfig, { mcpServers: {} }, { confineTo: projectDir })).rejects.toThrow(
+				ConfinedPathEscapeError,
+			)
 
 			// The linked file is untouched and nothing was staged beside it.
 			expect(JSON.parse(await fsSyncActual.promises.readFile(outside, "utf8"))).toEqual({ secret: "original" })
 			const entries = await fs.readdir(tempDir)
 			expect(entries).toContain("outside.json")
 			expect(
-				entries.filter((entry) => entry.includes(".new_") || entry.includes("safeWriteText") || entry.startsWith(".file-safety-staging") || entry.endsWith(".lock")),
+				entries.filter(
+					(entry) =>
+						entry.includes(".new_") ||
+						entry.includes("safeWriteText") ||
+						entry.startsWith(".file-safety-staging") ||
+						entry.endsWith(".lock"),
+				),
 			).toEqual([])
 		},
 	)
@@ -729,7 +742,11 @@ describe("safeWriteJson", () => {
 
 			// Confining is about the scope, not about forbidding links: a link that stays
 			// inside the project still publishes to its referent.
-			await safeWriteJson(alias, { mcpServers: { local: { url: "http://localhost" } } }, { confineTo: projectDir })
+			await safeWriteJson(
+				alias,
+				{ mcpServers: { local: { url: "http://localhost" } } },
+				{ confineTo: projectDir },
+			)
 
 			expect(JSON.parse(await fsSyncActual.promises.readFile(referent, "utf8"))).toEqual({
 				mcpServers: { local: { url: "http://localhost" } },
@@ -789,14 +806,15 @@ describe("safeWriteJson", () => {
 		// the failure is reached here rather than skipped on this Windows lane.
 		const platformSpy = vi.spyOn(process, "platform", "get").mockReturnValue("linux")
 		const realOpenSync = fsSyncActual.openSync
-		const openSyncSpy = vi
-			.spyOn(fsSyncActual, "openSync")
-			.mockImplementation(((target: Parameters<typeof realOpenSync>[0], ...rest: unknown[]) => {
-				// Only the parent-directory open fails; every other open (the staged file, the backup)
-				// goes to the real implementation so its descriptor is a real one.
-				if (String(target) === dir) throw Object.assign(new Error("EBADF"), { code: "EBADF" })
-				return (realOpenSync as unknown as (t: unknown, r: unknown) => number)(target, rest[0])
-			}) as typeof fsSyncActual.openSync)
+		const openSyncSpy = vi.spyOn(fsSyncActual, "openSync").mockImplementation(((
+			target: Parameters<typeof realOpenSync>[0],
+			...rest: unknown[]
+		) => {
+			// Only the parent-directory open fails; every other open (the staged file, the backup)
+			// goes to the real implementation so its descriptor is a real one.
+			if (String(target) === dir) throw Object.assign(new Error("EBADF"), { code: "EBADF" })
+			return (realOpenSync as unknown as (t: unknown, r: unknown) => number)(target, rest[0])
+		}) as typeof fsSyncActual.openSync)
 		// fs.unlink is already a vi.fn() in this spec's module mock; the file's idiom is to read
 		// calls through vi.mocked rather than wrapping it again with vi.spyOn.
 		vi.mocked(fs.unlink).mockClear()
@@ -812,9 +830,10 @@ describe("safeWriteJson", () => {
 		// And cleanup touched nothing: neither the published target nor the staging name the
 		// commit consumed.
 		const unlinked = vi.mocked(fs.unlink).mock.calls.map((call) => String(call[0]))
-		expect(unlinked.filter((p) => p === target || p.includes(".new_") || p.includes(".file-safety-staging"))).toEqual([])
+		expect(
+			unlinked.filter((p) => p === target || p.includes(".new_") || p.includes(".file-safety-staging")),
+		).toEqual([])
 	})
-
 
 	test.skipIf(process.platform === "win32")(
 		"refuses the publish when the authorized referent is repointed outside after the check",
@@ -861,10 +880,10 @@ describe("safeWriteJson", () => {
 				expect(
 					entries.filter(
 						(entry) =>
-				entry.includes(".new_") ||
-				entry.includes("safeWriteText") ||
-				entry.startsWith(".file-safety-staging") ||
-				entry.endsWith(".lock"),
+							entry.includes(".new_") ||
+							entry.includes("safeWriteText") ||
+							entry.startsWith(".file-safety-staging") ||
+							entry.endsWith(".lock"),
 					),
 				).toEqual([])
 			}
@@ -910,10 +929,10 @@ describe("safeWriteJson", () => {
 				expect(
 					entries.filter(
 						(entry) =>
-				entry.includes(".new_") ||
-				entry.includes("safeWriteText") ||
-				entry.startsWith(".file-safety-staging") ||
-				entry.endsWith(".lock"),
+							entry.includes(".new_") ||
+							entry.includes("safeWriteText") ||
+							entry.startsWith(".file-safety-staging") ||
+							entry.endsWith(".lock"),
 					),
 				).toEqual([])
 			}
@@ -980,7 +999,12 @@ describe("safeWriteJson", () => {
 			)
 			expect(lockMockFn).not.toHaveBeenCalled()
 			const entries = await fs.readdir(tempDir)
-			expect(entries.filter((entry) => entry.endsWith(".lock") || entry.includes(".new_") || entry.startsWith(".file-safety-staging"))).toEqual([])
+			expect(
+				entries.filter(
+					(entry) =>
+						entry.endsWith(".lock") || entry.includes(".new_") || entry.startsWith(".file-safety-staging"),
+				),
+			).toEqual([])
 		} finally {
 			vi.doUnmock("proper-lockfile")
 			vi.resetModules()
@@ -1053,7 +1077,12 @@ describe("safeWriteJson", () => {
 
 		const entries = await fs.readdir(tempDir)
 		expect(entries).not.toContain("scope-missing-parent")
-		expect(entries.filter((entry) => entry.endsWith(".lock") || entry.includes(".new_") || entry.startsWith(".file-safety-staging"))).toEqual([])
+		expect(
+			entries.filter(
+				(entry) =>
+					entry.endsWith(".lock") || entry.includes(".new_") || entry.startsWith(".file-safety-staging"),
+			),
+		).toEqual([])
 	})
 
 	// A scope that cannot be canonicalized must not fall back to a lexical root: a partly
@@ -1080,9 +1109,9 @@ describe("safeWriteJson", () => {
 			// refused before any filesystem side effect of the write.
 			await expect(fs.access(target)).rejects.toThrow()
 			expect(vi.mocked(fs.rename).mock.calls.filter(([, to]) => String(to) === target)).toEqual([])
-			expect(
-				vi.mocked(fs.mkdir).mock.calls.filter(([dir]) => String(dir).startsWith(scope + path.sep)),
-			).toEqual([])
+			expect(vi.mocked(fs.mkdir).mock.calls.filter(([dir]) => String(dir).startsWith(scope + path.sep))).toEqual(
+				[],
+			)
 		} finally {
 			realpathSpy.mockRestore()
 		}
@@ -1117,9 +1146,7 @@ describe("safeWriteJson", () => {
 
 			await expect(fs.access(target)).rejects.toThrow()
 			expect(
-				vi
-					.mocked(fs.mkdir)
-					.mock.calls.filter(([dir]) => String(dir).startsWith(missingScopeParent + path.sep)),
+				vi.mocked(fs.mkdir).mock.calls.filter(([dir]) => String(dir).startsWith(missingScopeParent + path.sep)),
 			).toEqual([])
 		} finally {
 			realpathSpy.mockRestore()

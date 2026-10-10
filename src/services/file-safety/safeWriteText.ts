@@ -39,7 +39,7 @@ export interface SafeWriteTextOptions {
 	/**
 	 * Pre-written staging file to use for the commit phase. When provided, safeWriteText skips
 	 * creating its own staging file and uses this path instead (it still fsyncs before rename).
- *
+	 *
 	 * The path is not trusted as given: it must name a file inside a private staging directory
 	 * beside the target (the .file-safety-staging_* directories this module creates, mode 0700).
 	 * A caller that can name any existing file beside the target can otherwise publish an unrelated
@@ -176,11 +176,12 @@ export class DaclPreservationError extends Error {
 	readonly stage: "existence" | "capture"
 
 	constructor(targetPath: string, stage: DaclPreservationError["stage"], cause?: unknown) {
-		const why = stage === "capture" ? "its DACL could not be captured" : "it could not be checked for DACL preservation"
-			super(
-				`The target ${targetPath} exists and ${why} -- nothing was published, because the commit rename would replace it with a file whose access rights this write cannot reproduce.`,
-				{ cause },
-			)
+		const why =
+			stage === "capture" ? "its DACL could not be captured" : "it could not be checked for DACL preservation"
+		super(
+			`The target ${targetPath} exists and ${why} -- nothing was published, because the commit rename would replace it with a file whose access rights this write cannot reproduce.`,
+			{ cause },
+		)
 		this.name = "DaclPreservationError"
 		this.targetPath = targetPath
 		this.stage = stage
@@ -347,7 +348,11 @@ async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunne
 
 /** Restore a DACL dump onto *dirPath* on Windows.
  * Returns whether icacls succeeded; the caller reports a failure. */
-async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<boolean> {
+async function _restoreDaclWindows(
+	dirPath: string,
+	dumpPath: string,
+	execFileRunner?: typeof execFile,
+): Promise<boolean> {
 	const runner = execFileRunner ?? execFile
 	try {
 		await new Promise<void>((resolve, reject) => {
@@ -848,7 +853,9 @@ export async function safeWriteText(
 					// from the one that was saved. Failing the write here would discard a write
 					// that already succeeded while promising a boundary this step can no longer
 					// re-establish, so it is reported.
-					warn(`safeWriteText: content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`)
+					warn(
+						`safeWriteText: content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`,
+					)
 				}
 			}
 
