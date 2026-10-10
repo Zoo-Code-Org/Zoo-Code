@@ -22,9 +22,21 @@ describe("safeWriteText against a real filesystem", () => {
 	})
 
 	function _leftovers(): string[] {
-		return fsSync
-			.readdirSync(dir)
-			.filter((name) => name.includes(".file-safety-staging") || name.includes(".new_") || name.includes(".bak"))
+		return (
+			fsSync
+				.readdirSync(dir)
+				// The Windows DACL dump is written next to the target and only ever shows up on the
+				// windows-latest run, so a filter that misses it lets a leaked dump pass a suite
+				// whose claim is the absence of residue.
+				.filter(function (name) {
+					return (
+						name.includes(".file-safety-staging") ||
+						name.includes(".new_") ||
+						name.includes(".bak") ||
+						name.includes(".acl.tmp")
+					)
+				})
+		)
 	}
 
 	it("creates a new file with the requested bytes and leaves no residue", async () => {
