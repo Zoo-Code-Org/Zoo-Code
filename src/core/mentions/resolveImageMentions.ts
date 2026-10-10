@@ -1,6 +1,7 @@
 import * as path from "path"
 
 import { mentionRegexGlobal, unescapeSpaces } from "../../shared/context-mentions"
+import { getImageMimeType, isSupportedImageMimeType } from "../../utils/imageMime"
 import {
 	isSupportedImageFormat,
 	readImageAsDataUrlWithBuffer,
@@ -50,8 +51,11 @@ function dedupePreserveOrder(values: string[]): string[] {
  * Resolves local image file mentions like `@/path/to/image.png` found in `text` into `data:image/...;base64,...`
  * and appends them to the outgoing `images` array.
  *
- * Behavior matches the read_file tool:
- * - Supports the same image formats: png, jpg, jpeg, gif, webp, svg, bmp, ico, tiff, avif
+ * Recognizes the same image extensions as the read_file tool, but only appends images
+ * supported by the shared image-block contract (JPEG, PNG, GIF, and WebP).
+ * Other image MIME types are skipped without changing the original text.
+ *
+ * Like the read_file tool:
  * - Respects per-file size limits (default 5MB)
  * - Respects total memory limits (default 20MB)
  * - Skips images if model doesn't support them
@@ -128,6 +132,10 @@ export async function resolveImageMentions({
 			}
 
 			const { dataUrl } = await readImageAsDataUrlWithBuffer(absPath)
+			if (!isSupportedImageMimeType(getImageMimeType(dataUrl))) {
+				// Fail-soft: skip formats unsupported by the shared image-block contract.
+				continue
+			}
 			newImages.push(dataUrl)
 
 			// Track memory usage
