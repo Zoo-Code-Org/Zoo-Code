@@ -40,6 +40,7 @@ describe("opencode-go registry", () => {
 	const responsesFormatModels = [
 		"gpt-5.6-luna",
 		"grok-4.6",
+		"grok-4.7",
 		"muse-spark-1.3-contributor",
 		"muse-spark-1.2-contributor",
 	]
@@ -187,6 +188,30 @@ describe("opencode-go registry", () => {
 					cacheReadsPriceMultiplier: 2,
 				},
 			})
+		})
+
+		it("curates grok-4.7 with its Go Responses capabilities", () => {
+			const info = getOpencodeGoModelInfo("grok-4.7")
+			expect(info).toMatchObject({
+				maxTokens: 500_000,
+				contextWindow: 500_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsMaxTokens: true,
+				supportsReasoningEffort: ["low", "medium", "high", "xhigh"],
+				reasoningEffort: "high",
+				inputPrice: 2.0,
+				outputPrice: 6.0,
+				cacheReadsPrice: 0.5,
+				longContextPricing: {
+					thresholdTokens: 200_000,
+					inputPriceMultiplier: 2,
+					outputPriceMultiplier: 2,
+					cacheReadsPriceMultiplier: 2,
+				},
+			})
+			// Go publishes no cache-write rate for Grok 4.7.
+			expect(info?.cacheWritesPrice).toBeUndefined()
 		})
 
 		it("is disjoint from the Anthropic-format set", () => {
