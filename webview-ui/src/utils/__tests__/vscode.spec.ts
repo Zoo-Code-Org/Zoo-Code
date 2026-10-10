@@ -99,8 +99,11 @@ describe("VSCodeAPIWrapper", () => {
 		expect(wrapper.getViewStateId()).toBe("memory-view")
 		expect(wrapper.getViewStateId()).toBe("memory-view")
 		expect(randomUUID).toHaveBeenCalledTimes(1)
-		expect(storage.getItem).toHaveBeenCalled()
-		expect(storage.setItem).toHaveBeenCalled()
+		expect(storage.getItem).toHaveBeenCalledWith("vscodeState")
+		expect(storage.setItem).toHaveBeenCalledWith(
+			"vscodeState",
+			expect.stringContaining('"viewStateId":"memory-view"'),
+		)
 	})
 
 	it("falls back to a timestamp-random id when crypto.randomUUID is unavailable", () => {
