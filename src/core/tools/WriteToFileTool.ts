@@ -166,22 +166,30 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	}
 
 	/**
-	 * Restore the diff editor document to its pre-streaming state and close the view.
+	 * Release a diff view that holds content the user was never asked to approve, and close
+	 * it.
 	 *
-	 * reset() clears the provider's state but leaves the diff document dirty with the
-	 * streamed content; a user save would then persist a write the task never completed
-	 * (denied or failed before approval). Must run BEFORE resetDiffViewAfterWrite(),
-	 * since reset() clears the state revertChanges() relies on. No-op when no diff view
-	 * is open. A revert failure is RETURNED rather than dropped: the caller records it as the
-	 * failure this stream produced, so debris left on disk is reported instead of being
-	 * silently continued past.
+	 * reset() clears the provider's state but leaves the diff document dirty with the streamed
+	 * content; a user save would then persist a write the task never completed (denied or
+	 * failed before approval). Must run BEFORE resetDiffViewAfterWrite(), since reset() clears
+	 * the state the discard relies on. No-op when no diff view is open.
+	 *
+	 * Deliberately NOT revertChanges(): that path SAVES. For a new-file preview it writes the
+	 * partial model output into the placeholder before deleting it, and for a modify it writes
+	 * the restored original back to a file this stream never changed - so a failed save, or a
+	 * failed delete after it, leaves bytes the user never approved on disk. The discard empties
+	 * or restores the buffer in memory only.
+	 *
+	 * A discard failure is RETURNED rather than dropped: the caller records it as the failure
+	 * this stream produced, so debris left on disk is reported instead of being silently
+	 * continued past.
 	 */
-	private async revertDiffChangesBeforeReset(task: Task): Promise<Error | undefined> {
+	private async discardUnapprovedStreamBeforeReset(task: Task): Promise<Error | undefined> {
 		try {
-			await task.diffViewProvider.revertChanges()
-		} catch (revertError) {
-			console.error("Error reverting write_to_file diff view changes:", revertError)
-			return revertError instanceof Error ? revertError : new Error(String(revertError))
+			await task.diffViewProvider.discardUnapprovedStream()
+		} catch (discardError) {
+			console.error("Error discarding the unapproved write_to_file diff view:", discardError)
+			return discardError instanceof Error ? discardError : new Error(String(discardError))
 		}
 		return undefined
 	}
@@ -216,7 +224,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		}
 
 		this.resetTaskPartialState(task)
-		const rollbackError = await this.revertDiffChangesBeforeReset(task)
+		const rollbackError = await this.discardUnapprovedStreamBeforeReset(task)
 		await this.resetDiffViewAfterWrite(task)
 
 		// A failed rollback is the more actionable failure (debris is still on disk), so it takes
@@ -443,10 +451,23 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		// once, so abandoned streams are torn down even if execute() never runs.
 		const partialStreamState = this.getTaskPartialStreamState(task)
 
+		// A delta of THIS call already failed at the diff view. Retrying on every later delta
+		// would re-open a diff editor that just failed and re-spawn a partial tool message for a
+		// call that has already reported its error, so the rest of the stream is suppressed until
+		// whichever teardown ends the call releases the entry.
+		if (partialStreamState.streamFailed) {
+			return
+		}
+
 		// Wait for path to stabilize before showing UI (prevents truncated paths)
 		if (!this.hasPathStabilizedForTask(partialStreamState, relPath) || newContent === undefined) {
 			return
 		}
+
+		// Which failure window this delta is in, read by the catch below: false while the
+		// pre-streaming setup runs, true from the moment the diff view is the thing at risk. Declared
+		// outside the try because a try block's own scope is not visible to its catch.
+		let diffViewStarted = false
 
 		try {
 			// Everything from here up to the diff view is setup that can fail before
@@ -513,40 +534,59 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			await task.ask("tool", partialMessage, block.partial).catch(() => {})
 
 			if (!this.isPartialStreamStillLive(task, partialStreamState)) {
-			return
-		}
-
-		} catch (error) {
-			// Unexpected failure in the pre-streaming setup (provider state, the filesystem probe,
-			// directory creation, the partial ask): this delta never reaches execute(), so nothing
-			// else releases what the registration acquired - and a diff view may already be open with
-			// unapproved content. Tear this task's entry and its TaskAborted listener down, close the
-			// view if one is open, then rethrow so BaseTool.handle() still reports the error once.
-			this.releasePartialStreamBookkeeping(task)
-			if (task.diffViewProvider.isEditing) {
-				await this.revertDiffChangesBeforeReset(task)
-				await this.resetDiffViewAfterWrite(task)
-			}
-			throw error
-		}
-
-		if (newContent) {
-			if (!task.diffViewProvider.isEditing) {
-				await task.diffViewProvider.open(relPath!)
-			}
-
-			// Cancellation may land while open() is in flight: its abort handler has
-			// already torn the stream down (and may have reverted or closed this very
-			// diff view), so streaming the partial content into it now would resurrect a
-			// view for a task that no longer exists.
-			if (!this.isPartialStreamStillLive(task, partialStreamState)) {
 				return
 			}
 
-			await task.diffViewProvider.update(
-				everyLineHasLineNumbers(newContent) ? stripLineNumbers(newContent) : newContent,
-				false,
-			)
+			// From here the diff view is what can fail, and its failure has to be owned by this
+			// boundary rather than escaping to BaseTool's generic catch, which reports the error but
+			// releases nothing: the entry and its TaskAborted listener would stay attached and the
+			// next delta would retry the operation that just failed.
+			diffViewStarted = true
+
+			if (newContent) {
+				if (!task.diffViewProvider.isEditing) {
+					await task.diffViewProvider.open(relPath!)
+				}
+
+				// Cancellation may land while open() is in flight: its abort handler has
+				// already torn the stream down (and may have reverted or closed this very
+				// diff view), so streaming the partial content into it now would resurrect a
+				// view for a task that no longer exists.
+				if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+					return
+				}
+
+				await task.diffViewProvider.update(
+					everyLineHasLineNumbers(newContent) ? stripLineNumbers(newContent) : newContent,
+					false,
+				)
+			}
+		} catch (error) {
+			// Two windows, two owners of the teardown.
+			//
+			// * Pre-streaming setup (provider state, the filesystem probe, directory creation, the
+			//   partial ask): nothing was shown and nothing of ours is on disk, so this call's entry
+			//   is released - a later delta may legitimately retry a transient setup failure.
+			// * The diff view (open()/update()): the preview itself is broken for this call. Releasing
+			//   here would let the next delta re-register and re-open the view that just failed, which
+			//   is the retry this boundary exists to stop, so the entry is kept and marked failed
+			//   instead: the guard at the top of handlePartial suppresses the rest of the stream, and
+			//   whichever teardown ends the call - the parse-failure boundary, which reports the
+			//   recorded error, execute(), or a cancellation - releases it and its listener.
+			//
+			// Either way the unapproved preview is discarded and the view reset before the error is
+			// rethrown, so BaseTool.handle() still reports it exactly once.
+			if (diffViewStarted) {
+				partialStreamState.streamFailed = true
+				partialStreamState.streamError = error instanceof Error ? error : new Error(String(error))
+			} else {
+				this.releasePartialStreamBookkeeping(task)
+			}
+			if (task.diffViewProvider.isEditing) {
+				await this.discardUnapprovedStreamBeforeReset(task)
+				await this.resetDiffViewAfterWrite(task)
+			}
+			throw error
 		}
 	}
 }

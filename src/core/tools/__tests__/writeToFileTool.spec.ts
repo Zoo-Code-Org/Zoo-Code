@@ -163,6 +163,7 @@ describe("writeToFileTool", () => {
 			update: vi.fn().mockResolvedValue(undefined),
 			reset: vi.fn().mockResolvedValue(undefined),
 			revertChanges: vi.fn().mockResolvedValue(undefined),
+			discardUnapprovedStream: vi.fn().mockResolvedValue(undefined),
 			saveChanges: vi.fn().mockResolvedValue({
 				newProblemsMessage: "",
 				userEdits: null,
@@ -563,6 +564,7 @@ describe("writeToFileTool", () => {
 				diffViewProvider: {
 					reset: vi.fn().mockResolvedValue(undefined),
 					revertChanges: vi.fn().mockResolvedValue(undefined),
+					discardUnapprovedStream: vi.fn().mockResolvedValue(undefined),
 				},
 				finalizePartialToolAsk: vi.fn().mockResolvedValue(undefined),
 			}
@@ -635,8 +637,10 @@ describe("writeToFileTool", () => {
 			)?.[1]
 			expect(abortListener).toBeInstanceOf(Function)
 			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
-			// The stream may have left a diff view open with content that was never approved.
-			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalled()
+			// The stream may have left a diff view open with content that was never approved, so
+			// the teardown discards it: revertChanges() would SAVE that content to disk.
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 			// Nothing was captured from the stream, so the parse error is still what the user sees.
 			expect(mockHandleError).toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
@@ -961,11 +965,18 @@ describe("writeToFileTool", () => {
 			// A streaming delta already hit a fatal filesystem error; the finalized block then fails
 			// to parse. The stream error is what the user can act on, so it takes the report slot and
 			// the incidental parse error is suppressed - reporting both would show two bubbles for one
-			// failure, reporting only the parse error would drop the actionable one.
-			await executeWriteFileTool({}, { isPartial: true })
-			await executeWriteFileTool({}, { isPartial: true })
+			// failure, reporting only the parse error would drop the actionable one. The error is
+			// induced through open() rather than assigned, so what gets reported is what production
+			// recorded on the entry.
 			const streamError = new Error("EROFS: read-only file system, open '/ro/test.py'")
-			;[...writeToFileTool["taskPartialStreamState"].values()][0].streamError = streamError
+			mockCline.diffViewProvider.open.mockImplementation(async () => {
+				mockCline.diffViewProvider.isEditing = true
+				throw streamError
+			})
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockHandleError.mockClear()
 
 			const block = {
 				type: "tool_use",
@@ -990,13 +1001,17 @@ describe("writeToFileTool", () => {
 			// The rollback is what keeps unapproved streamed content off disk. When it fails, the
 			// debris is the more actionable failure: it takes the report slot with the stream error
 			// kept behind it as the cause, instead of being logged and continued past.
-			await executeWriteFileTool({}, { isPartial: true })
-			await executeWriteFileTool({}, { isPartial: true })
 			const streamError = new Error("EACCES: permission denied, open '/ro/test.py'")
-			;[...writeToFileTool["taskPartialStreamState"].values()][0].streamError = streamError
-			mockCline.diffViewProvider.revertChanges.mockRejectedValue(
+			mockCline.diffViewProvider.open.mockImplementation(async () => {
+				mockCline.diffViewProvider.isEditing = true
+				throw streamError
+			})
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+			mockCline.diffViewProvider.discardUnapprovedStream.mockRejectedValue(
 				new Error("EACCES: could not remove the directory created for this write"),
 			)
+			mockHandleError.mockClear()
 
 			const block = {
 				type: "tool_use",
@@ -1016,6 +1031,119 @@ describe("writeToFileTool", () => {
 				expect.objectContaining({ message: expect.stringContaining("rollback failed") }),
 			)
 			expect(mockHandleError.mock.calls[0]?.[1]).toHaveProperty("cause", streamError)
+			expect(mockHandleError).not.toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
+		})
+
+		it("discards the unapproved preview and records the stream error when open() rejects", async () => {
+			// open() sits inside the cleanup-owned boundary: the preview is discarded (never saved),
+			// the view reset, the error recorded on this call's entry, and the error rethrown so
+			// BaseTool.handle() reports it exactly once.
+			const failure = new Error("EPERM: could not open the diff editor")
+			mockCline.diffViewProvider.open.mockImplementation(async () => {
+				mockCline.diffViewProvider.isEditing = true
+				throw failure
+			})
+
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+
+			expect(mockHandleError).toHaveBeenCalledTimes(1)
+			expect(mockHandleError).toHaveBeenCalledWith("handling partial write_to_file", failure)
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			// revertChanges() SAVES: an unapproved preview must never be routed through it.
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			const retained = [...writeToFileTool["taskPartialStreamState"].values()][0]
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			expect(retained.streamFailed).toBe(true)
+			expect(retained.streamError).toBe(failure)
+			// The listener goes with whichever teardown ends the call, not with this delta: the
+			// retained entry is what suppresses the rest of the stream.
+			expect(mockCline.off).not.toHaveBeenCalled()
+		})
+
+		it("suppresses the rest of the stream once the diff view has failed for this call", async () => {
+			const failure = new Error("EPERM: could not open the diff editor")
+			mockCline.diffViewProvider.open.mockImplementation(async () => {
+				mockCline.diffViewProvider.isEditing = true
+				throw failure
+			})
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.update.mockClear()
+			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			mockCline.ask.mockClear()
+			mockHandleError.mockClear()
+
+			// A third delta for the same call. Retrying would re-open the diff editor that just
+			// failed and re-ask for a call that already reported its error.
+			await executeWriteFileTool({}, { isPartial: true })
+
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
+			expect(mockCline.ask).not.toHaveBeenCalled()
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("discards the unapproved preview and records the stream error when update() rejects", async () => {
+			// The other half of the boundary: open() succeeded, so the view holds partial content,
+			// and update() is what fails.
+			const failure = new Error("EPERM: could not stream into the diff editor")
+			mockCline.diffViewProvider.open.mockImplementation(async () => {
+				mockCline.diffViewProvider.isEditing = true
+			})
+			mockCline.diffViewProvider.update.mockRejectedValue(failure)
+
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+
+			expect(mockHandleError).toHaveBeenCalledTimes(1)
+			expect(mockHandleError).toHaveBeenCalledWith("handling partial write_to_file", failure)
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			const retained = [...writeToFileTool["taskPartialStreamState"].values()][0]
+			expect(retained.streamFailed).toBe(true)
+			expect(retained.streamError).toBe(failure)
+		})
+
+		it("releases the stream state and deregisters the abort listener when the failed delta's block never completes", async () => {
+			const failure = new Error("EPERM: could not open the diff editor")
+			mockCline.diffViewProvider.open.mockImplementation(async () => {
+				mockCline.diffViewProvider.isEditing = true
+				throw failure
+			})
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+			mockHandleError.mockClear()
+
+			// The stream died mid-parameters, so the finalized block never parses and execute() never
+			// runs: the parse-failure boundary is what ends the call and releases the entry.
+			const block = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: {},
+				partial: false,
+			} as ToolUse<"write_to_file">
+			await writeToFileTool.handle(mockCline, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			// The induced stream error is the actionable one, reported once; the incidental parse
+			// error is suppressed.
+			expect(mockHandleError).toHaveBeenCalledTimes(1)
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", failure)
 			expect(mockHandleError).not.toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
 		})
 	})

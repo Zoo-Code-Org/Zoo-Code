@@ -17,6 +17,7 @@ interface CleanupTask {
 	diffViewProvider: {
 		reset: MockedFunction<() => Promise<void>>
 		revertChanges: MockedFunction<() => Promise<void>>
+		discardUnapprovedStream: MockedFunction<() => Promise<void>>
 	}
 	finalizePartialToolAsk: MockedFunction<() => Promise<void>>
 }
@@ -30,6 +31,7 @@ function buildTask(taskId: string, instanceId: string): Task {
 		diffViewProvider: {
 			reset: vi.fn().mockResolvedValue(undefined),
 			revertChanges: vi.fn().mockResolvedValue(undefined),
+			discardUnapprovedStream: vi.fn().mockResolvedValue(undefined),
 		},
 		finalizePartialToolAsk: vi.fn().mockResolvedValue(undefined),
 	}
@@ -76,15 +78,17 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 		expect(errorSpy).toHaveBeenCalledWith("Error resetting write_to_file diff view:", expect.any(Error))
 	})
 
-	it("logs and continues when reverting the diff document fails", async () => {
-		const task = buildTask("revert-fails", "inst-4")
+	it("logs and continues when discarding the unapproved diff view fails", async () => {
+		const task = buildTask("discard-fails", "inst-4")
 		const t = task as unknown as CleanupTask
-		t.diffViewProvider.revertChanges = vi.fn().mockRejectedValue(new Error("revert failed"))
+		t.diffViewProvider.discardUnapprovedStream = vi.fn().mockRejectedValue(new Error("discard failed"))
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
-		await writeToFileTool["revertDiffChangesBeforeReset"](task)
+		const failure = await writeToFileTool["discardUnapprovedStreamBeforeReset"](task)
 
-		expect(errorSpy).toHaveBeenCalledWith("Error reverting write_to_file diff view changes:", expect.any(Error))
+		expect(errorSpy).toHaveBeenCalledWith("Error discarding the unapproved write_to_file diff view:", expect.any(Error))
+		// Returned, not dropped: the caller reports the debris instead of continuing past it.
+		expect(failure?.message).toBe("discard failed")
 	})
 
 	it("logs and continues when finalizing the open partial ask fails", async () => {
