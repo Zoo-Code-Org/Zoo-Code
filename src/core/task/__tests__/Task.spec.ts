@@ -1436,10 +1436,10 @@ describe("Cline", () => {
 			// A disposed task cannot serve another guarded write, so its observed paths
 			// (version token + timestamp each) must not stay reachable for the host lifetime.
 			expect(task.observationRegistry.get("/workspace/a.ts")).toBeUndefined()
-			// A disposed task cannot serve another guarded write, so its observed paths
-			// (version token + timestamp each) must not stay reachable for the host lifetime.
 			expect(task.observationRegistry.get("/workspace/b.ts")).toBeUndefined()
-			// disposeOnce() closes the registry rather than only clearing the map.
+			// Closing is what makes a later observation refuse, so it is asserted rather than
+			// left to the test name: clearing the map alone would look identical from here.
+			expect(task.observationRegistry.isClosed).toBe(true)
 		})
 
 		it("refuses an observation recorded after the task was disposed", async () => {

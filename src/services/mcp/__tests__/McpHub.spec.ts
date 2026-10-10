@@ -1112,7 +1112,7 @@ describe("McpHub", () => {
 				expect(write && write[2]).toEqual(expect.objectContaining({ refuseSymlinkTarget: true }))
 			})
 
-			it("leaves the global toggleToolAlwaysAllow write free to follow a symlink", async () => {
+			it("leaves the global toggleToolAlwaysAllow write without a symlink refusal", async () => {
 				vi.mocked(fs.readFile).mockResolvedValue(
 					JSON.stringify({
 						mcpServers: {
@@ -1898,7 +1898,7 @@ describe("McpHub", () => {
 				expect(write && write[2]).toEqual(expect.objectContaining({ refuseSymlinkTarget: true }))
 			})
 
-			it("still follows a symlink for the global settings write", async () => {
+			it("leaves the global settings write without a symlink refusal", async () => {
 				vi.mocked(fs.readFile).mockResolvedValueOnce(
 					JSON.stringify({
 						mcpServers: {
@@ -1925,7 +1925,8 @@ describe("McpHub", () => {
 				await mcpHub.updateServerTimeout("test-server", 120)
 
 				// The global file lives in the extension global storage and users legitimately link
-				// it, so it keeps the resolve-and-follow behaviour.
+				// it, so this writer does not opt into the symlink refusal; what the assertion
+				// covers is that the option is absent, not what the filesystem then does.
 				const write = vi.mocked(safeWriteJson).mock.calls.at(-1)
 				expect(write && write[2]).not.toHaveProperty("refuseSymlinkTarget")
 			})
