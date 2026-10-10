@@ -99,4 +99,34 @@ describe("matching on Windows", () => {
 		expect(matches("C:/path/to/repo/etc/passwd", ["passwd"])).toBe(true)
 		expect(matches("C:/etc/passwd", ["passwd"])).toBe(false)
 	})
+
+	it("matches equivalent workspace roots across drives with Windows case and ordered exclusions", () => {
+		const rootMatch = (patterns: string[]) =>
+			matcher().isFileMatchedByPatterns({
+				filePath: "d:\\storage\\project\\DOCS\\NOTES.md",
+				cwd: "C:\\Aliases\\Project",
+				canonicalCwd: "D:\\Storage\\Project",
+				patterns,
+			})
+		expect(rootMatch(["docs/**"])).toBe(true)
+		expect(rootMatch(["c:/aliases/PROJECT/docs/**"])).toBe(true)
+		expect(rootMatch(["d:/STORAGE/project/docs/**"])).toBe(true)
+		expect(rootMatch(["docs/**", "!c:/aliases/project/docs/notes.md"])).toBe(false)
+		expect(rootMatch(["docs/**", "!D:/Storage/Project/docs/notes.md"])).toBe(false)
+	})
+
+	it("keeps Windows siblings and lexical-parent outside patterns separate from canonical roots", () => {
+		const rootMatch = (filePath: string, patterns: string[]) =>
+			matcher().isFileMatchedByPatterns({
+				filePath,
+				cwd: "C:\\Aliases\\Project",
+				canonicalCwd: "D:\\Storage\\Project",
+				patterns,
+			})
+		expect(rootMatch("C:/Aliases/shared/file.md", ["../shared/file.md"])).toBe(true)
+		expect(rootMatch("D:/Storage/shared/file.md", ["../shared/file.md"])).toBe(false)
+		expect(rootMatch("D:/Storage/shared/file.md", ["D:/Storage/shared/file.md"])).toBe(true)
+		expect(rootMatch("D:/Storage/Project-other/docs/file.md", ["docs/**"])).toBe(false)
+		expect(rootMatch("D:/Storage/Project-other/docs/file.md", ["C:/Aliases/Project-other/docs/**"])).toBe(false)
+	})
 })

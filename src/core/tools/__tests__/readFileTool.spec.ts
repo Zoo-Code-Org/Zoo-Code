@@ -27,7 +27,11 @@ import {
 	isSupportedImageFormat,
 	ImageMemoryTracker,
 } from "../helpers/imageHelpers"
-import { extractTextFromFile, addLineNumbers, getSupportedBinaryFormats } from "../../../integrations/misc/extract-text"
+import {
+	extractTextFromBuffer,
+	addLineNumbers,
+	getSupportedBinaryFormats,
+} from "../../../integrations/misc/extract-text"
 import { readWithIndentation, readWithSlice } from "../../../integrations/misc/indentation-reader"
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -46,12 +50,23 @@ vi.mock("path", async () => {
 vi.mock("fs/promises", () => ({
 	readFile: vi.fn(),
 	stat: vi.fn(),
+	realpath: vi.fn(async (file: string) => file),
+	lstat: vi.fn(async () => ({ dev: 1n, ino: 1n, isSymbolicLink: () => false })),
+	open: vi.fn(async (file: string) => {
+		const mocked = await import("fs/promises")
+		return {
+			stat: async () => ({ ...(await mocked.stat(file)), dev: 1n, ino: 1n }),
+			read: async () => ({ bytesRead: 0 }),
+			readFile: async (encoding?: "utf8") => (encoding ? mocked.readFile(file, encoding) : mocked.readFile(file)),
+			close: vi.fn().mockResolvedValue(undefined),
+		}
+	}),
 }))
 
 vi.mock("isbinaryfile")
 
 vi.mock("../../../integrations/misc/extract-text", () => ({
-	extractTextFromFile: vi.fn(),
+	extractTextFromBuffer: vi.fn(),
 	addLineNumbers: vi.fn().mockImplementation((text: string, startLine = 1) => {
 		if (!text) return ""
 		const lines = text.split("\n")
@@ -125,7 +140,7 @@ const mockedFsReadFile = vi.mocked(fsPromises.readFile)
 const mockedFsStat = vi.mocked(fsPromises.stat)
 
 const mockedIsBinaryFile = vi.mocked(isBinaryFile)
-const mockedExtractTextFromFile = vi.mocked(extractTextFromFile)
+const mockedExtractTextFromBuffer = vi.mocked(extractTextFromBuffer)
 const mockedReadWithSlice = vi.mocked(readWithSlice)
 const mockedReadWithIndentation = vi.mocked(readWithIndentation)
 const mockedIsSupportedImageFormat = vi.mocked(isSupportedImageFormat)
@@ -426,11 +441,11 @@ describe("ReadFileTool", () => {
 			const mockTask = createMockTask()
 			const callbacks = createMockCallbacks()
 
-			mockedExtractTextFromFile.mockResolvedValue("PDF content here")
+			mockedExtractTextFromBuffer.mockResolvedValue("PDF content here")
 
 			await readFileTool.execute({ path: "document.pdf" }, mockTask as any, callbacks)
 
-			expect(mockedExtractTextFromFile).toHaveBeenCalled()
+			expect(mockedExtractTextFromBuffer).toHaveBeenCalled()
 			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("PDF content here"))
 		})
 
@@ -438,11 +453,11 @@ describe("ReadFileTool", () => {
 			const mockTask = createMockTask()
 			const callbacks = createMockCallbacks()
 
-			mockedExtractTextFromFile.mockResolvedValue("DOCX content here")
+			mockedExtractTextFromBuffer.mockResolvedValue("DOCX content here")
 
 			await readFileTool.execute({ path: "document.docx" }, mockTask as any, callbacks)
 
-			expect(mockedExtractTextFromFile).toHaveBeenCalled()
+			expect(mockedExtractTextFromBuffer).toHaveBeenCalled()
 			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("DOCX content here"))
 		})
 
@@ -462,7 +477,7 @@ describe("ReadFileTool", () => {
 			const mockTask = createMockTask()
 			const callbacks = createMockCallbacks()
 
-			mockedExtractTextFromFile.mockRejectedValue(new Error("Extraction failed"))
+			mockedExtractTextFromBuffer.mockRejectedValue(new Error("Extraction failed"))
 
 			await readFileTool.execute({ path: "corrupt.pdf" }, mockTask as any, callbacks)
 
@@ -1013,7 +1028,7 @@ describe("ReadFileTool", () => {
 				)
 				expect(mockedFsReadFile).not.toHaveBeenCalled()
 				expect(mockedFsStat).not.toHaveBeenCalled()
-				expect(mockedExtractTextFromFile).not.toHaveBeenCalled()
+				expect(mockedExtractTextFromBuffer).not.toHaveBeenCalled()
 			},
 		)
 
@@ -1038,7 +1053,7 @@ describe("ReadFileTool", () => {
 			)
 			expect(mockedFsReadFile).not.toHaveBeenCalled()
 			expect(mockedFsStat).not.toHaveBeenCalled()
-			expect(mockedExtractTextFromFile).not.toHaveBeenCalled()
+			expect(mockedExtractTextFromBuffer).not.toHaveBeenCalled()
 		})
 
 		it.each(["src/app.ts", "src/файл.ts", "src/e\u0301-📚.ts"])(

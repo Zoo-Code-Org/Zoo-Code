@@ -392,6 +392,37 @@ function toMatcherPath(filePath: string, cwd: string | undefined, isWindows: boo
 	return toRootRelativePath(path.posix.resolve(workspaceRoot, normalized))
 }
 
+function normalizeAbsoluteWorkspaceRoot(root: string | undefined, isWindows: boolean): string | undefined {
+	const normalized = pathsepsToPosix(root ?? "", isWindows)
+	if (!isAbsolutePath(normalized, isWindows)) return undefined
+
+	return path.posix
+		.resolve(toPosixAbsolutePath(normalized, driveSegmentOf(normalized, isWindows), isWindows))
+		.replace(/\/$/, "")
+}
+
+function replaceWorkspaceRootPrefix(value: string, root: string, canonicalRoot: string, isWindows: boolean): string {
+	const comparableValue = isWindows ? value.toLowerCase() : value
+	const comparableRoot = isWindows ? root.toLowerCase() : root
+	return comparableValue === comparableRoot || comparableValue.startsWith(`${comparableRoot}/`)
+		? `${canonicalRoot}${value.slice(root.length)}`
+		: value
+}
+
+/** Translate only a verified workspace-root spelling, never a file symlink. */
+function canonicalizeWorkspaceRoot(
+	value: string,
+	cwd: string | undefined,
+	canonicalCwd: string | undefined,
+	isWindows: boolean,
+): string {
+	const root = normalizeAbsoluteWorkspaceRoot(cwd, isWindows)
+	const canonicalRoot = normalizeAbsoluteWorkspaceRoot(canonicalCwd, isWindows)
+	if (root === undefined || canonicalRoot === undefined) return value
+
+	return replaceWorkspaceRootPrefix(value, root, canonicalRoot, isWindows)
+}
+
 /**
  * Check whether a file path is covered by any of the configured patterns.
  *
@@ -411,12 +442,15 @@ function toMatcherPath(filePath: string, cwd: string | undefined, isWindows: boo
 export function isFileMatchedByPatterns({
 	filePath,
 	cwd,
+	canonicalCwd,
 	patterns,
 	isWindows = runningOnWindows(),
 	homeDir = os.homedir(),
 }: {
 	filePath?: string
 	cwd?: string
+	/** Verified realpath of cwd, used only by read approval. */
+	canonicalCwd?: string
 	patterns?: string[]
 	isWindows?: boolean
 	homeDir?: string
@@ -434,6 +468,12 @@ export function isFileMatchedByPatterns({
 	const matcherPatterns = patterns
 		.map((pattern) => toMatcherPattern(pattern, cwd, isWindows, homeDir))
 		.filter((pattern): pattern is string => !!pattern)
+		.map((pattern) => {
+			const negation = pattern.startsWith("!") ? "!" : ""
+			// Resolve against the original cwd BEFORE translation: ../shared names
+			// its lexical parent, not the canonical workspace's parent.
+			return `${negation}${canonicalizeWorkspaceRoot(pattern.slice(negation.length), cwd, canonicalCwd, isWindows)}`
+		})
 
 	if (!matcherPatterns.length) {
 		return false
@@ -442,7 +482,7 @@ export function isFileMatchedByPatterns({
 	try {
 		return ignore({ ignoreCase: isWindows })
 			.add([...matcherPatterns, MATCH_DIRECTORIES_ONLY_PATTERN])
-			.ignores(candidate)
+			.ignores(toRootRelativePath(canonicalizeWorkspaceRoot(`/${candidate}`, cwd, canonicalCwd, isWindows)))
 	} catch (error) {
 		// A path the matcher rejects cannot be confirmed as matching, so treat it
 		// as unmatched.

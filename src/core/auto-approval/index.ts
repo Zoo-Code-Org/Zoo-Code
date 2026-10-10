@@ -9,6 +9,7 @@ import {
 } from "@roo-code/types"
 
 import type { DcgDecision } from "../../services/destructive-command-guard/runner"
+import { realpath } from "fs/promises"
 
 import { ClineAskResponse } from "../../shared/WebviewMessage"
 
@@ -105,20 +106,23 @@ function areAllNamedFilesMatched(tool: ClineSayTool, matchFun: (filePath: string
  * narrows the list it appears in. This also means that negating a read is
  * ineffective while a non-negated write pattern still matches the file.
  */
-function isReadAllowedByPatterns(
+async function isReadAllowedByPatterns(
 	tool: ClineSayTool,
 	cwd: string | undefined,
 	state: Pick<ExtensionState, "allowedReadFiles" | "allowedWriteFiles">,
-): boolean {
-	if (tool.tool !== "readFile") {
+): Promise<boolean> {
+	if (tool.tool !== "readFile" || (!state.allowedReadFiles?.length && !state.allowedWriteFiles?.length)) {
 		return false
 	}
 
+	// Task-local root only. Unknown roots keep lexical matching; never resolve
+	// individual file aliases here, since those can point outside the workspace.
+	const canonicalCwd = cwd ? await realpath(cwd).catch(() => undefined) : undefined
 	return areAllNamedFilesMatched(
 		tool,
 		(filePath) =>
-			isFileMatchedByPatterns({ filePath, cwd, patterns: state.allowedReadFiles }) ||
-			isFileMatchedByPatterns({ filePath, cwd, patterns: state.allowedWriteFiles }),
+			isFileMatchedByPatterns({ filePath, cwd, canonicalCwd, patterns: state.allowedReadFiles }) ||
+			isFileMatchedByPatterns({ filePath, cwd, canonicalCwd, patterns: state.allowedWriteFiles }),
 	)
 }
 
@@ -392,7 +396,7 @@ export async function checkAutoApproval({
 			// `alwaysAllowReadOnly` permission. Such a pattern names its
 			// location, including outside the workspace, so it also stands in for
 			// `alwaysAllowReadOnlyOutsideWorkspace`.
-			const isAllowedReadFile = isReadAllowedByPatterns(tool, cwd, state)
+			const isAllowedReadFile = await isReadAllowedByPatterns(tool, cwd, state)
 
 			const isReadAllowed =
 				isAllowedReadFile ||

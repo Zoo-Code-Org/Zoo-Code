@@ -20,7 +20,7 @@ import { formatResponse } from "../prompts/responses"
 import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import { getReadablePath } from "../../utils/path"
-import { extractTextFromFile, addLineNumbers, getSupportedBinaryFormats } from "../../integrations/misc/extract-text"
+import { extractTextFromBuffer, addLineNumbers, getSupportedBinaryFormats } from "../../integrations/misc/extract-text"
 import { readWithIndentation, readWithSlice } from "../../integrations/misc/indentation-reader"
 import { DEFAULT_LINE_LIMIT } from "../prompts/tools/native-tools/read_file"
 import type { ToolUse, PushToolResult } from "../../shared/tools"
@@ -34,6 +34,8 @@ import {
 	ImageMemoryTracker,
 } from "./helpers/imageHelpers"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
+import { ReadFileTarget } from "./file-reading/ReadFileTarget"
+import { isReadFileCancelled, throwIfReadFileCancelled } from "./file-reading/readFileCancellation"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -62,8 +64,10 @@ interface FileResult {
 	imageDataUrl?: string
 	feedbackText?: string
 	feedbackImages?: string[]
+	approvalStatus?: "approved" | "denied"
 	// Store the original entry for mode processing
 	entry?: InternalFileEntry
+	target?: ReadFileTarget
 }
 
 // ─── Tool Implementation ──────────────────────────────────────────────────────
@@ -84,6 +88,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 	 * Execute new single-file format with slice/indentation mode support.
 	 */
 	private async executeNew(params: ReadFileParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
+		if (isReadFileCancelled(task)) return
 		const { pushToolResult } = callbacks
 		const modelInfo = task.api.getModel().info
 		const filePath = params.path
@@ -148,7 +153,12 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 
 				// RooIgnore validation
 				const accessAllowed = task.rooIgnoreController?.validateAccess(relPath)
-				if (!accessAllowed) {
+				if (accessAllowed) {
+					fileResult.target = await ReadFileTarget.resolve(path.resolve(task.cwd, relPath), () =>
+						throwIfReadFileCancelled(task),
+					)
+				}
+				if (!accessAllowed || !task.rooIgnoreController?.validateAccess(fileResult.target!.fullPath)) {
 					await task.say("rooignore_error", relPath)
 					const errorMsg = formatResponse.rooIgnoreError(relPath)
 					updateFileResult(relPath, {
@@ -164,6 +174,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 
 			// Phase 2: Request user approval
 			await this.requestApproval(task, filesToApprove, updateFileResult)
+			throwIfReadFileCancelled(task)
 
 			// Phase 3: Process approved files
 			const imageMemoryTracker = new ImageMemoryTracker()
@@ -181,49 +192,60 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				const entry = fileResult.entry!
 
 				try {
-					// Check if path is a directory
-					const stats = await fs.stat(fullPath)
-					if (stats.isDirectory()) {
-						const errorMsg = `Cannot read '${relPath}' because it is a directory. Use list_files tool instead.`
-						updateFileResult(relPath, {
-							status: "error",
-							error: errorMsg,
-							nativeContent: `File: ${relPath}\nError: ${errorMsg}`,
-						})
-						await task.say("error", `Error reading file ${relPath}: ${errorMsg}`)
-						continue
-					}
+					await fileResult.target!.withHandle(
+						async (file, stats) => {
+							// Check if path is a directory
+							if (stats.isDirectory()) {
+								const errorMsg = `Cannot read '${relPath}' because it is a directory. Use list_files tool instead.`
+								updateFileResult(relPath, {
+									status: "error",
+									error: errorMsg,
+									nativeContent: `File: ${relPath}\nError: ${errorMsg}`,
+								})
+								await task.say("error", `Error reading file ${relPath}: ${errorMsg}`)
+								return
+							}
 
-					// Check for binary file
-					const isBinary = await isBinaryFile(fullPath)
+							// Check for binary file
+							const probe = Buffer.alloc(512)
+							const { bytesRead } = await file.read(probe, 0, probe.length, 0)
+							throwIfReadFileCancelled(task)
+							const isBinary = await isBinaryFile(probe, bytesRead)
+							throwIfReadFileCancelled(task)
 
-					if (isBinary) {
-						await this.handleBinaryFile(
-							task,
-							relPath,
-							fullPath,
-							supportsImages,
-							maxImageFileSize,
-							maxTotalImageSize,
-							imageMemoryTracker,
-							updateFileResult,
-						)
-						continue
-					}
+							if (isBinary) {
+								await this.handleBinaryFile(
+									task,
+									relPath,
+									fullPath,
+									supportsImages,
+									maxImageFileSize,
+									maxTotalImageSize,
+									imageMemoryTracker,
+									updateFileResult,
+									file,
+								)
+								return
+							}
 
-					// Read text file content with lossy UTF-8 conversion
-					// Reading as Buffer first allows graceful handling of non-UTF8 bytes
-					// (they become U+FFFD replacement characters instead of throwing)
-					const buffer = await fs.readFile(fullPath)
-					const fileContent = buffer.toString("utf-8")
-					const result = this.processTextFile(fileContent, entry)
+							// Read text file content with lossy UTF-8 conversion
+							// Reading as Buffer first allows graceful handling of non-UTF8 bytes
+							// (they become U+FFFD replacement characters instead of throwing)
+							const buffer = await file.readFile()
+							throwIfReadFileCancelled(task)
+							const fileContent = buffer.toString("utf-8")
+							const result = this.processTextFile(fileContent, entry)
 
-					await task.fileContextTracker.trackFileContext(relPath, "read_tool" as RecordSource)
+							await task.fileContextTracker.trackFileContext(relPath, "read_tool" as RecordSource)
 
-					updateFileResult(relPath, {
-						nativeContent: `File: ${relPath}\n${result}`,
-					})
+							updateFileResult(relPath, {
+								nativeContent: `File: ${relPath}\n${result}`,
+							})
+						},
+						() => throwIfReadFileCancelled(task),
+					)
 				} catch (error) {
+					if (isReadFileCancelled(task)) throw error
 					const errorMsg = error instanceof Error ? error.message : String(error)
 					updateFileResult(relPath, {
 						status: "error",
@@ -235,6 +257,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 			}
 
 			// Phase 4: Build and return result
+			throwIfReadFileCancelled(task)
 			const hasErrors = fileResults.some((r) => r.status === "error" || r.status === "blocked")
 			if (hasErrors) {
 				task.didToolFailInCurrentTurn = true
@@ -242,6 +265,10 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 
 			this.buildAndPushResult(task, fileResults, pushToolResult)
 		} catch (error) {
+			if (isReadFileCancelled(task)) {
+				this.buildAndPushResult(task, fileResults, pushToolResult)
+				return
+			}
 			const relPath = filePath || "unknown"
 			const errorMsg = error instanceof Error ? error.message : String(error)
 
@@ -251,7 +278,15 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				nativeContent: `File: ${relPath}\nError: ${errorMsg}`,
 			})
 
-			await task.say("error", `Error reading file ${relPath}: ${errorMsg}`)
+			try {
+				await task.say("error", `Error reading file ${relPath}: ${errorMsg}`)
+			} catch (diagnosticError) {
+				if (!isReadFileCancelled(task)) throw diagnosticError
+			}
+			if (isReadFileCancelled(task)) {
+				this.buildAndPushResult(task, fileResults, pushToolResult)
+				return
+			}
 			task.didToolFailInCurrentTurn = true
 
 			const errorResult = fileResults
@@ -341,6 +376,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 		maxTotalImageSize: number,
 		imageMemoryTracker: ImageMemoryTracker,
 		updateFileResult: (path: string, updates: Partial<FileResult>) => void,
+		file: fs.FileHandle,
 	): Promise<void> {
 		const fileExtension = path.extname(relPath).toLowerCase()
 		const supportedBinaryFormats = getSupportedBinaryFormats()
@@ -354,7 +390,9 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					maxImageFileSize,
 					maxTotalImageSize,
 					imageMemoryTracker.getTotalMemoryUsed(),
+					file,
 				)
+				throwIfReadFileCancelled(task)
 
 				if (!validationResult.isValid) {
 					await task.fileContextTracker.trackFileContext(relPath, "read_tool" as RecordSource)
@@ -364,7 +402,8 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					return
 				}
 
-				const imageResult = await processImageFile(fullPath)
+				const imageResult = await processImageFile(fullPath, file, () => throwIfReadFileCancelled(task))
+				throwIfReadFileCancelled(task)
 				imageMemoryTracker.addMemoryUsage(imageResult.sizeInMB)
 				await task.fileContextTracker.trackFileContext(relPath, "read_tool" as RecordSource)
 
@@ -374,6 +413,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				})
 				return
 			} catch (error) {
+				if (isReadFileCancelled(task)) throw error
 				const errorMsg = error instanceof Error ? error.message : String(error)
 				updateFileResult(relPath, {
 					status: "error",
@@ -388,7 +428,10 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 		// Handle other supported binary formats (PDF, DOCX, etc.)
 		if (supportedBinaryFormats && supportedBinaryFormats.includes(fileExtension)) {
 			try {
-				const content = await extractTextFromFile(fullPath)
+				const source = await file.readFile()
+				throwIfReadFileCancelled(task)
+				const content = await extractTextFromBuffer(source, fullPath)
+				throwIfReadFileCancelled(task)
 				const numberedContent = addLineNumbers(content)
 				const lineCount = content.split("\n").length
 
@@ -402,6 +445,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				})
 				return
 			} catch (error) {
+				if (isReadFileCancelled(task)) throw error
 				const errorMsg = error instanceof Error ? error.message : String(error)
 				updateFileResult(relPath, {
 					status: "error",
@@ -430,6 +474,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 		updateFileResult: (path: string, updates: Partial<FileResult>) => void,
 	): Promise<void> {
 		if (filesToApprove.length === 0) return
+		throwIfReadFileCancelled(task)
 
 		if (filesToApprove.length > 1) {
 			// Batch approval
@@ -500,15 +545,16 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 			// Single file approval
 			const fileResult = filesToApprove[0]
 			const relPath = fileResult.path
-			const fullPath = path.resolve(task.cwd, relPath)
-			const isOutsideWorkspace = isPathOutsideWorkspace(fullPath)
+			const fullPath = fileResult.target!.fullPath
+			const isOutsideWorkspace = await ReadFileTarget.isOutsideWorkspace(fullPath)
+			throwIfReadFileCancelled(task)
 			const lineSnippet = this.getLineSnippet(fileResult.entry!)
 
 			const startLine = this.getStartLine(fileResult.entry!)
 
 			const completeMessage = JSON.stringify({
 				tool: "readFile",
-				path: getReadablePath(task.cwd, relPath),
+				path: getReadablePath(task.cwd, fullPath),
 				isOutsideWorkspace,
 				content: fullPath,
 				reason: lineSnippet,
@@ -517,8 +563,16 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 
 			const { response, text, images } = await task.ask("tool", completeMessage, false)
 
+			updateFileResult(relPath, {
+				approvalStatus: response === "yesButtonClicked" ? "approved" : "denied",
+				feedbackText: text,
+				feedbackImages: images,
+			})
+			throwIfReadFileCancelled(task)
+			if (text) await task.say("user_feedback", text, images)
+			throwIfReadFileCancelled(task)
+
 			if (response !== "yesButtonClicked") {
-				if (text) await task.say("user_feedback", text, images)
 				task.didRejectTool = true
 				updateFileResult(relPath, {
 					status: "denied",
@@ -527,7 +581,6 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					feedbackImages: images,
 				})
 			} else {
-				if (text) await task.say("user_feedback", text, images)
 				updateFileResult(relPath, { status: "approved", feedbackText: text, feedbackImages: images })
 			}
 		}
@@ -570,6 +623,16 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 	 * Build and push the final result to the tool output.
 	 */
 	private buildAndPushResult(task: Task, fileResults: FileResult[], pushToolResult: PushToolResult): void {
+		const cancelled = isReadFileCancelled(task)
+		if (cancelled) {
+			fileResults = fileResults.map((result) => ({
+				...result,
+				status: result.approvalStatus ?? "pending",
+				nativeContent: undefined,
+				imageDataUrl: undefined,
+			}))
+			if (!fileResults.some((result) => result.feedbackText || result.feedbackImages?.length)) return
+		}
 		const finalResult = fileResults
 			.filter((r) => r.nativeContent)
 			.map((r) => r.nativeContent)
@@ -578,7 +641,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 		const fileImageUrls = fileResults.filter((r) => r.imageDataUrl).map((r) => r.imageDataUrl as string)
 
 		let statusMessage = ""
-		let feedbackImages: string[] = []
+		let feedbackImages: string[] = cancelled ? fileResults.flatMap((result) => result.feedbackImages ?? []) : []
 
 		const deniedWithFeedback = fileResults.find((r) => r.status === "denied" && r.feedbackText)
 
@@ -687,7 +750,20 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 
 			// RooIgnore validation
 			const accessAllowed = task.rooIgnoreController?.validateAccess(relPath)
-			if (!accessAllowed) {
+			let target: ReadFileTarget | undefined
+			try {
+				if (accessAllowed) {
+					target = await ReadFileTarget.resolve(fullPath, () => throwIfReadFileCancelled(task))
+				}
+			} catch (error) {
+				if (isReadFileCancelled(task)) return
+				const errorMsg = error instanceof Error ? error.message : String(error)
+				results.push(`File: ${relPath}\nError: ${errorMsg}`)
+				await task.say("error", `Error reading file ${relPath}: ${errorMsg}`)
+				task.didToolFailInCurrentTurn = true
+				continue
+			}
+			if (!accessAllowed || !task.rooIgnoreController?.validateAccess(target!.fullPath)) {
 				await task.say("rooignore_error", relPath)
 				const errorMsg = formatResponse.rooIgnoreError(relPath)
 				results.push(`File: ${relPath}\nError: ${errorMsg}`)
@@ -697,7 +773,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 			}
 
 			// Request approval for single file
-			const isOutsideWorkspace = isPathOutsideWorkspace(fullPath)
+			const isOutsideWorkspace = await ReadFileTarget.isOutsideWorkspace(target!.fullPath)
 			let lineSnippet = ""
 			if (entry.lineRanges && entry.lineRanges.length > 0) {
 				const ranges = entry.lineRanges.map((range: LineRange) => `(lines ${range.start}-${range.end})`)
@@ -706,9 +782,9 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 
 			const completeMessage = JSON.stringify({
 				tool: "readFile",
-				path: getReadablePath(task.cwd, relPath),
+				path: getReadablePath(task.cwd, target!.fullPath),
 				isOutsideWorkspace,
-				content: fullPath,
+				content: target!.fullPath,
 				reason: lineSnippet || undefined,
 			} satisfies ClineSayTool)
 
@@ -724,81 +800,92 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 			if (text) await task.say("user_feedback", text, images)
 
 			try {
-				// Check if the path is a directory
-				const stats = await fs.stat(fullPath)
-				if (stats.isDirectory()) {
-					const errorMsg = `Cannot read '${relPath}' because it is a directory.`
-					results.push(`File: ${relPath}\nError: ${errorMsg}`)
-					await task.say("error", `Error reading file ${relPath}: ${errorMsg}`)
-					// Mirror the native path: a failed read marks the tool turn as failed.
-					task.didToolFailInCurrentTurn = true
-					continue
-				}
+				await target!.withHandle(async (file, stats) => {
+					// Check if the path is a directory
+					if (stats.isDirectory()) {
+						const errorMsg = `Cannot read '${relPath}' because it is a directory.`
+						results.push(`File: ${relPath}\nError: ${errorMsg}`)
+						await task.say("error", `Error reading file ${relPath}: ${errorMsg}`)
+						// Mirror the native path: a failed read marks the tool turn as failed.
+						task.didToolFailInCurrentTurn = true
+						return
+					}
 
-				const isBinary = await isBinaryFile(fullPath).catch(() => false)
+					let isBinary = false
+					try {
+						const probe = Buffer.alloc(512)
+						const { bytesRead } = await file.read(probe, 0, probe.length, 0)
+						isBinary = await isBinaryFile(probe, bytesRead)
+					} catch {
+						// Preserve the historical legacy text fallback when binary probing fails.
+					}
 
-				if (isBinary) {
-					// Handle binary files (images)
-					const fileExtension = path.extname(relPath).toLowerCase()
-					if (supportsImages && isSupportedImageFormat(fileExtension)) {
-						const state = await task.providerRef.deref()?.getState()
-						const {
-							maxImageFileSize = DEFAULT_MAX_IMAGE_FILE_SIZE_MB,
-							maxTotalImageSize = DEFAULT_MAX_TOTAL_IMAGE_SIZE_MB,
-						} = state ?? {}
-						const validation = await validateImageForProcessing(
-							fullPath,
-							supportsImages,
-							maxImageFileSize,
-							maxTotalImageSize,
-							0, // Legacy path doesn't track cumulative memory
-						)
-						if (!validation.isValid) {
-							results.push(`File: ${relPath}\nNotice: ${validation.notice ?? "Image validation failed"}`)
-							continue
+					if (isBinary) {
+						// Handle binary files (images)
+						const fileExtension = path.extname(relPath).toLowerCase()
+						if (supportsImages && isSupportedImageFormat(fileExtension)) {
+							const state = await task.providerRef.deref()?.getState()
+							const {
+								maxImageFileSize = DEFAULT_MAX_IMAGE_FILE_SIZE_MB,
+								maxTotalImageSize = DEFAULT_MAX_TOTAL_IMAGE_SIZE_MB,
+							} = state ?? {}
+							const validation = await validateImageForProcessing(
+								fullPath,
+								supportsImages,
+								maxImageFileSize,
+								maxTotalImageSize,
+								0, // Legacy path doesn't track cumulative memory
+								file,
+							)
+							if (!validation.isValid) {
+								results.push(
+									`File: ${relPath}\nNotice: ${validation.notice ?? "Image validation failed"}`,
+								)
+								return
+							}
+							const imageResult = await processImageFile(fullPath, file)
+							if (imageResult) {
+								results.push(`File: ${relPath}\n[Image file - content processed for vision model]`)
+							}
+						} else {
+							results.push(`File: ${relPath}\nError: Cannot read binary file`)
 						}
-						const imageResult = await processImageFile(fullPath)
-						if (imageResult) {
-							results.push(`File: ${relPath}\n[Image file - content processed for vision model]`)
+						return
+					}
+
+					// Read text file
+					const rawContent = await file.readFile("utf8")
+
+					// Handle line ranges if specified
+					let content: string
+					if (entry.lineRanges && entry.lineRanges.length > 0) {
+						const lines = rawContent.split("\n")
+						const selectedLines: string[] = []
+
+						for (const range of entry.lineRanges) {
+							// Convert to 0-based index, ranges are 1-based inclusive
+							const startIdx = Math.max(0, range.start - 1)
+							const endIdx = Math.min(lines.length - 1, range.end - 1)
+
+							for (let i = startIdx; i <= endIdx; i++) {
+								selectedLines.push(`${i + 1} | ${lines[i]}`)
+							}
 						}
+						content = selectedLines.join("\n")
 					} else {
-						results.push(`File: ${relPath}\nError: Cannot read binary file`)
-					}
-					continue
-				}
-
-				// Read text file
-				const rawContent = await fs.readFile(fullPath, "utf8")
-
-				// Handle line ranges if specified
-				let content: string
-				if (entry.lineRanges && entry.lineRanges.length > 0) {
-					const lines = rawContent.split("\n")
-					const selectedLines: string[] = []
-
-					for (const range of entry.lineRanges) {
-						// Convert to 0-based index, ranges are 1-based inclusive
-						const startIdx = Math.max(0, range.start - 1)
-						const endIdx = Math.min(lines.length - 1, range.end - 1)
-
-						for (let i = startIdx; i <= endIdx; i++) {
-							selectedLines.push(`${i + 1} | ${lines[i]}`)
+						// Read with default limits using slice mode
+						const result = readWithSlice(rawContent, 0, DEFAULT_LINE_LIMIT)
+						content = result.content
+						if (result.wasTruncated) {
+							content += `\n\n[File truncated: showing ${result.returnedLines} of ${result.totalLines} total lines]`
 						}
 					}
-					content = selectedLines.join("\n")
-				} else {
-					// Read with default limits using slice mode
-					const result = readWithSlice(rawContent, 0, DEFAULT_LINE_LIMIT)
-					content = result.content
-					if (result.wasTruncated) {
-						content += `\n\n[File truncated: showing ${result.returnedLines} of ${result.totalLines} total lines]`
-					}
-				}
 
-				results.push(`File: ${relPath}\n${content}`)
+					results.push(`File: ${relPath}\n${content}`)
 
-				// Track file in context
-				await task.fileContextTracker.trackFileContext(relPath, "read_tool")
+					// Track file in context
+					await task.fileContextTracker.trackFileContext(relPath, "read_tool")
+				})
 			} catch (error) {
 				const errorMsg = error instanceof Error ? error.message : String(error)
 				results.push(`File: ${relPath}\nError: ${errorMsg}`)
