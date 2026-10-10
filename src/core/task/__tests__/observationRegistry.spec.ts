@@ -71,7 +71,6 @@ describe("ObservationRegistry", () => {
 	})
 })
 
-
 describe("close() - disposal is terminal", () => {
 	it("drops every observation and refuses later ones", () => {
 		const registry = new ObservationRegistry()

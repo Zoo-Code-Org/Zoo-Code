@@ -467,7 +467,10 @@ describe("safeWriteJson", () => {
 
 		// The primary failure has to stay readable even though the rollback failure is what
 		// gets thrown on top of it.
-		const rejection = await safeWriteJson(currentTestFilePath, newData).then(() => null, (error) => error)
+		const rejection = await safeWriteJson(currentTestFilePath, newData).then(
+			() => null,
+			(error) => error,
+		)
 		expect(rejection).toBeInstanceOf(Error)
 		expect(rejection.name).toBe("RollbackFailedError")
 		expect(rejection.message).toContain("Primary rename failed")
@@ -565,11 +568,11 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual({ c: 3 })
 	})
 
-// The commit rename is no-follow for the final component: it targets the path the caller
-// named, so a link the caller never chose is REPLACED by the rename instead of receiving the
-// payload. Staging therefore happens beside the named path - the same directory the rename
-// lands in - which is also what keeps the rename on one volume. (Real symlinks are unavailable
-// in this CI lane, so the alias is simulated by mocking fs.realpath.)
+	// The commit rename is no-follow for the final component: it targets the path the caller
+	// named, so a link the caller never chose is REPLACED by the rename instead of receiving the
+	// payload. Staging therefore happens beside the named path - the same directory the rename
+	// lands in - which is also what keeps the rename on one volume. (Real symlinks are unavailable
+	// in this CI lane, so the alias is simulated by mocking fs.realpath.)
 	test("stages beside the caller-named path and never publishes through the symlink", async () => {
 		const referentDir = path.join(tempDir, "referent")
 		const linkDir = path.join(tempDir, "link")
@@ -709,9 +712,9 @@ describe("safeWriteJson", () => {
 			// asserted through unknown rather than stubbing every Stats field.
 		} as unknown as fsSyncActual.Stats)
 
-		await expect(
-			safeWriteJson(linkPath, { leaked: true }, { refuseSymlinkTarget: true }),
-		).rejects.toThrow(/refusing to write through the symlink/)
+		await expect(safeWriteJson(linkPath, { leaked: true }, { refuseSymlinkTarget: true })).rejects.toThrow(
+			/refusing to write through the symlink/,
+		)
 
 		vi.restoreAllMocks()
 		// Nothing was resolved, staged, locked, or committed: the referent still holds
@@ -746,9 +749,9 @@ describe("safeWriteJson", () => {
 			return Promise.resolve(asFile)
 		}) as unknown as typeof fs.lstat)
 
-		await expect(
-			safeWriteJson(linkPath, { leaked: true }, { refuseSymlinkTarget: true }),
-		).rejects.toThrow(/after resolution/)
+		await expect(safeWriteJson(linkPath, { leaked: true }, { refuseSymlinkTarget: true })).rejects.toThrow(
+			/after resolution/,
+		)
 
 		vi.restoreAllMocks()
 		expect(await readFileContent(referentPath)).toEqual({ seed: "untouched" })
@@ -774,9 +777,9 @@ describe("safeWriteJson", () => {
 			return Promise.resolve(asFile)
 		}) as unknown as typeof fs.lstat)
 
-		await expect(
-			safeWriteJson(linkPath, { leaked: true }, { refuseSymlinkTarget: true }),
-		).rejects.toThrow(/before publication/)
+		await expect(safeWriteJson(linkPath, { leaked: true }, { refuseSymlinkTarget: true })).rejects.toThrow(
+			/before publication/,
+		)
 
 		vi.restoreAllMocks()
 		expect(await readFileContent(referentPath)).toEqual({ seed: "untouched" })
@@ -791,9 +794,9 @@ describe("safeWriteJson", () => {
 		// the write has to stop here rather than publish through an unexamined entry.
 		vi.spyOn(fs, "lstat").mockRejectedValue(failure)
 
-		await expect(
-			safeWriteJson(target, { written: true }, { refuseSymlinkTarget: true }),
-		).rejects.toThrow(failure.message)
+		await expect(safeWriteJson(target, { written: true }, { refuseSymlinkTarget: true })).rejects.toThrow(
+			failure.message,
+		)
 
 		vi.restoreAllMocks()
 		// Nothing was locked, staged, or published: no target and no leftover temp file.
@@ -853,9 +856,9 @@ describe("safeWriteJson", () => {
 			return Promise.resolve(String(p) === tempDir ? asLink : asFile)
 		}) as unknown as typeof fs.lstat)
 
-		await expect(
-			safeWriteJson(target, { leaked: true }, { refuseSymlinkTarget: true }),
-		).rejects.toThrow(/is a symlink/)
+		await expect(safeWriteJson(target, { leaked: true }, { refuseSymlinkTarget: true })).rejects.toThrow(
+			/is a symlink/,
+		)
 
 		vi.restoreAllMocks()
 		expect(await readFileContent(target)).toEqual({ own: true })
@@ -885,13 +888,13 @@ describe("safeWriteJson", () => {
 		const failure = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
 		// "Could not inspect" is not evidence that the path is safe: only ENOENT is tolerated.
 		vi.spyOn(fs, "lstat").mockImplementation(((p: unknown) => {
-			if (String(p) === tempDir) { return Promise.reject(failure) }
+			if (String(p) === tempDir) {
+				return Promise.reject(failure)
+			}
 			return Promise.resolve(asFile)
 		}) as unknown as typeof fs.lstat)
 
-		await expect(
-			safeWriteJson(target, { leaked: true }, { refuseSymlinkTarget: true }),
-		).rejects.toThrow(/EACCES/)
+		await expect(safeWriteJson(target, { leaked: true }, { refuseSymlinkTarget: true })).rejects.toThrow(/EACCES/)
 
 		vi.restoreAllMocks()
 		expect(await readFileContent(target)).toEqual({ own: true })
@@ -910,5 +913,4 @@ describe("safeWriteJson", () => {
 		vi.restoreAllMocks()
 		expect(await readFileContent(target)).toEqual({ written: true })
 	})
-
 })

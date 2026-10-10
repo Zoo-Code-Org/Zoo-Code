@@ -2106,7 +2106,10 @@ export class McpHub {
 		}
 		this.isProgrammaticUpdate = true
 		try {
-			await safeWriteJson(configPath, updatedConfig, { prettyPrint: true, ...this.symlinkPolicyForSource(source) })
+			await safeWriteJson(configPath, updatedConfig, {
+				prettyPrint: true,
+				...this.symlinkPolicyForSource(source),
+			})
 		} finally {
 			// Reset flag after watcher debounce period (non-blocking)
 			this.flagResetTimer = setTimeout(() => {
@@ -2191,7 +2194,10 @@ export class McpHub {
 					mcpServers: config.mcpServers,
 				}
 
-				await safeWriteJson(configPath, updatedConfig, { prettyPrint: true, ...this.symlinkPolicyForSource(serverSource) })
+				await safeWriteJson(configPath, updatedConfig, {
+					prettyPrint: true,
+					...this.symlinkPolicyForSource(serverSource),
+				})
 
 				// Update server connections with the correct source
 				await this.updateServerConnections(config.mcpServers, serverSource)

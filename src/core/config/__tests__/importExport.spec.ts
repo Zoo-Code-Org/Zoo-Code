@@ -1555,10 +1555,14 @@ describe("importExport", () => {
 			expect(mockContextProxy.export).toHaveBeenCalled()
 			expect(fs.mkdir).toHaveBeenCalledWith("/mock/path", { recursive: true })
 
-			expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
-				providerProfiles: mockProviderProfiles,
-				globalSettings: mockGlobalSettings,
-			}, { refuseSymlinkTarget: true })
+			expect(safeWriteJson).toHaveBeenCalledWith(
+				"/mock/path/zoo-code-settings.json",
+				{
+					providerProfiles: mockProviderProfiles,
+					globalSettings: mockGlobalSettings,
+				},
+				{ refuseSymlinkTarget: true },
+			)
 		})
 
 		it("should include globalSettings when allowedMaxRequests is null", async () => {
@@ -1587,10 +1591,14 @@ describe("importExport", () => {
 				contextProxy: mockContextProxy,
 			})
 
-			expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
-				providerProfiles: mockProviderProfiles,
-				globalSettings: mockGlobalSettings,
-			}, { refuseSymlinkTarget: true })
+			expect(safeWriteJson).toHaveBeenCalledWith(
+				"/mock/path/zoo-code-settings.json",
+				{
+					providerProfiles: mockProviderProfiles,
+					globalSettings: mockGlobalSettings,
+				},
+				{ refuseSymlinkTarget: true },
+			)
 		})
 
 		it("should handle errors during the export process", async () => {
@@ -1710,10 +1718,14 @@ describe("importExport", () => {
 					contextProxy: mockContextProxy,
 				})
 
-				expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
-					providerProfiles: mockProviderProfiles,
-					globalSettings: mockGlobalSettings,
-				}, { refuseSymlinkTarget: true })
+				expect(safeWriteJson).toHaveBeenCalledWith(
+					"/mock/path/zoo-code-settings.json",
+					{
+						providerProfiles: mockProviderProfiles,
+						globalSettings: mockGlobalSettings,
+					},
+					{ refuseSymlinkTarget: true },
+				)
 			})
 
 			it("should export model dimension for OpenAI Compatible provider", async () => {
@@ -1863,10 +1875,14 @@ describe("importExport", () => {
 				})
 
 				// Should not throw an error and should preserve original settings
-				expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
-					providerProfiles: mockProviderProfiles,
-					globalSettings: mockGlobalSettings, // Should remain unchanged
-				}, { refuseSymlinkTarget: true })
+				expect(safeWriteJson).toHaveBeenCalledWith(
+					"/mock/path/zoo-code-settings.json",
+					{
+						providerProfiles: mockProviderProfiles,
+						globalSettings: mockGlobalSettings, // Should remain unchanged
+					},
+					{ refuseSymlinkTarget: true },
+				)
 			})
 
 			it("should maintain backward compatibility with existing exports", async () => {
@@ -1906,10 +1922,14 @@ describe("importExport", () => {
 				})
 
 				// Should not modify settings for non-openai-compatible providers
-				expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
-					providerProfiles: mockProviderProfiles,
-					globalSettings: mockGlobalSettings, // Should remain unchanged
-				}, { refuseSymlinkTarget: true })
+				expect(safeWriteJson).toHaveBeenCalledWith(
+					"/mock/path/zoo-code-settings.json",
+					{
+						providerProfiles: mockProviderProfiles,
+						globalSettings: mockGlobalSettings, // Should remain unchanged
+					},
+					{ refuseSymlinkTarget: true },
+				)
 			})
 
 			it("should handle missing current provider gracefully", async () => {
@@ -1951,10 +1971,14 @@ describe("importExport", () => {
 				})
 
 				// Should not throw an error and should preserve original settings
-				expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
-					providerProfiles: mockProviderProfiles,
-					globalSettings: mockGlobalSettings, // Should remain unchanged
-				}, { refuseSymlinkTarget: true })
+				expect(safeWriteJson).toHaveBeenCalledWith(
+					"/mock/path/zoo-code-settings.json",
+					{
+						providerProfiles: mockProviderProfiles,
+						globalSettings: mockGlobalSettings, // Should remain unchanged
+					},
+					{ refuseSymlinkTarget: true },
+				)
 			})
 		})
 
@@ -2188,10 +2212,14 @@ describe("importExport", () => {
 			})
 
 			// Step 4: Verify the exported data includes the model dimension
-			expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/test-settings.json", {
-				providerProfiles: mockProviderProfiles,
-				globalSettings: mockGlobalSettings,
-			}, { refuseSymlinkTarget: true })
+			expect(safeWriteJson).toHaveBeenCalledWith(
+				"/mock/path/test-settings.json",
+				{
+					providerProfiles: mockProviderProfiles,
+					globalSettings: mockGlobalSettings,
+				},
+				{ refuseSymlinkTarget: true },
+			)
 
 			// Step 5: Get the exported data for import test
 			const exportedData = (safeWriteJson as Mock).mock.calls[0][1]
