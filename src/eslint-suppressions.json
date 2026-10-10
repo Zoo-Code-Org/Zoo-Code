@@ -1196,7 +1196,7 @@
 	},
 	"integrations/misc/__tests__/open-file.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 11
+			"count": 1
 		}
 	},
 	"integrations/misc/__tests__/performance/processCarriageReturns.benchmark.ts": {
