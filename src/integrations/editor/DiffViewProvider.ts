@@ -724,7 +724,7 @@ export class DiffViewProvider {
 				await this.revertDocument(updatedDocument)
 			}
 
-	await this.closeOwnDiffView(absolutePath)
+			await this.closeOwnDiffView(absolutePath)
 
 			// Read auto-close preferences from state; fall back to defaults that
 			// preserve the existing behavior when unset (saveTask was resolved above
@@ -735,7 +735,8 @@ export class DiffViewProvider {
 				absolutePath,
 				this.userTouchedDiffEditor,
 				saveState?.autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
-				saveState?.autoCloseZooOpenedFilesAfterUserEdited ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
+				saveState?.autoCloseZooOpenedFilesAfterUserEdited ??
+					DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
 				saveState?.autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
 			)
 
@@ -752,7 +753,6 @@ export class DiffViewProvider {
 			this.teardownCancellationRequested = false
 			return { newProblemsMessage: undefined, userEdits: undefined, finalContent: undefined }
 		}
-
 
 		// Getting diagnostics before and after the file edit is a better approach than
 		// automatically tracking problems in real-time. This method ensures we only

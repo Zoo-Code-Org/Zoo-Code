@@ -50,12 +50,13 @@ afterEach(async () => {
 // Only isSymbolicLink() is consulted by the guard, so the double carries just
 // that method. The mocks reject asynchronously: a synchronous throw would bypass
 // resolvePublishTarget's catch and skip the ENOENT/symlink branch under test.
-const symlinkStat = (target: unknown) => ({
-	isSymbolicLink: () => target === currentLink,
-	// The staging-path check in safeWriteText also asks whether the path is a
-	// regular file, so the double carries that predicate as well.
-	isFile: () => target !== currentLink,
-}) as unknown as BigIntStats
+const symlinkStat = (target: unknown) =>
+	({
+		isSymbolicLink: () => target === currentLink,
+		// The staging-path check in safeWriteText also asks whether the path is a
+		// regular file, so the double carries that predicate as well.
+		isFile: () => target !== currentLink,
+	}) as unknown as BigIntStats
 let currentLink = ""
 
 describe("safeWriteJson lock key under a peer commit", () => {
@@ -108,7 +109,16 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// A write that declares no confinement scope no longer resolves the publish target at all,
 		// so the two post-lock resolutions this used to record are gone; the lock key still comes
 		// from the referent, which is what the test is about.
-		expect(order).toEqual(["resolve-failed", "lstat", "resolve", "resolve", "history_item.json", "link.json", "lstat", "lstat"])
+		expect(order).toEqual([
+			"resolve-failed",
+			"lstat",
+			"resolve",
+			"resolve",
+			"history_item.json",
+			"link.json",
+			"lstat",
+			"lstat",
+		])
 		// The bytes replaced the link rather than travelling through it to the referent: nobody
 		// authorized the referent here, because no scope was declared.
 		expect(JSON.parse(await fs.readFile(currentLink, "utf8"))).toEqual({ id: "task-1" })
@@ -167,7 +177,9 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			if (target === file) throw enoent
 			return canonicalDir
 		})
-		mockedLstat.mockImplementation(async () => ({ isSymbolicLink: () => false, isFile: () => true }) as unknown as BigIntStats)
+		mockedLstat.mockImplementation(
+			async () => ({ isSymbolicLink: () => false, isFile: () => true }) as unknown as BigIntStats,
+		)
 
 		expect(await resolveLockKey(file)).toBe(path.join(canonicalDir, "history_item.json"))
 	})
@@ -195,57 +207,57 @@ it("does not log a cleanup error when the safety net finds the temp file already
 	renameSpy.mockRestore()
 	unlinkSpy.mockRestore()
 	consoleError.mockRestore()
+})
+
+it("releases both locks when a default write over a symlink completes", async () => {
+	const dir = await makeDir("lockkey-")
+	const referent = path.join(dir, "history_item.json")
+	currentLink = path.join(dir, "link.json")
+	const acquired: string[] = []
+	const released: string[] = []
+
+	mockedRealpath.mockImplementation(async (target) => (target === currentLink ? referent : String(target)))
+	mockedLstat.mockImplementation(async (target) => symlinkStat(target))
+	mockedReadlink.mockImplementation(async (target) =>
+		target === currentLink ? referent : Promise.reject(new Error("not a link")),
+	)
+	mockedAcquireFileLock.mockImplementation(async (key) => {
+		acquired.push(String(key))
+		return async () => {
+			released.push(String(key))
+		}
 	})
 
-	it("releases both locks when a default write over a symlink completes", async () => {
-		const dir = await makeDir("lockkey-")
-		const referent = path.join(dir, "history_item.json")
-		currentLink = path.join(dir, "link.json")
-		const acquired: string[] = []
-		const released: string[] = []
+	await safeWriteJson(currentLink, { id: "task-1" })
 
-		mockedRealpath.mockImplementation(async (target) => (target === currentLink ? referent : String(target)))
-		mockedLstat.mockImplementation(async (target) => symlinkStat(target))
-		mockedReadlink.mockImplementation(async (target) =>
-			target === currentLink ? referent : Promise.reject(new Error("not a link")),
-		)
-		mockedAcquireFileLock.mockImplementation(async (key) => {
-			acquired.push(String(key))
-			return async () => {
-				released.push(String(key))
-			}
-		})
+	// Deterministic order: the two keys sorted, so two writers approaching the same pair from
+	// opposite sides cannot each hold one and wait for the other.
+	expect(acquired).toEqual([referent, currentLink].sort())
+	// Every lock taken is released, in the reverse of the order they were taken.
+	expect(released).toEqual([...acquired].reverse())
+})
 
-		await safeWriteJson(currentLink, { id: "task-1" })
+it("locks only the referent when the caller declared a confinement scope", async () => {
+	const dir = await makeDir("lockkey-")
+	const referent = path.join(dir, "history_item.json")
+	currentLink = path.join(dir, "link.json")
+	const acquired: string[] = []
 
-		// Deterministic order: the two keys sorted, so two writers approaching the same pair from
-		// opposite sides cannot each hold one and wait for the other.
-		expect(acquired).toEqual([referent, currentLink].sort())
-		// Every lock taken is released, in the reverse of the order they were taken.
-		expect(released).toEqual([...acquired].reverse())
+	// A confined caller publishes through the referent, so the referent lock is the one that
+	// serializes it - including against writers that name the referent directly. Adding the
+	// link-path lock here would be a second lock for an identity this call does not replace.
+	await fs.writeFile(referent, "{}", "utf8")
+	mockedRealpath.mockImplementation(async (target) => (target === currentLink ? referent : String(target)))
+	mockedLstat.mockImplementation(async (target) => symlinkStat(target))
+	mockedReadlink.mockImplementation(async (target) =>
+		target === currentLink ? referent : Promise.reject(new Error("not a link")),
+	)
+	mockedAcquireFileLock.mockImplementation(async (key) => {
+		acquired.push(String(key))
+		return async () => {}
 	})
 
-	it("locks only the referent when the caller declared a confinement scope", async () => {
-		const dir = await makeDir("lockkey-")
-		const referent = path.join(dir, "history_item.json")
-		currentLink = path.join(dir, "link.json")
-		const acquired: string[] = []
+	await safeWriteJson(currentLink, { id: "task-1" }, { confineTo: dir })
 
-		// A confined caller publishes through the referent, so the referent lock is the one that
-		// serializes it - including against writers that name the referent directly. Adding the
-		// link-path lock here would be a second lock for an identity this call does not replace.
-		await fs.writeFile(referent, "{}", "utf8")
-		mockedRealpath.mockImplementation(async (target) => (target === currentLink ? referent : String(target)))
-		mockedLstat.mockImplementation(async (target) => symlinkStat(target))
-		mockedReadlink.mockImplementation(async (target) =>
-			target === currentLink ? referent : Promise.reject(new Error("not a link")),
-		)
-		mockedAcquireFileLock.mockImplementation(async (key) => {
-			acquired.push(String(key))
-			return async () => {}
-		})
-
-		await safeWriteJson(currentLink, { id: "task-1" }, { confineTo: dir })
-
-		expect(acquired).toEqual([referent])
-	})
+	expect(acquired).toEqual([referent])
+})

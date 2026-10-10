@@ -75,9 +75,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		// one test would otherwise be handed to the next test's reads. Restore the default.
 		const stat = vi.mocked((await import("fs/promises")).default.stat)
 		stat.mockReset()
-		stat.mockResolvedValue(
-			{ dev: 1n, ino: 2n, size: 22n, mtimeNs: 100n, ctimeNs: 100n } as unknown as BigIntStats,
-		)
+		stat.mockResolvedValue({ dev: 1n, ino: 2n, size: 22n, mtimeNs: 100n, ctimeNs: 100n } as unknown as BigIntStats)
 		// The role-aware stat mock above also drives readFile, so its implementation is reset here too:
 		// a leaked implementation would decide which stat call the NEXT test sees as pre-read.
 		const readFile = vi.mocked((await import("fs/promises")).default.readFile)
@@ -235,9 +233,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		})
 
 		const observation = mockTask.observationRegistry.get(path.resolve(mockTask.cwd, "src/thing.ts"))
-		expect(observation?.version).toBe(
-			"1:2:22:100:100",
-		)
+		expect(observation?.version).toBe("1:2:22:100:100")
 		// A tool read is not a model read, so completeness stays unearned.
 		expect(observation?.complete).toBe(false)
 	})
@@ -246,9 +242,19 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		// Only the fields versionTokenOfStat reads; a full BigIntStats cannot be built
 		// against the mocked fs, so the double assertion is the narrowest option.
 		const stat = vi.mocked((await import("fs/promises")).default.stat)
-		stat
-			.mockResolvedValueOnce({ dev: 1n, ino: 2n, size: 22n, mtimeNs: 100n, ctimeNs: 100n } as unknown as BigIntStats)
-			.mockResolvedValueOnce({ dev: 1n, ino: 2n, size: 30n, mtimeNs: 200n, ctimeNs: 100n } as unknown as BigIntStats)
+		stat.mockResolvedValueOnce({
+			dev: 1n,
+			ino: 2n,
+			size: 22n,
+			mtimeNs: 100n,
+			ctimeNs: 100n,
+		} as unknown as BigIntStats).mockResolvedValueOnce({
+			dev: 1n,
+			ino: 2n,
+			size: 30n,
+			mtimeNs: 200n,
+			ctimeNs: 100n,
+		} as unknown as BigIntStats)
 
 		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
 			askApproval: mockAskApproval,
@@ -356,9 +362,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		// post-read token the tool cannot prove the version it read, so the read
 		// authorizes nothing and the save falls back to the re-read remediation.
 		const stat = vi.mocked((await import("fs/promises")).default.stat)
-		stat.mockRejectedValue(
-			Object.assign(new Error("EACCES"), { code: "EACCES" }),
-		)
+		stat.mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }))
 
 		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
 			askApproval: mockAskApproval,

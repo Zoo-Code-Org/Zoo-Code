@@ -138,12 +138,7 @@ async function _resolveScopeRoot(confineTo: string): Promise<string> {
  */
 function _assertWithinScope(requestedPath: string, candidatePath: string, scopeRoot: string): void {
 	const relative = path.relative(scopeRoot, candidatePath)
-	if (
-		relative === "" ||
-		relative === ".." ||
-		relative.startsWith(".." + path.sep) ||
-		path.isAbsolute(relative)
-	) {
+	if (relative === "" || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)) {
 		throw new ConfinedPathEscapeError(requestedPath, candidatePath, scopeRoot)
 	}
 }
@@ -349,16 +344,17 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// has been consumed and the target holds the new bytes. Unlinking the staging NAME at that
 		// point is an unlink of whatever answers to the name now, not of this write's staging file,
 		// and the published content must not be touched either.
-		const newFileToCleanupWithinCatch = originalError instanceof PostCommitDurabilityError ? null : actualTempNewFilePath
+		const newFileToCleanupWithinCatch =
+			originalError instanceof PostCommitDurabilityError ? null : actualTempNewFilePath
 
-// A failed safeWriteText left the target alone, with ONE exception: a
-// PostCommitDurabilityError is raised AFTER the commit rename, when the
-// parent-directory fsync fails, so the target already holds the NEW bytes.
-// Nothing here may restore or retry a write on that error - doing so would
-// overwrite published content. For every other failure the target still holds
-// the pre-write bytes and the backup copy was removed by safeWriteText itself.
-// Clean up the .new file if it still exists (safeWriteText also cleans up its
-// tempPath on failure; this is a safety net in case its cleanup missed it).
+		// A failed safeWriteText left the target alone, with ONE exception: a
+		// PostCommitDurabilityError is raised AFTER the commit rename, when the
+		// parent-directory fsync fails, so the target already holds the NEW bytes.
+		// Nothing here may restore or retry a write on that error - doing so would
+		// overwrite published content. For every other failure the target still holds
+		// the pre-write bytes and the backup copy was removed by safeWriteText itself.
+		// Clean up the .new file if it still exists (safeWriteText also cleans up its
+		// tempPath on failure; this is a safety net in case its cleanup missed it).
 		// step, so the target still holds the pre-write bytes, and the backup copy it
 		// took is removed by safeWriteText itself. Clean up the .new file if it still
 		// exists (safeWriteText also cleans up its tempPath on failure; this is a

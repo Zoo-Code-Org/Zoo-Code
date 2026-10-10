@@ -1148,10 +1148,7 @@ describe("DiffViewProvider", () => {
 				// task, a stale version, an unobserved overwrite - would otherwise leave empty
 				// scaffolding behind in the workspace.
 				mockTask.observationRegistry.clear()
-				vi.mocked(createDirectoriesForFile).mockResolvedValueOnce([
-					`${mockCwd}/new`,
-					`${mockCwd}/new/dir`,
-				])
+				vi.mocked(createDirectoriesForFile).mockResolvedValueOnce([`${mockCwd}/new`, `${mockCwd}/new/dir`])
 				const order: string[] = []
 				vi.mocked(fs.rmdir).mockImplementation(async (dir: unknown) => {
 					order.push(String(dir))
@@ -1162,10 +1159,7 @@ describe("DiffViewProvider", () => {
 				).rejects.toThrow("File already exists at new/dir/test.ts")
 
 				// Innermost first, so an ancestor is never removed while it still holds a child.
-				expect(order).toEqual([
-					mockCwd + "/new/dir",
-					mockCwd + "/new",
-				])
+				expect(order).toEqual([mockCwd + "/new/dir", mockCwd + "/new"])
 			})
 
 			it("rejects an observed write whose version token is stale", async () => {
@@ -1446,7 +1440,9 @@ describe("DiffViewProvider", () => {
 			// openDiffEditor resolves from the document-open event, so fire it.
 			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
 				setTimeout(() => {
-					callback({ uri: { fsPath: `${mockCwd}/test.txt`, scheme: "file" } } as unknown as vscode.TextDocument)
+					callback({
+						uri: { fsPath: `${mockCwd}/test.txt`, scheme: "file" },
+					} as unknown as vscode.TextDocument)
 				}, 0)
 				return { dispose: vi.fn() }
 			})
@@ -1475,9 +1471,7 @@ describe("DiffViewProvider", () => {
 			// The preview did record an observation - that is the entry under test.
 			expect(mockTask.observationRegistry.has(`${mockCwd}/test.txt`)).toBe(true)
 
-			await expect(diffViewProvider.saveChanges(false, 0, "edit")).rejects.toThrow(
-				/File not read yet/,
-			)
+			await expect(diffViewProvider.saveChanges(false, 0, "edit")).rejects.toThrow(/File not read yet/)
 			expect(safeWriteText).not.toHaveBeenCalled()
 			// The preview's authorization was withdrawn rather than left behind.
 			expect(mockTask.observationRegistry.has(`${mockCwd}/test.txt`)).toBe(false)
@@ -3236,7 +3230,7 @@ describe("DiffViewProvider", () => {
 
 		// A rejected publish closes its own diff view and rethrows, so the preview tabs the diff
 		// evicted are restored by that pass - and only by that pass.
-// The pre-merge row this covers: a cancellation or disposal that lands while the save owns
+		// The pre-merge row this covers: a cancellation or disposal that lands while the save owns
 		// its post-publish teardown used to leave the provider mid-edit. The save's pass closes the
 		// views and restores the tabs but never resets, the waiting revertChanges() returned without
 		// finalizing, and Task.disposeOnce() only awaits the reversion promise - so isEditing and the
