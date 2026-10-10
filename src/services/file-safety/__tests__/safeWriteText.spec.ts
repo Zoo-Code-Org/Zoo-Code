@@ -13,6 +13,7 @@ import {
 	resolveLockKey,
 	safeWriteText,
 	StagingPathError,
+	type PublishResidue,
 	type SafeWriteTextOptions,
 } from "../safeWriteText"
 
@@ -209,13 +210,18 @@ describe("safeWriteText", () => {
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 			vi.mocked(fs.rmdir).mockRejectedValue(Object.assign(new Error("ENOTEMPTY"), { code: "ENOTEMPTY" }))
 
-			await expect(safeWriteText(targetPath, "hello", { platform: "linux" })).resolves.toEqual({
-				leftoverPaths: [],
-			})
+			const result = await safeWriteText(targetPath, "hello", { platform: "linux" })
 
-			// the commit rename still happened and the rmdir error was swallowed
+			// The commit rename still happened: a directory this write created is a leftover to clean
+			// up, not a failed save. It is reported rather than swallowed, because the caller is the
+			// only party that can sweep it and an empty list claims there is nothing left to sweep.
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
-			expect(fs.rmdir).toHaveBeenCalledTimes(1)
+			const stagingDir = vi.mocked(fsSync.mkdirSync).mock.calls.map((call) => String(call[0]))[0]
+			expect(result).toEqual({ leftoverPaths: [stagingDir] })
+
+			// One retry: a directory can still be reported busy by the OS while the handle of the
+			// file it held is being released, so a single failure is not evidence it is stuck.
+			expect(fs.rmdir).toHaveBeenCalledTimes(2)
 			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
 		})
 
@@ -577,6 +583,18 @@ describe("safeWriteText", () => {
 			expect(orphan.cause).toBe(orphan.originalError)
 			expect(unlinkAttempts).toBe(2)
 			expect(fs.rename).not.toHaveBeenCalled()
+
+			// The dedicated orphan field names the copy, and the residue lists every path this write
+			// left on disk: the partial copy first, then the staged file the failure handler could not
+			// remove either. The throw discards the structured result, so without these the caller
+			// would have to work out for itself which of its paths are still on disk.
+			expect(orphan).toMatchObject({
+				leftoverPaths: [
+					expect.stringContaining("safeWriteText.bak_"),
+					expect.stringContaining("safeWriteText_"),
+				],
+				cleanupErrors: [expect.objectContaining({ code: "EPERM" }), expect.objectContaining({ code: "EPERM" })],
+			})
 		})
 
 		it("a failed staging-file flush rejects and publishes nothing", async () => {
@@ -1598,5 +1616,198 @@ describe("resolvePublishTarget", () => {
 
 		// The fallback is the resolved path, not the string that was handed in.
 		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), path.resolve(targetPath))
+	})
+})
+
+// A publish that cannot remove something it created has to say so on whichever exit it takes: the
+// resolved result carries the paths, and a rejection carries the same paths on the error, because the
+// throw discards the result. Each test below names one residue kind and one exit path.
+
+describe("residue a publish must not lose", () => {
+	beforeEach(() => mockDefaults())
+
+	/** Make only the DACL dump unlink fail, and record every attempt at it. */
+	function stuckDumpUnlink(): string[] {
+		const attempts: string[] = []
+		vi.mocked(fs.unlink).mockImplementation(async (p: unknown) => {
+			if (String(p).includes("safeWriteText.acl")) {
+				attempts.push(String(p))
+				throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+			}
+		})
+		return attempts
+	}
+
+	it("win32 DACL: a dump the finally block cannot remove is reported on the resolved write", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		const dumpAttempts = stuckDumpUnlink()
+
+		const result = await safeWriteText(targetPath, "data", { platform: "win32" })
+
+		// The publish committed and the restore ran: a dump that survives cleanup is a leftover to
+		// sweep, not a failed save.
+		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+		expect(execFile).toHaveBeenCalledTimes(2)
+
+		// The dump is retried once, and the result names the path once: recording each attempt would
+		// tell the caller there are two files to remove when there is one.
+		expect(dumpAttempts).toHaveLength(2)
+		expect(result).toEqual({ leftoverPaths: [dumpAttempts[0]] })
+	})
+
+	it("win32 DACL: a partial dump that cannot be removed is reported on the refusal", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		// icacls /save fails, so a partial dump may exist, and removing it fails too.
+		vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+			if (typeof cb === "function") cb(new Error("icacls error"), "", "")
+			return fakeChild
+		})
+		const dumpAttempts = stuckDumpUnlink()
+
+		const refusal = await safeWriteText(targetPath, "data", { platform: "win32" }).catch(
+			(caught: unknown) => caught,
+		)
+
+		expect(refusal).toBeInstanceOf(DaclInspectionError)
+		expect(fs.rename).not.toHaveBeenCalled()
+
+		// The refusal throws, so the structured result never reaches the caller. Without the residue
+		// on the error the caller holds an error naming no file while a partial DACL dump - a file
+		// whose contents describe access rights - stays on disk with no reference to it anywhere.
+		expect(refusal).toMatchObject({
+			leftoverPaths: [dumpAttempts[0]],
+			cleanupErrors: [expect.objectContaining({ code: "EPERM" })],
+		})
+	})
+
+	it("win32 DACL: a restore failure carries the dump its cleanup could not remove", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		// The save lands, the restore fails: the commit happened, so this is the exit where the
+		// dump's owner is the finally block and the error is DaclRestoreError.
+		let icaclsCalls = 0
+		vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+			icaclsCalls++
+			if (typeof cb === "function") cb(icaclsCalls === 1 ? null : new Error("icacls restore error"), "", "")
+			return fakeChild
+		})
+		const dumpAttempts = stuckDumpUnlink()
+
+		const failure = await safeWriteText(targetPath, "data", { platform: "win32" }).catch(
+			(caught: unknown) => caught,
+		)
+
+		expect(failure).toBeInstanceOf(DaclRestoreError)
+		expect(fs.rename).toHaveBeenCalledTimes(1)
+		// The original error is preserved, not replaced: its message is what tells the caller that
+		// the committed file answers to different access rights.
+		expect((failure as DaclRestoreError).message).toContain("could not be restored")
+
+		// Previously the finally block recorded this path and the failure handler threw it away with
+		// the result, so a dump left by a failed restore was invisible on the only exit taken.
+		expect(failure).toMatchObject({ leftoverPaths: [dumpAttempts[0]] })
+	})
+
+	it("a failed publish reports the staged file it could not remove", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.rename).mockRejectedValue(new Error("ENOSPC"))
+		const stagedAttempts: string[] = []
+		vi.mocked(fs.unlink).mockImplementation(async (p: unknown) => {
+			if (String(p).includes("safeWriteText_")) {
+				stagedAttempts.push(String(p))
+				throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+			}
+		})
+
+		const failure = await safeWriteText(targetPath, "data", { platform: "linux" }).catch(
+			(caught: unknown) => caught,
+		)
+
+		expect((failure as Error).message).toBe("ENOSPC")
+		expect(stagedAttempts).toHaveLength(2)
+		expect(failure).toMatchObject({ leftoverPaths: [stagedAttempts[0]] })
+	})
+
+	it("a failed publish reports the staging directory it could not remove", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.rename).mockRejectedValue(new Error("ENOSPC"))
+		vi.mocked(fs.rmdir).mockRejectedValue(Object.assign(new Error("ENOTEMPTY"), { code: "ENOTEMPTY" }))
+
+		const failure = await safeWriteText(targetPath, "data", { platform: "linux" }).catch(
+			(caught: unknown) => caught,
+		)
+
+		const stagingDir = vi.mocked(fsSync.mkdirSync).mock.calls.map((call) => String(call[0]))[0]
+		expect(failure).toMatchObject({ leftoverPaths: [stagingDir] })
+	})
+
+	it("a failed publish reports a backup copy it could not remove and still warns about it", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.rename).mockRejectedValue(new Error("ENOSPC"))
+		const backupAttempts: string[] = []
+		vi.mocked(fs.unlink).mockImplementation(async (p: unknown) => {
+			if (String(p).includes("safeWriteText.bak_")) {
+				backupAttempts.push(String(p))
+				throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+			}
+		})
+		const warnings: string[] = []
+
+		const failure = await safeWriteText(targetPath, "data", {
+			backup: true,
+			platform: "linux",
+			onWarning: (message) => warnings.push(message),
+		}).catch((caught: unknown) => caught)
+
+		expect((failure as Error).message).toBe("ENOSPC")
+		// The human notice and the caller-visible list are separate channels: neither replaces the
+		// other, because a caller cannot parse a warning and a human cannot read a thrown array.
+		expect(warnings).toHaveLength(1)
+		expect(warnings[0]).toContain("safeWriteText.bak_")
+		expect(failure).toMatchObject({ leftoverPaths: [backupAttempts[0]] })
+	})
+
+	it("a publish that cleaned everything up attaches no residue to its error", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.rename).mockRejectedValue(new Error("ENOSPC"))
+
+		const failure = await safeWriteText(targetPath, "data", { platform: "linux" }).catch(
+			(caught: unknown) => caught,
+		)
+
+		// An empty list would make every caller ask whether "no leftovers" means it checked or that
+		// the field was never filled in, so nothing is attached unless something stayed on disk.
+		expect((failure as PublishResidue).leftoverPaths).toBeUndefined()
+		expect((failure as PublishResidue).cleanupErrors).toBeUndefined()
+	})
+
+	it("a thrown value that cannot carry the residue is rethrown exactly as it came", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		// A rejected promise can carry any value, not only an Error. Attaching the residue by
+		// replacing such a value would change the error the caller catches, and assigning a property
+		// to a primitive throws, so the failure would become a TypeError about the cleanup.
+		vi.mocked(fs.rename).mockRejectedValue("boom")
+		vi.mocked(fs.unlink).mockRejectedValue(Object.assign(new Error("EPERM"), { code: "EPERM" }))
+
+		const failure = await safeWriteText(targetPath, "data", { platform: "linux" }).catch(
+			(caught: unknown) => caught,
+		)
+
+		expect(failure).toBe("boom")
 	})
 })

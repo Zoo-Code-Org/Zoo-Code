@@ -125,6 +125,19 @@ export interface SafeWriteTextResult {
 }
 
 /**
+ * The residue a publish could not remove. A resolved write reports it in `SafeWriteTextResult`; a
+ * rejected write cannot, because the throw discards that result, so the same two lists travel on the
+ * error the caller catches instead. Without them a failed publish would leave a file on disk with no
+ * reference to it anywhere the caller can reach.
+ */
+export interface PublishResidue {
+	/** Paths this write left on disk that its own cleanup could not remove. */
+	leftoverPaths: string[]
+	/** The failure that kept each path on disk, in the same order as `leftoverPaths`. */
+	cleanupErrors: unknown[]
+}
+
+/**
  * The backup copy could not be created AND the partial copy could not be removed.
  * The write failed either way, but the leftover is a copy of the previous content that
  * is still on disk: its path travels on the error so the caller can remove it, instead
@@ -299,30 +312,18 @@ export async function resolveLockKey(absoluteFilePath: string): Promise<string> 
 }
 
 /**
- * Remove this write's own staging directory once its temp file is gone. Best-effort by design: a
- * failure must not un-commit a published file. The directory is empty and per-write at this point,
- * so a later sweep of stale .file-safety-staging_* names can remove it without risking another
- * write's file. Takes the directory as a parameter because control-flow narrowing does not survive
- * the try/finally boundary above the call site.
+ * Remove one residue path this write created, retrying once: Windows reports EPERM for a path whose
+ * handle has not been released yet, so a single failure is not evidence that the path is stuck.
+ * ENOENT counts as removed - the goal is that the path is gone, not that this call performed the
+ * removal. `remove` is the filesystem call for this residue kind (`fs.unlink` for a file, `fs.rmdir`
+ * for a directory), so every residue this operation owns is removed under one set of rules rather
+ * than one per kind. Returns the error that kept the path on disk, or null when it is gone.
  */
-async function _removeOwnStagingDir(stagingDir: string | null): Promise<void> {
-	if (stagingDir === null) {
-		return
-	}
-	await fs.rmdir(stagingDir).catch(() => {})
-}
-
-/**
- * Remove a backup copy, retrying once: Windows reports EPERM for a file whose handle has not been
- * released yet, so a single failure is not evidence that the path is stuck. ENOENT counts as
- * removed - the goal is that the path is gone, not that this call performed the removal. Returns
- * the error that kept the path on disk, or null when it is gone.
- */
-async function _removeBackupCopy(backupPath: string): Promise<unknown> {
+async function _removeResidue(residuePath: string, remove: (residuePath: string) => Promise<void>): Promise<unknown> {
 	let lastError: unknown = null
 	for (let attempt = 0; attempt < 2; attempt++) {
 		try {
-			await fs.unlink(backupPath)
+			await remove(residuePath)
 			return null
 		} catch (error: unknown) {
 			if (errorCode(error) === "ENOENT") {
@@ -334,6 +335,24 @@ async function _removeBackupCopy(backupPath: string): Promise<unknown> {
 	return lastError
 }
 
+/**
+ * Attach the residue of a failed publish to the error being thrown, preserving that error: the
+ * caller's `instanceof` checks, its message and its cause all stay exactly as they were, and the
+ * residue is extra information on top. A publish that cleaned everything up attaches nothing, so a
+ * caller never has to tell an empty list apart from no residue at all. A thrown value that is not an
+ * object cannot carry the lists, and replacing it with one that could would change the error the
+ * caller catches, so it is returned as it came.
+ */
+function _attachResidue(error: unknown, residue: PublishResidue): unknown {
+	if (residue.leftoverPaths.length === 0 || typeof error !== "object" || error === null) {
+		return error
+	}
+	const carrier = error as PublishResidue
+	carrier.leftoverPaths = residue.leftoverPaths
+	carrier.cleanupErrors = residue.cleanupErrors
+	return error
+}
+
 export async function safeWriteText(
 	filePath: string,
 	content: string | Uint8Array,
@@ -341,8 +360,27 @@ export async function safeWriteText(
 ): Promise<SafeWriteTextResult> {
 	const absoluteFilePath = path.resolve(filePath)
 	// Every leftover is recorded here as it is discovered, so a caller gets a structured result
-	// instead of having to parse warnings to learn that content is still on disk.
+	// instead of having to parse warnings to learn that content is still on disk. A rejection cannot
+	// carry that result, so the same two lists are attached to the error it throws instead.
 	const leftoverPaths: string[] = []
+	const cleanupErrors: unknown[] = []
+
+	/**
+	 * Remove one residue path this write created and record it when it is still there. Every residue
+	 * this operation owns - staged file, staging directory, DACL dump, backup copy - is removed
+	 * through here, so a path that survives is reported the same way whichever step left it behind.
+	 */
+	const cleanResidue = async (
+		residuePath: string,
+		remove: (residuePath: string) => Promise<void>,
+	): Promise<unknown> => {
+		const cleanupError = await _removeResidue(residuePath, remove)
+		if (cleanupError !== null) {
+			leftoverPaths.push(residuePath)
+			cleanupErrors.push(cleanupError)
+		}
+		return cleanupError
+	}
 
 	// Warning delivery must never abort the write: the notices below describe a
 	// committed-but-imperfect publish, and a caller whose callback throws (a UI sink, a logger that
@@ -530,10 +568,11 @@ export async function safeWriteText(
 					// committed file (step 5).
 					daclDumpPath = dumpPath
 				} else {
-					// A failed icacls may have left a partial dump behind;
-					// remove it now (best-effort) so no partial dump survives and
-					// no later step can restore from it.
-					await fs.unlink(dumpPath).catch(() => {})
+					// A failed icacls may have left a partial dump behind; remove it now so no partial
+					// dump survives and no later step can restore from it. A dump that cannot be removed is
+					// recorded, because the refusal below throws: without the record the caller would hold
+					// an error naming no file while a partial DACL dump stayed on disk.
+					await cleanResidue(dumpPath, fs.unlink)
 					// The target exists and its DACL could not be captured, so the commit rename
 					// would replace it with a file that inherits different access rights. Nothing here
 					// can verify an equivalent restrictive ACL on the replacement, so the publish is
@@ -597,8 +636,9 @@ export async function safeWriteText(
 						// released yet); if it still fails the path is carried on the thrown error
 						// instead of being dropped where no caller can act on it.
 						const orphanPath = backupPath
-						// Same rule as the other two backup sites: one retry, ENOENT counts as removed.
-						const backupCleanupError = await _removeBackupCopy(orphanPath)
+						// Same rule as every other residue: one retry, ENOENT counts as removed, and a copy
+						// that stays is recorded so the error thrown below carries it too.
+						const backupCleanupError = await cleanResidue(orphanPath, fs.unlink)
 						backupPath = null
 						if (backupCleanupError !== null) {
 							throw new OrphanedBackupError(orphanPath, targetPath, backupError, backupCleanupError)
@@ -655,20 +695,14 @@ export async function safeWriteText(
 
 			// -- Step 6 (backup:true): delete backup on success -----------
 			if (releaseBackupOnSuccess && backupPath) {
-				// The backup is a full copy of the previous content sitting next to the
-				// published file. Dropping its path on a failed unlink would leave an artifact
-				// that no caller can find or remove, so the unlink is retried once (Windows
-				// commonly reports EPERM while another handle is still being released) and a
-				// persistent failure is reported with the path instead of swallowed. The publish
-				// itself succeeded, so the write still resolves: this is a leftover to clean up,
-				// not a failed save.
-				const cleanupError = await _removeBackupCopy(backupPath)
+				// The backup is a full copy of the previous content sitting next to the published file.
+				// A failed unlink goes through the shared residue path, which retries once (Windows
+				// commonly reports EPERM while another handle is still being released) and records a path
+				// that stays. The publish itself succeeded, so this is a leftover to clean up rather than
+				// a failed save: the path reaches the human through onWarning and the caller through the
+				// structured result, because a full copy of the previous content is still beside the target.
+				const cleanupError = await cleanResidue(backupPath, fs.unlink)
 				if (cleanupError !== null) {
-					// The publish itself succeeded, so this is a leftover to clean up rather than a
-					// failed save: the path reaches the human through onWarning and the caller through
-					// the structured result, because a full copy of the previous content is still
-					// sitting beside the target.
-					leftoverPaths.push(backupPath)
 					warn(
 						`safeWriteText: committed ${targetPath} but could not remove its backup copy at ${backupPath} (${
 							errorCode(cleanupError) ?? "unknown error"
@@ -677,22 +711,25 @@ export async function safeWriteText(
 				}
 			}
 		} finally {
-			// Unlink DACL dump regardless of success/failure in this span.
+			// Unlink the DACL dump on every exit from this span, success or failure, and record one that
+			// stays. This is the dump's only owner once a save succeeded, so what is recorded here is
+			// what the caller receives on either exit: a resolved write returns the list, and a rejected
+			// one carries the same list on its error instead of dropping it with the discarded result.
 			if (daclDumpPath !== null) {
-				const dumpPath = daclDumpPath
-				await fs.unlink(dumpPath).catch(() => {
-					leftoverPaths.push(dumpPath)
-				})
+				await cleanResidue(daclDumpPath, fs.unlink)
 			}
 		}
 
 		// tempPath is now the committed file; no cleanup needed.
 
-		// Best-effort: remove the now-empty staging directory. Self-staged
-		// writes only, and only this write's own directory: a per-write directory
-		// cannot be the one another concurrent write is still using. A failure must
-		// never un-commit a published file, so the removal swallows all errors.
-		await _removeOwnStagingDir(stagingDir)
+		// Remove the now-empty staging directory through the same cleanup path as every other residue.
+		// Self-staged writes only, and only this write's own directory: a per-write directory cannot be
+		// the one another concurrent write is still using. A failure must not un-commit a published
+		// file, but a directory this write created and could not remove is residue the caller is told
+		// about rather than a failure that disappears.
+		if (stagingDir !== null) {
+			await cleanResidue(stagingDir, fs.rmdir)
+		}
 
 		// The result is reported only after this call's own residue has been dealt with: a caller
 		// that receives an empty list knows there is nothing left for it to sweep.
@@ -706,12 +743,12 @@ export async function safeWriteText(
 			// the commit left there - before the commit that is the pre-write content, and
 			// after it the published content. Either way the copy has served its purpose
 			// and must not be left beside the target where no caller can find it.
-			// One retry, ENOENT counts as removed - the same rule as the other two backup sites.
-			const stuckBackup = await _removeBackupCopy(backupPath)
+			const stuckBackup = await cleanResidue(backupPath, fs.unlink)
 			if (stuckBackup !== null) {
 				// The original error is what the caller needs, so the leftover cannot be thrown, and a
 				// throw means the structured result never reaches the caller either: the path is
-				// reported with its location through onWarning instead of being dropped.
+				// reported with its location through onWarning, and attached to the error below, so
+				// neither the human nor the caller has to parse a message to find it.
 				warn(
 					`safeWriteText: the write failed and its backup copy could not be removed from ${backupPath} (${
 						errorCode(stuckBackup) ?? "unknown error"
@@ -720,23 +757,23 @@ export async function safeWriteText(
 			}
 			backupPath = null
 		}
-		try {
-			await fs.unlink(tempPath).catch(() => {})
-		} catch {
-			// cleanup failure is non-fatal
-		}
+
+		// The staged file and this write's own staging directory go through the same cleanup path as
+		// every other residue, so a failure at either is recorded and reported on the error below
+		// instead of being swallowed here: a caller that catches a throw has no result to read.
+		await cleanResidue(tempPath, fs.unlink)
 
 		// A failed self-staged write must not leave its staging directory behind.
 		// Only the directory this write created, and only after its temp file is
 		// gone, so the directory is empty and the removal stays best-effort.
-		if (stagingDir) {
-			await fs.rmdir(stagingDir).catch(() => {})
+		if (stagingDir !== null) {
+			await cleanResidue(stagingDir, fs.rmdir)
 		}
 
-		if (daclDumpPath !== null) {
-			await fs.unlink(daclDumpPath).catch(() => {})
-		}
-
-		throw originalError
+		// The DACL dump is not removed here. It is non-null only once step 2 saved a dump, and every
+		// path from that point enters the try whose finally owns the dump, so by the time this handler
+		// runs the dump has already been removed or recorded. Removing it again here would compensate
+		// for a resource this span no longer owns and would report a surviving dump twice.
+		throw _attachResidue(originalError, { leftoverPaths, cleanupErrors })
 	}
 }
