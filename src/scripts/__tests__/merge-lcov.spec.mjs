@@ -75,7 +75,12 @@ describe("mergeLcov", () => {
 		expect(mergeLcov([["core", withBrda(4)]])).toContain("BRDA:2,0,0,4")
 
 		// A positive count from one lane must win the union over a clamped lane.
-		expect(mergeLcov([["core", withBrda(-1)], ["api", report(new Set([1, 2]))]])).toContain("BRDA:2,0,0,1")
+		expect(
+			mergeLcov([
+				["core", withBrda(-1)],
+				["api", report(new Set([1, 2]))],
+			]),
+		).toContain("BRDA:2,0,0,1")
 	})
 
 	it("still rejects non-integer branch counts", () => {

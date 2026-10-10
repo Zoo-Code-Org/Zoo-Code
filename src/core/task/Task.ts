@@ -4436,8 +4436,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 						// Finalize the streaming tool call
 						let finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
-						dedupKey,
-						nativeToolCallParserScope,
+							dedupKey,
+							nativeToolCallParserScope,
 						)
 
 						// Get the index for this tool call using compound key
@@ -4457,10 +4457,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							if (resolved) {
 								eventName = resolved.name
 								dedupKey = NativeToolCallParser.makeStreamingKey(resolved.id, resolved.name)
-							finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
-								dedupKey,
-								nativeToolCallParserScope,
-							)
+								finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
+									dedupKey,
+									nativeToolCallParserScope,
+								)
 								toolUseIndex = this.streamingToolCallIndices.get(dedupKey)
 							}
 						}
