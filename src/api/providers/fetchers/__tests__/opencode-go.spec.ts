@@ -328,6 +328,27 @@ describe("Opencode Go Fetchers", () => {
 			})
 		})
 
+		it("overrides Responses defaults with live metadata for an uncurated numeric gpt model", () => {
+			const info = parseOpencodeGoModel({
+				id: "gpt-7-foo",
+				context_length: 2_000_000,
+				max_output_tokens: 64_000,
+				supports_images: false,
+				description: "Live GPT model description",
+			})
+
+			expect(info).toMatchObject({
+				contextWindow: 2_000_000,
+				maxTokens: 64_000,
+				supportsImages: false,
+				description: "Live GPT model description",
+				supportsMaxTokens: true,
+				supportsPromptCache: true,
+				supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+				reasoningEffort: "medium",
+			})
+		})
+
 		it("falls back to defaults for an unknown model with no cache pricing", () => {
 			const info = parseOpencodeGoModel({ id: "x", context_window: 100000, max_tokens: 8000 })
 			expect(info.supportsPromptCache).toBe(false)
