@@ -168,29 +168,42 @@ function _scopeErrorCode(error: unknown): string | undefined {
  *
  * acquireFileLock locks `<absolute path>.lock` with realpath:false (see fileLock.ts), so the
  * lock's identity is the directory ENTRY the path names, not the string. On Windows the
- * filesystem folds two spellings of one entry in two different ways: case anywhere, and short
- * (8.3) names in a component - `RUNNER~1` against `runneradmin`. A string comparison folds only
- * the first, so the second leaves two keys that look different and collide on one .lock
- * directory: the second acquisition answers 'Lock file is already being held' against the
- * first one's own lock.
+ * filesystem folds two spellings of one entry in two ways: case anywhere, and short (8.3) names
+ * inside a component - RUNNER~1 for a long user directory, which is what a CI runner hands out.
+ * A string comparison folds only the first, so the second leaves two keys that look different,
+ * one .lock directory, and a second acquisition that collides with the first one's own lock:
+ * 'Lock file is already being held' once the retries are spent.
  *
- * So fold the way the lock is placed: canonical parent directory plus basename, case-folded on
- * Windows. Canonicalising the parent is what folds a short name, because that folding belongs to
- * the filesystem rather than to any string rule. When the parent does not exist yet - a create,
- * the common case - realpath fails and the resolved spelling is all there is; case folding still
- * applies to it.
+ * So fold the way the lock is placed: canonicalise the deepest EXISTING ancestor and append the
+ * segments below it, case-folded on Windows. Canonicalising an existing ancestor is what folds a
+ * short name, because that folding belongs to the filesystem rather than to any string rule; a
+ * tail that does not exist yet can only be folded by the string rule. Realpathing the whole path,
+ * or only its immediate parent, loses the short-name folding as soon as one component is missing
+ * - which is every create into a directory that is about to be made, and is what the CI runner
+ * hit: resolveLockKey canonicalises through a higher ancestor, so a fold that stops below it
+ * returns two unequal keys for one file.
  */
 async function _lockIdentityKey(absoluteFilePath: string): Promise<string> {
-	const parent = path.dirname(absoluteFilePath)
-	let canonicalParent = parent
-	try {
-		canonicalParent = await fs.realpath(parent)
-	} catch {
-		// No canonical form exists yet: the directory is about to be created, so the resolved
-		// spelling is the only spelling.
+	// The walk starts at the parent, not at the target: the lock is the entry <path>.lock beside
+	// the file, so the final component must never be resolved through a symlink. Canonicalising it
+	// would fold a link and its referent into one key, and those are two different .lock entries -
+	// which is exactly the pair this unit takes on purpose.
+	const missing: string[] = [path.basename(absoluteFilePath)]
+	let current = path.dirname(absoluteFilePath)
+	for (;;) {
+		let canonical: string | undefined
+		try {
+			canonical = await fs.realpath(current)
+		} catch {
+			// This component is not there yet; an ancestor of it may be.
+		}
+		if (canonical !== undefined || path.dirname(current) === current) {
+			const folded = path.join(canonical ?? current, ...missing)
+			return process.platform === "win32" ? folded.toLowerCase() : folded
+		}
+		missing.unshift(path.basename(current))
+		current = path.dirname(current)
 	}
-	const folded = path.join(canonicalParent, path.basename(absoluteFilePath))
-	return process.platform === "win32" ? folded.toLowerCase() : folded
 }
 async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJsonOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)

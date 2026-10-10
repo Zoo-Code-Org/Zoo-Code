@@ -304,6 +304,64 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			expect(mockedAcquireFileLock).toHaveBeenCalledTimes(1)
 		},
 	)
+
+	// The mixed case the CI runner hit, and the reason folding cannot stop at the immediate parent:
+	// an ancestor that exists and is spelled as its 8.3 short name, with a tail that does not exist
+	// yet - a create into a directory that is about to be made. resolveLockKey canonicalises through
+	// the highest ancestor it can reach, so a fold that only asks for the immediate parent falls
+	// back to the short spelling while the referent key is already canonical: two unequal keys,
+	// one .lock directory, and the second acquisition collides with the first.
+	it.runIf(process.platform === "win32")(
+		"takes one lock when an existing ancestor is spelled short and the tail does not exist",
+		async () => {
+			const realDir = await makeDir("lockkey-mixed-")
+			const shortDir = path.join(path.dirname(realDir), "LOCKKE~2")
+			const requested = path.join(shortDir, "not-yet", "history_item.json")
+			const canonical = path.join(realDir, "not-yet", "history_item.json")
+
+			// One filesystem rule, not a list of paths: the short spelling of the existing directory
+			// resolves to the real one, and nothing below it exists yet, so every deeper probe
+			// rejects exactly as it would on a host where the create has not happened.
+			mockedRealpath.mockImplementation(async (probe) => {
+				const norm = String(probe).toLowerCase().replace(/\\/g, "/")
+				const short = shortDir.toLowerCase().replace(/\\/g, "/")
+				const real = realDir.toLowerCase().replace(/\\/g, "/")
+				if (norm === short) {
+					return realDir
+				}
+				if (norm === real || norm.startsWith(real + "/")) {
+					return String(probe)
+				}
+				throw enoent
+			})
+			mockedLstat.mockImplementation(
+				async () => ({ isSymbolicLink: () => false, isFile: () => true }) as unknown as BigIntStats,
+			)
+			const acquired: string[] = []
+			mockedAcquireFileLock.mockImplementation(async (key) => {
+				const identity = String(key).toLowerCase()
+				if (acquired.map((k) => k.toLowerCase()).includes(identity)) {
+					throw new Error("Lock file is already being held")
+				}
+				acquired.push(String(key))
+				return async () => {}
+			})
+
+			await expect(safeWriteJson(requested, { mcpServers: {} })).resolves.toBeUndefined()
+			expect(acquired).toHaveLength(1)
+			// One lock, naming one entry. Which spelling it carries is the implementation's choice
+			// (it keeps the requested one when the two fold together); what must hold is that the
+			// spelling is the SAME ENTRY the canonical path names, so a writer arriving by the real
+			// path queues behind this one rather than beside it.
+			const entryOf = (probe: string) => {
+				const norm = probe.toLowerCase().replace(/\\/g, "/")
+				const short = shortDir.toLowerCase().replace(/\\/g, "/")
+				const real = realDir.toLowerCase().replace(/\\/g, "/")
+				return norm.startsWith(short) ? real + norm.slice(short.length) : norm
+			}
+			expect(entryOf(acquired[0])).toBe(entryOf(canonical))
+		},
+	)
 })
 
 it("does not log a cleanup error when the safety net finds the temp file already gone", async () => {
