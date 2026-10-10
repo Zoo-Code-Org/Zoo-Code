@@ -669,6 +669,78 @@ describe("safeWriteText", () => {
 		expect(messages.some(function (m) { return m.includes(String(tempArg)) })).toBe(true)
 	})
 
+	it("retries a failed DACL-dump cleanup once and reports the leftover dump path", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const onWarning = vi.fn()
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fsSync.closeSync).mockReturnValue(undefined)
+		// The dump unlink keeps failing. The published file is fine, but the dump is a text copy
+		// of the target's access rights that only this write knew the name of.
+		vi.mocked(fs.unlink).mockRejectedValue(new Error("EPERM"))
+
+		await safeWriteText(targetPath, "data", { platform: "win32", onWarning })
+
+		const dumpUnlinks = vi.mocked(fs.unlink).mock.calls.filter(function (call) {
+			return String(call[0]).includes("safeWriteText.acl")
+		})
+		expect(dumpUnlinks.length).toBe(2)
+		expect(dumpUnlinks.map(function (call) { return call[0] })).toEqual([dumpUnlinks[0][0], dumpUnlinks[0][0]])
+		// Reported once, with the exact path, and the write still resolved.
+		const messages = onWarning.mock.calls.map(function (call) { return String(call[0]) })
+		const dumpReports = messages.filter(function (m) { return m.includes("could not remove the DACL dump") })
+		expect(dumpReports.length).toBe(1)
+		expect(dumpReports[0]).toContain(String(dumpUnlinks[0][0]))
+	})
+
+	it("reports the DACL dump path after a failed write without replacing the write error", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const onWarning = vi.fn()
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fsSync.closeSync).mockReturnValue(undefined)
+		vi.mocked(fs.rename).mockRejectedValue(new Error("ENOSPC"))
+		vi.mocked(fs.unlink).mockRejectedValue(new Error("EPERM"))
+
+		await expect(safeWriteText(targetPath, "data", { platform: "win32", onWarning })).rejects.toThrow("ENOSPC")
+
+		const dumpUnlinks = vi.mocked(fs.unlink).mock.calls.filter(function (call) {
+			return String(call[0]).includes("safeWriteText.acl")
+		})
+		// The commit span owns the dump removal, so the failure path must not retry the same file
+		// and report the same leftover twice.
+		expect(dumpUnlinks.length).toBe(2)
+		const messages = onWarning.mock.calls.map(function (call) { return String(call[0]) })
+		expect(messages.filter(function (m) { return m.includes("could not remove the DACL dump") }).length).toBe(1)
+		expect(messages.some(function (m) { return m.includes("safeWriteText.acl") })).toBe(true)
+	})
+
+	it("backup:true closes the seed descriptor even when the copy fails", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.closeSync).mockReturnValue(undefined)
+		// Distinct descriptors, and the backup's own id recorded, so the assertion below cannot be
+		// satisfied by the close of some other descriptor.
+		let nextFd = 40
+		const backupFds: number[] = []
+		vi.mocked(fsSync.openSync).mockImplementation(function (p) {
+			const id = nextFd++
+			if (String(p).includes("safeWriteText.bak")) backupFds.push(id)
+			return id
+		})
+		// The copy is the statement that sits between the open and the close.
+		vi.mocked(fs.copyFile).mockRejectedValue(new Error("EIO: copy failed"))
+
+		await expect(safeWriteText(targetPath, "data", { backup: true, platform: "linux" })).rejects.toThrow("EIO")
+
+		expect(backupFds.length).toBe(1)
+		// Every successful openSync gets a close attempt, including this path, because an open
+		// descriptor holds the backup file and blocks the cleanup below.
+		expect(fsSync.closeSync).toHaveBeenCalledWith(backupFds[0])
+		// And the half-made backup does not outlive the attempt.
+		expect(vi.mocked(fs.unlink).mock.calls.some(function (call) { return String(call[0]).includes("safeWriteText.bak") })).toBe(true)
+	})
+
 	// ── Test 5: win32 DACL path ──────────────────────────────────────────────
 
 	describe("win32 DACL", () => {

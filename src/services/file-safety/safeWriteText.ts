@@ -167,6 +167,35 @@ async function _releaseStagingDir(stagingDir: string, warn: (message: string) =>
 	)
 }
 
+/**
+ * Remove this write's DACL dump. Retried once for the same reason the backup copy is:
+ * on Windows an unlink commonly reports EPERM while another handle to the file is still
+ * being released, although the file is gone a moment later. A dump that survives both
+ * attempts is a concrete file beside the target whose name no caller can recover, so the
+ * exact path is reported through the warning sink instead of being swallowed - on the
+ * success path as well as on the failure path, where it must also never replace the
+ * original write error. ENOENT means the goal is already met, so it is not a failure.
+ */
+async function _discardDaclDump(daclDumpPath: string, warn: (message: string) => void): Promise<void> {
+	let cleanupError: unknown = null
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			await fs.unlink(daclDumpPath)
+			return
+		} catch (error: unknown) {
+			if (errorCode(error) === "ENOENT") {
+				return
+			}
+			cleanupError = error
+		}
+	}
+	warn(
+		`safeWriteText: could not remove the DACL dump ${daclDumpPath} (${
+			errorCode(cleanupError) ?? (cleanupError instanceof Error ? cleanupError.message : String(cleanupError))
+		}); it is a text copy of the target's access rights and can be deleted.`,
+	)
+}
+
 function _fsyncFile(fd: number): void {
 	fsSync.fsyncSync(fd)
 }
@@ -515,7 +544,15 @@ export async function safeWriteText(
 						// the chmod afterwards is what clears a copied read-only attribute on Windows
 						// and keeps a backup of a permissive file private.
 						const seedFd = fsSync.openSync(backupPath, "wx", 0o600)
-						fsSync.closeSync(seedFd)
+						try {
+							// Nothing runs here today: the descriptor exists only to create the destination with
+							// a fixed mode. The block is what guarantees the close below runs for every
+							// successful openSync, including any statement added between the open and the close -
+							// an unclosed descriptor holds the backup open and blocks the cleanup that has to
+							// remove that file.
+						} finally {
+							fsSync.closeSync(seedFd)
+						}
 						await fs.copyFile(targetPath, backupPath)
 						await fs.chmod(backupPath, 0o600)
 						// "r+" not "r": fsync on a read-only handle is EPERM on Windows, and the same
@@ -626,9 +663,13 @@ export async function safeWriteText(
 				}
 			}
 		} finally {
-			// Unlink DACL dump regardless of success/failure in this span.
+			// Unlink DACL dump regardless of success/failure in this span. A dump that survives is an
+			// artifact nobody else can name, so a failure is retried and reported with its path.
 			if (daclDumpPath !== null) {
-				await fs.unlink(daclDumpPath).catch(() => {})
+				await _discardDaclDump(daclDumpPath, warn)
+				// This span owns the removal: the catch below must not retry the same file and report
+				// the same leftover twice.
+				daclDumpPath = null
 			}
 		}
 
@@ -698,8 +739,9 @@ export async function safeWriteText(
 			await _releaseStagingDir(stagingDir, warn)
 		}
 
+		// Reported through the warning sink with its path, and never in place of originalError.
 		if (daclDumpPath !== null) {
-			await fs.unlink(daclDumpPath).catch(() => {})
+			await _discardDaclDump(daclDumpPath, warn)
 		}
 
 		throw originalError
