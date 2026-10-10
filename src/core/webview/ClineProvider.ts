@@ -2732,7 +2732,18 @@ export class ClineProvider
 
 			if (listWriteLanded) {
 				try {
-					await this.contextProxy.setValue("listApiConfigMeta", previousEntries)
+					// Restore only what this deletion owned. The mutation queue is per instance, so another
+					// provider can upsert a profile while this one waits on the survivor lookup; replaying
+					// the whole snapshot would silently drop that newer entry while its settings stayed
+					// saved. Put the deleted profile back where it was and keep everything that arrived
+					// since.
+					const currentEntries = this.getProviderProfileEntries()
+					if (!currentEntries.some(({ id }) => id === profileToDelete.id)) {
+						const restoreAt = previousEntries.findIndex(({ id }) => id === profileToDelete.id)
+						const restored = [...currentEntries]
+						restored.splice(Math.max(0, Math.min(restoreAt, restored.length)), 0, profileToDelete)
+						await this.contextProxy.setValue("listApiConfigMeta", restored)
+					}
 				} catch (compensationError: unknown) {
 					compensationFailures.push(`profile list: ${describeFailure(compensationError)}`)
 				}

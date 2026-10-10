@@ -4153,6 +4153,76 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("restores the deleted profile without dropping one another instance upserted meanwhile", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const lateProfile: ProviderSettingsEntry = {
+				name: "late-profile",
+				id: "late-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider, "log").mockImplementation(() => {})
+			const controller = new AbortController()
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue(undefined),
+				getProfile: vi.fn().mockImplementation(async ({ name }: { name: string }) => {
+					// A second provider instance upserts a profile while this one is waiting on the
+					// survivor lookup. The mutation queue is per instance, so nothing stops that write.
+					if (name === "keeper-profile") {
+						const shared =
+							(provider.contextProxy.getValue("listApiConfigMeta") as ProviderSettingsEntry[]) ?? []
+						await provider.contextProxy.setValue("listApiConfigMeta", [...shared, lateProfile])
+						controller.abort()
+					}
+					return name === "doomed-profile"
+						? {
+								name: "doomed-profile",
+								id: "doomed-id",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterApiKey: "doomed-secret",
+							}
+						: {
+								name: "keeper-profile",
+								id: "keeper-id",
+								apiProvider: providerIdentifiers.anthropic,
+								apiKey: "keeper-secret",
+							}
+				}),
+			}
+
+			await expect(provider["deleteProviderProfileUnlocked"](doomedProfile, controller.signal)).rejects.toThrow(
+				"Profile deletion was cancelled before the selection and settings rewrite",
+			)
+
+			// The deleted profile is back and the profile the other instance added survived: the
+			// compensation restores only the entries this deletion owned.
+			const restored = (provider.contextProxy.getValue("listApiConfigMeta") as ProviderSettingsEntry[]).map(
+				({ name }) => name,
+			)
+			expect(restored).toEqual(["doomed-profile", "keeper-profile", "late-profile"])
+			await provider.dispose()
+		})
+
 		it("restores the shared provider settings when a step after the rewrite fails", async () => {
 			const provider = new ClineProvider(
 				mockContext,

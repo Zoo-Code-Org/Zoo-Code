@@ -1073,6 +1073,14 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			expect(savedConfigId).toBe(childId)
 			expect(remaining.find(({ id }) => id === savedConfigId)).toBeUndefined()
 
+			// The deletion alone must have repointed the context at the surviving profile. Assert that
+			// before driving any further public path: a later mode switch that happens to repair the
+			// selection would otherwise mask a deletion that left currentApiConfigName on the profile
+			// it just removed.
+			const afterDeletion = provider.contextProxy.getValues()
+			expect(afterDeletion.currentApiConfigName).toBe("default")
+			expect(afterDeletion.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default"])
+
 			// Drive the public path the comment above describes instead of asserting only the
 			// mapping: switching to the mode that was pinned to the deleted profile must fall
 			// through to the surviving profile, not re-activate the deleted one.
@@ -1080,11 +1088,6 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			const afterSwitch = provider.contextProxy.getValues()
 			expect(afterSwitch.currentApiConfigName).toBe("default")
 			expect(afterSwitch.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default"])
-
-			// The context was repointed at the surviving profile.
-			const values = provider.contextProxy.getValues()
-			expect(values.currentApiConfigName).toBe("default")
-			expect(values.listApiConfigMeta?.map((entry) => entry.name)).toEqual(["default"])
 		})
 
 		it("treats an already-gone secret as success so the stale list entry is still pruned", async () => {
