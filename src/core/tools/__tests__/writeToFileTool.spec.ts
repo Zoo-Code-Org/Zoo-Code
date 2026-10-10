@@ -853,6 +853,47 @@ describe("writeToFileTool", () => {
 			)
 		})
 
+		it("removes the directories a delta adopted before resetting a denied write", async () => {
+			// An empty partial content can stabilize onto a new nested path: handlePartial() creates
+			// and adopts the parent directories without opening a diff view. The rooignore denial then
+			// reaches the reset with isEditing false, and reset() drops the adopted list without
+			// touching disk - the directories of a write nobody approved would stay on disk.
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			expect(mockCline.diffViewProvider.isEditing).toBe(false)
+			mockCline.diffViewProvider.removeAdoptedDirectories.mockClear()
+			mockCline.diffViewProvider.reset.mockClear()
+
+			await executeWriteFileTool({}, { accessAllowed: false })
+
+			expect(mockCline.diffViewProvider.removeAdoptedDirectories).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			// The order is the fix: after the reset the adopted list is gone, so removing after it
+			// would find nothing and leave the directories behind.
+			expect(mockCline.diffViewProvider.removeAdoptedDirectories.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.diffViewProvider.reset.mock.invocationCallOrder[0],
+			)
+		})
+
+		it("removes the directories a delta adopted before the validation-rejection release", async () => {
+			// The same leak on the other exit that skips execute()'s teardown: a partial delta
+			// opens a stream, then validateToolUse() rejects the completed block, so none of the
+			// normal cleanup runs.
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			expect(mockCline.diffViewProvider.isEditing).toBe(false)
+			mockCline.diffViewProvider.removeAdoptedDirectories.mockClear()
+			mockCline.diffViewProvider.reset.mockClear()
+
+			await writeToFileTool.releaseStreamAfterValidationRejection(mockCline)
+
+			expect(mockCline.diffViewProvider.removeAdoptedDirectories).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.removeAdoptedDirectories.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.diffViewProvider.reset.mock.invocationCallOrder[0],
+			)
+		})
+
 		it("releases the per-task stream state when a missing parameter returns early", async () => {
 			await executeWriteFileTool({}, { isPartial: true })
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)

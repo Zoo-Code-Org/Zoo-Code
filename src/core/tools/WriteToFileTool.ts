@@ -145,6 +145,10 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 		this.releasePartialStreamBookkeeping(task)
 		const rollbackError = await this.discardUnapprovedStreamBeforeReset(task)
+		// Same reason as the rooignore exit below: reset() drops the directories the delta
+		// adopted without touching disk, so a rejection that never opened a diff view would
+		// otherwise leave them behind for a write that never happened.
+		await this.releaseEarlyDirectories(task)
 		await this.resetDiffViewAfterWrite(task)
 		if (rollbackError) {
 			await task
@@ -357,6 +361,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 						})
 				}
 			}
+			// A delta that adopted parent directories before any diff view existed still owns
+			// them here: reset() drops the recorded list without touching disk, so on the no-editor
+			// path the directories of a denied write would stay on disk. When a session IS editing
+			// the provider owns them and the discard above has already removed them, which is why
+			// this runs after it and guards on isEditing itself.
+			await this.releaseEarlyDirectories(task)
 			await this.resetDiffViewAfterWrite(task)
 			return
 		}
