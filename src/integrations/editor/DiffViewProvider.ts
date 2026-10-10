@@ -1103,7 +1103,7 @@ export class DiffViewProvider {
 			// whose reset belongs to a tool caller that a cancellation or disposal may never let
 			// come back. Whoever gets here first claims it; a second waiter joins the claim
 			// instead of running a second reset.
-			await this.finalizeSession(() => this.reset())
+			await this.reset()
 			return
 		}
 		// Restore any preview tabs the diff evicted, reconstructing the user's
@@ -1112,7 +1112,7 @@ export class DiffViewProvider {
 
 		// Edit is done. The owner of the pass claims the finalization too, so a caller that
 		// waited on this pass cannot also close the session behind it.
-		await this.finalizeSession(() => this.reset())
+		await this.reset()
 	}
 
 	private async closeAllDiffViews(): Promise<void> {
@@ -1221,31 +1221,6 @@ export class DiffViewProvider {
 			this.teardownInFlight = undefined
 		}
 		return true
-	}
-
-	/**
-	 * Run the session's finalization exactly once. The first caller claims it and runs it;
-	 * anyone who arrives while it is running awaits that attempt rather than starting their own,
-	 * and anyone who arrives after it is done does nothing. A pass that owns its own teardown and
-	 * a caller that merely waited for one go through here, which is what keeps "only one caller
-	 * owns reset()" true regardless of how many cancellations piled onto the same pass.
-	 */
-	private async finalizeSession(finalize: () => Promise<void>): Promise<void> {
-		if (this.sessionFinalizationClaimed) {
-			return
-		}
-		if (this.finalizationInFlight) {
-			await this.finalizationInFlight
-			return
-		}
-		const inFlight = finalize()
-		this.finalizationInFlight = inFlight
-		try {
-			await inFlight
-			this.sessionFinalizationClaimed = true
-		} finally {
-			this.finalizationInFlight = undefined
-		}
 	}
 
 	// Stop tracking user activation of the target file. Called before any
@@ -1729,10 +1704,39 @@ export class DiffViewProvider {
 		return result
 	}
 
+	/**
+	 * Close the session, finalizing it exactly once per session.
+	 *
+	 * The guard sits on this public entry point rather than on an internal helper, because a guard
+	 * that only protects a private path is not a guard: Task and every edit tool call reset()
+	 * directly, and two of them can reach the same session at once. It is the same defect class as
+	 * the lock key in #1408 naming a different inode than the publish replaced - a guard aimed at
+	 * one object while the operation runs on another guards nothing.
+	 *
+	 * The claim lasts one session: open() clears both fields when a new diff starts, so a provider
+	 * reused by the next tool call is finalizable again.
+	 */
 	async reset(): Promise<void> {
-		// A reset closes the session whoever calls it through, so the finalization is claimed
-		// here as well: a teardown waiter that arrives afterwards must not run a second one.
-		this.sessionFinalizationClaimed = true
+		if (this.sessionFinalizationClaimed) {
+			return
+		}
+		if (this.finalizationInFlight) {
+			// Join the attempt already running instead of starting a second teardown.
+			await this.finalizationInFlight
+			return
+		}
+		const inFlight = this.performFinalReset()
+		this.finalizationInFlight = inFlight
+		try {
+			await inFlight
+			this.sessionFinalizationClaimed = true
+		} finally {
+			this.finalizationInFlight = undefined
+		}
+	}
+
+	/** The teardown itself: what one finalization of a session consists of. */
+	private async performFinalReset(): Promise<void> {
 		// Dispose touch listeners and cancel any pending deferred scroll BEFORE any
 		// async editor manipulation. closeAllDiffViews() awaits tab-close operations,
 		// so leaving listeners/timers live across that await could let a stale handler

@@ -3405,7 +3405,9 @@ describe("DiffViewProvider", () => {
 			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
 			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
-			diffViewProvider["reset"] = reset
+			// The guard sits on the public reset(), so the stub stands in for the teardown it
+			// guards: what has to happen exactly once is the teardown, not the call.
+			diffViewProvider["performFinalReset"] = reset
 			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
 			applyEdit.mockResolvedValue(true)
 			diffViewProvider["relPath"] = "mock-target-file.ts"
@@ -3625,7 +3627,9 @@ describe("DiffViewProvider", () => {
 			const reset = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["closeOwnDiffView"] = closeOwnDiffView
 			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
-			diffViewProvider["reset"] = reset
+			// The guard sits on the public reset(), so the stub stands in for the teardown it
+			// guards: what has to happen exactly once is the teardown, not the call.
+			diffViewProvider["performFinalReset"] = reset
 			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
 			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
 			applyEdit.mockResolvedValue(true)
@@ -3683,7 +3687,9 @@ describe("DiffViewProvider", () => {
 			const reset = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
 			diffViewProvider["closeOwnDiffView"] = closeOwnDiffView
-			diffViewProvider["reset"] = reset
+			// The guard sits on the public reset(), so the stub stands in for the teardown it
+			// guards: what has to happen exactly once is the teardown, not the call.
+			diffViewProvider["performFinalReset"] = reset
 			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
 			diffViewProvider["relPath"] = "mock-target-file.ts"
@@ -3738,7 +3744,9 @@ describe("DiffViewProvider", () => {
 			const reset = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["closeOwnDiffView"] = closeOwnDiffView
 			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
-			diffViewProvider["reset"] = reset
+			// The guard sits on the public reset(), so the stub stands in for the teardown it
+			// guards: what has to happen exactly once is the teardown, not the call.
+			diffViewProvider["performFinalReset"] = reset
 			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
 			diffViewProvider["relPath"] = "mock-target-file.ts"
@@ -3784,7 +3792,9 @@ describe("DiffViewProvider", () => {
 			const reset = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["closeOwnDiffView"] = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["restorePreviewTabs"] = restorePreviewTabs
-			diffViewProvider["reset"] = reset
+			// The guard sits on the public reset(), so the stub stands in for the teardown it
+			// guards: what has to happen exactly once is the teardown, not the call.
+			diffViewProvider["performFinalReset"] = reset
 			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
 			diffViewProvider["relPath"] = "mock-target-file.ts"
@@ -3806,6 +3816,23 @@ describe("DiffViewProvider", () => {
 
 			expect(restorePreviewTabs).toHaveBeenCalledTimes(2)
 			expect(reset).toHaveBeenCalledTimes(1)
+		})
+
+		it("two concurrent resets finalize the session exactly once", async () => {
+			// The guard sits on the public entry point, which is the shape a cancellation and a
+			// disposal produce: both call reset() on the same session at the same time.
+			const disposeListener = vi.fn()
+			const closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["relPath"] = undefined
+			diffViewProvider["disposeActiveEditorListener"] = disposeListener
+			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+
+			await Promise.all([diffViewProvider.reset(), diffViewProvider.reset()])
+
+			// Asserted on the teardown's own side effects rather than on a flag: the second caller
+			// joined the attempt already running instead of starting a second teardown.
+			expect(disposeListener).toHaveBeenCalledTimes(1)
+			expect(closeAllDiffViews).toHaveBeenCalledTimes(1)
 		})
 
 		it("revertChanges() does not finalize a session that a direct reset already closed", async () => {
