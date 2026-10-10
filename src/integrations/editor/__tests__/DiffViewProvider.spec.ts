@@ -2438,6 +2438,114 @@ describe("DiffViewProvider", () => {
 			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
 		})
 
+		it("does not adopt an autosaved match when the completeness gate rejected the update", async () => {
+			// The model read a slice, so its observation is partial, and open() stat-matched
+			// that same version - the version gate passes. But the guarded write was refused
+			// by the completeness gate before any compare-and-swap ran: adopting the
+			// matching bytes would report a successful full-file replacement for a write the
+			// completeness gate rejected, with the lines the model never read gone and
+			// nothing telling the model.
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider.editType = "modify"
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, versionTokenOfStat(previewStats), false)
+			diffViewProvider["preOpenObservation"] = { version: versionTokenOfStat(previewStats), complete: false }
+			diffViewProvider["openToken"] = versionTokenOfStat(previewStats)
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("new content")
+
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("File was only partially read")
+
+			// The adoption probe never runs once the completeness gate refuses, and the
+			// observation stays the partial read the model actually made.
+			expect(fs.readFile).not.toHaveBeenCalled()
+			const observation = mockTask.observationRegistry.get(`${mockCwd}/test.ts`)
+			expect(observation?.complete).toBe(false)
+			expect(observation?.version).toBe(versionTokenOfStat(previewStats))
+		})
+
+		it("adopts an autosaved match when the preview ran against the model's complete observation", async () => {
+			// The autosave shape with the preview's own pairing: the model read the whole
+			// file, open() stat-matched that version, and autosave published the accepted
+			// bytes. Only the version token moved, which is exactly what adoption exists
+			// for, so the completeness gate must not refuse this one.
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider.editType = "modify"
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, versionTokenOfStat(previewStats), true)
+			diffViewProvider["preOpenObservation"] = { version: versionTokenOfStat(previewStats), complete: true }
+			diffViewProvider["openToken"] = versionTokenOfStat(previewStats)
+			vi.mocked(computeVersionToken).mockResolvedValue("moved")
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("new content")
+
+			await expect(diffViewProvider.saveChanges(false)).resolves.toMatchObject({ newProblemsMessage: "" })
+
+			const observation = mockTask.observationRegistry.get(`${mockCwd}/test.ts`)
+			expect(observation?.version).toBe(versionTokenOfStat(previewStats))
+			expect(observation?.complete).toBe(true)
+		})
+
+		it("still adopts an autosaved match for a targeted edit after a partial read", async () => {
+			// A targeted edit is authorized by a partial read, so the completeness gate
+			// never rejects it; when autosave published the edit's bytes, the moved-token
+			// rejection is exactly the adoption shape and must stay adopted.
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider.editType = "modify"
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, versionTokenOfStat(previewStats), false)
+			diffViewProvider["preOpenObservation"] = { version: versionTokenOfStat(previewStats), complete: false }
+			diffViewProvider["openToken"] = versionTokenOfStat(previewStats)
+			vi.mocked(computeVersionToken).mockResolvedValue("moved")
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("new content")
+
+			await expect(diffViewProvider.saveChanges(false, 0, "edit")).resolves.toMatchObject({
+				newProblemsMessage: "",
+			})
+
+			// The edit's publish keeps the read's completeness: a partial read stays
+			// partial and cannot authorize a later full-file replacement.
+			const observation = mockTask.observationRegistry.get(`${mockCwd}/test.ts`)
+			expect(observation?.complete).toBe(false)
+		})
+
 		it("does not adopt a match when an external writer moved the file before the preview", async () => {
 			const mockEditor = mockTextEditor(`${mockCwd}/ext-writer.ts`)
 			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)

@@ -884,6 +884,62 @@ describe("safeWriteText", () => {
 			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toThrow(DaclRestoreError)
 		})
 
+		it("win32 DACL: a narrowing under a file path that contains a space is accepted", async () => {
+			// icacls echoes the path it was given ahead of the first entry. A workspace path
+			// with spaces ("OneDrive - Company", "My Projects") is the ordinary case, so the
+			// echo must be stripped whole: a whitespace-token strip leaves the path's tail in
+			// the first principal and every publish under such a path fails DaclRestoreError.
+			const targetPath = "/tmp/test-dir/My Projects/cfg.json"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const warnings: string[] = []
+			vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
+				const argv = args as unknown as string[]
+				const callback = cb as unknown as (err: unknown, stdout: string, stderr: string) => void
+				if (argv[1] === "/restore") {
+					callback(new Error("icacls restore error"), "", "")
+				} else if (argv[1] === undefined) {
+					callback(null, `${argv[0]} ${os.userInfo().username}:(F)`, "")
+				} else {
+					callback(null, "", "")
+				}
+				return fakeChild
+			})
+
+			await expect(
+				safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) }),
+			).resolves.toBeUndefined()
+
+			expect(
+				warnings.filter((m) => m.includes("narrowed to the current user's full control and verified")),
+			).toHaveLength(1)
+		})
+
+		it("win32 DACL: an inherited grant to the current user is not accepted as verified", async () => {
+			// The principal is exactly the expected one, so only the inheritance marker can
+			// reject this report. The flags of an entry are printed as separate groups
+			// ("bob:(I)(F)"), so the check must read the whole flag run: a check for the
+			// literal "(I)" inside a single group's text never fires and calls an inherited
+			// grant a verified narrowing.
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
+				const argv = args as unknown as string[]
+				const callback = cb as unknown as (err: unknown, stdout: string, stderr: string) => void
+				if (argv[1] === "/restore") {
+					callback(new Error("icacls restore error"), "", "")
+				} else if (argv[1] === undefined) {
+					callback(null, `${argv[0]} ${os.userInfo().username}:(I)(F)`, "")
+				} else {
+					callback(null, "", "")
+				}
+				return fakeChild
+			})
+
+			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toThrow(DaclRestoreError)
+		})
+
 		it("win32 DACL: a narrowing granted to a same-named account in another domain is not accepted", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)

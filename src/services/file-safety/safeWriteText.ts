@@ -29,10 +29,13 @@ export interface SafeWriteTextOptions {
 	execFileRunner?: typeof execFile
 
 	/**
-	 * Sink for non-fatal safety notices. A Windows DACL that could not be captured means the
-	 * committed file may inherit different access rights: the write still proceeds (a missing or
-	 * failing icacls must not block saving), but the caller is told instead of the change being
-	 * silent. Defaults to console.warn.
+	 * Sink for non-fatal safety notices: the access-check warning raised when an existing
+	 * target could not be checked before the publish, and the post-commit notices for a
+	 * saved DACL that was narrowed and verified instead of restored, that could not be
+	 * narrowed after a rollback, or whose rollback itself failed and left the pre-write
+	 * content retained. A capture failure on an existing target is not a notice: it
+	 * rejects the write with DaclCaptureError before the commit rename, so the target
+	 * keeps its previous content under its previous ACL. Defaults to console.warn.
 	 */
 	onWarning?: (message: string) => void
 
@@ -244,27 +247,30 @@ function _expectedAcePrincipals(identity: string): string[] {
 	}
 	return expected
 }
-function _aclEntriesAreNarrowedTo(report: string, identity: string): boolean {
-	// Every "principal:(flags)" pair in the report is an entry; the file path that icacls prints
-	// ahead of the first entry is stripped below so it cannot satisfy the check by containing the
-	// user's name.
-	const pattern = /([^:()]+):\(([^()]*)\)/g
+function _aclEntriesAreNarrowedTo(report: string, filePath: string, identity: string): boolean {
 	const expectedPrincipals = _expectedAcePrincipals(identity)
+	// icacls echoes the path it was given ahead of the first entry. Strip that known prefix
+	// whole, so a path containing spaces ("C:\\Users\\My Projects\\...") cannot leak into the
+	// first principal the way a whitespace-token strip would leak it.
+	let body = report.trimStart()
+	if (body.toLowerCase().startsWith(filePath.toLowerCase())) {
+		body = body.slice(filePath.length)
+	}
 	let count = 0
-	for (const match of report.matchAll(pattern)) {
-		let principal = match[1].trim()
-		// The first entry shares its line with the path. Only a leading token that looks like a
-		// path is dropped: a principal such as "NT AUTHORITY\\SYSTEM" legitimately contains a space
-		// and must survive intact.
-		const parts = principal.split(/\s+/)
-		if (parts.length > 1 && /^[A-Za-z]:[\\/]|^[\\/]/.test(parts[0])) {
-			principal = parts.slice(1).join(" ").trim()
+	for (const rawLine of body.split(/\r?\n/)) {
+		// One entry per line: "<principal>:(flags)(flags)...". Summary lines
+		// ("Successfully processed ...") and blanks carry no entry and are skipped.
+		const match = /^(.+?):((?:\([^()]*\))+)$/.exec(rawLine.trim())
+		if (!match) {
+			continue
 		}
-		const flags = match[2]
-		if (flags.includes("(I)")) {
+		// The flags group is the whole run of parenthesized groups, so the inheritance
+		// marker is matched as it is printed - "bob:(I)(F)" included. A verified
+		// narrowing holds only explicit grants: any inherited entry rejects the report.
+		if (match[2].includes("(I)")) {
 			return false
 		}
-		if (!expectedPrincipals.includes(principal.toLowerCase())) {
+		if (!expectedPrincipals.includes(match[1].trim().toLowerCase())) {
 			return false
 		}
 		count++
@@ -306,7 +312,7 @@ async function _restrictDaclWindows(
 	// so a substring match would pass on a file that grants that user nothing. Every entry must be
 	// an explicit grant to the current user with no inherited component, which is the only state
 	// this helper claims to have verified.
-	return _aclEntriesAreNarrowedTo(readBack, identity)
+	return _aclEntriesAreNarrowedTo(readBack, filePath, identity)
 }
 
 // -- public API ------------------------------------------------------------
