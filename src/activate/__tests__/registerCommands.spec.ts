@@ -880,7 +880,11 @@ describe("openClineInNewTab", () => {
 		const stateChange = (panelA.onDidChangeViewState as Mock).mock.calls[0]![0] as (e: {
 			webviewPanel: vscode.WebviewPanel
 		}) => void
-		stateChange({ webviewPanel: { ...panelA, active: true, visible: true } })
+		// The flags are set on the panel itself and the panel object is handed over: in VS Code
+		// `e.webviewPanel` is the same object the creation returned, and the production guard
+		// compares refs by identity, so a copy would let the test pass on a copied field.
+		Object.assign(panelA, { active: true, visible: true })
+		stateChange({ webviewPanel: panelA })
 
 		// ...so plusButtonClickedInTab targets A's provider, not B's.
 		const mockProviderA = {
@@ -888,8 +892,10 @@ describe("openClineInNewTab", () => {
 			evictCurrentTask: vi.fn().mockResolvedValue(undefined),
 			refreshWorkspace: vi.fn().mockResolvedValue(undefined),
 		}
+		// Matched by identity rather than by the marker field: a lookup keyed on a field that a
+		// spread copy also carries stays green even when the tracked ref is a different object.
 		;(ClineProvider.getInstanceForView as Mock).mockImplementation((view: unknown) =>
-			(view as { marker?: string }).marker === "panel-A" ? mockProviderA : undefined,
+			view === panelA ? mockProviderA : undefined,
 		)
 		const handlers = new Map<string, (...args: unknown[]) => unknown>()
 		;(vscode.commands.registerCommand as Mock).mockImplementation(
@@ -1083,7 +1089,7 @@ describe("openClineInNewTab", () => {
 		expect(getPanel()).toBe(panel)
 
 		const stateHandler = panel.onDidChangeViewState.mock.calls[0][0] as (event: {
-			webviewPanel: { visible: boolean; webview: { postMessage: (message: unknown) => void } }
+			webviewPanel: { active?: boolean; visible: boolean; webview: { postMessage: (message: unknown) => void } }
 		}) => void
 		const visibleEvent = { webviewPanel: { visible: true, webview: { postMessage: vi.fn() } } }
 		stateHandler(visibleEvent)
@@ -1095,6 +1101,14 @@ describe("openClineInNewTab", () => {
 		const hiddenEvent = { webviewPanel: { visible: false, webview: { postMessage: vi.fn() } } }
 		stateHandler(hiddenEvent)
 		expect(hiddenEvent.webviewPanel.webview.postMessage).not.toHaveBeenCalled()
+
+		// A visible panel that is not active must not take the tracked ref over. Earlier events in
+		// this test carried no `active` field at all, so that branch was never exercised. The
+		// event names a different panel object than the tracked one: a guard that looked only at
+		// `visible` would move the ref and this assertion would fail.
+		const otherPanel = { active: false, visible: true, webview: { postMessage: vi.fn() } }
+		stateHandler({ webviewPanel: otherPanel })
+		expect(getPanel()).toBe(panel)
 
 		const disposeHandler = panel.onDidDispose.mock.calls[0][0] as () => void
 		disposeHandler()
