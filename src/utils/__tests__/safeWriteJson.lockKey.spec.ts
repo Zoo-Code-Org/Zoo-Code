@@ -183,6 +183,46 @@ describe("safeWriteJson lock key under a peer commit", () => {
 
 		expect(await resolveLockKey(file)).toBe(path.join(canonicalDir, "history_item.json"))
 	})
+
+	// Windows canonicalisation is case-insensitive, so fs.realpath can hand back the very same file
+	// under a different spelling - the drive letter's case is the common one. Comparing the two lock
+	// identities case-sensitively then treats one file as two, and proper-lockfile answers the second
+	// acquisition with "Lock file is already being held": a write that should simply succeed fails,
+	// and it fails only on Windows. The double below answers that way for a key already taken under
+	// ANY spelling, which is what a case-insensitive filesystem does.
+	it.runIf(process.platform === "win32")(
+		"takes one lock when canonicalisation differs from the requested path only by case",
+		async () => {
+			const dir = await makeDir("lockkey-case-")
+			const target = path.join(dir, "history_item.json")
+			const lowerDrive = (p: string) => (/^[A-Za-z]:/.test(p) ? p[0].toLowerCase() + p.slice(1) : p)
+
+			mockedRealpath.mockImplementation(async (p) => lowerDrive(String(p)))
+			// The target does not exist yet (a create), which is what leaves the resolver's spelling as
+			// the only thing to compare. Anything else this call lstats - the staging file among them -
+			// is the regular file it is, so the double answers for that too instead of failing every probe.
+			mockedLstat.mockImplementation(async (probe) => {
+				if (String(probe).toLowerCase() === target.toLowerCase()) {
+					throw enoent
+				}
+				return { isSymbolicLink: () => false, isFile: () => true } as unknown as BigIntStats
+			})
+			const held = new Set<string>()
+			mockedAcquireFileLock.mockImplementation(async (key) => {
+				const identity = lowerDrive(String(key)).toLowerCase()
+				if (held.has(identity)) {
+					throw new Error("Lock file is already being held")
+				}
+				held.add(identity)
+				return async () => {
+					held.delete(identity)
+				}
+			})
+
+			await expect(safeWriteJson(target, { mcpServers: {} })).resolves.toBeUndefined()
+			expect(mockedAcquireFileLock).toHaveBeenCalledTimes(1)
+		},
+	)
 })
 
 it("does not log a cleanup error when the safety net finds the temp file already gone", async () => {
