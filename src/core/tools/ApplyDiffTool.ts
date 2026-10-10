@@ -5,6 +5,7 @@ import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { getReadablePath } from "../../utils/path"
+import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import { versionTokenOfStat } from "../../utils/versionToken"
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
@@ -15,6 +16,7 @@ import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { computeDiffStats, sanitizeUnifiedDiff } from "../diff/stats"
 import type { ToolUse } from "../../shared/tools"
 
+import { canonicalizeForApproval } from "./guardedWrite"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 
 interface ApplyDiffParams {
@@ -165,10 +167,24 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 			// Check if file is write-protected
 			const isWriteProtected = task.rooProtectedController?.isWriteProtected(relPath) || false
 
+			// The guard in guardedWrite refuses a target outside every workspace root unless the tool
+			// layer says the user approved this one, and it binds the publish to the identity that was
+			// approved. apply_diff has both save paths behind an askApproval, so it has to carry both
+			// through; without them an approved write outside the workspace is rejected by its own guard.
+			const isOutsideWorkspace = isPathOutsideWorkspace(absolutePath)
+			// Captured before the approval is asked: guardedWrite binds the publish to this identity, so
+			// a name repointed between the approval and the publish is refused instead of publishing to
+			// whatever the name points at by then. Inside the try so an unresolvable target goes through
+			// the tool's normal error handling and the diff-view reset.
+			const approvedCanonicalTarget = isOutsideWorkspace
+				? await canonicalizeForApproval(absolutePath, relPath)
+				: undefined
+
 			const sharedMessageProps: ClineSayTool = {
 				tool: "appliedDiff",
 				path: getReadablePath(task.cwd, relPath),
 				diff: diffContent,
+				isOutsideWorkspace,
 			}
 
 			if (isPreventFocusDisruptionEnabled) {
@@ -211,6 +227,11 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					diagnosticsEnabled,
 					writeDelayMs,
 					"edit",
+					// Seventh parameter is completeOverride (this call claims no completeness of its
+					// own); the eighth is the approval flag for a target outside every workspace root.
+					undefined,
+					isOutsideWorkspace,
+					approvedCanonicalTarget,
 				)
 			} else {
 				// Original behavior with diff view
@@ -250,7 +271,13 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				}
 
 				// Call saveChanges to update the DiffViewProvider properties
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs, "edit")
+				await task.diffViewProvider.saveChanges(
+					diagnosticsEnabled,
+					writeDelayMs,
+					"edit",
+					isOutsideWorkspace,
+					approvedCanonicalTarget,
+				)
 			}
 
 			// Track file edit operation

@@ -7,6 +7,8 @@ import type { MockedFunction } from "vitest"
 
 import { fileExistsAtPath } from "../../../utils/fs"
 import type { Task } from "../../task/Task"
+import { isPathOutsideWorkspace } from "../../../utils/pathUtils"
+import { canonicalizeForApproval } from "../guardedWrite"
 import { ApplyDiffTool } from "../ApplyDiffTool"
 import { ObservationRegistry } from "../../task/observationRegistry"
 
@@ -36,6 +38,20 @@ vi.mock("../../prompts/responses", () => ({
 		createPrettyPatch: vi.fn(() => "mock-diff"),
 	},
 }))
+
+// The outside-workspace approval plumbing is what the last two tests exercise: whether a path is
+// outside every workspace root, and the canonical identity of an approved target, are both host and
+// editor state, so they are doubled here and the assertions are about what the tool hands to the
+// guarded save path.
+vi.mock("../../../utils/pathUtils", async () => {
+	const actual = await vi.importActual("../../../utils/pathUtils")
+	return { ...actual, isPathOutsideWorkspace: vi.fn(() => false) }
+})
+
+vi.mock("../guardedWrite", async () => {
+	const actual = await vi.importActual("../guardedWrite")
+	return { ...actual, canonicalizeForApproval: vi.fn(async () => "/canonical/outside/thing.ts") }
+})
 
 vi.mock("../../diff/stats", () => ({
 	sanitizeUnifiedDiff: vi.fn((diff: string) => diff),
@@ -173,6 +189,10 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			true,
 			1000,
 			"edit",
+			// No completeness claim of its own, and an in-workspace target needs no approval flag.
+			undefined,
+			false,
+			undefined,
 		)
 		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
 		expect(mockTask.didEditFile).toBe(true)
@@ -217,7 +237,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			pushToolResult: mockPushToolResult,
 		})
 
-		expect(mockSaveChanges).toHaveBeenCalledWith(true, 1000, "edit")
+		expect(mockSaveChanges).toHaveBeenCalledWith(true, 1000, "edit", false, undefined)
 		expect(mockSaveDirectly).not.toHaveBeenCalled()
 		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
 		expect(mockHandleError).not.toHaveBeenCalled()
@@ -344,6 +364,9 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			true,
 			1000,
 			"edit",
+			undefined,
+			false,
+			undefined,
 		)
 		expect(mockHandleError).not.toHaveBeenCalled()
 		// Both bracketing stats were still attempted - the failure is not swallowed into
@@ -371,4 +394,55 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(mockHandleError).not.toHaveBeenCalled()
 		expect(stat).toHaveBeenCalledTimes(2)
 	})
+
+it("carries the outside-workspace approval and its canonical identity to the guarded save", async () => {
+		// guardedWrite refuses a target outside every workspace root unless the tool layer says the
+		// user approved this one, and it binds the publish to the identity that was approved.
+		// apply_diff asks for approval on both save paths, so an approved write has to reach the guard
+		// with both - otherwise the tool's own guard rejects what the user just approved.
+		vi.mocked(isPathOutsideWorkspace).mockReturnValue(true)
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockAskApproval).toHaveBeenCalled()
+		// The identity is captured from the resolved target, not the caller's spelling.
+		expect(canonicalizeForApproval).toHaveBeenCalledWith(expect.stringContaining("thing.ts"), "src/thing.ts")
+		expect(mockSaveDirectly).toHaveBeenCalledWith(
+			"src/thing.ts",
+			"modified file content\n",
+			false,
+			true,
+			1000,
+			"edit",
+			undefined,
+			true,
+			"/canonical/outside/thing.ts",
+		)
+		expect(mockHandleError).not.toHaveBeenCalled()
+	})
+
+	it("carries the approval through the diff-view save path too", async () => {
+		// The other save path is the one taken when the focus-disruption experiment is off; it needs
+		// the same two arguments or an approved write fails on half the configurations.
+		vi.mocked(isPathOutsideWorkspace).mockReturnValue(true)
+		mockTask.providerRef = {
+			deref: () => ({
+				getState: vi.fn().mockResolvedValue({ diagnosticsEnabled: true, writeDelayMs: 1000, experiments: {} }),
+			}),
+		} as unknown as Task["providerRef"]
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockSaveChanges).toHaveBeenCalledWith(true, 1000, "edit", true, "/canonical/outside/thing.ts")
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
+	})
+
 })
