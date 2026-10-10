@@ -46,49 +46,11 @@ Zoo Code builds on the foundation created by Roo Code and continues to expand it
 - **More dependable terminal and editing workflows** — fixes for premature terminal completion, task-state races, context management, diff editing, and provider-specific tool use.
 - **More control over your workspace** — rules management, per-mode MCP restrictions, multi-root path controls, model reasoning options, and completion change review actions.
 
-## GitHub Copilot
+## What's New in v3.88.0
 
-Select **GitHub Copilot** in Zoo Code's provider settings and click **Sign in to GitHub**. GitHub
-Copilot Chat must be installed and enabled. Zoo Code shows the signed-in account and refreshes the
-model list as Copilot registers models. Select a model and save the profile. VS Code may ask you to
-allow Zoo Code to use the model on the first request.
-
-Signing in proves a GitHub identity, not a Copilot subscription. An account without Copilot access
-signs in successfully and simply sees no models.
-
-- **Reconnect GitHub** requests a fresh authorization instead of reusing the existing session.
-- **Manage GitHub account** opens VS Code's own account menu. VS Code offers extensions no way to
-  sign out on a user's behalf, so signing out happens there. It affects Copilot and every other
-  extension using the account.
-
-VS Code manages the GitHub session; Zoo Code never displays or stores the access token.
-
-### Capabilities
-
-Capabilities come from what VS Code reports for each Copilot model, so new models work without code
-changes, and nothing about a model is saved into your settings where it could go stale.
-
-- **Context window:** the model's reported input limit, capped by Zoo Code's curated limit where one
-  is known. Before the host reports, the curated limit is shown, matching what Zoo Code enforces.
-- **Images:** read from the capability the host reports for each live model. A model that reports
-  nothing shows **Image support not reported** instead of being assumed unsupported or borrowed from
-  Zoo Code's curated catalog, which only describes a model the host has not listed yet. Images are
-  sent as image data, not text placeholders, and need a VS Code version that supports image parts;
-  Zoo Code's minimum supported VS Code version stays 1.100.
-- **Tools:** VS Code tells extensions only whether a model supports tools, not how many it accepts,
-  so Zoo Code applies the same advisory it shows for any provider when many MCP tools are enabled.
-  GitHub plan limits, premium-request allowances, organization policies, and backend limits still apply.
-- **Prompt caching:** Copilot owns any backend caching. The public VS Code Language Model API exposes
-  no cache-control directives or cache-hit usage, so Zoo Code neither enables caching nor reports
-  savings; the provider-managed label states this and does not promise a cache hit.
-
-The existing **VS Code LM API** provider remains available for models from other extensions.
-
-## What's New in v3.86.0
-
-- ✨ **New model support:** Use GPT-6.1 Sol, get the corrected Claude Opus 5.5 output budget, and select DeepSeek V4.1 Flash on OpenCode Go.
-- 🧭 **Reliable task aborts and interruptions:** Preserve the first abort reason, reset stream-abort state for each request, and stop interrupted tasks from replaying rejected subtasks.
-- 🛠️ **Dependable tools, prompts, and UI streaming:** Keep streamed tool arguments intact, enforce MCP tool policy, prevent invented line numbers, and smooth chat updates.
+- ✨ **Provider and model support:** Use Grok Build and improved custom-model support. This release also fixes Bedrock model limits and sends the Codex verbosity setting.
+- 🧭 **Task reliability:** This release fixes cancellation handling, tool-turn continuation, and task-message saving.
+- ⚡ **Faster editing and chat:** File writes no longer use artificial delays by default. Chat messages carry less file data, and code actions reach the last active chat.
 
 <details>
   <summary>🌐 Available languages</summary>

@@ -1,12 +1,13 @@
 import { act, fireEvent, render, screen, within } from "@/utils/test-utils"
 import { bedrockDefaultModelId, providerIdentifiers, type ProviderSettings } from "@roo-code/types"
-import type { ChangeEventHandler, InputHTMLAttributes, ReactNode } from "react"
+import type { ChangeEventHandler, ComponentProps, InputHTMLAttributes, ReactNode } from "react"
 
 import { requestLmStudioModels } from "@src/components/ui/hooks/useLmStudioModels"
 import type { useOpenRouterModelProviders } from "@src/components/ui/hooks/useOpenRouterModelProviders"
 import { vscode } from "@src/utils/vscode"
 
 import ApiOptions, { type ApiOptionsProps } from "../ApiOptions"
+import type { ModelPicker } from "../ModelPicker"
 
 type OpenRouterModelProvidersQueryResult = Pick<ReturnType<typeof useOpenRouterModelProviders>, "data">
 
@@ -31,7 +32,8 @@ type SelectMockProps = ChildrenProps & {
 
 type UseSelectedModelReturn = { provider?: string; id?: string; info: Record<string, never> }
 
-const { useOpenRouterModelProvidersMock, useSelectedModelMock } = vi.hoisted(() => ({
+const { modelPickerMock, useOpenRouterModelProvidersMock, useSelectedModelMock } = vi.hoisted(() => ({
+	modelPickerMock: vi.fn((_props: ComponentProps<typeof ModelPicker>) => null),
 	useOpenRouterModelProvidersMock: vi.fn<() => OpenRouterModelProvidersQueryResult>(() => ({ data: undefined })),
 	useSelectedModelMock: vi.fn(
 		(configuration: ProviderSettings): UseSelectedModelReturn => ({
@@ -114,7 +116,7 @@ vi.mock("../providers", () => {
 vi.mock("../providers/BedrockCustomArn", () => ({
 	BedrockCustomArn: () => <div data-testid="bedrock-custom-arn" />,
 }))
-vi.mock("../ModelPicker", () => ({ ModelPicker: () => null }))
+vi.mock("../ModelPicker", () => ({ ModelPicker: modelPickerMock }))
 vi.mock("../ApiErrorMessage", () => ({
 	ApiErrorMessage: ({ errorMessage }: { errorMessage: string }) => <div>{String(errorMessage)}</div>,
 }))
@@ -499,6 +501,29 @@ describe("ApiOptions interactions", () => {
 		)
 
 		expect(screen.queryByTestId("bedrock-custom-arn")).not.toBeInTheDocument()
+	})
+
+	it("maps a pasted ARN to the custom-arn pseudo-model and fills the custom ARN for Bedrock", () => {
+		const arn = "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/abcd1234efgh"
+		const setApiConfigurationField = vi.fn()
+		renderApiOptions({
+			apiConfiguration: { apiProvider: providerIdentifiers.bedrock, apiModelId: bedrockDefaultModelId },
+			setApiConfigurationField,
+		})
+
+		const props = modelPickerMock.mock.lastCall?.[0]
+		expect(props?.valueTransform?.(arn)).toBe("custom-arn")
+
+		props?.onModelChange?.(arn)
+		expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArn", arn)
+	})
+
+	it("does not transform model IDs for non-Bedrock providers", () => {
+		renderApiOptions({
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiModelId: "claude-sonnet" },
+		})
+
+		expect(modelPickerMock.mock.lastCall?.[0].valueTransform).toBeUndefined()
 	})
 
 	it("syncs the selected model into the config when the model id differs", () => {

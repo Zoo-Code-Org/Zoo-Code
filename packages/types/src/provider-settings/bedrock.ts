@@ -26,6 +26,7 @@ export const bedrockProviderDefinition = createProviderDefinition({
 		awsApiKey: z.string().optional(),
 		awsUseApiKey: z.boolean().optional(),
 		awsCustomArn: z.string().optional(),
+		awsCustomArnBaseModelId: z.string().optional(), // Registry model a custom ARN points to; drives capabilities and pricing
 		awsModelContextWindow: z.number().optional(),
 		awsBedrockEndpointEnabled: z.boolean().optional(),
 		awsBedrockEndpoint: z.string().optional(),

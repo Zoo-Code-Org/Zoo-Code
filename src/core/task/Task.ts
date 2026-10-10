@@ -1852,9 +1852,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// has to see and stalling a hands-free session. Leaving the message
 		// unclaimed lets the policy decision stand and keeps the message queued.
 		const queueMayAnswerThisAsk = !(blanketDenyEngaged && type === "command")
+		// A queued message must not short-circuit protected asks (e.g.
+		// DCG-blocked commands): claiming one here skips checkAutoApproval, and
+		// the drain below would auto-approve what protection intentionally
+		// leaves pending for explicit user approval.
 		const queuedMessage =
 			partial === true ||
 			type === "command_output" ||
+			isProtected ||
 			!queueMayAnswerThisAsk ||
 			!this.mayDrainQueuedMessageForAsk()
 				? undefined
@@ -2255,10 +2260,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// suggestion click that was incorrectly queued due to UI state), consume it
 					// immediately so the task doesn't hang. Command asks under blanket deny are
 					// excluded (`queueMayAnswerThisAsk`): a queued message must never stand in
-					// for the explicit approval the policy withheld.
+					// for the explicit approval the policy withheld. Protected asks are exempt
+					// too: like the pre-block drain above, they must wait for explicit user
+					// approval.
 					if (
 						queueMayAnswerThisAsk &&
 						shouldDrainQueuedMessageForAsk &&
+						!isProtected &&
 						!queuedCommandPolicyCheck &&
 						this.mayDrainQueuedMessageForAsk()
 					) {
@@ -4052,9 +4060,33 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										// Without this check, duplicate tool_use blocks with the same ID would
 										// be added to assistantMessageContent, causing API 400 errors:
 										// "tool_use ids must be unique"
-										if (this.streamingToolCallIndices.has(event.id)) {
+										// Use compound key (id, name) to distinguish different tools with the same call ID.
+										const dedupKey = NativeToolCallParser.makeStreamingKey(event.id, event.name)
+										if (this.streamingToolCallIndices.has(dedupKey)) {
 											console.warn(
 												`[Task#${this.taskId}] Ignoring duplicate tool_call_start for ID: ${event.id} (tool: ${event.name})`,
+											)
+											continue
+										}
+
+										// A call ID that already appears in assistantMessageContent cannot be
+										// round-tripped: the API history builder dedupes tool_use blocks by ID and
+										// results are matched by tool_use_id, so a second entry with the same ID
+										// would be orphaned. The compound-key check above already rejects an
+										// identical (id, name) start in this stream, so reject any remaining start
+										// that reuses an ID, regardless of the entry's displayed name: alias
+										// resolution renames a streaming entry to its canonical tool (the streamed
+										// name is kept in originalName), which would otherwise let a same-ID start
+										// under the canonical name slip past a name comparison. The first call wins.
+										const idAlreadyUsed = this.assistantMessageContent.some(
+											(entry) =>
+												// Stryker disable next-line ConditionalExpression: only tool_use and mcp_tool_use entries ever carry an id — the text block pushed in the text case has no id field and the start events reaching this guard always carry the string id locked in by processRawChunk — so the type check cannot change the outcome of entry.id === event.id for any entry this pipeline produces; the false replacement is additionally killed by the rejection tests.
+												(entry.type === "tool_use" || entry.type === "mcp_tool_use") &&
+												(entry as { id?: string }).id === event.id,
+										)
+										if (idAlreadyUsed) {
+											console.warn(
+												`[Task#${this.taskId}] Ignoring tool_call_start reusing call ID ${event.id} (tool: ${event.name})`,
 											)
 											continue
 										}
@@ -4076,7 +4108,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 										// Track the index where this tool will be stored
 										const toolUseIndex = this.assistantMessageContent.length
-										this.streamingToolCallIndices.set(event.id, toolUseIndex)
+										this.streamingToolCallIndices.set(dedupKey, toolUseIndex)
 
 										// Create initial partial tool use
 										const partialToolUse: ToolUse = {
@@ -4095,16 +4127,43 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
 										this.presentAssistantMessageSafe()
 									} else if (event.type === "tool_call_delta") {
-										// Process chunk using streaming JSON parser
-										const partialToolUse = NativeToolCallParser.processStreamingChunk(
-											event.id,
-											event.delta,
-											nativeToolCallParserScope,
-										)
+										// Deltas from the raw-chunk path carry the tracked name: build the
+										// compound key directly so same-ID calls cannot share an
+										// accumulator. Deltas without a name (legacy provider streams)
+										// keep the deprecated single-entry-per-ID lookup.
+										let streamingKey: string | undefined
 
-										if (partialToolUse) {
-											// Get the index for this tool call
-											const toolUseIndex = this.streamingToolCallIndices.get(event.id)
+										// Stryker disable next-line ConditionalExpression: event.name is always a string on this path — the only delta events reaching this handler are emitted by processRawChunk with the tracked start name (never undefined), so the legacy nameless branch below is unreachable defensive code and the conditional always takes the named side.
+										if (event.name !== undefined) {
+											streamingKey = NativeToolCallParser.makeStreamingKey(event.id, event.name)
+										} else {
+											const legacyEntry = NativeToolCallParser.getStreamingToolCallById(
+												event.id,
+												nativeToolCallParserScope,
+											)
+											streamingKey = legacyEntry
+												? NativeToolCallParser.makeStreamingKey(
+														legacyEntry.id,
+														legacyEntry.name,
+													)
+												: undefined
+										}
+
+										const partialToolUse =
+											// Stryker disable next-line ConditionalExpression: streamingKey can never be undefined here — makeStreamingKey always returns a string and the legacy lookup branch above is unreachable (see the directive on the event.name check) — so the null side is unreachable defensive code.
+											streamingKey === undefined
+												? null
+												: NativeToolCallParser.processStreamingChunk(
+														streamingKey,
+														event.delta,
+														nativeToolCallParserScope,
+													)
+
+										// Stryker disable next-line ConditionalExpression, EqualityOperator: streamingKey is always a defined string on this path (makeStreamingKey never returns undefined; the legacy branch is unreachable per the directives above), and processStreamingChunk returns a partial ToolUse for a known key, so both defensive conditions reduce to the partialToolUse check and cannot change the observed behavior.
+										if (partialToolUse && streamingKey !== undefined) {
+											// Reuse the compound key built above: it is exactly the key the start event
+											// registered under, so the delta lookup needs no second encoding.
+											const toolUseIndex = this.streamingToolCallIndices.get(streamingKey)
 											if (toolUseIndex !== undefined) {
 												// Store the ID for native protocol
 												;(partialToolUse as any).id = event.id
@@ -4489,14 +4548,42 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				const finalizeEvents = NativeToolCallParser.finalizeRawChunks(nativeToolCallParserScope)
 				for (const event of finalizeEvents) {
 					if (event.type === "tool_call_end") {
+						// Create compound key for deduplication (same pattern as streaming handler).
+						// End events carry the tool name; fall back to the id for events that don't.
+						// Stryker disable next-line LogicalOperator: event.name is always a string on this path — finalizeRawChunks emits end events with the tracked start name (a string, set before the tracker can start), so the ?? event.id fallback guards a nameless end event this pipeline cannot produce.
+						let eventName = event.name ?? event.id
+						let dedupKey = NativeToolCallParser.makeStreamingKey(event.id, eventName)
+
 						// Finalize the streaming tool call
-						const finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
-							event.id,
+						let finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
+							dedupKey,
 							nativeToolCallParserScope,
 						)
 
-						// Get the index for this tool call
-						const toolUseIndex = this.streamingToolCallIndices.get(event.id)
+						// Get the index for this tool call using compound key
+						let toolUseIndex = this.streamingToolCallIndices.get(dedupKey)
+
+						// Defensive resolution: if the end event's name does not match the start
+						// name (provider quirk), the compound-key lookup above misses and both the
+						// parser entry and the dedup tracking would stay stale. Resolve the tracked
+						// entry by id and target the real compound key for finalization and cleanup.
+						// Stryker disable next-line ConditionalExpression, LogicalOperator, EqualityOperator: the both-miss case is unreachable via the raw-chunk pipeline — end events carry the locked start name so the compound key resolves the registered entry, and a same-ID rejected-start end is always processed after the accepted start's end has already removed that entry; this defensive path protects against a cross-name end event the pipeline cannot produce.
+						if (finalToolUse === null && toolUseIndex === undefined) {
+							const resolved = NativeToolCallParser.getStreamingToolCallById(
+								event.id,
+								nativeToolCallParserScope,
+							)
+							// Stryker disable next-line ConditionalExpression: unreachable defensive region — getStreamingToolCallById can only resolve when the both-miss case above is reachable, which the raw-chunk pipeline cannot produce (see the directive there).
+							if (resolved) {
+								eventName = resolved.name
+								dedupKey = NativeToolCallParser.makeStreamingKey(resolved.id, resolved.name)
+								finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
+									dedupKey,
+									nativeToolCallParserScope,
+								)
+								toolUseIndex = this.streamingToolCallIndices.get(dedupKey)
+							}
+						}
 
 						if (finalToolUse) {
 							// Store the tool call ID
@@ -4507,8 +4594,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								this.assistantMessageContent[toolUseIndex] = finalToolUse
 							}
 
-							// Clean up tracking
-							this.streamingToolCallIndices.delete(event.id)
+							// Clean up tracking using compound key
+							this.streamingToolCallIndices.delete(dedupKey)
 
 							// Mark that we have new content to process
 							this.userMessageContentReady = false
@@ -4537,8 +4624,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								;(existingToolUse as any).id = event.id
 							}
 
-							// Clean up tracking
-							this.streamingToolCallIndices.delete(event.id)
+							// Clean up tracking using compound key
+							this.streamingToolCallIndices.delete(dedupKey)
 
 							// Mark that we have new content to process
 							this.userMessageContentReady = false

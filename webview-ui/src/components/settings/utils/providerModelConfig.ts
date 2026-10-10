@@ -237,6 +237,14 @@ export const shouldUseGenericModelPicker = (provider: ProviderName): boolean => 
 	return isStaticModelProvider(provider) && !PROVIDERS_WITH_CUSTOM_MODEL_UI.includes(provider)
 }
 
+const isArn = (modelId: string): boolean => modelId.trim().startsWith("arn:")
+
+/**
+ * Maps a Bedrock model picker selection to the stored model ID.
+ * A pasted ARN selects the "custom-arn" pseudo-model; the ARN itself goes to awsCustomArn.
+ */
+export const toBedrockModelId = (modelId: string): string => (isArn(modelId) ? "custom-arn" : modelId)
+
 /**
  * Handles provider-specific side effects when a model is changed.
  * Centralizes provider-specific logic to keep it out of the ApiOptions template.
@@ -246,9 +254,14 @@ export const handleModelChangeSideEffects = <K extends keyof ProviderSettings>(
 	modelId: string,
 	setApiConfigurationField: (field: K, value: ProviderSettings[K]) => void,
 ): void => {
-	// Bedrock: Clear custom ARN if not using custom ARN option
-	if (provider === providerIdentifiers.bedrock && modelId !== "custom-arn") {
-		setApiConfigurationField("awsCustomArn" as K, "" as ProviderSettings[K])
+	if (provider === providerIdentifiers.bedrock) {
+		// The base model and context window belong to a specific ARN (the provider applies the context
+		// window to every Bedrock model), so reset them whenever the ARN is replaced or cleared.
+		if (modelId !== "custom-arn") {
+			setApiConfigurationField("awsCustomArn" as K, (isArn(modelId) ? modelId.trim() : "") as ProviderSettings[K])
+			setApiConfigurationField("awsCustomArnBaseModelId" as K, "" as ProviderSettings[K])
+			setApiConfigurationField("awsModelContextWindow" as K, undefined as ProviderSettings[K])
+		}
 	}
 
 	// All providers: Clear reasoning settings when switching models to allow
