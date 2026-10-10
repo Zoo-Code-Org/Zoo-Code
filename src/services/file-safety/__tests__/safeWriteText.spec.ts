@@ -1214,15 +1214,33 @@ describe("resolveLockKey", () => {
 		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
 		vi.mocked(fs.realpath).mockRejectedValue(enoent)
 		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
-		// Only the link path is read, so a single answer is enough and keeps the mock's
-		// return type matching fs.promises.readlink.
-		vi.mocked(fs.readlink).mockResolvedValue("referent.json")
+		// Only the link path is a symlink: the referent it names is answered as the plain file it
+		// is. Answering every readlink call - as a blanket mockResolvedValue did - made the walk
+		// re-read its own resolved key as another link, so this test ran the bounded-cycle path
+		// (eight readlink calls and the depth limit) instead of the dangling-link path it is named
+		// for, and could not tell a correct walk from one that only stops because it gives up.
+		const enotlink = Object.assign(new Error("EINVAL: invalid argument, not a symlink"), { code: "EINVAL" })
+		vi.mocked(fs.readlink).mockImplementation(async (target) =>
+			// Compared on separators, not through path.join: the argument is the caller's spelling,
+			// which on Windows is "/tmp/linkdir/file.json" while path.join would render it with
+			// backslashes - and a mock that never recognises the link answers every call as "not a
+			// link", which is a different scenario from the one this test names.
+			String(target).replace(/\\/g, "/") === "/tmp/linkdir/file.json"
+				? "referent.json"
+				: Promise.reject(enotlink),
+		)
 
 		// Mid-commit a peer writer renames the referent away and back, so the key
 		// must still be computable while the link dangles.
 		await expect(resolveLockKey("/tmp/linkdir/file.json")).resolves.toBe(
 			path.resolve(path.join("/tmp/linkdir", "referent.json")),
 		)
+		// Two readlink calls, and that count is the proof of the normal exit: one from
+		// resolvePublishTarget on the link, one from the fallback walk on the referent, which is
+		// answered as "not a link" and ends the walk. The bounded walk would have asked eight times
+		// - what the cycle test below asserts - so this test now fails if the walk ever mistakes the
+		// referent for another link and runs to the depth limit instead.
+		expect(fs.readlink).toHaveBeenCalledTimes(2)
 	})
 
 	it("terminates on a two-link cycle instead of walking forever", async () => {
