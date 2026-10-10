@@ -1,3 +1,4 @@
+import * as fs from "fs/promises"
 import { DiffViewProvider, DIFF_VIEW_URI_SCHEME, DIFF_VIEW_LABEL_CHANGES } from "../DiffViewProvider"
 import * as vscode from "vscode"
 import * as path from "path"
@@ -16,6 +17,10 @@ vi.mock("fs/promises", () => ({
 	readFile: vi.fn().mockResolvedValue("file content"),
 	writeFile: vi.fn().mockResolvedValue(undefined),
 	access: vi.fn().mockResolvedValue(undefined),
+	// revertChanges() rolls a new-file edit back by deleting the placeholder and the
+	// directories the edit created.
+	unlink: vi.fn().mockResolvedValue(undefined),
+	rmdir: vi.fn().mockResolvedValue(undefined),
 }))
 
 // Mock utils
@@ -36,7 +41,7 @@ vi.mock("vscode", () => ({
 		onDidOpenTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
 		openTextDocument: vi.fn().mockResolvedValue({
 			isDirty: false,
-			save: vi.fn().mockResolvedValue(undefined),
+			save: vi.fn().mockResolvedValue(true),
 		}),
 		textDocuments: [],
 		fs: {
@@ -52,7 +57,7 @@ vi.mock("vscode", () => ({
 		onDidChangeTextEditorVisibleRanges: vi.fn(() => ({ dispose: vi.fn() })),
 		tabGroups: {
 			all: [],
-			close: vi.fn(),
+			close: vi.fn().mockResolvedValue(true),
 			activeTabGroup: { activeTab: undefined },
 		},
 		visibleTextEditors: [],
@@ -169,7 +174,7 @@ describe("DiffViewProvider", () => {
 
 		diffViewProvider = new DiffViewProvider(mockCwd, mockTask)
 		// Mock the necessary properties and methods
-		;(diffViewProvider as any).relPath = "test.txt"
+		diffViewProvider["relPath"] = "test.txt"
 		;(diffViewProvider as any).activeDiffEditor = {
 			document: {
 				uri: { fsPath: `${mockCwd}/test.txt` },
@@ -870,7 +875,7 @@ describe("DiffViewProvider", () => {
 				document: {
 					getText: vi.fn().mockReturnValue("new content"),
 					isDirty: false,
-					save: vi.fn().mockResolvedValue(undefined),
+					save: vi.fn().mockResolvedValue(true),
 				},
 			}
 			;(diffViewProvider as any).preDiagnostics = []
@@ -1015,7 +1020,7 @@ describe("DiffViewProvider", () => {
 				document: {
 					getText: vi.fn().mockReturnValue("content"),
 					isDirty: false,
-					save: vi.fn().mockResolvedValue(undefined),
+					save: vi.fn().mockResolvedValue(true),
 				},
 			}
 
@@ -1040,7 +1045,7 @@ describe("DiffViewProvider", () => {
 				document: {
 					getText: vi.fn().mockReturnValue("content"),
 					isDirty: false,
-					save: vi.fn().mockResolvedValue(undefined),
+					save: vi.fn().mockResolvedValue(true),
 				},
 			}
 
@@ -1060,7 +1065,7 @@ describe("DiffViewProvider", () => {
 						uri: { fsPath: `${mockCwd}/race.ts`, scheme: "file" },
 						getText: vi.fn().mockReturnValue("a\nCHANGED\nc\nd\n"),
 						isDirty: false,
-						save: vi.fn().mockResolvedValue(undefined),
+						save: vi.fn().mockResolvedValue(true),
 						lineCount: 5,
 						lineAt: vi.fn().mockReturnValue({ text: "" }),
 					},
@@ -1099,6 +1104,9 @@ describe("DiffViewProvider", () => {
 
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockSavedEditor as any)
 			;(diffViewProvider as any).closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			// Self-contained: revertChanges() only acts while an edit is in progress.
+			diffViewProvider["relPath"] = "test.txt"
+			diffViewProvider["isEditing"] = true
 			;(diffViewProvider as any).documentWasOpen = true
 			;(diffViewProvider as any).preEditScrollLine = 15
 			;(diffViewProvider as any).editType = "modify"
@@ -1108,7 +1116,7 @@ describe("DiffViewProvider", () => {
 					uri: { fsPath: `${mockCwd}/test.txt` },
 					getText: vi.fn().mockReturnValue("modified"),
 					isDirty: false,
-					save: vi.fn().mockResolvedValue(undefined),
+					save: vi.fn().mockResolvedValue(true),
 					positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
 				},
 			}
@@ -1129,10 +1137,10 @@ describe("DiffViewProvider", () => {
 
 		const buildActiveDiffEditor = () => ({
 			document: {
-				uri: { fsPath: mockTargetPath },
+				uri: { fsPath: mockTargetPath, scheme: "file" },
 				getText: vi.fn().mockReturnValue("content"),
 				isDirty: false,
-				save: vi.fn().mockResolvedValue(undefined),
+				save: vi.fn().mockResolvedValue(true),
 				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
 			},
 		})
@@ -1172,12 +1180,563 @@ describe("DiffViewProvider", () => {
 			expect(vscode.window.showTextDocument).toHaveBeenCalled()
 		})
 
+		it("revertChanges() removes the placeholder and created dirs when open() failed before the editor existed", async () => {
+			// open() creates the parent dirs and an empty placeholder BEFORE it awaits
+			// openDiffEditor(). If that await rejects there is no activeDiffEditor, and the
+			// rollback used to bail out - leaving an empty file that the next execute() mistook
+			// for an existing file, which a denial then preserved.
+			const createdDirs = [`${mockCwd}/new-parent`, `${mockCwd}/new-parent/nested`]
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "create",
+				createdDirs,
+			})
+
+			await diffViewProvider.revertChanges()
+
+			expect(fs.unlink).toHaveBeenCalledWith(`${mockCwd}/mock-target-file.ts`)
+			expect(fs.rmdir).toHaveBeenNthCalledWith(1, createdDirs[1])
+			expect(fs.rmdir).toHaveBeenNthCalledWith(2, createdDirs[0])
+		})
+
+		it("revertChanges() leaves an earlier edit's file alone when no edit is in progress", async () => {
+			// reset() used to leave relPath behind while clearing editType. A later stream that never
+			// opened a diff view then reached this method with a stale relPath and no editType, took
+			// the new-file branch, and unlinked the PREVIOUS edit's target - an existing user file,
+			// permanently. Nothing may be deleted unless an edit is actually in progress.
+			Object.assign(diffViewProvider, {
+				isEditing: false,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: undefined,
+				createdDirs: [`${mockCwd}/new-parent`],
+			})
+
+			await diffViewProvider.revertChanges()
+
+			expect(fs.unlink).not.toHaveBeenCalled()
+			expect(fs.rmdir).not.toHaveBeenCalled()
+		})
+
+		it("reset() clears relPath so a later teardown cannot reuse a stale target", async () => {
+			Object.assign(diffViewProvider, { isEditing: true, relPath: "mock-target-file.ts" })
+
+			await diffViewProvider.reset()
+
+			expect(diffViewProvider["relPath"]).toBeUndefined()
+		})
+
+		it("revertChanges() tolerates a placeholder that was never written", async () => {
+			// The failed open may have died before fs.writeFile ran; ENOENT during the
+			// rollback is success, not a new failure that would abort the cleanup.
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "create",
+				createdDirs: [],
+			})
+			vi.mocked(fs.unlink).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+			await expect(diffViewProvider.revertChanges()).resolves.toBeUndefined()
+
+			// The rollback still attempted the delete - the tolerance is about not
+			// aborting the rest of the cleanup, not about skipping it.
+			expect(fs.unlink).toHaveBeenCalledWith(`${mockCwd}/mock-target-file.ts`)
+		})
+
+		it("revertChanges() stops before the document work for an existing file when no editor exists", async () => {
+			// The modify branch used to dereference activeDiffEditor unconditionally. When open()
+			// never produced an editor there is no document to restore, and the old code threw a
+			// TypeError out of the denial path instead of finishing the teardown.
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "modify",
+				createdDirs: [],
+			})
+
+			await expect(diffViewProvider.revertChanges()).resolves.toBeUndefined()
+
+			expect(vscode.workspace.applyEdit).not.toHaveBeenCalled()
+			expect(fs.unlink).not.toHaveBeenCalled()
+			expect(fs.rmdir).not.toHaveBeenCalled()
+		})
+
+		it("revertChanges() keeps rolling back the remaining directories when one rmdir hits ENOENT", async () => {
+			// Same tolerance as the placeholder, for the created dirs: a directory that never
+			// landed must not abort the rest of the rollback and must not surface as a new failure.
+			const createdDirs = [`${mockCwd}/new-parent`, `${mockCwd}/new-parent/nested`]
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "create",
+				createdDirs,
+			})
+			vi.mocked(fs.rmdir).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+			await expect(diffViewProvider.revertChanges()).resolves.toBeUndefined()
+
+			expect(fs.rmdir).toHaveBeenCalledTimes(2)
+			expect(fs.rmdir).toHaveBeenNthCalledWith(1, createdDirs[1])
+			expect(fs.rmdir).toHaveBeenNthCalledWith(2, createdDirs[0])
+		})
+
+		it("revertChanges() surfaces a non-ENOENT directory failure instead of swallowing it", async () => {
+			// The tolerance is scoped to ENOENT: a directory that exists but could not be removed
+			// is a real rollback failure and must reach the caller rather than be hidden.
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "create",
+				createdDirs: [`${mockCwd}/new-parent`],
+			})
+			vi.mocked(fs.rmdir).mockRejectedValueOnce(Object.assign(new Error("EBUSY"), { code: "EBUSY" }))
+
+			await expect(diffViewProvider.revertChanges()).rejects.toThrow("EBUSY")
+		})
+
+		it("revertChanges() surfaces a placeholder delete that failed for a non-ENOENT reason", async () => {
+			// The ENOENT tolerance is scoped: an unlink that fails for another reason means the
+			// unapproved placeholder is still on disk, and the caller must not be told the
+			// rollback succeeded.
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "create",
+				createdDirs: [],
+			})
+			vi.mocked(fs.unlink).mockRejectedValueOnce(
+				Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }),
+			)
+
+			await expect(diffViewProvider.revertChanges()).rejects.toThrow("EACCES: permission denied")
+		})
+
+		it("revertChanges() restores the streamed buffer before closing it for a new file", async () => {
+			// tabGroups.close()'s second argument is preserveFocus, not a force-discard flag: closing
+			// a dirty tab prompts or is refused, which is how unapproved streamed content survived a
+			// "forced" close. The buffer must be restored to its pre-stream content and saved clean
+			// BEFORE the close, so close() never sees a dirty tab.
+			const editor = buildActiveDiffEditor()
+			editor.document.isDirty = true
+			const teardown = diffViewProvider as unknown as {
+				restorePreStreamBuffer: (absolutePath: string) => Promise<void>
+				saveBufferClean: (absolutePath: string) => Promise<void>
+			}
+			let restoreArgs: unknown[] = []
+			let saveArgs: unknown[] = []
+			let restoreOrder = 0
+			let saveOrder = 0
+			const restore = vi.spyOn(teardown, "restorePreStreamBuffer").mockResolvedValue(undefined)
+			const saveClean = vi.spyOn(teardown, "saveBufferClean").mockResolvedValue(undefined)
+			const dirtyTab = {
+				input: Object.assign(new vscode.TabInputText(makeUri(mockTargetPath)), {
+					uri: makeUri(mockTargetPath),
+				}),
+				isDirty: true,
+				label: "mock-target-file.ts",
+			}
+			const originalTabs = Object.getOwnPropertyDescriptor(vscode.window.tabGroups, "all")
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: () => [{ tabs: [dirtyTab] }],
+				configurable: true,
+			})
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "create",
+				createdDirs: [],
+				originalContent: "",
+			})
+
+			try {
+				await diffViewProvider.revertChanges()
+				// mockRestore() clears the recorded history, so the evidence is captured here.
+				restoreArgs = restore.mock.calls.map((args) => args[0])
+				saveArgs = saveClean.mock.calls.map((args) => args[0])
+				restoreOrder = restore.mock.invocationCallOrder[0]
+				saveOrder = saveClean.mock.invocationCallOrder[0]
+			} finally {
+				// Do not leak the fixture: later tests read the module-level tabGroups.all.
+				if (originalTabs) {
+					Object.defineProperty(vscode.window.tabGroups, "all", originalTabs)
+				}
+				restore.mockRestore()
+				saveClean.mockRestore()
+			}
+
+			expect(restoreArgs).toEqual([mockTargetPath])
+			expect(saveArgs).toEqual([mockTargetPath])
+			expect(saveOrder).toBeGreaterThan(restoreOrder)
+			const closeOrder = vi.mocked(vscode.window.tabGroups.close).mock.invocationCallOrder.at(-1)
+			expect(closeOrder).toBeGreaterThan(saveOrder)
+			// No force flag: the tab is clean by the time it is closed.
+			expect(vscode.window.tabGroups.close).toHaveBeenCalledWith(dirtyTab)
+			expect(fs.unlink).toHaveBeenCalledWith(mockTargetPath)
+		})
+
+		it("revertChanges() restores and saves the buffer once even when no plain text tab is open", async () => {
+			// The document can be open only through the diff editor: the user closed the plain text
+			// tab, so tabGroups.all yields no TabInputText for the path. Restoring inside the tab loop
+			// meant nothing ran, closeAllDiffViews() then skipped the dirty diff tab, and the unlink
+			// left a dirty diff tab holding unapproved content that a later save would recreate.
+			const editor = buildActiveDiffEditor()
+			editor.document.isDirty = true
+			const teardown = diffViewProvider as unknown as {
+				restorePreStreamBuffer: (absolutePath: string) => Promise<void>
+				saveBufferClean: (absolutePath: string) => Promise<void>
+			}
+			const restore = vi.spyOn(teardown, "restorePreStreamBuffer").mockResolvedValue(undefined)
+			const saveClean = vi.spyOn(teardown, "saveBufferClean").mockResolvedValue(undefined)
+			const originalTabs = Object.getOwnPropertyDescriptor(vscode.window.tabGroups, "all")
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				// No plain TabInputText tab for this path - only the diff editor holds the document.
+				get: () => [{ tabs: [] }],
+				configurable: true,
+			})
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "create",
+				createdDirs: [],
+				originalContent: "",
+			})
+
+			let restoreArgs: unknown[] = []
+			let saveArgs: unknown[] = []
+			let restoreOrder = 0
+			let saveOrder = 0
+			try {
+				await diffViewProvider.revertChanges()
+				// mockRestore() clears the recorded history, so the evidence is captured here.
+				restoreArgs = restore.mock.calls.map((args) => args[0])
+				saveArgs = saveClean.mock.calls.map((args) => args[0])
+				restoreOrder = restore.mock.invocationCallOrder[0]
+				saveOrder = saveClean.mock.invocationCallOrder[0]
+			} finally {
+				// Do not leak the fixture: later tests read the module-level tabGroups.all.
+				if (originalTabs) {
+					Object.defineProperty(vscode.window.tabGroups, "all", originalTabs)
+				}
+				restore.mockRestore()
+				saveClean.mockRestore()
+			}
+
+			// Exactly once each, restore before save, even with an empty tab list.
+			expect(restoreArgs).toEqual([mockTargetPath])
+			expect(saveArgs).toEqual([mockTargetPath])
+			expect(saveOrder).toBeGreaterThan(restoreOrder)
+			// The rollback still completed: the file it created was unlinked.
+			expect(fs.unlink).toHaveBeenCalledWith(mockTargetPath)
+		})
+
+		it("revertChanges() restores and saves an existing file through the real rollback path", async () => {
+			// The existing-file branch used to build its own WorkspaceEdit, discard applyEdit()'s boolean,
+			// and save unconditionally, so a refused restore wrote the unapproved streamed content to an
+			// existing file. It now runs through the same contract as the new-file branch. textDocuments is
+			// deliberately left empty: the branch reached this document through activeDiffEditor, and if the
+			// restore resolved it by path again it would find nothing and skip the restore in silence.
+			const editor = buildActiveDiffEditor()
+			editor.document.isDirty = true
+			editor.document.getText = vi.fn().mockReturnValue("streamed content")
+			const originalDocs = Object.getOwnPropertyDescriptor(vscode.workspace, "textDocuments")
+			Object.defineProperty(vscode.workspace, "textDocuments", { get: () => [], configurable: true })
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "modify",
+				createdDirs: [],
+				originalContent: "pre-stream content",
+			})
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["keepOrCloseEditedFile"] = vi.fn().mockResolvedValue(undefined)
+
+			try {
+				await diffViewProvider.revertChanges()
+			} finally {
+				if (originalDocs) {
+					Object.defineProperty(vscode.workspace, "textDocuments", originalDocs)
+				}
+			}
+
+			expect(vscode.workspace.applyEdit).toHaveBeenCalledTimes(1)
+			expect(mockWorkspaceEdit.replace).toHaveBeenCalledWith(
+				editor.document.uri,
+				expect.anything(),
+				"pre-stream content",
+			)
+			expect(editor.document.save).toHaveBeenCalledTimes(1)
+			expect(fs.unlink).not.toHaveBeenCalled()
+		})
+
+		it("revertChanges() does not save an existing file when the editor refuses the restore", async () => {
+			// The user must not be told the write was rolled back while the existing file still holds
+			// content they never approved: the refusal has to reach the reporting layer, and the save
+			// that would persist it must not run.
+			const editor = buildActiveDiffEditor()
+			editor.document.isDirty = true
+			editor.document.getText = vi.fn().mockReturnValue("streamed content")
+			const originalDocs = Object.getOwnPropertyDescriptor(vscode.workspace, "textDocuments")
+			Object.defineProperty(vscode.workspace, "textDocuments", { get: () => [], configurable: true })
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(false)
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "modify",
+				createdDirs: [],
+				originalContent: "pre-stream content",
+			})
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["keepOrCloseEditedFile"] = vi.fn().mockResolvedValue(undefined)
+
+			try {
+				await expect(diffViewProvider.revertChanges()).rejects.toThrow("could not restore the streamed buffer")
+				expect(editor.document.save).not.toHaveBeenCalled()
+				expect(diffViewProvider["keepOrCloseEditedFile"]).not.toHaveBeenCalled()
+			} finally {
+				if (originalDocs) {
+					Object.defineProperty(vscode.workspace, "textDocuments", originalDocs)
+				}
+			}
+		})
+
+		it("revertChanges() reports a save the editor did not perform for an existing file", async () => {
+			// A restore that applied but did not persist leaves a dirty buffer one save away from disk.
+			// save() resolves false in that case, and treating it as success would report a rollback that
+			// never completed.
+			const editor = buildActiveDiffEditor()
+			editor.document.isDirty = true
+			editor.document.getText = vi.fn().mockReturnValue("streamed content")
+			editor.document.save = vi.fn().mockResolvedValue(false)
+			const originalDocs = Object.getOwnPropertyDescriptor(vscode.workspace, "textDocuments")
+			Object.defineProperty(vscode.workspace, "textDocuments", { get: () => [], configurable: true })
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "modify",
+				createdDirs: [],
+				originalContent: "pre-stream content",
+			})
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["keepOrCloseEditedFile"] = vi.fn().mockResolvedValue(undefined)
+
+			try {
+				await expect(diffViewProvider.revertChanges()).rejects.toThrow("could not save the restored buffer")
+				expect(diffViewProvider["keepOrCloseEditedFile"]).not.toHaveBeenCalled()
+			} finally {
+				if (originalDocs) {
+					Object.defineProperty(vscode.workspace, "textDocuments", originalDocs)
+				}
+			}
+		})
+		it("revertChanges() reports a close the editor refused instead of deleting underneath it", async () => {
+			// Even a restored, saved buffer can fail to close (a vetoing editor). Swallowing that let
+			// the rollback delete the file underneath an open tab. The failure must propagate, and
+			// the file must survive: unlinking after a refused close leaves an open tab on a ghost.
+			const editor = buildActiveDiffEditor()
+			editor.document.isDirty = true
+			const dirtyTab = {
+				input: Object.assign(new vscode.TabInputText(makeUri(mockTargetPath)), {
+					uri: makeUri(mockTargetPath),
+				}),
+				isDirty: true,
+				label: "mock-target-file.ts",
+			}
+			const originalTabs = Object.getOwnPropertyDescriptor(vscode.window.tabGroups, "all")
+			const originalDocs = Object.getOwnPropertyDescriptor(vscode.workspace, "textDocuments")
+			const originalClose = Object.getOwnPropertyDescriptor(vscode.window.tabGroups, "close")
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: () => [{ tabs: [dirtyTab] }],
+				configurable: true,
+			})
+			Object.defineProperty(vscode.workspace, "textDocuments", {
+				get: () => [editor.document],
+				configurable: true,
+			})
+			Object.defineProperty(vscode.window.tabGroups, "close", {
+				value: vi.fn().mockResolvedValue(false),
+				configurable: true,
+			})
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "create",
+				createdDirs: [],
+				originalContent: "",
+			})
+
+			try {
+				await expect(diffViewProvider.revertChanges()).rejects.toThrow("could not close the restored buffer")
+				// This test owns only the refusal handling; the restore-before-close ordering is
+				// asserted by the test above. What matters here is that the close was attempted
+				// without a force flag and the file survived a close the editor vetoed.
+				expect(vscode.window.tabGroups.close).toHaveBeenCalledWith(dirtyTab)
+				expect(fs.unlink).not.toHaveBeenCalled()
+			} finally {
+				if (originalTabs) {
+					Object.defineProperty(vscode.window.tabGroups, "all", originalTabs)
+				}
+				if (originalDocs) {
+					Object.defineProperty(vscode.workspace, "textDocuments", originalDocs)
+				}
+				if (originalClose) {
+					Object.defineProperty(vscode.window.tabGroups, "close", originalClose)
+				}
+			}
+		})
+		it("revertChanges() restores and saves the buffer through the real rollback path", async () => {
+			// The two tests above spy restorePreStreamBuffer() and saveBufferClean(), so the restoration
+			// itself never runs there and only proves ordering. This one leaves both real: the buffer must
+			// be put back through a WorkspaceEdit and saved clean, which is what stops close() from ever
+			// seeing a dirty tab holding content the user never approved.
+			const editor = buildActiveDiffEditor()
+			editor.document.isDirty = true
+			editor.document.getText = vi.fn().mockReturnValue("streamed content")
+			const dirtyTab = {
+				input: Object.assign(new vscode.TabInputText(makeUri(mockTargetPath)), {
+					uri: makeUri(mockTargetPath),
+				}),
+				isDirty: true,
+				label: "mock-target-file.ts",
+			}
+			const originalTabs = Object.getOwnPropertyDescriptor(vscode.window.tabGroups, "all")
+			const originalDocs = Object.getOwnPropertyDescriptor(vscode.workspace, "textDocuments")
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: () => [{ tabs: [dirtyTab] }],
+				configurable: true,
+			})
+			Object.defineProperty(vscode.workspace, "textDocuments", {
+				// The real restore and save look the document up here; without this the methods would find
+				// nothing and pass without touching anything.
+				get: () => [editor.document],
+				configurable: true,
+			})
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "create",
+				createdDirs: [],
+				originalContent: "pre-stream content",
+			})
+
+			try {
+				await diffViewProvider.revertChanges()
+			} finally {
+				// Do not leak the fixtures: later tests read the module-level tabGroups.all and textDocuments.
+				if (originalTabs) {
+					Object.defineProperty(vscode.window.tabGroups, "all", originalTabs)
+				}
+				if (originalDocs) {
+					Object.defineProperty(vscode.workspace, "textDocuments", originalDocs)
+				}
+			}
+
+			// The real restore replaced the whole buffer with the pre-stream content.
+			expect(vscode.workspace.applyEdit).toHaveBeenCalledTimes(1)
+			expect(mockWorkspaceEdit.replace).toHaveBeenCalledWith(
+				editor.document.uri,
+				expect.anything(),
+				"pre-stream content",
+			)
+			// The real save ran on the restored buffer, and only then was the tab closed.
+			expect(editor.document.save).toHaveBeenCalledTimes(1)
+			const saveOrder = editor.document.save.mock.invocationCallOrder[0]
+			const closeOrder = vi.mocked(vscode.window.tabGroups.close).mock.invocationCallOrder.at(-1)
+			expect(closeOrder).toBeGreaterThan(saveOrder)
+			expect(fs.unlink).toHaveBeenCalledWith(mockTargetPath)
+		})
+
+		it("revertChanges() neither saves nor deletes when the editor refuses the restore", async () => {
+			// A refused WorkspaceEdit leaves the unapproved streamed content in the buffer. Saving it
+			// would persist exactly what this rollback exists to undo, and deleting the placeholder
+			// underneath would report a rollback that never finished. The refusal has to reach the
+			// caller that reports failures, which is what the user gets instead of a false success.
+			const editor = buildActiveDiffEditor()
+			editor.document.isDirty = true
+			editor.document.getText = vi.fn().mockReturnValue("streamed content")
+			const dirtyTab = {
+				input: Object.assign(new vscode.TabInputText(makeUri(mockTargetPath)), {
+					uri: makeUri(mockTargetPath),
+				}),
+				isDirty: true,
+				label: "mock-target-file.ts",
+			}
+			const originalTabs = Object.getOwnPropertyDescriptor(vscode.window.tabGroups, "all")
+			const originalDocs = Object.getOwnPropertyDescriptor(vscode.workspace, "textDocuments")
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: () => [{ tabs: [dirtyTab] }],
+				configurable: true,
+			})
+			Object.defineProperty(vscode.workspace, "textDocuments", {
+				get: () => [editor.document],
+				configurable: true,
+			})
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(false)
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "create",
+				createdDirs: [],
+				originalContent: "pre-stream content",
+			})
+
+			try {
+				await expect(diffViewProvider.revertChanges()).rejects.toThrow("could not restore the streamed buffer")
+			} finally {
+				if (originalTabs) {
+					Object.defineProperty(vscode.window.tabGroups, "all", originalTabs)
+				}
+				if (originalDocs) {
+					Object.defineProperty(vscode.workspace, "textDocuments", originalDocs)
+				}
+			}
+
+			// Nothing saveable was left behind, and nothing was closed or deleted on top of the refusal.
+			expect(editor.document.save).not.toHaveBeenCalled()
+			expect(vscode.window.tabGroups.close).not.toHaveBeenCalled()
+			expect(fs.unlink).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("userTouchedDiffEditor keep/close behavior", () => {
+		const mockTargetPath = `${mockCwd}/mock-target-file.ts`
+
+		const buildActiveDiffEditor = () => ({
+			document: {
+				uri: { fsPath: mockTargetPath, scheme: "file" },
+				getText: vi.fn().mockReturnValue("content"),
+				isDirty: false,
+				save: vi.fn().mockResolvedValue(true),
+				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
+			},
+		})
+
 		it("revertChanges() closes the file tab when the file was not open and untouched", async () => {
 			const closeFileTab = vi.fn().mockResolvedValue(undefined)
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
 			;(diffViewProvider as any).closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
 			;(diffViewProvider as any).closeFileTab = closeFileTab
 			;(diffViewProvider as any).relPath = "mock-target-file.ts"
+			// revertChanges() only acts while an edit is in progress.
+			diffViewProvider["isEditing"] = true
 			;(diffViewProvider as any).documentWasOpen = false
 			;(diffViewProvider as any).userTouchedDocument = false
 			;(diffViewProvider as any).preEditScrollLine = undefined
@@ -1198,6 +1757,8 @@ describe("DiffViewProvider", () => {
 			;(diffViewProvider as any).closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
 			;(diffViewProvider as any).closeFileTab = closeFileTab
 			;(diffViewProvider as any).relPath = "mock-target-file.ts"
+			// revertChanges() only acts while an edit is in progress.
+			diffViewProvider["isEditing"] = true
 			;(diffViewProvider as any).documentWasOpen = false
 			;(diffViewProvider as any).userTouchedDocument = true
 			;(diffViewProvider as any).preEditScrollLine = undefined
@@ -1247,20 +1808,6 @@ describe("DiffViewProvider", () => {
 			})
 
 			expect((diffViewProvider as any).userTouchedDocument).toBe(true)
-		})
-	})
-
-	describe("userTouchedDiffEditor keep/close behavior", () => {
-		const mockTargetPath = `${mockCwd}/mock-target-file.ts`
-
-		const buildActiveDiffEditor = () => ({
-			document: {
-				uri: { fsPath: mockTargetPath },
-				getText: vi.fn().mockReturnValue("content"),
-				isDirty: false,
-				save: vi.fn().mockResolvedValue(undefined),
-				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
-			},
 		})
 
 		it("saveChanges() keeps the file open when the user clicked inside the diff editor", async () => {
@@ -1470,6 +2017,8 @@ describe("DiffViewProvider", () => {
 			;(diffViewProvider as any).closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
 			;(diffViewProvider as any).closeFileTab = closeFileTab
 			;(diffViewProvider as any).relPath = "mock-target-file.ts"
+			// The guard in revertChanges() requires an edit in progress; this fixture sets fields directly.
+			diffViewProvider["isEditing"] = true
 			;(diffViewProvider as any).documentWasOpen = false
 			;(diffViewProvider as any).userTouchedDocument = false
 			// The user clicked inside the diff pane -- but this is a deny, so it must be ignored.
@@ -1661,10 +2210,10 @@ describe("DiffViewProvider", () => {
 
 		const buildActiveDiffEditor = () => ({
 			document: {
-				uri: { fsPath: mockTargetPath },
+				uri: { fsPath: mockTargetPath, scheme: "file" },
 				getText: vi.fn().mockReturnValue("content"),
 				isDirty: false,
-				save: vi.fn().mockResolvedValue(undefined),
+				save: vi.fn().mockResolvedValue(true),
 				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
 			},
 		})
