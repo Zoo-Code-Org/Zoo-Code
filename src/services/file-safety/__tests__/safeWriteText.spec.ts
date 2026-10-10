@@ -572,8 +572,9 @@ describe("safeWriteText", () => {
 			const options = { platform: "win32", execFileRunner: runner }
 
 			await freshWriteText(targetPath, "data", options)
-			const callsAfterFirstWrite = calls
-			expect(callsAfterFirstWrite).toBeGreaterThan(0)
+			// Exactly one save and one restore: the 1300 exit tells the restore it is
+			// the missing privilege, so the transient retry must not run.
+			expect(calls).toBe(2)
 			expect(warn).toHaveBeenCalledWith(expect.stringContaining("cannot restore DACLs"))
 
 			calls = 0
