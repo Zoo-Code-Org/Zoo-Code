@@ -4,6 +4,7 @@ import * as vscode from "vscode"
 import { Task } from "../Task"
 import { NativeToolCallParser } from "../../assistant-message/NativeToolCallParser"
 import { ClineProvider } from "../../webview/ClineProvider"
+import { WebviewFocusTracker } from "../../webview/WebviewFocusTracker"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import type { ProviderSettings } from "@roo-code/types"
 import type { ToolParamName } from "../../../shared/tools"
@@ -243,6 +244,7 @@ describe("Task - Streaming Tool Call Handling", () => {
 			mockOutputChannel,
 			"sidebar",
 			new ContextProxy(mockExtensionContext),
+			new WebviewFocusTracker(),
 		)
 
 		mockApiConfig = {

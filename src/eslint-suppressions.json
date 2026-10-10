@@ -976,7 +976,7 @@
 	},
 	"core/tools/__tests__/readFileTool.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 98
+			"count": 96
 		}
 	},
 	"core/tools/__tests__/runSlashCommandTool.spec.ts": {
@@ -1036,7 +1036,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 198
+			"count": 196
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
