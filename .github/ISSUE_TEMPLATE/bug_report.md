@@ -7,6 +7,8 @@ assignees: ""
 type: Bug
 ---
 
+<!-- Writing style: write in Simplified Technical English (ASD-STE100): short sentences, plain words, active voice, one idea per sentence, no contractions. Keep the title short and specific. -->
+
 **Describe the bug**
 A clear and concise description of what the bug is.
 

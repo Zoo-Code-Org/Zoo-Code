@@ -9,6 +9,8 @@ body:
               Thank you for your report! Please search existing issues first:
               https://github.com/Zoo-Code-Org/Zoo-Code/issues
 
+              Write in Simplified Technical English (ASD-STE100): short sentences, plain words, active voice, one idea per sentence, no contractions. Keep the title short and specific.
+
     - type: textarea
       id: problem
       attributes:

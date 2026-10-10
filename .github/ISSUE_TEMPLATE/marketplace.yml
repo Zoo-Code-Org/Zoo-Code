@@ -7,6 +7,8 @@ body:
           value: |
               **Thanks for your feedback!** Please check existing issues first: https://github.com/Zoo-Code-Org/Zoo-Code/issues
 
+              Write in Simplified Technical English (ASD-STE100): short sentences, plain words, active voice, one idea per sentence, no contractions. Keep the title short and specific.
+
     - type: dropdown
       id: feedback-type
       attributes:
