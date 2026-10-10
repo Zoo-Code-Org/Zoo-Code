@@ -1397,6 +1397,29 @@ describe("Cline", () => {
 			expect(JSON.stringify(truncatedCallResult)).toContain("missing nativeArgs")
 		})
 	})
+	describe("observation registry is task-local (S3, epic #1375)", () => {
+		it("gives each Task its own observation registry", () => {
+			const firstTask = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "first observation task",
+				startTask: false,
+			})
+			const secondTask = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "second observation task",
+				startTask: false,
+			})
+
+			// The guarded-write contract assumes an observation in one task never validates
+			// a write issued by another task, so the registries must not be shared state.
+			expect(firstTask.observationRegistry).not.toBe(secondTask.observationRegistry)
+			firstTask.observationRegistry.observe("/workspace/a.ts", "v-a")
+			expect(firstTask.observationRegistry.get("/workspace/a.ts")?.version).toBe("v-a")
+			expect(secondTask.observationRegistry.get("/workspace/a.ts")).toBeUndefined()
+		})
+	})
 
 	describe("constructor", () => {
 		it.each([{ apiConfigName: "parent-local-profile" }, { apiConfigName: undefined }])(
