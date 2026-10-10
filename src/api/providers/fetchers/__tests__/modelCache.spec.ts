@@ -1645,7 +1645,7 @@ it("releases the entry for a fetcher double that honors no cancellation at all",
 	expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(2)
 })
 
-it("ignores the caller signal on the auth-scoped bypass without entering the flight map", async () => {
+it("forwards the caller signal on the auth-scoped bypass without entering the flight map", async () => {
 	setupCancellationMocks()
 	// The single-flight arms its per-flight fetch bound whenever it creates a flight; the
 	// auth-scoped bypass must never touch that machinery.
@@ -1663,14 +1663,10 @@ it("ignores the caller signal on the auth-scoped bypass without entering the fli
 		// its own fetch, so the bypass never shares (or poisons) a flight with anything.
 		const second = getModels({ provider: providerIdentifiers.zooGateway, apiKey: "token-a" })
 		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
-		// The bypass carries no cancellation: the fetcher receives exactly its own options
-		// argument, so the caller's bound is never threaded to this path.
-		expect(mockGetZooGatewayModels.mock.calls[0]).toHaveLength(1)
+		// Each auth-scoped fetch receives only its own caller's cancellation signal.
+		expect(mockGetZooGatewayModels.mock.calls[0][1]).toEqual({ signal: controller.signal })
 		expect(mockGetZooGatewayModels.mock.calls[1]).toHaveLength(1)
 
-		// The caller's signal is ignored on this path: aborting changes nothing for a fetch the
-		// single-flight never owns, and the fetcher's own request bound remains the stop mechanism.
-		controller.abort()
 		await expect(first).resolves.toEqual(cancelledModelsB)
 		await expect(second).resolves.toEqual(cancelledModelsB)
 		expect(boundSpy).not.toHaveBeenCalled()

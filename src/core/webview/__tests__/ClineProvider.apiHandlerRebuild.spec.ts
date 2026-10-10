@@ -516,6 +516,63 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			},
 		)
 
+		test("holds later model updates until a timed-out save finishes compensation", async () => {
+			vi.useFakeTimers()
+			try {
+				const manager = provider.providerSettingsManager
+				const save = manager.saveConfig.bind(manager)
+				let releaseBroadcast!: () => void
+				let releaseRollback!: () => void
+				const broadcast = vi.spyOn(provider, "postStateToWebview").mockImplementationOnce(
+					() =>
+						new Promise<void>((resolve) => {
+							releaseBroadcast = resolve
+						}),
+				)
+				const saves = vi
+					.spyOn(manager, "saveConfig")
+					.mockImplementationOnce(save)
+					.mockImplementationOnce(async (name, settings) => {
+						await new Promise<void>((resolve) => {
+							releaseRollback = resolve
+						})
+						return save(name, settings)
+					})
+				const first = provider.upsertProviderProfile("existing", newSettings)
+				await vi.advanceTimersByTimeAsync(0)
+				expect(broadcast).toHaveBeenCalledTimes(1)
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				expect(await first).toBeUndefined()
+
+				const finalSettings = { ...oldSettings, openRouterModelId: "final-model" }
+				let secondSettled = false
+				const second = provider.upsertProviderProfile("existing", finalSettings).then((result) => {
+					secondSettled = true
+					return result
+				})
+				await vi.advanceTimersByTimeAsync(0)
+				expect(saves).toHaveBeenCalledTimes(1)
+				releaseBroadcast()
+				await vi.advanceTimersByTimeAsync(0)
+				expect(saves).toHaveBeenCalledTimes(2)
+				expect(saves.mock.calls[1][1]).toMatchObject(oldSettings)
+				// Waiting for compensation must not consume the next save's execution window.
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
+				expect(secondSettled).toBe(false)
+				expect(saves).toHaveBeenCalledTimes(2)
+				releaseRollback()
+				expect(await second).toBeTruthy()
+				expect(saves).toHaveBeenCalledTimes(3)
+				const reloaded = new ProviderSettingsManager(mockContext)
+				const profile = await reloaded.getProfile({ name: "existing" })
+				expect(profile).toMatchObject(finalSettings)
+				expect(await reloaded.getModeConfigId("code")).toBe(profile.id)
+				expect(provider.contextProxy.getProviderSettings()).toMatchObject(finalSettings)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
 		test("keeps a later update queued until persisted rollback completes", async () => {
 			const manager = provider.providerSettingsManager
 			const save = manager.saveConfig.bind(manager)
@@ -632,7 +689,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "second-profile")
 		})
 
-		test("timed-out mutations abort before writing state and advance the queue", async () => {
+		test("timed-out mutations abort before writing state and release the queue after settling", async () => {
 			vi.useFakeTimers()
 			const logSpy = vi.spyOn(provider, "log")
 			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
@@ -664,9 +721,9 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
 				await firstResult
 
-				// Queue advanced immediately on timeout — second enqueues now.
+				// The caller timed out, but the underlying activation still owns the queue.
 				const second = provider.activateProviderProfile({ name: "second-profile" })
-				// activateProfile not yet called for second (it runs in the next microtask).
+				await vi.advanceTimersByTimeAsync(0)
 				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(1)
 
 				// Resolve the first activation's inner promise so its in-flight mock can return.
@@ -678,6 +735,44 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "first-profile")
 				expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "second-profile")
 				expect(logSpy).toHaveBeenCalledWith("Provider profile mutation timed out; aborting in-flight mutation")
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		test("bounds queue waits and skips expired mutations when the blocked write eventually settles", async () => {
+			vi.useFakeTimers()
+			try {
+				let release!: () => void
+				const first = provider["enqueueProviderProfileMutation"](
+					() =>
+						new Promise<void>((resolve) => {
+							release = resolve
+						}),
+				)
+				const firstResult = expect(first).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				await firstResult
+
+				const expiredWrite = vi.fn(async () => {})
+				const second = provider["enqueueProviderProfileMutation"](expiredWrite)
+				const onRejected = vi.fn()
+				void second.catch(onRejected)
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS * 2)
+				expect(onRejected).toHaveBeenCalledWith(
+					expect.objectContaining({ message: "Provider profile mutation timed out" }),
+				)
+				expect(expiredWrite).not.toHaveBeenCalled()
+
+				const nextWrite = vi.fn(async () => {})
+				const third = provider["enqueueProviderProfileMutation"](nextWrite)
+				await vi.advanceTimersByTimeAsync(0)
+				expect(nextWrite).not.toHaveBeenCalled()
+				release()
+				await third
+				expect(expiredWrite).not.toHaveBeenCalled()
+				expect(nextWrite).toHaveBeenCalledTimes(1)
+				expect(vi.getTimerCount()).toBe(0)
 			} finally {
 				vi.useRealTimers()
 			}

@@ -262,15 +262,28 @@ export class ClineProvider
 
 	private enqueueProviderProfileMutation<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
 		const controller = new AbortController()
-		// Run fn after either outcome so a rejected mutation never poisons the queue.
-		const run = this.providerProfileMutationQueue.then(
-			() => fn(controller.signal),
-			() => fn(controller.signal),
-		)
-		const callerResult = this.withProviderProfileMutationTimeout(run, () => {
-			controller.abort()
-			this.log("Provider profile mutation timed out; aborting in-flight mutation")
+		// The queue tail always resolves. Skip callers whose queue wait expired before
+		// allowing their mutation to perform any work.
+		const run = this.providerProfileMutationQueue.then(() => {
+			controller.signal.throwIfAborted()
+			return fn(controller.signal)
 		})
+		// Allow a separate wait window for an earlier operation and compensation;
+		// waiting must not consume this mutation's execution timeout. A stalled queue
+		// still returns an error to the caller without permitting concurrent writes.
+		const callerResult = this.withProviderProfileMutationTimeout(
+			this.providerProfileMutationQueue,
+			() => {
+				controller.abort()
+				this.log("Provider profile mutation queue wait timed out; skipping queued mutation")
+			},
+			ClineProvider.PENDING_OPERATION_TIMEOUT_MS * 2,
+		).then(() =>
+			this.withProviderProfileMutationTimeout(run, () => {
+				controller.abort()
+				this.log("Provider profile mutation timed out; aborting in-flight mutation")
+			}),
+		)
 
 		void run.then(
 			() => {
@@ -289,22 +302,26 @@ export class ClineProvider
 			},
 		)
 
-		// Advance from the timeout-bounded result. Each fn checks its AbortSignal before
-		// writing state, so advancing the queue on timeout cannot produce stale overwrites.
-		this.providerProfileMutationQueue = callerResult.then(
+		// Keep ownership until all writes and compensation settle, even if the caller
+		// has timed out. Otherwise an older rollback can overwrite a later mutation.
+		this.providerProfileMutationQueue = run.then(
 			() => undefined,
 			() => undefined,
 		)
 		return callerResult
 	}
 
-	private withProviderProfileMutationTimeout<T>(operation: Promise<T>, onTimeout: () => void): Promise<T> {
+	private withProviderProfileMutationTimeout<T>(
+		operation: Promise<T>,
+		onTimeout: () => void,
+		timeoutMs = ClineProvider.PENDING_OPERATION_TIMEOUT_MS,
+	): Promise<T> {
 		let timeoutId: ReturnType<typeof setTimeout> | undefined
 		const timeout = new Promise<never>((_, reject) => {
 			timeoutId = setTimeout(() => {
 				onTimeout()
 				reject(new Error("Provider profile mutation timed out"))
-			}, ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+			}, timeoutMs)
 		})
 
 		return Promise.race([operation, timeout]).finally(() => {

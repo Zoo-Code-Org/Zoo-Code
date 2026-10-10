@@ -73,6 +73,32 @@ describe("ProviderSettingsManager", () => {
 		providerSettingsManager = new ProviderSettingsManager(mockContext)
 	})
 
+	describe("setModeConfig", () => {
+		it("persists a string mapping and removes only the unset mode after reload", async () => {
+			const storage = new Map<string, string>()
+			mockSecrets.get.mockImplementation(async (key: string) => storage.get(key))
+			mockSecrets.store.mockImplementation(async (key: string, value: string) => {
+				storage.set(key, value)
+			})
+
+			await providerSettingsManager.setModeConfig("code", "code-profile")
+			await providerSettingsManager.setModeConfig("ask", "ask-profile")
+			const reloaded = new ProviderSettingsManager(mockContext)
+			expect(await reloaded.getModeConfigId("code")).toBe("code-profile")
+			const storedModes = (await reloaded.export()).modeApiConfigs
+			expect(storedModes).toMatchObject({ code: "code-profile", ask: "ask-profile" })
+
+			await reloaded.setModeConfig("code", undefined)
+			const afterUnset = new ProviderSettingsManager(mockContext)
+			expect(await afterUnset.getModeConfigId("code")).toBeUndefined()
+			const remainingModes = (await afterUnset.export()).modeApiConfigs
+			expect(remainingModes).not.toHaveProperty("code")
+			expect(remainingModes).toEqual(
+				Object.fromEntries(Object.entries(storedModes ?? {}).filter(([mode]) => mode !== "code")),
+			)
+		})
+	})
+
 	describe("initialize", () => {
 		it("should not write to storage when secrets.get returns null", async () => {
 			// Mock readConfig to return null
