@@ -128,13 +128,6 @@ async function fileIsAbsent(absolutePath: string): Promise<boolean> {
 }
 
 /**
- * Publish content only if the target file does not exist.
- *
- * Rejects with a loud remediation error when the file already exists: the
- * write was issued for a file that was never read, so the caller must read
- * the file first, then retry.
- */
-/**
  * Read the on-disk token after a publish, best-effort: a publish that
  * succeeded is not undone by a failed stat, so the caller keeps the publish
  * and only skips the observation refresh.
@@ -143,6 +136,13 @@ async function tokenAfterPublish(absolutePath: string): Promise<string | undefin
 	return computeVersionToken(absolutePath).catch(() => undefined)
 }
 
+/**
+ * Publish content only if the target file does not exist.
+ *
+ * Rejects with a loud remediation error when the file already exists: the
+ * write was issued for a file that was never read, so the caller must read
+ * the file first, then retry.
+ */
 export async function createIfAbsent(
 	absolutePath: string,
 	content: string | Uint8Array,
@@ -203,9 +203,9 @@ export async function replaceIfVersion(
 	absolutePath: string,
 	expectedVersion: string,
 	content: string | Uint8Array,
+	displayPath: string,
 	// Re-checked under the lock: a link that waited on the FIFO chain can outlive
 	// the task that queued it.
-	displayPath: string,
 	isCancelled?: () => boolean,
 ): Promise<string | undefined> {
 	// Lock the key every other writer to this file uses: the resolved publish

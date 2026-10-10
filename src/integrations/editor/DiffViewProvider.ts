@@ -402,16 +402,6 @@ export class DiffViewProvider {
 	}
 
 	/**
-	 * Undo the on-disk side effects of an open() that failed before the diff editor was
-	 * created. open() creates the parent directories and writes an empty placeholder
-	 * for a new file; if the diff editor never opens, revertChanges() has no diff
-	 * editor to revert and the unapproved file would stay on disk. The placeholder is
-	 * removed only while it is still the exact file this open() wrote (same version
-	 * token), under the same resolved-path advisory lock every other writer to this
-	 * path uses; the directories this call created then go, innermost first, stopping
-	 * at the first directory another writer populated in the meantime.
-	 */
-	/**
 	 * Whether the path still holds the placeholder this provider created.
 	 * The stat-matched token is the strongest proof; when open() could not produce one
 	 * (a failed or disagreeing bracketing read), ownership falls back to the identity
@@ -433,6 +423,16 @@ export class DiffViewProvider {
 		return stats.dev === identity.dev && stats.ino === identity.ino && stats.size === 0n
 	}
 
+	/**
+	 * Undo the on-disk side effects of an open() that failed before the diff editor was
+	 * created. open() creates the parent directories and writes an empty placeholder
+	 * for a new file; if the diff editor never opens, revertChanges() has no diff
+	 * editor to revert and the unapproved file would stay on disk. The placeholder is
+	 * removed only while it is still the exact file this open() wrote (same version
+	 * token), under the same resolved-path advisory lock every other writer to this
+	 * path uses; the directories this call created then go, innermost first, stopping
+	 * at the first directory another writer populated in the meantime.
+	 */
 	private async undoPartialOpen(absolutePath: string): Promise<void> {
 		if (this.editType !== "create") {
 			return
@@ -618,7 +618,7 @@ export class DiffViewProvider {
 	 * even though the intended publish is satisfied. That reading is only sound when
 	 * the save was authorized against the exact version open() stat-matched.
 	 */
-	private canAdoptPublishedContent(): boolean {
+	private canAdoptPublishedContent(writeKind: GuardedWriteKind): boolean {
 		// A create placeholder is the file open() itself wrote, so a match is
 		// unambiguous and the CAS baseline is the placeholder token.
 		if (this.placeholderVersion !== undefined) {
@@ -634,6 +634,15 @@ export class DiffViewProvider {
 		// would record an observation for content the model never read and authorize a
 		// later full-file replacement.
 		if (this.preOpenObservation === null) {
+			return false
+		}
+		// A full-file publish rejected for a partial read is not a moved-token rejection:
+		// the completeness gate refused before any compare-and-swap ran, so the matching
+		// bytes on disk are the un-authorized replacement, not this save's satisfied
+		// autosave. Adopting them would report a successful full-file replacement for a
+		// write the completeness gate rejected. A targeted edit is authorized by a
+		// partial read, so only the full-file kinds take this branch.
+		if (writeKind !== "edit" && !this.preOpenObservation.complete) {
 			return false
 		}
 		// The caller's observation must still name the version the preview saw. If a
@@ -724,7 +733,7 @@ export class DiffViewProvider {
 				// only the version token moved. A rejection caused by an external writer, or
 				// by a save that was never authorized at all, must stay a rejection - the
 				// matching bytes are what the clobber looks like from here.
-				this.canAdoptPublishedContent() &&
+				this.canAdoptPublishedContent(writeKind) &&
 				// Only the autosave shape: a clean buffer means its content is what autosave
 				// already put on disk. A dirty buffer means the disk content came from
 				// someone else, so the discard cleanup below is still the right outcome.
