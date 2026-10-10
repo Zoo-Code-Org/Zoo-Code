@@ -1011,7 +1011,7 @@
 	},
 	"core/tools/__tests__/writeToFileTool.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 5
+			"count": 3
 		}
 	},
 	"core/tools/helpers/toolResultFormatting.ts": {

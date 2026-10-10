@@ -5,6 +5,7 @@ import { ClineProvider } from "../core/webview/ClineProvider"
 import { TaskRegistry } from "../core/task/TaskRegistry"
 import { PendingActionSettlementError, type Task } from "../core/task/Task"
 import { makeProviderStub } from "./helpers/provider-stub"
+import { writeToFileTool } from "../core/tools/WriteToFileTool"
 
 type MockTask = Pick<Task, "taskId" | "instanceId"> &
 	Partial<Pick<Task, "parentTaskId" | "abort" | "abandoned">> & {
@@ -206,6 +207,46 @@ describe("ClineProvider failed history restoration cleanup", () => {
 		expect(cleanupListener).toHaveBeenCalledOnce()
 		expect(taskEventListeners.has(task)).toBe(false)
 		expect(task.dispose).toHaveBeenCalledOnce()
+	})
+
+	it("releases the tool's per-task state before a directly disposed task loses its listeners", async () => {
+		const key = "failed-history-task.inst-1"
+		const order: string[] = []
+		const task = {
+			taskId: "failed-history-task",
+			instanceId: "inst-1",
+			emit: vi.fn(),
+			once: vi.fn(),
+			off: vi.fn(),
+			dispose: vi.fn().mockImplementation(() => {
+				// Dispose removes every listener, so this is the last moment the abort
+				// cleanup could still have run; the entry must already be gone here.
+				order.push(writeToFileTool["taskPartialStreamState"].has(key) ? "state-retained" : "state-cleared")
+				order.push("dispose")
+				return Promise.resolve()
+			}),
+		} as unknown as Task
+		// Fixture: the state entry the tool would have created during a partial stream.
+		writeToFileTool["taskPartialStreamState"].set(key, {
+			lastSeenPartialPath: undefined,
+			streamFailed: false,
+			streamError: undefined,
+			task,
+			abortCleanup: () => {},
+		})
+		const taskEventListeners = new Map([[task, [vi.fn()]]])
+		const taskRegistry = new TaskRegistry()
+		taskRegistry.push(task)
+		const provider = { taskRegistry, taskEventListeners, log: vi.fn() } as unknown as ClineProvider
+
+		await privateClineProvider.cleanupFailedHistoryTask.call(
+			provider,
+			task,
+			new PendingActionSettlementError("settlement failed"),
+		)
+
+		expect(order).toEqual(["state-cleared", "dispose"])
+		expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 	})
 
 	it("keeps the task active after an unrelated history resume failure", async () => {
