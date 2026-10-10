@@ -958,7 +958,7 @@ describe("safeWriteText", () => {
 			expect(fs.rename).toHaveBeenCalledWith(customTempPath, targetPath)
 		})
 
-		it("keeps the temp's default mode when the target does not exist yet (ENOENT)", async () => {
+		it("applies the fresh-file default mode masked by the process umask when the target does not exist yet (ENOENT)", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
@@ -966,16 +966,59 @@ describe("safeWriteText", () => {
 				throw enoent
 			})
 			vi.mocked(fsSync.openSync).mockReturnValue(2)
+			// fchmodSync does not apply the umask the way openSync's creation mode does, so the
+			// production default must mask it explicitly. A fixed umask keeps the expected mode
+			// deterministic on every lane.
+			const umaskSpy = vi.spyOn(process, "umask").mockReturnValue(0o027)
 
 			const customTempPath = "/tmp/test-dir/.file-safety-staging_peer/custom-temp.tmp"
 
-			await safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" })
+			try {
+				await safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" })
+			} finally {
+				umaskSpy.mockRestore()
+			}
 
 			// No existing target means nothing to preserve, but the published file still gets the
-			// documented default for a fresh file: the staging file is created 0600 so unpublished
-			// content is private, and publishing that mode unchanged would make every new file
-			// owner-only. Contract change: this test used to assert no fchmod at all.
-			expect(fsSync.fchmodSync).toHaveBeenCalledWith(2, 0o644)
+			// documented default for a fresh file, narrowed by the umask: 0o644 & ~0o027 = 0o640.
+			// The staging file is created 0600 so unpublished content is private, and publishing
+			// that mode unchanged would make every new file owner-only. Contract change: this test
+			// used to assert no fchmod at all, then an unmasked 0o644.
+			const freshModeCalls = vi
+				.mocked(fsSync.fchmodSync)
+				.mock.calls.filter(([fd, mode]) => fd === 2 && mode === 0o640)
+			expect(freshModeCalls).toHaveLength(1)
+			expect(vi.mocked(fsSync.fchmodSync).mock.calls.filter(([, mode]) => mode === 0o644)).toEqual([])
+			expect(fs.rename).toHaveBeenCalledWith(customTempPath, targetPath)
+		})
+
+		it("honors a restrictive umask for the fresh-target default mode (caller-staged)", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+			vi.mocked(fsSync.statSync).mockImplementation(() => {
+				throw enoent
+			})
+			vi.mocked(fsSync.openSync).mockReturnValue(2)
+			// The trigger from the review: umask 0o077. A self-staged new file is created through
+			// openSync(..., 0o644), which the umask narrows to 0o600; the staging-handle branch
+			// must not publish 0o644 past a restrictive umask, or the same process gets two
+			// different fresh-file modes decided by a staging detail.
+			const umaskSpy = vi.spyOn(process, "umask").mockReturnValue(0o077)
+
+			const customTempPath = "/tmp/test-dir/.file-safety-staging_peer/custom-temp.tmp"
+
+			try {
+				await safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" })
+			} finally {
+				umaskSpy.mockRestore()
+			}
+
+			const freshModeCalls = vi
+				.mocked(fsSync.fchmodSync)
+				.mock.calls.filter(([fd, mode]) => fd === 2 && mode === 0o600)
+			expect(freshModeCalls).toHaveLength(1)
+			expect(vi.mocked(fsSync.fchmodSync).mock.calls.filter(([, mode]) => mode === 0o644)).toEqual([])
 			expect(fs.rename).toHaveBeenCalledWith(customTempPath, targetPath)
 		})
 
