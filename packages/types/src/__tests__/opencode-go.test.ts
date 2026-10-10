@@ -39,6 +39,7 @@ describe("opencode-go registry", () => {
 	]
 	const responsesFormatModels = [
 		"gpt-5.6-luna",
+		"gpt-6-luna",
 		"grok-4.6",
 		"muse-spark-1.3-contributor",
 		"muse-spark-1.2-contributor",
@@ -179,6 +180,29 @@ describe("opencode-go registry", () => {
 				outputPrice: 1.2,
 				cacheWritesPrice: 0.25,
 				cacheReadsPrice: 0.02,
+				longContextPricing: {
+					thresholdTokens: 272_000,
+					inputPriceMultiplier: 2,
+					outputPriceMultiplier: 1.5,
+					cacheWritesPriceMultiplier: 2,
+					cacheReadsPriceMultiplier: 2,
+				},
+			})
+		})
+
+		it("curates gpt-6-luna with its documented Responses capabilities and pricing", () => {
+			expect(getOpencodeGoModelInfo("gpt-6-luna")).toMatchObject({
+				maxTokens: 128_000,
+				supportsMaxTokens: true,
+				contextWindow: 1_050_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+				reasoningEffort: "medium",
+				inputPrice: 0.1,
+				outputPrice: 0.5,
+				cacheWritesPrice: 0.125,
+				cacheReadsPrice: 0.01,
 				longContextPricing: {
 					thresholdTokens: 272_000,
 					inputPriceMultiplier: 2,
