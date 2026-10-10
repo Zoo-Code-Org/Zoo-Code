@@ -838,9 +838,7 @@ describe("openClineInNewTab", () => {
 			expect(created.dispose).toHaveBeenCalledTimes(1)
 			expect(panel.dispose).toHaveBeenCalledTimes(1)
 			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
-				expect.stringContaining(
-					"cleanup was incomplete (provider: dispose hung; panel: panel gone)",
-				),
+				expect.stringContaining("cleanup was incomplete (provider: dispose hung; panel: panel gone)"),
 			)
 		} finally {
 			// Restore the saved implementation rather than mockRestore(): this file's beforeEach
@@ -1243,8 +1241,8 @@ describe("openClineInNewTab", () => {
 		// rejection: dropping it for the joined caller would leave that command
 		// handler hanging on a promise that never yields a usable result.
 		let rejectCreation!: (error: Error) => void
-		// Only the in-flight creation is deferred; the retry after it settles gets the
-		// normal (immediate) context proxy.
+			// Only the in-flight creation is deferred; the retry after it settles gets the
+			// normal (immediate) context proxy.
 		;(ContextProxy.getInstance as Mock).mockReturnValueOnce(
 			new Promise((_resolve, reject) => {
 				rejectCreation = reject

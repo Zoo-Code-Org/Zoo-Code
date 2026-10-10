@@ -619,7 +619,6 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(persisted.mode).toBeUndefined()
 		})
 
-
 		it("restores the view mode pin even when the shared-mode rollback write fails", async () => {
 			// Only the TaskModeSwitched emit throws: a listener failure is what triggers the
 			// durable rollback under test.
@@ -739,18 +738,14 @@ describe("ClineProvider - Sticky Mode", () => {
 			updateSpy.mockImplementation(async (key: string, value: unknown) => {
 				if (key === "mode" && !gated) {
 					gated = true
-				await writeGate
+					await writeGate
 				}
 				return originalUpdate ? originalUpdate(key, value) : Promise.resolve()
 			})
 
 			const emitSpy = vi.spyOn(provider, "emit")
 			const controller = new AbortController()
-			const switchPromise = provider["handleModeSwitchUnlocked"](
-				"ask",
-				mockTask,
-				controller.signal,
-			)
+			const switchPromise = provider["handleModeSwitchUnlocked"]("ask", mockTask, controller.signal)
 
 			await vi.waitFor(() => expect(updateSpy).toHaveBeenCalledWith("mode", "ask"))
 			controller.abort()

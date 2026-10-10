@@ -1393,53 +1393,50 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 	})
 })
 
-	describe("webviewMessageHandler - host-owned keys in an updateSettings payload", () => {
-		beforeEach(() => {
-			vi.clearAllMocks()
-		})
-
-		it("refuses to apply profile- and provider-owned keys supplied by the webview", async () => {
-			// The webview is untrusted input. `apiConfiguration` is not even a RooCodeSettings key,
-			// so the only way it reaches the handler is a payload the compile-time type cannot
-			// express - which is what a crafted webview sends. Passing it through a variable rather
-			// than an inline literal models that at runtime.
-			const craftedPayload = {
-				enableCheckpoints: true,
-				apiConfiguration: {
-					apiProvider: providerIdentifiers.openrouter,
-					openRouterApiKey: "attacker-key",
-				},
-				listApiConfigMeta: [
-					{ name: "evil-profile", id: "evil-id", apiProvider: providerIdentifiers.openrouter },
-				],
-				viewStates: {
-					"evil-view": { mode: "act", currentApiConfigName: "evil-profile", updatedAt: 1 },
-				},
-				currentApiConfigName: "evil-profile",
-			}
-			await webviewMessageHandler(mockClineProvider, {
-				type: "updateSettings",
-				updatedSettings: craftedPayload,
-			})
-
-			// The ordinary setting still takes its normal route through provider.setValue, which
-			// is also what keeps the acting view's buffer and pin in sync.
-			expect(mockClineProvider.setValue).toHaveBeenCalledWith("enableCheckpoints", true)
-			// The profile- and provider-owned keys reach neither sink: not the shared store, and
-			// not this view's local buffer (which getState() prefers over the shared values).
-			for (const key of ["apiConfiguration", "listApiConfigMeta", "viewStates", "currentApiConfigName"]) {
-				expect(mockClineProvider.setValue).not.toHaveBeenCalledWith(key, expect.anything())
-				expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith(key, expect.anything())
-			}
-			expect(mockClineProvider.log).toHaveBeenCalledWith(
-				expect.stringContaining("Ignoring host-owned setting 'apiConfiguration'"),
-			)
-			expect(mockClineProvider.log).toHaveBeenCalledWith(
-				expect.stringContaining("Ignoring host-owned setting 'currentApiConfigName'"),
-			)
-		})
-
+describe("webviewMessageHandler - host-owned keys in an updateSettings payload", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
 	})
+
+	it("refuses to apply profile- and provider-owned keys supplied by the webview", async () => {
+		// The webview is untrusted input. `apiConfiguration` is not even a RooCodeSettings key,
+		// so the only way it reaches the handler is a payload the compile-time type cannot
+		// express - which is what a crafted webview sends. Passing it through a variable rather
+		// than an inline literal models that at runtime.
+		const craftedPayload = {
+			enableCheckpoints: true,
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "attacker-key",
+			},
+			listApiConfigMeta: [{ name: "evil-profile", id: "evil-id", apiProvider: providerIdentifiers.openrouter }],
+			viewStates: {
+				"evil-view": { mode: "act", currentApiConfigName: "evil-profile", updatedAt: 1 },
+			},
+			currentApiConfigName: "evil-profile",
+		}
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: craftedPayload,
+		})
+
+		// The ordinary setting still takes its normal route through provider.setValue, which
+		// is also what keeps the acting view's buffer and pin in sync.
+		expect(mockClineProvider.setValue).toHaveBeenCalledWith("enableCheckpoints", true)
+		// The profile- and provider-owned keys reach neither sink: not the shared store, and
+		// not this view's local buffer (which getState() prefers over the shared values).
+		for (const key of ["apiConfiguration", "listApiConfigMeta", "viewStates", "currentApiConfigName"]) {
+			expect(mockClineProvider.setValue).not.toHaveBeenCalledWith(key, expect.anything())
+			expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith(key, expect.anything())
+		}
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("Ignoring host-owned setting 'apiConfiguration'"),
+		)
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("Ignoring host-owned setting 'currentApiConfigName'"),
+		)
+	})
+})
 
 describe("webviewMessageHandler - profile deletion routes through the provider mutation path", () => {
 	beforeEach(() => {
@@ -1453,44 +1450,50 @@ describe("webviewMessageHandler - profile deletion routes through the provider m
 	type DeletionProviderFixture = { providerSettingsManager: Partial<Writable<ProviderSettingsManager>> }
 	const writable = mockClineProvider as DeletionProviderFixture
 
-		it("deletes through ClineProvider so the queue, compensation and sibling re-pin still run", async () => {
-			writable.providerSettingsManager = {
-				listConfig: vi.fn().mockResolvedValue([
-					{ name: "doomed-profile", id: "doomed-id", apiProvider: providerIdentifiers.openrouter },
-					{ name: "keeper-profile", id: "keeper-id", apiProvider: providerIdentifiers.anthropic },
-				]),
-				deleteConfig: vi.fn().mockResolvedValue(undefined),
-			}
-			mockClineProvider.deleteProviderProfile = vi.fn().mockResolvedValue(undefined)
-			// The handler compares the dialog answer against the TRANSLATED string, not the key:
-			// t comes from src/i18n, so the stub has to return the same value t produces here.
-			vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(t("common:answers.yes") as never)
+	it("deletes through ClineProvider so the queue, compensation and sibling re-pin still run", async () => {
+		writable.providerSettingsManager = {
+			listConfig: vi.fn().mockResolvedValue([
+				{ name: "doomed-profile", id: "doomed-id", apiProvider: providerIdentifiers.openrouter },
+				{ name: "keeper-profile", id: "keeper-id", apiProvider: providerIdentifiers.anthropic },
+			]),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		mockClineProvider.deleteProviderProfile = vi.fn().mockResolvedValue(undefined)
+		// The handler compares the dialog answer against the TRANSLATED string, not the key:
+		// t comes from src/i18n, so the stub has to return the same value t produces here.
+		vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(t("common:answers.yes") as never)
 
-			await webviewMessageHandler(mockClineProvider, { type: "deleteApiConfiguration", text: "doomed-profile" })
+		await webviewMessageHandler(mockClineProvider, { type: "deleteApiConfiguration", text: "doomed-profile" })
 
-			expect(mockClineProvider.deleteProviderProfile).toHaveBeenCalledWith({
-				name: "doomed-profile",
-				id: "doomed-id",
-				apiProvider: providerIdentifiers.openrouter,
-			})
-			expect(mockClineProvider.providerSettingsManager.deleteConfig).not.toHaveBeenCalled()
-			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		expect(mockClineProvider.deleteProviderProfile).toHaveBeenCalledWith({
+			name: "doomed-profile",
+			id: "doomed-id",
+			apiProvider: providerIdentifiers.openrouter,
 		})
-
-		it("reports the delete failure without falling back to a direct manager delete", async () => {
-			writable.providerSettingsManager = {
-				listConfig: vi.fn().mockResolvedValue([{ name: "doomed-profile", id: "doomed-id", apiProvider: providerIdentifiers.openrouter }]),
-				deleteConfig: vi.fn().mockResolvedValue(undefined),
-			}
-			mockClineProvider.deleteProviderProfile = vi.fn().mockRejectedValue(new Error("You cannot delete the last profile"))
-			vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(t("common:answers.yes") as never)
-
-			await webviewMessageHandler(mockClineProvider, { type: "deleteApiConfiguration", text: "doomed-profile" })
-
-			expect(mockClineProvider.providerSettingsManager.deleteConfig).not.toHaveBeenCalled()
-			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.delete_api_config")
-		})
+		expect(mockClineProvider.providerSettingsManager.deleteConfig).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
 	})
+
+	it("reports the delete failure without falling back to a direct manager delete", async () => {
+		writable.providerSettingsManager = {
+			listConfig: vi
+				.fn()
+				.mockResolvedValue([
+					{ name: "doomed-profile", id: "doomed-id", apiProvider: providerIdentifiers.openrouter },
+				]),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		mockClineProvider.deleteProviderProfile = vi
+			.fn()
+			.mockRejectedValue(new Error("You cannot delete the last profile"))
+		vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(t("common:answers.yes") as never)
+
+		await webviewMessageHandler(mockClineProvider, { type: "deleteApiConfiguration", text: "doomed-profile" })
+
+		expect(mockClineProvider.providerSettingsManager.deleteConfig).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.delete_api_config")
+	})
+})
 
 describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 	beforeEach(() => {

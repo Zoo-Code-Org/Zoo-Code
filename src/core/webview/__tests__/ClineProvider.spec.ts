@@ -713,7 +713,7 @@ describe("ClineProvider", () => {
 			for (let round = 0; round < 3; round++) {
 				await new Promise((resolve) => setImmediate(resolve))
 			}
-			
+
 			expect(ClineProvider.getAllInstances()).not.toContain(disposing)
 			expect(ClineProvider.getInstanceForView(disposing["view"] as vscode.WebviewView)).toBeUndefined()
 
@@ -1658,7 +1658,7 @@ describe("ClineProvider", () => {
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-const provider2 = new ClineProvider(
+			const provider2 = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"editor",
@@ -1676,7 +1676,7 @@ const provider2 = new ClineProvider(
 		})
 
 		it("should have viewId in correct format: {renderContext}-{instanceCount}", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -1690,14 +1690,14 @@ const provider = new ClineProvider(
 		})
 
 		it("should increment instance count for each new instance", async () => {
-const provider1 = new ClineProvider(
+			const provider1 = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"editor",
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-const provider2 = new ClineProvider(
+			const provider2 = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"editor",
@@ -1719,7 +1719,7 @@ const provider2 = new ClineProvider(
 
 	describe("saveViewState", () => {
 		it("should update viewLocalState and persist mode through registered viewStates", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -1751,7 +1751,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should update viewLocalState and persist currentApiConfigName through registered viewStates", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -1771,7 +1771,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should update viewLocalState for apiConfiguration without persisting provider settings or secrets", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -1795,7 +1795,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should clear local override when saveViewState receives undefined", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -1814,7 +1814,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should clear the currentApiConfigName override when saveViewState receives undefined", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -1848,16 +1848,14 @@ const provider = new ClineProvider(
 			// at the end says so instead of the test silently passing.
 			const rejectedKeys: string[] = []
 			const setValueOriginal = provider.contextProxy.setValue.bind(provider.contextProxy)
-			vi
-				.spyOn(provider.contextProxy, "setValue")
-				.mockImplementation(async (key, value) => {
-					const states = value as Record<string, { mode?: string }> | undefined
-					if (String(key) === "viewStates" && states?.["stable-sidebar-view"]?.mode === "architect") {
-						rejectedKeys.push(key)
-						throw new Error("persist failed")
-					}
-					return setValueOriginal(key, value)
-				})
+			vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key, value) => {
+				const states = value as Record<string, { mode?: string }> | undefined
+				if (String(key) === "viewStates" && states?.["stable-sidebar-view"]?.mode === "architect") {
+					rejectedKeys.push(key)
+					throw new Error("persist failed")
+				}
+				return setValueOriginal(key, value)
+			})
 
 			await provider["setViewStateId"]("stable-sidebar-view")
 
@@ -1877,7 +1875,7 @@ const provider = new ClineProvider(
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-const provider2 = new ClineProvider(
+			const provider2 = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"editor",
@@ -1905,7 +1903,7 @@ const provider2 = new ClineProvider(
 
 	describe("loadViewState", () => {
 		it("should keep viewLocalState empty when no stable per-view values exist", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -1929,7 +1927,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should log and keep existing viewLocalState when loadViewState fails", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -1954,7 +1952,7 @@ const provider = new ClineProvider(
 
 	describe("persisted view state pruning", () => {
 		it("should keep the newest 50 persisted view states", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -1981,7 +1979,7 @@ const provider = new ClineProvider(
 
 	describe("setViewStateId", () => {
 		it('should ignore "__proto__" and keep the temporary viewId', async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2003,7 +2001,7 @@ const provider = new ClineProvider(
 
 		it("restores the previous view id when the registration write fails so a later launch retries", async () => {
 			const contextProxy = new ContextProxy(mockContext)
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2037,7 +2035,7 @@ const provider = new ClineProvider(
 
 	describe("view state persistence edge cases", () => {
 		it("should read viewStates from the ContextProxy cache when not fresh", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2050,7 +2048,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should treat a corrupted non-object viewStates value as an empty map", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2064,7 +2062,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should merge saved fields, drop cleared fields and delete emptied entries", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2124,14 +2122,12 @@ const provider = new ClineProvider(
 			// getMockImplementation, not bind: spyOn reuses the same mock object, so a bound copy
 			// would call the spy's own implementation and recurse.
 			const originalUpdate = vi.mocked(mockContext.globalState.update).getMockImplementation()
-			const updateSpy = vi.spyOn(mockContext.globalState, "update").mockImplementation(
-				async (key, value) => {
-					if (key === "viewStates") {
-						throw new Error("view states write failed")
-					}
-					return originalUpdate?.(key, value)
-				},
-			)
+			const updateSpy = vi.spyOn(mockContext.globalState, "update").mockImplementation(async (key, value) => {
+				if (key === "viewStates") {
+					throw new Error("view states write failed")
+				}
+				return originalUpdate?.(key, value)
+			})
 			const logSpy = vi.spyOn(provider, "log")
 
 			await expect(provider.setValue("currentApiConfigName", "second-profile")).rejects.toThrow(
@@ -2147,15 +2143,13 @@ const provider = new ClineProvider(
 			expect(provider.getValues().currentApiConfigName).toBe("first-profile")
 			expect(provider.contextProxy.getValue("mode")).toBe("architect")
 			expect(provider.getValues().mode).toBe("architect")
-			expect(logSpy).toHaveBeenCalledWith(
-				expect.stringContaining("the shared value(s) were restored"),
-			)
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("the shared value(s) were restored"))
 			updateSpy.mockRestore()
 			await provider.dispose()
 		})
 
 		it("should rekey a pre-launch entry under the temporary id to the registered stable id", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2172,7 +2166,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should keep the stable entry and drop the temporary entry when both exist", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2191,7 +2185,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should clear only this view's entry without clobbering an entry only storage knows about", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2211,7 +2205,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should prune by updatedAt regardless of insertion order", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2234,7 +2228,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should sanitize, reject blank and undefined ids, and no-op on the active id", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2254,7 +2248,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should load persisted mode, profile name and resolved profile into viewLocalState", async () => {
-const writer = new ClineProvider(
+			const writer = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2265,7 +2259,7 @@ const writer = new ClineProvider(
 			await writer.saveViewState("mode", "architect")
 			await writer.saveViewState("currentApiConfigName", "my-profile")
 
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"editor",
@@ -2297,7 +2291,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should log a successful empty load when no persisted entry exists", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2312,7 +2306,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should keep the persisted profile name and log when the profile lookup fails", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2331,7 +2325,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should discard a stale load when the viewStateId changes during the profile lookup", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2355,7 +2349,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should reapply fields mutated while the load is in flight and keep persisted values for untouched fields", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2392,7 +2386,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should keep the persisted mode authoritative when the pre-load buffer is untouched", async () => {
-const writer = new ClineProvider(
+			const writer = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2403,7 +2397,7 @@ const writer = new ClineProvider(
 			await writer.saveViewState("mode", "code")
 			await writer.saveViewState("currentApiConfigName", "my-profile")
 
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"editor",
@@ -2436,7 +2430,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should not restore a persisted mode whose custom mode no longer exists", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2468,7 +2462,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should not resurrect a field cleared mid-load from the pre-load buffer", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2501,7 +2495,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should reapply an independently mutated mode when the load settles", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2530,7 +2524,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should reapply an independently mutated profile name when the load settles", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2562,7 +2556,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should reapply an independently mutated apiConfiguration when the load settles", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2594,7 +2588,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should keep every persisted field authoritative when the load is untouched", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2624,7 +2618,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should persist known modes and reject unknown or non-string modes", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2661,7 +2655,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should apply setValue mutations to global state and keep or clear the right buffer fields", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2687,7 +2681,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should remove the buffered apiConfiguration when it is cleared", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2705,7 +2699,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should clear viewLocalState and the persisted entry when resetting state", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2733,7 +2727,7 @@ const provider = new ClineProvider(
 
 	describe("provider profile mutations", () => {
 		it("should sync the view-local buffer when activating a profile over a loaded view state", async () => {
-const writer = new ClineProvider(
+			const writer = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2749,7 +2743,7 @@ const writer = new ClineProvider(
 				apiProvider: providerIdentifiers.openrouter,
 			}
 
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"editor",
@@ -2824,13 +2818,14 @@ const provider = new ClineProvider(
 				await expect(second).resolves.toBeUndefined()
 				expect(started).toEqual(["first", "second"])
 			} finally {
-				;(ClineProvider as unknown as { PENDING_OPERATION_TIMEOUT_MS: number }).PENDING_OPERATION_TIMEOUT_MS = originalTimeout
+				;(ClineProvider as unknown as { PENDING_OPERATION_TIMEOUT_MS: number }).PENDING_OPERATION_TIMEOUT_MS =
+					originalTimeout
 				vi.useRealTimers()
 			}
 		})
 
 		it("should report the activated profile's settings over a stale view-local buffer in getState", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2879,7 +2874,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should sync the view-local buffer when creating and activating a profile", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2907,7 +2902,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should report the fresh profile's settings over a stale view-local buffer in getState after upserting and activating a profile", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2956,7 +2951,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should sync the view-local buffer when deleting the current profile", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -2986,7 +2981,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should refresh the view-local apiConfiguration when deleting the active profile", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -3032,7 +3027,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should swallow only the typed not-found signal when pruning a stale profile entry", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -3065,7 +3060,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should propagate a non-not-found deletion failure for a profile named like the not-found message", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -3103,7 +3098,7 @@ const provider = new ClineProvider(
 		})
 
 		it("reconfigures a view pinned to the deleted profile even when the global selection points elsewhere", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -3409,17 +3404,17 @@ const provider = new ClineProvider(
 				getProfile: vi.fn().mockImplementation(({ name }: { name: string }) =>
 					name === "doomed-profile"
 						? Promise.resolve({
-							name: "doomed-profile",
-							id: "doomed-id",
-							apiProvider: providerIdentifiers.openrouter,
-							openRouterApiKey: "doomed-secret",
-						})
+								name: "doomed-profile",
+								id: "doomed-id",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterApiKey: "doomed-secret",
+							})
 						: Promise.resolve({
-							name: "keeper-profile",
-							id: "keeper-id",
-							apiProvider: providerIdentifiers.anthropic,
-							apiKey: "keeper-secret",
-						}),
+								name: "keeper-profile",
+								id: "keeper-id",
+								apiProvider: providerIdentifiers.anthropic,
+								apiKey: "keeper-secret",
+							}),
 				),
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
 				saveConfig: saveConfigSpy,
@@ -3431,7 +3426,9 @@ const provider = new ClineProvider(
 				.spyOn(provider.contextProxy, "setProviderSettings")
 				.mockRejectedValue(new Error("provider settings write failed"))
 
-			await expect(provider.deleteProviderProfile(doomedProfile)).rejects.toThrow("provider settings write failed")
+			await expect(provider.deleteProviderProfile(doomedProfile)).rejects.toThrow(
+				"provider settings write failed",
+			)
 			setProviderSettingsSpy.mockRestore()
 
 			// The settings are back under their original id...
@@ -3480,11 +3477,11 @@ const provider = new ClineProvider(
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
 				getProfile: vi.fn().mockResolvedValue({
-				name: "doomed-profile",
-				id: "doomed-id",
-				apiProvider: providerIdentifiers.openrouter,
-				apiKey: "doomed-secret",
-			}),
+					name: "doomed-profile",
+					id: "doomed-id",
+					apiProvider: providerIdentifiers.openrouter,
+					apiKey: "doomed-secret",
+				}),
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
 				// The settings are already gone and cannot be put back: the caller must not be able
 				// to read this as a clean rollback.
@@ -3525,18 +3522,14 @@ const provider = new ClineProvider(
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
 				getProfile: vi.fn().mockResolvedValue({
-				name: "keeper-profile",
-				id: "keeper-id",
-				apiProvider: providerIdentifiers.anthropic,
-				apiKey: "keeper-secret",
-			}),
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "keeper-secret",
+				}),
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
 				saveConfig: vi.fn().mockResolvedValue("doomed-id"),
-				listConfig: vi.fn().mockResolvedValue([
-					"doomed-profile",
-					"keeper-profile",
-					"new-profile",
-				]),
+				listConfig: vi.fn().mockResolvedValue(["doomed-profile", "keeper-profile", "new-profile"]),
 			}
 
 			// The deletion parks in this write, so the concurrent upsert gets its chance
@@ -3573,9 +3566,7 @@ const provider = new ClineProvider(
 
 			// The upsert's newer list write must survive. An unserialized deletion rolls back
 			// to the snapshot it took before the upsert ran and silently drops the new profile.
-			expect(JSON.stringify(provider.contextProxy.getValue("listApiConfigMeta"))).toContain(
-				"new-profile",
-			)
+			expect(JSON.stringify(provider.contextProxy.getValue("listApiConfigMeta"))).toContain("new-profile")
 			await provider.dispose()
 		})
 
@@ -3694,11 +3685,11 @@ const provider = new ClineProvider(
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
 				getProfile: vi.fn().mockResolvedValue({
-				name: "keeper-profile",
-				id: "keeper-id",
-				apiProvider: providerIdentifiers.anthropic,
-				apiKey: "keeper-secret",
-			}),
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "keeper-secret",
+				}),
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
 				saveConfig: vi.fn().mockResolvedValue("doomed-id"),
 			}
@@ -3728,9 +3719,13 @@ const provider = new ClineProvider(
 
 		it("rolls back the sibling views whose re-pin write succeeded when another sibling fails", async () => {
 			const provider = new ClineProvider(
-				mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext), new WebviewFocusTracker(),
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
 			)
-		// healthySibling
+			// healthySibling
 			// This sibling's writes all land: it is the one that has to be undone when the OTHER
 			// sibling's re-pin fails.
 			const healthySibling = new ClineProvider(
@@ -3742,14 +3737,17 @@ const provider = new ClineProvider(
 			)
 			await healthySibling["setViewStateId"]("healthy-sibling-view")
 			await healthySibling.saveViewState("currentApiConfigName", "doomed-profile")
-		// failingSibling
+			// failingSibling
 			const failingSiblingContext = {
 				...mockContext,
 				globalState: {
 					...mockContext.globalState,
 					update: (key: string, value: unknown) => {
 						const states = value as Record<string, { currentApiConfigName?: string }> | undefined
-						if ( key === "viewStates" && states?.["failing-sibling-view"]?.currentApiConfigName === "keeper-profile") {
+						if (
+							key === "viewStates" &&
+							states?.["failing-sibling-view"]?.currentApiConfigName === "keeper-profile"
+						) {
 							return Promise.reject(new Error("sibling pin write failed"))
 						}
 						return mockContext.globalState.update(key, value)
@@ -3766,17 +3764,25 @@ const provider = new ClineProvider(
 			await failingSibling["setViewStateId"]("failing-sibling-view")
 			await failingSibling.saveViewState("currentApiConfigName", "doomed-profile")
 			const doomedProfile: ProviderSettingsEntry = {
-				name: "doomed-profile", id: "doomed-id", apiProvider: providerIdentifiers.openrouter,
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
 			}
 			const keeperProfile: ProviderSettingsEntry = {
-				name: "keeper-profile", id: "keeper-id", apiProvider: providerIdentifiers.anthropic,
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
 			}
 			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
 			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
-				getProfile: vi.fn().mockResolvedValue({ name: "keeper-profile", id: "keeper-id", apiProvider: providerIdentifiers.anthropic }),
+				getProfile: vi.fn().mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
 				saveConfig: vi.fn().mockResolvedValue("doomed-id"),
 			}
@@ -4017,7 +4023,10 @@ const provider = new ClineProvider(
 					...mockContext.globalState,
 					update: (key: string, value: unknown) => {
 						const states = value as Record<string, { currentApiConfigName?: string }> | undefined
-						if (key === "viewStates" && states?.["failing-repin-view"]?.currentApiConfigName === "keeper-profile") {
+						if (
+							key === "viewStates" &&
+							states?.["failing-repin-view"]?.currentApiConfigName === "keeper-profile"
+						) {
 							return Promise.reject(new Error("sibling pin write failed"))
 						}
 						return mockContext.globalState.update(key, value)
@@ -4108,23 +4117,23 @@ const provider = new ClineProvider(
 					}
 					return name === "doomed-profile"
 						? {
-							name: "doomed-profile",
-							id: "doomed-id",
-							apiProvider: providerIdentifiers.openrouter,
-							openRouterApiKey: "doomed-secret",
-						}
+								name: "doomed-profile",
+								id: "doomed-id",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterApiKey: "doomed-secret",
+							}
 						: {
-							name: "keeper-profile",
-							id: "keeper-id",
-							apiProvider: providerIdentifiers.anthropic,
-							apiKey: "keeper-secret",
-						}
+								name: "keeper-profile",
+								id: "keeper-id",
+								apiProvider: providerIdentifiers.anthropic,
+								apiKey: "keeper-secret",
+							}
 				}),
 			}
 
-			await expect(
-				provider["deleteProviderProfileUnlocked"](doomedProfile, controller.signal),
-			).rejects.toThrow("Profile deletion was cancelled before the selection and settings rewrite")
+			await expect(provider["deleteProviderProfileUnlocked"](doomedProfile, controller.signal)).rejects.toThrow(
+				"Profile deletion was cancelled before the selection and settings rewrite",
+			)
 
 			// The list write landed before the cancellation point...
 			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([keeperProfile])
@@ -4169,17 +4178,17 @@ const provider = new ClineProvider(
 				getProfile: vi.fn().mockImplementation(async ({ name }) =>
 					name === "doomed-profile"
 						? {
-							name: "doomed-profile",
-							id: "doomed-id",
-							apiProvider: providerIdentifiers.openrouter,
-							openRouterApiKey: "doomed-key",
-						}
+								name: "doomed-profile",
+								id: "doomed-id",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterApiKey: "doomed-key",
+							}
 						: {
-							name: "keeper-profile",
-							id: "keeper-id",
-							apiProvider: providerIdentifiers.anthropic,
-							apiKey: "keeper-key",
-						}
+								name: "keeper-profile",
+								id: "keeper-id",
+								apiProvider: providerIdentifiers.anthropic,
+								apiKey: "keeper-key",
+							},
 				),
 			}
 			// The failure lands after the shared provider keys were replaced with the survivor's:
@@ -4200,9 +4209,8 @@ const provider = new ClineProvider(
 			await provider.dispose()
 		})
 
-
 		it("leaves the view buffer untouched when the deleted profile is neither globally active nor view-pinned", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -4274,7 +4282,7 @@ const provider = new ClineProvider(
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-const provider2 = new ClineProvider(
+			const provider2 = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"editor",
@@ -4303,7 +4311,7 @@ const provider2 = new ClineProvider(
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-const provider2 = new ClineProvider(
+			const provider2 = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"editor",
@@ -4330,7 +4338,7 @@ const provider2 = new ClineProvider(
 
 	describe("getState merging", () => {
 		it("should merge viewLocalState on top of global state", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -4352,7 +4360,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should preserve global state values not overridden by viewLocalState", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -4376,7 +4384,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should let viewLocalState apiConfiguration override provider settings", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -4398,7 +4406,7 @@ const provider = new ClineProvider(
 		})
 
 		it("reports the fresh global apiConfiguration after a profile activation followed by a global settings write", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -4440,7 +4448,7 @@ const provider = new ClineProvider(
 		})
 
 		it("clears this view's buffered apiConfiguration when activating a different profile", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -4475,7 +4483,7 @@ const provider = new ClineProvider(
 		})
 
 		it("clears this view's buffered apiConfiguration when directly activating a profile", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -4513,7 +4521,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should merge getValues from ContextProxy with view-local values taking precedence", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -4554,7 +4562,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should keep flat provider settings out of the view-local buffer", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -4594,7 +4602,7 @@ const provider = new ClineProvider(
 
 	describe("persisted view state", () => {
 		it("should persist setValue mutations for view-local mode", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -4613,7 +4621,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should persist setValues mutations for view-local API profile", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -4632,7 +4640,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should drop an unknown mode from setValues while keeping valid modes", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -4665,7 +4673,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should sanitize raw viewStateId before using it as persisted viewStates key", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -4705,7 +4713,7 @@ const provider = new ClineProvider(
 						return Promise.resolve()
 					})
 			})
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -4729,7 +4737,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should preserve persisted viewStates entry when an editor provider is disposed during teardown", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"editor",
@@ -4747,7 +4755,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should read viewStates fresh from storage so out-of-proxy writes are not clobbered", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -4779,7 +4787,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should re-key durable viewStates entries from the temporary pre-launch view id", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -4807,7 +4815,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should drop the temporary viewStates entry when a stable entry already exists", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -4833,7 +4841,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should discard a stale loadViewState when a newer view id is registered during the load", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -4885,7 +4893,7 @@ const provider = new ClineProvider(
 
 	describe("getState default values", () => {
 		it("should fall back to defaults for unset state values", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -4959,7 +4967,7 @@ const provider = new ClineProvider(
 		it("should report a non-retired apiProvider from state instead of the anthropic fallback", async () => {
 			const contextProxy = new ContextProxy(mockContext)
 			await contextProxy.setValues({ apiProvider: providerIdentifiers.openrouter })
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -4987,7 +4995,7 @@ const provider = new ClineProvider(
 				setValues: (values: Record<string, unknown>) => Promise<void>
 			}
 			await contextProxyAccess.setValues({ apiProvider: "bogus-provider" })
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -5003,7 +5011,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should serve the embedding model profiles default when the stored value is cleared", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -5356,7 +5364,7 @@ const provider = new ClineProvider(
 	})
 
 	it("should re-pin the view to a valid global selection when the first listed profile has no name", async () => {
-const provider = new ClineProvider(
+		const provider = new ClineProvider(
 			mockContext,
 			mockOutputChannel,
 			"sidebar",

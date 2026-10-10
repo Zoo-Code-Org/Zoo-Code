@@ -847,27 +847,27 @@ describe("ProviderSettingsManager", () => {
 			)
 		})
 
-	it("rejects a missing id lookup with the typed error naming that id", async () => {
-		mockSecrets.get.mockResolvedValue(
-			JSON.stringify({
-				currentApiConfigName: "default",
-				apiConfigs: {
-					default: { config: {}, id: "default" },
-					named: { config: {}, id: "known-id" },
-				},
-			}),
-		)
+		it("rejects a missing id lookup with the typed error naming that id", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						default: { config: {}, id: "default" },
+						named: { config: {}, id: "known-id" },
+					},
+				}),
+			)
 
-		// The id branch is the one the mode mapping and deleteProviderProfile hit: a stale
-		// mode -> id mapping must surface as a not-found the caller can prune, not as a
-		// generic failure that gets re-wrapped as unexpected.
-		await expect(
-			providerSettingsManager.getProfile({ id: "missing-id" }),
-		).rejects.toBeInstanceOf(ProviderSettingsNotFoundError)
-		await expect(
-			providerSettingsManager.getProfile({ id: "missing-id" }),
-		).rejects.toThrow("Config with ID 'missing-id' not found")
-	})
+			// The id branch is the one the mode mapping and deleteProviderProfile hit: a stale
+			// mode -> id mapping must surface as a not-found the caller can prune, not as a
+			// generic failure that gets re-wrapped as unexpected.
+			await expect(providerSettingsManager.getProfile({ id: "missing-id" })).rejects.toBeInstanceOf(
+				ProviderSettingsNotFoundError,
+			)
+			await expect(providerSettingsManager.getProfile({ id: "missing-id" })).rejects.toThrow(
+				"Config with ID 'missing-id' not found",
+			)
+		})
 
 		it("should throw error if secrets storage fails", async () => {
 			mockSecrets.get.mockResolvedValue(
