@@ -170,7 +170,8 @@ function _scopeErrorCode(error: unknown): string | undefined {
  */
 async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJsonOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
-	let releaseLock = async () => {} // Initialized to a no-op
+	// One release per lock acquired, kept in acquisition order and released in reverse below.
+	let releaseLocks: Array<() => Promise<void>> = []
 
 	// For directory creation
 	const dirPath = path.dirname(absoluteFilePath)
@@ -187,6 +188,17 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// commit rename - so the walk tolerates a dangling link instead of rejecting it
 	// here.
 	const lockKey = await resolveLockKey(absoluteFilePath)
+
+	// A default (unconfined) write replaces the link itself, so the identity it publishes through is
+	// the requested path, while resolveLockKey names the referent. Holding only the referent lock
+	// would let a writer that queues behind this one - which resolves to the link path once this
+	// commit is done, not to the referent - overlap with it, and their merge reads would overwrite
+	// each other. Lock both identities when they differ. A confined caller publishes through the
+	// referent, so it keeps the single referent lock that already serializes it against writers that
+	// name the referent directly.
+	const publishOverLink = options?.confineTo === undefined
+	const linkPathLockKey = absoluteFilePath
+	const lockKeys = publishOverLink && linkPathLockKey !== lockKey ? [lockKey, linkPathLockKey].sort() : [lockKey]
 
 	// Confinement, if the caller declared a scope, is checked before ANY filesystem
 	// side effect of this call: the directory creation below would otherwise create a
@@ -209,10 +221,22 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		throw dirError
 	}
 
-	// Acquire the lock before any file operations. If acquisition fails it throws
-	// immediately, and releaseLock stays a no-op so the finally block does not try
-	// to release an unacquired lock.
-	releaseLock = await acquireFileLock(lockKey)
+	// Acquire the locks before any file operations, in sorted key order: two writers approaching
+	// the same pair of identities from opposite sides must not deadlock. If an acquisition fails,
+	// anything already acquired is released here - the protected block has not started yet, so its
+	// finally would not, and a held lock outlives this call until the stale timeout.
+	const acquired: Array<() => Promise<void>> = []
+	try {
+		for (const key of lockKeys) {
+			acquired.push(await acquireFileLock(key))
+		}
+	} catch (lockError) {
+		for (const release of [...acquired].reverse()) {
+			await release().catch(() => undefined)
+		}
+		throw lockError
+	}
+	releaseLocks = acquired
 
 	// Variables to hold the actual path of the temp file if it is created.
 	let actualTempNewFilePath: string | null = null
@@ -232,7 +256,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// redirect a default write (McpHub passes no scope) onto a file nobody authorized, which is
 		// the boundary the confined callers exist to protect. A default write therefore replaces the
 		// link itself, as this primitive did before it resolved links at all.
-		resolvedTargetPath = options?.confineTo ? await resolvePublishTarget(absoluteFilePath) : absoluteFilePath
+		resolvedTargetPath = publishOverLink ? absoluteFilePath : await resolvePublishTarget(absoluteFilePath)
 
 		// Confinement, if the caller declared a scope. Both sides are canonicalized the
 		// same way: the publish target is resolved through symlinks, and a target that
@@ -307,7 +331,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			expectedAncestorIdentities: confinedAncestors,
 			// A write with no declared scope replaces the link rather than writing through it, so the
 			// publish must not re-resolve the path it is handed below.
-			publishOverLink: options?.confineTo === undefined,
+			publishOverLink,
 		}
 
 		await safeWriteText(resolvedTargetPath, "", textOptions)
@@ -370,11 +394,14 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		throw originalError // This MUST be the error that rejects the promise.
 	} finally {
-		// Release the lock in the main finally block.
-		try {
-			await releaseLock()
-		} catch (unlockError) {
-			console.error(`Failed to release lock for ${resolvedTargetPath ?? absoluteFilePath}:`, unlockError)
+		// Release in the reverse of the acquisition order, and release every lock that was acquired
+		// even if an earlier release threw: a lock this call took must not be left held.
+		for (const release of [...releaseLocks].reverse()) {
+			try {
+				await release()
+			} catch (unlockError) {
+				console.error(`Failed to release lock for ${resolvedTargetPath ?? absoluteFilePath}:`, unlockError)
+			}
 		}
 	}
 }
