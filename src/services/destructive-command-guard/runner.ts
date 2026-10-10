@@ -55,7 +55,13 @@ export function runDcg(binaryPath: string, command: string, cwd: string): Promis
 		const timer = setTimeout(() => fail(new Error("DCG evaluation timed out")), DCG_RUN_TIMEOUT_MS)
 		child.stdout?.on("data", (chunk: Buffer) => (stdout = appendOutputOrFail(stdout, chunk)))
 		child.stderr?.on("data", (chunk: Buffer) => (stderr = appendOutputOrFail(stderr, chunk)))
-		child.on("error", (error) => fail(new Error(`Unable to start DCG: ${error.message}`)))
+		child.on("error", (error) =>
+			fail(
+				new Error(
+					`Unable to start DCG executable '${binaryPath}' in working directory '${cwd}': ${error.message}`,
+				),
+			),
+		)
 		child.on("close", (code, signal) => {
 			if (settled) return
 			if (signal || (code !== 0 && code !== 1)) {
