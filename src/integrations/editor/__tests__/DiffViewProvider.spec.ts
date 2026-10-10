@@ -1088,7 +1088,17 @@ describe("DiffViewProvider", () => {
 			vi.mocked(fs.access).mockRejectedValue({ code: "ENOENT" })
 			vi.mocked(computeVersionToken).mockResolvedValue("v1")
 
-			await diffViewProvider.saveDirectly("../outside.ts", "new content", false, true, 1000, "create", undefined, true, path.resolve(mockCwd, "../outside.ts"))
+			await diffViewProvider.saveDirectly(
+				"../outside.ts",
+				"new content",
+				false,
+				true,
+				1000,
+				"create",
+				undefined,
+				true,
+				path.resolve(mockCwd, "../outside.ts"),
+			)
 
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
 			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/../outside.ts`, "new content")
@@ -1477,7 +1487,9 @@ describe("DiffViewProvider", () => {
 			// openDiffEditor resolves from the document-open event, so fire it.
 			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
 				setTimeout(() => {
-					callback({ uri: { fsPath: `${mockCwd}/test.txt`, scheme: "file" } } as unknown as vscode.TextDocument)
+					callback({
+						uri: { fsPath: `${mockCwd}/test.txt`, scheme: "file" },
+					} as unknown as vscode.TextDocument)
 				}, 0)
 				return { dispose: vi.fn() }
 			})
@@ -1506,9 +1518,7 @@ describe("DiffViewProvider", () => {
 			// The preview did record an observation - that is the entry under test.
 			expect(mockTask.observationRegistry.has(`${mockCwd}/test.txt`)).toBe(true)
 
-			await expect(diffViewProvider.saveChanges(false, 0, "edit")).rejects.toThrow(
-				/File not read yet/,
-			)
+			await expect(diffViewProvider.saveChanges(false, 0, "edit")).rejects.toThrow(/File not read yet/)
 			expect(safeWriteText).not.toHaveBeenCalled()
 			// The preview's authorization was withdrawn rather than left behind.
 			expect(mockTask.observationRegistry.has(`${mockCwd}/test.txt`)).toBe(false)

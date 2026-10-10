@@ -106,12 +106,7 @@ async function _resolveScopeRoot(confineTo: string): Promise<string> {
  */
 function _escapesScope(scopeRoot: string, candidate: string): boolean {
 	const relative = path.relative(scopeRoot, candidate)
-	return (
-		relative === "" ||
-		relative === ".." ||
-		relative.startsWith(".." + path.sep) ||
-		path.isAbsolute(relative)
-	)
+	return relative === "" || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)
 }
 
 function _scopeErrorCode(error: unknown): string | undefined {
