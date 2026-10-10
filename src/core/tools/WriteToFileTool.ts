@@ -16,6 +16,7 @@ import { convertNewFileToUnifiedDiff, computeDiffStats, sanitizeUnifiedDiff } fr
 import type { ToolUse } from "../../shared/tools"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
+import { canonicalizeForApproval } from "./guardedWrite"
 
 interface WriteToFileParams {
 	path: string
@@ -86,7 +87,6 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 		const fullPath = relPath ? path.resolve(task.cwd, relPath) : ""
 		const isOutsideWorkspace = isPathOutsideWorkspace(fullPath)
-
 		const sharedMessageProps: ClineSayTool = {
 			tool: fileExists ? "editedExistingFile" : "newFileCreated",
 			path: getReadablePath(task.cwd, relPath),
@@ -96,6 +96,14 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		}
 
 		try {
+			// Captured before the approval is asked: guardedWrite binds the publish to this
+			// identity, so a name repointed between the approval and the publish is refused
+			// instead of publishing to whatever the name points at by then. Inside the try so a
+			// target that cannot be resolved goes through the tool's normal error handling
+			// (handleError and the diff-view reset) instead of escaping the write flow.
+			const approvedCanonicalTarget = isOutsideWorkspace
+				? await canonicalizeForApproval(absolutePath, relPath)
+				: undefined
 			task.consecutiveMistakeCount = 0
 
 			const provider = task.providerRef.deref()
@@ -132,7 +140,21 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					return
 				}
 
-				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
+				// Guarded publish: this write carries the complete file content, so it uses
+				// create-guard semantics (unobserved targets may only be created when absent).
+				await task.diffViewProvider.saveDirectly(
+					relPath,
+					newContent,
+					false,
+					diagnosticsEnabled,
+					writeDelayMs,
+					"create",
+					// Seventh parameter is completeOverride (this call claims no completeness of its
+					// own); the eighth is the approval flag for a target outside every workspace root.
+					undefined,
+					isOutsideWorkspace,
+					approvedCanonicalTarget,
+				)
 			} else {
 				if (!task.diffViewProvider.isEditing) {
 					const partialMessage = JSON.stringify(sharedMessageProps)
@@ -164,7 +186,13 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					return
 				}
 
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+				await task.diffViewProvider.saveChanges(
+					diagnosticsEnabled,
+					writeDelayMs,
+					undefined,
+					isOutsideWorkspace,
+					approvedCanonicalTarget,
+				)
 			}
 
 			if (relPath) {

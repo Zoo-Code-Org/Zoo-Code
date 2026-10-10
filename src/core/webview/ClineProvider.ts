@@ -123,6 +123,7 @@ import {
 	saveApiMessages,
 	saveTaskMessages,
 	TaskHistoryStore,
+	TaskHistoryDeleteError,
 	abandonDelegatedChild,
 	completeDelegatedChild,
 	delegateTaskToChild,
@@ -193,6 +194,40 @@ function scheduleTask(
 
 type GetStateOptions = {
 	includeTaskHistory?: boolean
+}
+
+/**
+ * Remove the artifacts that belong to deleted tasks: the shadow-checkpoint repository
+ * branch and the task directory. Both are best-effort per task, matching the
+ * pre-existing behaviour, so one stubborn task does not strand the others.
+ *
+ * A free function rather than a private method: deleteTaskWithId is also invoked against
+ * partially-built receivers (the delegation specs call the prototype method with a stub
+ * `this`), where a method lookup on the receiver would fail.
+ */
+async function removeTaskArtifacts(taskIds: string[], globalStorageDir: string, workspaceDir: string): Promise<void> {
+	const { getTaskDirectoryPath } = await import("../../utils/storage")
+
+	for (const taskId of taskIds) {
+		try {
+			await ShadowCheckpointService.deleteTask({ taskId, globalStorageDir, workspaceDir })
+		} catch (error) {
+			console.error(
+				`[deleteTaskWithId${taskId}] failed to delete associated shadow repository or branch: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+
+		// Delete the task directory
+		try {
+			const dirPath = await getTaskDirectoryPath(globalStorageDir, taskId)
+			await fs.rm(dirPath, { recursive: true, force: true })
+			console.log(`[deleteTaskWithId${taskId}] removed task directory`)
+		} catch (error) {
+			console.error(
+				`[deleteTaskWithId${taskId}] failed to remove task directory: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+	}
 }
 
 export class ClineProvider
@@ -2370,36 +2405,41 @@ export class ClineProvider
 			}
 
 			// Delete all tasks from state in one batch
-			await this.taskHistoryStore.deleteMany(allIdsToDelete)
+			try {
+				await this.taskHistoryStore.deleteMany(allIdsToDelete)
+			} catch (error) {
+				if (error instanceof TaskHistoryDeleteError) {
+					// The error carries the ids that could NOT be removed; the rest are already
+					// gone from the store. Without this cleanup the webview keeps listing tasks
+					// that no longer exist, and the shadow repositories and task directories of
+					// the deleted ones are never removed. Clean up the successful ids first, then
+					// surface the batch failure to the caller.
+					const failed = new Set(error.taskIds)
+					this.recentTasksCache = undefined
+					// Artifacts first: deleteMany already dropped the successful ids from the store,
+					// so a webview post that rejects must not strand their checkpoint repositories
+					// and task directories. The caller needs the batch error, not a state-post
+					// failure, so the post is best-effort here.
+					await removeTaskArtifacts(
+						allIdsToDelete.filter((taskId: string) => !failed.has(taskId)),
+						this.contextProxy.globalStorageUri.fsPath,
+						this.cwd,
+					)
+					try {
+						await this.postStateToWebview()
+					} catch (stateError) {
+						console.error(
+							`[deleteTaskWithId] failed to post state after a partial task delete: ${
+								stateError instanceof Error ? stateError.message : String(stateError)
+							}`,
+						)
+					}
+				}
+				throw error
+			}
 			this.recentTasksCache = undefined
 
-			// Delete associated shadow repositories or branches and task directories
-			const globalStorageDir = this.contextProxy.globalStorageUri.fsPath
-			const workspaceDir = this.cwd
-			const { getTaskDirectoryPath } = await import("../../utils/storage")
-			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
-
-			for (const taskId of allIdsToDelete) {
-				try {
-					await ShadowCheckpointService.deleteTask({ taskId, globalStorageDir, workspaceDir })
-				} catch (error) {
-					console.error(
-						`[deleteTaskWithId${taskId}] failed to delete associated shadow repository or branch: ${error instanceof Error ? error.message : String(error)}`,
-					)
-				}
-
-				// Delete the task directory
-				try {
-					const dirPath = await getTaskDirectoryPath(globalStoragePath, taskId)
-					await fs.rm(dirPath, { recursive: true, force: true })
-					console.log(`[deleteTaskWithId${taskId}] removed task directory`)
-				} catch (error) {
-					console.error(
-						`[deleteTaskWithId${taskId}] failed to remove task directory: ${error instanceof Error ? error.message : String(error)}`,
-					)
-				}
-			}
-
+			await removeTaskArtifacts(allIdsToDelete, this.contextProxy.globalStorageUri.fsPath, this.cwd)
 			await this.postStateToWebview()
 		} catch (error) {
 			// If task is not found, just remove it from state

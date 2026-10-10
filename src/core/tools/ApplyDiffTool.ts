@@ -5,6 +5,8 @@ import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { getReadablePath } from "../../utils/path"
+import { isPathOutsideWorkspace } from "../../utils/pathUtils"
+import { versionTokenOfStat } from "../../utils/versionToken"
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
 import { fileExistsAtPath } from "../../utils/fs"
@@ -14,6 +16,7 @@ import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { computeDiffStats, sanitizeUnifiedDiff } from "../diff/stats"
 import type { ToolUse } from "../../shared/tools"
 
+import { canonicalizeForApproval } from "./guardedWrite"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 
 interface ApplyDiffParams {
@@ -68,7 +71,32 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				return
 			}
 
+			// The diff below is built from this exact read, so the save that follows must be
+			// authorized against the version captured here - not against whatever version the
+			// preview happens to stat afterwards. Same contract as ApplyPatchTool's hunk read:
+			// stat around the read and observe only when the file did not change underneath it.
+			const preReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 			const originalContent: string = await fs.readFile(absolutePath, "utf-8")
+			const postReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+			if (preReadStats && postReadStats) {
+				const preReadToken = versionTokenOfStat(preReadStats)
+				if (preReadToken === versionTokenOfStat(postReadStats)) {
+					// A tool read is not a model read. With no prior observation this stays a
+					// partial observation of the version the diff was computed against - the only
+					// authorization the save can have, since apply_diff computes its hunks from
+					// this read. When the model already observed the file, keep the completeness it
+					// earned, but only on the version it was earned on: refreshing an OLDER
+					// observation to the current version would let content the model built from a
+					// stale read pass the compare-and-swap, so an out-of-date observation is left
+					// alone and the save fails with the re-read remediation.
+					const prior = task.observationRegistry.get(absolutePath)
+					if (prior === undefined) {
+						task.observationRegistry.observe(absolutePath, preReadToken, false)
+					} else if (prior.version === preReadToken) {
+						task.observationRegistry.observe(absolutePath, preReadToken, prior.complete === true)
+					}
+				}
+			}
 
 			// Apply the diff to the original content
 			const diffResult = (await task.diffStrategy?.applyDiff(
@@ -138,10 +166,24 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 			// Check if file is write-protected
 			const isWriteProtected = task.rooProtectedController?.isWriteProtected(relPath) || false
 
+			// The guard in guardedWrite refuses a target outside every workspace root unless the tool
+			// layer says the user approved this one, and it binds the publish to the identity that was
+			// approved. apply_diff has both save paths behind an askApproval, so it has to carry both
+			// through; without them an approved write outside the workspace is rejected by its own guard.
+			const isOutsideWorkspace = isPathOutsideWorkspace(absolutePath)
+			// Captured before the approval is asked: guardedWrite binds the publish to this identity, so
+			// a name repointed between the approval and the publish is refused instead of publishing to
+			// whatever the name points at by then. Inside the try so an unresolvable target goes through
+			// the tool's normal error handling and the diff-view reset.
+			const approvedCanonicalTarget = isOutsideWorkspace
+				? await canonicalizeForApproval(absolutePath, relPath)
+				: undefined
+
 			const sharedMessageProps: ClineSayTool = {
 				tool: "appliedDiff",
 				path: getReadablePath(task.cwd, relPath),
 				diff: diffContent,
+				isOutsideWorkspace,
 			}
 
 			if (isPreventFocusDisruptionEnabled) {
@@ -173,7 +215,8 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					return
 				}
 
-				// Save directly without showing diff view or opening the file
+				// Save directly without showing diff view or opening the file. The diff is
+				// applied to an existing file, so edit-guard semantics require a prior read.
 				task.diffViewProvider.editType = "modify"
 				task.diffViewProvider.originalContent = originalContent
 				await task.diffViewProvider.saveDirectly(
@@ -182,6 +225,12 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					false,
 					diagnosticsEnabled,
 					writeDelayMs,
+					"edit",
+					// Seventh parameter is completeOverride (this call claims no completeness of its
+					// own); the eighth is the approval flag for a target outside every workspace root.
+					undefined,
+					isOutsideWorkspace,
+					approvedCanonicalTarget,
 				)
 			} else {
 				// Original behavior with diff view
@@ -221,7 +270,13 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				}
 
 				// Call saveChanges to update the DiffViewProvider properties
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+				await task.diffViewProvider.saveChanges(
+					diagnosticsEnabled,
+					writeDelayMs,
+					"edit",
+					isOutsideWorkspace,
+					approvedCanonicalTarget,
+				)
 			}
 
 			// Track file edit operation

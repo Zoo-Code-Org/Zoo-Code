@@ -26,6 +26,16 @@ vi.mock("delay", () => ({
 	default: vi.fn(),
 }))
 
+// The focus-disruption save path reads the original file content via fs.readFile.
+vi.mock("fs/promises", () => ({
+	// guardedWrite resolves the target through a namespace import, so the double has
+	// to expose realpath as a named export as well as on the default object.
+	realpath: vi.fn(async (p: string) => String(p)),
+	default: {
+		readFile: vi.fn().mockResolvedValue("original content"),
+	},
+}))
+
 vi.mock("../../../utils/fs", () => ({
 	fileExistsAtPath: vi.fn().mockResolvedValue(false),
 	createDirectoriesForFile: vi.fn().mockResolvedValue([]),
@@ -156,6 +166,11 @@ describe("writeToFileTool", () => {
 				userEdits: null,
 				finalContent: "final content",
 			}),
+			saveDirectly: vi.fn().mockResolvedValue({
+				newProblemsMessage: "",
+				userEdits: undefined,
+				finalContent: "final content",
+			}),
 			scrollToFirstDiff: vi.fn(),
 			updateDiagnosticSettings: vi.fn(),
 			pushToolWriteResult: vi.fn().mockImplementation(async function (
@@ -187,6 +202,7 @@ describe("writeToFileTool", () => {
 		mockCline.say = vi.fn().mockResolvedValue(undefined)
 		mockCline.ask = vi.fn().mockResolvedValue(undefined)
 		mockCline.recordToolError = vi.fn()
+		mockCline.processQueuedMessages = vi.fn()
 		mockCline.sayAndCreateMissingParamError = vi.fn().mockResolvedValue("Missing param error")
 
 		mockAskApproval = vi.fn().mockResolvedValue(true)
@@ -204,6 +220,7 @@ describe("writeToFileTool", () => {
 			fileExists?: boolean
 			isPartial?: boolean
 			accessAllowed?: boolean
+			experiments?: Record<string, boolean>
 		} = {},
 	): Promise<ToolResponse | undefined> {
 		// Configure mocks based on test scenario
@@ -213,6 +230,13 @@ describe("writeToFileTool", () => {
 
 		mockedFileExistsAtPath.mockResolvedValue(fileExists)
 		mockCline.rooIgnoreController.validateAccess.mockReturnValue(accessAllowed)
+		mockCline.providerRef.deref.mockReturnValue({
+			getState: vi.fn().mockResolvedValue({
+				diagnosticsEnabled: true,
+				writeDelayMs: 1000,
+				experiments: options.experiments ?? {},
+			}),
+		})
 
 		// Create a tool use object
 		const toolUse: ToolUse = {
@@ -447,6 +471,106 @@ describe("writeToFileTool", () => {
 				"user_feedback_diff",
 				expect.stringContaining("editedExistingFile"),
 			)
+		})
+	})
+
+	describe("guarded write (S4b, epic #1375)", () => {
+		const focusDisruption = { preventFocusDisruption: true }
+
+		it("publishes through saveDirectly with create kind when the write is approved", async () => {
+			const result = await executeWriteFileTool({}, { fileExists: true, experiments: focusDisruption })
+
+			expect(mockCline.diffViewProvider.saveDirectly).toHaveBeenCalledWith(
+				testFilePath,
+				testContent,
+				false,
+				true,
+				1000,
+				"create",
+				undefined,
+				false,
+				undefined,
+			)
+			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockCline.fileContextTracker.trackFileContext).toHaveBeenCalledWith(testFilePath, "roo_edited")
+			expect(mockCline.didEditFile).toBe(true)
+			expect(mockCline.consecutiveMistakeCount).toBe(0)
+			expect(result).toBe("Tool result message")
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("forwards an approved outside-workspace write as approved, not as completeness", async () => {
+			// Both trailing parameters are boolean | undefined, so only an assertion on the
+
+			// positions catches a swap: seventh is completeOverride, eighth is the approval
+
+			// flag.
+
+			mockedIsPathOutsideWorkspace.mockReturnValue(true)
+			try {
+				await executeWriteFileTool({}, { fileExists: true, experiments: focusDisruption })
+				const args = mockCline.diffViewProvider.saveDirectly.mock.calls.at(-1)!
+				expect(args[6]).toBeUndefined()
+				expect(args[7]).toBe(true)
+			} finally {
+				// The flag is a module mock. A reset after the assertions only runs when they pass;
+				// a failing assertion would leave it true and the following tests would then fail for
+				// the wrong reason.
+				mockedIsPathOutsideWorkspace.mockReturnValue(false)
+			}
+		})
+
+		it("routes an outside-workspace target that cannot be resolved through the tool's error handling", async () => {
+			// The identity capture runs before the approval is asked, so a target whose
+			// resolution fails must not escape the write flow: it has to reach handleError and
+			// the diff-view reset like every other failure of this tool, and it must not get
+			// as far as asking the user about a path that cannot be checked.
+			const { realpath } = await import("fs/promises")
+			vi.mocked(realpath).mockRejectedValue({ code: "EPERM" })
+			mockedIsPathOutsideWorkspace.mockReturnValue(true)
+			try {
+				await executeWriteFileTool({}, { fileExists: true, experiments: focusDisruption })
+
+				expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+				expect(mockCline.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
+			} finally {
+				// Restore both doubles here rather than after the assertions: a failing assertion would
+				// leave realpath rejecting and the target flagged outside-workspace, and every later
+				// test in this file - which assumes an in-workspace target that resolves to itself -
+				// would then fail for the wrong reason. The test above this one uses the same pattern.
+				vi.mocked(realpath).mockImplementation(async (p) => String(p))
+				mockedIsPathOutsideWorkspace.mockReturnValue(false)
+			}
+		})
+
+		it("surfaces the unobserved-existing remediation as a tool error and publishes nothing", async () => {
+			const guardError = new Error(
+				`File already exists at ${absoluteFilePath} and was not read before this write -- read the file first, then retry.`,
+			)
+			mockCline.diffViewProvider.saveDirectly.mockRejectedValue(guardError)
+
+			const result = await executeWriteFileTool({}, { fileExists: true, experiments: focusDisruption })
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", guardError)
+			expect(result).toBeUndefined()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockCline.didEditFile).toBe(false)
+		})
+
+		it("surfaces the stale-version remediation as a tool error and publishes nothing", async () => {
+			const guardError = new Error(
+				"Stale version -- the file changed since you read it (expected v1, current v2); re-read the file, then retry.",
+			)
+			mockCline.diffViewProvider.saveDirectly.mockRejectedValue(guardError)
+
+			const result = await executeWriteFileTool({}, { fileExists: true, experiments: focusDisruption })
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", guardError)
+			expect(result).toBeUndefined()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			expect(mockCline.didEditFile).toBe(false)
 		})
 	})
 
