@@ -14,7 +14,7 @@ function buildTask(getState: () => Promise<Record<string, unknown>>) {
 	task["abort"] = false
 	task["clineMessages"] = []
 	task["lastMessageTs"] = undefined
-	task["addToClineMessages"] = vi.fn(async () => {})
+	task["addToClineMessages"] = vi.fn(async () => true)
 	task["saveClineMessages"] = vi.fn(async () => true)
 	task["updateClineMessage"] = vi.fn(async () => {})
 	// Double assertion: `providerRef` is a `WeakRef<ClineProvider>`; `Task.ask` only calls `deref()` and `getState()`.

@@ -59,7 +59,7 @@ describe("CodebaseSearchTool", () => {
 			sayAndCreateMissingParamError: vi
 				.fn<Task["sayAndCreateMissingParamError"]>()
 				.mockResolvedValue("missing query"),
-			say: vi.fn<Task["say"]>().mockResolvedValue(undefined),
+			say: vi.fn<Task["say"]>().mockResolvedValue(true),
 			ask: vi.fn<Task["ask"]>().mockResolvedValue({ response: "yesButtonClicked" }),
 		}
 		task = taskStub as Task

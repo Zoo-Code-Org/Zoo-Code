@@ -3,11 +3,32 @@ import * as vscode from "vscode"
 
 import { API } from "../api"
 import { ClineProvider } from "../../core/webview/ClineProvider"
-import { TaskCommandName } from "@roo-code/types"
+import { IpcMessageType, TaskCommandName } from "@roo-code/types"
 import { makeClineProviderFactory } from "../../test-utils/provider"
 
 vi.mock("vscode")
 vi.mock("../../core/webview/ClineProvider")
+
+// Capture the registered IPC TaskCommand handler so a test can drive the
+// dispatch directly. IpcServer dispatches with emit (no promise handling), so
+// a rejected command must be contained inside the listener itself.
+const ipcState = vi.hoisted(() => ({
+	handlers: new Map<string, (...args: unknown[]) => unknown>(),
+	instances: [] as unknown[],
+}))
+
+vi.mock("@roo-code/ipc", () => ({
+	IpcServer: class {
+		listen = vi.fn()
+		send = vi.fn()
+		on = vi.fn((type: string, handler: (...args: unknown[]) => unknown) => {
+			ipcState.handlers.set(type, handler)
+		})
+		constructor(...args: unknown[]) {
+			ipcState.instances.push(args)
+		}
+	},
+}))
 
 describe("API - SendMessage Command", () => {
 	let api: API
@@ -153,5 +174,51 @@ describe("API - SendMessage Command", () => {
 			images,
 		})
 		expect(mockPostMessageToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	it("rejects in headless mode when the task refuses the delivery", async () => {
+		// Arrange: headless flow with an in-flight approval ask — the task
+		// refuses the slot write, and the API caller must see the failure.
+		const submitUserMessage = vi.fn().mockResolvedValue(false)
+		const headlessProvider = {
+			context: {} as vscode.ExtensionContext,
+			postMessageToWebview: mockPostMessageToWebview,
+			on: vi.fn(),
+			getCurrentTaskStack: vi.fn().mockReturnValue([]),
+			getCurrentTask: vi.fn().mockReturnValue({ submitUserMessage }),
+			viewLaunched: false,
+		} as unknown as ClineProvider
+		const headlessApi = new API(mockOutputChannel, headlessProvider, makeClineProviderFactory(), undefined, true)
+
+		// Act + Assert
+		await expect(headlessApi.sendMessage("Hello from headless")).rejects.toThrow(
+			"[API#sendMessage] message was not delivered",
+		)
+		expect(submitUserMessage).toHaveBeenCalledWith("Hello from headless", undefined)
+		expect(mockPostMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	it("contains a rejected headless SendMessage inside the IPC dispatch boundary", async () => {
+		// The task refuses the delivery; the fire-and-forget IPC listener must
+		// swallow and log the rejection instead of leaking an unhandled one.
+		const submitUserMessage = vi.fn().mockResolvedValue(false)
+		const headlessProvider = {
+			context: {} as vscode.ExtensionContext,
+			postMessageToWebview: mockPostMessageToWebview,
+			on: vi.fn(),
+			getCurrentTaskStack: vi.fn().mockReturnValue([]),
+			getCurrentTask: vi.fn().mockReturnValue({ submitUserMessage }),
+			viewLaunched: false,
+		} as unknown as ClineProvider
+		new API(mockOutputChannel, headlessProvider, makeClineProviderFactory(), "/tmp/test-roo-code.sock", true)
+		const handler = ipcState.handlers.get(IpcMessageType.TaskCommand)
+		expect(handler).toBeDefined()
+
+		await expect(
+			handler!("client-1", { commandName: TaskCommandName.SendMessage, data: { text: "hi" } }),
+		).resolves.toBeUndefined()
+
+		// The rejection is contained: logged, not rethrown.
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(expect.stringContaining("[API] SendMessage failed"))
 	})
 })

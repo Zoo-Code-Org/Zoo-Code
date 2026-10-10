@@ -147,9 +147,10 @@ describe("editFileTool", () => {
 		}
 		mockTask.say = vi.fn().mockResolvedValue(undefined)
 		mockTask.ask = vi.fn().mockResolvedValue(undefined)
+		mockTask.discardConsumedQueuedMessage = vi.fn()
 		mockTask.recordToolError = vi.fn()
 		mockTask.recordToolUsage = vi.fn()
-		mockTask.processQueuedMessages = vi.fn()
+		mockTask.processQueuedMessages = vi.fn().mockResolvedValue(undefined)
 		mockTask.sayAndCreateMissingParamError = vi.fn().mockResolvedValue("Missing param error")
 
 		mockAskApproval = vi.fn().mockResolvedValue(true)
@@ -599,6 +600,7 @@ describe("editFileTool", () => {
 			await executeEditFileTool({ old_string: "NonExistent" }, { isPartial: true })
 			await executeEditFileTool({ old_string: "NonExistent" }, { isPartial: true })
 
+			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", queuedMessageId: "queued-finalize" })
 			await executeEditFileTool(
 				{ old_string: "NonExistent" },
 				{ isPartial: false, fileContent: "Line 1\nLine 2\nLine 3" },
@@ -607,6 +609,8 @@ describe("editFileTool", () => {
 			const askCalls = mockTask.ask.mock.calls
 			const hasFinalToolAsk = askCalls.some((call: any[]) => call[0] === "tool" && call[2] === false)
 			expect(hasFinalToolAsk).toBe(true)
+			// The finalize ask consumed a queued message that the tool drops.
+			expect(mockTask.discardConsumedQueuedMessage).toHaveBeenCalledExactlyOnceWith("queued-finalize")
 		})
 
 		it("finalizes a partial tool preview row on no-op success (no changes needed)", async () => {
@@ -620,6 +624,7 @@ describe("editFileTool", () => {
 				{ isPartial: true, fileContent: "Line 1\nLine 2\nLine 3" },
 			)
 
+			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", queuedMessageId: "queued-finalize" })
 			const result = await executeEditFileTool(
 				{ old_string: " Line 2", new_string: "Line 2" },
 				{ isPartial: false, fileContent: "Line 1\nLine 2\nLine 3" },
@@ -629,6 +634,20 @@ describe("editFileTool", () => {
 			const askCalls = mockTask.ask.mock.calls
 			const hasFinalToolAsk = askCalls.some((call: any[]) => call[0] === "tool" && call[2] === false)
 			expect(hasFinalToolAsk).toBe(true)
+			expect(mockTask.discardConsumedQueuedMessage).toHaveBeenCalledExactlyOnceWith("queued-finalize")
+		})
+
+		it("drops nothing when the finalize ask itself rejects", async () => {
+			await executeEditFileTool({ old_string: "NonExistent" }, { isPartial: true })
+			await executeEditFileTool({ old_string: "NonExistent" }, { isPartial: true })
+
+			mockTask.ask.mockRejectedValue(new Error("superseded partial message"))
+			await executeEditFileTool(
+				{ old_string: "NonExistent" },
+				{ isPartial: false, fileContent: "Line 1\nLine 2\nLine 3" },
+			)
+
+			expect(mockTask.discardConsumedQueuedMessage).toHaveBeenCalledExactlyOnceWith(undefined)
 		})
 	})
 
@@ -676,6 +695,27 @@ describe("editFileTool", () => {
 
 			expect(mockHandleError).toHaveBeenCalledWith("edit_file", expect.any(Error))
 			expect(mockTask.diffViewProvider.reset).toHaveBeenCalled()
+		})
+
+		it("logs a queued-message drain failure after a successful edit without changing the tool result", async () => {
+			const drainError = new Error("queued submission failed")
+			mockTask.processQueuedMessages.mockRejectedValue(drainError)
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				const result = await executeEditFileTool()
+
+				// Flush the fire-and-forget drain promise so its rejection is logged.
+				await new Promise((resolve) => setTimeout(resolve, 0))
+
+				expect(result).toBe("Tool result message")
+				expect(mockHandleError).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"[EditFileTool] Failed to process queued messages:",
+					drainError,
+				)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
 		})
 	})
 

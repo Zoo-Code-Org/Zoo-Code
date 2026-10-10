@@ -525,7 +525,7 @@ describe("Task persistence", () => {
 			let saving: Promise<void> | undefined
 
 			try {
-				vi.spyOn(task, "say").mockResolvedValue(undefined)
+				vi.spyOn(task, "say").mockResolvedValue(true)
 				vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked", text: "", images: [] })
 				vi.spyOn(task, "emitFinalTokenUsageUpdate").mockImplementation(() => undefined)
 				vi.spyOn(task, "flushTelemetryInstallment").mockImplementation(() => undefined)
@@ -620,7 +620,7 @@ describe("Task persistence", () => {
 				toolDescription: vi.fn(),
 				toolCallId: completionCallId,
 			}
-			vi.spyOn(task, "say").mockResolvedValue(undefined)
+			vi.spyOn(task, "say").mockResolvedValue(true)
 			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked", text: "", images: [] })
 			vi.spyOn(task, "emitFinalTokenUsageUpdate").mockImplementation(() => undefined)
 			vi.spyOn(task, "flushTelemetryInstallment").mockImplementation(() => undefined)
@@ -690,7 +690,7 @@ describe("Task persistence", () => {
 				toolDescription: vi.fn(),
 				toolCallId: completionCallId,
 			}
-			vi.spyOn(task, "say").mockResolvedValue(undefined)
+			vi.spyOn(task, "say").mockResolvedValue(true)
 			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked", text: "", images: [] })
 			vi.spyOn(task, "emitFinalTokenUsageUpdate").mockImplementation(() => undefined)
 			vi.spyOn(task, "flushTelemetryInstallment").mockImplementation(() => undefined)
@@ -1956,6 +1956,75 @@ describe("Task persistence", () => {
 			expect(mockProvider.clearPendingTaskAction).toHaveBeenCalledWith("child-1", "finish-action")
 			expect(replay).not.toHaveBeenCalled()
 			expect(task.ask).toHaveBeenCalledWith("resume_task")
+		})
+
+		it("persists and acks queued feedback returned by the resume ask before continuing", async () => {
+			mockReadTaskMessages.mockResolvedValue([{ ts: 1, type: "say", say: "text", text: "Child" }])
+			mockReadApiMessages.mockResolvedValue([{ role: "user", content: "resume me" }])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "child-1",
+					number: 1,
+					ts: 1,
+					task: "Child",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+				},
+				startTask: false,
+			})
+			vi.spyOn(task, "ask").mockResolvedValue({
+				response: "messageResponse",
+				text: "queued resume feedback",
+				queuedMessageId: "queued-resume",
+			})
+			const persist = vi.spyOn(task, "persistQueuedFeedbackAndAcknowledge").mockResolvedValue(true)
+			const initiateTaskLoop = vi
+				.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop")
+				.mockResolvedValue(undefined)
+
+			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+
+			expect(persist).toHaveBeenCalledExactlyOnceWith("queued-resume", "queued resume feedback", undefined)
+			// The ack runs before the task loop continues.
+			expect(persist.mock.invocationCallOrder[0]).toBeLessThan(initiateTaskLoop.mock.invocationCallOrder[0])
+			expect(initiateTaskLoop).toHaveBeenCalled()
+		})
+
+		it("stops resumption when the queued resume feedback cannot be persisted", async () => {
+			mockReadTaskMessages.mockResolvedValue([{ ts: 1, type: "say", say: "text", text: "Child" }])
+			mockReadApiMessages.mockResolvedValue([{ role: "user", content: "resume me" }])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "child-1",
+					number: 1,
+					ts: 1,
+					task: "Child",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+				},
+				startTask: false,
+			})
+			vi.spyOn(task, "ask").mockResolvedValue({
+				response: "messageResponse",
+				text: "queued resume feedback",
+				queuedMessageId: "queued-resume",
+			})
+			vi.spyOn(task, "persistQueuedFeedbackAndAcknowledge").mockResolvedValue(false)
+			const initiateTaskLoop = vi
+				.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop")
+				.mockResolvedValue(undefined)
+
+			await expect(getTaskPersistenceAccess(task).resumeTaskFromHistory()).rejects.toThrow(
+				"Failed to persist queued feedback queued-resume",
+			)
+
+			expect(initiateTaskLoop).not.toHaveBeenCalled()
 		})
 
 		it("clears pending metadata after the matching tool result is saved", async () => {

@@ -2307,3 +2307,61 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		expect(TelemetryService.instance.updateTelemetryState).not.toHaveBeenCalled()
 	})
 })
+
+describe("webviewMessageHandler - chat message queue", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vi.mocked(mockClineProvider.getState).mockResolvedValue({} as never)
+	})
+
+	it("routes editQueuedMessage through the same image validation as fresh queued messages", async () => {
+		const { MessageQueueService } = await import("../../message-queue/MessageQueueService")
+		const queue = new MessageQueueService()
+		const added = queue.addMessage("original")!
+		const updateSpy = vi.spyOn(queue, "updateMessage")
+		const editQueuedMessage = vi.fn((id: string, text: string, images?: string[]) =>
+			queue.updateMessage(id, text, images),
+		)
+		vi.mocked(mockClineProvider.getCurrentTask).mockReturnValue({
+			cwd: "/mock/workspace",
+			rooIgnoreController: undefined,
+			messageQueueService: queue,
+			editQueuedMessage,
+		} as unknown as ReturnType<ClineProvider["getCurrentTask"]>)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "editQueuedMessage",
+			payload: { id: added.id, text: "edited", images: [] },
+		})
+
+		// resolveImageMentions is mocked to tag validated payloads; the edited
+		// message must carry the validated images, proving the edit path no
+		// longer bypasses the size/mention validation applied to queueMessage.
+		expect(resolveImageMentions).toHaveBeenCalled()
+		expect(editQueuedMessage).toHaveBeenCalledWith(added.id, "edited", ["data:image/png;base64,from-mention"])
+		expect(updateSpy).toHaveBeenCalledWith(added.id, "edited", ["data:image/png;base64,from-mention"])
+	})
+
+	it("logs, shows an error, and still posts the response when condenseTaskContext rejects", async () => {
+		const condenseError = new Error("Task with id task-1 not found in stack")
+		const providerWithCondense = mockClineProvider as unknown as {
+			condenseTaskContext: ReturnType<typeof vi.fn>
+		}
+		providerWithCondense.condenseTaskContext = vi.fn().mockRejectedValue(condenseError)
+
+		await expect(
+			webviewMessageHandler(mockClineProvider, { type: "condenseTaskContextRequest", text: "task-1" }),
+		).resolves.toBeUndefined()
+
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			"[condenseTaskContextRequest] Failed: Task with id task-1 not found in stack",
+		)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.condense_failed")
+		// The response must still reach the webview so ChatView clears
+		// isCondensing/sendingDisabled when the task vanished mid-request.
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "condenseTaskContextResponse",
+			text: "task-1",
+		})
+	})
+})

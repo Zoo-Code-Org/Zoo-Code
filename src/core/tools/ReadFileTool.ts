@@ -446,15 +446,15 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 			})
 
 			const completeMessage = JSON.stringify({ tool: "readFile", batchFiles } satisfies ClineSayTool)
-			const { response, text, images } = await task.ask("tool", completeMessage, false)
+			const { response, text, images, queuedMessageId } = await task.ask("tool", completeMessage, false)
 
 			if (response === "yesButtonClicked") {
-				if (text) await task.say("user_feedback", text, images)
+				await task.sayUserFeedbackAndAckQueued(text, images, queuedMessageId)
 				filesToApprove.forEach((fr) => {
 					updateFileResult(fr.path, { status: "approved", feedbackText: text, feedbackImages: images })
 				})
 			} else if (response === "noButtonClicked") {
-				if (text) await task.say("user_feedback", text, images)
+				await task.sayUserFeedbackAndAckQueued(text, images, queuedMessageId)
 				task.didRejectTool = true
 				filesToApprove.forEach((fr) => {
 					updateFileResult(fr.path, {
@@ -465,7 +465,9 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					})
 				})
 			} else {
-				// Individual permissions
+				// Individual permissions. A queued message consumed here is free
+				// text, not a permissions payload, so drop it without a write.
+				task.discardConsumedQueuedMessage(queuedMessageId)
 				try {
 					const individualPermissions = JSON.parse(text || "{}")
 					let hasAnyDenial = false
@@ -515,10 +517,10 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				startLine,
 			} satisfies ClineSayTool)
 
-			const { response, text, images } = await task.ask("tool", completeMessage, false)
+			const { response, text, images, queuedMessageId } = await task.ask("tool", completeMessage, false)
 
 			if (response !== "yesButtonClicked") {
-				if (text) await task.say("user_feedback", text, images)
+				await task.sayUserFeedbackAndAckQueued(text, images, queuedMessageId)
 				task.didRejectTool = true
 				updateFileResult(relPath, {
 					status: "denied",
@@ -527,7 +529,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					feedbackImages: images,
 				})
 			} else {
-				if (text) await task.say("user_feedback", text, images)
+				await task.sayUserFeedbackAndAckQueued(text, images, queuedMessageId)
 				updateFileResult(relPath, { status: "approved", feedbackText: text, feedbackImages: images })
 			}
 		}
@@ -712,16 +714,16 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				reason: lineSnippet || undefined,
 			} satisfies ClineSayTool)
 
-			const { response, text, images } = await task.ask("tool", completeMessage, false)
+			const { response, text, images, queuedMessageId } = await task.ask("tool", completeMessage, false)
 
 			if (response !== "yesButtonClicked") {
-				if (text) await task.say("user_feedback", text, images)
+				await task.sayUserFeedbackAndAckQueued(text, images, queuedMessageId)
 				task.didRejectTool = true
 				results.push(`File: ${relPath}\nStatus: Denied by user`)
 				continue
 			}
 
-			if (text) await task.say("user_feedback", text, images)
+			await task.sayUserFeedbackAndAckQueued(text, images, queuedMessageId)
 
 			try {
 				// Check if the path is a directory

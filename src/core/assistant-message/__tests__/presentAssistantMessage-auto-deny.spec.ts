@@ -81,6 +81,7 @@ interface MockTask {
 		}
 	}
 	say: ReturnType<typeof vi.fn>
+	sayUserFeedbackAndAckQueued: ReturnType<typeof vi.fn>
 	ask: ReturnType<typeof vi.fn>
 	pushToolResultToUserContent: ReturnType<typeof vi.fn>
 	getTaskMode: ReturnType<typeof vi.fn>
@@ -119,6 +120,8 @@ function buildMockTask(): MockTask {
 			}),
 		},
 		say: vi.fn().mockResolvedValue(undefined),
+		// The merged askApproval routes feedback through the durable queued ack.
+		sayUserFeedbackAndAckQueued: vi.fn().mockResolvedValue(undefined),
 		ask: vi.fn().mockResolvedValue({ response: "yesButtonClicked" }),
 		pushToolResultToUserContent: vi.fn(),
 		getTaskMode: vi.fn().mockResolvedValue("code"),

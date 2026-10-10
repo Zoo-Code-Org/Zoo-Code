@@ -238,7 +238,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 				isProtected?: boolean,
 				autoApprovalContext?: AutoApprovalContext,
 			) => {
-				const { response, text, images, autoDenyDetail } = await cline.ask(
+				const { response, text, images, queuedMessageId, autoDenyDetail } = await cline.ask(
 					type,
 					partialMessage,
 					false,
@@ -270,8 +270,8 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						return false
 					}
 
+					await cline.sayUserFeedbackAndAckQueued(text, images, queuedMessageId)
 					if (text) {
-						await cline.say("user_feedback", text, images)
 						pushToolResult(formatResponse.toolResult(formatResponse.toolDeniedWithFeedback(text), images))
 					} else {
 						pushToolResult(formatResponse.toolDenied())
@@ -283,8 +283,8 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 				// Store approval feedback to be merged into tool result (GitHub #10465)
 				// Don't push it as a separate tool_result here - that would create duplicates.
 				// The tool will call pushToolResult, which will merge the feedback into the actual result.
+				await cline.sayUserFeedbackAndAckQueued(text, images, queuedMessageId)
 				if (text) {
-					await cline.say("user_feedback", text, images)
 					approvalFeedback = { text, images }
 				}
 
@@ -807,12 +807,18 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 				// If execution is not allowed, notify user and break.
 				if (!repetitionCheck.allowExecution && repetitionCheck.askUser) {
 					// Handle repetition similar to mistake_limit_reached pattern.
-					const { response, text, images } = await cline.ask(
+					const { response, text, images, queuedMessageId } = await cline.ask(
 						repetitionCheck.askUser.messageKey as ClineAsk,
 						repetitionCheck.askUser.messageDetail.replace("{toolName}", block.name),
 					)
 
 					if (response === "messageResponse") {
+						// Durable ack first: the feedback must reach history before
+						// the API turn. When the ack fails the entry is re-queued
+						// for redelivery, and the model must not already have seen
+						// the text (mirrors AttemptCompletionTool's ordering).
+						await cline.sayUserFeedbackAndAckQueued(text, images, queuedMessageId)
+
 						// Add user feedback to userContent.
 						cline.userMessageContent.push(
 							{
@@ -821,9 +827,6 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 							},
 							...formatResponse.imageBlocks(images),
 						)
-
-						// Add user feedback to chat.
-						await cline.say("user_feedback", text, images)
 					}
 
 					// Track tool repetition in telemetry via PostHog exception tracking and event.

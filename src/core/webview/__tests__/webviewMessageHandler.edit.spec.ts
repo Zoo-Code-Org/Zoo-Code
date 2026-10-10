@@ -1,5 +1,6 @@
 import type { Mock } from "vitest"
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import * as vscode from "vscode"
 
 // Mock dependencies first
 vi.mock("vscode", () => ({
@@ -43,6 +44,7 @@ import type { ClineProvider } from "../ClineProvider"
 import type { ClineMessage } from "@roo-code/types"
 import type { ApiMessage } from "../../task-persistence/apiMessages"
 import { MessageManager } from "../../message-manager"
+import { Task } from "../../task/Task"
 
 describe("webviewMessageHandler - Edit Message with Timestamp Fallback", () => {
 	let mockClineProvider: ClineProvider
@@ -394,5 +396,81 @@ describe("webviewMessageHandler - Edit Message with Timestamp Fallback", () => {
 
 		// API history should be truncated from first message at/after edited timestamp (fallback)
 		expect(mockCurrentTask.overwriteApiConversationHistory).toHaveBeenCalledWith([])
+	})
+})
+
+describe("webviewMessageHandler - edit resubmission refusal", () => {
+	let mockClineProvider: ClineProvider
+	let mockCurrentTask: {
+		taskId: string
+		clineMessages: ClineMessage[]
+		apiConversationHistory: ApiMessage[]
+		overwriteClineMessages: ReturnType<typeof vi.fn>
+		overwriteApiConversationHistory: ReturnType<typeof vi.fn>
+		handleWebviewAskResponse: ReturnType<typeof vi.fn>
+		submitUserMessage: ReturnType<typeof vi.fn>
+		messageManager: MessageManager
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+
+		const taskBase = {
+			taskId: "test-task-id",
+			clineMessages: [] as ClineMessage[],
+			apiConversationHistory: [] as ApiMessage[],
+			overwriteClineMessages: vi.fn(),
+			overwriteApiConversationHistory: vi.fn(),
+			handleWebviewAskResponse: vi.fn(),
+			// The task refuses the slot write: an approval ask is in flight.
+			submitUserMessage: vi.fn().mockResolvedValue(false),
+		}
+		mockCurrentTask = {
+			...taskBase,
+			// MessageManager operates on the task's message arrays; the
+			// structural cast stays inside the helper per the test-utils rule.
+			messageManager: new MessageManager(taskBase as unknown as Task),
+		}
+
+		mockClineProvider = {
+			getCurrentTask: vi.fn().mockReturnValue(mockCurrentTask),
+			postMessageToWebview: vi.fn(),
+			postStateToWebview: vi.fn(),
+			contextProxy: {
+				getValue: vi.fn(),
+				setValue: vi.fn(),
+				globalStorageUri: { fsPath: "/mock/storage" },
+			},
+			log: vi.fn(),
+			getState: vi.fn().mockResolvedValue({
+				maxImageFileSize: 5,
+				maxTotalImageSize: 20,
+			}),
+		} as unknown as ClineProvider
+	})
+
+	it("surfaces a refused edit resubmission instead of dropping the edited message", async () => {
+		const userMessageTs = 1000
+		// Mutate the shared array: the MessageManager was constructed against
+		// it, and property reassignment here would not be visible to the
+		// manager's task reference.
+		mockCurrentTask.clineMessages.push({
+			ts: userMessageTs,
+			type: "say",
+			say: "user_feedback",
+			text: "Hello",
+		} as ClineMessage)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "editMessageConfirm",
+			messageTs: userMessageTs,
+			text: "Hello World",
+			restoreCheckpoint: false,
+		})
+
+		// The rewind already happened; the refusal must reach the user as a
+		// visible error instead of vanishing silently.
+		expect(mockCurrentTask.submitUserMessage).toHaveBeenCalledWith("Hello World", [])
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("error_editing_message"))
 	})
 })
