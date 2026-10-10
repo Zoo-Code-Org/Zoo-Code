@@ -391,37 +391,6 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))
 		})
 
-	it("creates a missing parent directory before staging", async () => {
-		const targetPath = "/tmp/test-dir/nested/deeper/target.txt"
-		const dirPath = "/tmp/test-dir/nested/deeper"
-		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-		vi.mocked(fsSync.openSync).mockReturnValue(1)
-
-		await safeWriteText(targetPath, "data")
-
-		expect(fs.mkdir).toHaveBeenCalledWith(dirPath, { recursive: true })
-		expect(fs.access).toHaveBeenCalledWith(dirPath)
-		expect(vi.mocked(fs.mkdir).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(fsSync.openSync).mock.invocationCallOrder[0])
-	})
-
-	it("surfaces a parent directory creation failure before any staging", async () => {
-		const targetPath = "/tmp/test-dir/nested/deeper/target.txt"
-		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-		vi.mocked(fs.mkdir).mockRejectedValue(Object.assign(new Error("EACCES mkdir"), { code: "EACCES" }))
-
-		await expect(safeWriteText(targetPath, "data")).rejects.toThrow("EACCES mkdir")
-		expect(fs.rename).not.toHaveBeenCalled()
-	})
-
-	it("surfaces a parent directory access failure before any staging", async () => {
-		const targetPath = "/tmp/test-dir/nested/deeper/target.txt"
-		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-		vi.mocked(fs.access).mockRejectedValue(Object.assign(new Error("EACCES access"), { code: "EACCES" }))
-
-		await expect(safeWriteText(targetPath, "data")).rejects.toThrow("EACCES access")
-		expect(fs.rename).not.toHaveBeenCalled()
-	})
-
 		it("win32 DACL: when target does not exist, no save/restore/dump", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
@@ -440,6 +409,41 @@ describe("safeWriteText", () => {
 
 			// no dump file created or unlinked
 			expect(fs.unlink).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("parent directory creation", () => {
+		it("creates a missing parent directory before staging", async () => {
+			const targetPath = "/tmp/test-dir/nested/deeper/target.txt"
+			const dirPath = "/tmp/test-dir/nested/deeper"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(targetPath, "data")
+
+			expect(fs.mkdir).toHaveBeenCalledWith(dirPath, { recursive: true })
+			expect(fs.access).toHaveBeenCalledWith(dirPath)
+			expect(vi.mocked(fs.mkdir).mock.invocationCallOrder[0]).toBeLessThan(
+				vi.mocked(fsSync.openSync).mock.invocationCallOrder[0],
+			)
+		})
+
+		it("surfaces a parent directory creation failure before any staging", async () => {
+			const targetPath = "/tmp/test-dir/nested/deeper/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fs.mkdir).mockRejectedValue(Object.assign(new Error("EACCES mkdir"), { code: "EACCES" }))
+
+			await expect(safeWriteText(targetPath, "data")).rejects.toThrow("EACCES mkdir")
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
+
+		it("surfaces a parent directory access failure before any staging", async () => {
+			const targetPath = "/tmp/test-dir/nested/deeper/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fs.access).mockRejectedValue(Object.assign(new Error("EACCES access"), { code: "EACCES" }))
+
+			await expect(safeWriteText(targetPath, "data")).rejects.toThrow("EACCES access")
+			expect(fs.rename).not.toHaveBeenCalled()
 		})
 	})
 
@@ -523,11 +527,7 @@ describe("safeWriteText", () => {
 			// umask 077) and publish a group/world-readable file for a target that never
 			// existed, so the mask has to stay in charge.
 			expect(fsSync.fchmodSync).not.toHaveBeenCalled()
-			expect(fsSync.openSync).toHaveBeenCalledWith(
-				expect.stringContaining("safeWriteText_"),
-				"w",
-				0o644,
-			)
+			expect(fsSync.openSync).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), "w", 0o644)
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 		})
 
@@ -555,10 +555,7 @@ describe("safeWriteText", () => {
 			await safeWriteText(targetPath, "data", { platform: "linux", targetPathIsResolved: true })
 
 			expect(fs.realpath).not.toHaveBeenCalled()
-			expect(fs.rename).toHaveBeenCalledWith(
-				expect.stringContaining("safeWriteText_"),
-				path.resolve(targetPath),
-			)
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), path.resolve(targetPath))
 		})
 
 		it("opens the temp before applying a read-only target's mode (0o444 does not block the open)", async () => {

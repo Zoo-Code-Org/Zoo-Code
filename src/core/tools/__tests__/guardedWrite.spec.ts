@@ -387,18 +387,19 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			})
 		})
 
-		it("evicts settled chain entries - a later write still serializes in order", async () => {
+		it("a write submitted after an earlier one settled still serializes in submission order", async () => {
 			const reg = new ObservationRegistry()
 			reg.observe(abs("evict.txt"), "v1")
 			mockedComputeVersionToken.mockResolvedValue("v1")
 			const task = createMockTask({ observationRegistry: reg })
 
-			// A first write settles; its chain entry is evicted with it.
+			// A first write settles before the next two are submitted.
 			const p1 = guardedWrite(task, "evict.txt", "first", "update")
 			await expect(p1).resolves.toBeUndefined()
 
-			// Two rapid writes submitted after the eviction must still run one
-			// at a time in submission order (the eviction must not drop the
+			// Two rapid writes submitted after that settlement must still run one at a
+			// time in submission order. Whether the settled entry has been evicted from the
+			// path map is not observable from here, so the test does not claim it.
 			// chain for in-flight or just-enqueued links).
 			const order: string[] = []
 			mockedSafeWriteText.mockImplementation(async (_path: string, content: string) => {
@@ -625,7 +626,11 @@ describe("task cancellation (S4a, epic #1375)", () => {
 		await first
 		await expect(second).rejects.toThrow(/was cancelled/)
 		// Only the first write published; the cancelled one touched nothing.
-		expect(mockedSafeWriteText.mock.calls.map(function (call) { return call[1] })).toEqual(["first"])
+		expect(
+			mockedSafeWriteText.mock.calls.map(function (call) {
+				return call[1]
+			}),
+		).toEqual(["first"])
 	})
 
 	it("refuses an already-cancelled task's write before any I/O", async () => {
