@@ -128,6 +128,10 @@ export const stories: Record<string, Story> = {
 		const { ChatTextAreaStory } = await import("@/components/chat/__tests__/ChatTextArea.visual.fixture")
 		return <ChatTextAreaStory />
 	},
+	"chat-row-conversation": async () => {
+		const { ChatRowConversationStory } = await import("@/components/chat/__tests__/ChatRow.visual.fixture")
+		return <ChatRowConversationStory />
+	},
 	"history-empty": async () => {
 		const [{ AppProviders }, { default: HistoryView }] = await Promise.all([
 			import("../AppProviders"),
