@@ -249,13 +249,32 @@ export class ClineProvider
 
 	private recentTasksCache?: string[]
 	public readonly taskHistoryStore: TaskHistoryStore
-	private taskHistoryStoreInitialized = false
+	/**
+	 * Resolves once `initializeTaskHistoryStore` has settled, i.e. after the
+	 * legacy globalState migration has completed (or failed). `taskHistoryStore.initialized`
+	 * resolves before migration runs, so lookups that must observe migrated
+	 * legacy tasks await this gate instead.
+	 */
+	private taskHistoryStoreReady: Promise<void> = Promise.resolve()
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
 	private providerProfileMutationQueue = Promise.resolve()
 	private historyTaskCreationQueue = Promise.resolve()
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
 		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
+	}
+
+	/**
+	 * Await the task-history store readiness gate before enqueueing a
+	 * provider-profile mutation.
+	 *
+	 * The gate is awaited before enqueue (not inside the queued callback) so a
+	 * slow or stuck migration cannot park a mutation inside the serialized
+	 * queue and hold up unrelated mutations behind it. Once the gate settles,
+	 * queued callbacks can assume the store is ready.
+	 */
+	private async awaitTaskHistoryStoreReady(): Promise<void> {
+		await this.taskHistoryStoreReady
 	}
 
 	private enqueueProviderProfileMutation<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -468,6 +487,14 @@ export class ClineProvider
 	 * Initialize the TaskHistoryStore and migrate from globalState if needed.
 	 */
 	private async initializeTaskHistoryStore(): Promise<void> {
+		// Re-arm the readiness gate synchronously so lookups that await it
+		// observe this init attempt, not a previous one. The resolver is
+		// captured per invocation so an overlapping earlier call's finally can
+		// never settle this invocation's gate (or leave its own unsettled).
+		let resolveReady!: () => void
+		this.taskHistoryStoreReady = new Promise<void>((resolve) => {
+			resolveReady = resolve
+		})
 		try {
 			await this.taskHistoryStore.initialize()
 
@@ -480,16 +507,55 @@ export class ClineProvider
 
 				if (legacyHistory.length > 0) {
 					this.log(`[initializeTaskHistoryStore] Migrating ${legacyHistory.length} entries from globalState`)
-					await this.taskHistoryStore.migrateFromGlobalState(legacyHistory)
+
+					if (!(await this.migrateFromGlobalStateWithRetry(legacyHistory))) {
+						// Leave the migration marker unset so the next launch
+						// re-runs migration against the still-idempotent store.
+						// Settle the gate below so waiting lookups cannot hang;
+						// they degrade to the (possibly incomplete) store.
+						this.log(
+							"[initializeTaskHistoryStore] Migration failed after retry; task history may be incomplete this session. Legacy entries remain in globalState and migration will be retried on next launch.",
+						)
+						return
+					}
 				}
 
 				await this.context.globalState.update(migrationKey, true)
 				this.log("[initializeTaskHistoryStore] Migration complete")
 			}
-
-			this.taskHistoryStoreInitialized = true
 		} catch (error) {
 			this.log(`[initializeTaskHistoryStore] Error: ${error instanceof Error ? error.message : String(error)}`)
+		} finally {
+			// Settle the gate even on failure so awaiting lookups can never hang.
+			resolveReady()
+		}
+	}
+
+	/**
+	 * Run the legacy globalState → per-task-file migration, retrying once after
+	 * a failure. Migration writes per entry and skips files that already exist,
+	 * and the caller only sets the migration marker after this returns true, so
+	 * a retry is idempotent and cannot duplicate or skip work. Returns false if
+	 * both attempts fail.
+	 */
+	private async migrateFromGlobalStateWithRetry(taskHistoryEntries: HistoryItem[]): Promise<boolean> {
+		try {
+			await this.taskHistoryStore.migrateFromGlobalState(taskHistoryEntries)
+			return true
+		} catch (firstError) {
+			this.log(
+				`[initializeTaskHistoryStore] Migration failed (${firstError instanceof Error ? firstError.message : String(firstError)}); retrying once`,
+			)
+		}
+
+		try {
+			await this.taskHistoryStore.migrateFromGlobalState(taskHistoryEntries)
+			return true
+		} catch (retryError) {
+			this.log(
+				`[initializeTaskHistoryStore] Migration failed after retry (${retryError instanceof Error ? retryError.message : String(retryError)})`,
+			)
+			return false
 		}
 	}
 
@@ -1713,6 +1779,7 @@ export class ClineProvider
 	 * current task. Pass null to apply only global mode/profile effects for a pending child.
 	 */
 	public async handleModeSwitch(newMode: Mode, targetTask: Task | null | undefined = this.getCurrentTask()) {
+		await this.awaitTaskHistoryStoreReady()
 		return this.enqueueProviderProfileMutation((signal) =>
 			this.handleModeSwitchUnlocked(newMode, targetTask, signal),
 		)
@@ -1731,7 +1798,12 @@ export class ClineProvider
 
 			try {
 				// Update the task history with the new mode first.
-				const taskHistoryItem = this.getTaskHistoryItem(task.taskId)
+				// The queue aborts this mutation after PENDING_OPERATION_TIMEOUT_MS
+				// (including time spent waiting in the queue) and advances; once
+				// aborted it must not resume writing here.
+				if (signal?.aborted) return
+
+				const taskHistoryItem = this.taskHistoryStore.get(task.taskId)
 
 				if (taskHistoryItem) {
 					await this.updateTaskHistory({ ...taskHistoryItem, mode: newMode })
@@ -1878,6 +1950,7 @@ export class ClineProvider
 		activate: boolean = true,
 	): Promise<string | undefined> {
 		try {
+			await this.awaitTaskHistoryStoreReady()
 			return await this.enqueueProviderProfileMutation(async (signal) => {
 				// TODO: Do we need to be calling `activateProfile`? It's not
 				// clear to me what the source of truth should be; in some cases
@@ -1913,7 +1986,7 @@ export class ClineProvider
 					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
 
 					// Keep the current task's sticky provider profile in sync with the newly-activated profile.
-					await this.persistStickyProviderProfileToCurrentTask(name)
+					await this.persistStickyProviderProfileToCurrentTask(name, {}, signal)
 				} else {
 					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
 				}
@@ -1957,8 +2030,10 @@ export class ClineProvider
 	private async persistStickyProviderProfileToCurrentTask(
 		apiConfigName: string,
 		options: { skipCurrentTaskRebuild?: boolean } = {},
+		signal?: AbortSignal,
 	): Promise<void> {
 		if (options.skipCurrentTaskRebuild) return
+		if (signal?.aborted) return
 		const task = this.getCurrentTask()
 		if (!task) {
 			return
@@ -1969,7 +2044,7 @@ export class ClineProvider
 			// been persisted into taskHistory (it will be captured on the next save).
 			task.setTaskApiConfigName(apiConfigName)
 
-			const taskHistoryItem = this.getTaskHistoryItem(task.taskId)
+			const taskHistoryItem = this.taskHistoryStore.get(task.taskId)
 
 			if (taskHistoryItem) {
 				await this.updateTaskHistory({ ...taskHistoryItem, apiConfigName })
@@ -1992,6 +2067,7 @@ export class ClineProvider
 			skipCurrentTaskRebuild?: boolean
 		},
 	) {
+		await this.awaitTaskHistoryStoreReady()
 		return this.enqueueProviderProfileMutation((signal) =>
 			this.activateProviderProfileUnlocked(args, options, signal),
 		)
@@ -2035,7 +2111,7 @@ export class ClineProvider
 		// Update the current task's sticky provider profile, unless this activation is
 		// being used purely as a non-persisting restoration (e.g., reopening a task from history).
 		if (persistTaskHistory) {
-			await this.persistStickyProviderProfileToCurrentTask(name, { skipCurrentTaskRebuild })
+			await this.persistStickyProviderProfileToCurrentTask(name, { skipCurrentTaskRebuild }, signal)
 		}
 
 		if (!skipCurrentTaskRebuild) {
@@ -2225,18 +2301,6 @@ export class ClineProvider
 
 	// Task history
 
-	private getTaskHistoryItem(id: string): HistoryItem | undefined {
-		const historyItem = this.taskHistoryStore.get(id)
-
-		// Once initialization and migration succeed, the file-backed store is authoritative.
-		// Legacy global state is only a fallback while startup is incomplete or has failed.
-		if (historyItem || this.taskHistoryStoreInitialized) {
-			return historyItem
-		}
-
-		return (this.getGlobalState("taskHistory") ?? []).find((item) => item.id === id)
-	}
-
 	async getTaskWithId(id: string): Promise<{
 		historyItem: HistoryItem
 		taskDirPath: string
@@ -2244,7 +2308,10 @@ export class ClineProvider
 		uiMessagesFilePath: string
 		apiConversationHistory: Anthropic.MessageParam[]
 	}> {
-		const historyItem = this.getTaskHistoryItem(id)
+		// Await the migration gate so a legacy task not yet migrated
+		// from globalState is still found.
+		await this.taskHistoryStoreReady
+		const historyItem = this.taskHistoryStore.get(id)
 
 		if (!historyItem) {
 			throw new Error("Task not found")

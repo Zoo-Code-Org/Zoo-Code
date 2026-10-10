@@ -5698,25 +5698,26 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 
 			provider.taskHistoryStore["cache"].set(historyItem.id, historyItem)
 			await provider.taskHistoryStore.delete(historyItem.id)
-			provider["taskHistoryStoreInitialized"] = true
 
 			await expect(provider.getTaskWithId(historyItem.id)).rejects.toThrow("Task not found")
 		})
 
 		it("rejects a missing task before file-backed history initialization", async () => {
-			provider["taskHistoryStoreInitialized"] = false
 			vi.mocked(mockContext.globalState.get).mockReturnValue(undefined)
 			await expect(provider.getTaskWithId("cold-start-missing-task")).rejects.toThrow("Task not found")
 		})
 
 		it("returns empty apiConversationHistory when file is missing", async () => {
-			const historyItem = { id: "missing-api-file-task", task: "test task", ts: Date.now() }
-			vi.mocked(mockContext.globalState.get).mockImplementation((key: string) => {
-				if (key === "taskHistory") {
-					return [historyItem]
-				}
-				return undefined
-			})
+			const historyItem = {
+				id: "missing-api-file-task",
+				task: "test task",
+				ts: Date.now(),
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
 
 			const deleteTaskSpy = vi.spyOn(provider, "deleteTaskFromState")
 
@@ -5728,13 +5729,16 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 		})
 
 		it("returns empty apiConversationHistory when file contains invalid JSON", async () => {
-			const historyItem = { id: "corrupt-api-task", task: "test task", ts: Date.now() }
-			vi.mocked(mockContext.globalState.get).mockImplementation((key: string) => {
-				if (key === "taskHistory") {
-					return [historyItem]
-				}
-				return undefined
-			})
+			const historyItem = {
+				id: "corrupt-api-task",
+				task: "test task",
+				ts: Date.now(),
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
 
 			// Make fileExistsAtPath return true so the read path is exercised
 			const fsUtils = await import("../../../utils/fs")
@@ -5754,6 +5758,457 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 
 			// Restore the spy
 			vi.mocked(fsUtils.fileExistsAtPath).mockRestore()
+		})
+
+		it("waits for legacy globalState migration to complete before serving lookups", async () => {
+			const legacyItem = {
+				id: "legacy-task-1",
+				task: "legacy task",
+				ts: 12345,
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+
+			// Let the store-level initialize resolve so the migration branch runs,
+			// and expose a legacy taskHistory array from globalState.
+			vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue(undefined)
+			vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) =>
+				key === "taskHistory" ? [legacyItem] : undefined) as typeof mockContext.globalState.get)
+
+			// Delay migration: the legacy entry only lands in the store once released.
+			let releaseMigration!: () => void
+			const migrationGate = new Promise<void>((resolve) => {
+				releaseMigration = resolve
+			})
+			vi.spyOn(provider.taskHistoryStore, "migrateFromGlobalState").mockImplementation(async (entries) => {
+				await migrationGate
+				// Mirror the effect migrateFromGlobalState has on the store cache
+				// once each legacy entry has been persisted.
+				for (const entry of entries) {
+					provider.taskHistoryStore["cache"].set(entry.id, entry)
+				}
+			})
+
+			const initPromise = provider["initializeTaskHistoryStore"]()
+			// Relies on the constructor's background init having already settled:
+			// this spec mocks fs/promises but not readdir, so that init fails
+			// fast and its finally fires before this second invocation re-arms the gate.
+
+			let lookupSettled = false
+			const lookup = provider
+				.getTaskWithId("legacy-task-1")
+				.then((result) => {
+					lookupSettled = true
+					return result
+				})
+				.catch((error: unknown) => {
+					lookupSettled = true
+					throw error
+				})
+
+			// While migration is in flight, the lookup must stay gated instead of
+			// throwing "Task not found" for a task the migration has not landed yet.
+			await new Promise((resolve) => setTimeout(resolve, 50))
+			expect(lookupSettled).toBe(false)
+
+			// Once migration completes, the gated lookup resolves with the legacy task.
+			releaseMigration()
+			await initPromise
+
+			await expect(lookup).resolves.toMatchObject({
+				historyItem: expect.objectContaining({ id: "legacy-task-1" }),
+			})
+		})
+	})
+
+	describe("task history store readiness gate", () => {
+		const legacyItem = {
+			id: "legacy-task-1",
+			task: "legacy task",
+			ts: 12345,
+			number: 1,
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		}
+
+		it("handleModeSwitch waits for delayed migration before persisting the mode", async () => {
+			const task = new Task(defaultTaskOptions)
+			const taskLegacyItem = { ...legacyItem, id: task.taskId }
+
+			vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue(undefined)
+			vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) =>
+				key === "taskHistory" ? [taskLegacyItem] : undefined) as typeof mockContext.globalState.get)
+			let releaseMigration!: () => void
+			const migrationGate = new Promise<void>((resolve) => {
+				releaseMigration = resolve
+			})
+			vi.spyOn(provider.taskHistoryStore, "migrateFromGlobalState").mockImplementation(async (entries) => {
+				await migrationGate
+				for (const entry of entries) {
+					provider.taskHistoryStore["cache"].set(entry.id, entry)
+				}
+			})
+
+			const initPromise = provider["initializeTaskHistoryStore"]()
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			const switchPromise = provider.handleModeSwitch("architect", task)
+
+			// The mode must not be persisted while migration is in flight.
+			await new Promise((resolve) => setTimeout(resolve, 50))
+			expect(updateTaskHistorySpy).not.toHaveBeenCalled()
+
+			releaseMigration()
+			await initPromise
+			await switchPromise
+
+			expect(updateTaskHistorySpy).toHaveBeenCalledWith(
+				expect.objectContaining({ id: task.taskId, mode: "architect" }),
+			)
+		})
+
+		it("sticky provider-profile persistence waits for delayed migration", async () => {
+			const task = new Task(defaultTaskOptions)
+			// The Task module is mocked in this spec; provide the method under test.
+			task["setTaskApiConfigName"] = vi.fn()
+			await provider.addClineToStack(task)
+
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "sticky-profile",
+				id: undefined,
+				apiProvider: providerIdentifiers.openrouter,
+			})
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+			provider["updateTaskApiHandlerIfNeeded"] = vi.fn()
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue(undefined)
+			vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) =>
+				key === "taskHistory"
+					? [{ ...legacyItem, id: task.taskId }]
+					: undefined) as typeof mockContext.globalState.get)
+			let releaseMigration!: () => void
+			const migrationGate = new Promise<void>((resolve) => {
+				releaseMigration = resolve
+			})
+			vi.spyOn(provider.taskHistoryStore, "migrateFromGlobalState").mockImplementation(async (entries) => {
+				await migrationGate
+				for (const entry of entries) {
+					provider.taskHistoryStore["cache"].set(entry.id, entry)
+				}
+			})
+
+			const initPromise = provider["initializeTaskHistoryStore"]()
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			const activationPromise = provider.activateProviderProfile({ name: "sticky-profile" })
+
+			// The provider profile must not be persisted while migration is in flight.
+			await new Promise((resolve) => setTimeout(resolve, 50))
+			expect(updateTaskHistorySpy).not.toHaveBeenCalled()
+
+			releaseMigration()
+			await initPromise
+			await activationPromise
+
+			expect(updateTaskHistorySpy).toHaveBeenCalledWith(
+				expect.objectContaining({ id: task.taskId, apiConfigName: "sticky-profile" }),
+			)
+		})
+
+		it("skips sticky persistence when the mutation signal is already aborted", async () => {
+			const task = new Task(defaultTaskOptions)
+			// The Task module is mocked in this spec; provide the method under test.
+			task["setTaskApiConfigName"] = vi.fn()
+			await provider.addClineToStack(task)
+
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			const controller = new AbortController()
+			controller.abort()
+
+			await provider["persistStickyProviderProfileToCurrentTask"]("sticky-profile", {}, controller.signal)
+
+			// The aborted mutation must not touch in-memory or persisted state.
+			expect(task["setTaskApiConfigName"]).not.toHaveBeenCalled()
+			expect(updateTaskHistorySpy).not.toHaveBeenCalled()
+		})
+
+		it("a mode switch held by the readiness gate does not block unrelated queued mutations", async () => {
+			const task = new Task(defaultTaskOptions)
+			const taskLegacyItem = { ...legacyItem, id: task.taskId }
+
+			vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue(undefined)
+			vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) =>
+				key === "taskHistory" ? [taskLegacyItem] : undefined) as typeof mockContext.globalState.get)
+			let releaseMigration!: () => void
+			const migrationGate = new Promise<void>((resolve) => {
+				releaseMigration = resolve
+			})
+			vi.spyOn(provider.taskHistoryStore, "migrateFromGlobalState").mockImplementation(async (entries) => {
+				await migrationGate
+				for (const entry of entries) {
+					provider.taskHistoryStore["cache"].set(entry.id, entry)
+				}
+			})
+
+			const initPromise = provider["initializeTaskHistoryStore"]()
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			const switchPromise = provider.handleModeSwitch("architect", task)
+
+			// The mode switch parks on the gate before it enters the queue, so a
+			// mutation enqueued behind it must still run while migration is in flight.
+			await new Promise((resolve) => setTimeout(resolve, 50))
+			expect(updateTaskHistorySpy).not.toHaveBeenCalled()
+			await expect(
+				provider["enqueueProviderProfileMutation"](async () => "unrelated-mutation-result"),
+			).resolves.toBe("unrelated-mutation-result")
+
+			releaseMigration()
+			await initPromise
+			await switchPromise
+
+			expect(updateTaskHistorySpy).toHaveBeenCalledWith(
+				expect.objectContaining({ id: task.taskId, mode: "architect" }),
+			)
+		})
+
+		it("a profile activation held by the readiness gate does not block unrelated queued mutations", async () => {
+			const task = new Task(defaultTaskOptions)
+			// The Task module is mocked in this spec; provide the method under test.
+			task["setTaskApiConfigName"] = vi.fn()
+			await provider.addClineToStack(task)
+
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "sticky-profile",
+				id: undefined,
+				apiProvider: providerIdentifiers.openrouter,
+			})
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+			provider["updateTaskApiHandlerIfNeeded"] = vi.fn()
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue(undefined)
+			vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) =>
+				key === "taskHistory"
+					? [{ ...legacyItem, id: task.taskId }]
+					: undefined) as typeof mockContext.globalState.get)
+			let releaseMigration!: () => void
+			const migrationGate = new Promise<void>((resolve) => {
+				releaseMigration = resolve
+			})
+			vi.spyOn(provider.taskHistoryStore, "migrateFromGlobalState").mockImplementation(async (entries) => {
+				await migrationGate
+				for (const entry of entries) {
+					provider.taskHistoryStore["cache"].set(entry.id, entry)
+				}
+			})
+
+			const initPromise = provider["initializeTaskHistoryStore"]()
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			const activationPromise = provider.activateProviderProfile({ name: "sticky-profile" })
+
+			// The activation parks on the gate before it enters the queue, so a
+			// mutation enqueued behind it must still run while migration is in flight.
+			await new Promise((resolve) => setTimeout(resolve, 50))
+			expect(updateTaskHistorySpy).not.toHaveBeenCalled()
+			await expect(
+				provider["enqueueProviderProfileMutation"](async () => "unrelated-mutation-result"),
+			).resolves.toBe("unrelated-mutation-result")
+
+			releaseMigration()
+			await initPromise
+			await activationPromise
+
+			expect(updateTaskHistorySpy).toHaveBeenCalledWith(
+				expect.objectContaining({ id: task.taskId, apiConfigName: "sticky-profile" }),
+			)
+		})
+
+		it("settles waiting lookups when store initialization rejects", async () => {
+			vi.spyOn(provider.taskHistoryStore, "initialize").mockRejectedValue(new Error("storage unavailable"))
+			const initPromise = provider["initializeTaskHistoryStore"]()
+
+			// No hang: the lookup settles against the empty store.
+			await expect(provider.getTaskWithId("legacy-task-1")).rejects.toThrow("Task not found")
+			await initPromise
+		})
+
+		it("sets the migration marker on a first-attempt success without retrying", async () => {
+			vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue(undefined)
+			vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) =>
+				key === "taskHistory" ? [legacyItem] : undefined) as typeof mockContext.globalState.get)
+			const migrateSpy = vi
+				.spyOn(provider.taskHistoryStore, "migrateFromGlobalState")
+				.mockImplementation(async (entries) => {
+					for (const entry of entries) {
+						provider.taskHistoryStore["cache"].set(entry.id, entry)
+					}
+				})
+
+			const initPromise = provider["initializeTaskHistoryStore"]()
+			await expect(provider.getTaskWithId("legacy-task-1")).resolves.toMatchObject({
+				historyItem: expect.objectContaining({ id: "legacy-task-1" }),
+			})
+			await initPromise
+
+			expect(migrateSpy).toHaveBeenCalledTimes(1)
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("taskHistoryMigratedToFiles", true)
+		})
+
+		it("retries a failed migration once and only then settles the gate", async () => {
+			vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue(undefined)
+			vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) =>
+				key === "taskHistory" ? [legacyItem] : undefined) as typeof mockContext.globalState.get)
+			let attempts = 0
+			const migrateSpy = vi
+				.spyOn(provider.taskHistoryStore, "migrateFromGlobalState")
+				.mockImplementation(async (entries) => {
+					attempts++
+					if (attempts === 1) {
+						throw new Error("transient lock failure")
+					}
+					for (const entry of entries) {
+						provider.taskHistoryStore["cache"].set(entry.id, entry)
+					}
+				})
+
+			const initPromise = provider["initializeTaskHistoryStore"]()
+
+			// The lookup stays gated across the failed first attempt and resolves
+			// once the retry lands the legacy entry.
+			await expect(provider.getTaskWithId("legacy-task-1")).resolves.toMatchObject({
+				historyItem: expect.objectContaining({ id: "legacy-task-1" }),
+			})
+			await initPromise
+
+			expect(migrateSpy).toHaveBeenCalledTimes(2)
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("taskHistoryMigratedToFiles", true)
+		})
+
+		it("settles the gate with the migration marker unset when migration keeps failing", async () => {
+			vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue(undefined)
+			vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) =>
+				key === "taskHistory" ? [legacyItem] : undefined) as typeof mockContext.globalState.get)
+			const migrateSpy = vi
+				.spyOn(provider.taskHistoryStore, "migrateFromGlobalState")
+				.mockRejectedValue(new Error("persistent disk failure"))
+
+			const initPromise = provider["initializeTaskHistoryStore"]()
+
+			// No hang: the lookup settles against the incomplete store, and the
+			// marker stays unset so the next launch re-runs migration.
+			await expect(provider.getTaskWithId("legacy-task-1")).rejects.toThrow("Task not found")
+			await initPromise
+
+			expect(migrateSpy).toHaveBeenCalledTimes(2)
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("taskHistoryMigratedToFiles", true)
+		})
+
+		it("serves legacy history on the launch after a failed migration", async () => {
+			vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue(undefined)
+			vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) =>
+				key === "taskHistory" ? [legacyItem] : undefined) as typeof mockContext.globalState.get)
+			let attempts = 0
+			vi.spyOn(provider.taskHistoryStore, "migrateFromGlobalState").mockImplementation(async (entries) => {
+				attempts++
+				if (attempts <= 2) {
+					throw new Error("persistent disk failure")
+				}
+				for (const entry of entries) {
+					provider.taskHistoryStore["cache"].set(entry.id, entry)
+				}
+			})
+
+			// First launch: both migration attempts fail; the legacy entries must
+			// remain the migration source for the next launch.
+			const firstInit = provider["initializeTaskHistoryStore"]()
+			await expect(provider.getTaskWithId("legacy-task-1")).rejects.toThrow("Task not found")
+			await firstInit
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("taskHistoryMigratedToFiles", true)
+
+			// Second launch: the untouched legacy history migrates and is served.
+			const secondInit = provider["initializeTaskHistoryStore"]()
+			await expect(provider.getTaskWithId("legacy-task-1")).resolves.toMatchObject({
+				historyItem: expect.objectContaining({ id: "legacy-task-1" }),
+			})
+			await secondInit
+
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("taskHistoryMigratedToFiles", true)
+		})
+
+		it("overlapping initializations settle only their own gate", async () => {
+			// Ensure the constructor's background init has settled so it cannot
+			// consume the per-call initialize implementations below.
+			await new Promise((resolve) => setTimeout(resolve, 10))
+
+			let releaseFirstInit!: () => void
+			const firstInitGate = new Promise<void>((resolve) => {
+				releaseFirstInit = resolve
+			})
+			let releaseSecondInit!: () => void
+			const secondInitGate = new Promise<void>((resolve) => {
+				releaseSecondInit = resolve
+			})
+			vi.spyOn(provider.taskHistoryStore, "initialize")
+				.mockImplementationOnce(async () => {
+					await firstInitGate
+				})
+				.mockImplementationOnce(async () => {
+					await secondInitGate
+				})
+			vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) =>
+				key === "taskHistory" ? [legacyItem] : undefined) as typeof mockContext.globalState.get)
+			vi.spyOn(provider.taskHistoryStore, "migrateFromGlobalState").mockImplementation(async (entries) => {
+				for (const entry of entries) {
+					provider.taskHistoryStore["cache"].set(entry.id, entry)
+				}
+			})
+
+			const firstInit = provider["initializeTaskHistoryStore"]()
+			let firstLookupSettled = false
+			const firstLookup = provider.getTaskWithId("legacy-task-1").then((result) => {
+				firstLookupSettled = true
+				return result
+			})
+
+			const secondInit = provider["initializeTaskHistoryStore"]()
+			let secondLookupSettled = false
+			const secondLookup = provider.getTaskWithId("legacy-task-1").then((result) => {
+				secondLookupSettled = true
+				return result
+			})
+
+			// Releasing the first init settles its own gate only; the re-armed
+			// second gate must stay pending (a shared resolver would settle it
+			// here and hang the first lookup instead).
+			releaseFirstInit()
+			await firstInit
+			await firstLookup
+			expect(firstLookupSettled).toBe(true)
+			expect(secondLookupSettled).toBe(false)
+
+			releaseSecondInit()
+			await secondInit
+			await secondLookup
+			expect(secondLookupSettled).toBe(true)
+		})
+
+		it("does not serve legacy globalState items that never reached the store", async () => {
+			vi.spyOn(provider.taskHistoryStore, "initialize").mockResolvedValue(undefined)
+			// Marker already set (migration ran previously); the write-through
+			// keeps the legacy array in globalState, but lookups must use the
+			// store only — the removed fallback is not consulted.
+			vi.mocked(mockContext.globalState.get).mockImplementation(((key: string) =>
+				key === "taskHistoryMigratedToFiles"
+					? true
+					: key === "taskHistory"
+						? [legacyItem]
+						: undefined) as typeof mockContext.globalState.get)
+
+			await provider["initializeTaskHistoryStore"]()
+
+			await expect(provider.getTaskWithId("legacy-task-1")).rejects.toThrow("Task not found")
 		})
 	})
 
