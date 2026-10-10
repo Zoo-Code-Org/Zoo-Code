@@ -183,7 +183,11 @@ export async function resolvePublishTarget(absoluteFilePath: string): Promise<st
  * default on ENOENT; any other failure is propagated, otherwise a restrictive
  * target (0o600) would be published with the default 0o644 through the rename.
  */
-function errorCode(error: unknown): string | undefined {
+/**
+ * The errno-style code of a filesystem error, or undefined for anything that is not one. Exported
+ * because safeWriteJson asks the same question of the same errors; a second copy of this test drifts.
+ */
+export function errorCode(error: unknown): string | undefined {
 	return typeof error === "object" && error !== null && "code" in error
 		? String((error as { code: unknown }).code)
 		: undefined

@@ -5,6 +5,7 @@ import { JsonStreamStringify } from "json-stream-stringify"
 
 import { acquireFileLock } from "./fileLock"
 import {
+	errorCode,
 	PostCommitDurabilityError,
 	resolveLockKey,
 	resolvePublishTarget,
@@ -77,7 +78,7 @@ async function _resolveScopeRoot(confineTo: string): Promise<string> {
 		// scope cannot be canonicalized at all, and continuing would build a partly
 		// lexical root that can disagree with the canonical target - the failure has to
 		// surface rather than decide the scope from a guess.
-		if (_scopeErrorCode(error) !== "ENOENT") {
+		if (errorCode(error) !== "ENOENT") {
 			throw error
 		}
 		const missing: string[] = []
@@ -93,7 +94,7 @@ async function _resolveScopeRoot(confineTo: string): Promise<string> {
 				const real = await fs.realpath(ancestor)
 				return path.join(real, ...missing.reverse())
 			} catch (innerError: unknown) {
-				if (_scopeErrorCode(innerError) !== "ENOENT") {
+				if (errorCode(innerError) !== "ENOENT") {
 					throw innerError
 				}
 			}
@@ -113,12 +114,6 @@ function _escapesScope(scopeRoot: string, candidate: string): boolean {
 		relative.startsWith(".." + path.sep) ||
 		path.isAbsolute(relative)
 	)
-}
-
-function _scopeErrorCode(error: unknown): string | undefined {
-	return typeof error === "object" && error !== null && "code" in error
-		? (error as { code?: string }).code
-		: undefined
 }
 
 /**
@@ -304,12 +299,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 				// The expected case: safeWriteText already removed its own temp file, so a
 				// missing file here is not a cleanup failure worth logging. Returning would
 				// also swallow the original error the caller needs.
-				const isAbsent =
-					typeof cleanupError === "object" &&
-					cleanupError !== null &&
-					"code" in cleanupError &&
-					cleanupError.code === "ENOENT"
-				if (!isAbsent) {
+				if (errorCode(cleanupError) !== "ENOENT") {
 					console.error(
 						`[Catch] Failed to clean up temporary new file ${newFileToCleanupWithinCatch}:`,
 						cleanupError,
