@@ -5,6 +5,8 @@ import { applyVisualTheme, visualThemes } from "../../../../playwright/themes"
 // The production ChatRow dependency graph can take over 30s to compile on a cold gallery server.
 test.setTimeout(120_000)
 
+const messagesUserText = "Please update the greeting and explain the change."
+
 for (const theme of visualThemes.filter(({ name }) => name === "dark" || name === "light")) {
 	test(`renders user, diff and assistant rows in the ${theme.name} theme`, async ({ page }) => {
 		await page.goto("/")
@@ -28,5 +30,3 @@ for (const theme of visualThemes.filter(({ name }) => name === "dark" || name ==
 		await expect(conversation).toHaveScreenshot(`chat-row-assistant-preview-${theme.name}.png`)
 	})
 }
-
-const messagesUserText = "Please update the greeting and explain the change."
