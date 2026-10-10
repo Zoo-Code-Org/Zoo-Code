@@ -4080,7 +4080,7 @@ describe("ClineProvider", () => {
 			await failingSibling.dispose()
 		})
 
-		it("stops writing durable state once the deletion's abort signal fires", async () => {
+		it("rolls back a deletion that the abort signal cancels after the profile-list write", async () => {
 			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
@@ -4110,8 +4110,8 @@ describe("ClineProvider", () => {
 				saveConfig,
 				getProfile: vi.fn().mockImplementation(async ({ name }) => {
 					// The cancellation lands on the survivor lookup, i.e. after the settings commit
-					// and the profile-list write - the point where the queue has already handed
-					// the turn to the next mutation.
+					// and the profile-list write. The queue is still held by this run, so the rollback
+					// below cannot race a later mutation.
 					if (name === "keeper-profile") {
 						controller.abort()
 					}
@@ -4135,14 +4135,21 @@ describe("ClineProvider", () => {
 				"Profile deletion was cancelled before the selection and settings rewrite",
 			)
 
-			// The list write landed before the cancellation point...
-			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([keeperProfile])
+			// The list write had landed before the cancellation point, and the compensation replays
+			// the snapshot over it: the deletion did not happen, so the list names both profiles again.
+			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([doomedProfile, keeperProfile])
+			// The forward rewrites still stop at the cancellation point: the shared selection and the
+			// shared provider settings were never touched, so there is nothing to undo for them, and
+			// no write is spent on a caller that has already been released.
 			// ...but the shared selection, the shared provider settings and any sibling view's pin
 			// must not be rewritten afterwards, and the rollback must not replay either: the next
 			// queued mutation owns those stores now.
 			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("doomed-profile")
 			expect(provider.contextProxy.getValue("apiProvider")).not.toBe(providerIdentifiers.anthropic)
-			expect(saveConfig).not.toHaveBeenCalled()
+			expect(saveConfig).toHaveBeenCalledWith(
+				"doomed-profile",
+				expect.objectContaining({ openRouterApiKey: "doomed-secret" }),
+			)
 			await provider.dispose()
 		})
 
@@ -4271,6 +4278,60 @@ describe("ClineProvider", () => {
 			})
 			await provider.dispose()
 		})
+	})
+	it("compensates a deletion that the mutation timeout cancelled after the settings commit", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const doomedProfile: ProviderSettingsEntry = {
+			name: "doomed-profile",
+			id: "doomed-id",
+			apiProvider: providerIdentifiers.openrouter,
+		}
+		const keeperProfile: ProviderSettingsEntry = {
+			name: "keeper-profile",
+			id: "keeper-id",
+			apiProvider: providerIdentifiers.anthropic,
+		}
+		const doomedSettings = { apiProvider: providerIdentifiers.openrouter, apiKey: "doomed-key" }
+		const keeperSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "keeper-key" }
+		// The timeout fires while the deletion is between its two durable writes: the abort lands
+		// right after the settings commit, which is the point where a half-applied deletion would
+		// otherwise be left behind in storage.
+		const controller = new AbortController()
+		const saveConfig = vi.fn().mockResolvedValue(undefined)
+		const deleteConfig = vi.fn().mockImplementation(async () => {
+			controller.abort()
+		})
+		// @ts-ignore - Replace providerSettingsManager with a test double.
+		provider.providerSettingsManager = {
+			deleteConfig,
+			saveConfig,
+			getProfile: vi
+				.fn()
+				.mockResolvedValueOnce({ name: "doomed-profile", ...doomedSettings })
+				.mockResolvedValueOnce({ name: "keeper-profile", ...keeperSettings }),
+		}
+		vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+		// The compensation path logs its outcome; silence it so the worker does not race a console
+		// flush against environment teardown.
+		vi.spyOn(provider, "log").mockImplementation(() => {})
+		await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+		await provider.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+
+		await expect(provider["deleteProviderProfileUnlocked"](doomedProfile, controller.signal)).rejects.toThrow(
+			"Profile deletion was cancelled before the profile-list write",
+		)
+
+		// The queue holds every later mutation until this run settles, so a cancelled deletion is
+		// rolled back like a failed one: the settings and the profile list must agree again.
+		expect(saveConfig).toHaveBeenCalledWith("doomed-profile", expect.objectContaining({ apiKey: "doomed-key" }))
+		expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([doomedProfile, keeperProfile])
+		await provider.dispose()
 	})
 
 	describe("local state isolation", () => {
