@@ -3,6 +3,7 @@ import { z, ZodError } from "zod"
 import deepEqual from "fast-deep-equal"
 
 import {
+	type ProviderSettings,
 	type ProviderSettingsWithId,
 	providerSettingsWithIdSchema,
 	discriminatedProviderSettingsWithIdSchema,
@@ -13,12 +14,28 @@ import {
 	type ProviderName,
 	isProviderName,
 	isRetiredProvider,
+	providerIdentifiers,
+	modelIdKeysByProvider,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { Mode, modes } from "../../shared/modes"
 import { buildApiHandler } from "../../api"
 import { downgradeLegacyRooConfig } from "./routerRemoval"
+
+export const RESET_ONLY_KEYS: readonly string[] = [
+	"awsCustomArn",
+	"reasoningEffort",
+	"modelMaxTokens",
+	"modelMaxThinkingTokens",
+]
+
+export interface UpdateProfileModelResult {
+	success: boolean
+	updatedProfile?: ProviderSettingsWithId
+	previousProfile?: ProviderSettingsWithId
+	reason?: "not_found" | "provider_mismatch" | "disallowed"
+}
 
 // Type-safe model migrations mapping
 type ModelMigrations = {
@@ -87,11 +104,25 @@ export class ProviderSettingsManager {
 		return Math.random().toString(36).substring(2, 15)
 	}
 
-	// Synchronize readConfig/writeConfig operations to avoid data loss.
-	private _lock = Promise.resolve()
+	/**
+	 * Process-wide lock serializing profile reads and writes across all ProviderSettingsManager
+	 * instances sharing secretsKey within the extension host process to guarantee persistence integrity.
+	 */
+	private static readonly locks = new Map<string, Promise<void>>()
+	public static resetLocksForTesting(): void {
+		ProviderSettingsManager.locks.clear()
+	}
 	private lock<T>(cb: () => Promise<T>) {
-		const next = this._lock.then(cb)
-		this._lock = next.catch(() => {}) as Promise<void>
+		const key = this.secretsKey
+		const previous = ProviderSettingsManager.locks.get(key) ?? Promise.resolve()
+		const next = previous.then(cb)
+		ProviderSettingsManager.locks.set(
+			key,
+			next.then(
+				() => undefined,
+				() => undefined,
+			),
+		)
 		return next
 	}
 
@@ -374,41 +405,165 @@ export class ProviderSettingsManager {
 		}
 	}
 
+	private normalizeAndFilterConfig(config: ProviderSettingsWithId, id: string): ProviderSettingsWithId {
+		const normalizedConfig = downgradeLegacyRooConfig(config as Record<string, unknown>)
+			.config as ProviderSettingsWithId
+
+		// For active providers, filter out settings from other providers.
+		// For retired providers, preserve full profile fields (including legacy
+		// provider-specific keys) to avoid data loss — passthrough() keeps
+		// unknown keys that strict parse() would strip.
+		const filteredConfig =
+			typeof normalizedConfig.apiProvider === "string" && isRetiredProvider(normalizedConfig.apiProvider)
+				? providerSettingsWithIdSchema.passthrough().parse(normalizedConfig)
+				: discriminatedProviderSettingsWithIdSchema.parse(normalizedConfig)
+		return { ...filteredConfig, id }
+	}
+
 	/**
 	 * Save a config with the given name.
 	 * Preserves the ID from the input 'config' object if it exists,
-	 * otherwise generates a new one (for creation scenarios).
+	/**
+	 * Atomically saves a configuration under the persistence lock, returning the assigned ID,
+	 * whether the profile existed before this save, and a snapshot of the previous configuration.
 	 */
-	public async saveConfig(name: string, config: ProviderSettingsWithId): Promise<string> {
+	public async saveConfigWithPrevious(
+		name: string,
+		config: ProviderSettingsWithId,
+	): Promise<{ id: string; existed: boolean; previousProfile?: ProviderSettingsWithId }> {
 		try {
 			return await this.lock(async () => {
 				const providerProfiles = await this.load()
+				const existing = providerProfiles.apiConfigs[name]
+				const existed = !!existing
+				const previousProfile = existing
+					? (JSON.parse(JSON.stringify(existing)) as ProviderSettingsWithId)
+					: undefined
 				// Preserve the existing ID if this is an update to an existing config.
-				const existingId = providerProfiles.apiConfigs[name]?.id
+				const existingId = existing?.id
 				const id = config.id || existingId || this.generateId()
-				const normalizedConfig = downgradeLegacyRooConfig(config as Record<string, unknown>)
-					.config as ProviderSettingsWithId
-
-				// For active providers, filter out settings from other providers.
-				// For retired providers, preserve full profile fields (including legacy
-				// provider-specific keys) to avoid data loss — passthrough() keeps
-				// unknown keys that strict parse() would strip.
-				const filteredConfig =
-					typeof normalizedConfig.apiProvider === "string" && isRetiredProvider(normalizedConfig.apiProvider)
-						? providerSettingsWithIdSchema.passthrough().parse(normalizedConfig)
-						: discriminatedProviderSettingsWithIdSchema.parse(normalizedConfig)
-				providerProfiles.apiConfigs[name] = { ...filteredConfig, id }
+				providerProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(config, id)
 				await this.store(providerProfiles)
-				return id
+				return { id, existed, previousProfile }
 			})
 		} catch (error) {
 			throw new Error(`Failed to save config: ${error}`)
 		}
 	}
 
-	public async getProfile(
+	public async saveConfig(name: string, config: ProviderSettingsWithId): Promise<string> {
+		const { id } = await this.saveConfigWithPrevious(name, config)
+		return id
+	}
+
+	/**
+	 * Restores a stored profile to `restoredConfig` if and only if
+	 * the currently stored profile still matches `expectedConfig`.
+	 * If `restoredConfig` is omitted or undefined, deletes the profile (for rollback of newly created configs).
+	 * Serialized through the process-wide persistence lock.
+	 */
+	public async restoreConfigIfMatches(
+		name: string,
+		expectedConfig: ProviderSettingsWithId,
+		restoredConfig?: ProviderSettingsWithId,
+	): Promise<boolean> {
+		try {
+			return await this.lock(async () => {
+				const providerProfiles = await this.load()
+				const current = providerProfiles.apiConfigs[name]
+				if (!current) return false
+
+				const currentId = current.id || this.generateId()
+				const expectedTarget = JSON.parse(
+					JSON.stringify(this.normalizeAndFilterConfig(expectedConfig, expectedConfig.id || currentId)),
+				) as ProviderSettingsWithId
+				const cleanCurrent = JSON.parse(JSON.stringify(current)) as ProviderSettingsWithId
+				if (!deepEqual(cleanCurrent, expectedTarget)) return false
+
+				if (restoredConfig) {
+					providerProfiles.apiConfigs[name] = this.normalizeAndFilterConfig(
+						restoredConfig,
+						restoredConfig.id || currentId,
+					)
+				} else if (Object.keys(providerProfiles.apiConfigs).length > 1) {
+					delete providerProfiles.apiConfigs[name]
+				}
+				await this.store(providerProfiles)
+				return true
+			})
+		} catch (error) {
+			throw new Error(`Failed to restore config: ${error}`)
+		}
+	}
+
+	/**
+	 * Updates a profile's model configuration if and only if the profile exists,
+	 * its stored provider matches expectedProvider, and any optional validator passes.
+	 * Applies only model-specific keys and resets, preserving other profile fields.
+	 * Serialized through the process-wide persistence lock.
+	 */
+	public async updateProfileModel(
+		name: string,
+		expectedProvider: string,
+		patch: Record<string, unknown>,
+		validateProfileAllowed?: (candidate: ProviderSettingsWithId) => boolean,
+	): Promise<UpdateProfileModelResult> {
+		try {
+			return await this.lock(async () => {
+				const providerProfiles = await this.load()
+				const current = providerProfiles.apiConfigs[name]
+				if (!current) return { success: false, reason: "not_found" }
+
+				const storedProvider = current.apiProvider ?? providerIdentifiers.openrouter
+				if (storedProvider !== expectedProvider) return { success: false, reason: "provider_mismatch" }
+
+				const applyPatchToProfile = (base: ProviderSettingsWithId) => {
+					const baseProvider = base.apiProvider ?? providerIdentifiers.openrouter
+					const providerModelKey: string | undefined =
+						baseProvider === providerIdentifiers.openai
+							? "openAiModelId"
+							: modelIdKeysByProvider[baseProvider as keyof typeof modelIdKeysByProvider]
+					const allowedKeys: ReadonlySet<string> = new Set(
+						providerModelKey ? [providerModelKey, ...RESET_ONLY_KEYS] : RESET_ONLY_KEYS,
+					)
+
+					const merged: Record<string, unknown> = { ...base, apiProvider: baseProvider }
+					for (const [key, value] of Object.entries(patch)) {
+						if (key === "apiProvider" || !allowedKeys.has(key)) continue
+						if (value !== null && typeof value !== "string" && typeof value !== "number") continue
+						if (
+							RESET_ONLY_KEYS.includes(key) &&
+							value !== null &&
+							!(key === "awsCustomArn" && value === "")
+						)
+							continue
+						merged[key] = value === null ? undefined : value
+					}
+					return this.normalizeAndFilterConfig(merged as ProviderSettingsWithId, base.id || this.generateId())
+				}
+
+				const candidate = applyPatchToProfile(current)
+				if (validateProfileAllowed && !validateProfileAllowed(candidate))
+					return { success: false, reason: "disallowed" }
+
+				const previousProfile = current
+				providerProfiles.apiConfigs[name] = candidate
+				await this.store(providerProfiles)
+				return { success: true, updatedProfile: candidate, previousProfile }
+			})
+		} catch (error) {
+			throw new Error(`Failed to update profile model: ${error}`)
+		}
+	}
+
+	/**
+	 * Looks up a profile by name or ID.
+	 * Returns the profile if found, or undefined if not found in valid storage.
+	 * Propagates storage and parse errors instead of treating them as not found.
+	 */
+	public async findProfile(
 		params: { name: string } | { id: string },
-	): Promise<ProviderSettingsWithId & { name: string }> {
+	): Promise<(ProviderSettingsWithId & { name: string }) | undefined> {
 		try {
 			return await this.lock(async () => {
 				const providerProfiles = await this.load()
@@ -417,23 +572,14 @@ export class ProviderSettingsManager {
 
 				if ("name" in params) {
 					name = params.name
-
-					if (!providerProfiles.apiConfigs[name]) {
-						throw new Error(`Config with name '${name}' not found`)
-					}
-
+					if (!providerProfiles.apiConfigs[name]) return undefined
 					providerSettings = providerProfiles.apiConfigs[name]
 				} else {
 					const id = params.id
-
 					const entry = Object.entries(providerProfiles.apiConfigs).find(
 						([_, apiConfig]) => apiConfig.id === id,
 					)
-
-					if (!entry) {
-						throw new Error(`Config with ID '${id}' not found`)
-					}
-
+					if (!entry) return undefined
 					name = entry[0]
 					providerSettings = entry[1]
 				}
@@ -441,8 +587,19 @@ export class ProviderSettingsManager {
 				return { name, ...providerSettings }
 			})
 		} catch (error) {
-			throw new Error(`Failed to get profile: ${error instanceof Error ? error.message : error}`)
+			throw new Error(`Failed to find profile: ${error instanceof Error ? error.message : error}`)
 		}
+	}
+
+	public async getProfile(
+		params: { name: string } | { id: string },
+	): Promise<ProviderSettingsWithId & { name: string }> {
+		const profile = await this.findProfile(params)
+		if (!profile) {
+			const identifier = "name" in params ? `name '${params.name}'` : `ID '${params.id}'`
+			throw new Error(`Failed to get profile: Config with ${identifier} not found`)
+		}
+		return profile
 	}
 
 	/**
@@ -503,19 +660,16 @@ export class ProviderSettingsManager {
 		}
 	}
 
-	/**
-	 * Set the API config for a specific mode.
-	 */
-	public async setModeConfig(mode: Mode, configId: string) {
+	public async setModeConfig(mode: Mode, configId?: string) {
 		try {
 			return await this.lock(async () => {
 				const providerProfiles = await this.load()
-				// Ensure the per-mode config map exists
-				if (!providerProfiles.modeApiConfigs) {
-					providerProfiles.modeApiConfigs = {}
+				if (configId === undefined) {
+					if (providerProfiles.modeApiConfigs) delete providerProfiles.modeApiConfigs[mode]
+				} else {
+					if (!providerProfiles.modeApiConfigs) providerProfiles.modeApiConfigs = {}
+					providerProfiles.modeApiConfigs[mode] = configId
 				}
-				// Assign the chosen config ID to this mode
-				providerProfiles.modeApiConfigs[mode] = configId
 				await this.store(providerProfiles)
 			})
 		} catch (error) {

@@ -113,6 +113,8 @@
 	},
 	"selectMode": "Sélectionner le mode d'interaction",
 	"selectApiConfig": "Sélectionner la configuration de l'API",
+	"selectModel": "Sélectionner le modèle",
+	"selectModelUnsupported": "La sélection du modèle n'est pas disponible pour ce fournisseur ici. Cliquez pour ouvrir les paramètres.",
 	"lockApiConfigAcrossModes": "Verrouiller la configuration API pour tous les modes dans cet espace de travail",
 	"unlockApiConfigAcrossModes": "La configuration API est verrouillée pour tous les modes dans cet espace de travail (cliquer pour déverrouiller)",
 	"enhancePrompt": "Améliorer la requête avec un contexte supplémentaire",
