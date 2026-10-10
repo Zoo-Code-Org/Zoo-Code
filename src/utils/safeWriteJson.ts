@@ -199,10 +199,15 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// comparison asks for a second lock on the lock directory the first one already holds, and the
 	// write dies with "Lock file is already being held" on Windows alone. Compare the way the
 	// filesystem compares: case-insensitively there, exactly elsewhere.
-	const sameIdentity = process.platform === "win32"
-		? lockKey.toLowerCase() === linkPathLockKey.toLowerCase()
-		: lockKey === linkPathLockKey
-	const lockKeys = publishOverLink ? (sameIdentity ? [linkPathLockKey] : [lockKey, linkPathLockKey].sort()) : [lockKey]
+	const sameIdentity =
+		process.platform === "win32"
+			? lockKey.toLowerCase() === linkPathLockKey.toLowerCase()
+			: lockKey === linkPathLockKey
+	const lockKeys = publishOverLink
+		? sameIdentity
+			? [linkPathLockKey]
+			: [lockKey, linkPathLockKey].sort()
+		: [lockKey]
 
 	// Confinement, if the caller declared a scope, is checked before ANY filesystem
 	// side effect of this call: the directory creation below would otherwise create a
