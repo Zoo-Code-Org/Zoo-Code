@@ -1165,7 +1165,10 @@ export class DiffViewProvider {
 		try {
 			await fs.access(absolutePath, fsConstants.W_OK)
 		} catch (error: unknown) {
-			const code = typeof error === "object" && error !== null && "code" in error ? (error as { code?: string }).code : undefined
+			const code =
+				typeof error === "object" && error !== null && "code" in error
+					? (error as { code?: string }).code
+					: undefined
 			if (code !== "ENOENT") throw error
 		}
 		await safeWriteText(absolutePath, content)

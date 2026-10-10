@@ -3,14 +3,12 @@ import * as fsSync from "fs"
 import * as path from "path"
 import { JsonStreamStringify } from "json-stream-stringify"
 
-
 import {
 	resolvePublishTarget,
 	safeWriteText,
 	PublishNotDurableError,
 	type SafeWriteTextOptions,
 } from "../services/file-safety/safeWriteText"
-
 
 import { acquireFileLock } from "./fileLock"
 
@@ -74,7 +72,6 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
 		throw dirError
 	}
-
 
 	// Acquire the lock before any file operations. `acquireFileLock` owns the
 	// shared advisory lock protocol, so callers that lock the same path with
@@ -196,16 +193,14 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
  * @param prettyPrint Whether to format the JSON with indentation.
  * @returns Promise<void>
  */
-async function _streamDataToFile(
-	targetPath: string,
-	data: any,
-	prettyPrint = false,
-	mode?: number,
-): Promise<void> {
+async function _streamDataToFile(targetPath: string, data: any, prettyPrint = false, mode?: number): Promise<void> {
 	// Stream data to avoid high memory usage for large JSON objects.
 	// mode is explicit because createWriteStream defaults to 0o666 (& ~umask): the
 	// staged file is readable by others until the commit renames it onto the target.
-	const fileWriteStream = fsSync.createWriteStream(targetPath, { encoding: "utf8", ...(mode !== undefined ? { mode } : {}) })
+	const fileWriteStream = fsSync.createWriteStream(targetPath, {
+		encoding: "utf8",
+		...(mode !== undefined ? { mode } : {}),
+	})
 
 	// JsonStreamStringify traverses the object and streams tokens directly
 	// The 'spaces' parameter adds indentation during streaming, not via a separate pass

@@ -22,7 +22,9 @@ describe("safeWriteText against a real filesystem", () => {
 	})
 
 	function _leftovers(): string[] {
-		return fsSync.readdirSync(dir).filter((name) => name.includes(".file-safety-staging") || name.includes(".new_") || name.includes(".bak"))
+		return fsSync
+			.readdirSync(dir)
+			.filter((name) => name.includes(".file-safety-staging") || name.includes(".new_") || name.includes(".bak"))
 	}
 
 	it("creates a new file with the requested bytes and leaves no residue", async () => {
@@ -43,4 +45,4 @@ describe("safeWriteText against a real filesystem", () => {
 		expect(fsSync.readFileSync(target, "utf8")).toBe("replacement")
 		expect(_leftovers()).toEqual([])
 	})
-}) 
+})

@@ -110,8 +110,8 @@ describe("safeWriteJson", () => {
 
 	// Durability of the commit (Persistence Integrity)
 	test.skipIf(process.platform === "win32")(
-			"keeps the published target when the commit landed but the directory fsync failed",
-			async () => {
+		"keeps the published target when the commit landed but the directory fsync failed",
+		async () => {
 			const target = path.join(tempDir, "durable.json")
 			// The first fsync is the staged file, the second is the parent directory AFTER the
 			// commit rename. Failing only the second one is the PublishNotDurableError case:
@@ -131,13 +131,13 @@ describe("safeWriteJson", () => {
 			// The staged file was renamed onto the target, so the catch path must not treat that
 			// path as a leftover temp file: the new content has to survive the rejection.
 			expect(await readFileContent(target)).toEqual(payload)
-	},
+		},
 	)
 
 	// Staging permissions
 	test.skipIf(process.platform === "win32")(
-			"omits an explicit mode for an absent target so the file takes the umask default",
-			async () => {
+		"omits an explicit mode for an absent target so the file takes the umask default",
+		async () => {
 			const target = path.join(tempDir, "absent-target.json")
 			await safeWriteJson(target, { fresh: 1 })
 
@@ -148,11 +148,11 @@ describe("safeWriteJson", () => {
 
 			const mode = (await fs.stat(target)).mode & 0o777
 			expect(mode).toBe(0o666 & ~process.umask())
-			},
+		},
 	)
 
 	test.skipIf(process.platform === "win32")(
-			"stages the temp file with the existing target's mode instead of the process default",
+		"stages the temp file with the existing target's mode instead of the process default",
 		async () => {
 			const target = path.join(tempDir, "private.json")
 			await fs.writeFile(target, JSON.stringify({ initial: 1 }), { mode: 0o600 })
@@ -216,32 +216,29 @@ describe("safeWriteJson", () => {
 		},
 	)
 
-	test(
-		"surfaces a stat failure other than ENOENT instead of staging with the default mode",
-		async () => {
-			const target = path.join(tempDir, "stat-fails.json")
-			await fs.writeFile(target, JSON.stringify({ initial: 1 }))
+	test("surfaces a stat failure other than ENOENT instead of staging with the default mode", async () => {
+		const target = path.join(tempDir, "stat-fails.json")
+		await fs.writeFile(target, JSON.stringify({ initial: 1 }))
 
-			const streamCalls = vi.mocked(fsSyncActual.createWriteStream)
-			streamCalls.mockClear()
-			const statSpy = vi.spyOn(fsSyncActual, "statSync").mockImplementation(() => {
-				throw Object.assign(new Error("EIO"), { code: "EIO" })
-			})
+		const streamCalls = vi.mocked(fsSyncActual.createWriteStream)
+		streamCalls.mockClear()
+		const statSpy = vi.spyOn(fsSyncActual, "statSync").mockImplementation(() => {
+			throw Object.assign(new Error("EIO"), { code: "EIO" })
+		})
 
-			try {
-				await expect(safeWriteJson(target, { updated: 2 })).rejects.toThrow(/EIO/)
-				// The stat failure has to surface BEFORE anything is staged: a staged file
-				// created with the wide default mode would sit beside a restrictive target
-				// for the duration of the write. Asserting no stream call (not just no
-				// leftover) is what pins the order - safeWriteText would also reject this
-				// EIO later, which alone would pass without any staging-mode check.
-				expect(streamCalls).not.toHaveBeenCalled()
-				expect((await fs.readdir(tempDir)).filter((entry) => entry.includes(".new_"))).toEqual([])
-			} finally {
-				statSpy.mockRestore()
-			}
-		},
-	)
+		try {
+			await expect(safeWriteJson(target, { updated: 2 })).rejects.toThrow(/EIO/)
+			// The stat failure has to surface BEFORE anything is staged: a staged file
+			// created with the wide default mode would sit beside a restrictive target
+			// for the duration of the write. Asserting no stream call (not just no
+			// leftover) is what pins the order - safeWriteText would also reject this
+			// EIO later, which alone would pass without any staging-mode check.
+			expect(streamCalls).not.toHaveBeenCalled()
+			expect((await fs.readdir(tempDir)).filter((entry) => entry.includes(".new_"))).toEqual([])
+		} finally {
+			statSpy.mockRestore()
+		}
+	})
 
 	test.skipIf(process.platform === "win32")(
 		"serializes a writer that reaches the file through a symlink with one that uses the referent",

@@ -797,9 +797,9 @@ describe("DiffViewProvider", () => {
 			const eacces = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
 			vi.mocked(fs.access).mockRejectedValueOnce(eacces)
 
-			await expect(
-				diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200),
-			).rejects.toThrow("EACCES")
+			await expect(diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200)).rejects.toThrow(
+				"EACCES",
+			)
 
 			// The old fs.writeFile path failed the same way; safeWriteText must not run.
 			expect(safeWriteText).not.toHaveBeenCalled()
@@ -834,10 +834,10 @@ describe("DiffViewProvider", () => {
 			expect(accessIndex).toBeGreaterThanOrEqual(0)
 			expect(calls[accessIndex][0]).toBe(`${mockCwd}/test.ts`)
 
-		// An existence-only check would not catch a read-only target: the guard has to be handed
-		// the write bit, otherwise the read-only contract this unit preserves is silently gone.
-		const { constants } = await import("fs")
-		expect(calls[accessIndex][1]).toBe(constants.W_OK)
+			// An existence-only check would not catch a read-only target: the guard has to be handed
+			// the write bit, otherwise the read-only contract this unit preserves is silently gone.
+			const { constants } = await import("fs")
+			expect(calls[accessIndex][1]).toBe(constants.W_OK)
 
 			// The check is only meaningful before the publish; after it, an EACCES target would
 			// already have been renamed over.
