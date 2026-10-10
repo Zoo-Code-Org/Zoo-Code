@@ -329,6 +329,67 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			expect(storeInternals(store).cache.has("lock-enoent")).toBe(true)
 			expect(onWrite).not.toHaveBeenCalled()
 		})
+
+		it("reports a lock failure as a completed deletion when the named file is itself gone", async () => {
+			// The other half of the same verdict: an ENOENT from the lock says nothing about the
+			// file, so the file is asked directly - and here it really answers ENOENT. The answer
+			// comes from the filesystem rather than a mock, so the branch is reached the way
+			// production reaches it: a task file that was already removed while the lock was lost.
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "lock-fail-gone" }))
+			onWrite.mockClear()
+			await actualFs.rm(historyFilePath(storagePath, "lock-fail-gone"))
+			vi.mocked(withFileLock).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+			await expect(store.delete("lock-fail-gone")).resolves.toBeUndefined()
+
+			// The named path said it is absent, so the item is gone whatever the lock did: evicted,
+			// and the index written through without it. A verdict that kept the item here would leave
+			// an entry whose file can never be deleted again.
+			const { cache, taskFileMtimes } = storeInternals(store)
+			expect(cache.has("lock-fail-gone")).toBe(false)
+			expect(taskFileMtimes.has("lock-fail-gone")).toBe(false)
+			expect(store.get("lock-fail-gone")).toBeUndefined()
+			expect(onWrite).toHaveBeenCalledTimes(1)
+			const writtenIds = (onWrite.mock.calls[0][0] as HistoryItem[]).map((item) => item.id)
+			expect(writtenIds).not.toContain("lock-fail-gone")
+		})
+
+		it("reports the lock failure and the failed check when the named file cannot be stat'ed", async () => {
+			// The third answer the check can give is neither "gone" nor "there": EACCES, a transport
+			// error, an ENOTDIR on the way. Then nothing is known about the file, so the item stays
+			// and the report has to carry both facts - which lock failed, and that the file could not
+			// be checked to settle it. Reporting only the lock would read as a plain lock timeout and
+			// send the next operator to look for a peer that never existed.
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "lock-fail-uncheckable" }))
+			onWrite.mockClear()
+			vi.mocked(withFileLock).mockRejectedValueOnce(Object.assign(new Error("ELOCKED"), { code: "ELOCKED" }))
+			const statError = Object.assign(new Error("EACCES"), { code: "EACCES" })
+			// Spied rather than forced through the real filesystem: an unreadable directory is not
+			// portable, and the branch is about the errno the check reports, not about how it got it.
+			const lstatSpy = vi.spyOn(fs, "lstat").mockRejectedValue(statError)
+			let rejection: unknown
+			try {
+				await store.delete("lock-fail-uncheckable")
+			} catch (error: unknown) {
+				rejection = error
+			} finally {
+				lstatSpy.mockRestore()
+			}
+
+			expect(rejection).toBeInstanceOf(TaskHistoryDeleteError)
+			const deleteError = rejection as TaskHistoryDeleteError
+			expect(deleteError.reason).toContain("the per-file lock could not be taken (ELOCKED)")
+			expect(deleteError.reason).toContain("the file could not be checked (EACCES)")
+			// The check's own error is the cause, not the lock's: it is the last thing that was known.
+			expect(deleteError.cause).toBe(statError)
+			expect(storeInternals(store).cache.has("lock-fail-uncheckable")).toBe(true)
+			expect(store.get("lock-fail-uncheckable")).toBeDefined()
+			expect(onWrite).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("reconcile()", () => {
