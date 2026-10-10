@@ -572,6 +572,14 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						is_error: true,
 					})
 
+					// A partial delta is never validated or parsed, so this task's write_to_file stream
+					// state and its preview can already exist when the completed block turns out to
+					// carry no native arguments. The loop breaks here without reaching handle(), so
+					// nothing else releases them.
+					if (block.name === "write_to_file") {
+						await writeToFileTool.releaseStreamAfterValidationRejection(cline)
+					}
+
 					break
 				}
 			}

@@ -164,6 +164,8 @@ describe("writeToFileTool", () => {
 			reset: vi.fn().mockResolvedValue(undefined),
 			revertChanges: vi.fn().mockResolvedValue(undefined),
 			discardUnapprovedStream: vi.fn().mockResolvedValue(undefined),
+			adoptCreatedDirectories: vi.fn(),
+			removeAdoptedDirectories: vi.fn().mockResolvedValue(undefined),
 			saveChanges: vi.fn().mockResolvedValue({
 				newProblemsMessage: "",
 				userEdits: null,
@@ -567,6 +569,8 @@ describe("writeToFileTool", () => {
 					reset: vi.fn().mockResolvedValue(undefined),
 					revertChanges: vi.fn().mockResolvedValue(undefined),
 					discardUnapprovedStream: vi.fn().mockResolvedValue(undefined),
+					adoptCreatedDirectories: vi.fn(),
+					removeAdoptedDirectories: vi.fn().mockResolvedValue(undefined),
 				},
 				finalizePartialToolAsk: vi.fn().mockResolvedValue(undefined),
 			}
@@ -623,6 +627,30 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
 			expect(discardOrder).toBeLessThan(resetOrder)
 			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+		})
+
+		it("still releases the per-task state when the diff view reset fails during the write teardown", async () => {
+			// reset() sits between the failed write and the release. A reset that rejects must
+			// neither skip that release nor take over the failure the model is told about.
+			mockCline.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.reset.mockRejectedValue(new Error("reset failed"))
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			writeToFileTool["getTaskPartialStreamState"](mockCline)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			try {
+				await executeWriteFileTool({})
+
+				expect(mockHandleError).toHaveBeenCalledWith(
+					"writing file",
+					expect.objectContaining({ message: "save failed" }),
+				)
+				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			} finally {
+				errorSpy.mockRestore()
+				writeToFileTool["taskPartialStreamState"].clear()
+			}
 		})
 
 		it("reports a discard that fails during the write teardown", async () => {
@@ -869,6 +897,32 @@ describe("writeToFileTool", () => {
 			expect(mockCline.ask).toHaveBeenCalledTimes(1)
 			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("removes the directories it created when the stream is released during their creation", async () => {
+			// The delta creates the parent directories right after the probe and hands them to the
+			// diff view's cleanup state. A cancellation landing inside that creation leaves
+			// directories no teardown will visit: open() never ran, so the discard and the revert
+			// have no session to clean, and reset() drops the recorded list without touching disk.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			mockCline.diffViewProvider.editType = undefined
+			mockCline.diffViewProvider.adoptCreatedDirectories.mockClear()
+			mockCline.diffViewProvider.removeAdoptedDirectories.mockClear()
+			mockCline.diffViewProvider.open.mockClear()
+			const created = ["/mock-workspace/new-file/nested"]
+			// mockImplementationOnce: executeWriteFileTool re-arms the default resolved value
+			// on every call, so a plain mockImplementation would be overwritten.
+			mockedCreateDirectoriesForFile.mockImplementationOnce(async () => {
+				writeToFileTool.clearTaskState(mockCline)
+				return created
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.diffViewProvider.adoptCreatedDirectories).toHaveBeenCalledWith(created)
+			expect(mockCline.diffViewProvider.removeAdoptedDirectories).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
 		})
 
 		it("stops before touching the diff view when the stream state is released during an in-flight ask", async () => {

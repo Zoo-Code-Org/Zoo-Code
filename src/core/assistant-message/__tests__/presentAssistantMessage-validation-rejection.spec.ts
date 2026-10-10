@@ -169,6 +169,59 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 		expect(toolResult.content).toContain("repetition limit reached")
 	})
 
+	it("releases the streamed state when the completed block carries no native arguments", async () => {
+		// A third way to break out of the loop before handle(): the parser never finished the
+		// call. Streaming is not gated by it either, so the same state and preview can exist.
+		mockValidate.mockReturnValue(undefined)
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call-write-2",
+				name: "write_to_file",
+				params: { path: "a.ts" },
+				partial: false,
+			},
+		]
+
+		await presentAssistantMessage(mockTask as unknown as Task)
+
+		expect(mockRelease).toHaveBeenCalledTimes(1)
+		expect(mockRelease).toHaveBeenCalledWith(mockTask)
+		expect(mockHandle).not.toHaveBeenCalled()
+		const toolResult = mockTask.userMessageContent.find((item) => item.type === "tool_result")
+		if (!toolResult) {
+			throw new Error("expected a tool_result for the rejected call")
+		}
+		expect(toolResult.content).toContain("missing nativeArgs")
+	})
+
+	it("does not release the write_to_file stream for a different tool refused by the repetition guard", async () => {
+		// The release is scoped by tool name in every branch. A repeated read_file must not
+		// reach through to write_to_file's state.
+		mockValidate.mockReturnValue(undefined)
+		mockTask.toolRepetitionDetector.check = vi
+			.fn()
+			.mockReturnValue({
+				allowExecution: false,
+				askUser: { messageKey: "mistake_limit_reached", messageDetail: "repeated" },
+			})
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call-read-2",
+				name: "read_file",
+				params: { path: "a.ts" },
+				nativeArgs: { path: "a.ts" },
+				partial: false,
+			},
+		]
+
+		await presentAssistantMessage(mockTask as unknown as Task)
+
+		expect(mockRelease).not.toHaveBeenCalled()
+		expect(mockHandle).not.toHaveBeenCalled()
+	})
+
 	it("leaves the stream alone when a rejected tool never streamed", async () => {
 		// The release is write_to_file scoped: a rejected read_file must not touch it.
 		mockTask.assistantMessageContent = [

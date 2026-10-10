@@ -158,6 +158,20 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		}
 	}
 
+	/**
+	 * Drop the directories a delta created before the diff view took ownership.
+	 *
+	 * Only for a call that never reached open(): once a session is editing, the provider owns
+	 * those directories and its own discard or revert removes them, so this must not reach
+	 * past the delta that adopted them.
+	 */
+	private async releaseEarlyDirectories(task: Task): Promise<void> {
+		if (task.diffViewProvider.isEditing) {
+			return
+		}
+		await task.diffViewProvider.removeAdoptedDirectories()
+	}
+
 	private resetTaskPartialState(task: Task): void {
 		const key = this.getPartialStreamFailureKey(task)
 		const state = this.taskPartialStreamState.get(key)
@@ -507,7 +521,10 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 						})
 				}
 			}
-			await task.diffViewProvider.reset()
+			// Guarded: a reset() that rejects must not skip the release below, and it must
+			// not turn a reported write failure into a teardown failure the caller cannot act
+			// on - the per-task entry and its TaskAborted listener are still ours to drop.
+			await this.resetDiffViewAfterWrite(task)
 			this.releasePartialStreamBookkeeping(task)
 			return
 		}
@@ -580,12 +597,16 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			// Create parent directories early for new files to prevent ENOENT errors
 			// in subsequent operations (e.g., diffViewProvider.open)
 			if (!fileExists) {
-				await createDirectoriesForFile(absolutePath)
+				// Handed to the diff view's cleanup state at once, not at open(): open() records
+				// only the directories it creates itself, which is none after this call, and every
+				// teardown removes what that list holds.
+				task.diffViewProvider.adoptCreatedDirectories(await createDirectoriesForFile(absolutePath))
 			}
 			// Abandonment can land while the directory creation is in flight: its teardown has
 			// already released this task's stream state, and asking or streaming now would show a
 			// partial tool call for a task that no longer exists.
 			if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+				await this.releaseEarlyDirectories(task)
 				return
 			}
 
@@ -604,6 +625,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			await task.ask("tool", partialMessage, block.partial).catch(() => {})
 
 			if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+				await this.releaseEarlyDirectories(task)
 				return
 			}
 
@@ -651,6 +673,9 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				partialStreamState.streamError = error instanceof Error ? error : new Error(String(error))
 			} else {
 				this.releasePartialStreamBookkeeping(task)
+				// The setup window owns whatever the diff view never took over, including the
+				// directories this delta created a few lines above.
+				await this.releaseEarlyDirectories(task)
 			}
 			if (task.diffViewProvider.isEditing) {
 				const discardError = await this.discardUnapprovedStreamBeforeReset(task)

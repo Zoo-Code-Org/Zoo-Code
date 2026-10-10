@@ -134,8 +134,10 @@ export class DiffViewProvider {
 		}
 
 		// For new files, create any necessary directories and keep track of new
-		// directories to delete if the user denies the operation.
-		this.createdDirs = await createDirectoriesForFile(absolutePath)
+		// directories to delete if the user denies the operation. Merged rather than
+		// assigned: handlePartial() may have created them first and recorded them, and
+		// overwriting the list would hand those directories back to the leak.
+		this.adoptCreatedDirectories(await createDirectoriesForFile(absolutePath))
 
 		// Make sure the file exists before we open it.
 		if (!fileExists) {
@@ -1274,6 +1276,45 @@ export class DiffViewProvider {
 		} while (result !== previous)
 
 		return result
+	}
+
+	/**
+	 * Record directories an edit created before the diff view exists.
+	 *
+	 * handlePartial() creates the parent directories early so a later open() cannot hit ENOENT,
+	 * and open() can only record the directories IT creates - which is none, once that earlier
+	 * call has already made them. Every teardown reads createdDirs (the discard and the revert
+	 * both remove it) while reset() merely drops the list, so an unrecorded creation is
+	 * invisible to all of them and survives on disk. Merging rather than assigning keeps
+	 * whichever call made the directories first still accounted for.
+	 */
+	adoptCreatedDirectories(directories: string[]): void {
+		for (const directory of directories) {
+			if (!this.createdDirs.includes(directory)) {
+				this.createdDirs.push(directory)
+			}
+		}
+	}
+
+	/**
+	 * Remove the directories this edit recorded but the diff view never took over.
+	 *
+	 * A delta that created parent directories and then stopped - a cancellation landing during
+	 * the creation, or a setup failure before open() - leaves directories no teardown will
+	 * visit: the discard and the revert only run for a session that reached the editor, and
+	 * reset() drops the list without touching the disk. Deepest first; a directory that is
+	 * already gone or not empty is not this edit's to force away.
+	 */
+	async removeAdoptedDirectories(): Promise<void> {
+		const directories = this.createdDirs
+		this.createdDirs = []
+		for (let i = directories.length - 1; i >= 0; i--) {
+			try {
+				await fs.rmdir(directories[i])
+			} catch {
+				// Already gone, or something else lives in it: not this edit's to remove.
+			}
+		}
 	}
 
 	async reset(): Promise<void> {

@@ -18,6 +18,8 @@ interface CleanupTask {
 		reset: MockedFunction<() => Promise<void>>
 		revertChanges: MockedFunction<() => Promise<void>>
 		discardUnapprovedStream: MockedFunction<() => Promise<void>>
+		adoptCreatedDirectories: MockedFunction<(directories: string[]) => void>
+		removeAdoptedDirectories: MockedFunction<() => Promise<void>>
 	}
 	finalizePartialToolAsk: MockedFunction<() => Promise<void>>
 	say: MockedFunction<() => Promise<void>>
@@ -33,6 +35,8 @@ function buildTask(taskId: string, instanceId: string): Task {
 			reset: vi.fn().mockResolvedValue(undefined),
 			revertChanges: vi.fn().mockResolvedValue(undefined),
 			discardUnapprovedStream: vi.fn().mockResolvedValue(undefined),
+			adoptCreatedDirectories: vi.fn(),
+			removeAdoptedDirectories: vi.fn().mockResolvedValue(undefined),
 		},
 		finalizePartialToolAsk: vi.fn().mockResolvedValue(undefined),
 		say: vi.fn().mockResolvedValue(undefined),
@@ -147,6 +151,24 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 		await writeToFileTool.releaseStreamAfterValidationRejection(task)
 
 		expect(t.say).toHaveBeenCalledWith("error", expect.stringContaining("may still show unapproved content"))
+		expect(t.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+		errorSpy.mockRestore()
+	})
+
+	it("resolves and logs when the rollback report itself cannot be delivered", async () => {
+		// Task.say() throws once the task is aborted, and the presenter can reject a block
+		// while that abort lands. The release must still finish and reset the view: a report
+		// that cannot be delivered is not a reason to stop cleaning up.
+		const task = buildTask("rejected-report-fails", "inst-9")
+		const t = task as unknown as CleanupTask
+		t.diffViewProvider.discardUnapprovedStream = vi.fn().mockRejectedValue(new Error("close rejected"))
+		t.say = vi.fn().mockRejectedValue(new Error("task aborted"))
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		writeToFileTool["getTaskPartialStreamState"](task)
+
+		await expect(writeToFileTool.releaseStreamAfterValidationRejection(task)).resolves.toBeUndefined()
+
+		expect(errorSpy).toHaveBeenCalledWith("Error reporting write_to_file rollback failure:", expect.any(Error))
 		expect(t.diffViewProvider.reset).toHaveBeenCalledTimes(1)
 		errorSpy.mockRestore()
 	})

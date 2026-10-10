@@ -2289,6 +2289,49 @@ describe("DiffViewProvider", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(fsPath)
 		})
 
+		it("keeps directories created before open() visible to the discard", async () => {
+			// handlePartial() creates the parent directories before the diff view exists and hands
+			// them over; open() then finds them already there and records none of its own. An
+			// assigning open() would overwrite the list and hand those directories back to the
+			// leak: the discard removes createdDirs and reset() just drops it.
+			const relPath = "early-directories.ts"
+			const fsPath = `${mockCwd}/${relPath}`
+			const early = [`${mockCwd}/early/nested`]
+			const mockEditor = {
+				document: {
+					uri: { fsPath, scheme: "file" },
+					getText: vi.fn().mockReturnValue(""),
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+					lineCount: 0,
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			}
+			// Structural double for the mocked editor: the mock only implements the members
+			// open() touches, so it is routed through unknown rather than any.
+			const editor = mockEditor as unknown as vscode.TextEditor
+			vi.mocked(vscode.window).visibleTextEditors = [editor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback({ uri: { fsPath, scheme: "file" } } as vscode.TextDocument), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+			vi.mocked(vscode.window.onDidChangeTextEditorVisibleRanges).mockReturnValue({ dispose: vi.fn() })
+			vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			diffViewProvider.editType = "create"
+			diffViewProvider.adoptCreatedDirectories(early)
+
+			await diffViewProvider.open(relPath)
+
+			await diffViewProvider.discardUnapprovedStream()
+
+			expect(fs.rmdir).toHaveBeenCalledWith(early[0])
+		})
+
 		it("does not remove the file once saveChanges() has approved the content", async () => {
 			// saveChanges() turns the placeholder into approved content and drops this edit's
 			// claim on it, so a later abandoned cleanup must leave the approved file on disk.
