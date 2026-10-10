@@ -133,6 +133,44 @@ function _scopeErrorCode(error: unknown): string | undefined {
  * @param {SafeWriteJsonOptions} options - Optional configuration for JSON formatting.
  * @returns {Promise<void>}
  */
+/**
+ * Fold a path into the identity its advisory lock is actually placed under.
+ *
+ * acquireFileLock locks `<absolute path>.lock` with realpath:false (see fileLock.ts), so the
+ * lock's identity is the directory ENTRY the path names, not the string. On Windows the
+ * filesystem folds two spellings of one entry in two ways: case anywhere, and short (8.3) names
+ * inside a component - the runner profile directory arrives as RUNNER~1 on a CI agent, which is
+ * where this was first observed. A case-only comparison folds only the first, so the second
+ * leaves two keys that look different, one .lock directory, and a second acquisition that
+ * collides with the first one's own lock: 'Lock file is already being held' once the retries are
+ * spent.
+ *
+ * So fold the way the lock is placed: canonicalise the deepest EXISTING ancestor and append the
+ * segments below it, case-folded on Windows. Canonicalising an existing ancestor is what folds a
+ * short name, because that folding belongs to the filesystem rather than to any string rule; a
+ * tail that does not exist yet can only be folded by the string rule. The walk starts at the
+ * PARENT, not at the file: the lock is the entry beside the file, so the final component must
+ * never be resolved through a symlink, or a link and its referent would fold into one key and
+ * the two distinct .lock entries this call takes on purpose would collapse into one.
+ */
+async function _lockIdentityKey(absoluteFilePath: string): Promise<string> {
+	const missing: string[] = [path.basename(absoluteFilePath)]
+	let current = path.dirname(absoluteFilePath)
+	for (;;) {
+		let canonical: string | undefined
+		try {
+			canonical = await fs.realpath(current)
+		} catch {
+			// This component is not there yet; an ancestor of it may be.
+		}
+		if (canonical !== undefined || path.dirname(current) === current) {
+			const folded = path.join(canonical ?? current, ...missing)
+			return process.platform === "win32" ? folded.toLowerCase() : folded
+		}
+		missing.unshift(path.basename(current))
+		current = path.dirname(current)
+	}
+}
 async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJsonOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 	// One release per lock acquired, kept in acquisition order and released in reverse below.
@@ -164,14 +202,16 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// only the link-path lock lets those two writers overlap, and their merge reads overwrite each
 	// other. Resolving the referent here costs one more realpath on a default write; it is a read of
 	// the link target for locking purposes, not a decision to publish through it.
-	// resolveLockKey canonicalizes and Windows paths are case-insensitive, so the two keys are
-	// compared the same way the filesystem would: byte-for-byte they can name one file twice, and
-	// locking a file that this call already locked would stall on its own stale timeout.
+	// The two keys are compared the way the filesystem would, not the way strings compare:
+	// byte-for-byte they can name one file twice, and locking a file this call already locked
+	// would stall on its own stale timeout. Folding is per _lockIdentityKey, because case folding
+	// alone leaves a short-name spelling unequal to the canonical one resolveLockKey returns.
 	const linkPathLockKey = absoluteFilePath
-	const sameIdentity =
-		process.platform === "win32"
-			? referentLockKey.toLowerCase() === linkPathLockKey.toLowerCase()
-			: referentLockKey === linkPathLockKey
+	const [referentLockIdentity, linkPathLockIdentity] = await Promise.all([
+		_lockIdentityKey(referentLockKey),
+		_lockIdentityKey(linkPathLockKey),
+	])
+	const sameIdentity = referentLockIdentity === linkPathLockIdentity
 	const lockKeys = publishOverLink
 		? sameIdentity
 			? [linkPathLockKey]
