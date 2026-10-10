@@ -812,9 +812,13 @@ describe("DiffViewProvider", () => {
 			vi.mocked(safeWriteText).mockClear()
 			vi.mocked(fs.access).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
 
-			await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200)
+			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200)
 
 			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			// Call counts alone would still pass if the publish ran but the caller reported
+			// nothing about the content it wrote.
+			expect(result.finalContent).toBe("new content")
+			expect(result.userEdits).toBeUndefined()
 			vi.mocked(fs.access).mockResolvedValue(undefined)
 		})
 
