@@ -105,4 +105,43 @@ describe("ObservationRegistry", () => {
 			expect(obs.complete).toBe(false)
 		})
 	})
+	describe("forget", () => {
+		it("drops the observation for one path and reports that it did", () => {
+			const reg = new ObservationRegistry()
+			reg.observe("/a/b/c.ts", "v1")
+			reg.observe("/a/b/d.ts", "v2")
+			const sizeBefore = reg.size
+
+			expect(reg.forget("/a/b/c.ts")).toBe(true)
+
+			// The three effects the row names: gone from the registry, one smaller, and a true
+			// result. Asserted together because a delete that returned the wrong boolean, or that
+			// cleared more than it was asked to, would pass a size-only check.
+			expect(reg.get("/a/b/c.ts")).toBeUndefined()
+			expect(reg.has("/a/b/c.ts")).toBe(false)
+			expect(reg.size).toBe(sizeBefore - 1)
+			// The reason forget() exists rather than clear(): the other authorization survives.
+			expect(reg.get("/a/b/d.ts")?.version).toBe("v2")
+		})
+
+		it("reports false when the path was never observed", () => {
+			const reg = new ObservationRegistry()
+			reg.observe("/a/b/c.ts", "v1")
+
+			expect(reg.forget("/absent.ts")).toBe(false)
+			expect(reg.size).toBe(1)
+			expect(reg.get("/a/b/c.ts")?.version).toBe("v1")
+		})
+
+		it("reports false when the same path is forgotten twice", () => {
+			const reg = new ObservationRegistry()
+			reg.observe("/a/b/c.ts", "v1")
+			expect(reg.forget("/a/b/c.ts")).toBe(true)
+
+			// A second revoke must not report a success it did not earn: the caller uses the
+			// boolean to tell "I dropped the authorization" from "there was nothing to drop".
+			expect(reg.forget("/a/b/c.ts")).toBe(false)
+			expect(reg.size).toBe(0)
+		})
+	})
 })
