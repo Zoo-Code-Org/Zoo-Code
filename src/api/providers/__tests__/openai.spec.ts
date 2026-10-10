@@ -2008,6 +2008,23 @@ describe("getOpenAiModels", () => {
 		vi.mocked(axios.get).mockClear()
 	})
 
+	it("forwards cancellation to the HTTP request", async () => {
+		const controller = new AbortController()
+		vi.mocked(axios.get).mockImplementationOnce(
+			(_url, options) =>
+				new Promise((_resolve, reject) => {
+					options?.signal?.addEventListener?.("abort", () => reject(new Error("cancelled")))
+				}),
+		)
+		const pending = getOpenAiModels("https://example.test/v1", "test-key", undefined, controller.signal)
+		expect(axios.get).toHaveBeenCalledWith(
+			"https://example.test/v1/models",
+			expect.objectContaining({ signal: controller.signal }),
+		)
+		controller.abort()
+		expect(await pending).toEqual([])
+	})
+
 	it("should return empty array when baseUrl is not provided", async () => {
 		const result = await getOpenAiModels(undefined, "test-key")
 		expect(result).toEqual([])

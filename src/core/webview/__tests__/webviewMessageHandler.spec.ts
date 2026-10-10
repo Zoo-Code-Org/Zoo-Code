@@ -1,3 +1,14 @@
+import { ModelRequestRegistry } from "../ModelRequestRegistry"
+import { getOpenAiModels } from "../../../api/providers/openai"
+import { getVsCodeLmModels } from "../../../api/providers/vscode-lm"
+vi.mock("../../../api/providers/openai", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../../api/providers/openai")>()),
+	getOpenAiModels: vi.fn(),
+}))
+vi.mock("../../../api/providers/vscode-lm", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../../api/providers/vscode-lm")>()),
+	getVsCodeLmModels: vi.fn(),
+}))
 // npx vitest core/webview/__tests__/webviewMessageHandler.spec.ts
 
 import type { Mock } from "vitest"
@@ -97,6 +108,7 @@ const mockFetchOpenAiCodexRateLimitInfo = vi.mocked(fetchOpenAiCodexRateLimitInf
 
 // Mock ClineProvider
 const mockClineProvider = {
+	modelRequests: new ModelRequestRegistry(),
 	getState: vi.fn(),
 	postMessageToWebview: vi.fn(),
 	customModesManager: {
@@ -200,6 +212,22 @@ describe("webviewMessageHandler - organization allowlist enforcement", () => {
 
 		expect(upsertProviderProfile).not.toHaveBeenCalled()
 		expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+	})
+
+	it("rejects a disallowed save without persisting or updating state", async () => {
+		const saveConfig = vi.fn()
+		const listConfig = vi.fn()
+		Object.assign(mockClineProvider, { providerSettingsManager: { saveConfig, listConfig } })
+		await webviewMessageHandler(mockClineProvider, {
+			type: "saveApiConfiguration",
+			text: "profile",
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiModelId: "claude-opus-4-20250514" },
+		})
+		expect(saveConfig).not.toHaveBeenCalled()
+		expect(listConfig).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		expect(mockClineProvider.postStateToWebview).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(t("common:errors.violated_organization_allowlist"))
 	})
 
 	it("allows an allow-listed model on upsertApiConfiguration", async () => {
@@ -344,15 +372,18 @@ describe("webviewMessageHandler - requestLmStudioModels", () => {
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestLmStudioModels",
+			requestId: "models-request",
 		})
 
 		expect(mockGetModels).toHaveBeenCalledWith({
 			provider: providerIdentifiers.lmstudio,
+			signal: expect.any(AbortSignal),
 			baseUrl: "http://localhost:1234",
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "lmStudioModels",
+			requestId: "models-request",
 			lmStudioModels: mockModels,
 		})
 	})
@@ -362,10 +393,11 @@ describe("webviewMessageHandler - requestLmStudioModels", () => {
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestLmStudioModels",
+			requestId: "models-request",
 			values: { baseUrl: "http://127.0.0.1:4321" },
 		})
 
-		expect(mockGetLMStudioModels).toHaveBeenCalledWith("http://127.0.0.1:4321")
+		expect(mockGetLMStudioModels).toHaveBeenCalledWith("http://127.0.0.1:4321", { signal: expect.any(AbortSignal) })
 		expect(mockGetModels).not.toHaveBeenCalled()
 	})
 
@@ -374,10 +406,11 @@ describe("webviewMessageHandler - requestLmStudioModels", () => {
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestLmStudioModels",
+			requestId: "models-request",
 			values: { baseUrl: "" },
 		})
 
-		expect(mockGetLMStudioModels).toHaveBeenCalledWith("")
+		expect(mockGetLMStudioModels).toHaveBeenCalledWith("", { signal: expect.any(AbortSignal) })
 		expect(mockGetModels).not.toHaveBeenCalled()
 	})
 })
@@ -447,15 +480,18 @@ describe("webviewMessageHandler - requestOllamaModels", () => {
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestOllamaModels",
+			requestId: "models-request",
 		})
 
 		expect(mockGetModels).toHaveBeenCalledWith({
 			provider: providerIdentifiers.ollama,
+			signal: expect.any(AbortSignal),
 			baseUrl: "http://localhost:1234",
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "ollamaModels",
+			requestId: "models-request",
 			ollamaModels: mockModels,
 		})
 	})
@@ -465,10 +501,12 @@ describe("webviewMessageHandler - requestOllamaModels", () => {
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestOllamaModels",
+			requestId: "models-request",
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "ollamaModels",
+			requestId: "models-request",
 			ollamaModels: {},
 		})
 	})
@@ -478,10 +516,12 @@ describe("webviewMessageHandler - requestOllamaModels", () => {
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestOllamaModels",
+			requestId: "models-request",
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "ollamaModels",
+			requestId: "models-request",
 			ollamaModels: {},
 			error: "Connection refused",
 		})
@@ -496,6 +536,7 @@ describe("webviewMessageHandler - requestOllamaModels", () => {
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestOllamaModels",
+			requestId: "models-request",
 			values: { baseUrl: "https://ollama.example.com" },
 		})
 
@@ -505,6 +546,7 @@ describe("webviewMessageHandler - requestOllamaModels", () => {
 		)
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "ollamaModels",
+			requestId: "models-request",
 			ollamaModels: {},
 			error: "Cache write failed",
 		})
@@ -524,6 +566,7 @@ describe("webviewMessageHandler - requestOllamaModels", () => {
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestOllamaModels",
+			requestId: "models-request",
 			values: {
 				baseUrl: "https://ollama.example.com",
 				apiKey: "secret-key",
@@ -534,6 +577,7 @@ describe("webviewMessageHandler - requestOllamaModels", () => {
 		expect(mockFlushModels).toHaveBeenCalledWith(
 			{
 				provider: providerIdentifiers.ollama,
+				signal: expect.any(AbortSignal),
 				baseUrl: "https://ollama.example.com",
 				apiKey: "secret-key",
 			},
@@ -541,12 +585,14 @@ describe("webviewMessageHandler - requestOllamaModels", () => {
 		)
 		expect(mockGetModels).toHaveBeenCalledWith({
 			provider: providerIdentifiers.ollama,
+			signal: expect.any(AbortSignal),
 			baseUrl: "https://ollama.example.com",
 			apiKey: "secret-key",
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "ollamaModels",
+			requestId: "models-request",
 			ollamaModels: mockModels,
 		})
 	})
@@ -2356,5 +2402,129 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		await Promise.resolve()
 
 		expect(TelemetryService.instance.updateTelemetryState).not.toHaveBeenCalled()
+	})
+})
+
+describe("model request correlation and cancellation", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockClineProvider.getState = vi.fn().mockResolvedValue({ apiConfiguration: {} })
+		mockFlushModels.mockReset().mockResolvedValue(undefined)
+		mockGetModels.mockReset().mockResolvedValue({})
+	})
+
+	it("echoes the OpenAI request ID", async () => {
+		vi.mocked(getOpenAiModels).mockResolvedValue(["model"])
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestOpenAiModels",
+			requestId: "openai-request",
+			values: { baseUrl: "https://example.test/v1", apiKey: "test-key" },
+		})
+		expect(getOpenAiModels).toHaveBeenCalledWith(
+			"https://example.test/v1",
+			"test-key",
+			undefined,
+			expect.any(AbortSignal),
+		)
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "openAiModels",
+			requestId: "openai-request",
+			openAiModels: ["model"],
+		})
+	})
+
+	it("echoes the VS Code LM request ID", async () => {
+		vi.mocked(getVsCodeLmModels).mockResolvedValue([])
+		await webviewMessageHandler(mockClineProvider, { type: "requestVsCodeLmModels", requestId: "vscode-request" })
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "vsCodeLmModels",
+			requestId: "vscode-request",
+			vsCodeLmModels: [],
+		})
+	})
+
+	it.each(["requestOllamaModels", "requestLmStudioModels"] as const)(
+		"cancels %s during refresh before reading models",
+		async (type) => {
+			let finish!: () => void
+			mockFlushModels.mockImplementationOnce(
+				() =>
+					new Promise<void>((resolve) => {
+						finish = resolve
+					}),
+			)
+			const pending = webviewMessageHandler(mockClineProvider, { type, requestId: "cancel-refresh" })
+			await vi.waitFor(() => expect(mockFlushModels).toHaveBeenCalled())
+			const signal = mockFlushModels.mock.calls[0][0].signal
+			await webviewMessageHandler(mockClineProvider, { type: "cancelModelRequest", requestId: "cancel-refresh" })
+			expect(signal?.aborted).toBe(true)
+			finish()
+			await pending
+			expect(mockGetModels).not.toHaveBeenCalled()
+			expect(mockClineProvider.postMessageToWebview).not.toHaveBeenCalled()
+		},
+	)
+
+	it.each(["requestOllamaModels", "requestLmStudioModels", "requestRouterModels"] as const)(
+		"cancels %s during model reads without publishing results",
+		async (type) => {
+			let finish!: (models: ModelRecord) => void
+			mockGetModels.mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						finish = resolve
+					}),
+			)
+			const pending = webviewMessageHandler(mockClineProvider, {
+				type,
+				requestId: "cancel-read",
+				values: { provider: providerIdentifiers.openrouter },
+			})
+			await vi.waitFor(() => expect(mockGetModels).toHaveBeenCalled())
+			const signal = mockGetModels.mock.calls[0][0].signal
+			await webviewMessageHandler(mockClineProvider, { type: "cancelModelRequest", requestId: "cancel-read" })
+			expect(signal?.aborted).toBe(true)
+			finish({})
+			await pending
+			expect(mockClineProvider.postMessageToWebview).not.toHaveBeenCalled()
+		},
+	)
+
+	it("settles cancelled VS Code discovery even when the native API is still pending", async () => {
+		let finish!: (models: Awaited<ReturnType<typeof getVsCodeLmModels>>) => void
+		vi.mocked(getVsCodeLmModels).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finish = resolve
+				}),
+		)
+		const pending = webviewMessageHandler(mockClineProvider, {
+			type: "requestVsCodeLmModels",
+			requestId: "cancel-vscode",
+		})
+		await webviewMessageHandler(mockClineProvider, { type: "cancelModelRequest", requestId: "cancel-vscode" })
+		await pending
+		finish([])
+		expect(mockClineProvider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	it("aborts OpenAI HTTP work and suppresses its late response", async () => {
+		let finish!: (models: string[]) => void
+		vi.mocked(getOpenAiModels).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finish = resolve
+				}),
+		)
+		const pending = webviewMessageHandler(mockClineProvider, {
+			type: "requestOpenAiModels",
+			requestId: "cancel-openai",
+			values: { baseUrl: "https://example.test/v1", apiKey: "test-key" },
+		})
+		await webviewMessageHandler(mockClineProvider, { type: "cancelModelRequest", requestId: "cancel-openai" })
+		expect(vi.mocked(getOpenAiModels).mock.calls[0][3]?.aborted).toBe(true)
+		finish(["stale"])
+		await pending
+		expect(mockClineProvider.postMessageToWebview).not.toHaveBeenCalled()
 	})
 })

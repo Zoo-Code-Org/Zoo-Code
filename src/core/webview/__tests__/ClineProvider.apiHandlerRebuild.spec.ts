@@ -1,3 +1,4 @@
+import { ProviderSettingsManager } from "../../config/ProviderSettingsManager"
 import { WebviewFocusTracker } from "../WebviewFocusTracker"
 // npx vitest core/webview/__tests__/ClineProvider.apiHandlerRebuild.spec.ts
 
@@ -244,6 +245,8 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		// Mock providerSettingsManager
 		;(provider as any).providerSettingsManager = {
 			saveConfig: vi.fn().mockResolvedValue("test-id"),
+			hasConfig: vi.fn().mockResolvedValue(true),
+			deleteConfig: vi.fn(),
 			listConfig: vi.fn().mockResolvedValue([
 				{
 					name: "test-config",
@@ -461,6 +464,109 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(provider["contextProxy"].getValue("currentApiConfigName")).toBe("previous-config")
 
 			postSpy.mockRestore()
+		})
+	})
+
+	describe("persisted profile compensation", () => {
+		const oldSettings = { apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" }
+		const newSettings = { apiProvider: providerIdentifiers.openrouter, openRouterModelId: "new-model" }
+		beforeEach(async () => {
+			Object.defineProperty(provider, "providerSettingsManager", {
+				value: new ProviderSettingsManager(mockContext),
+				configurable: true,
+			})
+			await provider.contextProxy.setValue("mode", "code")
+			await provider.providerSettingsManager.saveConfig("existing", oldSettings)
+			await provider.providerSettingsManager.setModeConfig("code", undefined)
+			await provider.contextProxy.setProviderSettings(oldSettings)
+			await provider.contextProxy.setValue("currentApiConfigName", "existing")
+			await provider.contextProxy.setValue(
+				"listApiConfigMeta",
+				await provider.providerSettingsManager.listConfig(),
+			)
+		})
+
+		test.each(["list", "activation", "broadcast"] as const)(
+			"restores existing and removes new profiles after %s failure",
+			async (phase) => {
+				const manager = provider.providerSettingsManager
+				const previous = await manager.getProfile({ name: "existing" })
+				const previousMeta = provider.contextProxy.getValue("listApiConfigMeta")
+				const task = new Task({ ...defaultTaskOptions, apiConfiguration: oldSettings })
+				await provider.addClineToStack(task)
+				for (const name of ["existing", "new-profile"]) {
+					if (phase === "list")
+						vi.spyOn(manager, "listConfig").mockRejectedValueOnce(new Error("list failed"))
+					if (phase === "activation")
+						vi.spyOn(provider.contextProxy, "setProviderSettings").mockRejectedValueOnce(
+							new Error("activation failed"),
+						)
+					if (phase === "broadcast")
+						vi.spyOn(provider, "postStateToWebview").mockRejectedValueOnce(new Error("broadcast failed"))
+					expect(await provider.upsertProviderProfile(name, newSettings)).toBeUndefined()
+					expect(await manager.getProfile({ name: "existing" })).toEqual(previous)
+					expect(await manager.hasConfig("new-profile")).toBe(false)
+					expect(await manager.getModeConfigId("code")).toBeUndefined()
+					expect(provider.contextProxy.getProviderSettings()).toMatchObject(oldSettings)
+					expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("existing")
+					expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual(previousMeta)
+					expect(task.apiConfiguration).toEqual(oldSettings)
+					expect(task.setTaskApiConfigName).not.toHaveBeenCalled()
+				}
+			},
+		)
+
+		test("keeps a later update queued until persisted rollback completes", async () => {
+			const manager = provider.providerSettingsManager
+			const save = manager.saveConfig.bind(manager)
+			let releaseRollback!: () => void
+			vi.spyOn(manager, "saveConfig")
+				.mockImplementationOnce(save)
+				.mockImplementationOnce(async (name, settings) => {
+					await new Promise<void>((resolve) => {
+						releaseRollback = resolve
+					})
+					return save(name, settings)
+				})
+			vi.spyOn(provider, "postStateToWebview").mockRejectedValueOnce(new Error("broadcast failed"))
+			const first = provider.upsertProviderProfile("existing", newSettings)
+			await vi.waitFor(() => expect(manager.saveConfig).toHaveBeenCalledTimes(2))
+			const finalSettings = { ...oldSettings, openRouterModelId: "final-model" }
+			const second = provider.upsertProviderProfile("existing", finalSettings)
+			await Promise.resolve()
+			expect(manager.saveConfig).toHaveBeenCalledTimes(2)
+			releaseRollback()
+			expect(await first).toBeUndefined()
+			expect(await second).toBeTruthy()
+			expect(await manager.getProfile({ name: "existing" })).toMatchObject(finalSettings)
+			expect(provider.contextProxy.getProviderSettings()).toMatchObject(finalSettings)
+		})
+
+		test("snapshots queued updates after the prior mutation and finishes rollback before the next", async () => {
+			let release!: () => void
+			const broadcast = vi
+				.spyOn(provider, "postStateToWebview")
+				.mockImplementationOnce(
+					() =>
+						new Promise<void>((resolve) => {
+							release = resolve
+						}),
+				)
+				.mockRejectedValueOnce(new Error("second broadcast failed"))
+			const first = provider.upsertProviderProfile("existing", newSettings)
+			await vi.waitFor(() => expect(broadcast).toHaveBeenCalledTimes(1))
+			const second = provider.upsertProviderProfile("existing", {
+				...newSettings,
+				openRouterModelId: "failed-model",
+			})
+			release()
+			expect(await first).toBeTruthy()
+			expect(await second).toBeUndefined()
+			expect(await provider.providerSettingsManager.getProfile({ name: "existing" })).toMatchObject(newSettings)
+			expect(provider.contextProxy.getProviderSettings()).toMatchObject(newSettings)
+			expect(await provider.providerSettingsManager.getModeConfigId("code")).toBe(
+				(await provider.providerSettingsManager.getProfile({ name: "existing" })).id,
+			)
 		})
 	})
 

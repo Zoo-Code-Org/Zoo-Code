@@ -55,6 +55,63 @@ describe("useChatModelSelector", () => {
 		})
 	})
 
+	describe("request cleanup", () => {
+		it.each([
+			providerIdentifiers.ollama,
+			providerIdentifiers.lmstudio,
+			providerIdentifiers.openai,
+			providerIdentifiers.vscodeLm,
+		])("cancels %s on provider switch and rapid remount", (apiProvider) => {
+			const config = { apiProvider, openAiBaseUrl: "https://example.test/v1", openAiApiKey: "test-key" }
+			mockUseExtensionState.mockReturnValue({ apiConfiguration: config })
+			const first = renderHook(() => useChatModelSelector(), { wrapper })
+			const request = mockPostMessage.mock.calls.at(-1)![0]
+			mockUseExtensionState.mockReturnValue({ apiConfiguration: { apiProvider: providerIdentifiers.anthropic } })
+			first.rerender()
+			expect(mockPostMessage).toHaveBeenLastCalledWith({
+				type: "cancelModelRequest",
+				requestId: request.requestId,
+			})
+			mockUseExtensionState.mockReturnValue({ apiConfiguration: config })
+			first.rerender()
+			const restarted = mockPostMessage.mock.calls.at(-1)![0]
+			expect(restarted.requestId).not.toBe(request.requestId)
+			first.unmount()
+			expect(mockPostMessage).toHaveBeenLastCalledWith({
+				type: "cancelModelRequest",
+				requestId: restarted.requestId,
+			})
+			const second = renderHook(() => useChatModelSelector(), { wrapper })
+			const remounted = mockPostMessage.mock.calls.at(-1)![0]
+			expect(remounted.requestId).not.toBe(restarted.requestId)
+			second.unmount()
+			expect(mockPostMessage).toHaveBeenLastCalledWith({
+				type: "cancelModelRequest",
+				requestId: remounted.requestId,
+			})
+		})
+
+		it("cancels the replayed StrictMode effect and the final request on unmount", () => {
+			mockUseExtensionState.mockReturnValue({ apiConfiguration: { apiProvider: providerIdentifiers.ollama } })
+			const { unmount } = renderHook(() => useChatModelSelector(), {
+				wrapper: ({ children }) => <React.StrictMode>{children}</React.StrictMode>,
+			})
+			const messages = mockPostMessage.mock.calls.map(([message]) => message)
+			expect(messages.map((message) => message.type)).toEqual([
+				"requestOllamaModels",
+				"cancelModelRequest",
+				"requestOllamaModels",
+			])
+			expect(messages[1].requestId).toBe(messages[0].requestId)
+			expect(messages[2].requestId).not.toBe(messages[0].requestId)
+			unmount()
+			expect(mockPostMessage).toHaveBeenLastCalledWith({
+				type: "cancelModelRequest",
+				requestId: messages[2].requestId,
+			})
+		})
+	})
+
 	describe("static providers", () => {
 		it("returns static models for anthropic with apiModelId key", () => {
 			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
@@ -102,175 +159,32 @@ describe("useChatModelSelector", () => {
 		})
 	})
 
-	describe("zoo-gateway (dynamic router provider)", () => {
-		it("reads zoo-gateway models from the react-query routerModels", () => {
+	describe("dynamic router providers", () => {
+		it.each([
+			[providerIdentifiers.zooGateway, "zooGatewayModelId", "anthropic/claude-sonnet-4"],
+			[providerIdentifiers.opencodeGo, "opencodeGoModelId", "glm-5.2"],
+			[providerIdentifiers.kenari, "kenariModelId", "glm-5-2"],
+			[providerIdentifiers.nanogpt, "nanoGptModelId", "openai/gpt-5.6-sol"],
+			[providerIdentifiers.requesty, "requestyModelId", "openai/gpt-5.1"],
+			[providerIdentifiers.unbound, "unboundModelId", "openai/gpt-4o"],
+			[providerIdentifiers.vercelAiGateway, "vercelAiGatewayModelId", "openai/gpt-4o-mini"],
+			[providerIdentifiers.kimiCode, "apiModelId", "kimi-k2"],
+		] as const)("reads %s models from the react-query routerModels", (provider, modelIdKey, modelId) => {
 			mockUseRouterModels.mockReturnValue({
-				data: {
-					[providerIdentifiers.zooGateway]: {
-						"anthropic/claude-sonnet-4": { maxTokens: 1, contextWindow: 1 },
-					},
-				},
+				data: { [provider]: { [modelId]: { maxTokens: 1, contextWindow: 1 } } },
 				isLoading: false,
 				isError: false,
 			})
 			mockUseExtensionState.mockReturnValue({
-				apiConfiguration: {
-					apiProvider: providerIdentifiers.zooGateway,
-					zooGatewayModelId: "anthropic/claude-sonnet-4",
-				},
+				apiConfiguration: { apiProvider: provider, [modelIdKey]: modelId },
 				routerModels: undefined,
 			})
 
 			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
 
-			expect(result.current.modelIdKey).toBe("zooGatewayModelId")
+			expect(result.current.modelIdKey).toBe(modelIdKey)
 			expect(result.current.defaultModelId).toBeTruthy()
-			expect(Object.keys(result.current.models!)).toEqual(["anthropic/claude-sonnet-4"])
-		})
-	})
-
-	describe("opencode-go (dynamic router provider)", () => {
-		it("reads opencode-go models from the react-query routerModels", () => {
-			mockUseRouterModels.mockReturnValue({
-				data: { [providerIdentifiers.opencodeGo]: { "glm-5.2": { maxTokens: 1, contextWindow: 1 } } },
-				isLoading: false,
-				isError: false,
-			})
-			mockUseExtensionState.mockReturnValue({
-				apiConfiguration: { apiProvider: providerIdentifiers.opencodeGo, opencodeGoModelId: "glm-5.2" },
-				routerModels: undefined,
-			})
-
-			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
-
-			expect(result.current.modelIdKey).toBe("opencodeGoModelId")
-			expect(result.current.defaultModelId).toBeTruthy()
-			expect(Object.keys(result.current.models!)).toEqual(["glm-5.2"])
-		})
-	})
-
-	describe("kenari (dynamic router provider)", () => {
-		it("reads kenari models from the react-query routerModels", () => {
-			mockUseRouterModels.mockReturnValue({
-				data: { [providerIdentifiers.kenari]: { "glm-5-2": { maxTokens: 1, contextWindow: 1 } } },
-				isLoading: false,
-				isError: false,
-			})
-			mockUseExtensionState.mockReturnValue({
-				apiConfiguration: { apiProvider: providerIdentifiers.kenari, kenariModelId: "glm-5-2" },
-				routerModels: undefined,
-			})
-
-			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
-
-			expect(result.current.modelIdKey).toBe("kenariModelId")
-			expect(result.current.defaultModelId).toBeTruthy()
-			expect(Object.keys(result.current.models!)).toEqual(["glm-5-2"])
-		})
-	})
-
-	describe("nanogpt (dynamic router provider)", () => {
-		it("reads nanogpt models from the react-query routerModels", () => {
-			mockUseRouterModels.mockReturnValue({
-				data: { [providerIdentifiers.nanogpt]: { "openai/gpt-5.6-sol": { maxTokens: 1, contextWindow: 1 } } },
-				isLoading: false,
-				isError: false,
-			})
-			mockUseExtensionState.mockReturnValue({
-				apiConfiguration: { apiProvider: providerIdentifiers.nanogpt, nanoGptModelId: "openai/gpt-5.6-sol" },
-				routerModels: undefined,
-			})
-
-			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
-
-			expect(result.current.modelIdKey).toBe("nanoGptModelId")
-			expect(result.current.defaultModelId).toBeTruthy()
-			expect(Object.keys(result.current.models!)).toEqual(["openai/gpt-5.6-sol"])
-		})
-	})
-
-	describe("requesty (dynamic router provider)", () => {
-		it("reads requesty models from the react-query routerModels", () => {
-			mockUseRouterModels.mockReturnValue({
-				data: { [providerIdentifiers.requesty]: { "openai/gpt-5.1": { maxTokens: 1, contextWindow: 1 } } },
-				isLoading: false,
-				isError: false,
-			})
-			mockUseExtensionState.mockReturnValue({
-				apiConfiguration: { apiProvider: providerIdentifiers.requesty, requestyModelId: "openai/gpt-5.1" },
-				routerModels: undefined,
-			})
-
-			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
-
-			expect(result.current.modelIdKey).toBe("requestyModelId")
-			expect(result.current.defaultModelId).toBeTruthy()
-			expect(Object.keys(result.current.models!)).toEqual(["openai/gpt-5.1"])
-		})
-	})
-
-	describe("unbound (dynamic router provider)", () => {
-		it("reads unbound models from the react-query routerModels", () => {
-			mockUseRouterModels.mockReturnValue({
-				data: { [providerIdentifiers.unbound]: { "openai/gpt-4o": { maxTokens: 1, contextWindow: 1 } } },
-				isLoading: false,
-				isError: false,
-			})
-			mockUseExtensionState.mockReturnValue({
-				apiConfiguration: { apiProvider: providerIdentifiers.unbound, unboundModelId: "openai/gpt-4o" },
-				routerModels: undefined,
-			})
-
-			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
-
-			expect(result.current.modelIdKey).toBe("unboundModelId")
-			expect(result.current.defaultModelId).toBeTruthy()
-			expect(Object.keys(result.current.models!)).toEqual(["openai/gpt-4o"])
-		})
-	})
-
-	describe("vercel-ai-gateway (dynamic router provider)", () => {
-		it("reads vercel-ai-gateway models from the react-query routerModels", () => {
-			mockUseRouterModels.mockReturnValue({
-				data: {
-					[providerIdentifiers.vercelAiGateway]: { "openai/gpt-4o-mini": { maxTokens: 1, contextWindow: 1 } },
-				},
-				isLoading: false,
-				isError: false,
-			})
-			mockUseExtensionState.mockReturnValue({
-				apiConfiguration: {
-					apiProvider: providerIdentifiers.vercelAiGateway,
-					vercelAiGatewayModelId: "openai/gpt-4o-mini",
-				},
-				routerModels: undefined,
-			})
-
-			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
-
-			expect(result.current.modelIdKey).toBe("vercelAiGatewayModelId")
-			expect(result.current.defaultModelId).toBeTruthy()
-			expect(Object.keys(result.current.models!)).toEqual(["openai/gpt-4o-mini"])
-		})
-	})
-
-	describe("kimi-code (dynamic router provider)", () => {
-		it("reads kimi-code models from the react-query routerModels using apiModelId", () => {
-			mockUseRouterModels.mockReturnValue({
-				data: { [providerIdentifiers.kimiCode]: { "kimi-k2": { maxTokens: 1, contextWindow: 1 } } },
-				isLoading: false,
-				isError: false,
-			})
-			mockUseExtensionState.mockReturnValue({
-				apiConfiguration: { apiProvider: providerIdentifiers.kimiCode, apiModelId: "kimi-k2" },
-				routerModels: undefined,
-			})
-
-			const { result } = renderHook(() => useChatModelSelector(), { wrapper })
-
-			expect(result.current.modelIdKey).toBe("apiModelId")
-			expect(result.current.defaultModelId).toBeTruthy()
-			expect(Object.keys(result.current.models!)).toEqual(["kimi-k2"])
+			expect(Object.keys(result.current.models!)).toEqual([modelId])
 		})
 	})
 
@@ -318,13 +232,13 @@ describe("useChatModelSelector", () => {
 			expect(mockPostMessage).toHaveBeenCalledTimes(1)
 			configure({ "X-Test": "first" })
 			rerender()
-			expect(mockPostMessage).toHaveBeenCalledTimes(2)
+			expect(mockPostMessage).toHaveBeenCalledTimes(3)
 			configure({ "X-Test": "first" })
 			rerender()
-			expect(mockPostMessage).toHaveBeenCalledTimes(2)
+			expect(mockPostMessage).toHaveBeenCalledTimes(3)
 			configure({ "X-Test": "second" })
 			rerender()
-			expect(mockPostMessage).toHaveBeenCalledTimes(3)
+			expect(mockPostMessage).toHaveBeenCalledTimes(5)
 			expect(mockPostMessage).toHaveBeenLastCalledWith(
 				expect.objectContaining({
 					values: expect.objectContaining({ openAiHeaders: { "X-Test": "second" } }),

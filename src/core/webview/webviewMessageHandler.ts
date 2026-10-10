@@ -1,3 +1,4 @@
+import { resolveModelWithAbort } from "../../api/providers/utils/abort-signal"
 import { safeWriteJson } from "../../utils/safeWriteJson"
 import * as path from "path"
 import * as os from "os"
@@ -127,6 +128,41 @@ export const webviewMessageHandler = async (
 	message: WebviewMessage,
 	marketplaceManager?: MarketplaceManager,
 ) => {
+	if (message.type === "cancelModelRequest") {
+		if (message.requestId) provider.modelRequests.cancel(message.requestId)
+		return
+	}
+	if (
+		message.requestId &&
+		[
+			"requestOllamaModels",
+			"requestLmStudioModels",
+			"requestOpenAiModels",
+			"requestVsCodeLmModels",
+			"requestRouterModels",
+		].includes(message.type)
+	) {
+		return provider.modelRequests.run(message.requestId, (signal) =>
+			handleWebviewMessage(provider, message, marketplaceManager, signal),
+		)
+	}
+	return handleWebviewMessage(provider, message, marketplaceManager)
+}
+
+const handleWebviewMessage = async (
+	provider: ClineProvider,
+	message: WebviewMessage,
+	marketplaceManager?: MarketplaceManager,
+	modelRequestSignal?: AbortSignal,
+) => {
+	const requestOptions = (options: GetModelsOptions): GetModelsOptions => {
+		modelRequestSignal?.throwIfAborted()
+		return modelRequestSignal ? { ...options, signal: modelRequestSignal } : options
+	}
+	const getRequestModels = (options: GetModelsOptions) => getModels(requestOptions(options))
+	const flushRequestModels = (options: GetModelsOptions, refresh: boolean) =>
+		flushModels(requestOptions(options), refresh)
+
 	// Utility functions provided for concise get/update of global state via contextProxy API.
 	const getGlobalState = <K extends keyof GlobalState>(key: K) => provider.contextProxy.getValue(key)
 	const updateGlobalState = async <K extends keyof GlobalState>(key: K, value: GlobalState[K]) =>
@@ -1142,8 +1178,9 @@ export const webviewMessageHandler = async (
 
 			const safeGetModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
 				try {
-					return await getModels(options)
+					return await getRequestModels(options)
 				} catch (error) {
+					modelRequestSignal?.throwIfAborted()
 					console.error(
 						`Failed to fetch models in webviewMessageHandler requestRouterModels for ${options.provider}:`,
 						error,
@@ -1198,7 +1235,7 @@ export const webviewMessageHandler = async (
 				// If explicit credentials are provided in message.values (from Refresh Models button),
 				// flush the cache first to ensure we fetch fresh data with the new credentials
 				if (message?.values?.litellmApiKey || message?.values?.litellmBaseUrl) {
-					await flushModels(
+					await flushRequestModels(
 						{ provider: providerIdentifiers.litellm, apiKey: litellmApiKey, baseUrl: litellmBaseUrl },
 						true,
 					)
@@ -1216,7 +1253,7 @@ export const webviewMessageHandler = async (
 
 			if (poeApiKey) {
 				if (message?.values?.poeApiKey || message?.values?.poeBaseUrl) {
-					await flushModels(
+					await flushRequestModels(
 						{ provider: providerIdentifiers.poe, apiKey: poeApiKey, baseUrl: poeBaseUrl },
 						true,
 					)
@@ -1234,7 +1271,7 @@ export const webviewMessageHandler = async (
 
 			if (deepSeekApiKey) {
 				if (message?.values?.deepSeekApiKey || message?.values?.deepSeekBaseUrl) {
-					await flushModels(
+					await flushRequestModels(
 						{ provider: providerIdentifiers.deepseek, apiKey: deepSeekApiKey, baseUrl: deepSeekBaseUrl },
 						true,
 					)
@@ -1256,7 +1293,7 @@ export const webviewMessageHandler = async (
 
 			if (moonshotApiKey) {
 				if (message?.values?.moonshotApiKey || message?.values?.moonshotBaseUrl) {
-					await flushModels(
+					await flushRequestModels(
 						{ provider: providerIdentifiers.moonshot, apiKey: moonshotApiKey, baseUrl: moonshotBaseUrl },
 						true,
 					)
@@ -1281,7 +1318,7 @@ export const webviewMessageHandler = async (
 
 			// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
 			if (message?.values?.opencodeGoApiKey) {
-				await flushModels({ provider: providerIdentifiers.opencodeGo, apiKey: opencodeGoApiKey }, true)
+				await flushRequestModels({ provider: providerIdentifiers.opencodeGo, apiKey: opencodeGoApiKey }, true)
 			}
 
 			candidates.push({
@@ -1298,7 +1335,7 @@ export const webviewMessageHandler = async (
 
 			// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
 			if (message?.values?.kenariApiKey) {
-				await flushModels({ provider: providerIdentifiers.kenari, apiKey: kenariApiKey }, true)
+				await flushRequestModels({ provider: providerIdentifiers.kenari, apiKey: kenariApiKey }, true)
 			}
 
 			candidates.push({
@@ -1311,7 +1348,7 @@ export const webviewMessageHandler = async (
 			// same key-scoped options for refresh and retrieval.
 			const nanoGptApiKey = message?.values?.nanoGptApiKey ?? apiConfiguration.nanoGptApiKey
 			if (message?.values?.nanoGptApiKey !== undefined) {
-				await flushModels({ provider: providerIdentifiers.nanogpt, apiKey: nanoGptApiKey }, true)
+				await flushRequestModels({ provider: providerIdentifiers.nanogpt, apiKey: nanoGptApiKey }, true)
 			}
 
 			candidates.push({
@@ -1343,7 +1380,7 @@ export const webviewMessageHandler = async (
 			// If refresh flag is set and we have a specific provider, flush its cache first
 			if (shouldRefresh && providerFilter && modelFetchPromises.length > 0) {
 				const targetCandidate = modelFetchPromises[0]
-				await flushModels(targetCandidate.options, true)
+				await flushRequestModels(targetCandidate.options, true)
 			}
 
 			const results = await Promise.allSettled(
@@ -1353,6 +1390,7 @@ export const webviewMessageHandler = async (
 				}),
 			)
 
+			modelRequestSignal?.throwIfAborted()
 			results.forEach((result, index) => {
 				const routerName = modelFetchPromises[index].key
 
@@ -1376,8 +1414,10 @@ export const webviewMessageHandler = async (
 				}
 			})
 
+			modelRequestSignal?.throwIfAborted()
 			await provider.postMessageToWebview({
 				type: RouterModelsMessageType.routerModels,
+				requestId: message.requestId,
 				routerModels,
 				values: providerFilter ? { provider: requestedProvider } : undefined,
 			})
@@ -1402,10 +1442,12 @@ export const webviewMessageHandler = async (
 				// Refresh the cache before reading the models. Keep this error
 				// separate from the read below so diagnostics identify which
 				// cache operation failed.
-				await flushModels(ollamaOptions, true)
+				await flushRequestModels(ollamaOptions, true)
 			} catch (error) {
+				modelRequestSignal?.throwIfAborted()
 				const errorMsg = error instanceof Error ? error.message : String(error)
 				provider.log(`[requestOllamaModels] Failed to refresh model cache for ${logBaseUrl}: ${errorMsg}`)
+				modelRequestSignal?.throwIfAborted()
 				await provider.postMessageToWebview({
 					type: OllamaModelsMessageType.ollamaModels,
 					ollamaModels: {},
@@ -1416,18 +1458,21 @@ export const webviewMessageHandler = async (
 			}
 
 			try {
-				const ollamaModels = await getModels(ollamaOptions)
+				const ollamaModels = await getRequestModels(ollamaOptions)
 
 				// Always post a response so the webview refresh status can
 				// transition out of "loading" — even when no models are found.
+				modelRequestSignal?.throwIfAborted()
 				await provider.postMessageToWebview({
 					type: OllamaModelsMessageType.ollamaModels,
 					ollamaModels,
 					requestId: message.requestId,
 				})
 			} catch (error) {
+				modelRequestSignal?.throwIfAborted()
 				const errorMsg = error instanceof Error ? error.message : String(error)
 				provider.log(`[requestOllamaModels] Failed to read models for ${logBaseUrl}: ${errorMsg}`)
+				modelRequestSignal?.throwIfAborted()
 				await provider.postMessageToWebview({
 					type: OllamaModelsMessageType.ollamaModels,
 					ollamaModels: {},
@@ -1445,18 +1490,23 @@ export const webviewMessageHandler = async (
 				const hasPreviewBaseUrl = typeof requestedBaseUrl === "string"
 				let lmStudioModels: ModelRecord
 				if (hasPreviewBaseUrl) {
-					lmStudioModels = await getLMStudioModels(requestedBaseUrl)
+					modelRequestSignal?.throwIfAborted()
+					lmStudioModels = await getLMStudioModels(
+						requestedBaseUrl,
+						...(modelRequestSignal ? [{ signal: modelRequestSignal }] : []),
+					)
 				} else {
 					const lmStudioOptions = {
 						provider: providerIdentifiers.lmstudio,
 						baseUrl: lmStudioApiConfig.lmStudioBaseUrl,
 					}
 					// Flush cache and refresh to ensure fresh models.
-					await flushModels(lmStudioOptions, true)
-					lmStudioModels = await getModels(lmStudioOptions)
+					await flushRequestModels(lmStudioOptions, true)
+					lmStudioModels = await getRequestModels(lmStudioOptions)
 				}
 
 				if (Object.keys(lmStudioModels).length > 0) {
+					modelRequestSignal?.throwIfAborted()
 					await provider.postMessageToWebview({
 						type: LmStudioModelsMessageType.lmStudioModels,
 						lmStudioModels: lmStudioModels,
@@ -1464,12 +1514,14 @@ export const webviewMessageHandler = async (
 					})
 				}
 			} catch (error) {
+				modelRequestSignal?.throwIfAborted()
 				// Silently fail - user hasn't configured LM Studio yet.
 				console.debug("LM Studio models fetch failed:", error)
 			}
 			break
 		}
 		case "requestRooModels": {
+			modelRequestSignal?.throwIfAborted()
 			await provider.postMessageToWebview({
 				type: RouterModelsMessageType.singleRouterModelFetchResponse,
 				success: false,
@@ -1484,8 +1536,10 @@ export const webviewMessageHandler = async (
 					message?.values?.baseUrl,
 					message?.values?.apiKey,
 					message?.values?.openAiHeaders,
+					modelRequestSignal,
 				)
 
+				modelRequestSignal?.throwIfAborted()
 				await provider.postMessageToWebview({
 					type: OpenAiModelsMessageType.openAiModels,
 					openAiModels,
@@ -1495,8 +1549,10 @@ export const webviewMessageHandler = async (
 
 			break
 		case VsCodeLmModelsMessageType.requestVsCodeLmModels:
-			const vsCodeLmModels = await getVsCodeLmModels()
+			modelRequestSignal?.throwIfAborted()
+			const vsCodeLmModels = await resolveModelWithAbort(getVsCodeLmModels, modelRequestSignal, "VS Code LM")
 			// TODO: Cache like we do for OpenRouter, etc?
+			modelRequestSignal?.throwIfAborted()
 			await provider.postMessageToWebview({
 				type: VsCodeLmModelsMessageType.vsCodeLmModels,
 				vsCodeLmModels,

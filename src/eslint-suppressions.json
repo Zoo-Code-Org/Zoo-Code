@@ -401,7 +401,7 @@
 	},
 	"api/providers/openai.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 3
+			"count": 2
 		}
 	},
 	"api/providers/openrouter.ts": {

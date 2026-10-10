@@ -2630,6 +2630,7 @@ describe("ClineProvider", () => {
 				.mockResolvedValue([
 					{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 				]),
+			hasConfig: vi.fn().mockResolvedValue(false),
 			saveConfig: vi.fn().mockResolvedValue("test-id"),
 			setModeConfig: vi.fn(),
 			getModeConfigId: vi.fn().mockResolvedValue(undefined),
@@ -3367,7 +3368,11 @@ describe("ClineProvider", () => {
 			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 			;(provider as any).providerSettingsManager = {
+				hasConfig: vi.fn().mockResolvedValue(false),
+				deleteConfig: vi.fn(),
 				setModeConfig: vi.fn().mockRejectedValue(new Error("Failed to update mode config")),
+				saveConfig: vi.fn().mockResolvedValue("test-id"),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
 					.mockResolvedValue([
@@ -3400,6 +3405,8 @@ describe("ClineProvider", () => {
 			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 			;(provider as any).providerSettingsManager = {
+				hasConfig: vi.fn().mockResolvedValue(false),
+				deleteConfig: vi.fn(),
 				setModeConfig: vi.fn(),
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
@@ -3446,6 +3453,8 @@ describe("ClineProvider", () => {
 				throw new Error("API handler error")
 			})
 			;(provider as any).providerSettingsManager = {
+				hasConfig: vi.fn().mockResolvedValue(false),
+				deleteConfig: vi.fn(),
 				setModeConfig: vi.fn(),
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
@@ -3478,9 +3487,8 @@ describe("ClineProvider", () => {
 			)
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.create_api_config")
 
-			// The partial failure is rolled back: the persisted profile list is
-			// re-read and the in-memory state is restored rather than left pointing
-			// at a half-applied profile.
+			// The initial metadata write is followed by restoration of the snapshot.
+			expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("test-config")
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("listApiConfigMeta", [
 				{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 			])

@@ -573,8 +573,14 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	}
 }
 
-export async function getOpenAiModels(baseUrl?: string, apiKey?: string, openAiHeaders?: Record<string, string>) {
+export async function getOpenAiModels(
+	baseUrl?: string,
+	apiKey?: string,
+	openAiHeaders?: Record<string, string>,
+	signal?: AbortSignal,
+) {
 	try {
+		signal?.throwIfAborted()
 		if (!baseUrl) {
 			return []
 		}
@@ -586,7 +592,7 @@ export async function getOpenAiModels(baseUrl?: string, apiKey?: string, openAiH
 			return []
 		}
 
-		const config: Record<string, any> = {}
+		const config: Record<string, unknown> = signal ? { signal } : {}
 		const headers: Record<string, string> = {
 			...DEFAULT_HEADERS,
 			...(openAiHeaders || {}),

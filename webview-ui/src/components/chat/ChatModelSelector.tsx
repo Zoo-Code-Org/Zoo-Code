@@ -7,6 +7,8 @@ import { useAppTranslation } from "@/i18n/TranslationContext"
 import { vscode } from "@/utils/vscode"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { useSelectedModel } from "@/components/ui/hooks/useSelectedModel"
+import { isModelAllowedForOrganization, isProviderAllowAll } from "@roo-code/types"
+
 import { filterModels } from "@/components/settings/utils/organizationFilters"
 import { useChatModelSelector } from "./hooks/useChatModelSelector"
 
@@ -58,39 +60,17 @@ export const ChatModelSelector = ({ disabled = false, title, triggerClassName = 
 		return modelIds.filter((id) => id.toLowerCase().includes(q))
 	}, [modelIds, searchValue])
 
-	// Whether org policy permits an arbitrary/custom model id for this provider.
-	// Only providers that are explicitly `allowAll` may use free-form ids; when a
-	// provider is narrowed to an allow-list we must not expose the custom-model
-	// escape hatch (the options list is already filtered by `filterModels`).
-	const canUseCustomModel = useMemo(() => {
-		if (!organizationAllowList || organizationAllowList.allowAll) {
-			return true
-		}
-		if (!provider) {
-			return false
-		}
-		return organizationAllowList.providers[provider]?.allowAll === true
-	}, [organizationAllowList, provider])
+	// Org policy permits an arbitrary/custom model id only when the provider is
+	// explicitly `allowAll`; the options list is already filtered by `filterModels`.
+	const canUseCustomModel = useMemo(
+		() => isProviderAllowAll(organizationAllowList, provider),
+		[organizationAllowList, provider],
+	)
 
-	// Defense-in-depth: reject a selection that the organization policy disallows,
-	// regardless of how it was produced (option click, keyboard, or custom entry).
+	// Defense-in-depth: reject a selection the org policy disallows, regardless
+	// of how it was produced (option click, keyboard, or custom entry).
 	const isModelAllowed = useCallback(
-		(modelId: string): boolean => {
-			if (!organizationAllowList || organizationAllowList.allowAll) {
-				return true
-			}
-			if (!provider) {
-				return false
-			}
-			const providerConfig = organizationAllowList.providers[provider]
-			if (!providerConfig) {
-				return false
-			}
-			if (providerConfig.allowAll) {
-				return true
-			}
-			return providerConfig.models?.includes(modelId) ?? false
-		},
+		(modelId: string): boolean => isModelAllowedForOrganization(organizationAllowList, provider, modelId),
 		[organizationAllowList, provider],
 	)
 
