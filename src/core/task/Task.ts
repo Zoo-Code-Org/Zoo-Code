@@ -50,6 +50,8 @@ import {
 	isResumableAsk,
 	QueuedMessage,
 	DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
+	DEFAULT_TOOL_REPETITION_SOFT_LIMIT,
+	normalizeToolRepetitionSoftLimit,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	MAX_CHECKPOINT_TIMEOUT_SECONDS,
 	MIN_CHECKPOINT_TIMEOUT_SECONDS,
@@ -451,6 +453,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// Tool Use
 	consecutiveMistakeCount: number = 0
 	consecutiveMistakeLimit: number
+	toolRepetitionSoftLimit: number
 	consecutiveMistakeCountForApplyDiff: Map<string, number> = new Map()
 	consecutiveMistakeCountForEditFile: Map<string, number> = new Map()
 	consecutiveNoToolUseCount: number = 0
@@ -648,6 +651,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		enableCheckpoints = true,
 		checkpointTimeout = DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 		consecutiveMistakeLimit = DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
+		toolRepetitionSoftLimit = DEFAULT_TOOL_REPETITION_SOFT_LIMIT,
 		taskId,
 		task,
 		images,
@@ -719,6 +723,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.autoApprovalHandler = new AutoApprovalHandler()
 
 		this.consecutiveMistakeLimit = consecutiveMistakeLimit ?? DEFAULT_CONSECUTIVE_MISTAKE_LIMIT
+		this.toolRepetitionSoftLimit = normalizeToolRepetitionSoftLimit(
+			toolRepetitionSoftLimit ?? DEFAULT_TOOL_REPETITION_SOFT_LIMIT,
+			this.consecutiveMistakeLimit,
+		)
 		this.providerRef = new WeakRef(provider)
 		this.globalStoragePath = provider.context.globalStorageUri.fsPath
 		this.diffViewProvider = new DiffViewProvider(this.cwd, this)
@@ -774,7 +782,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Set up diff strategy
 		this.diffStrategy = new MultiSearchReplaceDiffStrategy(diffFuzzyThreshold)
 
-		this.toolRepetitionDetector = new ToolRepetitionDetector(this.consecutiveMistakeLimit)
+		this.toolRepetitionDetector = new ToolRepetitionDetector(
+			this.toolRepetitionSoftLimit,
+			this.consecutiveMistakeLimit,
+		)
 
 		// Initialize todo list if provided
 		if (initialTodos && initialTodos.length > 0) {
@@ -2443,6 +2454,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Update the configuration and rebuild the API handler
 		this.apiConfiguration = newApiConfiguration
 		this.api = buildApiHandler(this.apiConfiguration)
+
+		// Refresh only the soft tool-repetition limit from the new profile so an
+		// active task immediately enforces it. The task-level
+		// `consecutiveMistakeLimit` (the hard stop) is intentionally preserved:
+		// it may have been set explicitly at task creation (e.g. the extension
+		// API creates tasks with `Number.MAX_SAFE_INTEGER`), and a profile switch
+		// must not silently override it. The detector's in-progress counting
+		// state is preserved.
+		this.toolRepetitionSoftLimit = normalizeToolRepetitionSoftLimit(
+			newApiConfiguration.toolRepetitionSoftLimit ?? DEFAULT_TOOL_REPETITION_SOFT_LIMIT,
+			this.consecutiveMistakeLimit,
+		)
+		this.toolRepetitionDetector.updateLimits(this.toolRepetitionSoftLimit, this.consecutiveMistakeLimit)
 	}
 
 	public async submitUserMessage(
