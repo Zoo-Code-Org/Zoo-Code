@@ -211,7 +211,6 @@ it("does not log a cleanup error when the safety net finds the temp file already
 	await expect(safeWriteJson(target, { id: "task-1" })).rejects.toThrow("commit rename failed")
 
 	// The safety net really ran, and ran on the staged .new_ file it was supposed to remove.
-	// The safety net really ran, and ran on the staged .new_ file it was supposed to remove.
 	// Two unlinks of that path are expected: safeWriteText cleans up the tempPath it was
 	// handed, and then safeWriteJson runs its own safety net on the same path. Dropping the
 	// net would leave one, which is exactly what this checks.
@@ -332,4 +331,37 @@ it("serializes a writer that names the referent directly while the link still ex
 	// referent keeps the content its own writer put there.
 	expect(JSON.parse(await fs.readFile(link, "utf8"))).toEqual({ id: "task-4" })
 	expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ had: "referent content" })
+
+})
+
+it("takes one lock for a regular file whose parent directory resolves through a symlink", async () => {
+	// A parent that resolves elsewhere is the ordinary case: macOS /var -> /private/var under
+	// os.tmpdir(), a workspace opened through a symlinked folder, a symlinked home. The two
+	// spellings name one file, so a comparison that only folds letter case calls them two
+	// identities and safeWriteJson acquires both keys - proper-lockfile then creates two .lock
+	// entries in the same directory, the second acquisition finds the lock this call already
+	// holds, retries, and fails with ELOCKED on every unscoped write.
+	const canonicalDir = await makeDir("canonical-parent-")
+	const aliasDir = path.join(os.tmpdir(), "alias-of-canonical")
+	const aliasFile = path.join(aliasDir, "cfg.json")
+	const canonicalFile = path.join(canonicalDir, "cfg.json")
+	currentLink = ""
+	// The file is a regular file, not a link: only an ancestor directory resolves elsewhere.
+	mockedRealpath.mockImplementation(async (target) => {
+		const t = String(target)
+		if (t === aliasDir) return canonicalDir
+		if (t === aliasFile) return canonicalFile
+		return t
+	})
+	mockedLstat.mockImplementation(async () => ({ isSymbolicLink: () => false, isFile: () => true }) as unknown as BigIntStats)
+	mockedReadlink.mockRejectedValue(enoent)
+
+	await safeWriteJson(aliasFile, { id: "task-1" })
+
+	const keys = mockedAcquireFileLock.mock.calls.map((c: unknown[]) => String(c[0]))
+	expect(keys).toHaveLength(1)
+	// Which spelling got the lock is the other half of the claim: proper-lockfile writes
+	// ${key}.lock, so a lock taken on the alias spelling is a different file on disk from the
+	// one a writer that names the canonical path takes - one identity, two locks again.
+	expect(keys[0]).toBe(canonicalFile)
 })

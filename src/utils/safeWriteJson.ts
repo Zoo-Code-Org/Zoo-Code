@@ -5,6 +5,7 @@ import { JsonStreamStringify } from "json-stream-stringify"
 
 import { acquireFileLock } from "./fileLock"
 import {
+	resolveLinkPathLockKey,
 	resolveLockKey,
 	resolvePublishTarget,
 	safeWriteText,
@@ -206,7 +207,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// byte-for-byte they can name one file twice, and locking a file this call already locked
 	// would stall on its own stale timeout. Folding is per _lockIdentityKey, because case folding
 	// alone leaves a short-name spelling unequal to the canonical one resolveLockKey returns.
-	const linkPathLockKey = absoluteFilePath
+	const linkPathLockKey = await resolveLinkPathLockKey(absoluteFilePath)
 	const [referentLockIdentity, linkPathLockIdentity] = await Promise.all([
 		_lockIdentityKey(referentLockKey),
 		_lockIdentityKey(linkPathLockKey),
