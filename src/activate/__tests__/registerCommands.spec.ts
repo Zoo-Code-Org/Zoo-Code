@@ -1171,7 +1171,7 @@ describe("openClineInNewTab", () => {
 		expect(getPanel()).toBe(panel)
 
 		const stateHandler = panel.onDidChangeViewState.mock.calls[0][0] as (event: {
-			webviewPanel: { visible: boolean; webview: { postMessage: (message: unknown) => void } }
+			webviewPanel: { active?: boolean; visible: boolean; webview: { postMessage: (message: unknown) => void } }
 		}) => void
 		const visibleEvent = { webviewPanel: { visible: true, webview: { postMessage: vi.fn() } } }
 		stateHandler(visibleEvent)
@@ -1183,6 +1183,14 @@ describe("openClineInNewTab", () => {
 		const hiddenEvent = { webviewPanel: { visible: false, webview: { postMessage: vi.fn() } } }
 		stateHandler(hiddenEvent)
 		expect(hiddenEvent.webviewPanel.webview.postMessage).not.toHaveBeenCalled()
+
+		// A visible panel that is not active must not take the tracked ref over. Earlier events in
+		// this test carried no `active` field at all, so that branch was never exercised. The
+		// event names a different panel object than the tracked one: a guard that looked only at
+		// `visible` would move the ref and this assertion would fail.
+		const otherPanel = { active: false, visible: true, webview: { postMessage: vi.fn() } }
+		stateHandler({ webviewPanel: otherPanel })
+		expect(getPanel()).toBe(panel)
 
 		const disposeHandler = panel.onDidDispose.mock.calls[0][0] as () => void
 		disposeHandler()
