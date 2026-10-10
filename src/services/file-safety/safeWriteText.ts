@@ -302,6 +302,13 @@ export async function createStagingFile(targetPath: string): Promise<StagingHand
 		// rather than a crash.
 		const stat: { dev?: bigint; ino?: bigint } | undefined = await fs.lstat(tempPath, { bigint: true })
 		return new StagingHandle(tempPath, stagingDir, stat?.dev, stat?.ino)
+	} catch (error: unknown) {
+		// This call created the directory, so this call removes it: a handle that was never handed
+		// out has no other owner, and an empty private staging directory beside the target is
+		// residue nobody else would ever clean.
+		await fs.unlink(tempPath).catch(() => {})
+		await fs.rmdir(stagingDir).catch(() => {})
+		throw error
 	} finally {
 		// The descriptor is this call's own: a close that is still owed must not be abandoned, and
 		// must not replace the error the caller needs to see.
@@ -656,9 +663,12 @@ export async function safeWriteText(
 			}
 			const fd = fsSync.openSync(tempPath, "r+")
 			try {
-				if (targetMode !== null) {
-					fsSync.fchmodSync(fd, targetMode)
-				}
+				// An existing target keeps its mode. A target that does not exist yet gets the
+				// documented default for a fresh file rather than the staging file's private 0600:
+				// the handle is created 0600 so nobody can read content that is not yet published,
+				// but publishing that mode as-is would make every new file owner-only, which is a
+				// change in who can read the file, decided by a staging detail.
+				fsSync.fchmodSync(fd, targetMode === null ? 0o644 : targetMode)
 				_fsyncFile(fd)
 			} finally {
 				fsSync.closeSync(fd)
