@@ -989,7 +989,9 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		conversationId?: string, // Optional conversation ID to track cache points across messages
 	): { system: SystemContentBlock[]; messages: Message[] } {
 		// First convert messages using shared converter for proper image handling
-		const convertedMessages = sharedConverter(anthropicMessages as Anthropic.Messages.MessageParam[])
+		const convertedMessages = sharedConverter(anthropicMessages as Anthropic.Messages.MessageParam[], {
+			preserveReasoning: modelInfo?.preserveReasoning === true,
+		})
 
 		// If prompt caching is disabled, return the converted messages directly
 		if (!usePromptCache) {
