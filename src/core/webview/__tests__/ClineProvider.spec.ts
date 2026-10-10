@@ -34,6 +34,7 @@ import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 import { ClineProvider } from "../ClineProvider"
 import { webviewMessageHandler } from "../webviewMessageHandler"
+import * as webviewMessages from "../webviewMessageHandler"
 import { enqueueSettingsSave } from "../settingsSaveQueue"
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { MessageManager } from "../../message-manager"
@@ -605,6 +606,7 @@ describe("ClineProvider", () => {
 
 		function createView() {
 			const messages = makeEventEmitter<WebviewMessage>()
+			const onDidReceiveMessage = vi.fn(messages.event)
 			const visibility = makeEventEmitter<void>()
 			const disposed = makeEventEmitter<void>()
 			const postMessage = vi.fn<(message: ExtensionMessage) => Promise<boolean>>().mockResolvedValue(true)
@@ -617,13 +619,13 @@ describe("ClineProvider", () => {
 					cspSource: "vscode-webview://test-csp-source",
 					asWebviewUri: (uri) => uri,
 					postMessage,
-					onDidReceiveMessage: messages.event,
+					onDidReceiveMessage,
 				},
 				onDidChangeVisibility: visibility.event,
 				onDidDispose: disposed.event,
 				show: vi.fn(),
 			}
-			return { view, messages, visibility, disposed, postMessage }
+			return { view, messages, visibility, disposed, postMessage, onDidReceiveMessage }
 		}
 
 		beforeEach(async () => {
@@ -710,29 +712,189 @@ describe("ClineProvider", () => {
 			},
 		)
 
-		test("stops an active profile save after disposal during a profile metadata read", async () => {
+		test.each(["provider", "sidebar"] as const)(
+			"registered callback suppresses the exact save abort reason on %s disposal",
+			async (target) => {
+				let release!: () => void
+				const write = vi.spyOn(provider.contextProxy, "setValue").mockImplementationOnce(
+					() =>
+						new Promise<void>((resolve) => {
+							release = resolve
+						}),
+				)
+				const callback = sidebar.onDidReceiveMessage.mock.calls[0][0]
+				const saving = callback({ type: "updateSettings", updatedSettings: { tableStriped: true } })
+				await vi.waitFor(() => expect(write).toHaveBeenCalled())
+				if (target === "provider") await provider.dispose()
+				else sidebar.disposed.fire()
+				await expect(saving).resolves.toBeUndefined()
+				release()
+				await enqueueSettingsSave(provider.contextProxy, new AbortController().signal, async () => {})
+				write.mockRestore()
+			},
+		)
+
+		test.each([false, true])("registered callback rethrows a save error (aborted: %s)", async (abort) => {
+			// Control the handler rejection to exercise the wrapper independently of the queue's abort race.
+			let reject!: (error: Error) => void
+			const handler = vi.spyOn(webviewMessages, "webviewMessageHandler").mockImplementationOnce(
+				() =>
+					new Promise<void>((_, rejectSave) => {
+						reject = rejectSave
+					}),
+			)
+			const callback = sidebar.onDidReceiveMessage.mock.calls[0][0]
+			const error = new Error("save failed")
+			const saving = callback({ type: "updateSettings", updatedSettings: { tableStriped: true } })
+			const rejected = expect(saving).rejects.toBe(error)
+			if (abort) sidebar.disposed.fire()
+			expect(error).not.toBe(provider.settingsSaveSignal.reason)
+			reject(error)
+			await rejected
+			handler.mockRestore()
+		})
+
+		test.each(["save", "metadata", "settings"] as const)(
+			"finishes profile persistence after disposal during %s and delays the next webview state",
+			async (stage) => {
+				let release!: () => void
+				const blocked = new Promise<void>((resolve) => {
+					release = resolve
+				})
+				const configuration: ProviderSettings = { apiProvider: providerIdentifiers.openrouter }
+				const metadata = [{ id: "saved-id", name: "saved-profile", ...configuration }]
+				const save = vi.spyOn(provider.providerSettingsManager, "saveConfig").mockImplementation(async () => {
+					if (stage === "save") await blocked
+					return "saved-id"
+				})
+				const list = vi.spyOn(provider.providerSettingsManager, "listConfig").mockImplementation(async () => {
+					if (stage === "metadata") await blocked
+					return metadata
+				})
+				const setMode = vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+				const setProviderSettings = provider.contextProxy.setProviderSettings.bind(provider.contextProxy)
+				const settings = vi
+					.spyOn(provider.contextProxy, "setProviderSettings")
+					.mockImplementation(async (values) => {
+						if (stage === "settings") await blocked
+						await setProviderSettings(values)
+					})
+				const task = new Task(defaultTaskOptions)
+				task.updateApiConfiguration = vi.fn()
+				task.setTaskApiConfigName = vi.fn()
+				const currentTask = vi.spyOn(provider, "getCurrentTask").mockReturnValue(task)
+				const upsert = vi.spyOn(provider, "upsertProviderProfile")
+				const saving = webviewMessageHandler(provider, {
+					type: "upsertApiConfiguration",
+					text: "saved-profile",
+					apiConfiguration: configuration,
+				})
+				await vi.waitFor(() =>
+					expect(stage === "save" ? save : stage === "metadata" ? list : settings).toHaveBeenCalled(),
+				)
+				const cancelled = expect(saving).rejects.toMatchObject({ name: "AbortError" })
+				sidebar.disposed.fire()
+				await cancelled
+				await provider.resolveWebviewView(createView().view)
+				const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				const previousReads = list.mock.calls.length
+				const launching = webviewMessageHandler(provider, { type: "webviewDidLaunch" })
+				await new Promise<void>((resolve) => setImmediate(resolve))
+				expect(list).toHaveBeenCalledTimes(previousReads)
+				expect(post).not.toHaveBeenCalled()
+				release()
+				await launching
+				await expect(upsert.mock.results[0].value).rejects.toMatchObject({ name: "AbortError" })
+				expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual(metadata)
+				expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("saved-profile")
+				expect(provider.contextProxy.getValue("apiProvider")).toBe(providerIdentifiers.openrouter)
+				expect(setMode).toHaveBeenCalledWith(defaultModeSlug, "saved-id")
+				expect(task.updateApiConfiguration).toHaveBeenCalledWith(configuration)
+				expect(task.setTaskApiConfigName).toHaveBeenCalledWith("saved-profile")
+				for (const spy of [save, list, setMode, settings, upsert, post, currentTask]) spy.mockRestore()
+			},
+		)
+
+		test("logs slow profile writes and keeps their lock when a queued mutation times out", async () => {
 			let release!: () => void
+			const blocked = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			const log = vi.spyOn(provider, "log")
+			vi.useFakeTimers()
+			try {
+				const saving = provider["enqueueProviderProfileMutation"](() => blocked, { allowTimeout: false })
+				const timedOutWrite = vi.fn().mockResolvedValue(undefined)
+				const timingOut = provider["enqueueProviderProfileMutation"](timedOutWrite)
+				const rejected = expect(timingOut).rejects.toThrow("Provider profile mutation timed out")
+				const nextWrite = vi.fn().mockResolvedValue(undefined)
+				const queued = provider["enqueueProviderProfileMutation"](nextWrite, { allowTimeout: false })
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				await rejected
+				expect(log).toHaveBeenCalledWith(
+					"Provider profile save is still pending; waiting for persistence to finish",
+				)
+				expect(nextWrite).not.toHaveBeenCalled()
+				release()
+				await saving
+				await queued
+				expect(nextWrite).toHaveBeenCalledOnce()
+				expect(timedOutWrite).not.toHaveBeenCalled()
+			} finally {
+				release()
+				vi.useRealTimers()
+				log.mockRestore()
+			}
+		})
+
+		test("an inactive profile save finishes metadata persistence after cancellation", async () => {
+			let release!: () => void
+			const metadata = [{ id: "saved-id", name: "saved-profile" }]
+			const save = vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("saved-id")
 			const list = vi.spyOn(provider.providerSettingsManager, "listConfig").mockImplementationOnce(
 				() =>
 					new Promise((resolve) => {
-						release = () => resolve([])
+						release = () => resolve(metadata)
 					}),
 			)
-			const write = vi.spyOn(provider.contextProxy, "setValue")
-			const saving = webviewMessageHandler(provider, {
-				type: "upsertApiConfiguration",
-				text: "saved-profile",
-				apiConfiguration: {},
-			})
-			await vi.waitFor(() => expect(list).toHaveBeenCalled())
+			const saving = provider.upsertProviderProfile("saved-profile", {}, false, provider.settingsSaveSignal)
 			const cancelled = expect(saving).rejects.toMatchObject({ name: "AbortError" })
+			await vi.waitFor(() => expect(list).toHaveBeenCalled())
 			sidebar.disposed.fire()
-			await cancelled
 			release()
-			await enqueueSettingsSave(provider.contextProxy, new AbortController().signal, async () => {})
-			expect(write).not.toHaveBeenCalled()
+			await cancelled
+			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual(metadata)
+			expect(provider.contextProxy.getValue("currentApiConfigName")).not.toBe("saved-profile")
+			save.mockRestore()
 			list.mockRestore()
-			write.mockRestore()
+		})
+
+		test("a partial profile failure waits for outstanding writes and remains retryable", async () => {
+			let release!: () => void
+			const metadata = [{ id: "saved-id", name: "saved-profile" }]
+			const save = vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("saved-id")
+			const list = vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue(metadata)
+			const setMode = vi
+				.spyOn(provider.providerSettingsManager, "setModeConfig")
+				.mockRejectedValueOnce(new Error("write failed"))
+			const settings = vi.spyOn(provider.contextProxy, "setProviderSettings").mockImplementationOnce(
+				() =>
+					new Promise<void>((resolve) => {
+						release = resolve
+					}),
+			)
+			const saving = provider.upsertProviderProfile("saved-profile", {})
+			const finished = vi.fn()
+			void saving.then(finished)
+			await vi.waitFor(() => expect(settings).toHaveBeenCalled())
+			expect(finished).not.toHaveBeenCalled()
+			release()
+			await expect(saving).resolves.toBeUndefined()
+			setMode.mockResolvedValue(undefined)
+			await expect(provider.upsertProviderProfile("saved-profile", {})).resolves.toBe("saved-id")
+			expect(list).toHaveBeenCalledTimes(2)
+			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual(metadata)
+			for (const spy of [save, list, setMode, settings]) spy.mockRestore()
 		})
 
 		test("allows settings saves when a disposed sidebar is resolved again", async () => {
@@ -1876,6 +2038,57 @@ describe("ClineProvider", () => {
 
 		// Should post state and theme to webview
 		expect(mockPostMessage).toHaveBeenCalled()
+	})
+
+	test("launches with cached state when refreshing profile metadata fails", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		const list = vi
+			.spyOn(provider.providerSettingsManager, "listConfig")
+			.mockRejectedValue(new Error("read failed"))
+		const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+		const log = vi.spyOn(provider, "log")
+		await expect(webviewMessageHandler(provider, { type: "webviewDidLaunch" })).resolves.toBeUndefined()
+		expect(post).toHaveBeenCalled()
+		expect(provider.isViewLaunched).toBe(true)
+		expect(log).toHaveBeenCalledWith("Failed to refresh provider profile metadata on launch")
+		for (const spy of [list, post, log]) spy.mockRestore()
+	})
+
+	test("bounds the launch wait without releasing the save queue, then posts refreshed state", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		const list = vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+		const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+		let release!: () => void
+		const saving = enqueueSettingsSave(
+			provider.contextProxy,
+			provider.settingsSaveSignal,
+			() =>
+				new Promise<void>((resolve) => {
+					release = resolve
+				}),
+		)
+		vi.useFakeTimers()
+		try {
+			const launching = webviewMessageHandler(provider, { type: "webviewDidLaunch" })
+			const nextWrite = vi.fn().mockResolvedValue(undefined)
+			const queued = enqueueSettingsSave(provider.contextProxy, provider.settingsSaveSignal, nextWrite)
+			await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+			await launching
+			expect(provider.isViewLaunched).toBe(true)
+			expect(post).toHaveBeenCalled()
+			expect(nextWrite).not.toHaveBeenCalled()
+			post.mockClear()
+			release()
+			await saving
+			await queued
+			expect(nextWrite).toHaveBeenCalledOnce()
+			expect(post).toHaveBeenCalledOnce()
+		} finally {
+			release()
+			vi.useRealTimers()
+			list.mockRestore()
+			post.mockRestore()
+		}
 	})
 
 	test("logs detached workspace initialization failures", async () => {

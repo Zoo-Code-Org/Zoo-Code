@@ -39,7 +39,7 @@ import { type ApiMessage } from "../task-persistence/apiMessages"
 import { saveTaskMessages } from "../task-persistence"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
-import { ClineProvider } from "./ClineProvider"
+import type { ClineProvider } from "./ClineProvider"
 import { findOriginalContent } from "./stripOriginalContent"
 import { handleCheckpointRestoreOperation } from "./checkpointRestoreHandler"
 import { generateErrorDiagnostics } from "./diagnosticsHandler"
@@ -634,7 +634,36 @@ const handleWebviewMessage = async (
 				provider.resolveWebviewThemeFixtureProbe(message.requestId, message.themeFixture)
 			}
 			break
-		case "webviewDidLaunch":
+		case "webviewDidLaunch": {
+			// A disposed view may still be completing an uncancellable profile write.
+			// Refresh metadata before publishing state, including after a failed save.
+			const launchSignal = provider.settingsSaveSignal
+			let refreshTimedOut = false
+			const refreshProfiles = enqueueSettingsSave(provider.contextProxy, launchSignal, async () => {
+				const metadata = await provider.providerSettingsManager.listConfig()
+				launchSignal.throwIfAborted()
+				await updateGlobalState("listApiConfigMeta", metadata)
+				if (refreshTimedOut) await provider.postStateToWebview()
+			}).catch((error) => {
+				if (launchSignal.aborted && error === launchSignal.reason) throw error
+				provider.log("Failed to refresh provider profile metadata on launch")
+			})
+			let refreshTimeout: ReturnType<typeof setTimeout> | undefined
+			try {
+				await Promise.race([
+					refreshProfiles,
+					new Promise<void>((resolve) => {
+						refreshTimeout = setTimeout(() => {
+							// Release only the launch wait; keep the write queue serialized.
+							refreshTimedOut = true
+							provider.log("Provider profile metadata refresh timed out on launch")
+							resolve()
+						}, 30_000)
+					}),
+				])
+			} finally {
+				clearTimeout(refreshTimeout)
+			}
 			// Load custom modes first
 			const customModes = await provider.customModesManager.getCustomModes()
 			await updateGlobalState("customModes", customModes)
@@ -743,6 +772,7 @@ const handleWebviewMessage = async (
 
 			provider.isViewLaunched = true
 			break
+		}
 		case "newTask":
 			// Initializing new instance of Cline will make sure that any
 			// agentically running promises in old instance don't affect our new
