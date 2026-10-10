@@ -9,6 +9,8 @@ body:
               Thank you for your report! Please search existing issues first:
               https://github.com/Zoo-Code-Org/Zoo-Code/issues
 
+              Write in Simplified Technical English: short sentences, plain words, active voice, one idea per sentence.
+
     - type: textarea
       id: problem
       attributes:
