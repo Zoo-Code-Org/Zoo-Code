@@ -32,8 +32,11 @@ export interface SafeWriteJsonOptions {
 	/**
 	 * Refuse to publish through a symlink at the target path.
 	 *
-	 * By default a symlink target is resolved and the write lands on its referent,
-	 * which is what keeps every alias of one file behind a single advisory lock.
+	 * Two things differ by default and should not be conflated: the advisory LOCK is keyed to
+	 * the resolved referent, which is what keeps every alias of one file behind a single lock,
+	 * while the PUBLISH stays on the path the caller named - the commit is a rename, and a
+	 * rename replaces that directory entry, so a symlink there is replaced rather than followed
+	 * and its referent never receives the payload.
 	 * That is the wrong default for a payload whose destination the user chose -
 	 * settings exports carry API credentials - where following a link they never
 	 * pointed at would write secrets into a file they did not pick. When this is
@@ -214,9 +217,10 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		}
 
 		// Step 1: Write data to a new temporary file via JSON streaming.
-		// Stage it beside the *resolved* target (the symlink referent when the path is
-		// a symlink; the resolved path above): safeWriteText commits by renaming
-		// onto that referent, and a rename across filesystems would fail with EXDEV.
+		// Stage it beside the path being published (publishTargetPath, the caller-named one):
+		// safeWriteText commits by renaming onto that same entry, and a rename across
+		// filesystems would fail with EXDEV, so the staging directory has to be the one the
+		// commit lands in - not the directory of the lock key.
 		actualTempNewFilePath = path.join(
 			path.dirname(publishTargetPath),
 			".new_" + Date.now() + "_" + Math.random().toString(36).substring(2) + ".tmp",
