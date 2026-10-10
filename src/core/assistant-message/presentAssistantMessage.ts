@@ -779,6 +779,14 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 						error.message,
 					)
 
+					// A partial delta may already have registered this task's write_to_file stream
+					// state and opened a preview. Validation rejects the completed block before
+					// writeToFileTool.handle() runs, so nothing else releases them and the task would
+					// carry a stale stream into its next write.
+					if (block.name === "write_to_file") {
+						await writeToFileTool.releaseStreamAfterValidationRejection(cline)
+					}
+
 					break
 				}
 
@@ -846,6 +854,11 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 							`Tool call repetition limit reached for ${block.name}. Please try a different approach.`,
 						),
 					)
+					// Same family as the validation branch above: the completed block is refused
+					// before handle() runs, so a stream that had already started owns nobody but here.
+					if (block.name === "write_to_file") {
+						await writeToFileTool.releaseStreamAfterValidationRejection(cline)
+					}
 					break
 				}
 			}

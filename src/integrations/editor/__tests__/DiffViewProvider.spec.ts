@@ -2323,6 +2323,114 @@ describe("DiffViewProvider", () => {
 			expect(fs.unlink).not.toHaveBeenCalled()
 		})
 
+		it("does not claim ownership of a placeholder whose write failed", async () => {
+			// open() writes the empty placeholder and only then records it as this edit's. When the
+			// write itself fails, this edit created nothing, so a later discard must not unlink a
+			// file it never made - claiming ownership before the write would.
+			const relPath = "unwritten-placeholder.ts"
+			const fsPath = `${mockCwd}/${relPath}`
+			const callOrder: string[] = []
+			vi.mocked(fs.writeFile).mockRejectedValueOnce(new Error("EDQUOT: quota exceeded"))
+			diffViewProvider.editType = "create"
+
+			await expect(diffViewProvider.open(relPath)).rejects.toThrow("EDQUOT")
+
+			expect(diffViewProvider["placeholderPath"]).toBeUndefined()
+
+			// A discard that runs afterwards for the same relPath has no ownership to act on.
+			Object.assign(diffViewProvider, {
+				relPath,
+				activeDiffEditor: { document: makeAbandonedDocument(callOrder) },
+				createdDirs: [],
+				closeAllDiffViews: vi.fn().mockResolvedValue(undefined),
+				closeFileTab: vi.fn().mockResolvedValue(undefined),
+			})
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+
+			await diffViewProvider.discardUnapprovedStream()
+
+			expect(fs.unlink).not.toHaveBeenCalled()
+		})
+
+		it("releases placeholder ownership once revertChanges() has deleted the new file", async () => {
+			// revertChanges() unlinks the file a create made. Ownership ends with that delete: a
+			// later discard that still claimed the path would unlink a file the next edit may
+			// already have recreated.
+			const relPath = "reverted-placeholder.ts"
+			const fsPath = `${mockCwd}/${relPath}`
+			Object.assign(diffViewProvider, {
+				relPath,
+				editType: "create",
+				createdDirs: [],
+				placeholderPath: fsPath,
+				activeDiffEditor: {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue("partial content"),
+						isDirty: false,
+						save: vi.fn().mockResolvedValue(undefined),
+					},
+				},
+				closeAllDiffViews: vi.fn().mockResolvedValue(undefined),
+				closeFileTab: vi.fn().mockResolvedValue(undefined),
+			})
+
+			await diffViewProvider.revertChanges()
+
+			expect(fs.unlink).toHaveBeenCalledWith(fsPath)
+			expect(diffViewProvider["placeholderPath"]).toBeUndefined()
+
+			// A discard after a successful revert must not reach for that path a second time.
+			const callOrder: string[] = []
+			Object.assign(diffViewProvider, { activeDiffEditor: { document: makeAbandonedDocument(callOrder) } })
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+
+			await diffViewProvider.discardUnapprovedStream()
+
+			expect(fs.unlink).toHaveBeenCalledTimes(1)
+		})
+
+		it("releases the placeholder it already deleted when the rest of the revert fails", async () => {
+			// revertChanges() ends in reset(), which would drop the ownership claim anyway. When a
+			// later step of the revert throws, reset() never runs: the file this revert already
+			// deleted must not stay claimed, or a discard after the failure unlinks whatever the
+			// next edit recreated at that path.
+			const relPath = "reverted-then-rmdir-failed.ts"
+			const fsPath = `${mockCwd}/${relPath}`
+			Object.assign(diffViewProvider, {
+				relPath,
+				editType: "create",
+				createdDirs: [`${mockCwd}/leftover-dir`],
+				placeholderPath: fsPath,
+				activeDiffEditor: {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue("partial content"),
+						isDirty: false,
+						save: vi.fn().mockResolvedValue(undefined),
+					},
+				},
+				closeAllDiffViews: vi.fn().mockResolvedValue(undefined),
+				closeFileTab: vi.fn().mockResolvedValue(undefined),
+			})
+			vi.mocked(fs.rmdir).mockRejectedValueOnce(new Error("ENOTEMPTY: directory not empty"))
+
+			await expect(diffViewProvider.revertChanges()).rejects.toThrow("ENOTEMPTY")
+
+			expect(fs.unlink).toHaveBeenCalledWith(fsPath)
+			// The delete landed, so the claim ended with it - reset() never ran here.
+			expect(diffViewProvider["placeholderPath"]).toBeUndefined()
+
+			// A discard after the failed revert must not reach for that path a second time.
+			const callOrder: string[] = []
+			Object.assign(diffViewProvider, { activeDiffEditor: { document: makeAbandonedDocument(callOrder) } })
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+
+			await diffViewProvider.discardUnapprovedStream()
+
+			expect(fs.unlink).toHaveBeenCalledTimes(1)
+		})
+
 		it("does nothing when no abandoned view is open", async () => {
 			Object.assign(diffViewProvider, { relPath: undefined, activeDiffEditor: undefined })
 

@@ -120,6 +120,44 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		this.resetTaskPartialState(task)
 	}
 
+	/**
+	 * Release what a streamed write left behind when the presenter rejects the COMPLETED
+	 * block before the tool ever runs.
+	 *
+	 * Streaming is not gated by the checks that guard execution: a partial delta registers
+	 * this task's entry (and its TaskAborted listener) and may open a preview, then
+	 * validateToolUse() throws for the completed block - a mode restriction, a disabled
+	 * tool - or the repetition guard refuses it, and the loop breaks before
+	 * writeToFileTool.handle() is reached. None of execute()'s teardown, the parse-failure
+	 * hook, or clearTaskState() runs on that path, so the task would keep the listener, the
+	 * map entry, a preview holding content nobody was asked to approve, and the directories
+	 * that preview created; a retained streamFailed also suppresses this task's later
+	 * previews.
+	 *
+	 * Resources only: the validation error is the tool result the model sees, so nothing is
+	 * reported here beyond a failed rollback, which is a hazard the user - not the model -
+	 * has to know about. A no-op for every task that never streamed.
+	 */
+	async releaseStreamAfterValidationRejection(task: Task): Promise<void> {
+		if (!this.taskPartialStreamState.has(this.getPartialStreamFailureKey(task))) {
+			return
+		}
+
+		this.releasePartialStreamBookkeeping(task)
+		const rollbackError = await this.discardUnapprovedStreamBeforeReset(task)
+		await this.resetDiffViewAfterWrite(task)
+		if (rollbackError) {
+			await task
+				.say(
+					"error",
+					"write_to_file: the diff editor could not be restored after the tool call was rejected, so it may still show unapproved content. Do not save that editor.",
+				)
+				.catch((sayError) => {
+					console.error("Error reporting write_to_file rollback failure:", sayError)
+				})
+		}
+	}
+
 	private resetTaskPartialState(task: Task): void {
 		const key = this.getPartialStreamFailureKey(task)
 		const state = this.taskPartialStreamState.get(key)
