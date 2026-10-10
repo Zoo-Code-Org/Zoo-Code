@@ -337,7 +337,8 @@
 		"followupQuestions": {
 			"label": "Soru",
 			"description": "Yapılandırılan zaman aşımından sonra takip sorularına ilişkin ilk önerilen yanıtı otomatik olarak seç",
-			"timeoutLabel": "İlk yanıtı otomatik olarak seçmeden önce beklenecek süre"
+			"timeoutLabel": "İlk yanıtı otomatik olarak seçmeden önce beklenecek süre",
+			"timeoutZeroDescription": "Hiçbir zaman otomatik seçim yapmaması için 0 olarak ayarlayın — her zaman yanıtı manuel olarak seçmenizi bekleyin"
 		},
 		"execute": {
 			"label": "Yürüt",

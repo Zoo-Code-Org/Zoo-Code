@@ -100,6 +100,55 @@ describe("FollowUpSuggest", () => {
 		expect(screen.getByText(/Selecting in 3s/)).toBeInTheDocument()
 	})
 
+	it("should not show countdown and should not auto-select when timeout is 0", () => {
+		const testState: TestExtensionState = {
+			...defaultTestState,
+			followupAutoApproveTimeoutMs: 0,
+		}
+
+		const { unmount } = renderWithTestProviders(
+			<FollowUpSuggest
+				suggestions={mockSuggestions}
+				onSuggestionClick={mockOnSuggestionClick}
+				ts={123}
+				onCancelAutoApproval={mockOnCancelAutoApproval}
+			/>,
+			testState,
+		)
+
+		// A timeout of 0 means "never auto-select": no countdown should be shown.
+		expect(screen.queryByText(/\d+s/)).not.toBeInTheDocument()
+
+		// Advancing time must not trigger the auto-selection callback.
+		act(() => {
+			vi.advanceTimersByTime(10000)
+		})
+		expect(mockOnSuggestionClick).not.toHaveBeenCalled()
+
+		// Unmounting still notifies the caller that no auto-approval is pending.
+		unmount()
+		expect(mockOnCancelAutoApproval).toHaveBeenCalled()
+	})
+
+	it("should not show countdown for negative timeout values", () => {
+		const testState: TestExtensionState = {
+			...defaultTestState,
+			followupAutoApproveTimeoutMs: -1000,
+		}
+
+		renderWithTestProviders(
+			<FollowUpSuggest
+				suggestions={mockSuggestions}
+				onSuggestionClick={mockOnSuggestionClick}
+				ts={123}
+				onCancelAutoApproval={mockOnCancelAutoApproval}
+			/>,
+			testState,
+		)
+
+		expect(screen.queryByText(/\d+s/)).not.toBeInTheDocument()
+	})
+
 	it("should not display countdown timer when isAnswered is true", () => {
 		renderWithTestProviders(
 			<FollowUpSuggest

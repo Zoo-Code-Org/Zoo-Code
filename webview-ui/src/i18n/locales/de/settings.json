@@ -337,7 +337,8 @@
 		"followupQuestions": {
 			"label": "Frage",
 			"description": "Automatisch die erste vorgeschlagene Antwort für Folgefragen nach der konfigurierten Zeitüberschreitung auswählen",
-			"timeoutLabel": "Wartezeit vor der automatischen Auswahl der ersten Antwort"
+			"timeoutLabel": "Wartezeit vor der automatischen Auswahl der ersten Antwort",
+			"timeoutZeroDescription": "Auf 0 setzen, um nie automatisch auszuwählen — warte immer, bis du manuell eine Antwort auswählst"
 		},
 		"execute": {
 			"label": "Ausführen",

@@ -337,7 +337,8 @@
 		"followupQuestions": {
 			"label": "Vraag",
 			"description": "Selecteer automatisch het eerste voorgestelde antwoord voor vervolgvragen na de geconfigureerde time-out",
-			"timeoutLabel": "Wachttijd voordat het eerste antwoord automatisch wordt geselecteerd"
+			"timeoutLabel": "Wachttijd voordat het eerste antwoord automatisch wordt geselecteerd",
+			"timeoutZeroDescription": "Stel in op 0 om nooit automatisch te selecteren — wacht altijd tot je handmatig een antwoord kiest"
 		},
 		"execute": {
 			"label": "Uitvoeren",
