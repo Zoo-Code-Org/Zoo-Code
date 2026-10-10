@@ -3,9 +3,7 @@ import * as fsSync from "fs"
 import * as path from "path"
 import { JsonStreamStringify } from "json-stream-stringify"
 
-
 import { resolvePublishTarget, safeWriteText, type SafeWriteTextOptions } from "../services/file-safety/safeWriteText"
-
 
 import { acquireFileLock } from "./fileLock"
 

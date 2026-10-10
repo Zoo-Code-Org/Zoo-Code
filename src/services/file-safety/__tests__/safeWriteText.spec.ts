@@ -271,7 +271,9 @@ describe("safeWriteText", () => {
 			})
 			expect(seedOpen).toBeDefined()
 			expect(seedOpen?.[2]).toBe(0o600)
-			const seedOrder = vi.mocked(fsSync.openSync).mock.invocationCallOrder[vi.mocked(fsSync.openSync).mock.calls.indexOf(seedOpen!)]
+			const seedOrder = vi.mocked(fsSync.openSync).mock.invocationCallOrder[
+				vi.mocked(fsSync.openSync).mock.calls.indexOf(seedOpen!)
+			]
 			expect(seedOrder).toBeLessThan(vi.mocked(fs.copyFile).mock.invocationCallOrder[0])
 
 			// The chmod keeps a copied read-only attribute (Windows) from breaking the fsync

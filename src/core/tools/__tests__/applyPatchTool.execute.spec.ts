@@ -314,9 +314,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			// read: the hunk was still processed against the content that was read.
 			expect(mockSaveDirectly).toHaveBeenCalledTimes(1)
 			// But a read whose version is unknown may not be observed...
-			expect(
-				mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts")),
-			).toBe(false)
+			expect(mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts"))).toBe(false)
 			// ...and the publish it leaves unauthorized is reported as an error, not a save.
 			expect(mockHandleError).toHaveBeenCalledWith("apply patch", guardError)
 			expect(mockPushToolResult).not.toHaveBeenCalledWith("Saved file")

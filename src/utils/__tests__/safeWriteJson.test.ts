@@ -624,7 +624,6 @@ describe("safeWriteJson", () => {
 				expect.stringContaining("Failed to release lock"),
 				expect.any(Error),
 			)
-
 		} finally {
 			// vi.unmock is hoisted, so it cannot undo the vi.doMock above at runtime; doUnmock
 			// does. resetModules keeps a later test from re-importing this module with the

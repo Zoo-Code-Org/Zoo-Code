@@ -837,7 +837,9 @@ describe("DiffViewProvider", () => {
 
 			// Verify file was written via safeWriteText
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { preCommitVerify: expect.any(Function) })
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {
+				preCommitVerify: expect.any(Function),
+			})
 
 			// Verify file was opened without focus
 			expect(vscode.window.showTextDocument).toHaveBeenCalledWith(
@@ -860,7 +862,9 @@ describe("DiffViewProvider", () => {
 
 			// Verify file was written via safeWriteText
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { preCommitVerify: expect.any(Function) })
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {
+				preCommitVerify: expect.any(Function),
+			})
 
 			// Verify file was NOT opened
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
@@ -875,7 +879,9 @@ describe("DiffViewProvider", () => {
 
 			// Verify file was written via safeWriteText
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { preCommitVerify: expect.any(Function) })
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {
+				preCommitVerify: expect.any(Function),
+			})
 
 			// Verify delay was NOT called
 			expect(mockDelay).not.toHaveBeenCalled()
@@ -921,21 +927,26 @@ describe("DiffViewProvider", () => {
 
 				await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
 
-				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { preCommitVerify: expect.any(Function) })
-
+				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {
+					preCommitVerify: expect.any(Function),
+				})
 			})
 			it("holds the lock across the guard check and the publish", async () => {
 				const order: string[] = []
 				vi.mocked(acquireFileLock).mockImplementation(async () => {
 					order.push("acquire")
-					return async () => { order.push("release") }
+					return async () => {
+						order.push("release")
+					}
 				})
 				mockTask.observationRegistry.clear()
 				vi.mocked(fs.access).mockImplementation(async () => {
 					order.push("check")
 					throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
 				})
-				vi.mocked(safeWriteText).mockImplementation(async () => { order.push("publish") })
+				vi.mocked(safeWriteText).mockImplementation(async () => {
+					order.push("publish")
+				})
 
 				await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
 
@@ -969,7 +980,9 @@ describe("DiffViewProvider", () => {
 
 				await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
 
-				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", { preCommitVerify: expect.any(Function) })
+				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {
+					preCommitVerify: expect.any(Function),
+				})
 			})
 
 			it("fails closed when the owning task has been collected", async () => {

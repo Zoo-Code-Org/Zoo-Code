@@ -195,12 +195,20 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		// against the mocked fs, so the double assertion is the narrowest option.
 		const statMock = vi.mocked((await import("fs/promises")).default.stat)
 		statMock
-			.mockResolvedValueOnce(
-				{ dev: 7n, ino: 4242n, size: 1234n, mtimeNs: 1n, ctimeNs: 2n } as unknown as BigIntStats,
-			)
-			.mockResolvedValueOnce(
-				{ dev: 7n, ino: 4242n, size: 9999n, mtimeNs: 3n, ctimeNs: 4n } as unknown as BigIntStats,
-			)
+			.mockResolvedValueOnce({
+				dev: 7n,
+				ino: 4242n,
+				size: 1234n,
+				mtimeNs: 1n,
+				ctimeNs: 2n,
+			} as unknown as BigIntStats)
+			.mockResolvedValueOnce({
+				dev: 7n,
+				ino: 4242n,
+				size: 9999n,
+				mtimeNs: 3n,
+				ctimeNs: 4n,
+			} as unknown as BigIntStats)
 
 		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
 			askApproval: mockAskApproval,
@@ -211,7 +219,6 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		// A read that straddled a write proves nothing about the current version, so no
 		// observation may be recorded and the guarded publish keeps its remediation.
 		expect(mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts"))).toBe(false)
-
 	})
 	it.each(["pre-read", "post-read"])(
 		"continues the read and records no observation when the %s stat fails",
@@ -258,9 +265,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 				"edit",
 			)
 			// Nothing may be observed from a read whose version is unknown.
-			expect(
-				mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts")),
-			).toBe(false)
+			expect(mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts"))).toBe(false)
 			// And the refused publish surfaces as an error rather than a saved file.
 			expect(mockHandleError).toHaveBeenCalledWith("applying diff", guardError)
 			expect(mockPushToolResult).not.toHaveBeenCalledWith("Saved file")
