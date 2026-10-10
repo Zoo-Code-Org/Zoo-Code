@@ -1421,7 +1421,9 @@ describe("DiffViewProvider", () => {
 			// openDiffEditor resolves from the document-open event, so fire it.
 			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
 				setTimeout(() => {
-					callback({ uri: { fsPath: `${mockCwd}/test.txt`, scheme: "file" } } as unknown as vscode.TextDocument)
+					callback({
+						uri: { fsPath: `${mockCwd}/test.txt`, scheme: "file" },
+					} as unknown as vscode.TextDocument)
 				}, 0)
 				return { dispose: vi.fn() }
 			})
@@ -1450,9 +1452,7 @@ describe("DiffViewProvider", () => {
 			// The preview did record an observation - that is the entry under test.
 			expect(mockTask.observationRegistry.has(`${mockCwd}/test.txt`)).toBe(true)
 
-			await expect(diffViewProvider.saveChanges(false, 0, "edit")).rejects.toThrow(
-				/File not read yet/,
-			)
+			await expect(diffViewProvider.saveChanges(false, 0, "edit")).rejects.toThrow(/File not read yet/)
 			expect(safeWriteText).not.toHaveBeenCalled()
 			// The preview's authorization was withdrawn rather than left behind.
 			expect(mockTask.observationRegistry.has(`${mockCwd}/test.txt`)).toBe(false)
@@ -1725,7 +1725,11 @@ describe("DiffViewProvider", () => {
 				ctimeNs: BigInt(5_000_000_000n),
 			} as unknown as BigIntStats
 			const movedAway = { ...emptyOurs, mtimeNs: BigInt(4_000_000_005n) } as unknown as BigIntStats
-			const nowFilled = { ...emptyOurs, size: BigInt(24), mtimeNs: BigInt(4_000_000_007n) } as unknown as BigIntStats
+			const nowFilled = {
+				...emptyOurs,
+				size: BigInt(24),
+				mtimeNs: BigInt(4_000_000_007n),
+			} as unknown as BigIntStats
 			vi.mocked(fs.stat).mockResolvedValueOnce(emptyOurs).mockResolvedValueOnce(movedAway)
 			vi.mocked(fs.stat).mockResolvedValue(nowFilled)
 			vi.mocked(fs.readFile).mockResolvedValue("")
@@ -2472,11 +2476,7 @@ describe("DiffViewProvider", () => {
 				mtimeNs: BigInt(4_000_000_001n),
 				ctimeNs: BigInt(5_000_000_000n),
 			} as unknown as BigIntStats
-			mockTask.observationRegistry.observe(
-				`${mockCwd}/ext-writer.ts`,
-				versionTokenOfStat(previewStats),
-				true,
-			)
+			mockTask.observationRegistry.observe(`${mockCwd}/ext-writer.ts`, versionTokenOfStat(previewStats), true)
 			vi.mocked(fs.stat).mockResolvedValue(externalStats)
 			vi.mocked(fs.readFile).mockResolvedValue("external bytes")
 
@@ -2494,9 +2494,9 @@ describe("DiffViewProvider", () => {
 
 			// No adoption: the observation is not moved onto the state that was clobbered,
 			// so the model's next write is not authorized by it.
-			expect(
-				mockTask.observationRegistry.get(`${mockCwd}/ext-writer.ts`)?.version,
-			).toBe(versionTokenOfStat(previewStats))
+			expect(mockTask.observationRegistry.get(`${mockCwd}/ext-writer.ts`)?.version).toBe(
+				versionTokenOfStat(previewStats),
+			)
 		})
 
 		it("does not adopt a match for an update over a target the model never read", async () => {
@@ -2545,9 +2545,7 @@ describe("DiffViewProvider", () => {
 			// The rejection is the outcome: under the old gate the byte match was adopted
 			// and saveChanges resolved as a success, granting the model a clean result for
 			// a write that never happened.
-			expect(
-				mockTask.observationRegistry.get(`${mockCwd}/unread-target.ts`)?.complete,
-			).toBe(false)
+			expect(mockTask.observationRegistry.get(`${mockCwd}/unread-target.ts`)?.complete).toBe(false)
 		})
 
 		it("does not adopt an autosaved match for an edit that was never authorized", async () => {
@@ -3667,7 +3665,6 @@ describe("DiffViewProvider", () => {
 			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
 			expect(reset).toHaveBeenCalledTimes(1)
 		})
-
 
 		// The row: the rejected save's pass ended at closeOwnDiffView(), and the preview tabs were
 		// restored after the pass was over. A cancellation that landed in that window started a

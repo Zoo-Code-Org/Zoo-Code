@@ -709,16 +709,18 @@ describe("safeWriteJson", () => {
 			const projectConfig = path.join(projectDir, "mcp.json")
 			await fs.symlink(outside, projectConfig)
 
-			await expect(
-				safeWriteJson(projectConfig, { mcpServers: {} }, { confineTo: projectDir }),
-			).rejects.toThrow(ConfinedPathEscapeError)
+			await expect(safeWriteJson(projectConfig, { mcpServers: {} }, { confineTo: projectDir })).rejects.toThrow(
+				ConfinedPathEscapeError,
+			)
 
 			// The linked file is untouched and nothing was staged beside it.
 			expect(JSON.parse(await fsSyncActual.promises.readFile(outside, "utf8"))).toEqual({ secret: "original" })
 			const entries = await fs.readdir(tempDir)
 			expect(entries).toContain("outside.json")
 			expect(
-				entries.filter((entry) => entry.includes(".new_") || entry.includes("safeWriteText") || entry.endsWith(".lock")),
+				entries.filter(
+					(entry) => entry.includes(".new_") || entry.includes("safeWriteText") || entry.endsWith(".lock"),
+				),
 			).toEqual([])
 		},
 	)
@@ -735,7 +737,11 @@ describe("safeWriteJson", () => {
 
 			// Confining is about the scope, not about forbidding links: a link that stays
 			// inside the project still publishes to its referent.
-			await safeWriteJson(alias, { mcpServers: { local: { url: "http://localhost" } } }, { confineTo: projectDir })
+			await safeWriteJson(
+				alias,
+				{ mcpServers: { local: { url: "http://localhost" } } },
+				{ confineTo: projectDir },
+			)
 
 			expect(JSON.parse(await fsSyncActual.promises.readFile(referent, "utf8"))).toEqual({
 				mcpServers: { local: { url: "http://localhost" } },
@@ -784,7 +790,6 @@ describe("safeWriteJson", () => {
 			mcpServers: { local: { url: "http://localhost" } },
 		})
 	})
-
 
 	test.skipIf(process.platform === "win32")(
 		"confines a scope path that itself runs through a symlink and does not exist yet",
@@ -911,7 +916,6 @@ describe("safeWriteJson", () => {
 			vi.resetModules()
 		}
 	})
-
 
 	// The walk-up branch, pinned through the shape CR suggested: the target sits under the same
 	// existing ancestor but OUTSIDE the missing scope. That matters because the two outcomes then

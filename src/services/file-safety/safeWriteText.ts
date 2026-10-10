@@ -196,7 +196,11 @@ async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunne
 
 /** Restore a DACL dump onto *dirPath* on Windows.
  * Returns whether icacls succeeded; the caller reports a failure. */
-async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<boolean> {
+async function _restoreDaclWindows(
+	dirPath: string,
+	dumpPath: string,
+	execFileRunner?: typeof execFile,
+): Promise<boolean> {
 	const runner = execFileRunner ?? execFile
 	try {
 		await new Promise<void>((resolve, reject) => {
@@ -290,7 +294,9 @@ async function _restrictDaclWindows(
 		return false
 	}
 	const readBack = await new Promise<string | null>((resolve) => {
-		runner("icacls", [filePath], { windowsHide: true }, (err, stdout) => (err ? resolve(null) : resolve(stdout ?? "")))
+		runner("icacls", [filePath], { windowsHide: true }, (err, stdout) =>
+			err ? resolve(null) : resolve(stdout ?? ""),
+		)
 	})
 	if (readBack === null) {
 		return false
@@ -652,7 +658,9 @@ export async function safeWriteText(
 				// Not "absent": the target is there but could not be checked (EACCES, ...), so
 				// DACL preservation was skipped for a reason the caller cannot infer from the
 				// successful write alone.
-				warn(`Could not check ${targetPath} for DACL preservation (${errorCode(accessError) ?? "unknown error"}); the replacement may inherit different access rights.`)
+				warn(
+					`Could not check ${targetPath} for DACL preservation (${errorCode(accessError) ?? "unknown error"}); the replacement may inherit different access rights.`,
+				)
 			}
 		}
 		try {
@@ -802,7 +810,9 @@ export async function safeWriteText(
 							try {
 								await fs.rename(rollbackPath, targetPath)
 							} catch (rollbackError: unknown) {
-								warn(`safeWriteText: the DACL of ${targetPath} could not be restored and its content could not be rolled back; the pre-write content is retained at ${rollbackPath}.`)
+								warn(
+									`safeWriteText: the DACL of ${targetPath} could not be restored and its content could not be rolled back; the pre-write content is retained at ${rollbackPath}.`,
+								)
 								throw new DaclRestoreError(targetPath, rollbackError)
 							}
 							// The rolled-back file is the backup, whose access rights came from the
@@ -811,12 +821,16 @@ export async function safeWriteText(
 							// finished its job either.
 							const rolledBackAcl = await _restrictDaclWindows(targetPath, options?.execFileRunner)
 							if (!rolledBackAcl) {
-								warn(`safeWriteText: the previous content is back at ${targetPath}, but its access rights could not be narrowed or verified; the file carries the access rights of its directory.`)
+								warn(
+									`safeWriteText: the previous content is back at ${targetPath}, but its access rights could not be narrowed or verified; the file carries the access rights of its directory.`,
+								)
 							}
 						}
 						throw new DaclRestoreError(targetPath)
 					}
-					warn(`safeWriteText: content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file's access rights were narrowed to the current user's full control and verified.`)
+					warn(
+						`safeWriteText: content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file's access rights were narrowed to the current user's full control and verified.`,
+					)
 				}
 			}
 
