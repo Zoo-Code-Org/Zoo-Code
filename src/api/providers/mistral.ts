@@ -16,6 +16,8 @@ import { ApiHandlerOptions } from "../../shared/api"
 import { convertToMistralMessages } from "../transform/mistral-format"
 import { ApiStream } from "../transform/stream"
 import { handleProviderError } from "./utils/error-handler"
+import { createAbortError, isRequestAborted, mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
@@ -101,66 +103,102 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 		// Temporary debug log for QA
 		// console.log("[MISTRAL DEBUG] Raw API request body:", requestOptions)
 
+		// Fast-fail if the request was already aborted before building.
+		throwIfAborted(metadata?.abortSignal)
+
+		// The request-local controller is the provider-owned abort handle; the
+		// fetch signal merges it with the external Task signal (AbortSignal.any
+		// inside RequestConfigBuilder), so external aborts cancel the in-flight
+		// request without manual listener management.
+		const requestBuilder = new RequestConfigBuilder<{ signal?: AbortSignal }>()
+		requestBuilder.addMergedSignal(new AbortController(), metadata)
+		const requestSignal = requestBuilder.getOption("signal")
+
 		let response
 		try {
-			response = await this.client.chat.stream(requestOptions)
+			response = await this.client.chat.stream(requestOptions, {
+				fetchOptions: { signal: requestSignal },
+			})
+
+			for await (const event of response) {
+				// Stop consuming buffered events once the request is aborted (the
+				// SDK iterator may keep delivering buffered content after abort).
+				// Stryker disable next-line OptionalChaining: requestSignal is always set by the addMergedSignal call above (a request-local controller signal exists even without an external signal), so the optional chain cannot observe a nullish value
+				if (requestSignal?.aborted) {
+					break
+				}
+
+				const delta = event.data.choices[0]?.delta
+
+				if (delta?.content) {
+					if (typeof delta.content === "string") {
+						// Handle string content as text (no pre-yield guard: this is
+						// the first yield of the iteration — the top-of-loop check
+						// runs without a suspension point before it).
+						yield { type: "text", text: delta.content }
+					} else if (Array.isArray(delta.content)) {
+						// Handle array of content chunks
+						// The SDK v1.9.18 supports ThinkChunk with type "thinking"
+						for (const chunk of delta.content as ContentChunkWithThinking[]) {
+							if (chunk.type === "thinking" && chunk.thinking) {
+								// Handle thinking content as reasoning chunks
+								// ThinkChunk has a 'thinking' property that contains an array of text/reference chunks
+								for (const thinkingPart of chunk.thinking) {
+									if (thinkingPart.type === "text" && thinkingPart.text) {
+										throwIfAborted(requestSignal)
+										yield { type: "reasoning", text: thinkingPart.text }
+									}
+								}
+							} else if (chunk.type === "text" && chunk.text) {
+								// Handle text content normally
+								throwIfAborted(requestSignal)
+								yield { type: "text", text: chunk.text }
+							}
+						}
+					}
+				}
+
+				// Handle tool calls in stream
+				// Mistral SDK provides tool_calls in delta similar to OpenAI format
+				const toolCalls = (delta as { toolCalls?: MistralToolCall[] })?.toolCalls
+				if (toolCalls) {
+					for (let i = 0; i < toolCalls.length; i++) {
+						const toolCall = toolCalls[i]
+						throwIfAborted(requestSignal)
+						yield {
+							type: "tool_call_partial",
+							index: i,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
+						}
+					}
+				}
+
+				if (event.data.usage) {
+					throwIfAborted(requestSignal)
+					yield {
+						type: "usage",
+						inputTokens: event.data.usage.promptTokens || 0,
+						outputTokens: event.data.usage.completionTokens || 0,
+					}
+				}
+			}
+
+			// An aborted request must surface as an AbortError, not as a normal
+			// stream completion: the top-of-loop break (or a swallowed mid-stream
+			// abort) ends the loop without throwing otherwise.
+			throwIfAborted(requestSignal)
 		} catch (error) {
+			// Aborted request: covers both the external signal and SDK-native
+			// abort errors that may surface before the signal flag propagates.
+			if (isRequestAborted(error, metadata?.abortSignal)) {
+				throw createAbortError("Mistral")
+			}
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model, "createMessage")
 			TelemetryService.instance.captureException(apiError)
 			throw new Error(`Mistral completion error: ${errorMessage}`)
-		}
-
-		for await (const event of response) {
-			const delta = event.data.choices[0]?.delta
-
-			if (delta?.content) {
-				if (typeof delta.content === "string") {
-					// Handle string content as text
-					yield { type: "text", text: delta.content }
-				} else if (Array.isArray(delta.content)) {
-					// Handle array of content chunks
-					// The SDK v1.9.18 supports ThinkChunk with type "thinking"
-					for (const chunk of delta.content as ContentChunkWithThinking[]) {
-						if (chunk.type === "thinking" && chunk.thinking) {
-							// Handle thinking content as reasoning chunks
-							// ThinkChunk has a 'thinking' property that contains an array of text/reference chunks
-							for (const thinkingPart of chunk.thinking) {
-								if (thinkingPart.type === "text" && thinkingPart.text) {
-									yield { type: "reasoning", text: thinkingPart.text }
-								}
-							}
-						} else if (chunk.type === "text" && chunk.text) {
-							// Handle text content normally
-							yield { type: "text", text: chunk.text }
-						}
-					}
-				}
-			}
-
-			// Handle tool calls in stream
-			// Mistral SDK provides tool_calls in delta similar to OpenAI format
-			const toolCalls = (delta as { toolCalls?: MistralToolCall[] })?.toolCalls
-			if (toolCalls) {
-				for (let i = 0; i < toolCalls.length; i++) {
-					const toolCall = toolCalls[i]
-					yield {
-						type: "tool_call_partial",
-						index: i,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
-					}
-				}
-			}
-
-			if (event.data.usage) {
-				yield {
-					type: "usage",
-					inputTokens: event.data.usage.promptTokens || 0,
-					outputTokens: event.data.usage.completionTokens || 0,
-				}
-			}
 		}
 	}
 
@@ -193,14 +231,29 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 		return { id, info, maxTokens, temperature }
 	}
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Fast-fail if the request was already aborted before building.
+		throwIfAborted(options?.abortSignal)
+
 		const { id: model, temperature } = this.getModel()
 
 		try {
-			const response = await this.client.chat.complete({
-				model,
-				messages: [{ role: "user", content: prompt }],
-				temperature,
-			})
+			// Build Mistral SDK RequestOptions
+			const requestOptions: Parameters<typeof this.client.chat.complete>[1] = {}
+			// Build a single signal that combines the external abort with the per-request
+			// timeout (timeoutMs <= 0 disables the timeout; see mergeAbortSignalAndTimeout).
+			const signal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+			if (signal) {
+				requestOptions.fetchOptions = { signal }
+			}
+
+			const response = await this.client.chat.complete(
+				{
+					model,
+					messages: [{ role: "user", content: prompt }],
+					temperature,
+				},
+				Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
+			)
 
 			const content = response.choices?.[0]?.message.content
 
@@ -214,6 +267,11 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 
 			return content || ""
 		} catch (error) {
+			// Aborted request: covers both the external signal and SDK-native
+			// abort errors that may surface before the signal flag propagates.
+			if (isRequestAborted(error, options?.abortSignal)) {
+				throw createAbortError("Mistral")
+			}
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model, "completePrompt")
 			TelemetryService.instance.captureException(apiError)
