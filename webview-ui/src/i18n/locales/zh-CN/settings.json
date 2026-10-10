@@ -337,7 +337,8 @@
 		"followupQuestions": {
 			"label": "问题",
 			"description": "在配置的超时时间后自动选择后续问题的第一个建议答案",
-			"timeoutLabel": "自动选择第一个答案前的等待时间"
+			"timeoutLabel": "自动选择第一个答案前的等待时间",
+			"timeoutZeroDescription": "设为 0 表示不自动选择，始终等待你手动选择答案"
 		},
 		"execute": {
 			"label": "执行",

@@ -337,7 +337,8 @@
 		"followupQuestions": {
 			"label": "질문",
 			"description": "설정된 시간이 지나면 후속 질문에 대한 첫 번째 제안 답변을 자동으로 선택합니다",
-			"timeoutLabel": "첫 번째 답변을 자동 선택하기 전 대기 시간"
+			"timeoutLabel": "첫 번째 답변을 자동 선택하기 전 대기 시간",
+			"timeoutZeroDescription": "0으로 설정하면 자동으로 선택하지 않고 항상 직접 답변을 선택할 때까지 기다립니다"
 		},
 		"execute": {
 			"label": "실행",

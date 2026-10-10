@@ -59,6 +59,13 @@ export const FollowUpSuggest = ({
 					? followupAutoApproveTimeoutMs
 					: DEFAULT_FOLLOWUP_TIMEOUT_MS
 
+			// A timeout of 0 (or negative) means "never auto-select": don't start a
+			// countdown at all, and let the user choose an answer manually.
+			if (timeoutMs <= 0) {
+				setCountdown(null)
+				return () => onCancelAutoApproval?.()
+			}
+
 			// Convert milliseconds to seconds for the countdown
 			setCountdown(Math.floor(timeoutMs / 1000))
 

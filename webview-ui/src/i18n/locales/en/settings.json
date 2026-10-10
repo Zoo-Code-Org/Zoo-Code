@@ -415,7 +415,8 @@
 		"followupQuestions": {
 			"label": "Question",
 			"description": "Automatically select the first suggested answer for follow-up questions after the configured timeout",
-			"timeoutLabel": "Time to wait before auto-selecting the first answer"
+			"timeoutLabel": "Time to wait before auto-selecting the first answer",
+			"timeoutZeroDescription": "Set to 0 to never auto-select — always wait for you to choose an answer manually"
 		},
 		"execute": {
 			"label": "Execute",

@@ -362,7 +362,8 @@
 		"followupQuestions": {
 			"label": "後續提問",
 			"description": "在設定的逾時時間過後，自動選擇後續問題的第一個建議答案",
-			"timeoutLabel": "自動選擇第一個答案前的等待時間"
+			"timeoutLabel": "自動選擇第一個答案前的等待時間",
+			"timeoutZeroDescription": "設為 0 表示不自動選擇，始終等待你手動選擇答案"
 		},
 		"execute": {
 			"label": "執行命令",

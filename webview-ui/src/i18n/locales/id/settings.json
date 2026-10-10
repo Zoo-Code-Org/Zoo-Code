@@ -337,7 +337,8 @@
 		"followupQuestions": {
 			"label": "Pertanyaan",
 			"description": "Secara otomatis memilih jawaban pertama yang disarankan untuk pertanyaan lanjutan setelah batas waktu yang dikonfigurasi",
-			"timeoutLabel": "Waktu tunggu sebelum otomatis memilih jawaban pertama"
+			"timeoutLabel": "Waktu tunggu sebelum otomatis memilih jawaban pertama",
+			"timeoutZeroDescription": "Setel ke 0 untuk tidak pernah memilih otomatis — selalu tunggu Anda memilih jawaban secara manual"
 		},
 		"execute": {
 			"label": "Eksekusi",
