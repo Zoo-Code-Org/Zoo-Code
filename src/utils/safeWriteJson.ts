@@ -140,7 +140,8 @@ function _scopeErrorCode(error: unknown): string | undefined {
  */
 async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJsonOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
-	let releaseLock = async () => {} // Initialized to a no-op
+	// One release per lock acquired, kept in acquisition order and released in reverse below.
+	let releaseLocks: Array<() => Promise<void>> = []
 
 	// For directory creation
 	const dirPath = path.dirname(absoluteFilePath)
@@ -159,7 +160,29 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// confinement scope publishes through the referent and therefore locks the referent. Locking
 	// the referent while replacing the link lets two writers hold two different locks for one
 	// publish target - the lost update the lock exists to prevent.
-	const lockKey = options?.confineTo ? await resolveLockKey(absoluteFilePath) : absoluteFilePath
+	const publishOverLink = options?.confineTo === undefined
+	const referentLockKey = await resolveLockKey(absoluteFilePath)
+	// A confined caller publishes through the referent, so the referent is the identity it replaces
+	// and the only lock it needs. A default write replaces the link itself, so the link path is the
+	// identity it replaces - and it also takes the referent lock, because while the link exists that
+	// is the lock serializing this alias against a writer that names the referent directly. Holding
+	// only the link-path lock lets those two writers overlap, and their merge reads overwrite each
+	// other. Resolving the referent here costs one more realpath on a default write; it is a read of
+	// the link target for locking purposes, not a decision to publish through it.
+	// resolveLockKey canonicalizes and Windows paths are case-insensitive, so the two keys are
+	// compared the same way the filesystem would: byte-for-byte they can name one file twice, and
+	// locking a file that this call already locked would stall on its own stale timeout.
+	const linkPathLockKey = absoluteFilePath
+	const sameIdentity =
+		process.platform === "win32"
+			? referentLockKey.toLowerCase() === linkPathLockKey.toLowerCase()
+			: referentLockKey === linkPathLockKey
+	const lockKeys = publishOverLink
+		? sameIdentity
+			? [linkPathLockKey]
+			: [referentLockKey, linkPathLockKey].sort()
+		: [referentLockKey]
+	const lockKey = lockKeys[lockKeys.length - 1]
 
 	// Confinement, if the caller declared a scope, is checked BEFORE the lock is
 	// taken and before the parent-directory creation below: an out-of-scope target
@@ -172,7 +195,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// inside the lock, since a peer writer may move the referent in between.
 	if (options?.confineTo) {
 		const scopeRoot = await _resolveScopeRoot(options.confineTo)
-		_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(lockKey), scopeRoot)
+		_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(referentLockKey), scopeRoot)
 	}
 
 	try {
@@ -187,7 +210,22 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 	// immediately, and releaseLock stays a no-op so the finally block does not try
 	// to release an unacquired lock.
-	releaseLock = await acquireFileLock(lockKey)
+	// Acquired in sorted key order, so two writers approaching the same pair of identities from
+	// opposite sides cannot each hold one and wait for the other. If an acquisition fails, anything
+	// already acquired is released here: the protected block has not started, so its finally would
+	// not run, and a held lock outlives this call until the stale timeout.
+	const acquired: Array<() => Promise<void>> = []
+	try {
+		for (const key of lockKeys) {
+			acquired.push(await acquireFileLock(key))
+		}
+	} catch (lockError) {
+		for (const release of [...acquired].reverse()) {
+			await release().catch(() => undefined)
+		}
+		throw lockError
+	}
+	releaseLocks = acquired
 
 	// Variables to hold the actual path of the temp file if it is created.
 	let actualTempNewFilePath: string | null = null
@@ -273,7 +311,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			backup: true,
 			// A write with no declared scope replaces the link rather than writing through it, so the
 			// publish must not re-resolve the path it is handed below.
-			publishOverLink: options?.confineTo === undefined,
+			publishOverLink,
 		}
 
 		await safeWriteText(resolvedTargetPath, "", textOptions)
@@ -316,11 +354,14 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		throw originalError // This MUST be the error that rejects the promise.
 	} finally {
-		// Release the lock in the main finally block.
-		try {
-			await releaseLock()
-		} catch (unlockError) {
-			console.error(`Failed to release lock for ${resolvedTargetPath ?? absoluteFilePath}:`, unlockError)
+		// Release in the reverse of the acquisition order, and release every lock that was acquired
+		// even if an earlier release threw: a lock this call took must not be left held.
+		for (const release of [...releaseLocks].reverse()) {
+			try {
+				await release()
+			} catch (unlockError) {
+				console.error(`Failed to release lock for ${resolvedTargetPath ?? absoluteFilePath}:`, unlockError)
+			}
 		}
 	}
 }
