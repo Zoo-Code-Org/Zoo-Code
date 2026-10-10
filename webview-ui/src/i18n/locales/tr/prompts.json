@@ -104,6 +104,10 @@
 				"label": "Promptu Geliştir",
 				"description": "Girdileriniz için özel öneriler veya iyileştirmeler almak için prompt geliştirmeyi kullanın. Bu, Zoo'nun niyetinizi anlamasını ve mümkün olan en iyi yanıtları sağlamasını garanti eder. Sohbetteki ✨ simgesi aracılığıyla kullanılabilir."
 			},
+			"COMMIT_MESSAGE": {
+				"label": "Commit Mesajı",
+				"description": "Değişikliklerinizi bir commit mesajında özetler. Kaynak Denetimi panelindeki Zoo Code simgesiyle kullanılabilir ve sonucu doğrudan commit giriş kutusuna yazar."
+			},
 			"CONDENSE": {
 				"label": "Bağlam Yoğunlaştırma",
 				"description": "Jeton sınırlarını yönetmek için konuşma bağlamının nasıl yoğunlaştırılacağını yapılandırın. Bu istem, hem manuel hem de otomatik bağlam yoğunlaştırma işlemleri için kullanılır."

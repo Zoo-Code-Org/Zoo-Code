@@ -40,6 +40,7 @@
 		"update_support_prompt": "Error al actualizar el mensaje de soporte",
 		"reset_support_prompt": "Error al restablecer el mensaje de soporte",
 		"enhance_prompt": "Error al mejorar el mensaje",
+		"commit_message_empty_response": "El modelo devolvió un mensaje de commit vacío.",
 		"get_system_prompt": "Error al obtener el mensaje del sistema",
 		"search_commits": "Error al buscar commits",
 		"save_api_config": "Error al guardar la configuración de API",
