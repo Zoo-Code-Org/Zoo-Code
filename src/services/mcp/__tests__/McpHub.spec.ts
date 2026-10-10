@@ -1122,11 +1122,22 @@ describe("McpHub", () => {
 
 			await mcpHub.toggleToolAlwaysAllow("test-server", "global", "another-tool", true)
 
-			const write = vi.mocked(safeWriteJson).mock.calls.find((call) => String(call[0]).includes("mcp"))
-			expect(write).toBeDefined()
+			// Name the exact call instead of picking any match: a find on the substring
+			// "mcp" returns the FIRST mcp-named write, which need not be the allowlist
+			// write - the default-creation write getMcpSettingsFilePath makes when the
+			// settings file is missing (McpHub.ts:513) also matches, and it never passes
+			// confineTo, so the assertion could judge that write and stay green while a
+			// confinement root on the real allowlist write went unnoticed. Check every
+			// write to the settings file, as the timeout and delete tests above do.
+			const writes = vi
+				.mocked(safeWriteJson)
+				.mock.calls.filter((call) => String(call[0]).endsWith("mcp_settings.json"))
+			expect(writes.length).toBeGreaterThan(0)
 			// undefined confineTo is the unconstrained case: safeWriteJson only checks the path
 			// when a confinement root is supplied.
-			expect(write![2]?.confineTo).toBeUndefined()
+			for (const write of writes) {
+				expect(write[2]?.confineTo).toBeUndefined()
+			}
 		})
 
 		it("should add tool to always allow list when enabling", async () => {

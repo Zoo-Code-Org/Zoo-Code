@@ -1521,6 +1521,25 @@ describe("ReadFileTool", () => {
 		})
 
 		describe("observation registry", () => {
+			// Indices of fs.stat calls against a path ending in fileName, filtered by
+			// whether the call passed { bigint: true }. Counting matching calls is
+			// the load-bearing form here: toHaveBeenCalledWith asserts membership,
+			// which the directory-check stat alone satisfies, and it cannot tell a
+			// skipped stat from one that ran.
+			const usesBigintOptions = (options: unknown): boolean =>
+				typeof options === "object" && options !== null && (options as { bigint?: unknown }).bigint === true
+			const statCallsMatching = (fileName: string, bigint: boolean): number[] =>
+				mockedFsStat.mock.calls
+					.map((_, index) => index)
+					.filter((index) => {
+						const [statPath, options] = mockedFsStat.mock.calls[index]
+						return String(statPath).endsWith(fileName) && usesBigintOptions(options) === bigint
+					})
+			// Vitest records invocationCallOrder parallel to mock.calls; comparing it
+			// against the readFile call tells the pre-read observation stat from the
+			// post-read one instead of trusting positional order by eye.
+			const statOrderBeforeRead = (statIndex: number): boolean =>
+				mockedFsStat.mock.invocationCallOrder[statIndex] < mockedFsReadFile.mock.invocationCallOrder[0]
 			it("records an observation on successful read of an existing file", async () => {
 				const mockTask = createMockTask({
 					observationRegistry: new ObservationRegistry(),
@@ -1556,6 +1575,19 @@ describe("ReadFileTool", () => {
 				const obs = reg.get(calledPath)
 				expect(obs).toBeDefined()
 				expect(obs!.version).toBe(calledVersion)
+				// Regression evidence: both observation stats must be bigint stats.
+				// Count the calls that match - correct path AND { bigint: true } -
+				// because a membership assertion passes on its own: the read path
+				// also stats the same path without options for the directory check.
+				const bigintStatIndexes = statCallsMatching("existing.ts", true)
+				expect(bigintStatIndexes).toHaveLength(2)
+				// Neither observation stat is a plain stat: the directory check stays
+				// the only stat without options...
+				expect(statCallsMatching("existing.ts", false)).toHaveLength(1)
+				// ...and the two bigint stats bracket the read: exactly one before it
+				// (pre-read observation) and exactly one after (post-read observation).
+				expect(bigintStatIndexes.filter((index) => statOrderBeforeRead(index))).toHaveLength(1)
+				expect(bigintStatIndexes.filter((index) => !statOrderBeforeRead(index))).toHaveLength(1)
 			})
 
 			it("a failed read (absent path) leaves the registry size 0 and does not throw", async () => {
@@ -1609,6 +1641,15 @@ describe("ReadFileTool", () => {
 				const [calledPath, calledVersion] = observeSpy.mock.calls[0]
 				expect(calledPath).toContain("legacy.ts")
 				expect(calledVersion).toMatch(/^\d+:\d+:\d+:\d+:\d+$/)
+				// Regression evidence, same contract on the legacy path: count the
+				// matching calls (correct path AND { bigint: true }) instead of
+				// asserting membership, which the directory-check stat alone satisfies.
+				const bigintStatIndexes = statCallsMatching("legacy.ts", true)
+				expect(bigintStatIndexes).toHaveLength(2)
+				expect(statCallsMatching("legacy.ts", false)).toHaveLength(1)
+				// The two bigint stats bracket the read: pre-read before it, post-read after.
+				expect(bigintStatIndexes.filter((index) => statOrderBeforeRead(index))).toHaveLength(1)
+				expect(bigintStatIndexes.filter((index) => !statOrderBeforeRead(index))).toHaveLength(1)
 			})
 
 			it("does not observe when the file mutates between the pre-read and post-read stats", async () => {
@@ -1679,6 +1720,17 @@ describe("ReadFileTool", () => {
 				expect(observeSpy).not.toHaveBeenCalled()
 				expect(reg.size).toBe(0)
 				expect(mockTask.didToolFailInCurrentTurn).toBe(false)
+				// The abort must skip only the post-read observation: the pre-read
+				// observation stat is still issued, and no bigint stat follows the
+				// read. Counted by matching calls (correct path AND { bigint: true }):
+				// a membership assertion cannot tell "post-stat skipped" from
+				// "post-stat ran".
+				const bigintStatIndexes = statCallsMatching("existing.ts", true)
+				expect(bigintStatIndexes).toHaveLength(1)
+				// The single bigint stat ran before the read: it is the pre-read one.
+				expect(statOrderBeforeRead(bigintStatIndexes[0])).toBe(true)
+				// The directory-check stat is untouched: still exactly one plain stat.
+				expect(statCallsMatching("existing.ts", false)).toHaveLength(1)
 			})
 
 			it("records nothing when the task is aborted before the post-read stat (legacy path)", async () => {
@@ -1712,6 +1764,13 @@ describe("ReadFileTool", () => {
 
 				expect(observeSpy).not.toHaveBeenCalled()
 				expect(reg.size).toBe(0)
+				// Same contract on the legacy path: the pre-read observation stat is
+				// still issued and the post-read one is skipped - counted by matching
+				// calls, not by membership.
+				const bigintStatIndexes = statCallsMatching("legacy.ts", true)
+				expect(bigintStatIndexes).toHaveLength(1)
+				expect(statOrderBeforeRead(bigintStatIndexes[0])).toBe(true)
+				expect(statCallsMatching("legacy.ts", false)).toHaveLength(1)
 			})
 
 			it("records nothing when the task is cancelled while the post-read stat is in flight (native path)", async () => {
