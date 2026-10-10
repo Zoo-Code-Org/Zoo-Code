@@ -16,6 +16,7 @@ interface CleanupTask {
 	off: MockedFunction<(...args: unknown[]) => unknown>
 	diffViewProvider: {
 		reset: MockedFunction<() => Promise<void>>
+		discardUnapprovedStream: MockedFunction<() => Promise<void>>
 		revertChanges: MockedFunction<() => Promise<void>>
 	}
 	finalizePartialToolAsk: MockedFunction<() => Promise<void>>
@@ -31,6 +32,7 @@ function buildTask(taskId: string, instanceId: string): Task {
 		diffViewProvider: {
 			reset: vi.fn().mockResolvedValue(undefined),
 			revertChanges: vi.fn().mockResolvedValue(undefined),
+			discardUnapprovedStream: vi.fn().mockResolvedValue(undefined),
 		},
 		finalizePartialToolAsk: vi.fn().mockResolvedValue(undefined),
 		say: vi.fn().mockResolvedValue(undefined),
@@ -78,22 +80,22 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 		expect(errorSpy).toHaveBeenCalledWith("Error resetting write_to_file diff view:", expect.any(Error))
 	})
 
-	it("logs and continues when reverting the diff document fails", async () => {
+	it("logs and continues when discarding the unapproved diff view fails", async () => {
 		const task = buildTask("revert-fails", "inst-4")
 		const t = task as unknown as CleanupTask
-		t.diffViewProvider.revertChanges = vi.fn().mockRejectedValue(new Error("revert failed"))
+		t.diffViewProvider.discardUnapprovedStream = vi.fn().mockRejectedValue(new Error("revert failed"))
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
-		await writeToFileTool["revertDiffChangesBeforeReset"](task)
+		await writeToFileTool["discardUnapprovedStreamBeforeReset"](task)
 
-		expect(errorSpy).toHaveBeenCalledWith("Error reverting write_to_file diff view changes:", expect.any(Error))
+		expect(errorSpy).toHaveBeenCalledWith("Error discarding the unapproved write_to_file diff view:", expect.any(Error))
 	})
 
-	it("reverts while the recovery state exists and reports the hazard when the revert fails", async () => {
+	it("discards while the recovery state exists and reports the hazard when the discard fails", async () => {
 		const task = buildTask("revert-fails-teardown", "inst-6")
 		const t = task as unknown as CleanupTask
 		let stateSizeDuringRevert = -1
-		t.diffViewProvider.revertChanges = vi.fn(async () => {
+		t.diffViewProvider.discardUnapprovedStream = vi.fn(async () => {
 			// The recovery state must still be present while the rollback runs.
 			stateSizeDuringRevert = writeToFileTool["taskPartialStreamState"].size
 			throw new Error("revert failed")
@@ -125,7 +127,7 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 	it("reports the rollback hazard AND the retained streaming error, and returns true", async () => {
 		const task = buildTask("revert-fails-with-stream-error", "inst-7")
 		const t = task as unknown as CleanupTask
-		t.diffViewProvider.revertChanges = vi.fn().mockRejectedValue(new Error("revert failed"))
+		t.diffViewProvider.discardUnapprovedStream = vi.fn().mockRejectedValue(new Error("revert failed"))
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 		const state = writeToFileTool["getTaskPartialStreamState"](task)
 		const streamError = new Error("filesystem failure while streaming")
@@ -149,7 +151,7 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 	it("still reports the streaming error when the rollback warning itself fails", async () => {
 		const task = buildTask("rollback-warning-fails", "inst-8")
 		const t = task as unknown as CleanupTask
-		t.diffViewProvider.revertChanges = vi.fn().mockRejectedValue(new Error("revert failed"))
+		t.diffViewProvider.discardUnapprovedStream = vi.fn().mockRejectedValue(new Error("revert failed"))
 		t.say = vi.fn().mockRejectedValue(new Error("say failed"))
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 		const state = writeToFileTool["getTaskPartialStreamState"](task)
@@ -174,7 +176,7 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 	it("surfaces the rollback hazard from the failed-stream cleanup as well", async () => {
 		const task = buildTask("failed-stream-cleanup", "inst-9")
 		const t = task as unknown as CleanupTask
-		t.diffViewProvider.revertChanges = vi.fn().mockRejectedValue(new Error("revert failed"))
+		t.diffViewProvider.discardUnapprovedStream = vi.fn().mockRejectedValue(new Error("revert failed"))
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
 		await writeToFileTool["cleanupFailedPartialStream"](task)

@@ -38,6 +38,14 @@ export class DiffViewProvider {
 	isEditing = false
 	originalContent: string | undefined
 	private createdDirs: string[] = []
+	/**
+	 * Absolute path of the empty placeholder open() created for a new-file edit, or undefined
+	 * when no placeholder is outstanding. reset() does NOT clear relPath, and saveDirectly()
+	 * sets relPath for a file that was written with approval, so relPath alone cannot tell a
+	 * caller that a file on disk belongs to the abandoned edit. Only this field justifies an
+	 * unlink.
+	 */
+	private placeholderPath: string | undefined
 	private documentWasOpen = false
 	// Tracks whether the target file's tab was pinned before the diff session.
 	// Closing the tab to open the diff drops VS Code's pin state, so we restore
@@ -137,6 +145,10 @@ export class DiffViewProvider {
 		// Make sure the file exists before we open it.
 		if (!fileExists) {
 			await fs.writeFile(absolutePath, "")
+			// From here until the placeholder is removed, THIS edit owns that path. Set after
+			// the write succeeds, so a failed write does not claim ownership of a file we did
+			// not create.
+			this.placeholderPath = absolutePath
 		}
 
 		// If the file was already open, close it (must happen after showing the
@@ -341,6 +353,9 @@ export class DiffViewProvider {
 		}
 
 		const absolutePath = path.resolve(this.cwd, this.relPath)
+		// The write below is the approved one: whatever placeholder open() created at this path
+		// becomes real content, so it is no longer an artifact this edit may remove.
+		this.placeholderPath = undefined
 		const updatedDocument = this.activeDiffEditor.document
 		const editedContent = updatedDocument.getText()
 
@@ -544,6 +559,134 @@ export class DiffViewProvider {
 		}
 	}
 
+	/**
+	 * Release a diff view whose content was never approved: an abandoned partial stream,
+	 * a failed stream, or a write the user was never asked to approve (rooignore denial,
+	 * validation failure). Deliberately NOT the same as revertChanges(), because
+	 * revertChanges() SAVES and neither abandoned case may write to disk:
+	 *
+	 * - create: its new-file branch saves a dirty buffer as-is before deleting the file,
+	 *   which writes partial model output the task never approved - and leaves it on disk
+	 *   if the delete then fails.
+	 * - modify: its branch restores the original content and saves it. That is a write to
+	 *   a file the user never approved, and for a rooignore-denial path a write the
+	 *   policy forbids outright.
+	 *
+	 * Here the target file is never written. A create buffer is emptied FIRST, so the
+	 * only bytes that can ever reach the placeholder are none and the tab is clean enough
+	 * to close without a prompt; a modify buffer is restored to the content already on
+	 * disk in memory only, so the file itself is untouched and the tab (now showing the
+	 * original content, still marked dirty) is left for the user rather than force-closed
+	 * over any edits they may have typed into the preview. The placeholder plus the
+	 * directories this edit created are removed either way.
+	 */
+	async discardUnapprovedStream(): Promise<void> {
+		if (!this.relPath) {
+			return
+		}
+
+		const absolutePath = path.resolve(this.cwd, this.relPath)
+		// Snapshot the directories this edit created BEFORE the editor work below, and
+		// clear the field so nothing else can act on them twice. If an await below
+		// rejects, the caller runs reset(), which drops relPath/createdDirs - this is
+		// then the only chance to remove what the abandoned edit left on disk.
+		const createdDirs = this.createdDirs
+		this.createdDirs = []
+		// Same reason for the placeholder: an await below may reject and the caller then runs
+		// reset(), which drops this field too.
+		const placeholderPath = this.placeholderPath
+		this.placeholderPath = undefined
+
+		let editorFailure: unknown
+		// open() creates the directories and the empty placeholder BEFORE it assigns
+		// activeDiffEditor (openDiffEditor() can reject on its 10s timeout or a failed
+		// vscode.diff call), so an abandoned create can leave artifacts on disk with no
+		// editor at all. Only the buffer and tab work needs the editor; the artifact
+		// cleanup below runs either way.
+		if (this.activeDiffEditor) {
+			const document = this.activeDiffEditor.document
+			try {
+				this.disposeActiveEditorListener()
+				this.cancelDeferredScroll()
+
+				if (document.isDirty) {
+					// Restore the buffer to what this edit started from - the empty placeholder for a
+					// create, the content already on disk for a modify. A failed applyEdit leaves the
+					// unapproved streamed content in the buffer, and saving then would persist exactly
+					// what this method exists to discard, so the save is conditional and the failure is
+					// surfaced to the caller as a rollback hazard.
+					const edit = new vscode.WorkspaceEdit()
+					const fullRange = new vscode.Range(
+						document.positionAt(0),
+						document.positionAt(document.getText().length),
+					)
+					const restoredContent = this.editType === "modify" ? this.stripAllBOMs(this.originalContent ?? "") : ""
+					edit.replace(document.uri, fullRange, restoredContent)
+					const applied = await vscode.workspace.applyEdit(edit)
+					if (!applied) {
+						editorFailure = new Error(
+							`Could not restore the diff editor buffer for ${this.relPath}; it may still hold unapproved content.`,
+						)
+					} else if (this.editType !== "modify") {
+						// Only the emptied placeholder is ever saved: this edit created that file, and
+						// closing a dirty tab would prompt. A modify is never saved here - a modify's
+						// restore is an in-memory revert, and saving it would write to a file the user
+						// never approved (see the method comment).
+						await document.save()
+					}
+				}
+
+				// Close the diff tabs only now: a vscode.diff tab is dirty while its modified side
+				// holds the streamed content, and closeAllDiffViews() deliberately skips dirty tabs to
+				// avoid a save prompt. Closing before the restore above left that tab open over a file
+				// this method is about to unlink.
+				await this.closeAllDiffViews()
+				await this.closeFileTab(absolutePath)
+			} catch (error) {
+				// Do NOT stop here: the placeholder and the created directories still have
+				// to go. The original failure is re-thrown once the artifacts are dealt with,
+				// so the caller still reports the rollback hazard instead of a silent success.
+				editorFailure = error
+			}
+		}
+
+		let cleanupFailure: unknown
+		try {
+			// Only a placeholder THIS edit created may be removed. relPath survives reset(), and
+			// saveDirectly() sets it for a file that was written with approval, so unlinking
+			// absolutePath unconditionally can delete content the user approved.
+			if (placeholderPath) {
+				await fs.unlink(placeholderPath).catch((error: unknown) => {
+					// open() creates the placeholder; if it is already gone there is nothing
+					// left to remove and the discard did its job.
+					if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+						throw error
+					}
+				})
+			}
+
+			// Remove only the directories this edit created, in reverse order.
+			for (let i = createdDirs.length - 1; i >= 0; i--) {
+				await fs.rmdir(createdDirs[i]).catch((error: unknown) => {
+					if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+						throw error
+					}
+				})
+			}
+		} catch (error) {
+			cleanupFailure = error
+			console.error("Error removing abandoned write_to_file artifacts:", error)
+		}
+
+		if (editorFailure) {
+			throw editorFailure instanceof Error ? editorFailure : new Error(String(editorFailure))
+		}
+		if (cleanupFailure) {
+			throw cleanupFailure instanceof Error ? cleanupFailure : new Error(String(cleanupFailure))
+		}
+	}
+
+
 	async revertChanges(): Promise<void> {
 		if (!this.relPath) {
 			return
@@ -582,6 +725,9 @@ export class DiffViewProvider {
 			}
 
 			await this.removeCreatedFile(absolutePath)
+			// The placeholder this edit owned is gone; a later discard must not delete whatever
+			// occupies the path now.
+			this.placeholderPath = undefined
 
 			// Remove only the directories we created, in reverse order.
 			for (let i = this.createdDirs.length - 1; i >= 0; i--) {
@@ -1224,6 +1370,7 @@ export class DiffViewProvider {
 		this.isEditing = false
 		this.originalContent = undefined
 		this.createdDirs = []
+		this.placeholderPath = undefined
 		this.documentWasOpen = false
 		this.documentWasPinned = false
 		this.activeDiffEditor = undefined

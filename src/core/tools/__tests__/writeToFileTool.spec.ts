@@ -170,6 +170,7 @@ describe("writeToFileTool", () => {
 			update: vi.fn().mockResolvedValue(undefined),
 			reset: vi.fn().mockResolvedValue(undefined),
 			revertChanges: vi.fn().mockResolvedValue(undefined),
+			discardUnapprovedStream: vi.fn().mockResolvedValue(undefined),
 			saveDirectly: vi.fn().mockResolvedValue(undefined),
 			saveChanges: vi.fn().mockResolvedValue({
 				newProblemsMessage: "",
@@ -603,6 +604,106 @@ describe("writeToFileTool", () => {
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		})
 
+		it("releases the per-task stream state when provider state rejects during a partial delta", async () => {
+			// provider.getState() looks like a read and is an await into the extension host. It runs
+			// after this task's entry and its TaskAborted listener were registered, and a rejection
+			// here reaches neither the streaming block nor execute()'s teardown - BaseTool.handle()
+			// only reports the error. Without the outer boundary the singleton keeps the task, its
+			// diff-view provider and a listener that nothing else removes.
+			const stateFailure = Object.assign(new Error("EPERM: could not read the extension state"), {
+				code: "EPERM",
+			})
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			mockCline.providerRef.deref.mockReturnValue({ getState: vi.fn().mockRejectedValue(stateFailure) })
+			// The second delta already streamed and opened the view; only the failing delta matters here.
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			mockCline.finalizePartialToolAsk.mockClear()
+			mockHandleError.mockClear()
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			// Releasing the state must not swallow the failure: BaseTool.handle() still reports it.
+			expect(mockHandleError).toHaveBeenCalledTimes(1)
+			expect(mockHandleError).toHaveBeenCalledWith("handling partial write_to_file", stateFailure)
+			// Nothing was streamed and nothing was shown, so there is no preview left to roll back.
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
+			expect(mockCline.finalizePartialToolAsk).not.toHaveBeenCalled()
+		})
+
+		it("does not run a second cleanup when the task aborts while open() is in flight and open() then rejects", async () => {
+			// openDiffEditor() has command-failure and timeout rejection paths, so a cancellation can
+			// land while open() is pending and open() can then reject. The TaskAborted teardown already
+			// released this entry and task disposal already owns the diff cleanup, so the streaming
+			// catch must stop instead of finalizing the ask and reverting a second time over the same
+			// view - which would also write the failure mark into an entry that is no longer live.
+			let abortCleanup: (() => void) | undefined
+			mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+				if (event === RooCodeEventName.TaskAborted) {
+					abortCleanup = listener
+				}
+				return mockCline
+			})
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(abortCleanup).toBeInstanceOf(Function)
+			mockCline.diffViewProvider.open.mockImplementation(async () => {
+				abortCleanup?.()
+				throw new Error("command 'vscode.diff' rejected while the task was cancelled")
+			})
+			mockCline.finalizePartialToolAsk.mockClear()
+			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			mockCline.diffViewProvider.reset.mockClear()
+			mockHandleError.mockClear()
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.finalizePartialToolAsk).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			// The cancellation is not a streaming failure: nothing is retained for the next stream,
+			// and the delta does not report an error the user did not cause.
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("stops before the diff restore when the task aborts while the failed ask is being finalized", async () => {
+			// The cleanup has two awaits. A cancellation that lands in the gap between them has
+			// already run the teardown, and task disposal owns the diff cleanup from that moment, so
+			// restoring and resetting here would race the disposal over the same view.
+			let abortCleanup: (() => void) | undefined
+			mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+				if (event === RooCodeEventName.TaskAborted) {
+					abortCleanup = listener
+				}
+				return mockCline
+			})
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(abortCleanup).toBeInstanceOf(Function)
+			mockCline.diffViewProvider.open.mockRejectedValue(new Error("command 'vscode.diff' rejected"))
+			mockCline.finalizePartialToolAsk.mockImplementation(async () => {
+				abortCleanup?.()
+			})
+			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			mockCline.diffViewProvider.reset.mockClear()
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			// The first cleanup step ran; the second must not.
+			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
 		it("does not treat a changed path between deltas as stabilized", async () => {
 			// Delta 1 streams "alpha.txt"; delta 2 streams "beta.txt" for the same task. The path changed
 			// between deltas, so it must not count as stabilized and no partial `tool` ask may be issued for
@@ -704,7 +805,7 @@ describe("writeToFileTool", () => {
 				// streaming failure above already reverted it once (revert + reset),
 				// and the parse path runs the same cleanup again because execute()
 				// never runs on this path.
-				expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(2)
+				expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(2)
 				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(2)
 				// Per-task state torn down at this boundary: guard cleared, the exact
 				// registered abort listener detached.
@@ -765,7 +866,7 @@ describe("writeToFileTool", () => {
 				expect(mockHandleError).toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
 				// The diff document is restored by the parse path itself (no streaming
 				// failure happened, so this is the only revert + reset in the test).
-				expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
+				expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
 				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
 				// Per-task state torn down: guard cleared, exact listener detached.
 				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
@@ -971,10 +1072,10 @@ describe("writeToFileTool", () => {
 			mockCline.diffViewProvider.open.mockRejectedValue(
 				Object.assign(new Error("EACCES: permission denied, open '/ro/test.py'"), { code: "EACCES" }),
 			)
-			// Record the relative order of revertChanges() and reset() (vitest mocks expose
+			// Record the relative order of discardUnapprovedStream() and reset() (vitest mocks expose
 			// no invocationCallOrder).
 			const diffViewCallOrder: string[] = []
-			mockCline.diffViewProvider.revertChanges.mockImplementation(async () => {
+			mockCline.diffViewProvider.discardUnapprovedStream.mockImplementation(async () => {
 				diffViewCallOrder.push("revert")
 			})
 			mockCline.diffViewProvider.reset.mockImplementation(async () => {
@@ -992,7 +1093,7 @@ describe("writeToFileTool", () => {
 			// a wrong argument (e.g. relPath) would leave the spinner stuck.
 			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(expectedPartialToolMessage)
 			// The failed write's streamed content must be reverted before reset() clears the
-			// state revertChanges() relies on.
+			// state discardUnapprovedStream() relies on.
 			expect(diffViewCallOrder).toEqual(["revert", "reset"])
 			expect(mockHandleError).not.toHaveBeenCalled()
 		})
@@ -1002,10 +1103,10 @@ describe("writeToFileTool", () => {
 			mockCline.diffViewProvider.update.mockRejectedValue(
 				Object.assign(new Error("EROFS: read-only file system, write '/ro/test.py'"), { code: "EROFS" }),
 			)
-			// Record the relative order of revertChanges() and reset() (vitest mocks expose
+			// Record the relative order of discardUnapprovedStream() and reset() (vitest mocks expose
 			// no invocationCallOrder).
 			const diffViewCallOrder: string[] = []
-			mockCline.diffViewProvider.revertChanges.mockImplementation(async () => {
+			mockCline.diffViewProvider.discardUnapprovedStream.mockImplementation(async () => {
 				diffViewCallOrder.push("revert")
 			})
 			mockCline.diffViewProvider.reset.mockImplementation(async () => {
@@ -1022,7 +1123,7 @@ describe("writeToFileTool", () => {
 			// a wrong argument (e.g. relPath) would leave the spinner stuck.
 			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(expectedPartialToolMessage)
 			// The failed write's streamed content must be reverted before reset() clears the
-			// state revertChanges() relies on.
+			// state discardUnapprovedStream() relies on.
 			expect(diffViewCallOrder).toEqual(["revert", "reset"])
 			expect(mockHandleError).not.toHaveBeenCalled()
 		})
@@ -1173,10 +1274,10 @@ describe("writeToFileTool", () => {
 			mockedCreateDirectoriesForFile.mockRejectedValue(
 				Object.assign(new Error("EACCES: permission denied, mkdir '/ro'"), { code: "EACCES" }),
 			)
-			// Record the relative order of revertChanges() and reset() (vitest mocks expose
+			// Record the relative order of discardUnapprovedStream() and reset() (vitest mocks expose
 			// no invocationCallOrder).
 			const diffViewCallOrder: string[] = []
-			mockCline.diffViewProvider.revertChanges.mockImplementation(async () => {
+			mockCline.diffViewProvider.discardUnapprovedStream.mockImplementation(async () => {
 				diffViewCallOrder.push("revert")
 			})
 			mockCline.diffViewProvider.reset.mockImplementation(async () => {
@@ -1194,7 +1295,7 @@ describe("writeToFileTool", () => {
 		})
 
 		it("continues cleanup when reverting the diff document fails before approval", async () => {
-			// Pins the .catch arm on revertChanges() in revertDiffChangesBeforeReset(): a failed
+			// Pins the .catch arm on discardUnapprovedStream() in discardUnapprovedStreamBeforeReset(): a failed
 			// revert (e.g. the diff view was already closed) must only be logged so the
 			// remaining cleanup (diff view reset + per-task state teardown) always completes.
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
@@ -1209,7 +1310,7 @@ describe("writeToFileTool", () => {
 				mockedCreateDirectoriesForFile.mockRejectedValue(
 					Object.assign(new Error("EACCES: permission denied, mkdir '/ro'"), { code: "EACCES" }),
 				)
-				mockCline.diffViewProvider.revertChanges.mockRejectedValue(new Error("revert failed"))
+				mockCline.diffViewProvider.discardUnapprovedStream.mockRejectedValue(new Error("revert failed"))
 
 				// Stream two deltas so the diff view opens with the unapproved content...
 				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
@@ -1219,7 +1320,7 @@ describe("writeToFileTool", () => {
 
 				expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
 				expect(consoleErrorSpy).toHaveBeenCalledWith(
-					"Error reverting write_to_file diff view changes:",
+					"Error discarding the unapproved write_to_file diff view:",
 					expect.any(Error),
 				)
 				// The diff view is still reset and the per-task stream state still torn down.
@@ -1260,7 +1361,7 @@ describe("writeToFileTool", () => {
 				// tool ask is closed.
 				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(undefined)
 				expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
-				expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
+				expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
 				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 				expect(consoleErrorSpy).toHaveBeenCalledWith(
 					"Error finalizing write_to_file partial tool ask:",
@@ -1307,7 +1408,7 @@ describe("writeToFileTool", () => {
 				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 
 				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(expectedPartialToolMessage)
-				expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
+				expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
 				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 				expect(mockHandleError).not.toHaveBeenCalled()
 				expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -1331,7 +1432,7 @@ describe("writeToFileTool", () => {
 				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 
 				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(expectedPartialToolMessage)
-				expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
+				expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
 				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 				expect(mockHandleError).not.toHaveBeenCalled()
 				expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -1401,7 +1502,7 @@ describe("writeToFileTool", () => {
 			// path closes whichever partial tool ask is open) to dismiss the spinner
 			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(undefined)
 			// The write was never approved, so the diff document is reverted before reset
-			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
 		})
 
 		it("runs diff cleanup when handleError rejects", async () => {
@@ -1411,7 +1512,7 @@ describe("writeToFileTool", () => {
 			// could persist the failed write. The handleError rejection itself propagates
 			// (it is not swallowed by the cleanup). As in the missing-parameter tests
 			// above, the revert mock awaits a deferred so the test proves the cleanup
-			// AWAITs revertChanges() before reset(): with the revert still pending,
+			// AWAITs discardUnapprovedStream() before reset(): with the revert still pending,
 			// reset() must not have run yet.
 			mockHandleError.mockRejectedValue(new Error("handleError rejected (aborted task)"))
 			mockedCreateDirectoriesForFile.mockRejectedValue(
@@ -1422,7 +1523,7 @@ describe("writeToFileTool", () => {
 			const revertDeferred = new Promise<void>((resolve) => {
 				resolveRevert = resolve
 			})
-			mockCline.diffViewProvider.revertChanges.mockImplementation(async () => {
+			mockCline.diffViewProvider.discardUnapprovedStream.mockImplementation(async () => {
 				diffViewCallOrder.push("revert")
 				await revertDeferred
 			})
@@ -1436,7 +1537,7 @@ describe("writeToFileTool", () => {
 			// handleError was attempted with the write context and the cleanup has reached
 			// the deferred revert...
 			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
-			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
 			// ...and while the revert is still pending, reset() must not have run yet.
 			expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
 
