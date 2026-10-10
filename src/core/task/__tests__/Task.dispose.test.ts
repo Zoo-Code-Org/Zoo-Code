@@ -196,8 +196,11 @@ describe("Task dispose method", () => {
 				resolveCleanup = resolve
 			}),
 		)
+		// A modify: disposal reverts it. Disposal discards a create instead (see the
+		// create/modify pair in Task.spec.ts), and these tests are about the reversion promise.
 		task.isStreaming = true
 		task.diffViewProvider.isEditing = true
+		task.diffViewProvider.editType = "modify"
 		const revertChangesSpy = vi.spyOn(task.diffViewProvider, "revertChanges").mockReturnValue(
 			new Promise((resolve) => {
 				resolveReversion = resolve
@@ -231,8 +234,11 @@ describe("Task dispose method", () => {
 		const reversion = new Promise<void>((resolve) => {
 			resolveReversion = resolve
 		})
+		// A modify: disposal reverts it. Disposal discards a create instead (see the
+		// create/modify pair in Task.spec.ts), and these tests are about the reversion promise.
 		task.isStreaming = true
 		task.diffViewProvider.isEditing = true
+		task.diffViewProvider.editType = "modify"
 		const revertChangesSpy = vi.spyOn(task.diffViewProvider, "revertChanges").mockReturnValue(reversion)
 
 		const disposal = task.dispose()
@@ -253,8 +259,11 @@ describe("Task dispose method", () => {
 	test("should log rejected diff reversion and continue final abort persistence", async () => {
 		const reversionError = new Error("reversion failed")
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		// A modify: disposal reverts it. Disposal discards a create instead (see the
+		// create/modify pair in Task.spec.ts), and these tests are about the reversion promise.
 		task.isStreaming = true
 		task.diffViewProvider.isEditing = true
+		task.diffViewProvider.editType = "modify"
 		vi.spyOn(task.diffViewProvider, "revertChanges").mockRejectedValue(reversionError)
 		const saveMessages = vi.fn().mockResolvedValue(true)
 		Object.defineProperty(task, "saveClineMessages", { value: saveMessages })

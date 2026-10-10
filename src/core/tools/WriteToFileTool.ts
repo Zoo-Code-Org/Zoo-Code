@@ -162,13 +162,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 * state teardown) still runs so the task is not left half-torn-down.
 	 */
 	private async revertDiffChangesBeforeReset(task: Task): Promise<boolean> {
-		// Every caller of this restores content the user never approved, so a new-file
-		// edit must NOT go through revertChanges(): its new-file branch saves the dirty
-		// buffer - unapproved partial model output - before deleting the file, so a
-		// failed delete leaves that content on disk (for a .rooignore-denied path that
-		// is a write the policy forbids). releaseAbandonedDiffView() keeps revertChanges()
-		// for modify edits, which restores the original content and is safe, and discards
-		// a new-file buffer without ever persisting it.
+		// Every caller of this restores content the user never approved, so neither edit
+		// type may go through revertChanges(): it SAVES. Its create branch saves the dirty
+		// buffer - unapproved partial model output - before deleting the file, so a failed
+		// delete leaves that content on disk; its modify branch restores the original
+		// content and saves it, which for a .rooignore-denied path is a write the policy
+		// forbids and for any abandoned stream a write the user never approved.
 		return this.releaseAbandonedDiffView(task)
 	}
 
@@ -258,22 +257,46 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	}
 
 	/**
-	 * Release the diff view of an abandoned stream. A modify edit restores the original
-	 * content, which is safe. A new-file edit must NOT go through revertChanges(): its
-	 * new-file branch saves the dirty buffer - unapproved partial model output - before
-	 * deleting the file, so it discards the buffer without persisting it instead.
+	 * Release the diff view of an abandoned, failed, or denied stream without writing to
+	 * the target file. Neither edit type may go through revertChanges(), because that
+	 * method saves: its create branch persists the dirty buffer (unapproved partial model
+	 * output) before deleting the file, and its modify branch writes the restored original
+	 * content back to a file the user never approved - a write the rooignore policy
+	 * forbids outright for a denied path. discardUnapprovedStream() restores the buffer in
+	 * memory only and removes the artifacts this edit created.
 	 */
 	private async releaseAbandonedDiffView(task: Task): Promise<boolean> {
 		try {
-			if (task.diffViewProvider.editType === "modify") {
-				await task.diffViewProvider.revertChanges()
-			} else {
-				await task.diffViewProvider.discardUnapprovedStream()
-			}
+			await task.diffViewProvider.discardUnapprovedStream()
 			return true
 		} catch (releaseError) {
 			console.error("Error releasing the abandoned write_to_file diff view:", releaseError)
 			return false
+		}
+	}
+
+	/**
+	 * Own the diff view that open() publishes AFTER cancellation already released this
+	 * stream. The TaskAborted teardown only knows about the view that existed when it ran;
+	 * a create that completes afterwards leaves its placeholder and the directories open()
+	 * made on disk with no owner, and a modify leaves a dirty preview - nothing else in the
+	 * stream path will touch them, because execute() never runs for a cancelled stream.
+	 *
+	 * Idempotent by construction: the discard is a no-op once reset() has cleared the
+	 * provider (no relPath / activeDiffEditor), so a second settle of the same open() - or
+	 * a later delta that also observes the release - cannot roll back twice or report the
+	 * hazard twice.
+	 */
+	private async discardDiffViewOpenedAfterRelease(task: Task): Promise<void> {
+		if (!task.diffViewProvider.isEditing) {
+			return
+		}
+		const released = await this.releaseAbandonedDiffView(task)
+		await this.resetDiffViewAfterWrite(task)
+		if (!released) {
+			// The buffer could not be restored, so the editor may still show content this task
+			// never approved; the cancellation itself reports its own outcome, not this hazard.
+			await this.reportRevertFailure(task)
 		}
 	}
 
@@ -643,8 +666,10 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				// Cancellation may land while open() is in flight: its abort handler has
 				// already torn the stream down (and may have reverted or closed this very
 				// diff view), so streaming the partial content into it now would resurrect a
-				// view for a task that no longer exists.
+				// view for a task that no longer exists. The view open() just published is now
+				// this method's responsibility - the teardown ran before it existed.
 				if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+					await this.discardDiffViewOpenedAfterRelease(task)
 					return
 				}
 
@@ -662,6 +687,9 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				// outcome here.
 				if (!this.isPartialStreamStillLive(task, partialStreamState)) {
 					console.error(`Error streaming write_to_file diff view:`, error)
+					// The teardown ran while this call was in flight, so it could not have released the
+					// view open() had already published (or left half-published). Discard it here.
+					await this.discardDiffViewOpenedAfterRelease(task)
 					return
 				}
 

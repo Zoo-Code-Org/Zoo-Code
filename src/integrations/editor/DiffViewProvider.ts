@@ -529,14 +529,25 @@ export class DiffViewProvider {
 	}
 
 	/**
-	 * Release a diff view whose content was never approved (an abandoned partial
-	 * stream). Deliberately NOT the same as revertChanges(): for a new-file edit that
-	 * path saves a dirty buffer as-is before deleting the file, which would write
-	 * partial model output the task never approved - and leave it on disk if the
-	 * delete then fails. Here the buffer is emptied FIRST, so the only bytes that can
-	 * ever reach the placeholder file are none; the tab is then clean enough to close
-	 * without a prompt, and the placeholder plus the directories this edit created are
-	 * removed.
+	 * Release a diff view whose content was never approved: an abandoned partial stream,
+	 * a failed stream, or a write the user was never asked to approve (rooignore denial,
+	 * validation failure). Deliberately NOT the same as revertChanges(), because
+	 * revertChanges() SAVES and neither abandoned case may write to disk:
+	 *
+	 * - create: its new-file branch saves a dirty buffer as-is before deleting the file,
+	 *   which writes partial model output the task never approved - and leaves it on disk
+	 *   if the delete then fails.
+	 * - modify: its branch restores the original content and saves it. That is a write to
+	 *   a file the user never approved, and for a rooignore-denial path a write the
+	 *   policy forbids outright.
+	 *
+	 * Here the target file is never written. A create buffer is emptied FIRST, so the
+	 * only bytes that can ever reach the placeholder are none and the tab is clean enough
+	 * to close without a prompt; a modify buffer is restored to the content already on
+	 * disk in memory only, so the file itself is untouched and the tab (now showing the
+	 * original content, still marked dirty) is left for the user rather than force-closed
+	 * over any edits they may have typed into the preview. The placeholder plus the
+	 * directories this edit created are removed either way.
 	 */
 	async discardUnapprovedStream(): Promise<void> {
 		if (!this.relPath) {
@@ -569,14 +580,30 @@ export class DiffViewProvider {
 				await this.closeAllDiffViews()
 
 				if (document.isDirty) {
+					// Restore the buffer to what this edit started from - the empty placeholder for a
+					// create, the content already on disk for a modify. A failed applyEdit leaves the
+					// unapproved streamed content in the buffer, and saving then would persist exactly
+					// what this method exists to discard, so the save is conditional and the failure is
+					// surfaced to the caller as a rollback hazard.
 					const edit = new vscode.WorkspaceEdit()
 					const fullRange = new vscode.Range(
 						document.positionAt(0),
 						document.positionAt(document.getText().length),
 					)
-					edit.replace(document.uri, fullRange, "")
-					await vscode.workspace.applyEdit(edit)
-					await document.save()
+					const restoredContent = this.editType === "modify" ? this.stripAllBOMs(this.originalContent ?? "") : ""
+					edit.replace(document.uri, fullRange, restoredContent)
+					const applied = await vscode.workspace.applyEdit(edit)
+					if (!applied) {
+						editorFailure = new Error(
+							`Could not restore the diff editor buffer for ${this.relPath}; it may still hold unapproved content.`,
+						)
+					} else if (this.editType !== "modify") {
+						// Only the emptied placeholder is ever saved: this edit created that file, and
+						// closing a dirty tab would prompt. A modify is never saved here - a modify's
+						// restore is an in-memory revert, and saving it would write to a file the user
+						// never approved (see the method comment).
+						await document.save()
+					}
 				}
 
 				await this.closeFileTab(absolutePath)

@@ -520,18 +520,20 @@ describe("writeToFileTool", () => {
 			)
 		})
 
-		it("restores the original content for a modify edit instead of discarding it", async () => {
-			// A modify edit has pre-existing content on disk, so restoring it is both safe
-			// and correct; only the new-file case must avoid the save.
+		it("discards a modify teardown too, because revertChanges() would save it", async () => {
+			// revertChanges() restores the original content and SAVES it. For a stream the user
+			// never approved that is a write they never asked for - and for a rooignore-denied
+			// path a write the policy forbids - so both edit types take the in-memory discard.
 			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 			mockCline.diffViewProvider.editType = "modify"
 			mockCline.diffViewProvider.discardUnapprovedStream = vi.fn().mockResolvedValue(undefined)
+			mockCline.diffViewProvider.revertChanges.mockClear()
 
 			await writeToFileTool.teardownAbandonedStream(mockCline)
 
-			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
-			expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		})
 
@@ -577,6 +579,63 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		})
+		it("discards the diff view that open() publishes after the stream state was released", async () => {
+			// The TaskAborted teardown can only release the view that existed when it ran. When open()
+			// completes AFTER the release it publishes a view nobody owns any more: for a create that
+			// is the placeholder plus the directories open() wrote to disk, and execute() never runs
+			// for a cancelled stream, so nothing else would ever remove them.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.update.mockClear()
+			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			mockCline.diffViewProvider.revertChanges.mockClear()
+			mockCline.diffViewProvider.reset.mockClear()
+			// open() is only called when no view is open yet, so the flag starts clear and open()
+			// itself publishes the view - the real ordering, where the cancellation lands inside the
+			// window open() is in flight.
+			mockCline.diffViewProvider.isEditing = false
+			mockCline.diffViewProvider.open.mockImplementationOnce(async () => {
+				mockCline.diffViewProvider.isEditing = true
+				writeToFileTool.clearTaskState(mockCline)
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+			// The delta that lost the race owns the view open() just published, and releasing it must
+			// never go through revertChanges(): that saves.
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+		it("does not roll back twice when a released stream is observed a second time", async () => {
+			// Idempotency: the discard is a no-op once reset() has cleared the provider, so a second
+			// observation of the same release cannot roll back again or report a hazard that never
+			// happened. reset() is what clears isEditing, which is the guard's only input.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			mockCline.diffViewProvider.reset.mockClear()
+			mockCline.say.mockClear()
+			mockCline.diffViewProvider.isEditing = false
+			mockCline.diffViewProvider.reset.mockImplementation(async () => {
+				mockCline.diffViewProvider.isEditing = false
+			})
+			mockCline.diffViewProvider.open.mockImplementationOnce(async () => {
+				mockCline.diffViewProvider.isEditing = true
+				writeToFileTool.clearTaskState(mockCline)
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			// A later settle observes the same release with nothing left to release.
+			await writeToFileTool["discardDiffViewOpenedAfterRelease"](mockCline)
+
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			expect(mockCline.say).not.toHaveBeenCalled()
+		})
 		it("does not finalize the ask or roll back twice when open() rejects after a cancellation", async () => {
 			// A cancellation during open() releases the stream state through the TaskAborted
 			// teardown (which also reverts or closes this diff view) AND rejects the call in
@@ -591,6 +650,7 @@ describe("writeToFileTool", () => {
 			mockCline.diffViewProvider.revertChanges.mockClear()
 			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
 			mockCline.ask.mockClear()
+			mockCline.finalizePartialToolAsk.mockClear()
 			mockCline.diffViewProvider.open.mockImplementationOnce(async () => {
 				writeToFileTool.clearTaskState(mockCline)
 				throw new Error("EACCES: permission denied, open mock-file")
@@ -599,8 +659,11 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 
 			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
-			// Only the partial ask this delta issued: no finalize on top of it.
+			// Only the partial ask this delta issued: no finalize on top of it. Asserted on the
+			// finalize mock itself - finalizePartialToolAskAfterFailure() calls finalizePartialToolAsk,
+			// not ask(), so the ask count alone cannot see a regression there.
 			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+			expect(mockCline.finalizePartialToolAsk).not.toHaveBeenCalled()
 			// The teardown that already ran owns the rollback: no second one from the catch.
 			expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()

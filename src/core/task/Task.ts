@@ -1820,8 +1820,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.debouncedEmitTokenUsage(tokenUsage, this.toolUsage)
 
 			const provider = this.providerRef.deref()
-			const existingStatus = provider?.taskHistoryStore.get(this.taskId)?.status
-			await provider?.updateTaskHistory(existingStatus ? { ...historyItem, status: existingStatus } : historyItem)
+			// A released provider makes the two calls below optional-chain no-ops, so without this
+			// guard the stage reports success while persisting nothing and clears the repair flag -
+			// the history entry then stays behind the messages that ARE on disk and nothing retries
+			// it. Treat it as the failed stage it is and leave the flag set for disposeOnce().
+			if (!provider) {
+				this.pendingTaskMetadataRepair = true
+				console.error("Failed to save task metadata: the task has no provider to persist task history.")
+				return false
+			}
+			const existingStatus = provider.taskHistoryStore.get(this.taskId)?.status
+			await provider.updateTaskHistory(existingStatus ? { ...historyItem, status: existingStatus } : historyItem)
 			this.pendingTaskMetadataRepair = false
 			return true
 		} catch (error) {
@@ -3573,7 +3582,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		try {
 			// If we're not streaming then `abortStream` won't be called.
 			if (this.isStreaming && this.diffViewProvider.isEditing) {
-				this.diffReversionPromise = this.diffViewProvider.revertChanges().catch(console.error)
+				// A cancelled stream was never approved. For a create, revertChanges() saves the dirty
+				// buffer - the partial content the model streamed - before deleting the file, so a
+				// failed delete leaves unapproved bytes on disk; the discard path empties the buffer
+				// first, so the only bytes that can reach the placeholder are none. A modify still
+				// reverts, which restores the content already on disk.
+				const releaseUnapprovedEdit =
+					this.diffViewProvider.editType === "modify"
+						? this.diffViewProvider.revertChanges()
+						: this.diffViewProvider.discardUnapprovedStream()
+				this.diffReversionPromise = releaseUnapprovedEdit.catch(console.error)
 			}
 		} catch (error) {
 			console.error("Error reverting diff changes:", error)
@@ -3585,7 +3603,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// has to happen before the first yield, because abortTaskOnce() awaits diffReversionPromise
 		// right after void dispose(), an abandoned stream can reach its finally while this await is
 		// in flight and leave the revert decision below false, and direct dispose() callers rely on
-		// the abort flag being set synchronously. Skipped while taskApiConfigReady has not settled -
 		// the abort flag being set synchronously. Skipped only when the retry could block: while
 		// taskApiConfigReady has not settled AND _taskApiConfigName is still undefined,
 		// persistTaskMetadata() awaits that promise and teardown must not wait on it. Once the name

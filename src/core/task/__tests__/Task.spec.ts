@@ -6738,6 +6738,40 @@ describe("Cline", () => {
 			historySpy.mockRestore()
 		})
 
+		it("treats a released provider as a failed metadata stage instead of a silent success", async () => {
+			// providerRef.deref() returns undefined once the provider is gone. Without the guard the
+			// two history calls optional-chain to nothing, persistTaskMetadata() returns true and
+			// CLEARS pendingTaskMetadataRepair: the history entry then stays behind the messages that
+			// are already on disk and disposeOnce() has nothing left to retry on.
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
+			fsReal.mkdirSync(taskDir, { recursive: true })
+			const historySpy = vi.spyOn(mockProvider, "updateTaskHistory").mockResolvedValue([])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			// Bracket access for the private field: the flag must start clear so the assertion below
+			// proves the failed stage SET it again rather than merely leaving it alone.
+			await task["taskApiConfigReady"]
+			task["pendingTaskMetadataRepair"] = false
+			Object.defineProperty(task, "providerRef", {
+				value: { deref: vi.fn().mockReturnValue(undefined) },
+				configurable: true,
+			})
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			const persisted = await task["persistTaskMetadata"]()
+
+			expect(persisted).toBe(false)
+			expect(historySpy).not.toHaveBeenCalled()
+			expect(task["pendingTaskMetadataRepair"]).toBe(true)
+			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("no provider to persist task history"))
+			errorSpy.mockRestore()
+			historySpy.mockRestore()
+		})
+
 		it("finishes the synchronous teardown before the dispose-time metadata retry", async () => {
 			// The retry has to sit after disposeOnce()'s synchronous section, not in front of it:
 			// abortTaskOnce() awaits diffReversionPromise right after void dispose(), an abandoned
@@ -6765,14 +6799,28 @@ describe("Cline", () => {
 			task["pendingTaskMetadataRepair"] = true
 			task.isStreaming = true
 			task.diffViewProvider.isEditing = true
+			// A modify: disposal reverts it. The edit type decides which release path disposal takes
+			// (see the create/modify disposal pair below), and this test is about the ordering.
+			task.diffViewProvider.editType = "modify"
 			const revertSpy = vi.spyOn(task.diffViewProvider, "revertChanges").mockResolvedValue(undefined)
 
 			const disposing = task.dispose()
+			// No await before this one: dispose() sets the abort flag synchronously, so a retry moved
+			// in front of the teardown would park dispose() on the gated task-history write first and
+			// this would read false.
+			expect(task.abort).toBe(true)
+
 			await new Promise<void>((resolve) => setImmediate(resolve))
 
 			// The teardown completed without waiting for the task-history write.
 			expect(task.abort).toBe(true)
 			expect(revertSpy).toHaveBeenCalledTimes(1)
+			// Bracket access for the private field: abortTaskOnce() awaits this promise right after
+			// void dispose(), so it has to exist once the teardown has run.
+			expect(task["diffReversionPromise"]).toBeDefined()
+			// And the retry has actually started: historySpy is gated, so without this assertion the
+			// test cannot tell "the teardown ran first" from "the retry never ran at all".
+			expect(historySpy).toHaveBeenCalledTimes(1)
 
 			releaseHistory?.()
 			await disposing
@@ -6780,6 +6828,60 @@ describe("Cline", () => {
 			expect(historySpy).toHaveBeenCalledTimes(1)
 			historySpy.mockRestore()
 			revertSpy.mockRestore()
+		})
+
+		it("discards a cancelled create preview instead of saving it through revertChanges", async () => {
+			// revertChanges() for a create SAVES the dirty buffer - the partial content the model
+			// streamed and nobody approved - before deleting the file, so a failed delete leaves
+			// unapproved bytes on disk. A cancelled stream never reached approval, so disposal has to
+			// take the discard path, which empties the buffer first.
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
+			fsReal.mkdirSync(taskDir, { recursive: true })
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task["taskApiConfigReady"]
+			task.isStreaming = true
+			task.diffViewProvider.isEditing = true
+			task.diffViewProvider.editType = "create"
+			const revertSpy = vi.spyOn(task.diffViewProvider, "revertChanges").mockResolvedValue(undefined)
+			const discardSpy = vi.spyOn(task.diffViewProvider, "discardUnapprovedStream").mockResolvedValue(undefined)
+
+			await task.dispose()
+
+			expect(discardSpy).toHaveBeenCalledTimes(1)
+			expect(revertSpy).not.toHaveBeenCalled()
+			revertSpy.mockRestore()
+			discardSpy.mockRestore()
+		})
+
+		it("still reverts a cancelled modify preview, whose restore is the content already on disk", async () => {
+			// The pair of the test above: a modify has prior content, and disposal keeps reverting it
+			// so the editor shows what was on disk before the stream started.
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
+			fsReal.mkdirSync(taskDir, { recursive: true })
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task["taskApiConfigReady"]
+			task.isStreaming = true
+			task.diffViewProvider.isEditing = true
+			task.diffViewProvider.editType = "modify"
+			const revertSpy = vi.spyOn(task.diffViewProvider, "revertChanges").mockResolvedValue(undefined)
+			const discardSpy = vi.spyOn(task.diffViewProvider, "discardUnapprovedStream").mockResolvedValue(undefined)
+
+			await task.dispose()
+
+			expect(revertSpy).toHaveBeenCalledTimes(1)
+			expect(discardSpy).not.toHaveBeenCalled()
+			revertSpy.mockRestore()
+			discardSpy.mockRestore()
 		})
 
 		it("does not block teardown when a pending metadata repair has an unsettled api-config init", async () => {

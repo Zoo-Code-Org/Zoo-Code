@@ -188,6 +188,20 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 		errorSpy.mockRestore()
 	})
 
+	it("stays silent when the failed-stream cleanup restores the buffer", async () => {
+		// The hazard report is conditional on the rollback failing. A cleanup that always
+		// reported "could not be restored" would pass the test above and still spam a false
+		// warning on every failed stream, so the success path needs its own negative case.
+		const task = buildTask("failed-stream-cleanup-ok", "inst-12")
+		const t = task as unknown as CleanupTask
+
+		await writeToFileTool["cleanupFailedPartialStream"](task)
+
+		expect(t.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+		expect(t.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+		expect(t.say).not.toHaveBeenCalled()
+	})
+
 	it("logs and continues when finalizing the open partial ask fails", async () => {
 		const task = buildTask("finalize-fails", "inst-5")
 		const t = task as unknown as CleanupTask
@@ -215,17 +229,19 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 		expect(rolledBack).toBe(true)
 	})
 
-	it("keeps revertChanges for a modify rollback so the original content is restored", async () => {
-		// A modify edit has real prior content on disk; restoring it through
-		// revertChanges() is safe and must not be replaced by the discard path.
+	it("routes a modify rollback through the discard path as well, because revertChanges() saves", async () => {
+		// A modify edit does have prior content on disk, but revertChanges() restores it by
+		// WRITING: applyEdit plus document.save(). Every caller of this helper restores content
+		// the user never approved, and for a .rooignore-denied path that write is one the policy
+		// forbids outright - so both edit types take the in-memory discard.
 		const task = buildTask("modify-rollback", "inst-11")
 		const t = task as unknown as CleanupTask
 		t.diffViewProvider.editType = "modify"
 
 		const rolledBack = await writeToFileTool["revertDiffChangesBeforeReset"](task)
 
-		expect(t.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
-		expect(t.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
+		expect(t.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+		expect(t.diffViewProvider.revertChanges).not.toHaveBeenCalled()
 		expect(rolledBack).toBe(true)
 	})
 })
