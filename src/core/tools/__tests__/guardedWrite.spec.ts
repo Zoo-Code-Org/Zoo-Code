@@ -273,6 +273,26 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			)
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
+
+		it("does not probe existence or recreate when an updated file vanished after the read", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1")
+			const task = createMockTask({ observationRegistry: reg })
+			// The file vanished: the CAS token recomputation rejects with ENOENT,
+			// which the version guard reports as the deleted-file remediation.
+			mockedComputeVersionToken.mockRejectedValue({ code: "ENOENT" })
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+
+			await expect(guardedWrite(task, "doc.txt", "new content", "update")).rejects.toThrow(
+				"File was deleted after it was read -- the version recorded at read time (v1) no longer exists; re-read the file, then retry.",
+			)
+
+			// The existence probe is a "create"-only step: an "update" must not run
+			// it (the branch condition short-circuits on kind) and must not recreate
+			// the vanished file - only the CAS branch may decide the write.
+			expect(mockedFsAccess).not.toHaveBeenCalled()
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("edit", () => {
@@ -313,6 +333,82 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		})
 	})
 
+	describe("observation refresh after publication", () => {
+		it("re-observes the published token so a second update without a re-read succeeds", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1")
+			const task = createMockTask({ observationRegistry: reg })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			// The publish changes the on-disk state: the token moves to v2.
+			mockedSafeWriteText.mockImplementation(async () => {
+				mockedComputeVersionToken.mockResolvedValue("v2")
+			})
+
+			await guardedWrite(task, "doc.txt", "one", "update")
+
+			// The registry records what this write published, not the pre-write read.
+			expect(reg.get(abs("doc.txt"))?.version).toBe("v2")
+
+			// A second write from the same task without a re-read succeeds: its CAS
+			// compares against the content the task itself published.
+			await guardedWrite(task, "doc.txt", "two", "update")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
+			expect(reg.get(abs("doc.txt"))?.version).toBe("v2")
+		})
+
+		it("records an observation after creating an unobserved file so a follow-up write is not treated as unobserved", async () => {
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("created-v1")
+			const task = createMockTask()
+			// After the create the file exists on disk.
+			mockedSafeWriteText.mockImplementation(async () => {
+				mockedFsAccess.mockResolvedValue(undefined)
+			})
+
+			await guardedWrite(task, "made.txt", "content", "create")
+
+			expect(task.observationRegistry.get(abs("made.txt"))?.version).toBe("created-v1")
+
+			// Without the write-back this second write would take the unobserved
+			// branch and fail "File already exists ... was not read before this
+			// write" for a file the same task had just created.
+			await guardedWrite(task, "made.txt", "revised", "update")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
+		})
+
+		it("re-observes after a successful edit write", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1")
+			const task = createMockTask({ observationRegistry: reg })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			mockedSafeWriteText.mockImplementation(async () => {
+				mockedComputeVersionToken.mockResolvedValue("v2")
+			})
+
+			await guardedWrite(task, "doc.txt", "patched", "edit")
+
+			expect(reg.get(abs("doc.txt"))?.version).toBe("v2")
+		})
+
+		it("keeps a published write successful when the post-publication token computation fails", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1")
+			const task = createMockTask({ observationRegistry: reg })
+			mockedComputeVersionToken
+				.mockResolvedValueOnce("v1") // the CAS check at entry passes
+				.mockRejectedValueOnce({ code: "EACCES" }) // the post-publication token fails
+
+			await expect(guardedWrite(task, "doc.txt", "new content", "update")).resolves.toBeUndefined()
+
+			// The write published; the failed bookkeeping leaves the previous
+			// observation in place (a follow-up write then fails stale and re-reads).
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
+			expect(reg.get(abs("doc.txt"))?.version).toBe("v1")
+		})
+	})
+
 	describe("concurrency: per-path FIFO chain", () => {
 		it("two concurrent updates on one path - exactly one publishes, the other fails stale", async () => {
 			const reg = new ObservationRegistry()
@@ -336,6 +432,44 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(r2.reason.message).toBe(
 				"Stale version -- the file changed since you read it (expected v1, current v2); re-read the file, then retry.",
 			)
+		})
+
+		it("holds the submission-time token when the registry moves on while the write waits", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("queued-token.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			let releaseFirst: () => void = () => {}
+			const gate = new Promise<void>((resolve) => {
+				releaseFirst = resolve
+			})
+			let publishes = 0
+			mockedSafeWriteText.mockImplementation(async (_path: string, content: string) => {
+				publishes += 1
+				if (content === "first") {
+					await gate
+				}
+				// Each publish moves the on-disk token forward.
+				mockedComputeVersionToken.mockResolvedValue("v2")
+			})
+
+			const first = guardedWrite(task, "queued-token.txt", "first", "update")
+			const second = guardedWrite(task, "queued-token.txt", "second", "update")
+			await new Promise((resolve) => setImmediate(resolve))
+			// A re-read lands while both writes are still in flight: the registry
+			// moves to v2 behind the queued writes.
+			reg.observe(abs("queued-token.txt"), "v2")
+			releaseFirst()
+
+			await first
+			// The second write was submitted against v1. The first write published
+			// over that state, so the queued write fails stale instead of publishing
+			// content derived from the v1 read over the v2 file. An execution-time
+			// registry lookup would rescue it with the refreshed token and lose the
+			// first write's update.
+			await expect(second).rejects.toThrow("Stale version")
+			expect(publishes).toBe(1)
 		})
 
 		it("observed-absent then two concurrent creates - the second fails stale", async () => {

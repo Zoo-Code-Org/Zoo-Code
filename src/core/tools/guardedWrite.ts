@@ -12,7 +12,10 @@
  *
  * A per-absolute-path FIFO chain of tail promises orders concurrent
  * in-process writes to the same path: the first matching write wins, the rest
- * fail stale. Observations come from the task's S2 ObservationRegistry.
+ * fail stale. Observations come from the task's S2 ObservationRegistry and are
+ * captured at submission time; a successful publication re-observes the path
+ * with the published token so sequential writes from one task compare against
+ * the content that task published, not against its pre-write read.
  *
  * Check-to-publication window (CodeRabbit review, PRs #1405 / #1413): every
  * guard predicate is enforced TWICE -- once at entry and once at publication
@@ -316,17 +319,34 @@ export class CancelledTaskWriteError extends Error {
  * Guarded write entry point.
  *
  * 1. Resolves the absolute path against task.cwd.
- * 2. Consults the task's S2 observation registry to pick the guard:
+ * 2. Captures the task's S2 observation for the path at SUBMISSION time, not
+ *    when the queued link runs: the content being written was derived from
+ *    the read this observation records, so the CAS must compare against that
+ *    token even if the registry moves on - through a re-read or through this
+ *    task's own earlier write re-observing the path - while the link waits
+ *    behind another write. A queued write whose token no longer matches fails
+ *    stale and the caller re-reads; publishing it anyway would overwrite
+ *    content the submitted write never saw.
+ * 3. Consults the captured observation to pick the guard:
  *    - unobserved + create/update: createIfAbsent (rejects if it exists);
  *    - observed + create on a file that vanished after the read: recreate;
  *    - observed otherwise: replaceIfVersion (CAS on the S1 version token);
  *    - unobserved + edit: unobservedEditGuard.
- * 3. Runs the chosen guard on the per-path FIFO chain so concurrent writes to
- *    the same path are deterministically ordered. The chain holds the
+ *    The guard runs on the per-path FIFO chain so concurrent writes to the
+ *    same path are deterministically ordered. The chain holds the
  *    serialization across the whole verify+publish window, and the guard's
  *    publication-time re-verification (inside safeWriteText, immediately
  *    before the commit rename) closes the check-to-rename window for writers
  *    serialized by the chain.
+ * 4. After a successful publication the new on-disk token is recorded back
+ *    into the registry, so a follow-up write from the same task compares
+ *    against the content this write published instead of failing stale
+ *    against its own output (or treating a file it just created as
+ *    unobserved). The re-observation runs inside the chain link, before the
+ *    link settles, so the next queued link and the next submission both see
+ *    the refreshed token. A token failure after a successful publication is
+ *    swallowed: the write itself succeeded, and the registry keeps the
+ *    previous observation, which a follow-up write already handles.
  */
 export async function guardedWrite(
 	task: Task,
@@ -335,6 +355,8 @@ export async function guardedWrite(
 	kind: GuardedWriteKind = "update",
 ): Promise<void> {
 	const absolutePath = resolveAbsolutePath(task, relPathOrAbsolute)
+	// Submission-time capture - see step 2 above.
+	const obs = task.observationRegistry.get(absolutePath)
 
 	return enqueue(absolutePath, async () => {
 		// The link can reach the head of the queue long after the task that issued it is
@@ -345,8 +367,6 @@ export async function guardedWrite(
 			throw new CancelledTaskWriteError(absolutePath)
 		}
 
-		const obs = task.observationRegistry.get(absolutePath)
-
 		if (obs === undefined) {
 			// Edit-style writes require a prior read: no observation, no write.
 			if (kind === "edit") {
@@ -355,21 +375,29 @@ export async function guardedWrite(
 			// Never read: only an absent target may be created. (The edit guard
 			// above rejects before reaching this line.)
 			await createIfAbsent(absolutePath, content)
-			return
-		}
-
-		if (kind === "edit") {
-			await replaceIfVersion(absolutePath, obs.version, content)
-			return
-		}
-
-		// kind is "create" or "update": a "create" on a file that vanished
-		// after the read recreates it; otherwise the version recorded at read
-		// time must still match the on-disk token.
-		if (kind === "create" && (await fileIsAbsent(absolutePath))) {
+		} else if (kind === "create" && (await fileIsAbsent(absolutePath))) {
+			// A "create" on a file that vanished after the read recreates it.
+			// Observed "edit" and "update" writes never reach the existence probe -
+			// the condition short-circuits on kind - and take the CAS branch below.
 			await createIfAbsent(absolutePath, content)
 		} else {
+			// The version recorded at read time must still match the on-disk
+			// token: for "edit" and "update", and for "create" on a file that
+			// still exists.
 			await replaceIfVersion(absolutePath, obs.version, content)
+		}
+
+		// Re-observe the published version (step 4). A failure to compute the
+		// token after a successful publication must not turn the published
+		// write into a failed one, so it is swallowed here and the registry
+		// keeps the previous observation.
+		try {
+			const published = await computeVersionToken(absolutePath)
+			task.observationRegistry.observe(absolutePath, published)
+		} catch {
+			// Swallowed on purpose: the publication itself succeeded, and a
+			// follow-up write against the previous observation is the
+			// pre-existing contract (stale -> re-read).
 		}
 	})
 }
