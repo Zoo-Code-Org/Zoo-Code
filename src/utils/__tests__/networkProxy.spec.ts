@@ -1,10 +1,34 @@
 import * as vscode from "vscode"
-import { initializeNetworkProxy, getProxyConfig, isProxyEnabled, isDebugMode, getSystemProxyUrl } from "../networkProxy"
+import { NodeHttpHandler } from "@smithy/node-http-handler"
+import { HttpProxyAgent } from "http-proxy-agent"
+import { HttpsProxyAgent } from "https-proxy-agent"
+import {
+	initializeNetworkProxy,
+	getProxyConfig,
+	isProxyEnabled,
+	isDebugMode,
+	getSystemProxyUrl,
+	createProxyRoutingRequestHandler,
+} from "../networkProxy"
 
 // Mock global-agent
 vi.mock("global-agent", () => ({
 	bootstrap: vi.fn(),
 }))
+
+vi.mock("@smithy/node-http-handler", () => ({
+	NodeHttpHandler: vi.fn().mockImplementation(function (options?: unknown) {
+		return {
+			options,
+			handle: vi.fn(),
+			updateHttpClientConfig: vi.fn(),
+			httpHandlerConfigs: vi.fn().mockReturnValue({}),
+			destroy: vi.fn(),
+		}
+	}),
+}))
+vi.mock("http-proxy-agent", () => ({ HttpProxyAgent: vi.fn() }))
+vi.mock("https-proxy-agent", () => ({ HttpsProxyAgent: vi.fn() }))
 
 // Mock vscode
 vi.mock("vscode", () => ({
@@ -467,6 +491,120 @@ describe("networkProxy", () => {
 				const result = getSystemProxyUrl("not-a-valid-url")
 				expect(result).toBe("http://proxy.corp:3128")
 			})
+		})
+	})
+
+	describe("createProxyRoutingRequestHandler", () => {
+		type Handler = NonNullable<ReturnType<typeof createProxyRoutingRequestHandler>>
+
+		// The handler reads only these fields off the request. Building a real HttpRequest would
+		// pull in @smithy/protocol-http, which is not a direct dependency, so a literal stands in.
+		const requestTo = (hostname: string, port?: number) =>
+			({ protocol: "https:", hostname, port }) as unknown as Parameters<Handler["handle"]>[0]
+
+		// The two inner handlers are told apart by how they were built: only the proxied one
+		// receives agents.
+		const innerHandlers = () => {
+			const built = vi.mocked(NodeHttpHandler).mock.results.map((r) => r.value)
+			return {
+				direct: built.find((h) => h.options === undefined),
+				proxied: built.find((h) => h.options?.httpsAgent),
+			}
+		}
+
+		beforeEach(() => {
+			vi.clearAllMocks()
+			delete process.env.HTTPS_PROXY
+			delete process.env.https_proxy
+			delete process.env.HTTP_PROXY
+			delete process.env.http_proxy
+			delete process.env.NO_PROXY
+			delete process.env.no_proxy
+			mockConfig.get.mockReturnValue(undefined)
+		})
+
+		it("should return undefined when no proxy is configured", () => {
+			expect(createProxyRoutingRequestHandler()).toBeUndefined()
+			expect(NodeHttpHandler).not.toHaveBeenCalled()
+		})
+
+		it("should build both proxy agents without keeping connections alive", () => {
+			process.env.HTTPS_PROXY = "http://proxy.corp:3128"
+
+			expect(createProxyRoutingRequestHandler()).toBeDefined()
+
+			// No agent options: an idle connection would outlive the request that opened it.
+			expect(HttpProxyAgent).toHaveBeenCalledWith("http://proxy.corp:3128")
+			expect(HttpsProxyAgent).toHaveBeenCalledWith("http://proxy.corp:3128")
+			const { proxied } = innerHandlers()
+			expect(proxied?.options?.httpAgent).toBe(vi.mocked(HttpProxyAgent).mock.instances[0])
+			expect(proxied?.options?.httpsAgent).toBe(vi.mocked(HttpsProxyAgent).mock.instances[0])
+		})
+
+		it("should send a request through the proxy when NO_PROXY does not cover it", () => {
+			process.env.HTTPS_PROXY = "http://proxy.corp:3128"
+			process.env.NO_PROXY = "example.com"
+
+			const handler = createProxyRoutingRequestHandler()
+			const request = requestTo("bedrock-runtime.us-east-1.amazonaws.com")
+			handler?.handle(request)
+
+			const { direct, proxied } = innerHandlers()
+			expect(proxied?.handle).toHaveBeenCalledWith(request)
+			expect(direct?.handle).not.toHaveBeenCalled()
+		})
+
+		it("should send a request directly when NO_PROXY covers its host", () => {
+			process.env.HTTPS_PROXY = "http://proxy.corp:3128"
+			process.env.NO_PROXY = "amazonaws.com"
+
+			const handler = createProxyRoutingRequestHandler()
+			// The host is only known per request, which is the point of deciding here: indexed
+			// file contents must not reach a proxy the user excluded.
+			const request = requestTo("bedrock-runtime.eu-west-1.amazonaws.com")
+			handler?.handle(request)
+
+			const { direct, proxied } = innerHandlers()
+			expect(direct?.handle).toHaveBeenCalledWith(request)
+			expect(proxied?.handle).not.toHaveBeenCalled()
+		})
+
+		it("should send every request directly when NO_PROXY is '*'", () => {
+			process.env.HTTPS_PROXY = "http://proxy.corp:3128"
+			process.env.NO_PROXY = "*"
+
+			const handler = createProxyRoutingRequestHandler()
+			handler?.handle(requestTo("bedrock-runtime.us-east-1.amazonaws.com"))
+
+			const { direct, proxied } = innerHandlers()
+			expect(direct?.handle).toHaveBeenCalledOnce()
+			expect(proxied?.handle).not.toHaveBeenCalled()
+		})
+
+		it("should match NO_PROXY against the host when the request carries a port", () => {
+			process.env.HTTPS_PROXY = "http://proxy.corp:3128"
+			process.env.NO_PROXY = "amazonaws.com"
+
+			const handler = createProxyRoutingRequestHandler()
+			handler?.handle(requestTo("bedrock-runtime.us-east-1.amazonaws.com", 8443))
+
+			const { direct, proxied } = innerHandlers()
+			expect(direct?.handle).toHaveBeenCalledOnce()
+			expect(proxied?.handle).not.toHaveBeenCalled()
+		})
+
+		it("should forward configuration updates and teardown to both routes", () => {
+			process.env.HTTPS_PROXY = "http://proxy.corp:3128"
+
+			const handler = createProxyRoutingRequestHandler()
+			handler?.updateHttpClientConfig("requestTimeout", 1234)
+			handler?.destroy()
+
+			const { direct, proxied } = innerHandlers()
+			expect(direct?.updateHttpClientConfig).toHaveBeenCalledWith("requestTimeout", 1234)
+			expect(proxied?.updateHttpClientConfig).toHaveBeenCalledWith("requestTimeout", 1234)
+			expect(direct?.destroy).toHaveBeenCalledOnce()
+			expect(proxied?.destroy).toHaveBeenCalledOnce()
 		})
 	})
 })
