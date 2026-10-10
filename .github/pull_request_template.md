@@ -4,6 +4,7 @@ Thank you for contributing to Zoo Code!
 Before submitting your PR, please ensure:
 - It's linked to an approved GitHub Issue.
 - You've reviewed our [Contributing Guidelines](../CONTRIBUTING.md).
+- Write in Simplified Technical English: short sentences, plain words, active voice, one idea per sentence.
 -->
 
 ### Related GitHub Issue
@@ -37,6 +38,7 @@ Detail the steps to test your changes. This helps reviewers verify your work.
 - [ ] **Issue Linked**: This PR is linked to an approved GitHub Issue (see "Related GitHub Issue" above).
 - [ ] **Scope**: My changes are focused on the linked issue (one major feature/fix per PR).
 - [ ] **Self-Review**: I have performed a thorough self-review of my code.
+- [ ] **Writing Style**: The PR title and description use Simplified Technical English (short sentences, plain words, active voice, one idea per sentence).
 - [ ] **Testing**: New and/or updated tests have been added to cover my changes (if applicable).
 - [ ] **Visual Snapshot** (UI changes only): If a user would notice this change at a glance (layout, theme tokens, brand elements, empty/error states), I've added or updated a `*.visual.tsx` snapshot in `webview-ui/`. See `webview-ui/AGENTS.md` → "When a UI change needs a snapshot".
 - [ ] **Documentation Impact**: I have considered if my changes require documentation updates (see "Documentation Updates" section below).

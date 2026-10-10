@@ -7,6 +7,8 @@ assignees: ""
 type: Bug
 ---
 
+<!-- Writing style: use Simplified Technical English. Use short sentences, plain words, active voice, and one idea per sentence. -->
+
 **Describe the bug**
 A clear and concise description of what the bug is.
 
