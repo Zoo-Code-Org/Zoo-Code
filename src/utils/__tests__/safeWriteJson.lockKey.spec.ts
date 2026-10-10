@@ -331,7 +331,6 @@ it("serializes a writer that names the referent directly while the link still ex
 	// referent keeps the content its own writer put there.
 	expect(JSON.parse(await fs.readFile(link, "utf8"))).toEqual({ id: "task-4" })
 	expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ had: "referent content" })
-
 })
 
 it("takes one lock for a regular file whose parent directory resolves through a symlink", async () => {
@@ -353,7 +352,9 @@ it("takes one lock for a regular file whose parent directory resolves through a 
 		if (t === aliasFile) return canonicalFile
 		return t
 	})
-	mockedLstat.mockImplementation(async () => ({ isSymbolicLink: () => false, isFile: () => true }) as unknown as BigIntStats)
+	mockedLstat.mockImplementation(
+		async () => ({ isSymbolicLink: () => false, isFile: () => true }) as unknown as BigIntStats,
+	)
 	mockedReadlink.mockRejectedValue(enoent)
 
 	await safeWriteJson(aliasFile, { id: "task-1" })
