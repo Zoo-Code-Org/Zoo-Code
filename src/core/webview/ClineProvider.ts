@@ -298,9 +298,12 @@ export class ClineProvider
 			},
 		)
 
-		// Advance from the timeout-bounded result. Each fn checks its AbortSignal before
-		// writing state, so advancing the queue on timeout cannot produce stale overwrites.
-		this.providerProfileMutationQueue = callerResult.then(
+		// Chain the queue to the underlying run, not to the timeout-bounded result: the timeout
+		// exists to release the caller, not to release the queue. A mutation that is still
+		// writing durable state must keep later mutations out, otherwise the next profile
+		// mutation interleaves its own writes with the one still in flight - the abort signal is
+		// advisory, so a fn that ignores it would run concurrently with its successor.
+		this.providerProfileMutationQueue = run.then(
 			() => undefined,
 			() => undefined,
 		)

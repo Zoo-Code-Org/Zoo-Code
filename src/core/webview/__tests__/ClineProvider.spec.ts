@@ -2747,6 +2747,51 @@ const provider = new ClineProvider(
 			await provider.dispose()
 		})
 
+		it("keeps the mutation queue chained to the running mutation after the caller-facing timeout", async () => {
+			// The timeout exists to release the caller, not to release the queue. A mutation that is
+			// still writing durable state must keep later mutations out: the abort signal is advisory,
+			// so a fn that ignores it would otherwise interleave its writes with its successor's.
+			vi.useFakeTimers()
+			// PENDING_OPERATION_TIMEOUT_MS is a public static readonly, so TS forbids assigning it;
+			// the double assertion is the only way to shorten it for this test without widening the
+			// production API or making the constant mutable in production.
+			const originalTimeout = ClineProvider.PENDING_OPERATION_TIMEOUT_MS
+			;(ClineProvider as unknown as { PENDING_OPERATION_TIMEOUT_MS: number }).PENDING_OPERATION_TIMEOUT_MS = 50
+			const started: string[] = []
+			let releaseFirst!: () => void
+			try {
+				const first = provider["enqueueProviderProfileMutation"](async () => {
+					started.push("first")
+					await new Promise<void>((resolve) => {
+						releaseFirst = resolve
+					})
+				})
+				// Attach the rejection handler before the timer fires: the caller-facing timeout rejects
+				// inside the fake-timer tick, and a handler attached only afterwards is reported by
+				// Vitest as an unhandled rejection.
+				const firstRejected = expect(first).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(0)
+
+				// The caller is released at the timeout while the mutation itself is still running.
+				await vi.advanceTimersByTimeAsync(60)
+				await firstRejected
+
+				const second = provider["enqueueProviderProfileMutation"](async () => {
+					started.push("second")
+				})
+				await vi.advanceTimersByTimeAsync(0)
+				expect(started).toEqual(["first"])
+
+				// Only once the running mutation settles does the queue hand over.
+				releaseFirst()
+				await expect(second).resolves.toBeUndefined()
+				expect(started).toEqual(["first", "second"])
+			} finally {
+				;(ClineProvider as unknown as { PENDING_OPERATION_TIMEOUT_MS: number }).PENDING_OPERATION_TIMEOUT_MS = originalTimeout
+				vi.useRealTimers()
+			}
+		})
+
 		it("should report the activated profile's settings over a stale view-local buffer in getState", async () => {
 const provider = new ClineProvider(
 				mockContext,
