@@ -320,6 +320,280 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				await expect(fs.readFile(untrackedFile, "utf-8")).rejects.toThrow()
 			})
 
+			describe("restore with changed ignore rules (#1832)", () => {
+				it.each(["../HEAD", "..\\HEAD", "HEAD", "--help", "a".repeat(39), "a".repeat(41)])(
+					"rejects invalid hash %s before reading files or running Git",
+					async (hash) => {
+						service.on("error", vitest.fn())
+						const read = vitest.spyOn(fs, "readFile")
+						const git = service["git"]!
+						const raw = vitest.spyOn(git, "raw")
+						const clean = vitest.spyOn(git, "clean")
+						const reset = vitest.spyOn(git, "reset")
+						await expect(service.restoreCheckpoint(hash)).rejects.toThrow("Invalid checkpoint commit hash")
+						expect(read).not.toHaveBeenCalled()
+						expect(raw).not.toHaveBeenCalled()
+						expect(clean).not.toHaveBeenCalled()
+						expect(reset).not.toHaveBeenCalled()
+					},
+				)
+
+				it.each(["missing", "blob"])("rejects a %s object before cleanup", async (kind) => {
+					service.on("error", vitest.fn())
+					const git = service["git"]!
+					const hash = kind === "blob" ? await git.revparse(["HEAD:test.txt"]) : "a".repeat(40)
+					const read = vitest.spyOn(fs, "readFile")
+					const clean = vitest.spyOn(git, "clean")
+					const reset = vitest.spyOn(git, "reset")
+					await expect(service.restoreCheckpoint(hash)).rejects.toThrow()
+					expect(read).not.toHaveBeenCalled()
+					expect(clean).not.toHaveBeenCalled()
+					expect(reset).not.toHaveBeenCalled()
+				})
+
+				it("records files ignored before initialization for a baseHash restore", async () => {
+					const gitignore = path.join(service.workspaceDir, ".gitignore")
+					const secret = path.join(service.workspaceDir, "initial-secret.txt")
+					await fs.writeFile(gitignore, ".gitignore\ninitial-secret.txt\n")
+					await fs.writeFile(secret, "initial protection")
+					const initial = new klass(
+						taskId,
+						`${service.checkpointsDir}-initial`,
+						service.workspaceDir,
+						() => {},
+					)
+					await initial.initShadowGit()
+					const git = simpleGit(initial.checkpointsDir)
+					expect(await git.raw(["ls-files", "--", "initial-secret.txt"])).toBe("")
+					expect((await git.raw(["check-ignore", "initial-secret.txt"])).trim()).toBe("initial-secret.txt")
+					await fs.writeFile(gitignore, ".gitignore\n")
+					await fs.writeFile(testFile, "modified")
+					await initial.restoreCheckpoint(initial.baseHash!)
+					expect(await fs.readFile(secret, "utf8")).toBe("initial protection")
+					expect(await fs.readFile(testFile, "utf8")).toBe("Hello, world!")
+				})
+
+				it.each(["missing", "truncated", "invalid", "unreadable"])(
+					"refuses a new checkpoint with a %s record without changing workspace files",
+					async (failure) => {
+						service.on("error", vitest.fn())
+						const checkpoint = await service.saveCheckpoint("protected", { allowEmpty: true })
+						const recordPath = path.join(
+							service.checkpointsDir,
+							".git",
+							"zoo-checkpoint-ignored",
+							checkpoint!.commit,
+						)
+						if (failure === "missing") await fs.rm(recordPath)
+						if (failure === "truncated") await fs.writeFile(recordPath, 'Zoo-Checkpoint-Ignored: v1\n["')
+						if (failure === "invalid") await fs.writeFile(recordPath, "Zoo-Checkpoint-Ignored: v1\n[7]")
+						await fs.writeFile(testFile, "must not reset")
+						const untracked = path.join(service.workspaceDir, "must-not-clean.txt")
+						await fs.writeFile(untracked, "must not clean")
+						if (failure === "unreadable") {
+							vitest
+								.spyOn(fs, "readFile")
+								.mockRejectedValueOnce(Object.assign(new Error("denied"), { code: "EACCES" }))
+						}
+						await expect(service.restoreCheckpoint(checkpoint!.commit)).rejects.toThrow()
+						expect(await fs.readFile(testFile, "utf8")).toBe("must not reset")
+						expect(await fs.readFile(untracked, "utf8")).toBe("must not clean")
+					},
+				)
+
+				it.each(["initial", "saved"])(
+					"fails a %s checkpoint with unpublished metadata and refuses restore after restart",
+					async (phase) => {
+						const gitignore = path.join(service.workspaceDir, ".gitignore")
+						const secret = path.join(service.workspaceDir, "secret.txt")
+						await fs.writeFile(gitignore, ".gitignore\nsecret.txt\n")
+						await fs.writeFile(secret, "must survive")
+						if (phase === "initial") {
+							service = new klass(
+								taskId,
+								`${service.checkpointsDir}-failed`,
+								service.workspaceDir,
+								() => {},
+							)
+						}
+						service.on("error", vitest.fn())
+						const checkpointEvent = vitest.fn()
+						service.on("checkpoint", checkpointEvent)
+						const rename = vitest
+							.spyOn(fs, "rename")
+							.mockRejectedValueOnce(new Error("metadata publish failed"))
+						await expect(
+							phase === "initial"
+								? service.initShadowGit()
+								: service.saveCheckpoint("failed", { allowEmpty: true }),
+						).rejects.toThrow("metadata publish failed")
+						rename.mockRestore()
+						expect(service.getCheckpoints()).toEqual([])
+						expect(checkpointEvent).not.toHaveBeenCalled()
+						const failedHash = await simpleGit(service.checkpointsDir).revparse(["HEAD"])
+						service = new klass(taskId, service.checkpointsDir, service.workspaceDir, () => {})
+						service.on("error", vitest.fn())
+						await service.initShadowGit()
+						// A no-op save must not silently rebuild the lost record with later observations.
+						await expect(service.saveCheckpoint("retry without changes")).rejects.toThrow()
+						await fs.writeFile(gitignore, ".gitignore\n")
+						await expect(service.restoreCheckpoint(failedHash)).rejects.toThrow()
+						expect(await fs.readFile(secret, "utf8")).toBe("must survive")
+					},
+				)
+
+				it("keeps files that were ignored at checkpoint time when .gitignore was overwritten", async () => {
+					// The reported setup: .gitignore ignores itself, so it is never in a checkpoint.
+					const gitignore = path.join(service.workspaceDir, ".gitignore")
+					const secret = path.join(service.workspaceDir, "secrets", "key.txt")
+					await fs.writeFile(gitignore, ".gitignore\nsecrets/\n")
+					await fs.mkdir(path.dirname(secret), { recursive: true })
+					await fs.writeFile(secret, "untracked and ignored")
+					const shadowGit = simpleGit(service.checkpointsDir)
+					expect(await shadowGit.raw(["ls-files", "--", "secrets/key.txt"])).toBe("")
+					expect((await shadowGit.raw(["check-ignore", "secrets/key.txt"])).trim()).toBe("secrets/key.txt")
+					const checkpoint = await service.saveCheckpoint("before write", { allowEmpty: true })
+
+					// An agent overwrites .gitignore, so secrets/ is no longer ignored, and creates a file.
+					await fs.writeFile(gitignore, "dist/\n")
+					const createdAfter = path.join(service.workspaceDir, "created-after.txt")
+					await fs.writeFile(createdAfter, "new")
+
+					await service.restoreCheckpoint(checkpoint!.commit)
+
+					expect(await fs.readFile(secret, "utf-8")).toBe("untracked and ignored")
+					// .gitignore was never checkpointed, so the overwritten version is kept rather than deleted.
+					expect(await fs.readFile(gitignore, "utf-8")).toBe("dist/\n")
+					expect(await fileExistsAtPath(createdAfter)).toBe(false)
+				})
+
+				it("keeps files that were ignored at checkpoint time when a checkpointed .gitignore changed", async () => {
+					const gitignore = path.join(service.workspaceDir, ".gitignore")
+					const secret = path.join(service.workspaceDir, "secrets", "key.txt")
+					await fs.writeFile(gitignore, "secrets/\n")
+					await fs.mkdir(path.dirname(secret), { recursive: true })
+					await fs.writeFile(secret, "untracked and ignored")
+					const shadowGit = simpleGit(service.checkpointsDir)
+					expect(await shadowGit.raw(["ls-files", "--", "secrets/key.txt"])).toBe("")
+					expect((await shadowGit.raw(["check-ignore", "secrets/key.txt"])).trim()).toBe("secrets/key.txt")
+					const checkpoint = await service.saveCheckpoint("with .gitignore")
+					expect(checkpoint?.commit).toBeTruthy()
+
+					await fs.writeFile(gitignore, "dist/\n")
+					const createdAfter = path.join(service.workspaceDir, "nested", "created-after.txt")
+					await fs.mkdir(path.dirname(createdAfter), { recursive: true })
+					await fs.writeFile(createdAfter, "new")
+
+					await service.restoreCheckpoint(checkpoint!.commit)
+
+					expect(await fs.readFile(secret, "utf-8")).toBe("untracked and ignored")
+					// Normalize line endings: core.autocrlf may rewrite the restored file on Windows.
+					expect((await fs.readFile(gitignore, "utf-8")).replace(/\r\n/g, "\n")).toBe("secrets/\n")
+					// Files created after the checkpoint are still rolled back, including their new directory.
+					expect(await fileExistsAtPath(path.dirname(createdAfter))).toBe(false)
+				})
+
+				it.each([false, true])("restores a legacy checkpoint (NUL-delimited record: %s)", async (hasRecord) => {
+					const gitignore = path.join(service.workspaceDir, ".gitignore")
+					const secret = path.join(service.workspaceDir, "legacy-secret.txt")
+					await fs.writeFile(gitignore, ".gitignore\nlegacy-secret.txt\n")
+					await fs.writeFile(secret, "ignored at save time")
+					const shadowGit = simpleGit(service.checkpointsDir)
+					expect(await shadowGit.raw(["ls-files", "--", "legacy-secret.txt"])).toBe("")
+					expect((await shadowGit.raw(["check-ignore", "legacy-secret.txt"])).trim()).toBe(
+						"legacy-secret.txt",
+					)
+					await fs.writeFile(testFile, "checkpointed")
+					// An old commit has no metadata-required marker in its message.
+					await shadowGit.add(".")
+					const checkpoint = await shadowGit.commit("legacy checkpoint")
+					if (hasRecord) {
+						await fs.writeFile(
+							path.join(service.checkpointsDir, ".git", "zoo-checkpoint-ignored", checkpoint.commit),
+							".gitignore\0legacy-secret.txt",
+						)
+					}
+					const createdAfter = path.join(service.workspaceDir, "created-after.txt")
+					await fs.writeFile(createdAfter, "new")
+					await fs.writeFile(gitignore, ".gitignore\n")
+
+					await service.restoreCheckpoint(checkpoint!.commit)
+
+					expect(await fs.readFile(testFile, "utf-8")).toBe("checkpointed")
+					expect(await fileExistsAtPath(createdAfter)).toBe(false)
+					// Unlike recorded protection, legacy git clean only consults the current ignore rules.
+					expect(await fileExistsAtPath(secret)).toBe(hasRecord)
+				})
+
+				it.each(["write", "rename"] as const)(
+					"preserves the existing ignore record when %s fails",
+					async (failure) => {
+						const gitignore = path.join(service.workspaceDir, ".gitignore")
+						const secret = path.join(service.workspaceDir, "secret.txt")
+						await fs.writeFile(gitignore, ".gitignore\nsecret.txt\nnew-secret.txt\n")
+						await fs.writeFile(secret, "keep me")
+						const checkpoint = await service.saveCheckpoint("protected secret", { allowEmpty: true })
+						const recordDir = path.join(service.checkpointsDir, ".git", "zoo-checkpoint-ignored")
+						const recordPath = path.join(recordDir, checkpoint!.commit)
+						const previous = await fs.readFile(recordPath, "utf8")
+						const previousFiles = await fs.readdir(recordDir)
+						await fs.writeFile(path.join(service.workspaceDir, "new-secret.txt"), "new ignored file")
+						const writeFile = fs.writeFile.bind(fs)
+						const failureSpy =
+							failure === "write"
+								? vitest.spyOn(fs, "writeFile").mockImplementationOnce(async (file) => {
+										await writeFile(file, "") // Simulate truncation before a failed write.
+										throw new Error("record write failed")
+									})
+								: vitest.spyOn(fs, "rename").mockRejectedValueOnce(new Error("record rename failed"))
+
+						service.on("error", vitest.fn())
+						await expect(service.saveCheckpoint("no tracked changes")).rejects.toThrow(
+							`record ${failure} failed`,
+						)
+						expect(failureSpy).toHaveBeenCalledOnce()
+						failureSpy.mockRestore()
+						expect(await fs.readFile(recordPath, "utf8")).toBe(previous)
+						expect(await fs.readdir(recordDir)).toEqual(previousFiles)
+						await fs.writeFile(gitignore, ".gitignore\n")
+						await service.restoreCheckpoint(checkpoint!.commit)
+						expect(await fs.readFile(secret, "utf8")).toBe("keep me")
+					},
+				)
+
+				it("removes empty untracked directories without deleting protected contents", async () => {
+					const gitignore = path.join(service.workspaceDir, ".gitignore")
+					await fs.writeFile(gitignore, ".gitignore\nmixed/keep.txt\nignored-empty/\n")
+					await fs.mkdir(path.join(service.workspaceDir, "mixed"))
+					await fs.writeFile(path.join(service.workspaceDir, "mixed", "keep.txt"), "protected")
+					// Keep Git from collapsing the whole mixed directory into an ignored entry.
+					await fs.writeFile(path.join(service.workspaceDir, "mixed", "tracked.txt"), "tracked")
+					await fs.mkdir(path.join(service.workspaceDir, "ignored-empty"))
+					await fs.mkdir(path.join(service.workspaceDir, "tracked"))
+					await fs.writeFile(path.join(service.workspaceDir, "tracked", "keep.txt"), "tracked")
+					const checkpoint = await service.saveCheckpoint("with protected paths")
+					await fs.writeFile(gitignore, ".gitignore\ncurrent-empty/\n")
+					for (const dir of ["empty/deep", "mixed/empty", "tracked/empty", "current-empty"]) {
+						await fs.mkdir(path.join(service.workspaceDir, dir), { recursive: true })
+					}
+
+					await service.restoreCheckpoint(checkpoint!.commit)
+
+					for (const dir of ["empty", "mixed/empty", "tracked/empty"]) {
+						expect(await fileExistsAtPath(path.join(service.workspaceDir, dir)), dir).toBe(false)
+					}
+					for (const dir of ["ignored-empty", "current-empty"]) {
+						expect(await fileExistsAtPath(path.join(service.workspaceDir, dir)), dir).toBe(true)
+					}
+					expect(await fs.readFile(path.join(service.workspaceDir, "mixed", "keep.txt"), "utf8")).toBe(
+						"protected",
+					)
+					expect(await fs.readFile(path.join(service.workspaceDir, "tracked", "keep.txt"), "utf8")).toBe(
+						"tracked",
+					)
+				})
+			})
+
 			it("does not create a checkpoint for ignored files", async () => {
 				// Create a file that matches an ignored pattern (e.g., .log file).
 				const ignoredFile = path.join(service.workspaceDir, "ignored.log")
