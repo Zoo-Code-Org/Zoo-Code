@@ -3,7 +3,4 @@ import { createProviderIdentifierConfig } from "@roo-code/config-eslint/provider
 import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
 /** @type {import("eslint").Linter.Config} */
-export default [
-	...config,
-	createProviderIdentifierConfig({ providerIdentifiers, retiredProviderIdentifiers }),
-]
+export default [...config, createProviderIdentifierConfig({ providerIdentifiers, retiredProviderIdentifiers })]

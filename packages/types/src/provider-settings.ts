@@ -3,6 +3,7 @@ import { z } from "zod"
 import { providerDefinitionList, type ProviderDefinition } from "./provider-settings/index.js"
 import { API_PROVIDER_FIELD, SETTINGS_SHAPE_FIELD } from "./provider-settings/common.js"
 export {
+	DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS,
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
 	parseOpenAiExtraBody,
 	kimiCodeAuthMethodSchema,

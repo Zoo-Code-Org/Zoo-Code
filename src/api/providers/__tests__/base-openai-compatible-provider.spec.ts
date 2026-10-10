@@ -365,9 +365,7 @@ describe("BaseOpenAiCompatibleProvider", () => {
 
 			await customHandler.completePrompt("hello")
 
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({ model: "some/custom-model-not-in-list" }),
-			)
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: "some/custom-model-not-in-list" }))
 		})
 	})
 
