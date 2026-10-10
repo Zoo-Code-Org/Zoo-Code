@@ -169,6 +169,25 @@ describe("getModels with new GetModelsOptions", () => {
 		expect(result).toEqual(mockModels)
 	})
 
+	it("forwards the caller's cancellation signal to Requesty model discovery", async () => {
+		setupCancellationMocks()
+		// Keep the fetch pending so the caller's abort lands mid-flight: under the
+		// single-flight contract the caller's signal detaches this waiter (and rejects
+		// it with the canonical AbortError) instead of being handed to the fetcher.
+		mockGetRequestyModels.mockImplementation(() => new Promise<ModelRecord>(() => {}))
+
+		const controller = new AbortController()
+		const promise = getModels({
+			provider: providerIdentifiers.requesty,
+			apiKey: DUMMY_REQUESTY_KEY,
+			signal: controller.signal,
+		})
+
+		controller.abort()
+
+		await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+	})
+
 	it("dispatches credentialed fetchers through canonical provider identifiers", async () => {
 		const mockModels = {
 			"requesty/canonical-model": {
