@@ -18,6 +18,10 @@ import { arePathsEqual, getReadablePath } from "../../utils/path"
 import { formatResponse } from "../../core/prompts/responses"
 import { diagnosticsToProblemsString, getNewDiagnostics } from "../diagnostics"
 import { Task } from "../../core/task/Task"
+import { versionTokenOfStat } from "../../utils/versionToken"
+import { withFileLock } from "../../utils/fileLock"
+import { resolveLockKey } from "../../services/file-safety/safeWriteText"
+import { guardedWrite, GuardRejectedError, type GuardedWriteKind } from "../../core/tools/guardedWrite"
 
 import { DecorationController } from "./DecorationController"
 
@@ -39,6 +43,28 @@ export class DiffViewProvider {
 	// it when re-showing the edited file afterward.
 	private documentWasPinned = false
 	private relPath?: string
+	private teardownInFlight: Promise<void> | undefined
+	/**
+	 * A cancellation (revertChanges) that arrived while another pass already owned this
+	 * session. The owning pass reads it when its cleanup returns, so a save does not run
+	 * diagnostics or read provider state that a cancellation is closing underneath it.
+	 */
+	private teardownCancellationRequested = false
+	/**
+	 * Whether this edit session has been closed (its reset has been claimed). A caller that
+	 * waited for someone else's teardown cannot decide this by reading provider state: isEditing
+	 * and activeDiffEditor are exactly what the finalization changes, so two callers that both
+	 * waited on a pass which never resets would each see the session still open and each close it.
+	 * The claim is what makes "exactly one of us finalizes" a fact rather than a race.
+	 */
+	private sessionFinalizationClaimed = false
+	private finalizationInFlight: Promise<void> | undefined
+	// Counts the teardown passes this provider has actually run; a caller that awaited an
+	// in-flight pass does not count. A save uses it to tell its own post-publish cleanup apart
+	// from a teardown a cancellation or disposal started underneath it: once any teardown has
+	// begun the session is being taken down, and a second pass over the same buffers and tabs is
+	// duplicate cleanup.
+	private teardownPasses = 0
 	private newContent?: string
 	private activeDiffEditor?: vscode.TextEditor
 	private fadedOverlayController?: DecorationController
@@ -82,6 +108,35 @@ export class DiffViewProvider {
 		viewColumn: vscode.ViewColumn
 	}> = []
 	private taskRef: WeakRef<Task>
+	/**
+	 * Version token of the empty placeholder open() wrote for a new file (the
+	 * create branch), captured under the S2 stat-matched contract. A rejected
+	 * guarded save removes the placeholder only while its on-disk token still
+	 * equals this value, so a file created by someone else in the meantime is
+	 * never unlinked.
+	 */
+	private placeholderVersion: string | undefined = undefined
+	/**
+	 * The (dev, ino) identity of the file open() created for a new file, taken from the
+	 * stat it performs right after the write. placeholderVersion needs a stat-matched
+	 * read of the content, and that can fail or disagree; ownership of the placeholder
+	 * must not depend on it, or a rejected save leaves behind a file this call created
+	 * that nobody can tell is theirs to remove. The identity is only ever used to remove
+	 * a file that is still EMPTY, so the worst it can act on is a 0-byte file.
+	 */
+	private placeholderIdentity: { dev: bigint; ino: bigint } | undefined = undefined
+	/**
+	 * The observation this path had BEFORE open() recorded the preview's own
+	 * version token: null when there was none, undefined when this provider never
+	 * opened a preview. open() observes the current on-disk version, so a file that
+	 * changed between the tool's read and this preview leaves the preview token as
+	 * the only entry - and a targeted save would then CAS against a version the
+	 * caller never read, publishing stale content over the intervening change.
+	 */
+	private preOpenObservation: { version: string; complete: boolean } | null | undefined = undefined
+	// The on-disk version open() stat-matched, kept so accept-time adoption can
+	// verify the save was authorized against that exact version.
+	private openToken: string | undefined = undefined
 
 	constructor(
 		private cwd: string,
@@ -95,6 +150,20 @@ export class DiffViewProvider {
 		const fileExists = this.editType === "modify"
 		const absolutePath = path.resolve(this.cwd, relPath)
 		this.isEditing = true
+		// A new diff session may reuse this provider after a cancelled one, so the teardown marker
+		// starts clean: otherwise every later save would report itself cancelled without publishing.
+		this.teardownPasses = 0
+		// A new session has to be finalizable: a provider that was reset once would otherwise
+		// report its finalization as already claimed.
+		this.sessionFinalizationClaimed = false
+		this.finalizationInFlight = undefined
+
+		// Snapshot the authorization as it stands before this preview touches the
+		// registry; saveChanges(..., "edit") restores it below.
+		const priorObservation = this.taskRef.deref()?.observationRegistry.get(absolutePath)
+		this.preOpenObservation = priorObservation
+			? { version: priorObservation.version, complete: priorObservation.complete }
+			: null
 
 		// Capture the current scroll position before we close the tab so we can
 		// restore it after saving/reverting.
@@ -120,7 +189,36 @@ export class DiffViewProvider {
 		this.preDiagnostics = vscode.languages.getDiagnostics()
 
 		if (fileExists) {
+			// S4b follow-up (#44 / epic #1375): the preview is a full read of the
+			// on-disk original. Observe it with the S2 stat-matched contract so the
+			// accepted save (a full-file replacement) publishes through the guard's
+			// version check instead of bypassing it; a stat mismatch (or failure)
+			// leaves the target unobserved and the save fails closed.
+			const preStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 			this.originalContent = await fs.readFile(absolutePath, "utf-8")
+			const postStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+			const displayTask = this.taskRef.deref()
+			// Only record the preview token when the task has no observation for
+			// this path: a read_file observation recorded the version the model's
+			// content was built on, and the accept-time guard must compare against
+			// THAT token. Replacing it with the current on-disk token would blind
+			// the save to changes that happened between the model's read and this
+			// preview (e.g. an external editor), letting a v1-based overwrite
+			// clobber the v2 change. An unread target has no observation, so the
+			// preview token is recorded (stat-matched) but never as a complete read:
+			// this is the tool's own preview, not a read the model made, so it must
+			// not authorize a later full-file replacement.
+			if (preStats && postStats && versionTokenOfStat(preStats) === versionTokenOfStat(postStats)) {
+				// The version this preview stat-matched. Adoption at accept time is only
+				// sound when the save was authorized against exactly this version, so it is
+				// recorded whether or not the registry already had an observation for the
+				// path - the case it exists for is a prior read followed by an external
+				// writer moving the file before this preview ran.
+				this.openToken = versionTokenOfStat(preStats)
+				if (displayTask && !displayTask.observationRegistry.has(absolutePath)) {
+					displayTask.observationRegistry.observe(absolutePath, this.openToken, false)
+				}
+			}
 		} else {
 			this.originalContent = ""
 		}
@@ -132,6 +230,50 @@ export class DiffViewProvider {
 		// Make sure the file exists before we open it.
 		if (!fileExists) {
 			await fs.writeFile(absolutePath, "")
+			// S4b follow-up (#44 / epic #1375): the empty placeholder is fully
+			// known (empty), but verify it with the same S2 stat-matched contract
+			// as the modify branch above: a stat-mismatched or non-empty read
+			// means another writer touched the placeholder in the window after
+			// open() wrote it, and that writer's token must not be observed as
+			// complete (observing it would claim we saw content we never read, and
+			// the token-guarded cleanup would unlink their file) - nothing is
+			// recorded and the save fails closed instead. When the placeholder is
+			// verified empty, its token replaces any prior observation for the
+			// path: a prior observation describes a file that no longer exists, and
+			// keeping it would make the accept-time CAS (the placeholder token on
+			// disk vs. the vanished file's token) fail every time, so recreating
+			// the file would always fail. The placeholder token is the correct
+			// baseline for the new file: an external change to the placeholder
+			// before the accept moves the on-disk token and fails the CAS. The
+			// cleanup token is captured whether or not the task is still live:
+			// a rejected save must not leave the placeholder behind even when the
+			// owning task has been collected.
+			const placeholderPreStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+			if (placeholderPreStats) {
+				const placeholderContent = await fs.readFile(absolutePath, "utf-8").catch(() => undefined)
+				const placeholderPostStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+				const placeholderToken = versionTokenOfStat(placeholderPreStats)
+				// Ownership first, independent of whether the token below can be trusted:
+				// this is the file open() just created, and its identity is what a later
+				// cleanup re-checks when no stat-matched token is available.
+				this.placeholderIdentity = { dev: placeholderPreStats.dev, ino: placeholderPreStats.ino }
+				// Stat-matched (S2): the read is trusted only while the bracketing
+				// stats agree and the content is exactly the empty placeholder.
+				if (
+					placeholderPostStats &&
+					placeholderToken === versionTokenOfStat(placeholderPostStats) &&
+					placeholderContent === ""
+				) {
+					// Remember the placeholder token so a rejected save can remove
+					// the placeholder only while it is still the exact file open()
+					// wrote.
+					this.placeholderVersion = placeholderToken
+					const displayTask = this.taskRef.deref()
+					if (displayTask) {
+						displayTask.observationRegistry.observe(absolutePath, placeholderToken, true)
+					}
+				}
+			}
 		}
 
 		// If the file was already open, close it (must happen after showing the
@@ -170,7 +312,20 @@ export class DiffViewProvider {
 		// diff evicts them (VS Code reuses the group's single preview slot).
 		this.snapshotPreviewTabs = this.captureUnrelatedPreviewTabs(absolutePath)
 
-		this.activeDiffEditor = await this.openDiffEditor()
+		try {
+			this.activeDiffEditor = await this.openDiffEditor()
+		} catch (error) {
+			// open() has already created the parent directories and, for a new file, written
+			// an empty placeholder. With no active diff editor there is nothing for
+			// revertChanges() to undo, so the unapproved file (and the directories made for
+			// it) would stay on disk: undo that part of the open here.
+			await this.undoPartialOpen(absolutePath)
+			this.isEditing = false
+			this.createdDirs = []
+			this.placeholderVersion = undefined
+			this.placeholderIdentity = undefined
+			throw error
+		}
 		this.fadedOverlayController = new DecorationController("fadedOverlay", this.activeDiffEditor)
 		this.activeLineController = new DecorationController("activeLine", this.activeDiffEditor)
 		// Apply faded overlay to all lines initially.
@@ -244,6 +399,70 @@ export class DiffViewProvider {
 				}
 			}
 		})
+	}
+
+	/**
+	 * Whether the path still holds the placeholder this provider created.
+	 * The stat-matched token is the strongest proof; when open() could not produce one
+	 * (a failed or disagreeing bracketing read), ownership falls back to the identity
+	 * captured at creation plus "still empty". A file that carries content is never
+	 * removed on the fallback, so a peer that wrote through the placeholder keeps it.
+	 */
+	private async _placeholderStillOurs(absolutePath: string): Promise<boolean> {
+		const stats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+		if (!stats) {
+			return false
+		}
+		if (this.placeholderVersion !== undefined) {
+			return versionTokenOfStat(stats) === this.placeholderVersion
+		}
+		const identity = this.placeholderIdentity
+		if (!identity) {
+			return false
+		}
+		return stats.dev === identity.dev && stats.ino === identity.ino && stats.size === 0n
+	}
+
+	/**
+	 * Undo the on-disk side effects of an open() that failed before the diff editor was
+	 * created. open() creates the parent directories and writes an empty placeholder
+	 * for a new file; if the diff editor never opens, revertChanges() has no diff
+	 * editor to revert and the unapproved file would stay on disk. The placeholder is
+	 * removed only while it is still the exact file this open() wrote (same version
+	 * token), under the same resolved-path advisory lock every other writer to this
+	 * path uses; the directories this call created then go, innermost first, stopping
+	 * at the first directory another writer populated in the meantime.
+	 */
+	private async undoPartialOpen(absolutePath: string): Promise<void> {
+		if (this.editType !== "create") {
+			return
+		}
+		const ownsPlaceholder = this.placeholderVersion !== undefined || this.placeholderIdentity !== undefined
+		try {
+			await withFileLock(await resolveLockKey(absolutePath), async () => {
+				if (ownsPlaceholder) {
+					if (!(await this._placeholderStillOurs(absolutePath))) {
+						// Another writer owns the path now: leave their file alone.
+						return
+					}
+					try {
+						await fs.unlink(absolutePath)
+					} catch {
+						// The placeholder vanished or the unlink failed; keep the directories.
+						return
+					}
+				}
+				for (let i = this.createdDirs.length - 1; i >= 0; i--) {
+					try {
+						await fs.rmdir(this.createdDirs[i])
+					} catch {
+						break
+					}
+				}
+			})
+		} catch {
+			// Best-effort: the open() failure is the outcome the caller sees.
+		}
 	}
 
 	async update(accumulatedContent: string, isFinal: boolean) {
@@ -323,9 +542,122 @@ export class DiffViewProvider {
 		}
 	}
 
+	/**
+	 * Revert one document through the workbench command. The command takes no
+	 * resource argument: when the Open Editors view has focus with a selection it
+	 * force-reverts every selected editor, otherwise the active editor. Activate
+	 * the target first so only this document is reverted, then give the user
+	 * their focus back.
+	 */
+	private async revertDocument(document: vscode.TextDocument): Promise<boolean> {
+		const previous = vscode.window.activeTextEditor
+		try {
+			await vscode.window.showTextDocument(document, { preserveFocus: false, preview: false })
+			await vscode.commands.executeCommand("workbench.action.files.revert")
+		} catch {
+			// best-effort: a document that cannot be reverted stays dirty
+		}
+		if (previous && previous.document !== document) {
+			// Give the user their focus back.
+			try {
+				await vscode.window.showTextDocument(previous.document, { preserveFocus: false, preview: false })
+			} catch {
+				// best-effort: the focus cannot always be restored
+			}
+		}
+		// The caller must know whether the discard actually completed: a document
+		// that stays dirty can still be saved by VS Code's ordinary file service,
+		// which would recreate a placeholder the cleanup removed.
+		return !document.isDirty
+	}
+
+	/**
+	 * Adopt content that is already on disk as the result of this save.
+	 *
+	 * VS Code's autosave can write the modified side of a diff before the user
+	 * accepts it, which moves the version token without changing the bytes, so
+	 * the compare-and-swap rejects a guard that is already satisfied. The read is
+	 * paired with the bigint stat that produced the token and re-checked after the
+	 * read, so a write landing between the two cannot make an unrelated content
+	 * match look like this publish. The observation keeps the completeness of the
+	 * original read: a caller-side check must not upgrade a partial observation
+	 * into authority for a full-file replacement.
+	 *
+	 * Returns true only when the on-disk bytes are exactly the content this save
+	 * intended to publish.
+	 */
+	private async adoptAlreadyPublishedContent(
+		task: Task,
+		absolutePath: string,
+		encodedContent: Uint8Array,
+	): Promise<boolean> {
+		const before = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+		if (!before) {
+			return false
+		}
+		const disk = await fs.readFile(absolutePath).catch(() => undefined)
+		if (!disk) {
+			return false
+		}
+		const after = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+		if (!after || versionTokenOfStat(before) !== versionTokenOfStat(after)) {
+			return false
+		}
+		if (Buffer.compare(Buffer.from(disk), Buffer.from(encodedContent)) !== 0) {
+			return false
+		}
+		const observation = task.observationRegistry.get(absolutePath)
+		task.observationRegistry.observe(absolutePath, versionTokenOfStat(after), observation?.complete ?? false)
+		return true
+	}
+	/**
+	 * Whether a byte-for-byte match on disk may be adopted as this save's publish.
+	 *
+	 * Adoption exists for one shape: the preview (or an autosave of it) already put
+	 * the accepted content on disk, so the compare-and-swap rejects on a moved token
+	 * even though the intended publish is satisfied. That reading is only sound when
+	 * the save was authorized against the exact version open() stat-matched.
+	 */
+	private canAdoptPublishedContent(writeKind: GuardedWriteKind): boolean {
+		// A create placeholder is the file open() itself wrote, so a match is
+		// unambiguous and the CAS baseline is the placeholder token.
+		if (this.placeholderVersion !== undefined) {
+			return true
+		}
+		// open() snapshots the authorization as it stood before the preview. No
+		// snapshot means no preview ran, so there is no pairing to verify.
+		if (this.preOpenObservation === undefined) {
+			return true
+		}
+		// A preview over a target the model never read: the rejection is about
+		// authorization, not a moved token, for every write kind. Adopting the match
+		// would record an observation for content the model never read and authorize a
+		// later full-file replacement.
+		if (this.preOpenObservation === null) {
+			return false
+		}
+		// A full-file publish rejected for a partial read is not a moved-token rejection:
+		// the completeness gate refused before any compare-and-swap ran, so the matching
+		// bytes on disk are the un-authorized replacement, not this save's satisfied
+		// autosave. Adopting them would report a successful full-file replacement for a
+		// write the completeness gate rejected. A targeted edit is authorized by a
+		// partial read, so only the full-file kinds take this branch.
+		if (writeKind !== "edit" && !this.preOpenObservation.complete) {
+			return false
+		}
+		// The caller's observation must still name the version the preview saw. If a
+		// different writer moved the file first, the guard was right to reject and the
+		// matching bytes are the clobber it warned about.
+		return this.openToken !== undefined && this.preOpenObservation.version === this.openToken
+	}
+
 	async saveChanges(
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
+		// Stryker disable next-line StringLiteral: an empty kind dispatches exactly
+		// like "update" in guardedWrite (only "edit" and "create" branch distinctly),
+		// so the StringLiteral mutant here is equivalent.
+		writeKind: GuardedWriteKind = "update",
 	): Promise<{
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
@@ -339,33 +671,227 @@ export class DiffViewProvider {
 		const updatedDocument = this.activeDiffEditor.document
 		const editedContent = updatedDocument.getText()
 
-		if (updatedDocument.isDirty) {
-			await updatedDocument.save()
+		// S4b follow-up (#44 / epic #1375): the accepted diff is a full-file
+		// replacement, so publish it through the guarded-write API instead of
+		// saving the document raw. open() observed the on-disk version the
+		// preview was built on; replaceIfVersion rejects the save when the file
+		// changed after the preview or the target was never observed, with the
+		// standard re-read-then-retry remediation.
+		const saveTask = this.taskRef.deref()
+		let encodedContent: Uint8Array | undefined
+		try {
+			if (!saveTask) {
+				// Fail closed: without the owning task the observation registry is
+				// unreachable and the save cannot be guarded. The rejection flows
+				// through the same discard-only cleanup as a guard verdict, so a
+				// dead task cannot leave the empty placeholder behind either.
+				throw new Error("Cannot guard the write: the owning task is no longer available")
+			}
+			// Publish with the document's own encoding. VS Code's codec covers the
+			// legacy code pages Node cannot represent (a hand-rolled encoder would
+			// have to reject them), so encode here and let the guarded write publish
+			// the bytes unchanged. The write kind comes from the caller: a targeted
+			// edit after a partial read is authorized by the edit guard, while a
+			// full-file replacement still needs a complete observation.
+			encodedContent = await vscode.workspace.encode(editedContent, {
+				encoding: updatedDocument.encoding,
+			})
+			// The preview must not authorize the save it made unverifiable. Restore
+			// the observation that existed before open() so the compare-and-swap runs
+			// against the version the caller's content was built on; when there was
+			// none, drop the preview's entry so the unobserved-edit guard rejects the
+			// write and the caller gets the re-read remediation instead.
+			if (writeKind === "edit" && this.preOpenObservation !== undefined) {
+				if (this.preOpenObservation) {
+					saveTask.observationRegistry.observe(
+						absolutePath,
+						this.preOpenObservation.version,
+						this.preOpenObservation.complete,
+					)
+				} else {
+					saveTask.observationRegistry.forget(absolutePath)
+				}
+			}
+			await guardedWrite(saveTask, this.relPath, encodedContent, writeKind)
+		} catch (error) {
+			// Autosave can publish the modified side of the diff before the user
+			// accepts, so the bytes on disk may already be exactly what this save
+			// intended. The compare-and-swap still rejects because the version token
+			// moved, and the cleanup below would report a failure for content that is
+			// already published. When a stat-matched read returns the same bytes the
+			// write already happened, so adopt that state instead of failing.
+			if (
+				// Stryker disable next-line LogicalOperator: GuardRejectedError is only thrown
+				// by guardedWrite, and guardedWrite is reached only after the !saveTask check
+				// above has thrown a plain Error. So whenever this operand is evaluated saveTask
+				// is provably non-null: dropping it cannot change which branch is taken.
+				error instanceof GuardRejectedError &&
+				saveTask &&
+				encodedContent &&
+				// The match must be attributable to THIS save: adoption exists for the
+				// autosave shape, where the preview already put the accepted bytes on disk and
+				// only the version token moved. A rejection caused by an external writer, or
+				// by a save that was never authorized at all, must stay a rejection - the
+				// matching bytes are what the clobber looks like from here.
+				this.canAdoptPublishedContent(writeKind) &&
+				// Only the autosave shape: a clean buffer means its content is what autosave
+				// already put on disk. A dirty buffer means the disk content came from
+				// someone else, so the discard cleanup below is still the right outcome.
+				!updatedDocument.isDirty &&
+				(await this.adoptAlreadyPublishedContent(saveTask, absolutePath, encodedContent))
+			) {
+				// The publish is already satisfied; fall through to the normal
+				// post-save flow rather than reporting a rejection.
+			} else {
+				// Discard-only failure cleanup. The publish was rejected (stale
+				// version, unobserved target, a partial-read observation, or an
+				// unavailable task), so the on-disk content is the newer source of
+				// truth. Reload it
+				// into the buffer (discarding the rejected edit), remove the empty
+				// new-file placeholder while it is still exactly the file open()
+				// wrote, and close the diff views. Never use revertChanges() here:
+				// it restores originalContent and saves it, which would overwrite
+				// the newer disk content that caused the rejection. Best-effort —
+				// the guard verdict is rethrown below.
+				try {
+					// Dispose before any programmatic activation: showTextDocument can
+					// change the active editor even with preserveFocus, so a listener
+					// still attached here would record this cleanup as a user touch and
+					// let the auto-close preferences keep the transient tab open.
+					this.disposeActiveEditorListener()
+					this.cancelDeferredScroll()
+
+					const ownedTeardown = await this.runTeardown(async () => {
+						let discardSucceeded = !updatedDocument.isDirty
+						if (updatedDocument.isDirty) {
+							discardSucceeded = await this.revertDocument(updatedDocument)
+						}
+						if (
+							discardSucceeded &&
+							this.editType === "create" &&
+							(this.placeholderVersion !== undefined || this.placeholderIdentity !== undefined)
+						) {
+							// Cleanup has to be serialized with the same resolved-path advisory lock
+							// every other writer to this file uses. A token check and an unlink in
+							// separate steps let a peer writer commit in the gap and lose its write.
+							// A differing token, or a lock that cannot be taken, leaves the file in place.
+							await withFileLock(await resolveLockKey(absolutePath), async () => {
+								if (!(await this._placeholderStillOurs(absolutePath))) {
+									return
+								}
+								let unlinked = false
+								try {
+									await fs.unlink(absolutePath)
+									unlinked = true
+								} catch {
+									// the placeholder vanished or the unlink failed
+								}
+								if (!unlinked) {
+									return
+								}
+								// The file is gone, so its tab must go too: closing only the diff
+								// views would leave a clean plain-text tab for a deleted file.
+								await this.closeFileTab(absolutePath)
+								// The directories open() created for the new file must go with it,
+								// innermost first. rmdir refuses a directory another writer populated
+								// in the meantime, so the cleanup stops at the first failure.
+								for (let i = this.createdDirs.length - 1; i >= 0; i--) {
+									try {
+										await fs.rmdir(this.createdDirs[i])
+									} catch {
+										break
+									}
+								}
+							})
+						}
+						await this.closeOwnDiffView(absolutePath)
+						// Opening the diff evicted any preview tab the file had. This path closes its own diff
+						// view and rethrows, so this pass is the only one that can put that preview state back;
+						// a caller that merely waited for it must not restore the tabs a second time. It runs
+						// INSIDE the pass rather than after it: the pass is what owns the session, and a
+						// cancellation that arrives while the tabs are being put back has to wait for that
+						// pass instead of starting a second teardown over the same tabs. reset() stays with
+						// the tool caller's error handling, which owns the provider lifecycle.
+						await this.restorePreviewTabs()
+					})
+				} catch {
+					// cleanup is best-effort; the guard verdict below is the outcome
+				}
+				throw error
+			}
 		}
 
+		// The publish wrote the buffer's exact content to disk, but the
+		// document still carries its pre-save dirty flag and the close helpers
+		// skip dirty tabs. Revert from disk (content is identical — no write,
+		// no token change) to clear the dirty state before the close logic.
+		// document.save() would re-publish through the unguarded VS Code file
+		// service and advance the on-disk token, so the revert is the
+		// content-safe way to clear it.
 		// Stop tracking touches and cancel any pending scroll-to-diff before any
-		// programmatic editor activation below.
-		this.disposeActiveEditorListener()
-		this.cancelDeferredScroll()
+		// programmatic editor activation: showTextDocument below can change the
+		// active editor even with preserveFocus, so a listener still attached would
+		// record this programmatic revert as a user touch and keep the transient
+		// tab open against the auto-close preference.
+		// A cancellation or disposal that reached teardown while the guarded publish was awaiting
+		// already owns this session: that teardown closed the diff views and applied the auto-close
+		// preferences. Running this save's own post-publish cleanup on top of it would tear the same
+		// session down twice, so the save reports that it did not complete a save flow of its own.
+		if (this.teardownPasses > 0) {
+			return { newProblemsMessage: undefined, userEdits: undefined, finalContent: undefined }
+		}
 
-		await this.closeAllDiffViews()
+		// The post-publish cleanup is a teardown pass like any other, so it goes through the same
+		// serialization revertChanges() uses: a cancellation that lands while it runs waits for it
+		// instead of closing the same tabs underneath it.
+		const ownedTeardown = await this.runTeardown(async () => {
+			this.disposeActiveEditorListener()
+			this.cancelDeferredScroll()
 
-		// Read auto-close preferences from state; fall back to defaults that
-		// preserve the existing behavior when unset.
-		const saveTask = this.taskRef.deref()
-		const saveState = await saveTask?.providerRef.deref()?.getState()
+			// Revert only while the buffer is still exactly what the guard published.
+			// Keystrokes typed during the publish would be discarded by a revert, so a
+			// buffer that moved on stays dirty: the close helpers skip dirty tabs and
+			// the user's text survives in the editor.
+			if (updatedDocument.isDirty && updatedDocument.getText() === editedContent) {
+				await this.revertDocument(updatedDocument)
+			}
 
-		await this.keepOrCloseEditedFile(
-			absolutePath,
-			this.userTouchedDiffEditor,
-			saveState?.autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
-			saveState?.autoCloseZooOpenedFilesAfterUserEdited ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
-			saveState?.autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
-		)
+			await this.closeAllDiffViews()
 
-		// Restore any preview tabs the diff evicted, reconstructing the user's
-		// prior not-yet-edited tab state.
-		await this.restorePreviewTabs()
+			// Read auto-close preferences from state; fall back to defaults that
+			// preserve the existing behavior when unset (saveTask was resolved above
+			// for the guarded publish).
+			const saveState = await saveTask?.providerRef.deref()?.getState()
+
+			await this.keepOrCloseEditedFile(
+				absolutePath,
+				this.userTouchedDiffEditor,
+				saveState?.autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
+				saveState?.autoCloseZooOpenedFilesAfterUserEdited ??
+					DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
+				saveState?.autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
+			)
+
+			// Restore any preview tabs the diff evicted, reconstructing the user's
+			// prior not-yet-edited tab state.
+			await this.restorePreviewTabs()
+		})
+
+		if (!ownedTeardown) {
+			// A teardown that started first owns this session: it closed the diff views and applied the
+			// auto-close preferences. Reporting diagnostics and a completed-save result for a session
+			// that was torn down underneath this save would present a save that never finished.
+			return { newProblemsMessage: undefined, userEdits: undefined, finalContent: undefined }
+		}
+
+		if (this.teardownCancellationRequested) {
+			// A cancellation or disposal reached revertChanges() while this save owned the post-publish
+			// pass. The publish is on disk, but the session is closing: the waiting caller finalizes
+			// it, and diagnostics or the EOL/patch tail below read provider state (newContent,
+			// relPath) that the finalization clears. Report no completed save instead.
+			this.teardownCancellationRequested = false
+			return { newProblemsMessage: undefined, userEdits: undefined, finalContent: undefined }
+		}
 
 		// Getting diagnostics before and after the file edit is a better approach than
 		// automatically tracking problems in real-time. This method ensures we only
@@ -527,60 +1053,74 @@ export class DiffViewProvider {
 		this.disposeActiveEditorListener()
 		this.cancelDeferredScroll()
 
-		if (!fileExists) {
-			if (updatedDocument.isDirty) {
+		const ownedTeardown = await this.runTeardown(async () => {
+			if (!fileExists) {
+				if (updatedDocument.isDirty) {
+					await updatedDocument.save()
+				}
+
+				await this.closeAllDiffViews()
+				// The file was newly created for this edit; close its transiently
+				// opened tab before deleting it from disk.
+				await this.closeFileTab(absolutePath)
+				await fs.unlink(absolutePath)
+
+				// Remove only the directories we created, in reverse order.
+				for (let i = this.createdDirs.length - 1; i >= 0; i--) {
+					await fs.rmdir(this.createdDirs[i])
+				}
+			} else {
+				// Revert document.
+				const edit = new vscode.WorkspaceEdit()
+
+				const fullRange = new vscode.Range(
+					updatedDocument.positionAt(0),
+					updatedDocument.positionAt(updatedDocument.getText().length),
+				)
+
+				edit.replace(updatedDocument.uri, fullRange, this.stripAllBOMs(this.originalContent ?? ""))
+
+				// Apply the edit and save, since contents shouldn't have changed
+				// this won't show in local history unless of course the user made
+				// changes and saved during the edit.
+				await vscode.workspace.applyEdit(edit)
 				await updatedDocument.save()
+
+				await this.closeAllDiffViews()
+
+				// Read auto-close preferences from state; fall back to defaults that
+				// preserve the existing behavior when unset.
+				const revertTask = this.taskRef.deref()
+				const revertState = await revertTask?.providerRef.deref()?.getState()
+
+				await this.keepOrCloseEditedFile(
+					absolutePath,
+					false,
+					revertState?.autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
+					revertState?.autoCloseZooOpenedFilesAfterUserEdited ??
+						DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
+					revertState?.autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
+				)
 			}
+		})
 
-			await this.closeAllDiffViews()
-			// The file was newly created for this edit; close its transiently
-			// opened tab before deleting it from disk.
-			await this.closeFileTab(absolutePath)
-			await fs.unlink(absolutePath)
-
-			// Remove only the directories we created, in reverse order.
-			for (let i = this.createdDirs.length - 1; i >= 0; i--) {
-				await fs.rmdir(this.createdDirs[i])
-			}
-		} else {
-			// Revert document.
-			const edit = new vscode.WorkspaceEdit()
-
-			const fullRange = new vscode.Range(
-				updatedDocument.positionAt(0),
-				updatedDocument.positionAt(updatedDocument.getText().length),
-			)
-
-			edit.replace(updatedDocument.uri, fullRange, this.stripAllBOMs(this.originalContent ?? ""))
-
-			// Apply the edit and save, since contents shouldn't have changed
-			// this won't show in local history unless of course the user made
-			// changes and saved during the edit.
-			await vscode.workspace.applyEdit(edit)
-			await updatedDocument.save()
-
-			await this.closeAllDiffViews()
-
-			// Read auto-close preferences from state; fall back to defaults that
-			// preserve the existing behavior when unset.
-			const revertTask = this.taskRef.deref()
-			const revertState = await revertTask?.providerRef.deref()?.getState()
-
-			await this.keepOrCloseEditedFile(
-				absolutePath,
-				false,
-				revertState?.autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
-				revertState?.autoCloseZooOpenedFilesAfterUserEdited ??
-					DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
-				revertState?.autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
-			)
+		if (!ownedTeardown) {
+			// Another teardown started first and already ran the pass over this session's buffers,
+			// tabs and preview state, so restoring the preview tabs here would be that same work a
+			// second time. Finalizing the session is still owed when the owning pass is one that
+			// never resets - a save's post-publish cleanup, or a rejected save's discard cleanup,
+			// whose reset belongs to a tool caller that a cancellation or disposal may never let
+			// come back. Whoever gets here first claims it; a second waiter joins the claim
+			// instead of running a second reset.
+			await this.reset()
+			return
 		}
-
 		// Restore any preview tabs the diff evicted, reconstructing the user's
 		// prior not-yet-edited tab state.
 		await this.restorePreviewTabs()
 
-		// Edit is done.
+		// Edit is done. The owner of the pass claims the finalization too, so a caller that
+		// waited on this pass cannot also close the session behind it.
 		await this.reset()
 	}
 
@@ -616,6 +1156,80 @@ export class DiffViewProvider {
 			)
 
 		await Promise.all(closeOps)
+	}
+
+	/**
+	 * Close only this provider's diff tab. closeAllDiffViews() closes every clean
+	 * diff tab in the workbench, so a rejected save would also close another task's
+	 * diff view while that task's provider still holds its activation listener and
+	 * deferred scroll timer against a tab that is gone. A rejection belongs to one
+	 * task, so the cleanup must stay inside that task's view.
+	 */
+	private async closeOwnDiffView(absolutePath: string): Promise<void> {
+		const target = path.resolve(absolutePath)
+		const tabs = vscode.window.tabGroups.all
+			.flatMap((group) => group.tabs)
+			.filter((tab) => {
+				if (tab.isDirty) {
+					return false
+				}
+				if (tab.input instanceof vscode.TabInputTextDiff) {
+					// Only Zoo's own diff tabs, not a Source Control diff the user has open
+					// for the same file.
+					return (
+						tab.input.original.scheme === DIFF_VIEW_URI_SCHEME &&
+						path.resolve(tab.input.modified.fsPath) === target
+					)
+				}
+				// A diff tab for a file that was already open is identified by its label
+				// rather than by the URI scheme. A basename alone cannot tell two tasks in
+				// different directories apart, so the label only counts when the tab's own
+				// URI points at this provider's target.
+				const uri = (tab.input as { uri?: { fsPath?: string } })?.uri
+				return (
+					typeof uri?.fsPath === "string" &&
+					path.resolve(uri.fsPath) === target &&
+					typeof tab.label === "string" &&
+					tab.label.startsWith(`${path.basename(target)}: ${DIFF_VIEW_LABEL_CHANGES}`)
+				)
+			})
+		for (const tab of tabs) {
+			try {
+				await vscode.window.tabGroups.close(tab)
+			} catch {
+				// best-effort: the tab stays open
+			}
+		}
+	}
+	/**
+	 * Only one teardown path may act on a document at a time. A cancellation can reach
+	 * revertChanges() while a rejected save is already discarding the same buffer, and
+	 * both would edit the document and close the same tabs. The second caller awaits the
+	 * cleanup already in flight instead of repeating it.
+	 */
+	private async runTeardown(cleanup: () => Promise<void>): Promise<boolean> {
+		if (this.teardownInFlight !== undefined) {
+			// Record the cancellation before waiting: the pass that owns the session has to know a
+			// cancellation is waiting on it, and the waiting caller must not leave the session
+			// mid-edit if that pass turns out not to finalize it.
+			this.teardownCancellationRequested = true
+			await this.teardownInFlight
+			// The pass belongs to whoever started it; that caller also owns the finalization
+			// steps (preview tabs, reset), so the caller is told it did not own this pass.
+			return false
+		}
+		// A pass starts clean: a cancellation recorded for an earlier pass must not leak into
+		// this one.
+		this.teardownCancellationRequested = false
+		const inFlight = cleanup()
+		this.teardownPasses++
+		this.teardownInFlight = inFlight
+		try {
+			await inFlight
+		} finally {
+			this.teardownInFlight = undefined
+		}
+		return true
 	}
 
 	// Stop tracking user activation of the target file. Called before any
@@ -1099,7 +1713,39 @@ export class DiffViewProvider {
 		return result
 	}
 
+	/**
+	 * Close the session, finalizing it exactly once per session.
+	 *
+	 * The guard sits on this public entry point rather than on an internal helper, because a guard
+	 * that only protects a private path is not a guard: Task and every edit tool call reset()
+	 * directly, and two of them can reach the same session at once. It is the same defect class as
+	 * the lock key in #1408 naming a different inode than the publish replaced - a guard aimed at
+	 * one object while the operation runs on another guards nothing.
+	 *
+	 * The claim lasts one session: open() clears both fields when a new diff starts, so a provider
+	 * reused by the next tool call is finalizable again.
+	 */
 	async reset(): Promise<void> {
+		if (this.sessionFinalizationClaimed) {
+			return
+		}
+		if (this.finalizationInFlight) {
+			// Join the attempt already running instead of starting a second teardown.
+			await this.finalizationInFlight
+			return
+		}
+		const inFlight = this.performFinalReset()
+		this.finalizationInFlight = inFlight
+		try {
+			await inFlight
+			this.sessionFinalizationClaimed = true
+		} finally {
+			this.finalizationInFlight = undefined
+		}
+	}
+
+	/** The teardown itself: what one finalization of a session consists of. */
+	private async performFinalReset(): Promise<void> {
 		// Dispose touch listeners and cancel any pending deferred scroll BEFORE any
 		// async editor manipulation. closeAllDiffViews() awaits tab-close operations,
 		// so leaving listeners/timers live across that await could let a stale handler
@@ -1108,7 +1754,15 @@ export class DiffViewProvider {
 		this.disposeActiveEditorListener()
 		this.cancelDeferredScroll()
 
-		await this.closeAllDiffViews()
+		// A reset belongs to one task. Closing every clean diff tab would close another
+		// task's view while that task's provider still holds its activation listener and
+		// deferred scroll timer against a tab that is gone, so the cleanup stays inside
+		// this provider's view whenever it knows which file it was editing.
+		if (this.relPath) {
+			await this.closeOwnDiffView(path.resolve(this.cwd, this.relPath))
+		} else {
+			await this.closeAllDiffViews()
+		}
 		this.editType = undefined
 		this.isEditing = false
 		this.originalContent = undefined
@@ -1127,6 +1781,10 @@ export class DiffViewProvider {
 		this.userTouchedDocument = false
 		this.userTouchedDiffEditor = false
 		this.snapshotPreviewTabs = []
+		this.placeholderVersion = undefined
+		this.placeholderIdentity = undefined
+		this.preOpenObservation = undefined
+		this.openToken = undefined
 	}
 
 	/**
@@ -1136,6 +1794,10 @@ export class DiffViewProvider {
 	 * @param relPath - Relative path to the file
 	 * @param content - Content to write to the file
 	 * @param openFile - Whether to show the file in editor (false = open in memory only for diagnostics)
+	 * @param writeKind - Guarded-write kind that selects the S4a guard for this publish.
+	 *   Defaults to "create" because this method always publishes a complete file
+	 *   content: an unobserved target may only be created when absent, and an
+	 *   observed target must still carry the current observation token.
 	 * @returns Result of the save operation including any new problems detected
 	 */
 	async saveDirectly(
@@ -1144,6 +1806,10 @@ export class DiffViewProvider {
 		openFile: boolean = true,
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
+		writeKind: GuardedWriteKind = "create",
+		// Completeness the caller earned elsewhere; a move carries the source's
+		// view through the publish instead of claiming completeness for lines it never read.
+		completeOverride?: boolean,
 	): Promise<{
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
@@ -1154,9 +1820,19 @@ export class DiffViewProvider {
 		// Get diagnostics before editing the file
 		this.preDiagnostics = vscode.languages.getDiagnostics()
 
-		// Write the content directly to the file
+		// Publish through the S4 guarded-write API (epic #1375): an unobserved
+		// write to an existing file and a stale observed version are rejected
+		// with a re-read-then-retry remediation instead of overwriting the file.
+		// Concurrent in-process writes to the same path are already ordered by
+		// the guard's per-path FIFO chain, so no additional locking is added here.
+		const task = this.taskRef.deref()
+		if (!task) {
+			// Fail closed: without the owning task the observation registry is
+			// unreachable and the write cannot be guarded.
+			throw new Error("Cannot guard the write: the owning task is no longer available")
+		}
 		await createDirectoriesForFile(absolutePath)
-		await fs.writeFile(absolutePath, content, "utf-8")
+		await guardedWrite(task, relPath, content, writeKind, completeOverride)
 
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory
@@ -1167,13 +1843,11 @@ export class DiffViewProvider {
 				preserveFocus: true,
 			})
 		} else {
-			// Just open the document in memory to trigger diagnostics without showing it
-			const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
-
-			// Save the document to ensure VSCode recognizes it as saved and triggers diagnostics
-			if (doc.isDirty) {
-				await doc.save()
-			}
+			// Just open the document in memory to trigger diagnostics without showing it.
+			// Do not save here: the guarded publish already committed the accepted content,
+			// and saving a dirty buffer would republish its stale bytes through VS Code's
+			// unguarded save path, over what the guard wrote.
+			await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
 
 			// Force a small delay to ensure diagnostics are triggered
 			await new Promise((resolve) => setTimeout(resolve, 100))
