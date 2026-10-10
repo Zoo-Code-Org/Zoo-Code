@@ -1,11 +1,10 @@
 ---
 name: Add provider model
 about: Add a provider model that isn't htere
-title: ''
+title: ""
 labels: model
-assignees: ''
+assignees: ""
 type: Task
-
 ---
 
 Name of model: (GPT 5.4)

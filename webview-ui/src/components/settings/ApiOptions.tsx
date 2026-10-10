@@ -25,6 +25,7 @@ import {
 	getStaticModelsForProvider,
 	shouldUseGenericModelPicker,
 	handleModelChangeSideEffects,
+	toBedrockModelId,
 } from "./utils/providerModelConfig"
 
 import { vscode } from "@src/utils/vscode"
@@ -756,6 +757,11 @@ const ApiOptions = ({
 								organizationAllowList={organizationAllowList}
 								errorMessage={modelValidationError}
 								simplifySettings={fromWelcomeView}
+								valueTransform={
+									activeSelectedProvider === providerIdentifiers.bedrock
+										? toBedrockModelId
+										: undefined
+								}
 								onModelChange={(modelId) =>
 									handleModelChangeSideEffects(
 										activeSelectedProvider,

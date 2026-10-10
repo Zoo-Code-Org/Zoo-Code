@@ -1012,3 +1012,65 @@ describe("OpenAiCodexHandler Responses Lite requests", () => {
 		})
 	})
 })
+
+describe("OpenAiCodexHandler verbosity", () => {
+	afterEach(() => {
+		vitest.restoreAllMocks()
+		vitest.unstubAllGlobals()
+	})
+
+	function createHandler(options: ConstructorParameters<typeof OpenAiCodexHandler>[0]) {
+		const handler = new OpenAiCodexHandler(options)
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+		const create = vitest.fn().mockResolvedValue(
+			asyncStreamFrom([
+				{ type: "response.output_text.delta", delta: "ok" },
+				{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+			]),
+		)
+		Reflect.set(handler, "client", { responses: { create } })
+		return { handler, create }
+	}
+
+	const sendRequest = {
+		chat: (handler: OpenAiCodexHandler) => collectStream(handler.createMessage("System prompt", [])),
+		"one-shot": (handler: OpenAiCodexHandler) => handler.completePrompt("Hello"),
+	}
+
+	// gpt-5 uses ordinary Responses; gpt-6.1-sol goes through Responses Lite.
+	const supportedCases = (["gpt-5", "gpt-6.1-sol"] as const).flatMap((apiModelId) =>
+		(["chat", "one-shot"] as const).flatMap((call) =>
+			(
+				[
+					["low", "low"],
+					["medium", "medium"],
+					["high", "high"],
+					[undefined, "medium"],
+				] as const
+			).map(([setting, expected]) => ({ apiModelId, call, verbosity: setting ?? "unset", setting, expected })),
+		),
+	)
+
+	it.each(supportedCases)(
+		"$apiModelId $call request sends text.verbosity $expected when verbosity is $verbosity",
+		async ({ apiModelId, call, setting, expected }) => {
+			const { handler, create } = createHandler({ apiModelId, ...(setting ? { verbosity: setting } : {}) })
+
+			await sendRequest[call](handler)
+
+			expect(create.mock.calls[0][0].text).toEqual({ verbosity: expected })
+		},
+	)
+
+	it.each(["chat", "one-shot"] as const)(
+		"omits text.verbosity for a model without verbosity support (%s)",
+		async (call) => {
+			const { handler, create } = createHandler({ apiModelId: "gpt-5-codex", verbosity: "high" })
+
+			await sendRequest[call](handler)
+
+			expect(create.mock.calls[0][0]).not.toHaveProperty("text")
+		},
+	)
+})

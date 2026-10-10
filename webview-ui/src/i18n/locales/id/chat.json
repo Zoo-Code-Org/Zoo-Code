@@ -372,10 +372,10 @@
 		"title": "Zoo Code {{version}} Dirilis",
 		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Yang Baru:",
-			"highlight1": "✨ Dukungan model baru: Gunakan GPT-6.1 Sol, manfaatkan batas output Claude Opus 5.5 yang telah diperbaiki, dan pilih DeepSeek V4.1 Flash di OpenCode Go.",
-			"highlight2": "🧭 Pembatalan dan interupsi task yang andal: Pertahankan alasan pembatalan pertama, reset status pembatalan stream pada setiap request, dan cegah task yang terinterupsi menjalankan ulang subtask yang ditolak.",
-			"highlight3": "🛠️ Tools, prompts, dan streaming UI yang andal: Jaga argumen tool yang diterima melalui stream tetap utuh, terapkan kebijakan tool MCP, cegah nomor baris rekaan, dan buat pembaruan chat lebih lancar."
+			"heading": "Yang baru di Zoo Code v3.88.0",
+			"highlight1": "✨ Dukungan provider dan model: Gunakan Grok Build dan dukungan model kustom yang lebih baik. Rilis ini juga memperbaiki batas model Bedrock dan mengirim pengaturan verbosity Codex.",
+			"highlight2": "🧭 Keandalan task: Rilis ini memperbaiki penanganan pembatalan, kelanjutan tool turn, dan penyimpanan pesan task.",
+			"highlight3": "⚡ Pengeditan dan chat lebih cepat: Penulisan file tidak lagi memakai penundaan buatan secara bawaan. Pesan chat membawa lebih sedikit data file, dan code action mencapai chat yang terakhir aktif."
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",

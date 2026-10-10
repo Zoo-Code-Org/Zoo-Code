@@ -9,6 +9,7 @@ import {
 	isAzureOpenAiBaseUrl,
 	openAiModelInfoSaneDefaults,
 	DEEP_SEEK_DEFAULT_TEMPERATURE,
+	DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS,
 	OPENAI_AZURE_AI_INFERENCE_PATH,
 	parseOpenAiExtraBody,
 } from "@roo-code/types"
@@ -92,6 +93,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		const modelUrl = this.options.openAiBaseUrl ?? ""
 		const modelId = this.options.openAiModelId ?? ""
 		const enabledR1Format = this.options.openAiR1FormatEnabled ?? false
+		// Stryker disable next-line LogicalOperator: equivalent. An unset option makes `&&`
+		// yield undefined, which the parameter default in convertToolsForOpenAI turns back into
+		// the same strict value as `??`.
+		const strictToolSchemas = this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS
 		const isAzureAiInference = this._isAzureAiInference(modelUrl)
 		const deepseekReasoner = modelId.includes("deepseek-reasoner") || enabledR1Format
 
@@ -173,7 +178,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				stream: true as const,
 				...(isGrokXAI ? {} : { stream_options: { include_usage: true } }),
 				...(reasoning && reasoning),
-				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tools: this.convertToolsForOpenAI(metadata?.tools, strictToolSchemas),
 				tool_choice: metadata?.tool_choice,
 				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 			}
@@ -241,7 +246,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 					: [systemMessage, ...convertToOpenAiMessages(messages)],
 				...reasoning,
 				// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS)
-				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tools: this.convertToolsForOpenAI(metadata?.tools, strictToolSchemas),
 				tool_choice: metadata?.tool_choice,
 				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 			}
@@ -359,6 +364,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	): ApiStream {
 		const { info: modelInfo, reasoning } = this.getModel()
 		const methodIsAzureAiInference = this._isAzureAiInference(this.options.openAiBaseUrl)
+		// Stryker disable next-line LogicalOperator: equivalent. An unset option makes `&&`
+		// yield undefined, which the parameter default in convertToolsForOpenAI turns back into
+		// the same strict value as `??`.
+		const strictToolSchemas = this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS
 
 		if (this.options.openAiStreamingEnabled ?? true) {
 			const isGrokXAI = this._isGrokXAI(this.options.openAiBaseUrl)
@@ -377,7 +386,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				...reasoning,
 				temperature: undefined,
 				// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS)
-				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tools: this.convertToolsForOpenAI(metadata?.tools, strictToolSchemas),
 				tool_choice: metadata?.tool_choice,
 				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 			}
@@ -412,7 +421,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				...reasoning,
 				temperature: undefined,
 				// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS)
-				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tools: this.convertToolsForOpenAI(metadata?.tools, strictToolSchemas),
 				tool_choice: metadata?.tool_choice,
 				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 			}
