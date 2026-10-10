@@ -917,6 +917,23 @@ export class ClineProvider
 		return Array.from(this.activeInstances)
 	}
 
+	/**
+	 * Returns the live instance whose current view is the given view or panel,
+	 * if any. Title-bar commands on a specific surface use this to target the
+	 * instance that owns that surface rather than the visible-instance
+	 * heuristic (which picks whichever surface the user last focused).
+	 */
+	public static getInstanceForView(view: vscode.WebviewView | vscode.WebviewPanel): ClineProvider | undefined {
+		// A provider whose disposal has started is still listed in activeInstances until
+		// dispose() finishes its ASYNCHRONOUS task cleanup (the set removal happens after
+		// it), so a command queued during that window would otherwise be handed a dying
+		// provider and re-run task eviction and workspace refresh on top of the disposal
+		// already performing them. A disposing instance never resolves a view lookup, which
+		// also means every *InTab handler bails on undefined instead of mutating a disposed
+		// task.
+		return Array.from(this.activeInstances).find((instance) => instance.view === view && !instance._disposed)
+	}
+
 	public static async getInstance(): Promise<ClineProvider | undefined> {
 		let visibleProvider = ClineProvider.getVisibleInstance()
 
