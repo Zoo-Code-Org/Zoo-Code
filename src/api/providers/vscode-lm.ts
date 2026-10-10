@@ -1143,6 +1143,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		const salvageLeakedToolCalls = providedToolSchemas.size > 0
 		let salvageBuffer: string[] | undefined
 		let salvageCarry = ""
+		let salvageCarryIsInvokeWhitespace = false
 		let salvagePrecedingText: string[] = []
 		const salvageScan = new QuotingScanState()
 		let salvagedToolCallIndex = 0
@@ -1181,6 +1182,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			if (!salvageBuffer) {
 				const carried = salvageCarry
 				salvageCarry = ""
+				salvageCarryIsInvokeWhitespace = false
 				salvageScan.advance(carried)
 				return carried ? [{ type: "text", text: carried }] : []
 			}
@@ -1226,6 +1228,13 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 						continue
 					}
 
+					// An unfinished invoke can carry unlimited whitespace; do not rescan it for every chunk.
+					if (salvageCarryIsInvokeWhitespace && /^\s*$/.test(chunk.value)) {
+						salvageCarry += chunk.value
+						continue
+					}
+					salvageCarryIsInvokeWhitespace = false
+
 					// Watch for the start of a leaked tool-call block, carrying a small tail across
 					// chunks so a marker split across chunk boundaries is still detected.
 					const combined = salvageCarry + chunk.value
@@ -1242,6 +1251,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 						const carryLength = trailingPartialToolMarkerLength(combined)
 						const emit = carryLength > 0 ? combined.slice(0, combined.length - carryLength) : combined
 						salvageCarry = carryLength > 0 ? combined.slice(combined.length - carryLength) : ""
+						salvageCarryIsInvokeWhitespace = /^<(?:antml:)?invoke\s+$/i.test(salvageCarry)
 						if (emit) {
 							salvagePrecedingText.push(emit)
 							yield { type: "text", text: emit }

@@ -355,6 +355,40 @@ describe("VsCodeLmHandler", () => {
 				return drain()
 			}
 
+			it.each([{ tools: undefined }, { tools: [] }])(
+				"streams marker text immediately when tools are $tools",
+				async ({ tools }) => {
+					const parts = [
+						'<function_calls><invoke name="calculator">',
+						'<parameter name="operation">add</parameter></invoke></function_calls>',
+					]
+					let partsProduced = 0
+					mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+						stream: (async function* () {
+							for (const part of parts) {
+								partsProduced++
+								yield new vscode.LanguageModelTextPart(part)
+							}
+						})(),
+					})
+					const stream = handler.createMessage("system", [{ role: "user", content: "hi" }], {
+						taskId: "test-task",
+						tools,
+					})
+
+					await expect(stream.next()).resolves.toEqual({
+						done: false,
+						value: { type: "text", text: parts[0] },
+					})
+					expect(partsProduced).toBe(1)
+					await expect(stream.next()).resolves.toEqual({
+						done: false,
+						value: { type: "text", text: parts[1] },
+					})
+					expect((await collectStream(stream)).map((chunk) => chunk.type)).toEqual(["usage"])
+				},
+			)
+
 			it("recovers a tool call the model streamed as raw invoke XML", async () => {
 				const chunks = await collect([
 					"Thinking. ",
@@ -381,6 +415,73 @@ describe("VsCodeLmHandler", () => {
 				expect(chunks.filter((chunk) => chunk.type === "text")).toEqual([{ type: "text", text: "abc " }])
 				expect(chunks.filter((chunk) => chunk.type === "tool_call")).toMatchObject([
 					{ name: "calculator", arguments: JSON.stringify({ operation: "sub" }) },
+				])
+			})
+
+			it("scans unfinished invoke whitespace with linear work across small chunks", async () => {
+				const measure = async (partCount: number) => {
+					const originalExec = RegExp.prototype.exec
+					let scannedCharacters = 0
+					const execSpy = vi.spyOn(RegExp.prototype, "exec").mockImplementation(function (
+						this: RegExp,
+						text: string,
+					) {
+						if (this.source.includes("invoke") || this.source.includes("function_calls")) {
+							scannedCharacters += text.length
+						}
+						return originalExec.call(this, text)
+					})
+					try {
+						const parts = ["<invoke", ...Array<string>(partCount).fill(" \t\n\r ")]
+						const chunks = await collect(parts)
+						expect(chunks.filter((chunk) => chunk.type !== "usage")).toEqual([
+							{ type: "text", text: parts.join("") },
+						])
+					} finally {
+						execSpy.mockRestore()
+					}
+					return scannedCharacters
+				}
+
+				// Count regex input rather than wall time so shared runners do not make this flaky.
+				const small = await measure(200)
+				const large = await measure(800)
+				expect(large / small).toBeGreaterThan(3)
+				expect(large / small).toBeLessThan(6)
+			})
+
+			it.each([
+				['name="calculator"></invoke>'],
+				["n", "a", "m", "e", "=", '"calculator"></invoke>'],
+				["ordinary text"],
+				['<function_calls><invoke name="calculator"></invoke></function_calls>'],
+			])("preserves the whole parse after carried whitespace followed by %j", async (...ending) => {
+				const parts = ["<ANTML:INVOKE", " ".repeat(80), "\t\n", ...ending]
+				const text = parts.join("")
+				const expected = extractLeakedToolCalls(text, new Set(["calculator"]))
+				const chunks = await collect(parts)
+
+				expect(
+					chunks
+						.filter((chunk) => chunk.type === "text")
+						.map((chunk) => chunk.text)
+						.join(""),
+				).toBe(expected.leftoverText)
+				expect(chunks.filter((chunk) => chunk.type === "tool_call").map((chunk) => chunk.name)).toEqual(
+					expected.calls.map((call) => call.name),
+				)
+			})
+
+			it("resumes immediate whitespace delivery after a native call flushes an unfinished invoke", async () => {
+				const carried = "<invoke" + " ".repeat(80)
+				streamMixedParts(["<invoke", " ".repeat(80), { name: "calculator", input: {} }, " \t", "tail"])
+				const chunks = await drain()
+
+				expect(chunks.filter((chunk) => chunk.type !== "usage")).toEqual([
+					{ type: "text", text: carried },
+					{ type: "tool_call", id: "native-1", name: "calculator", arguments: "{}" },
+					{ type: "text", text: " \t" },
+					{ type: "text", text: "tail" },
 				])
 			})
 
@@ -586,6 +687,20 @@ describe("VsCodeLmHandler", () => {
 				const chunks = await collect(["<function_calls>\n```\n" + block + "\n```\n</function_calls>"])
 
 				expect(chunks.some((chunk) => chunk.type === "tool_call")).toBe(false)
+			})
+
+			it("preserves a fenced wrapper when its fence precedes the marker in the same chunk", async () => {
+				const text =
+					'```xml\n<function_calls><invoke name="calculator"><parameter name="operation">add</parameter></invoke></function_calls>\n```'
+				const chunks = await collect([text])
+
+				expect(chunks.some((chunk) => chunk.type === "tool_call")).toBe(false)
+				expect(
+					chunks
+						.filter((chunk) => chunk.type === "text")
+						.map((chunk) => chunk.text)
+						.join(""),
+				).toBe(text)
 			})
 
 			it.each([
