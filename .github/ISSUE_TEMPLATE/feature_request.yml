@@ -8,7 +8,7 @@ body:
           value: |
               Thank you for helping improve Zoo Code!
               Please focus on the problem and the desired behavior in plain language.
-              Write in Simplified Technical English: short sentences, plain words, active voice, one idea per sentence.
+              Write in Simplified Technical English: short sentences, plain words, active voice, one idea per sentence. Keep the title short and specific.
 
     - type: textarea
       id: problem

@@ -7,7 +7,7 @@ assignees: ""
 type: Feature
 ---
 
-<!-- Writing style: use Simplified Technical English. Use short sentences, plain words, active voice, and one idea per sentence. -->
+<!-- Writing style: write in Simplified Technical English: short sentences, plain words, active voice, one idea per sentence. Keep the title short and specific. -->
 
 **Is your feature request related to a problem? Please describe.**
 A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
