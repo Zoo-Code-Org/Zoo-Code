@@ -836,6 +836,27 @@ describe("safeWriteText", () => {
 		expect(warnings).toHaveLength(0)
 	})
 
+	// The DACL refusals sit inside the try whose catch performs the cleanup, so a refused publish is
+	// cleaned up by that handler and by nothing else. Counted, not matched with toHaveBeenCalledWith:
+	// that matcher passes however many times the same path is passed, so it cannot see a cleanup
+	// that runs twice.
+	it("win32: a refused publish removes its staged file and staging directory exactly once", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+			if (typeof cb === "function") cb(new Error("icacls error"), "", "")
+			return fakeChild
+		})
+
+		await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toBeInstanceOf(DaclInspectionError)
+
+		const unlinkCalls = vi.mocked(fs.unlink).mock.calls.map((call) => String(call[0]))
+		const rmdirCalls = vi.mocked(fs.rmdir).mock.calls.map((call) => String(call[0]))
+		expect(unlinkCalls.filter((p) => p.includes("safeWriteText_"))).toHaveLength(1)
+		expect(rmdirCalls.filter((p) => p.includes(".file-safety-staging"))).toHaveLength(1)
+	})
+
 	// Warning delivery is advisory: it must not be able to fail the save it is reporting on.
 	it("win32: a throwing onWarning does not abort the write", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"

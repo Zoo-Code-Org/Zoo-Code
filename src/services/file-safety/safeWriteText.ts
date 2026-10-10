@@ -515,23 +515,6 @@ export async function safeWriteText(
 
 		// -- Step 2 (win32): save DACL BEFORE the backup copy -----------
 		const platform = options?.platform ?? process.platform
-		// A refusal before the commit has to remove what this call already made: the failure
-		// handler below is out of reach from here, and a staged file stranded beside the target is
-		// residue the caller should not have to discover on its own.
-		const _cleanupBeforeCommit = async (ownDir: string | null): Promise<string[]> => {
-			const stuck: string[] = []
-			const staged = tempPath
-			await fs.unlink(staged).catch(() => {
-				stuck.push(staged)
-			})
-			if (ownDir) {
-				await fs.rmdir(ownDir).catch(() => {
-					stuck.push(ownDir)
-				})
-			}
-			return stuck
-		}
-
 		if (platform === "win32") {
 			let accessError: unknown = null
 			try {
@@ -556,16 +539,16 @@ export async function safeWriteText(
 					// can verify an equivalent restrictive ACL on the replacement, so the publish is
 					// refused instead of warned about: a save that silently changed who can read the
 					// file is not a save the user can trust. Nothing is committed yet, so the target
-					// still holds its content; the staged file this call already made is removed by
-					// the cleanup below, because the failure handler further down is out of reach.
-					leftoverPaths.push(...(await _cleanupBeforeCommit(stagingDir)))
+					// still holds its content, and this throw lands in the catch at the bottom of this
+					// try - the one place that unlinks the staged file and removes this write's own
+					// staging directory before rethrowing - so a refused publish strands no residue.
 					throw new DaclInspectionError(targetPath, "save", null)
 				}
 			} else if (errorCode(accessError) !== "ENOENT") {
 				// Not "absent": the target is there but its access rights could not be read (EACCES,
 				// ...), so publishing would replace a file whose rights this call never learned. Same
-				// rule as the save failure above: refuse before anything is committed.
-				leftoverPaths.push(...(await _cleanupBeforeCommit(stagingDir)))
+				// rule as the save failure above: refuse before anything is committed, and let the
+				// catch at the bottom of this try remove the staged file and the staging directory.
 				throw new DaclInspectionError(targetPath, "inspect", accessError)
 			}
 		}
@@ -726,9 +709,9 @@ export async function safeWriteText(
 			// One retry, ENOENT counts as removed - the same rule as the other two backup sites.
 			const stuckBackup = await _removeBackupCopy(backupPath)
 			if (stuckBackup !== null) {
-				// The original error is what the caller needs, so the leftover cannot be thrown; it is
-				// reported with its path instead of dropped, through onWarning and the result.
-				leftoverPaths.push(backupPath)
+				// The original error is what the caller needs, so the leftover cannot be thrown, and a
+				// throw means the structured result never reaches the caller either: the path is
+				// reported with its location through onWarning instead of being dropped.
 				warn(
 					`safeWriteText: the write failed and its backup copy could not be removed from ${backupPath} (${
 						errorCode(stuckBackup) ?? "unknown error"

@@ -26,9 +26,13 @@ describe("safeWriteText against a real filesystem", () => {
 		const targetPath = path.join(dir, "target.txt")
 		await fs.writeFile(targetPath, "old bytes")
 
-		// No platform override: the real platform's own durability and ACL steps run.
-		// A failed icacls restore in a throwaway temp directory is reported, not thrown,
-		// so the publish still lands.
+		// No platform override: the real platform's own durability and ACL steps run, and this
+		// case is the successful restore. A failed restore now throws DaclRestoreError after the
+		// commit rename has already happened (the focused unit test "win32 DACL: a failed restore
+		// is an error and the dump is still unlinked" covers that path), so on a machine where
+		// icacls cannot put a saved ACL back into a throwaway temp directory this publish
+		// reports that error instead of resolving, and the residue assertions below are reached
+		// only where the restore worked.
 		await safeWriteText(targetPath, "new bytes", { backup: true })
 
 		expect(await fs.readFile(targetPath, "utf8")).toBe("new bytes")
