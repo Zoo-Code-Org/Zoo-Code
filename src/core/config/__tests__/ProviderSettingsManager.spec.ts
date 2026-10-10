@@ -459,6 +459,41 @@ describe("ProviderSettingsManager", () => {
 			expect(storedConfig).toEqual(expectedConfig)
 		})
 
+		it.each([true, false, undefined])(
+			"round-trips Codex WebSocket preference %s in a saved profile",
+			async (enabled) => {
+				mockSecrets.get.mockResolvedValue(
+					JSON.stringify({
+						currentApiConfigName: "default",
+						apiConfigs: { default: {} },
+						modeApiConfigs: {},
+					}),
+				)
+				const configuration = {
+					apiProvider: providerIdentifiers.openaiCodex,
+					apiModelId: "gpt-5.6-sol",
+					...(enabled !== undefined ? { openAiCodexUseWebSocket: enabled } : {}),
+				}
+				await providerSettingsManager.saveConfig("codex", configuration)
+				const stored = mockSecrets.store.mock.calls.at(-1)?.[1]
+				if (typeof stored !== "string") throw new Error("Profile was not stored")
+				mockSecrets.get.mockResolvedValue(stored)
+				expect(await providerSettingsManager.getProfile({ name: "codex" })).toMatchObject(configuration)
+				expect((await providerSettingsManager.getProfile({ name: "codex" })).openAiCodexUseWebSocket).toBe(
+					enabled,
+				)
+				const exported = await providerSettingsManager.export()
+				expect(exported.apiConfigs.codex.openAiCodexUseWebSocket).toBe(enabled)
+				await providerSettingsManager.import(exported)
+				const imported = mockSecrets.store.mock.calls.at(-1)?.[1]
+				if (typeof imported !== "string") throw new Error("Profile was not imported")
+				mockSecrets.get.mockResolvedValue(imported)
+				expect((await providerSettingsManager.getProfile({ name: "codex" })).openAiCodexUseWebSocket).toBe(
+					enabled,
+				)
+			},
+		)
+
 		it.each([OpenAiCodexServiceTier.Default, OpenAiCodexServiceTier.Priority] as const)(
 			"should persist the OpenAI Codex %s speed preference",
 			async (openAiCodexServiceTier) => {

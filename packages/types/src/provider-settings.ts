@@ -5,6 +5,7 @@ import { API_PROVIDER_FIELD, SETTINGS_SHAPE_FIELD } from "./provider-settings/co
 export {
 	DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS,
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
+	DEFAULT_OPEN_AI_CODEX_USE_WEBSOCKET,
 	parseOpenAiExtraBody,
 	kimiCodeAuthMethodSchema,
 	type KimiCodeAuthMethod,

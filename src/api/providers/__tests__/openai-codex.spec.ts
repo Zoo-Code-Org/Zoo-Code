@@ -11,6 +11,8 @@ vitest.mock("@roo-code/telemetry", () => ({
 import { Anthropic } from "@anthropic-ai/sdk"
 import { OPEN_AI_CODEX_SERVICE_TIER_KEY, OpenAiCodexServiceTier, SERVICE_TIER_KEY } from "@roo-code/types"
 import { OpenAiCodexHandler, transformResponsesLiteBody } from "../openai-codex"
+import { CodexWebSocketTransport, CodexWebSocketUnavailableError } from "../CodexWebSocketTransport"
+import { CodexWebSocketTransportScope } from "../codex-websocket/scopes/CodexWebSocketTransportScope"
 import { openAiCodexOAuthManager } from "../../../integrations/openai-codex/oauth"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
@@ -27,6 +29,111 @@ function createCompletedStream() {
 		},
 	])
 }
+
+describe("OpenAiCodexHandler WebSocket transport", () => {
+	beforeEach(() => {
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+	})
+	afterEach(() => {
+		vitest.restoreAllMocks()
+		vitest.unstubAllEnvs()
+		vitest.unstubAllGlobals()
+	})
+
+	it("initializes the DI scope on the first request rather than in the provider constructor", async () => {
+		const init = vitest.spyOn(CodexWebSocketTransportScope.prototype, "init")
+		vitest.spyOn(CodexWebSocketTransport.prototype, "stream").mockImplementation(() => createCompletedStream())
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.6-sol", openAiCodexUseWebSocket: true })
+		expect(init).not.toHaveBeenCalled()
+		await collectStream(handler.createMessage("System", []))
+		await collectStream(handler.createMessage("System", []))
+		expect(init).toHaveBeenCalledOnce()
+	})
+
+	it("routes Lite requests through the transport and returns existing usage chunks", async () => {
+		const stream = vitest
+			.spyOn(CodexWebSocketTransport.prototype, "stream")
+			.mockReturnValue(createCompletedStream())
+		const reset = vitest.spyOn(CodexWebSocketTransport.prototype, "resetContinuation")
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-6.1-sol", openAiCodexUseWebSocket: true })
+		const chunks = await collectStream(
+			handler.createMessage("System", [], {
+				taskId: "task-1",
+				suppressPreviousResponseId: true,
+			}),
+		)
+		expect(stream).toHaveBeenCalledWith(
+			expect.objectContaining({
+				input: expect.arrayContaining([expect.objectContaining({ type: "additional_tools" })]),
+			}),
+			expect.objectContaining({
+				headers: expect.objectContaining({
+					Authorization: "Bearer test-token",
+					"ChatGPT-Account-Id": "acct_test",
+					session_id: "task-1",
+				}),
+			}),
+		)
+		expect(reset).toHaveBeenCalledOnce()
+		expect(chunks).toContainEqual(expect.objectContaining({ type: "usage", inputTokens: 1, outputTokens: 1 }))
+	})
+
+	it.each([undefined, false])("keeps SDK streaming when WebSocket is %s", async (enabled) => {
+		vitest.stubEnv("ZOO_CODE_CODEX_WEBSOCKET", "1")
+		const stream = vitest.spyOn(CodexWebSocketTransport.prototype, "stream")
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.6-sol", openAiCodexUseWebSocket: enabled })
+		const create = vitest.fn().mockResolvedValue(createCompletedStream())
+		Reflect.set(handler, "client", { responses: { create } })
+		await collectStream(handler.createMessage("System", []))
+		expect(create).toHaveBeenCalledOnce()
+		expect(stream).not.toHaveBeenCalled()
+	})
+
+	it("uses the HTTP fallback for a failed upgrade", async () => {
+		vitest.spyOn(CodexWebSocketTransport.prototype, "stream").mockImplementation(() => {
+			throw new CodexWebSocketUnavailableError("Upgrade rejected")
+		})
+		const fetch = vitest.fn().mockResolvedValue({
+			ok: true,
+			body: new ReadableStream({
+				start(controller) {
+					controller.enqueue(
+						new TextEncoder().encode(
+							'data: {"type":"response.completed","response":{"output":[],"usage":{"input_tokens":1,"output_tokens":1}}}\n\n',
+						),
+					)
+					controller.close()
+				},
+			}),
+		})
+		vitest.stubGlobal("fetch", fetch)
+		await collectStream(
+			new OpenAiCodexHandler({ apiModelId: "gpt-5.6-sol", openAiCodexUseWebSocket: true }).createMessage(
+				"System",
+				[],
+			),
+		)
+		expect(fetch).toHaveBeenCalledOnce()
+	})
+
+	it("does not replay an ambiguously accepted request over HTTP", async () => {
+		vitest.spyOn(CodexWebSocketTransport.prototype, "stream").mockImplementation(() => {
+			throw new Error("Connection closed after send")
+		})
+		const fetch = vitest.fn()
+		vitest.stubGlobal("fetch", fetch)
+		await expect(
+			collectStream(
+				new OpenAiCodexHandler({ apiModelId: "gpt-5.6-sol", openAiCodexUseWebSocket: true }).createMessage(
+					"System",
+					[],
+				),
+			),
+		).rejects.toThrow("Connection closed after send")
+		expect(fetch).not.toHaveBeenCalled()
+	})
+})
 
 describe("OpenAiCodexHandler.getModel", () => {
 	it.each(["gpt-5.1", "gpt-5", "gpt-5.1-codex", "gpt-5-codex", "gpt-5-codex-mini", "gpt-5.3-codex-spark"])(
