@@ -2142,6 +2142,63 @@ describe("Cline", () => {
 				expect(Object.keys(cleanConversationHistory[0]!)).toEqual(["role", "content"])
 			})
 
+			it("sends tool_result blocks first when stored history has images between them (#1774)", async () => {
+				const cline = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				vi.spyOn(getTaskTestAccess(cline), "getSystemPrompt").mockResolvedValue("mock system prompt")
+				const mockStream = {
+					async *[Symbol.asyncIterator]() {
+						yield { type: "text", text: "response" }
+					},
+				} as AsyncGenerator<ApiStreamChunk>
+				const createMessageSpy = vi.spyOn(cline.api, "createMessage").mockReturnValue(mockStream)
+
+				// History as persisted by a turn that read an image alongside another tool call.
+				cline.apiConversationHistory = [
+					{ role: "user", content: [{ type: "text", text: "read the logo and list files" }], ts: 1 },
+					{
+						role: "assistant",
+						content: [
+							{ type: "tool_use", id: "read", name: "read_file", input: { path: "logo.jpg" } },
+							{ type: "tool_use", id: "cmd", name: "execute_command", input: { command: "ls" } },
+						],
+						ts: 2,
+					},
+					{
+						role: "user",
+						content: [
+							{ type: "tool_result", tool_use_id: "read", content: "File: logo.jpg" },
+							{ type: "image", source: { type: "base64", media_type: "image/jpeg", data: "abc" } },
+							{ type: "tool_result", tool_use_id: "cmd", content: "Exit code: 0" },
+							{ type: "text", text: "<environment_details>" },
+						],
+						ts: 3,
+					},
+				]
+
+				const iterator = cline.attemptApiRequest(0)
+				await iterator.next()
+
+				const [, sentHistory] = requireDefined(createMessageSpy.mock.calls[0])
+				const lastUserContent = requireDefined(sentHistory.at(-1)).content as Array<{ type: string }>
+				expect(lastUserContent.slice(0, 2)).toMatchObject([
+					{ type: "tool_result", tool_use_id: "read" },
+					{ type: "tool_result", tool_use_id: "cmd" },
+				])
+				expect(lastUserContent.slice(2).some((block) => block.type === "tool_result")).toBe(false)
+				// The stored history keeps its original shape.
+				expect(requireDefined(cline.apiConversationHistory.at(-1)).content).toMatchObject([
+					{ type: "tool_result" },
+					{ type: "image" },
+					{ type: "tool_result" },
+					{ type: "text" },
+				])
+			})
+
 			it("should shape image blocks for API compatibility before request construction", async () => {
 				const conversationHistory = [
 					{
