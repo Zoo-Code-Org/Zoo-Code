@@ -1149,6 +1149,56 @@ describe("safeWriteJson", () => {
 		).toEqual([])
 	})
 
+	// Confinement presence must be decided with an explicit undefined comparison, not by truthiness:
+	// an empty string is a DECLARED scope, and _resolveScopeRoot canonicalizes path.resolve("") to the
+	// current working directory - the same base every other path in this primitive resolves against.
+	// While publishOverLink treated only undefined as unconfined and the scope checks tested truthiness,
+	// confineTo: "" published through the referent while skipping every scope check and the ancestor
+	// pin: a write anywhere outside the working directory escaped with no error at all.
+	test("rejects an empty-string confineTo whose target is outside the working directory", async () => {
+		const realCwd = await fs.realpath(process.cwd())
+		const realTemp = await fs.realpath(tempDir)
+		// Premise: the temp dir must actually sit outside the working directory, or the rejection
+		// pinned below would be pinning nothing.
+		const relative = path.relative(realCwd, realTemp)
+		const outsideCwd =
+			relative === "" || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)
+		expect(outsideCwd).toBe(true)
+
+		// The parent does not exist yet: the mkdir in safeWriteJson would create it - a filesystem
+		// change outside the scope - unless the pre-lock check refuses first.
+		const outsideDir = path.join(tempDir, "empty-scope-missing-parent")
+		const outside = path.join(outsideDir, "outside.json")
+		await expect(safeWriteJson(outside, { mcpServers: {} }, { confineTo: "" })).rejects.toThrow(
+			ConfinedPathEscapeError,
+		)
+
+		// Rejected before any side effect, like every other out-of-scope confined write.
+		const entries = await fs.readdir(tempDir)
+		expect(entries).not.toContain("empty-scope-missing-parent")
+		expect(
+			entries.filter(
+				(entry) =>
+					entry.endsWith(".lock") || entry.includes(".new_") || entry.startsWith(".file-safety-staging"),
+			),
+		).toEqual([])
+	})
+
+	// The other half of the chosen semantics: the empty string resolves to the working directory, so a
+	// target inside it is IN scope and publishes. This pins "empty string = cwd" against the rejected
+	// alternative (refuse the option outright), so a future change of mind has to pass here.
+	test("publishes an empty-string confined write whose target is inside the working directory", async () => {
+		const previousCwd = process.cwd()
+		process.chdir(tempDir)
+		try {
+			const target = path.join(tempDir, "empty-scope-inside.json")
+			await safeWriteJson(target, { confined: true }, { confineTo: "" })
+			expect(JSON.parse(await fs.readFile(target, "utf8"))).toEqual({ confined: true })
+		} finally {
+			process.chdir(previousCwd)
+		}
+	})
+
 	// A scope that cannot be canonicalized must not fall back to a lexical root: a partly
 	// lexical scope can disagree with the canonicalized publish target, which is exactly the
 	// disagreement the confinement check exists to prevent. The errno has to reach the caller.
