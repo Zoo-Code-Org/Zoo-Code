@@ -111,7 +111,9 @@ describe("editTool", () => {
 				getState: vi.fn().mockResolvedValue({
 					diagnosticsEnabled: true,
 					writeDelayMs: 1000,
-					experiments: {},
+					// Pin the legacy diff-editor path explicitly: the PREVENT_FOCUS_DISRUPTION default
+					// flipped to true (L2, plan #33), so these tests must opt out.
+					experiments: { preventFocusDisruption: false } as Record<string, boolean>,
 				}),
 			}),
 		}
@@ -358,6 +360,39 @@ describe("editTool", () => {
 			expect(mockTask.diffViewProvider.revertChanges).toHaveBeenCalled()
 			expect(mockTask.diffViewProvider.saveChanges).not.toHaveBeenCalled()
 			expect(result).toContain("rejected")
+		})
+	})
+
+	describe("focus disruption default (L2: chat-diff is the default approval path)", () => {
+		it("saves via saveDirectly without opening the diff editor when no experiment value is stored", async () => {
+			mockAskApproval.mockResolvedValue(true)
+			// No stored experiment value: the default (flipped to true in L2) resolves
+			// to the chat-diff path.
+			mockTask.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockResolvedValue({
+					diagnosticsEnabled: true,
+					writeDelayMs: 1000,
+					experiments: {},
+				}),
+			})
+
+			await executeEditTool()
+
+			expect(mockTask.diffViewProvider.saveDirectly).toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockTask.didEditFile).toBe(true)
+		})
+
+		it("still uses the diff-editor path when the user has opted out (stored false)", async () => {
+			mockAskApproval.mockResolvedValue(true)
+			// Base mock pins experiments: { preventFocusDisruption: false } (legacy path).
+
+			await executeEditTool()
+
+			expect(mockTask.diffViewProvider.open).toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
 		})
 	})
 
