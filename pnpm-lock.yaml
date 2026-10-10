@@ -620,6 +620,9 @@ importers:
       workerpool:
         specifier: ^9.2.0
         version: 9.2.0
+      ws:
+        specifier: ^8.18.3
+        version: 8.21.3
       yaml:
         specifier: ^2.8.0
         version: 2.9.0
@@ -666,6 +669,9 @@ importers:
       '@types/vscode':
         specifier: 1.100.0
         version: 1.100.0
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.2
       '@vitest/coverage-v8':
         specifier: 4.1.9
         version: 4.1.9(vitest@4.1.11)
@@ -3572,6 +3578,9 @@ packages:
 
   '@types/vscode@1.100.0':
     resolution: {integrity: sha512-4uNyvzHoraXEeCamR3+fzcBlh7Afs4Ifjs4epINyUX/jvdk0uzLnwiDY35UKDKnkCHP5Nu3dljl2H8lR6s+rQw==}
+
+  '@types/ws@8.18.2':
+    resolution: {integrity: sha512-67MQl+fpWKVTT1NYdnmo3U4sc/xPo/zQBncVnI74qmQa0z/b+1g6iYqNmGCPbxO+zz2aklb08a0oHfegiVd0/w==}
 
   '@types/yargs-parser@21.0.3':
     resolution: {integrity: sha512-I4q9QU9MQv4oEOz4tAHJtNz1cwuLxn2F3xcc2iV5WdqLPpUnj30aUuxt1mAxYTG+oe8CZMV/+6rU4S4gRDzqtQ==}
@@ -11852,6 +11861,10 @@ snapshots:
   '@types/vscode-webview@1.57.5': {}
 
   '@types/vscode@1.100.0': {}
+
+  '@types/ws@8.18.2':
+    dependencies:
+      '@types/node': 22.20.1
 
   '@types/yargs-parser@21.0.3': {}
 
