@@ -840,11 +840,20 @@ describe("safeWriteText", () => {
 
 			await expect(safeWriteText(targetPath, "data")).rejects.toThrow("EBUSY rename")
 			expect(stagingUnlinks).toBe(2)
-			expect(
-				warn.mock.calls.filter(function (call) {
-					return String(call[0]).includes("staging temp release failed")
-				}).length,
-			).toBe(1)
+			// The retry exists so the reader learns WHICH path was retained, so the assertions
+			// have to name it: counting attempts and matching a prefix would still pass if the
+			// warning reported a different path than the one being unlinked.
+			const stagedPath = String(vi.mocked(fs.rename).mock.calls[0]?.[0])
+			expect(stagedPath).toContain(".file-safety-staging")
+			const unlinkAttempts = vi.mocked(fs.unlink).mock.calls.filter(function (call) {
+				return String(call[0]) === stagedPath
+			})
+			expect(unlinkAttempts.length).toBe(2)
+			const releaseWarnings = warn.mock.calls.filter(function (call) {
+				return String(call[0]).includes("staging temp release failed")
+			})
+			expect(releaseWarnings.length).toBe(1)
+			expect(String(releaseWarnings[0]?.[0])).toContain(stagedPath)
 			warn.mockRestore()
 		})
 
