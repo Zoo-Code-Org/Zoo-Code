@@ -75,6 +75,7 @@ import { makeExtensionContext } from "../../../test-utils/vscode"
 import type { ModelRecord } from "@roo-code/types"
 
 import { webviewMessageHandler } from "../webviewMessageHandler"
+import { enqueueSettingsSave } from "../settingsSaveQueue"
 import type { ClineProvider } from "../ClineProvider"
 import { flushModels, getModels } from "../../../api/providers/fetchers/modelCache"
 import { getLMStudioModels } from "../../../api/providers/fetchers/lmstudio"
@@ -99,7 +100,11 @@ const mockGetAccountId = vi.mocked(openAiCodexOAuthManager.getAccountId)
 const mockFetchOpenAiCodexRateLimitInfo = vi.mocked(fetchOpenAiCodexRateLimitInfo)
 
 // Mock ClineProvider
+const mockSettingsSaveController = new AbortController()
 const mockClineProvider = {
+	get settingsSaveSignal() {
+		return mockSettingsSaveController.signal
+	},
 	getState: vi.fn(),
 	postMessageToWebview: vi.fn(),
 	customModesManager: {
@@ -2947,6 +2952,47 @@ describe("webviewMessageHandler - updateSettings branch handling", () => {
 })
 
 describe("webviewMessageHandler - serialized settings saves", () => {
+	it.each(["updateSettings", "upsertApiConfiguration", "telemetrySetting", "debugSetting"] as const)(
+		"cancels queued %s without waiting for blocked storage",
+		async (type) => {
+			const controller = new AbortController()
+			const provider = mockClineProvider
+			const signalGetter = vi.spyOn(provider, "settingsSaveSignal", "get").mockReturnValue(controller.signal)
+			try {
+				let release!: () => void
+				const write = vi.mocked(provider.contextProxy.setValue).mockImplementationOnce(
+					() =>
+						new Promise<void>((resolve) => {
+							release = resolve
+						}),
+				)
+				const active = webviewMessageHandler(provider, {
+					type: "updateSettings",
+					updatedSettings: { soundVolume: 0.2 },
+				})
+				const pending = webviewMessageHandler(provider, {
+					type,
+					requestId: "cancelled",
+					updatedSettings: { soundVolume: 0.9 },
+				})
+				const cancellations = Promise.all([
+					expect(active).rejects.toMatchObject({ name: "AbortError" }),
+					expect(pending).rejects.toMatchObject({ name: "AbortError" }),
+				])
+				controller.abort()
+				await cancellations
+				release()
+				await enqueueSettingsSave(provider.contextProxy, new AbortController().signal, async () => {})
+				expect(write).not.toHaveBeenCalledWith("soundVolume", 0.9)
+				expect(provider.postMessageToWebview).not.toHaveBeenCalledWith(
+					expect.objectContaining({ requestId: "cancelled" }),
+				)
+			} finally {
+				signalGetter.mockRestore()
+			}
+		},
+	)
+
 	it("keeps processing later saves after an earlier save throws", async () => {
 		;(mockClineProvider as unknown as { getMcpHub: () => undefined }).getMcpHub = () => undefined
 		// debugSetting without a requestId rethrows its write failure, which is what

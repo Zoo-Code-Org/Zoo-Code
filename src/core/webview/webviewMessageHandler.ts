@@ -119,9 +119,10 @@ import {
 	handleCheckoutBranch,
 } from "./worktree"
 
+import { enqueueSettingsSave } from "./settingsSaveQueue"
+
 // A webview timeout does not cancel host writes. Keep every SettingsView save message
 // in arrival order, including retries and messages from views sharing the same context.
-const settingsSaveQueues = new WeakMap<ClineProvider["contextProxy"], Promise<void>>()
 const settingsSaveMessageTypes = new Set<WebviewMessage["type"]>([
 	"updateSettings",
 	"upsertApiConfiguration",
@@ -138,33 +139,35 @@ export const webviewMessageHandler = async (
 		return handleWebviewMessage(provider, message, marketplaceManager)
 	}
 
-	const previous = settingsSaveQueues.get(provider.contextProxy) ?? Promise.resolve()
-	const save = previous.then(() => handleWebviewMessage(provider, message, marketplaceManager))
-	// Preserve the caller's error while allowing subsequent saves after a failure.
-	settingsSaveQueues.set(
-		provider.contextProxy,
-		save.catch(() => undefined),
+	const signal = provider.settingsSaveSignal
+	return enqueueSettingsSave(provider.contextProxy, signal, () =>
+		handleWebviewMessage(provider, message, marketplaceManager, signal),
 	)
-	return save
 }
 
 const handleWebviewMessage = async (
 	provider: ClineProvider,
 	message: WebviewMessage,
 	marketplaceManager?: MarketplaceManager,
+	signal?: AbortSignal,
 ) => {
 	// Utility functions provided for concise get/update of global state via contextProxy API.
 	const getGlobalState = <K extends keyof GlobalState>(key: K) => provider.contextProxy.getValue(key)
-	const updateGlobalState = async <K extends keyof GlobalState>(key: K, value: GlobalState[K]) =>
+	const updateGlobalState = async <K extends keyof GlobalState>(key: K, value: GlobalState[K]) => {
+		signal?.throwIfAborted()
 		await provider.contextProxy.setValue(key, value)
+	}
 
 	// SettingsView correlates each write separately before marking the whole save complete.
 	const saveSetting = async (key: string, write: () => Promise<unknown>) => {
 		let success = false
 		try {
+			signal?.throwIfAborted()
 			await write()
+			signal?.throwIfAborted()
 			success = true
 		} catch (error) {
+			signal?.throwIfAborted()
 			if (!message.requestId) throw error
 			provider.log(
 				`Failed to save settings: ${JSON.stringify([key])}; error: ${JSON.stringify(error instanceof Error ? error.name : "Unknown")}`,
@@ -782,12 +785,15 @@ const handleWebviewMessage = async (
 				if (message.updatedSettings.destructiveCommandGuardEnabled === true) {
 					try {
 						const { ensureDcgInstalled } = await import("../../services/destructive-command-guard")
+						signal?.throwIfAborted()
 						const binaryPath = await ensureDcgInstalled(provider.context.globalStorageUri.fsPath)
+						signal?.throwIfAborted()
 						if (!binaryPath) {
 							message.updatedSettings.destructiveCommandGuardEnabled = false
 							vscode.window.showErrorMessage(t("common:errors.destructiveCommandGuard.unavailable"))
 						}
 					} catch (error) {
+						signal?.throwIfAborted()
 						message.updatedSettings.destructiveCommandGuardEnabled = false
 						vscode.window.showErrorMessage(
 							t("common:errors.destructiveCommandGuard.enableFailed", {
@@ -800,6 +806,7 @@ const handleWebviewMessage = async (
 				const pendingSettings = new Set(Object.keys(message.updatedSettings))
 				try {
 					for (const [key, value] of Object.entries(message.updatedSettings)) {
+						signal?.throwIfAborted()
 						let newValue = value
 
 						if (key === "language") {
@@ -911,10 +918,13 @@ const handleWebviewMessage = async (
 							}
 						}
 
+						signal?.throwIfAborted()
 						await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
+						signal?.throwIfAborted()
 						pendingSettings.delete(key)
 					}
 				} catch (error) {
+					signal?.throwIfAborted()
 					// Earlier entries may already be saved. Keep the remaining keys retryable.
 					// Escape untrusted keys and error names; values and error text may contain secrets.
 					provider.log(
@@ -2381,7 +2391,12 @@ const handleWebviewMessage = async (
 		case "upsertApiConfiguration":
 			await saveSetting("apiConfiguration", async () => {
 				if (message.text && message.apiConfiguration) {
-					const id = await provider.upsertProviderProfile(message.text, message.apiConfiguration)
+					const id = await provider.upsertProviderProfile(
+						message.text,
+						message.apiConfiguration,
+						true,
+						signal,
+					)
 					// The provider returns undefined when persistence fails.
 					if (message.requestId && id === undefined) throw new Error()
 				} else if (message.requestId) {
@@ -2835,6 +2850,7 @@ const handleWebviewMessage = async (
 			const thisUpdate = telemetrySettingQueue
 				.catch(() => undefined)
 				.then(async () => {
+					signal?.throwIfAborted()
 					const telemetrySetting = message.text as TelemetrySetting
 					const previousSetting = getGlobalState("telemetrySetting") || "unset"
 					const isOptedIn = isTelemetryOptedIn(telemetrySetting)
@@ -2851,6 +2867,7 @@ const handleWebviewMessage = async (
 					// captureTelemetrySettingsChanged calls above/below still track the user's
 					// stored preference transition on its own, independent of that live toggle.
 					await updateGlobalState("telemetrySetting", telemetrySetting)
+					signal?.throwIfAborted()
 
 					if (TelemetryService.hasInstance()) {
 						TelemetryService.instance.updateTelemetryState(isOptedIn && vscode.env.isTelemetryEnabled)
@@ -2873,6 +2890,7 @@ const handleWebviewMessage = async (
 				await vscode.workspace
 					.getConfiguration(Package.name)
 					.update("debug", message.bool ?? false, vscode.ConfigurationTarget.Global)
+				signal?.throwIfAborted()
 				await provider.postStateToWebview()
 			})
 			break

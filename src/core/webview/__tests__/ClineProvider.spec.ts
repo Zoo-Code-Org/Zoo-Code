@@ -34,6 +34,7 @@ import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 import { ClineProvider } from "../ClineProvider"
 import { webviewMessageHandler } from "../webviewMessageHandler"
+import { enqueueSettingsSave } from "../settingsSaveQueue"
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { MessageManager } from "../../message-manager"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../../api/providers/fetchers/lmstudio"
@@ -536,10 +537,7 @@ describe("ClineProvider", () => {
 				cspSource: "vscode-webview://test-csp-source",
 			},
 			visible: true,
-			onDidDispose: vi.fn().mockImplementation((callback) => {
-				callback()
-				return { dispose: vi.fn() }
-			}),
+			onDidDispose: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 			onDidChangeVisibility: vi.fn().mockImplementation(() => {
 				return { dispose: vi.fn() }
 			}),
@@ -670,6 +668,87 @@ describe("ClineProvider", () => {
 			const target = await resolveChatProvider(provider.webviewFocusTracker)
 			await target?.handleCodeAction("addToContext", "ADD_TO_CONTEXT", { selectedText: "selected code" })
 		}
+
+		test.each(["provider", "sidebar"] as const)(
+			"cancels saves immediately on %s disposal and stops a blocked batch",
+			async (target) => {
+				let release!: () => void
+				const blocked = new Promise<void>((resolve) => {
+					release = resolve
+				})
+				const write = vi.spyOn(provider.contextProxy, "setValue").mockImplementationOnce(() => blocked)
+				const saving = webviewMessageHandler(provider, {
+					type: "updateSettings",
+					updatedSettings: { soundVolume: 0.2, tableStriped: true },
+				})
+				const queued = webviewMessageHandler(provider, {
+					type: "updateSettings",
+					updatedSettings: { soundVolume: 0.8 },
+				})
+				const cancelled = Promise.all([
+					expect(saving).rejects.toMatchObject({ name: "AbortError" }),
+					expect(queued).rejects.toMatchObject({ name: "AbortError" }),
+				])
+				if (target === "provider") {
+					await provider.dispose()
+				} else {
+					sidebar.disposed.fire()
+				}
+				await cancelled
+				await expect(
+					webviewMessageHandler(provider, {
+						type: "updateSettings",
+						updatedSettings: { soundVolume: 0.9 },
+					}),
+				).rejects.toMatchObject({ name: "AbortError" })
+				release()
+				// Another provider sharing the context is a barrier for the cancelled batch.
+				await enqueueSettingsSave(provider.contextProxy, new AbortController().signal, async () => {})
+				expect(write).toHaveBeenCalledTimes(1)
+				expect(write).toHaveBeenCalledWith("soundVolume", 0.2)
+				write.mockRestore()
+			},
+		)
+
+		test("stops an active profile save after disposal during a profile metadata read", async () => {
+			let release!: () => void
+			const list = vi.spyOn(provider.providerSettingsManager, "listConfig").mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						release = () => resolve([])
+					}),
+			)
+			const write = vi.spyOn(provider.contextProxy, "setValue")
+			const saving = webviewMessageHandler(provider, {
+				type: "upsertApiConfiguration",
+				text: "saved-profile",
+				apiConfiguration: {},
+			})
+			await vi.waitFor(() => expect(list).toHaveBeenCalled())
+			const cancelled = expect(saving).rejects.toMatchObject({ name: "AbortError" })
+			sidebar.disposed.fire()
+			await cancelled
+			release()
+			await enqueueSettingsSave(provider.contextProxy, new AbortController().signal, async () => {})
+			expect(write).not.toHaveBeenCalled()
+			list.mockRestore()
+			write.mockRestore()
+		})
+
+		test("allows settings saves when a disposed sidebar is resolved again", async () => {
+			const oldSignal = provider.settingsSaveSignal
+			sidebar.disposed.fire()
+			expect(oldSignal.aborted).toBe(true)
+			await provider.resolveWebviewView(createView().view)
+			expect(provider.settingsSaveSignal.aborted).toBe(false)
+			const write = vi.spyOn(provider.contextProxy, "setValue").mockResolvedValue(undefined)
+			await webviewMessageHandler(provider, {
+				type: "updateSettings",
+				updatedSettings: { tableStriped: true },
+			})
+			expect(write).toHaveBeenCalledWith("tableStriped", true)
+			write.mockRestore()
+		})
 
 		test("reports current visibility independently of panel activation", () => {
 			expect(provider.isViewVisible).toBe(true)

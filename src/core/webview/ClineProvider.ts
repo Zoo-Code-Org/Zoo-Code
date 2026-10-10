@@ -230,6 +230,11 @@ export class ClineProvider
 	private taskEventListeners: WeakMap<Task, Array<() => void>> = new WeakMap()
 	private currentWorkspacePath: string | undefined
 	private _disposed = false
+	private settingsSaveController = new AbortController()
+
+	public get settingsSaveSignal(): AbortSignal {
+		return this.settingsSaveController.signal
+	}
 	private readonly _postStateToWebviewThrottled = debounce(
 		async () => {
 			try {
@@ -814,6 +819,7 @@ export class ClineProvider
 	- https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
 	*/
 	private clearWebviewResources() {
+		this.settingsSaveController.abort()
 		this.rejectPendingThemeFixtureProbes(new Error("Webview was disposed before the theme fixture probe completed"))
 		while (this.webviewDisposables.length) {
 			const x = this.webviewDisposables.pop()
@@ -840,6 +846,7 @@ export class ClineProvider
 		}
 
 		this._disposed = true
+		this.settingsSaveController.abort()
 		this._postStateToWebviewThrottled.cancel()
 		this.log("Disposing ClineProvider...")
 
@@ -1016,6 +1023,10 @@ export class ClineProvider
 	}
 
 	async resolveWebviewView(webviewView: vscode.WebviewView | vscode.WebviewPanel) {
+		if (this._disposed) return
+		if (this.settingsSaveController.signal.aborted) {
+			this.settingsSaveController = new AbortController()
+		}
 		this.view = webviewView
 		const inTabMode = "onDidChangeViewState" in webviewView
 
@@ -1699,8 +1710,14 @@ export class ClineProvider
 	 * @param webview A reference to the extension webview
 	 */
 	private setWebviewMessageListener(webview: vscode.Webview) {
-		const onReceiveMessage = async (message: WebviewMessage) =>
-			webviewMessageHandler(this, message, this.marketplaceManager)
+		const onReceiveMessage = async (message: WebviewMessage) => {
+			const signal = this.settingsSaveSignal
+			try {
+				await webviewMessageHandler(this, message, this.marketplaceManager)
+			} catch (error) {
+				if (!signal.aborted || error !== signal.reason) throw error
+			}
+		}
 
 		const messageDisposable = webview.onDidReceiveMessage(onReceiveMessage)
 		this.webviewDisposables.push(messageDisposable)
@@ -1876,9 +1893,12 @@ export class ClineProvider
 		name: string,
 		providerSettings: ProviderSettings,
 		activate: boolean = true,
+		saveSignal?: AbortSignal,
 	): Promise<string | undefined> {
 		try {
-			return await this.enqueueProviderProfileMutation(async (signal) => {
+			return await this.enqueueProviderProfileMutation(async (mutationSignal) => {
+				const signal = saveSignal ? AbortSignal.any([mutationSignal, saveSignal]) : mutationSignal
+				signal.throwIfAborted()
 				// TODO: Do we need to be calling `activateProfile`? It's not
 				// clear to me what the source of truth should be; in some cases
 				// we rely on the `ContextProxy`'s data store and in other cases
@@ -1890,6 +1910,8 @@ export class ClineProvider
 
 				if (activate) {
 					const { mode } = await this.getState()
+					const listApiConfigMeta = await this.providerSettingsManager.listConfig()
+					signal.throwIfAborted()
 
 					// These promises do the following:
 					// 1. Adds or updates the list of provider profiles.
@@ -1902,12 +1924,13 @@ export class ClineProvider
 					// We should probably switch to that and verify that it works.
 					// I left the original implementation in just to be safe.
 					await Promise.all([
-						this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+						this.updateGlobalState("listApiConfigMeta", listApiConfigMeta),
 						this.updateGlobalState("currentApiConfigName", name),
 						this.providerSettingsManager.setModeConfig(mode, id),
 						this.contextProxy.setProviderSettings(providerSettings),
 					])
 
+					signal.throwIfAborted()
 					// Change the provider for the current task.
 					// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
 					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
@@ -1915,13 +1938,17 @@ export class ClineProvider
 					// Keep the current task's sticky provider profile in sync with the newly-activated profile.
 					await this.persistStickyProviderProfileToCurrentTask(name)
 				} else {
-					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
+					const listApiConfigMeta = await this.providerSettingsManager.listConfig()
+					signal.throwIfAborted()
+					await this.updateGlobalState("listApiConfigMeta", listApiConfigMeta)
 				}
 
+				signal.throwIfAborted()
 				await this.postStateToWebview()
 				return id
 			})
 		} catch (error) {
+			saveSignal?.throwIfAborted()
 			this.log(
 				`Error create new api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 			)
