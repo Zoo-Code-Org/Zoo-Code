@@ -293,43 +293,58 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 		const isWriteProtected = task.rooProtectedController?.isWriteProtected(relPath) || false
 
+		// Declared outside the setup boundary below: the write body's try block reads it after the
+		// setup succeeded, and a block-scoped declaration would not be visible there.
 		let fileExists: boolean
-		const absolutePath = path.resolve(task.cwd, relPath)
+		let sharedMessageProps: ClineSayTool
 
-		if (task.diffViewProvider.editType !== undefined) {
-			fileExists = task.diffViewProvider.editType === "modify"
-		} else {
-			fileExists = await fileExistsAtPath(absolutePath)
-			task.diffViewProvider.editType = fileExists ? "modify" : "create"
-		}
+		// The setup below awaits before the write's own try/catch begins. A rejection there (an
+		// EACCES/EROFS from createDirectoriesForFile, a failing filesystem probe) would otherwise
+		// escape execute() with this task's stream entry and its TaskAborted listener still
+		// registered, so the map would keep the task alive and a later write could reuse a stale
+		// stream state. Release and rethrow: BaseTool.handle() still reports the error exactly
+		// once, and no diff view is open yet, so there is no preview to discard.
+		try {
+			const absolutePath = path.resolve(task.cwd, relPath)
 
-		// Create parent directories early for new files to prevent ENOENT errors
-		// in subsequent operations (e.g., diffViewProvider.open, fs.readFile)
-		if (!fileExists) {
-			await createDirectoriesForFile(absolutePath)
-		}
+			if (task.diffViewProvider.editType !== undefined) {
+				fileExists = task.diffViewProvider.editType === "modify"
+			} else {
+				fileExists = await fileExistsAtPath(absolutePath)
+				task.diffViewProvider.editType = fileExists ? "modify" : "create"
+			}
 
-		if (newContent.startsWith("```")) {
-			newContent = newContent.split("\n").slice(1).join("\n")
-		}
+			// Create parent directories early for new files to prevent ENOENT errors
+			// in subsequent operations (e.g., diffViewProvider.open, fs.readFile)
+			if (!fileExists) {
+				await createDirectoriesForFile(absolutePath)
+			}
 
-		if (newContent.endsWith("```")) {
-			newContent = newContent.split("\n").slice(0, -1).join("\n")
-		}
+			if (newContent.startsWith("```")) {
+				newContent = newContent.split("\n").slice(1).join("\n")
+			}
 
-		if (!task.api.getModel().id.includes("claude")) {
-			newContent = unescapeHtmlEntities(newContent)
-		}
+			if (newContent.endsWith("```")) {
+				newContent = newContent.split("\n").slice(0, -1).join("\n")
+			}
 
-		const fullPath = relPath ? path.resolve(task.cwd, relPath) : ""
-		const isOutsideWorkspace = isPathOutsideWorkspace(fullPath)
+			if (!task.api.getModel().id.includes("claude")) {
+				newContent = unescapeHtmlEntities(newContent)
+			}
 
-		const sharedMessageProps: ClineSayTool = {
-			tool: fileExists ? "editedExistingFile" : "newFileCreated",
-			path: getReadablePath(task.cwd, relPath),
-			content: newContent,
-			isOutsideWorkspace,
-			isProtected: isWriteProtected,
+			const fullPath = relPath ? path.resolve(task.cwd, relPath) : ""
+			const isOutsideWorkspace = isPathOutsideWorkspace(fullPath)
+
+			sharedMessageProps = {
+				tool: fileExists ? "editedExistingFile" : "newFileCreated",
+				path: getReadablePath(task.cwd, relPath),
+				content: newContent,
+				isOutsideWorkspace,
+				isProtected: isWriteProtected,
+			}
+		} catch (error) {
+			this.releasePartialStreamBookkeeping(task)
+			throw error
 		}
 
 		try {
@@ -433,6 +448,20 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				await this.finalizePartialToolAskAfterFailure(task, pendingPartialAsk)
 			}
 			await handleError("writing file", error as Error)
+			// A preview that never got its approved write to disk holds unapproved content: discard
+			// it before reset() drops the state the discard depends on. This is also the teardown for
+			// a saveChanges() that rejected mid-write - the placeholder is still owned by this edit,
+			// because saveChanges() releases ownership only once the save lands - so the discard is
+			// what removes the empty or half-written new file.
+			if (task.diffViewProvider.isEditing) {
+				const discardError = await this.discardUnapprovedStreamBeforeReset(task)
+				if (discardError) {
+					await task.say(
+						"error",
+						`write_to_file could not discard the unapproved preview after the failed write: ${discardError.message}`,
+					)
+				}
+			}
 			await task.diffViewProvider.reset()
 			this.releasePartialStreamBookkeeping(task)
 			return
@@ -579,8 +608,19 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				this.releasePartialStreamBookkeeping(task)
 			}
 			if (task.diffViewProvider.isEditing) {
-				await this.discardUnapprovedStreamBeforeReset(task)
+				const discardError = await this.discardUnapprovedStreamBeforeReset(task)
 				await this.resetDiffViewAfterWrite(task)
+				if (discardError) {
+					// Two failures, two channels. The exception this delta produced stays the primary one:
+					// BaseTool.handle() reports it unchanged, so wrapping it here would change the failure
+					// the caller sees. The discard failure is a separate, actionable condition - the
+					// placeholder or the created directories are still on disk and the buffer may still hold
+					// unapproved content - so it gets its own report instead of only a console line.
+					await task.say(
+						"error",
+						`write_to_file could not discard the unapproved preview after the failed stream: ${discardError.message}`,
+					)
+				}
 			}
 			throw error
 		}

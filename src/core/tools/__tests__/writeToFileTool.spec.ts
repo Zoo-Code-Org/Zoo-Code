@@ -449,7 +449,14 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 			expect(mockCline.ask).toHaveBeenCalledTimes(1)
-			expect(mockCline.once).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+			// One listener per task, not one per delta, and the teardown must deregister THAT function:
+			// expect.any(Function) would also pass a tool that registered twice or removed a
+			// different callback and left the real listener attached.
+			const registrations = mockCline.once.mock.calls.filter(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)
+			expect(registrations).toHaveLength(1)
+			expect(mockCline.once).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
 
 			abortCleanup?.()
 			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
@@ -599,6 +606,55 @@ describe("writeToFileTool", () => {
 
 			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
 			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(expectedPartialToolMessage)
+		})
+
+		it("discards the unapproved preview when the approved write itself fails", async () => {
+			// saveChanges() releases placeholder ownership only once the write lands, so a rejected
+			// save leaves this edit owning an empty or half-written new file. The catch has to run
+			// the discard - the only teardown that removes what this edit created - before reset()
+			// drops the state the discard reads.
+			mockCline.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
+			mockCline.diffViewProvider.isEditing = true
+
+			await executeWriteFileTool({})
+
+			const discardOrder = mockCline.diffViewProvider.discardUnapprovedStream.mock.invocationCallOrder[0]
+			const resetOrder = mockCline.diffViewProvider.reset.mock.invocationCallOrder[0]
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			expect(discardOrder).toBeLessThan(resetOrder)
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+		})
+
+		it("reports a discard that fails during the write teardown", async () => {
+			// The discard is the last thing standing between an abandoned create and debris on
+			// disk. If it throws, the user still has to learn the file may be left behind - a
+			// console line is not a report.
+			mockCline.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.discardUnapprovedStream.mockRejectedValue(
+				new Error("EPERM: operation not permitted"),
+			)
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			try {
+				await executeWriteFileTool({})
+
+				expect(mockCline.say).toHaveBeenCalledWith(
+					"error",
+					expect.stringContaining("could not discard the unapproved preview after the failed write"),
+				)
+				expect(mockCline.say).toHaveBeenCalledWith(
+					"error",
+					expect.stringContaining("EPERM: operation not permitted"),
+				)
+				// The write failure stays the reported failure; the discard failure is additional.
+				expect(mockHandleError).toHaveBeenCalledWith(
+					"writing file",
+					expect.objectContaining({ message: "save failed" }),
+				)
+			} finally {
+				errorSpy.mockRestore()
+			}
 		})
 	})
 
@@ -953,6 +1009,98 @@ describe("writeToFileTool", () => {
 				"handling partial write_to_file",
 				expect.objectContaining({ message: "provider state unavailable" }),
 			)
+		})
+
+		it("reports a discard failure without replacing the error the delta produced", async () => {
+			// The delta failed in the pre-streaming setup, and the discard of the preview an
+			// earlier delta left open failed too. Two failures, two channels: BaseTool.handle()
+			// must still report THIS delta's error - wrapping it would change the failure the
+			// caller sees - while the discard failure (debris still on disk) gets its own report.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockRejectedValue(new Error("provider state unavailable")),
+			})
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.discardUnapprovedStream.mockRejectedValue(
+				new Error("EPERM: operation not permitted"),
+			)
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			try {
+				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+				expect(mockCline.say).toHaveBeenCalledWith(
+					"error",
+					expect.stringContaining("could not discard the unapproved preview after the failed stream"),
+				)
+				expect(mockCline.say).toHaveBeenCalledWith(
+					"error",
+					expect.stringContaining("EPERM: operation not permitted"),
+				)
+				const reported = mockHandleError.mock.calls.find(
+					([context]) => context === "handling partial write_to_file",
+				)?.[1] as Error
+				expect(reported.message).toBe("provider state unavailable")
+				expect(reported.name).toBe("Error")
+			} finally {
+				errorSpy.mockRestore()
+			}
+		})
+
+		it("leaves a replacement stream state alone when the delta it replaced resumes", async () => {
+			// Liveness is object identity, not key presence: a test that only clears the entry
+			// passes for an implementation that checks the key. Here a new stream takes over the
+			// same task key while the old delta awaits the filesystem, so the resumed delta must
+			// neither continue its side effects nor write through the replacement's entry.
+			let releaseGate: (() => void) | undefined
+			const gate = new Promise<void>((resolve) => {
+				releaseGate = resolve
+			})
+			// The path must be stabilized by an earlier delta before handlePartial() touches the
+			// filesystem, which is also what registers this task's entry.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			mockedCreateDirectoriesForFile.mockImplementationOnce(() => gate.then(() => []))
+			const streaming = executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await new Promise<void>((resolve) => setImmediate(resolve))
+			expect(mockedCreateDirectoriesForFile).toHaveBeenCalledTimes(1)
+
+			const key = writeToFileTool["getPartialStreamFailureKey"](mockCline as never) as string
+			writeToFileTool["resetTaskPartialState"](mockCline as never)
+			const replacement = writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			replacement.streamFailed = false
+			releaseGate?.()
+			await streaming
+
+			expect(mockCline.ask).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].get(key)).toBe(replacement)
+			expect(replacement.streamFailed).toBe(false)
+			expect(replacement.streamError).toBeUndefined()
+		})
+
+		it("releases the stream state when the setup before the write boundary rejects", async () => {
+			// execute() creates the parent directories for a new file before its write boundary
+			// begins. An EACCES there used to escape execute() entirely - BaseTool.handle() only
+			// reports it - so the map kept this task's entry and its abort listener alive, and a
+			// later write could inherit a stale stream state.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			mockedCreateDirectoriesForFile.mockRejectedValueOnce(new Error("EACCES: permission denied"))
+
+			// The failure itself keeps travelling the path it always took: the boundary releases
+			// and rethrows, so the caller still sees the original error and nothing reports it twice.
+			await expect(executeWriteFileTool({})).rejects.toThrow("EACCES: permission denied")
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			expect(mockHandleError).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
 		})
 
 		it("reports the captured stream error once when the finalized block fails to parse", async () => {
