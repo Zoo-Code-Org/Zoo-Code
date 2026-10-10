@@ -138,6 +138,35 @@ function _stagingDir(dir: string): string {
 	return sd
 }
 
+/** Remove this write's own staging directory, retrying once and reporting the exact path
+ * when it still fails. Shared by the success and the failure path so neither one silently
+ * discards a cleanup failure: an ENOTEMPTY from a racing writer, an EPERM while a handle
+ * inside the directory is still being released, or a transient filesystem error leaves a
+ * concrete directory on disk that no caller can find again. A cleanup failure must never
+ * un-commit a published file and must never replace the original write error, so it travels
+ * through the warning sink carrying the path a later cleanup pass needs. */
+async function _releaseStagingDir(stagingDir: string, warn: (message: string) => void): Promise<void> {
+	let cleanupError: unknown = null
+	// Retry once: Windows reports EPERM while a handle inside the directory is still being
+	// released, and the second attempt usually succeeds.
+	try {
+		await fs.rmdir(stagingDir)
+		return
+	} catch {
+		try {
+			await fs.rmdir(stagingDir)
+			return
+		} catch (secondError: unknown) {
+			cleanupError = secondError
+		}
+	}
+	warn(
+		`safeWriteText: could not remove the staging directory ${stagingDir} (${
+			cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+		}); it is left in place for a later cleanup pass`,
+	)
+}
+
 function _fsyncFile(fd: number): void {
 	fsSync.fsyncSync(fd)
 }
@@ -608,9 +637,10 @@ export async function safeWriteText(
 		// Best-effort: remove the now-empty staging directory. Self-staged
 		// writes only, and only this write's own directory: a per-write directory
 		// cannot be the one another concurrent write is still using. A failure must
-		// never un-commit a published file, so the removal swallows all errors.
+		// never un-commit a published file, so it is reported through the warning sink with
+		// the leftover path instead of being swallowed.
 		if (stagingDir) {
-			await fs.rmdir(stagingDir).catch(() => {})
+			await _releaseStagingDir(stagingDir, warn)
 		}
 	} catch (originalError: unknown) {
 		// The backup is a COPY taken before the commit, never a rename of the target,
@@ -661,9 +691,11 @@ export async function safeWriteText(
 
 		// A failed self-staged write must not leave its staging directory behind.
 		// Only the directory this write created, and only after its temp file is
-		// gone, so the directory is empty and the removal stays best-effort.
+		// gone, so the directory is empty and the removal stays best-effort: the original
+		// write error keeps propagating, and a directory that still cannot be removed is
+		// reported with its path rather than discarded.
 		if (stagingDir) {
-			await fs.rmdir(stagingDir).catch(() => {})
+			await _releaseStagingDir(stagingDir, warn)
 		}
 
 		if (daclDumpPath !== null) {

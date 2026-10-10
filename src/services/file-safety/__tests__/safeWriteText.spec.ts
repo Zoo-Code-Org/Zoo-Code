@@ -67,6 +67,14 @@ function _fileStats(isLink: boolean): fsSync.Stats {
 	s.isFile = () => !isLink
 	return s
 }
+// Directory stand-in: neither a symlink nor a regular file. The symlink double short-circuits
+// on isSymbolicLink(), so only this double reaches the branch that rejects any other file type.
+function _notARegularFileStats(): fsSync.Stats {
+	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats
+	s.isSymbolicLink = () => false
+	s.isFile = () => false
+	return s
+}
 
 // fs.BigIntStats is a type-only export (fs.BigIntStats is undefined at runtime), so the stand-in is
 // a Stats object carrying bigint ino/dev - exactly what fs.lstat(path, { bigint: true }) hands
@@ -200,18 +208,50 @@ describe("safeWriteText", () => {
 			expect(fs.rmdir).not.toHaveBeenCalled()
 		})
 
-		it("a failed staging-dir removal never fails the committed write", async () => {
+		it("retries a failed staging-dir removal, never fails the committed write, and reports the exact path", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
+			const warnings: string[] = []
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 			vi.mocked(fs.rmdir).mockRejectedValue(Object.assign(new Error("ENOTEMPTY"), { code: "ENOTEMPTY" }))
 
-			await expect(safeWriteText(targetPath, "hello", { platform: "linux" })).resolves.toBeUndefined()
+			await expect(
+				safeWriteText(targetPath, "hello", { platform: "linux", onWarning: (m) => warnings.push(m) }),
+			).resolves.toBeUndefined()
 
-			// the commit rename still happened and the rmdir error was swallowed
+			// the commit rename still happened, and the removal was retried once
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
-			expect(fs.rmdir).toHaveBeenCalledTimes(1)
-			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
+			expect(fs.rmdir).toHaveBeenCalledTimes(2)
+			const stagingDirs = vi.mocked(fsSync.mkdirSync).mock.calls.map((call) => String(call[0]))
+			expect(stagingDirs.length).toBe(1)
+			expect(fs.rmdir).toHaveBeenNthCalledWith(1, stagingDirs[0])
+			expect(fs.rmdir).toHaveBeenNthCalledWith(2, stagingDirs[0])
+			// the leftover is not swallowed: the exact directory path reaches the warning sink
+			const reported = warnings.filter((m) => m.includes(stagingDirs[0]))
+			expect(reported).toHaveLength(1)
+			expect(reported[0]).toContain("could not remove the staging directory")
+		})
+
+		it("reports a staging directory it could not remove after a failed write, without replacing the write error", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			const warnings: string[] = []
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// The commit rename fails, and the post-failure cleanup then fails twice.
+			vi.mocked(fs.rename).mockRejectedValue(new Error("ENOSPC"))
+			vi.mocked(fs.rmdir).mockRejectedValue(Object.assign(new Error("EPERM"), { code: "EPERM" }))
+
+			await expect(
+				safeWriteText(targetPath, "data", { platform: "linux", onWarning: (m) => warnings.push(m) }),
+			).rejects.toThrow("ENOSPC")
+
+			const stagingDirs = vi.mocked(fsSync.mkdirSync).mock.calls.map((call) => String(call[0]))
+			expect(stagingDirs.length).toBe(1)
+			expect(fs.rmdir).toHaveBeenCalledTimes(2)
+			expect(fs.rmdir).toHaveBeenNthCalledWith(2, stagingDirs[0])
+			const reported = warnings.filter((m) => m.includes(stagingDirs[0]))
+			expect(reported).toHaveLength(1)
+			expect(reported[0]).toContain("could not remove the staging directory")
 		})
 
 		it("gives each self-staged write its own staging directory so a concurrent write cannot remove it", async () => {
@@ -1291,6 +1331,28 @@ describe("caller-supplied staging path", () => {
 		).rejects.toThrow(StagingPathError)
 		expect(fsSync.openSync).not.toHaveBeenCalled()
 		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("rejects a staging path that is a directory rather than a regular file", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const supplied = "/tmp/test-dir/staging-dir"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		// The symlink double above short-circuits on isSymbolicLink(), so the "another file
+		// type" branch is only reachable through a path that is neither link nor file. A
+		// directory would otherwise be renamed over the target, publishing a directory in
+		// place of the file.
+		vi.mocked(fs.lstat).mockResolvedValue(_notARegularFileStats())
+
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: supplied, platform: "linux" }),
+		).rejects.toThrow("Staging file must be a regular file, not another file type")
+		expect(fsSync.openSync).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+		expect(fs.unlink).not.toHaveBeenCalled()
+		// The rejection names the path the caller has to clean up.
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: supplied, platform: "linux" }),
+		).rejects.toMatchObject({ stagingPath: path.resolve(supplied) })
 	})
 
 	it("rejects a staging path that is the target itself", async () => {
