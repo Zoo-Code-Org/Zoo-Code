@@ -38,3 +38,32 @@ describe("alwaysDenyUnapprovedCommands global setting", () => {
 		expect(() => globalSettingsSchema.parse({ alwaysDenyUnapprovedCommands: "true" })).toThrow()
 	})
 })
+describe("viewStates global setting", () => {
+	it("accepts a persisted per-view record", () => {
+		const parsed = globalSettingsSchema.parse({
+			viewStates: {
+				"view-1": { mode: "architect", currentApiConfigName: "profile-a", updatedAt: 1_700_000_000_000 },
+			},
+		})
+
+		expect(GLOBAL_SETTINGS_KEYS).toContain("viewStates")
+		expect(parsed.viewStates?.["view-1"]).toEqual({
+			mode: "architect",
+			currentApiConfigName: "profile-a",
+			updatedAt: 1_700_000_000_000,
+		})
+	})
+
+	it("accepts an empty entry because every field is optional", () => {
+		const parsed = globalSettingsSchema.parse({ viewStates: { "view-1": {} } })
+
+		expect(parsed.viewStates?.["view-1"]).toEqual({})
+	})
+
+	it("rejects malformed fields, non-object entries and non-record values", () => {
+		expect(() => globalSettingsSchema.parse({ viewStates: { "view-1": { mode: 7 } } })).toThrow()
+		expect(() => globalSettingsSchema.parse({ viewStates: { "view-1": { updatedAt: "now" } } })).toThrow()
+		expect(() => globalSettingsSchema.parse({ viewStates: { "view-1": "architect" } })).toThrow()
+		expect(() => globalSettingsSchema.parse({ viewStates: "view-1" })).toThrow()
+	})
+})

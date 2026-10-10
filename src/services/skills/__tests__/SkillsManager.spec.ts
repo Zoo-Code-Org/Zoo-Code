@@ -1,4 +1,5 @@
 import * as path from "path"
+import type { FileSystemWatcher } from "vscode"
 
 // Use vi.hoisted to ensure mocks are available during hoisting
 const {
@@ -1755,5 +1756,63 @@ Instructions`)
 			// Verify directory was NOT cleaned up (still has other skills)
 			expect(mockRmdir).not.toHaveBeenCalled()
 		})
+	})
+})
+describe("SkillsManager disposal during initialization", () => {
+	it("does not create a file watcher when disposal lands during discovery", async () => {
+		const vscode = await import("vscode")
+		const watchers: { dispose: () => void }[] = []
+		const createWatcher = vi.mocked(vscode.workspace.createFileSystemWatcher)
+		// Captured so the finally block can hand the file's original mock back rather than
+		// leaving this test's implementation behind for later tests.
+		const originalWatcherImpl = createWatcher.getMockImplementation()
+		createWatcher.mockImplementation(() => {
+			const watcher = { onDidChange: vi.fn(), onDidCreate: vi.fn(), onDidDelete: vi.fn(), dispose: vi.fn() }
+			watchers.push(watcher)
+			// The watcher path only touches the three event hooks and dispose; the full VS Code
+			// FileSystemWatcher interface has more members this unit never calls.
+			return watcher as unknown as FileSystemWatcher
+		})
+		mockDirectoryExists.mockResolvedValue(true)
+		const previousEnv = process.env.NODE_ENV
+		delete process.env.NODE_ENV
+
+		const manager = new SkillsManager({
+			cwd: PROJECT_DIR,
+			customModesManager: { getCustomModes: vi.fn().mockResolvedValue([]) },
+		} as unknown as ClineProvider)
+		// Discovery is what the disposal races against: it settles only after dispose ran.
+		let releaseDiscovery!: () => void
+		vi.spyOn(manager, "discoverSkills").mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					releaseDiscovery = resolve
+				}),
+		)
+
+		try {
+			const initializing = manager.initialize()
+			await manager.dispose()
+			releaseDiscovery()
+			await initializing
+		} finally {
+			// Restoring after an await would skip the restore when initialize or dispose rejects,
+			// and assigning undefined writes the string "undefined" rather than unsetting.
+			if (previousEnv === undefined) {
+				delete process.env.NODE_ENV
+			} else {
+				process.env.NODE_ENV = previousEnv
+			}
+			createWatcher.mockReset()
+			if (originalWatcherImpl) {
+				createWatcher.mockImplementation(originalWatcherImpl)
+			}
+		}
+
+		// Two facts asserted apart: nothing was created after the disposal, and nothing created is
+		// left undisposed. A single "no leak" assertion would pass a build that created watchers and
+		// never disposed them.
+		expect(createWatcher).not.toHaveBeenCalled()
+		expect(watchers.filter((w) => vi.mocked(w.dispose).mock.calls.length === 0)).toHaveLength(0)
 	})
 })
