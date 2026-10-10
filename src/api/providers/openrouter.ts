@@ -43,6 +43,7 @@ import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
 type OpenRouterChatCompletionParams = OpenAI.Chat.ChatCompletionCreateParams & {
 	transforms?: string[]
 	include_reasoning?: boolean
+	session_id?: string
 	// https://openrouter.ai/docs/use-cases/reasoning-tokens
 	reasoning?: OpenRouterReasoningParams
 }
@@ -129,6 +130,7 @@ interface CompletionUsage {
 	prompt_tokens?: number
 	prompt_tokens_details?: {
 		cached_tokens?: number
+		cache_write_tokens?: number
 	}
 	total_tokens?: number
 	cost?: number
@@ -297,19 +299,28 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 			})
 		}
 
-		// https://openrouter.ai/docs/features/prompt-caching
-		// TODO: Add a `promptCacheStratey` field to `ModelInfo`.
-		if (OPEN_ROUTER_PROMPT_CACHING_MODELS.has(modelId)) {
-			if (modelId.startsWith("google")) {
-				addGeminiCacheBreakpoints(systemPrompt, openAiMessages)
-			} else {
-				addAnthropicCacheBreakpoints(systemPrompt, openAiMessages)
-			}
+		// Anthropic models require explicit cache breakpoints through OpenRouter.
+		// Prefer live capability metadata so newly released Claude models receive
+		// cache markers without a client update. Keep the legacy allowlist as a
+		// fallback for models whose cached metadata predates cache-pricing fields.
+		if (
+			modelId.startsWith("anthropic/") &&
+			(model.info.supportsPromptCache || OPEN_ROUTER_PROMPT_CACHING_MODELS.has(modelId))
+		) {
+			addAnthropicCacheBreakpoints(systemPrompt, openAiMessages)
+		} else if (modelId.startsWith("google/") && OPEN_ROUTER_PROMPT_CACHING_MODELS.has(modelId)) {
+			// Preserve the existing explicit-breakpoint behavior for the Gemini
+			// models where Zoo has historically enabled it. Newer Gemini models use
+			// OpenRouter's implicit caching and do not need explicit markers.
+			addGeminiCacheBreakpoints(systemPrompt, openAiMessages)
 		}
 
 		// https://openrouter.ai/docs/transforms
 		const completionParams: OpenRouterChatCompletionParams = {
 			model: modelId,
+			// OpenRouter added provider sticky routing for prompt caches. A stable
+			// task ID pins all turns to the endpoint holding this task's warm cache.
+			...(metadata?.taskId ? { session_id: metadata.taskId } : {}),
 			...(maxTokens && maxTokens > 0 && { max_tokens: maxTokens }),
 			temperature,
 			top_p: topP,
@@ -535,6 +546,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 				inputTokens: lastUsage.prompt_tokens || 0,
 				outputTokens: lastUsage.completion_tokens || 0,
 				cacheReadTokens: lastUsage.prompt_tokens_details?.cached_tokens,
+				cacheWriteTokens: lastUsage.prompt_tokens_details?.cache_write_tokens,
 				reasoningTokens: lastUsage.completion_tokens_details?.reasoning_tokens,
 				totalCost: (lastUsage.cost_details?.upstream_inference_cost || 0) + (lastUsage.cost || 0),
 			}
