@@ -1054,11 +1054,21 @@ describe("McpHub", () => {
 
 		describe("symlink policy on MCP settings writes", () => {
 			it("refuses a symlinked target when deleteServer omits the source but the server is a project server", async () => {
-				vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({ mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"] } } }))
+				vi.mocked(fs.readFile).mockResolvedValue(
+					JSON.stringify({
+						mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"] } },
+					}),
+				)
 				mcpHub.connections = [
 					{
 						type: "connected",
-						server: { name: "test-server", type: "stdio", command: "node", args: ["test.js"], source: "project" },
+						server: {
+							name: "test-server",
+							type: "stdio",
+							command: "node",
+							args: ["test.js"],
+							source: "project",
+						},
 						client: {},
 						transport: {},
 					} as unknown as ConnectedMcpConnection,
@@ -1074,11 +1084,23 @@ describe("McpHub", () => {
 			})
 
 			it("refuses a symlinked target for a project toggleToolAlwaysAllow write", async () => {
-				vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({ mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"], alwaysAllow: [] } } }))
+				vi.mocked(fs.readFile).mockResolvedValue(
+					JSON.stringify({
+						mcpServers: {
+							"test-server": { type: "stdio", command: "node", args: ["test.js"], alwaysAllow: [] },
+						},
+					}),
+				)
 				mcpHub.connections = [
 					{
 						type: "connected",
-						server: { name: "test-server", type: "stdio", command: "node", args: ["test.js"], source: "project" },
+						server: {
+							name: "test-server",
+							type: "stdio",
+							command: "node",
+							args: ["test.js"],
+							source: "project",
+						},
 						client: {},
 						transport: {},
 					} as unknown as ConnectedMcpConnection,
@@ -1091,11 +1113,23 @@ describe("McpHub", () => {
 			})
 
 			it("leaves the global toggleToolAlwaysAllow write free to follow a symlink", async () => {
-				vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({ mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"], alwaysAllow: [] } } }))
+				vi.mocked(fs.readFile).mockResolvedValue(
+					JSON.stringify({
+						mcpServers: {
+							"test-server": { type: "stdio", command: "node", args: ["test.js"], alwaysAllow: [] },
+						},
+					}),
+				)
 				mcpHub.connections = [
 					{
 						type: "connected",
-						server: { name: "test-server", type: "stdio", command: "node", args: ["test.js"], source: "global" },
+						server: {
+							name: "test-server",
+							type: "stdio",
+							command: "node",
+							args: ["test.js"],
+							source: "global",
+						},
 						client: {},
 						transport: {},
 					} as unknown as ConnectedMcpConnection,
@@ -1829,14 +1863,27 @@ describe("McpHub", () => {
 
 		describe("updateServerTimeout", () => {
 			it("refuses a symlinked target for a project-scoped timeout write", async () => {
-				vi.mocked(fs.readFile).mockResolvedValueOnce(JSON.stringify({ mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"], timeout: 60 } } }))
+				vi.mocked(fs.readFile).mockResolvedValueOnce(
+					JSON.stringify({
+						mcpServers: {
+							"test-server": { type: "stdio", command: "node", args: ["test.js"], timeout: 60 },
+						},
+					}),
+				)
 				// The SDK client/transport are never touched by this write path (it reads only
 				// server.name and server.source), so the literal is projected onto the connection
 				// type through unknown rather than adding another `as any` to this file.
 				mcpHub.connections = [
 					{
 						type: "connected",
-						server: { name: "test-server", type: "stdio", command: "node", args: ["test.js"], timeout: 60, source: "project" },
+						server: {
+							name: "test-server",
+							type: "stdio",
+							command: "node",
+							args: ["test.js"],
+							timeout: 60,
+							source: "project",
+						},
 						client: {},
 						transport: {},
 					} as unknown as ConnectedMcpConnection,
@@ -1852,11 +1899,24 @@ describe("McpHub", () => {
 			})
 
 			it("still follows a symlink for the global settings write", async () => {
-				vi.mocked(fs.readFile).mockResolvedValueOnce(JSON.stringify({ mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"], timeout: 60 } } }))
+				vi.mocked(fs.readFile).mockResolvedValueOnce(
+					JSON.stringify({
+						mcpServers: {
+							"test-server": { type: "stdio", command: "node", args: ["test.js"], timeout: 60 },
+						},
+					}),
+				)
 				mcpHub.connections = [
 					{
 						type: "connected",
-						server: { name: "test-server", type: "stdio", command: "node", args: ["test.js"], timeout: 60, source: "global" },
+						server: {
+							name: "test-server",
+							type: "stdio",
+							command: "node",
+							args: ["test.js"],
+							timeout: 60,
+							source: "global",
+						},
 						client: {},
 						transport: {},
 					} as unknown as ConnectedMcpConnection,
