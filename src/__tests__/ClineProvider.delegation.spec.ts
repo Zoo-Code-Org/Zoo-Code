@@ -31,6 +31,8 @@ function makeStoreStub(
 			return []
 		}),
 		get: vi.fn().mockReturnValue(undefined),
+		markLocallyActive: vi.fn(),
+		markLocallyInactive: vi.fn(),
 		...overrides,
 	}
 }
@@ -787,6 +789,8 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 				current = updater(current)
 				return [current]
 			}),
+			markLocallyActive: vi.fn(),
+			markLocallyInactive: vi.fn(),
 			clearPendingActionIfMatching: vi.fn(async (_taskId: string, actionId: string) => {
 				if (current.pendingAction?.kind === "create_subtask" && current.pendingAction.actionId === actionId) {
 					current = { ...current, pendingAction: undefined }
@@ -874,6 +878,8 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 				get: vi.fn(() => interruptedParent),
 				atomicReadAndUpdate,
 				clearPendingActionIfMatching,
+				markLocallyActive: vi.fn(),
+				markLocallyInactive: vi.fn(),
 			},
 		} as unknown as ClineProvider
 
@@ -938,6 +944,8 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 				get: vi.fn(() => interruptedParent),
 				atomicReadAndUpdate,
 				clearPendingActionIfMatching,
+				markLocallyActive: vi.fn(),
+				markLocallyInactive: vi.fn(),
 			},
 		} as unknown as ClineProvider
 
@@ -1003,6 +1011,8 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 				get: vi.fn(() => interruptedParent),
 				atomicReadAndUpdate,
 				clearPendingActionIfMatching,
+				markLocallyActive: vi.fn(),
+				markLocallyInactive: vi.fn(),
 			},
 		} as unknown as ClineProvider
 
@@ -1070,6 +1080,8 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 					return []
 				}),
 				clearPendingActionIfMatching,
+				markLocallyActive: vi.fn(),
+				markLocallyInactive: vi.fn(),
 			},
 		} as unknown as ClineProvider
 
@@ -1137,6 +1149,8 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 					return []
 				}),
 				clearPendingActionIfMatching,
+				markLocallyActive: vi.fn(),
+				markLocallyInactive: vi.fn(),
 			},
 		} as unknown as ClineProvider
 
@@ -1221,6 +1235,8 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 				}),
 				clearPendingActionIfMatching,
 				deleteMany: vi.fn().mockResolvedValue(undefined),
+				markLocallyActive: vi.fn(),
+				markLocallyInactive: vi.fn(),
 			},
 		} as unknown as ClineProvider
 

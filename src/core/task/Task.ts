@@ -65,6 +65,7 @@ import { CloudService } from "@roo-code/cloud"
 import { ApiHandler, ApiHandlerCreateMessageMetadata, buildApiHandler } from "../../api"
 import { ApiStream, GroundingSource } from "../../api/transform/stream"
 import { maybeRemoveImageBlocks } from "../../api/transform/image-cleaning"
+import { type ReasoningDetail } from "../../api/transform/openai-format"
 import { OutputTokenLimitError } from "../../api/providers/utils/output-token-limit-error"
 
 // shared
@@ -267,6 +268,75 @@ type AssistantMessagePersistenceCancellation = {
 	cancelled: boolean
 	promise: Promise<void>
 	resolve: () => void
+}
+
+/**
+ * OpenAI Responses API reasoning summary element (e.g. `{ type: "summary_text", text }`).
+ * Derived from the installed `openai` SDK types rather than restated locally.
+ */
+type ReasoningSummaryItem = NonNullable<OpenAI.Responses.ResponseReasoningItem["summary"]>[number]
+
+/**
+ * Reasoning content block stored at the head of an assistant message's `content` array by
+ * OpenAI-family providers. It is not part of the Anthropic `ContentBlockParam` union, so the
+ * conversation-history builder handles it as a parallel block variant.
+ */
+type ReasoningContentBlockParam = {
+	type: "reasoning"
+	id?: string
+	summary?: ReasoningSummaryItem[]
+	encrypted_content?: string
+	text?: string
+}
+
+/** A `ReasoningContentBlockParam` whose encrypted payload is confirmed present. */
+type EncryptedReasoningContentBlockParam = ReasoningContentBlockParam & { encrypted_content: string }
+
+function asEncryptedReasoningContentBlockParam(
+	block: { type?: string } | undefined,
+): EncryptedReasoningContentBlockParam | undefined {
+	if (!block || block.type !== "reasoning") {
+		return undefined
+	}
+	const candidate = block as ReasoningContentBlockParam
+	return typeof candidate.encrypted_content === "string" ? (candidate as EncryptedReasoningContentBlockParam) : undefined
+}
+
+function asPlainTextReasoningContentBlockParam(
+	block: { type?: string } | undefined,
+): (ReasoningContentBlockParam & { text: string }) | undefined {
+	if (!block || block.type !== "reasoning") {
+		return undefined
+	}
+	const candidate = block as ReasoningContentBlockParam
+	return typeof candidate.text === "string" ? (candidate as ReasoningContentBlockParam & { text: string }) : undefined
+}
+
+type ReasoningItemForRequest = {
+	type: "reasoning"
+	encrypted_content: string
+	id?: string
+	summary?: ReasoningSummaryItem[]
+}
+
+/** Assistant message carrying OpenRouter-style reasoning details (Gemini 3, etc.). */
+type MessageParamWithReasoningDetails = Anthropic.Messages.MessageParam & {
+	reasoning_details?: ReasoningDetail[]
+}
+
+/** Entry shape produced by `buildCleanConversationHistory`: regular messages plus the two reasoning variants. */
+type CleanConversationHistoryEntry =
+	| Anthropic.Messages.MessageParam
+	| ReasoningItemForRequest
+	| MessageParamWithReasoningDetails
+
+/**
+ * Error shape providers surface during retries: an optional HTTP status plus an optional
+ * Google-RPC-style `errorDetails` array (e.g. the RetryInfo entry sent on HTTP 429).
+ */
+interface BackoffApiError extends Error {
+	status?: number
+	errorDetails?: { "@type"?: string; retryDelay?: string }[]
 }
 
 export class PendingActionSettlementError extends Error {
@@ -478,6 +548,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private abortPromise?: Promise<void>
 	private disposalPromise?: Promise<void>
 	private diffReversionPromise: Promise<void> = Promise.resolve()
+
+	/**
+	 * Delegated-child liveness heartbeat. While a child task streams a turn its
+	 * history file can legitimately go quiet for minutes (no saves between long
+	 * model generations), which used to let startup/periodic reconciliation in
+	 * another window — or this window after an extension-host restart, before
+	 * any local-ownership claim — misjudge the live child as a crash orphan and
+	 * repair it to `interrupted`, severing the delegation link. A throttled
+	 * `lastActivityAt` write is the durable signal that the owning session is
+	 * still alive. One minute keeps the signal comfortably inside the store's
+	 * 5-minute liveness threshold even with jittered ticks.
+	 */
+	private static readonly LIVENESS_HEARTBEAT_INTERVAL_MS = 60 * 1000
+	private livenessHeartbeatInterval?: NodeJS.Timeout
 
 	// Checkpoints
 	enableCheckpoints: boolean
@@ -808,16 +892,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (startTask) {
 			this._started = true
 			this.startIdleTelemetryCheck()
+			// Validate BEFORE starting the liveness heartbeat: the throw branch
+			// is unreachable in production (the constructor guard above fires
+			// first), but if it ever did fire it must not leak the unref'd
+			// heartbeat interval.
+			if (!task && !images && !historyItem) {
+				throw new Error("Either historyItem or task/images must be provided")
+			}
+			this.startLivenessHeartbeat()
 			if (task || images) {
 				void this.startTask(task, images).catch((error) => {
 					console.error("[Task#constructor] startTask failed:", error)
 				})
-			} else if (historyItem) {
+			} else {
 				void this.resumeTaskFromHistory().catch((error) => {
 					console.error("[Task#constructor] resumeTaskFromHistory failed:", error)
 				})
-			} else {
-				throw new Error("Either historyItem or task/images must be provided")
 			}
 		}
 	}
@@ -2887,6 +2977,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 		this._started = true
 		this.startIdleTelemetryCheck()
+		this.startLivenessHeartbeat()
 
 		const { task, images } = this.metadata
 
@@ -2912,6 +3003,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 		this._started = true
 		this.startIdleTelemetryCheck()
+		this.startLivenessHeartbeat()
 
 		const { task, images } = this.metadata
 
@@ -3456,6 +3548,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			console.error("Error flushing shutdown telemetry:", error)
 		}
 
+		// A disposed task must stop claiming liveness: a trailing heartbeat
+		// would keep reconciliation from repairing a genuinely orphaned child.
+		this.stopLivenessHeartbeat()
+
+		// Release the local session ownership claim: a disposed task no longer
+		// runs in this window, and a stale `locallyActiveTaskIds` entry would
+		// silently exclude the id from in-window orphan repair for the window's
+		// lifetime. A non-active status write already drops the claim; teardown
+		// paths that write no status are covered here. Best-effort, like the
+		// heartbeat: disposal must never fail on the store.
+		try {
+			this.providerRef.deref()?.taskHistoryStore.markLocallyInactive(this.taskId)
+		} catch (error) {
+			console.warn(`[Task#dispose] Failed to release local ownership for task ${this.taskId}:`, error)
+		}
+
 		// A task being disposed is no longer serving requests: set the same
 		// cancellation state `abortTask()` sets, synchronously before the aborts
 		// below, so the request-construction guard (`abort || abandoned` in
@@ -3548,7 +3656,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			throw new Error("Provider not available")
 		}
 
-		const child = await (provider as any).delegateParentAndOpenChild({
+		const child = await provider.delegateParentAndOpenChild({
 			parentTaskId: this.taskId,
 			message,
 			initialTodos,
@@ -3587,6 +3695,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Mark as initialized and active
 		this.isInitialized = true
 		this.emit(RooCodeEventName.TaskActive, this.taskId)
+
+		// This is a launch entry like start()/run(): a nested-delegation resume
+		// re-activates a delegated parent that may itself be an awaited child,
+		// and the whole-lifetime liveness heartbeat must cover it from this
+		// point on. Idempotent — a task that never stopped heartbeating keeps
+		// its interval.
+		this.startLivenessHeartbeat()
 
 		// Load conversation history if not already loaded
 		if (this.apiConversationHistory.length === 0) {
@@ -4119,7 +4234,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										}
 
 										// Store the ID for native protocol
-										;(partialToolUse as any).id = event.id
+										partialToolUse.id = event.id
 
 										// Add to content and present
 										this.assistantMessageContent.push(partialToolUse)
@@ -4166,7 +4281,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 											const toolUseIndex = this.streamingToolCallIndices.get(streamingKey)
 											if (toolUseIndex !== undefined) {
 												// Store the ID for native protocol
-												;(partialToolUse as any).id = event.id
+												partialToolUse.id = event.id
 
 												// Update the existing tool use with new partial data
 												this.assistantMessageContent[toolUseIndex] = partialToolUse
@@ -4587,7 +4702,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 						if (finalToolUse) {
 							// Store the tool call ID
-							;(finalToolUse as any).id = event.id
+							finalToolUse.id = event.id
 
 							// Get the index and replace partial with final
 							if (toolUseIndex !== undefined) {
@@ -4621,7 +4736,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								existingToolUse.nativeArgs = undefined
 								existingToolUse.params = {}
 								// Ensure it has the ID for native protocol
-								;(existingToolUse as any).id = event.id
+								existingToolUse.id = event.id
 							}
 
 							// Clean up tracking using compound key
@@ -5126,10 +5241,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		})()
 	}
 
-	private getCurrentProfileId(state: any): string {
+	private getCurrentProfileId(
+		state: Pick<ExtensionState, "currentApiConfigName" | "listApiConfigMeta"> | undefined,
+	): string {
 		return (
-			state?.listApiConfigMeta?.find((profile: any) => profile.name === state?.currentApiConfigName)?.id ??
-			"default"
+			state?.listApiConfigMeta?.find(
+				// Stryker disable next-line OptionalChaining: equivalent mutant — the find callback only
+				// runs when state is non-nullish, so removing the inner `?.` cannot change behavior.
+				(profile) => profile.name === state?.currentApiConfigName,
+			)?.id ?? "default"
 		)
 	}
 
@@ -5814,7 +5934,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	// Shared exponential backoff for retries (first-chunk and mid-stream)
-	private async backoffAndAnnounce(retryAttempt: number, error: any): Promise<void> {
+	private async backoffAndAnnounce(retryAttempt: number, error: BackoffApiError): Promise<void> {
 		try {
 			const state = await this.providerRef.deref()?.getState()
 			const baseDelay = state?.requestDelaySeconds || 5
@@ -5836,7 +5956,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Prefer RetryInfo on 429 if present
 			if (error?.status === 429) {
 				const retryInfo = error?.errorDetails?.find(
-					(d: any) => d["@type"] === "type.googleapis.com/google.rpc.RetryInfo",
+					(d) => d["@type"] === "type.googleapis.com/google.rpc.RetryInfo",
 				)
 				const match = retryInfo?.retryDelay?.match?.(/^(\d+)s$/)
 				if (match) {
@@ -5897,17 +6017,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private buildCleanConversationHistory(
 		messages: ApiMessage[],
 		requestModelInfo: ModelInfo,
-	): Array<
-		Anthropic.Messages.MessageParam | { type: "reasoning"; encrypted_content: string; id?: string; summary?: any[] }
-	> {
-		type ReasoningItemForRequest = {
-			type: "reasoning"
-			encrypted_content: string
-			id?: string
-			summary?: any[]
-		}
-
-		const cleanConversationHistory: (Anthropic.Messages.MessageParam | ReasoningItemForRequest)[] = []
+	): CleanConversationHistoryEntry[] {
+		const cleanConversationHistory: CleanConversationHistoryEntry[] = []
 
 		for (const msg of messages) {
 			// Standalone reasoning: send encrypted, skip plain text
@@ -5956,26 +6067,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						role: "assistant",
 						content: assistantContent,
 						reasoning_details: msgWithDetails.reasoning_details,
-					} as any)
+					})
 
 					continue
 				}
 
 				// Embedded reasoning: encrypted (send) or plain text (skip)
-				const hasEncryptedReasoning =
-					first && (first as any).type === "reasoning" && typeof (first as any).encrypted_content === "string"
-				const hasPlainTextReasoning =
-					first && (first as any).type === "reasoning" && typeof (first as any).text === "string"
+				const encryptedReasoning = asEncryptedReasoningContentBlockParam(first)
+				const plainTextReasoning = asPlainTextReasoningContentBlockParam(first)
 
-				if (hasEncryptedReasoning) {
-					const reasoningBlock = first as any
-
+				if (encryptedReasoning) {
 					// Send as separate reasoning item (OpenAI Native)
 					cleanConversationHistory.push({
 						type: "reasoning",
-						summary: reasoningBlock.summary ?? [],
-						encrypted_content: reasoningBlock.encrypted_content,
-						...(reasoningBlock.id ? { id: reasoningBlock.id } : {}),
+						summary: encryptedReasoning.summary ?? [],
+						encrypted_content: encryptedReasoning.encrypted_content,
+						...(encryptedReasoning.id ? { id: encryptedReasoning.id } : {}),
 					})
 
 					// Send assistant message without reasoning
@@ -5995,7 +6102,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					} satisfies Anthropic.Messages.MessageParam)
 
 					continue
-				} else if (hasPlainTextReasoning) {
+				} else if (plainTextReasoning) {
 					// Check if the model's preserveReasoning flag is set, resolved from
 					// the request's threaded model snapshot (same per-request source as
 					// the prompt and tool arrays) rather than a fresh getModel() re-read,
@@ -6145,6 +6252,66 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		// Don't hold the process open just for this timer.
 		this.idleTelemetryCheckInterval?.unref?.()
+	}
+
+	/**
+	 * Start the delegated-child liveness heartbeat for the task's whole active
+	 * lifetime. No-op for non-child tasks: only an active child awaited by a
+	 * delegated parent is at risk of reconcile orphan-repair, so standalone
+	 * tasks never pay the write cost. Idempotent — a second call while a
+	 * heartbeat is already running leaves the existing interval in place.
+	 *
+	 * The heartbeat intentionally outlives individual streaming rounds: a
+	 * quiet-but-alive child that is running a long tool call or awaiting a
+	 * user ask writes nothing to its history file for minutes, and both the
+	 * peer-window startup pass and the periodic delegation tick would
+	 * otherwise read stale mtime AND stale/absent `lastActivityAt` and
+	 * misrepair the live link (the #1495 bug class).
+	 */
+	private startLivenessHeartbeat(): void {
+		if (this.livenessHeartbeatInterval !== undefined || !this.parentTaskId) {
+			return
+		}
+		this.livenessHeartbeatInterval = setInterval(() => {
+			void this.recordLivenessHeartbeat()
+		}, Task.LIVENESS_HEARTBEAT_INTERVAL_MS)
+		// Don't hold the process open just for this timer.
+		this.livenessHeartbeatInterval.unref?.()
+	}
+
+	/**
+	 * Stop the liveness heartbeat. Safe to call when none is running.
+	 */
+	private stopLivenessHeartbeat(): void {
+		if (this.livenessHeartbeatInterval !== undefined) {
+			clearInterval(this.livenessHeartbeatInterval)
+			this.livenessHeartbeatInterval = undefined
+		}
+	}
+
+	/**
+	 * One heartbeat beat: persist `lastActivityAt` for this task so
+	 * reconciliation sees the session as alive. Skipped once the task was
+	 * cancelled/abandoned — a stale trailing beat must not claim life the
+	 * session no longer has. The store additionally refuses to bump a record
+	 * whose persisted status is not active, so a completed/interrupted child
+	 * is never falsely claimed even before disposal stops this interval.
+	 * Failures are logged, never thrown: a heartbeat must never disturb the
+	 * turn it reports on.
+	 */
+	private async recordLivenessHeartbeat(): Promise<void> {
+		if (this.abort || this.abandoned) {
+			return
+		}
+		const provider = this.providerRef.deref()
+		if (!provider) {
+			return
+		}
+		try {
+			await provider.taskHistoryStore.recordTaskActivity(this.taskId)
+		} catch (error) {
+			console.warn(`[Task#${this.taskId}] Failed to persist liveness heartbeat:`, error)
+		}
 	}
 
 	// Getters
