@@ -415,18 +415,18 @@ describe("Task.run() idempotency", () => {
 		// shared registry would let a parent read authorize a subtask write, and one task
 		// clearing its registry would revoke the other task authorization. The field is an
 		// instance initializer, so this asserts the ownership rather than the type.
-	const first = new Task({
-		provider: mockProvider as unknown as ClineProvider,
-		apiConfiguration: mockApiConfiguration,
-		task: "first",
-		startTask: false,
-	})
-	const second = new Task({
-		provider: mockProvider as unknown as ClineProvider,
-		apiConfiguration: mockApiConfiguration,
-		task: "second",
-		startTask: false,
-	})
+		const first = new Task({
+			provider: mockProvider as unknown as ClineProvider,
+			apiConfiguration: mockApiConfiguration,
+			task: "first",
+			startTask: false,
+		})
+		const second = new Task({
+			provider: mockProvider as unknown as ClineProvider,
+			apiConfiguration: mockApiConfiguration,
+			task: "second",
+			startTask: false,
+		})
 
 		expect(first.observationRegistry).not.toBe(second.observationRegistry)
 		first.observationRegistry.observe("/same/path.ts", "1:2:22:100:100", true)

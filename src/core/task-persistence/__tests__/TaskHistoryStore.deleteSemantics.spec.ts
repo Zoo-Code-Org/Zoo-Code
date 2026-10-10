@@ -603,7 +603,9 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			// One id fails at the lock, the other at the unlink: both outcomes count as
 			// "not deleted", and neither may be treated as gone.
 			vi.mocked(withFileLock).mockRejectedValueOnce(new Error("lock acquisition timed out"))
-			vi.mocked(fs.unlink).mockRejectedValueOnce(Object.assign(new Error("EBUSY: resource busy"), { code: "EBUSY" }))
+			vi.mocked(fs.unlink).mockRejectedValueOnce(
+				Object.assign(new Error("EBUSY: resource busy"), { code: "EBUSY" }),
+			)
 
 			const failure = await store
 				.deleteMany(["all-a", "all-b"])

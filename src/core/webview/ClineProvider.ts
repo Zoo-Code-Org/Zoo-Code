@@ -205,11 +205,7 @@ type GetStateOptions = {
  * partially-built receivers (the delegation specs call the prototype method with a stub
  * `this`), where a method lookup on the receiver would fail.
  */
-async function removeTaskArtifacts(
-	taskIds: string[],
-	globalStorageDir: string,
-	workspaceDir: string,
-): Promise<void> {
+async function removeTaskArtifacts(taskIds: string[], globalStorageDir: string, workspaceDir: string): Promise<void> {
 	const { getTaskDirectoryPath } = await import("../../utils/storage")
 
 	for (const taskId of taskIds) {

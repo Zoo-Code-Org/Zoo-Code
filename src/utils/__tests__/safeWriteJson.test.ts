@@ -707,18 +707,20 @@ describe("safeWriteJson", () => {
 		// proper-lockfile and the capture never sees a call. The error class is taken from
 		// the same module instance the SUT came from.
 		vi.resetModules()
-		const { safeWriteJson: reimported, ConfinedPathEscapeError: ReimportedError } = await import(
-			"../safeWriteJson"
-		)
+		const { safeWriteJson: reimported, ConfinedPathEscapeError: ReimportedError } = await import("../safeWriteJson")
 
 		try {
-			await expect(
-				reimported(outside, { mcpServers: {} }, { confineTo: projectDir }),
-			).rejects.toThrow(ReimportedError)
+			await expect(reimported(outside, { mcpServers: {} }, { confineTo: projectDir })).rejects.toThrow(
+				ReimportedError,
+			)
 
 			// The confinement verdict came first: no lock was ever attempted.
 			expect(lockCalls).toEqual([])
-			expect((await fs.readdir(tempDir)).filter(function (entry: string) { return entry.endsWith(".lock") })).toEqual([])
+			expect(
+				(await fs.readdir(tempDir)).filter(function (entry: string) {
+					return entry.endsWith(".lock")
+				}),
+			).toEqual([])
 		} finally {
 			vi.doUnmock("proper-lockfile")
 			vi.resetModules()
@@ -742,7 +744,11 @@ describe("safeWriteJson", () => {
 
 		// Nothing was created outside the scope, and no lock was attempted there.
 		expect(fsSyncActual.existsSync(missingParent)).toBe(false)
-		expect((await fs.readdir(tempDir)).filter(function (entry: string) { return entry.endsWith(".lock") })).toEqual([])
+		expect(
+			(await fs.readdir(tempDir)).filter(function (entry: string) {
+				return entry.endsWith(".lock")
+			}),
+		).toEqual([])
 	})
 
 	test.skipIf(process.platform === "win32")(
@@ -758,16 +764,18 @@ describe("safeWriteJson", () => {
 			const projectConfig = path.join(projectDir, "mcp.json")
 			await fs.symlink(outside, projectConfig)
 
-			await expect(
-				safeWriteJson(projectConfig, { mcpServers: {} }, { confineTo: projectDir }),
-			).rejects.toThrow(ConfinedPathEscapeError)
+			await expect(safeWriteJson(projectConfig, { mcpServers: {} }, { confineTo: projectDir })).rejects.toThrow(
+				ConfinedPathEscapeError,
+			)
 
 			// The linked file is untouched and nothing was staged beside it.
 			expect(JSON.parse(await fsSyncActual.promises.readFile(outside, "utf8"))).toEqual({ secret: "original" })
 			const entries = await fs.readdir(tempDir)
 			expect(entries).toContain("outside.json")
 			expect(
-				entries.filter((entry) => entry.includes(".new_") || entry.includes("safeWriteText") || entry.endsWith(".lock")),
+				entries.filter(
+					(entry) => entry.includes(".new_") || entry.includes("safeWriteText") || entry.endsWith(".lock"),
+				),
 			).toEqual([])
 		},
 	)
@@ -784,7 +792,11 @@ describe("safeWriteJson", () => {
 
 			// Confining is about the scope, not about forbidding links: a link that stays
 			// inside the project still publishes to its referent.
-			await safeWriteJson(alias, { mcpServers: { local: { url: "http://localhost" } } }, { confineTo: projectDir })
+			await safeWriteJson(
+				alias,
+				{ mcpServers: { local: { url: "http://localhost" } } },
+				{ confineTo: projectDir },
+			)
 
 			expect(JSON.parse(await fsSyncActual.promises.readFile(referent, "utf8"))).toEqual({
 				mcpServers: { local: { url: "http://localhost" } },
@@ -827,5 +839,4 @@ describe("safeWriteJson", () => {
 			expect(await readFileContent(currentTestFilePath)).toEqual({ after: true })
 		},
 	)
-
 })
