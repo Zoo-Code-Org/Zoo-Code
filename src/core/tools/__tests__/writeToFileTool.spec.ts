@@ -1,5 +1,6 @@
 import * as path from "path"
 
+import { RooCodeEventName } from "@roo-code/types"
 import type { MockedFunction } from "vitest"
 
 import { fileExistsAtPath, createDirectoriesForFile } from "../../../utils/fs"
@@ -115,9 +116,18 @@ describe("writeToFileTool", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		writeToFileTool.resetPartialState()
+		// Per-task entries are released by the tool's own teardown paths (execute() exits, the
+		// handle() parse-failure hook, clearTaskState). The suite clears them explicitly so no
+		// test inherits another test's stream state or abort listener.
+		for (const state of [...writeToFileTool["taskPartialStreamState"].values()]) {
+			writeToFileTool.clearTaskState(state.task)
+		}
 
 		mockedPathResolve.mockReturnValue(absoluteFilePath)
 		mockedFileExistsAtPath.mockResolvedValue(false)
+		// vi.clearAllMocks() keeps the last mock implementation; reset the factory default here
+		// so no test depends on declaration order or an earlier test's rejection.
+		mockedCreateDirectoriesForFile.mockResolvedValue([])
 		mockedIsPathOutsideWorkspace.mockReturnValue(false)
 		mockedGetReadablePath.mockReturnValue("test/path.txt")
 		mockedUnescapeHtmlEntities.mockImplementation((content) => {
@@ -128,6 +138,8 @@ describe("writeToFileTool", () => {
 			return content
 		})
 
+		mockCline.taskId = "task-1"
+		mockCline.instanceId = "instance-1"
 		mockCline.cwd = "/"
 		mockCline.consecutiveMistakeCount = 0
 		mockCline.didEditFile = false
@@ -151,6 +163,9 @@ describe("writeToFileTool", () => {
 			update: vi.fn().mockResolvedValue(undefined),
 			reset: vi.fn().mockResolvedValue(undefined),
 			revertChanges: vi.fn().mockResolvedValue(undefined),
+			discardUnapprovedStream: vi.fn().mockResolvedValue(undefined),
+			adoptCreatedDirectories: vi.fn(),
+			removeAdoptedDirectories: vi.fn().mockResolvedValue(undefined),
 			saveChanges: vi.fn().mockResolvedValue({
 				newProblemsMessage: "",
 				userEdits: null,
@@ -186,8 +201,12 @@ describe("writeToFileTool", () => {
 		}
 		mockCline.say = vi.fn().mockResolvedValue(undefined)
 		mockCline.ask = vi.fn().mockResolvedValue(undefined)
+		mockCline.once = vi.fn()
+		mockCline.off = vi.fn()
+		mockCline.finalizePartialToolAsk = vi.fn().mockResolvedValue(undefined)
 		mockCline.recordToolError = vi.fn()
 		mockCline.sayAndCreateMissingParamError = vi.fn().mockResolvedValue("Missing param error")
+		mockCline.processQueuedMessages = vi.fn()
 
 		mockAskApproval = vi.fn().mockResolvedValue(true)
 		mockHandleError = vi.fn().mockResolvedValue(undefined)
@@ -418,6 +437,1049 @@ describe("writeToFileTool", () => {
 			expect(mockCline.ask).toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.open).toHaveBeenCalledWith(testFilePath)
 			expect(mockCline.diffViewProvider.update).toHaveBeenCalledWith(testContent, false)
+		})
+
+		it("cleans per-task partial state when the task aborts before execute finalization", async () => {
+			let abortCleanup: (() => void) | undefined
+			mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+				if (event === RooCodeEventName.TaskAborted) {
+					abortCleanup = listener
+				}
+				return mockCline
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+			// One listener per task, not one per delta, and the teardown must deregister THAT function:
+			// expect.any(Function) would also pass a tool that registered twice or removed a
+			// different callback and left the real listener attached.
+			const registrations = mockCline.once.mock.calls.filter(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)
+			expect(registrations).toHaveLength(1)
+			expect(mockCline.once).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
+
+			abortCleanup?.()
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(2)
+		})
+
+		it("does not treat a changed path between deltas as stabilized", async () => {
+			// Delta 1 streams "alpha.txt"; delta 2 streams "beta.txt" for the same task. The path changed
+			// between deltas, so it must not count as stabilized and no partial `tool` ask may be issued for
+			// the still-changing second path.
+			await executeWriteFileTool({ path: "alpha.txt" }, { isPartial: true })
+			await executeWriteFileTool({ path: "beta.txt" }, { isPartial: true })
+
+			expect(mockCline.ask).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("path stabilization predicate", () => {
+		// The predicate is exercised directly (it is private) because not all of its branches are
+		// observable through handlePartial(): an undefined path reaches the same early return either
+		// way, so the clause-by-clause behavior must be pinned at the predicate level.
+		function makeState(lastSeenPartialPath: string | undefined) {
+			return {
+				lastSeenPartialPath,
+				streamFailed: false,
+				streamError: undefined,
+				task: mockCline,
+				abortCleanup: () => {},
+			}
+		}
+
+		it("reports a first delta as not stabilized and records the seen path", () => {
+			const state = makeState(undefined)
+
+			expect(writeToFileTool["hasPathStabilizedForTask"](state, "a.txt")).toBe(false)
+			expect(state.lastSeenPartialPath).toBe("a.txt")
+		})
+
+		it("reports a repeated path as stabilized", () => {
+			const state = makeState("a.txt")
+
+			expect(writeToFileTool["hasPathStabilizedForTask"](state, "a.txt")).toBe(true)
+		})
+
+		it("reports a changed path as not stabilized", () => {
+			const state = makeState("a.txt")
+
+			expect(writeToFileTool["hasPathStabilizedForTask"](state, "b.txt")).toBe(false)
+			expect(state.lastSeenPartialPath).toBe("b.txt")
+		})
+	})
+
+	describe("resetPartialState", () => {
+		it("resets only the singleton path and leaves every task's stream state alone", async () => {
+			// The tool instance is a module-level singleton shared by concurrent tasks, so the
+			// base-class reset owns only lastSeenPartialPath. Clearing every task's entry from here
+			// would drop another task's streamFailed/streamError while it is still streaming; the
+			// per-task teardown (execute() exits, the parse-failure hook, clearTaskState) owns those.
+			let abortCleanup: (() => void) | undefined
+			mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+				if (event === RooCodeEventName.TaskAborted) {
+					abortCleanup = listener
+				}
+				return mockCline
+			})
+
+			// Seed one per-task state with an abort listener attached.
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+			expect(abortCleanup).toBeTypeOf("function")
+
+			writeToFileTool["lastSeenPartialPath"] = "stale-path"
+			writeToFileTool.resetPartialState()
+
+			expect(writeToFileTool["lastSeenPartialPath"]).toBeUndefined()
+			expect(mockCline.off).not.toHaveBeenCalled()
+			// The entry survives, and with it the per-task path stabilization: the next delta is
+			// still the same live stream, so it goes straight to the partial ask instead of
+			// restarting an un-stabilized sequence.
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(2)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			// The task-scoped teardown is what releases it.
+			writeToFileTool.clearTaskState(mockCline)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
+		})
+	})
+
+	describe("per-task stream state isolation", () => {
+		// A second task streaming through the same singleton while mockCline's execute()
+		// runs. Structural double, same pattern as the partial-state-cleanup spec.
+		function buildStreamingTask(taskId: string, instanceId: string) {
+			return {
+				taskId,
+				instanceId,
+				once: vi.fn(),
+				off: vi.fn(),
+				diffViewProvider: {
+					reset: vi.fn().mockResolvedValue(undefined),
+					revertChanges: vi.fn().mockResolvedValue(undefined),
+					discardUnapprovedStream: vi.fn().mockResolvedValue(undefined),
+					adoptCreatedDirectories: vi.fn(),
+					removeAdoptedDirectories: vi.fn().mockResolvedValue(undefined),
+				},
+				finalizePartialToolAsk: vi.fn().mockResolvedValue(undefined),
+			}
+		}
+
+		it("leaves another task's stream state intact when execute() completes", async () => {
+			const other = buildStreamingTask("task-2", "instance-2")
+			const otherState = writeToFileTool["getTaskPartialStreamState"](other as never)
+			otherState.streamFailed = true
+			otherState.streamError = new Error("other task stream failure")
+
+			await executeWriteFileTool({})
+
+			// The other task is still streaming: its failure state must survive, or its
+			// next delta re-opens the diff view and spawns a duplicate partial ask.
+			const retained = writeToFileTool["taskPartialStreamState"].get("task-2.instance-2")
+			expect(retained).toBeDefined()
+			expect(retained?.streamFailed).toBe(true)
+			expect(retained?.streamError?.message).toBe("other task stream failure")
+			expect(other.off).not.toHaveBeenCalled()
+		})
+
+		it("finalizes the partial ask when the write itself fails", async () => {
+			// Exact payload streamed as the partial tool ask for this scenario; a weaker
+			// matcher would pass a mutant that finalizes with the wrong text and still
+			// leaves the spinner stuck.
+			const expectedPartialToolMessage = JSON.stringify({
+				tool: "newFileCreated",
+				path: "test/path.txt",
+				content: testContent,
+				isOutsideWorkspace: false,
+				isProtected: false,
+			})
+			mockCline.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
+
+			await executeWriteFileTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(expectedPartialToolMessage)
+		})
+
+		it("discards the unapproved preview when the approved write itself fails", async () => {
+			// saveChanges() releases placeholder ownership only once the write lands, so a rejected
+			// save leaves this edit owning an empty or half-written new file. The catch has to run
+			// the discard - the only teardown that removes what this edit created - before reset()
+			// drops the state the discard reads.
+			mockCline.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
+			mockCline.diffViewProvider.isEditing = true
+
+			await executeWriteFileTool({})
+
+			const discardOrder = mockCline.diffViewProvider.discardUnapprovedStream.mock.invocationCallOrder[0]
+			const resetOrder = mockCline.diffViewProvider.reset.mock.invocationCallOrder[0]
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			expect(discardOrder).toBeLessThan(resetOrder)
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+		})
+
+		it("still releases the per-task state when the diff view reset fails during the write teardown", async () => {
+			// reset() sits between the failed write and the release. A reset that rejects must
+			// neither skip that release nor take over the failure the model is told about.
+			mockCline.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.reset.mockRejectedValue(new Error("reset failed"))
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			writeToFileTool["getTaskPartialStreamState"](mockCline)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			try {
+				await executeWriteFileTool({})
+
+				expect(mockHandleError).toHaveBeenCalledWith(
+					"writing file",
+					expect.objectContaining({ message: "save failed" }),
+				)
+				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			} finally {
+				errorSpy.mockRestore()
+				writeToFileTool["taskPartialStreamState"].clear()
+			}
+		})
+
+		it("reports a discard that fails during the write teardown", async () => {
+			// The discard is the last thing standing between an abandoned create and debris on
+			// disk. If it throws, the user still has to learn the file may be left behind - a
+			// console line is not a report.
+			mockCline.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.discardUnapprovedStream.mockRejectedValue(
+				new Error("EPERM: operation not permitted"),
+			)
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			try {
+				await executeWriteFileTool({})
+
+				expect(mockCline.say).toHaveBeenCalledWith(
+					"error",
+					expect.stringContaining("could not discard the unapproved preview after the failed write"),
+				)
+				expect(mockCline.say).toHaveBeenCalledWith(
+					"error",
+					expect.stringContaining("EPERM: operation not permitted"),
+				)
+				// The write failure stays the reported failure; the discard failure is additional.
+				expect(mockHandleError).toHaveBeenCalledWith(
+					"writing file",
+					expect.objectContaining({ message: "save failed" }),
+				)
+			} finally {
+				errorSpy.mockRestore()
+			}
+		})
+
+		it("finishes the teardown when the discard report itself cannot be delivered", async () => {
+			// Task.say() throws once the task is aborted. Awaiting the report unguarded let that
+			// rejection escape the catch, skipping the reset() and the bookkeeping release below -
+			// so the abort that made the report fail also leaked the state the report described.
+			mockCline.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.discardUnapprovedStream.mockRejectedValue(
+				new Error("EPERM: operation not permitted"),
+			)
+			mockCline.say.mockRejectedValue(new Error("task aborted"))
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			writeToFileTool["getTaskPartialStreamState"](mockCline)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			try {
+				await executeWriteFileTool({})
+
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+				expect(mockHandleError).toHaveBeenCalledWith(
+					"writing file",
+					expect.objectContaining({ message: "save failed" }),
+				)
+			} finally {
+				errorSpy.mockRestore()
+				mockCline.say.mockResolvedValue(undefined)
+				writeToFileTool["taskPartialStreamState"].clear()
+			}
+		})
+	})
+
+	describe("early-exit stream state cleanup", () => {
+		it("releases this task's stream state when the completed block fails to parse", async () => {
+			// The streaming deltas registered this task's entry; the finalized block then arrives
+			// without nativeArgs, so execute() never runs and none of its teardown runs either.
+			// Without a parse-failure boundary the entry and its TaskAborted listener survive for
+			// the rest of the task's life, and the diff view keeps unapproved partial content.
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			const block = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: {},
+				// No nativeArgs at all: that is what drives BaseTool's parse-failure path, where
+				// execute() and all of its teardown are skipped.
+			} as ToolUse<"write_to_file">
+			await writeToFileTool.handle(mockCline, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			// The stream may have left a diff view open with content that was never approved, so
+			// the teardown discards it: revertChanges() would SAVE that content to disk.
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			// Nothing was captured from the stream, so the parse error is still what the user sees.
+			expect(mockHandleError).toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
+		})
+
+		it("releases the per-task stream state when content is missing", async () => {
+			// The missing-content return sits before execute()'s guarded scope, so it needs its own
+			// release. The state is seeded first so the assertion proves a release happened rather
+			// than an empty map.
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			const toolUse = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: { path: testFilePath },
+				nativeArgs: { path: testFilePath, content: undefined },
+				// The fixture's point is a nativeArgs object whose content never arrived, which the
+				// typed params cannot express - hence the double assertion.
+				partial: false,
+			} as unknown as ToolUse<"write_to_file">
+			const pushToolResult = vi.fn()
+			await writeToFileTool.handle(mockCline, toolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult,
+			})
+
+			expect(mockCline.sayAndCreateMissingParamError).toHaveBeenCalledWith("write_to_file", "content")
+			expect(pushToolResult).toHaveBeenCalledWith("Missing param error")
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			// A stream may have opened a diff view for this call; the early return still closes it.
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+		})
+
+		it("releases the per-task stream state when the write completes", async () => {
+			// Seed first: without the seed the map is empty either way and the assertion is vacuous.
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			await executeWriteFileTool({})
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+		})
+
+		it("releases the per-task stream state when the write itself fails", async () => {
+			// The catch path tears down too: a failed write must not leave the entry (and its
+			// streamFailed guard) attached to the task.
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
+
+			await executeWriteFileTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+		})
+		it("releases the per-task stream state when a rooignore denial returns early", async () => {
+			// A partial delta creates the per-task state and registers the abort listener; the
+			// denial then returns before the cleanup, which used to leave both behind for the
+			// task's lifetime (a retained streamFailed also suppresses later diff previews).
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			// A partial delta is not gated by the access check, so the denied call can still be
+			// holding a preview: open() never consults rooignore.
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			mockCline.diffViewProvider.reset.mockClear()
+
+			await executeWriteFileTool({}, { accessAllowed: false })
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			// The exact listener this task registered, not just any function: a mismatched
+			// off() argument would leave the real listener attached.
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			// The denied preview must not survive for the next write to reuse.
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.discardUnapprovedStream.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.diffViewProvider.reset.mock.invocationCallOrder[0],
+			)
+		})
+
+		it("removes the directories a delta adopted before resetting a denied write", async () => {
+			// The first delta only records the path; a second delta on the same path is what stabilizes
+			// it, and only then does handlePartial() create the parent directories and hand them to the
+			// diff view. Empty content keeps that delta from opening a diff view, so the rooignore
+			// denial reaches the reset with isEditing false, and reset() drops the adopted list without
+			// touching disk - the directories of a write nobody approved would stay on disk.
+			const adoptedDirs = ["/mock-workspace/test/nested"]
+			mockedCreateDirectoriesForFile.mockResolvedValue(adoptedDirs)
+			await executeWriteFileTool({ content: "" }, { isPartial: true })
+			// The first delta stops at the stabilization gate, so nothing is adopted yet.
+			expect(mockCline.diffViewProvider.adoptCreatedDirectories).not.toHaveBeenCalled()
+			await executeWriteFileTool({ content: "" }, { isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			// The adopted list the cleanup below removes really holds directories: with only the first
+			// delta it is empty, the provider removes nothing, and the assertion below cannot fail.
+			expect(mockCline.diffViewProvider.adoptCreatedDirectories).toHaveBeenCalledWith(adoptedDirs)
+			expect(mockCline.diffViewProvider.isEditing).toBe(false)
+			mockCline.diffViewProvider.removeAdoptedDirectories.mockClear()
+			mockCline.diffViewProvider.reset.mockClear()
+
+			await executeWriteFileTool({}, { accessAllowed: false })
+
+			expect(mockCline.diffViewProvider.removeAdoptedDirectories).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			// The order is the fix: after the reset the adopted list is gone, so removing after it
+			// would find nothing and leave the directories behind.
+			expect(mockCline.diffViewProvider.removeAdoptedDirectories.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.diffViewProvider.reset.mock.invocationCallOrder[0],
+			)
+		})
+
+		it("removes the directories a delta adopted before the validation-rejection release", async () => {
+			// The same leak on the other exit that skips execute()'s teardown: the stabilized delta
+			// adopts directories without opening a diff view, then validateToolUse() rejects the
+			// completed block, so none of the normal cleanup runs.
+			const adoptedDirs = ["/mock-workspace/test/nested"]
+			mockedCreateDirectoriesForFile.mockResolvedValue(adoptedDirs)
+			await executeWriteFileTool({ content: "" }, { isPartial: true })
+			await executeWriteFileTool({ content: "" }, { isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			// Same reason as the test above: the adopted list has to hold something before the
+			// removal can mean anything.
+			expect(mockCline.diffViewProvider.adoptCreatedDirectories).toHaveBeenCalledWith(adoptedDirs)
+			expect(mockCline.diffViewProvider.isEditing).toBe(false)
+			mockCline.diffViewProvider.removeAdoptedDirectories.mockClear()
+			mockCline.diffViewProvider.reset.mockClear()
+
+			await writeToFileTool.releaseStreamAfterValidationRejection(mockCline)
+
+			expect(mockCline.diffViewProvider.removeAdoptedDirectories).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.removeAdoptedDirectories.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.diffViewProvider.reset.mock.invocationCallOrder[0],
+			)
+		})
+
+		it("releases the per-task stream state when a missing parameter returns early", async () => {
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			await writeToFileTool.execute({ path: "", content: "mock content" }, mockCline, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+		})
+
+		it("stops before the filesystem probe when the state is released while provider state is in flight", async () => {
+			// handlePartial() awaits provider.getState() before any side effect. A cancellation
+			// during that await runs the TaskAborted teardown; the delta already in flight must
+			// stop there instead of probing, asking and opening a diff view for a dead task.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn(async () => {
+					writeToFileTool.clearTaskState(mockCline)
+					return {}
+				}),
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("stops before the partial ask when the state is released during the filesystem probe", async () => {
+			// Same teardown, one await later. The first delta pins editType, so clear it to
+			// take the fileExistsAtPath branch again and abort inside it.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.editType = undefined
+			// mockImplementationOnce: executeWriteFileTool re-arms the default resolved value
+			// on every call, so a plain mockImplementation would be overwritten.
+			mockedFileExistsAtPath.mockImplementationOnce(async () => {
+				writeToFileTool.clearTaskState(mockCline)
+				return false
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("removes the directories it created when the stream is released during their creation", async () => {
+			// The delta creates the parent directories right after the probe and hands them to the
+			// diff view's cleanup state. A cancellation landing inside that creation leaves
+			// directories no teardown will visit: open() never ran, so the discard and the revert
+			// have no session to clean, and reset() drops the recorded list without touching disk.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			mockCline.diffViewProvider.editType = undefined
+			mockCline.diffViewProvider.adoptCreatedDirectories.mockClear()
+			mockCline.diffViewProvider.removeAdoptedDirectories.mockClear()
+			mockCline.diffViewProvider.open.mockClear()
+			const created = ["/mock-workspace/new-file/nested"]
+			// mockImplementationOnce: executeWriteFileTool re-arms the default resolved value
+			// on every call, so a plain mockImplementation would be overwritten.
+			mockedCreateDirectoriesForFile.mockImplementationOnce(async () => {
+				writeToFileTool.clearTaskState(mockCline)
+				return created
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.diffViewProvider.adoptCreatedDirectories).toHaveBeenCalledWith(created)
+			expect(mockCline.diffViewProvider.removeAdoptedDirectories).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+		})
+
+		it("stops before touching the diff view when the stream state is released during an in-flight ask", async () => {
+			// A cancellation while task.ask() is in flight runs the TaskAborted teardown. The
+			// delta that was already in flight must not then re-open the diff view for a task
+			// the user cancelled - that resurrects the state the teardown just released.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.update.mockClear()
+			mockCline.ask.mockImplementation(async () => {
+				writeToFileTool.clearTaskState(mockCline)
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("stops before updating the diff view when the task is cancelled while open() is in flight", async () => {
+			// open() is the first provider await after the partial ask. If TaskAborted lands
+			// while it is in flight, the teardown has already released this task's stream
+			// state (and may have reverted or closed this very view), so the delta that is
+			// already in flight must not stream partial content into a cancelled task's view.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(1)
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.update.mockClear()
+			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			mockCline.diffViewProvider.reset.mockClear()
+			mockCline.diffViewProvider.open.mockImplementationOnce(async () => {
+				// open() had already marked the session as editing when the abort landed - which
+				// is exactly why the abort cleanup, checking isEditing earlier, could not close it.
+				mockCline.diffViewProvider.isEditing = true
+				writeToFileTool.clearTaskState(mockCline)
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			// The view and the placeholder open() wrote are this delta's to close: the abort
+			// cleanup had already run, so nobody else would.
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+		})
+		it("releases the per-task stream state when the user rejects the diff-view approval", async () => {
+			// A partial delta registers the entry and the TaskAborted listener. The denial then
+			// returns from inside the try block, skipping the success-path teardown, so both stay
+			// attached for the rest of the task's life (and a retained streamFailed would keep
+			// suppressing this task's later diff previews).
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockAskApproval.mockResolvedValue(false)
+			await executeWriteFileTool({})
+			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			// The exact listener this task registered, not just any function: a mismatched
+			// off() argument would leave the real listener attached.
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+		})
+		it("releases the per-task stream state when the prevent-focus-disruption approval is rejected", async () => {
+			// The experiment branch asks for approval without ever opening a diff view, so the
+			// only teardown for this call is the one at the end of the try block - which the
+			// denial return skips.
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockResolvedValue({
+					diagnosticsEnabled: true,
+					writeDelayMs: 1000,
+					experiments: { preventFocusDisruption: true },
+				}),
+			})
+			mockCline.diffViewProvider.saveDirectly = vi.fn().mockResolvedValue(undefined)
+			mockAskApproval.mockResolvedValue(false)
+			await executeWriteFileTool({})
+			expect(mockCline.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			// The exact listener this task registered, not just any function: a mismatched
+			// off() argument would leave the real listener attached.
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+		})
+		it("releases the per-task stream state when prevent-focus-disruption skips the partial preview", async () => {
+			// The first delta only pins the path, so the entry is still live after it (the stream
+			// is in flight). The second delta reaches the experiment check: handlePartial() then
+			// returns without ever showing a preview, and nothing else would ever release the
+			// entry or detach the TaskAborted listener for this task.
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockResolvedValue({ experiments: { preventFocusDisruption: true } }),
+			})
+
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			await executeWriteFileTool({}, { isPartial: true })
+
+			expect(mockCline.ask).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			// The exact listener this task registered, not just any function: a mismatched
+			// off() argument would leave the real listener attached.
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+		})
+
+		it("stops the partial delta when the task aborts while directory creation is in flight", async () => {
+			// handlePartial() awaits createDirectoriesForFile() for a new file, then asks and streams
+			// the diff view. An abandonment that lands during that await has already released this
+			// task's stream state; without a re-check after the await the delta keeps going and puts a
+			// partial tool ask and a diff-view update on screen for a task that no longer exists.
+			let abortCleanup: (() => void) | undefined
+			mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+				if (event === RooCodeEventName.TaskAborted) {
+					abortCleanup = listener
+				}
+				return mockCline
+			})
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			let releaseGate: (() => void) | undefined
+			const gate = new Promise<void>((resolve) => {
+				releaseGate = resolve
+			})
+			mockedCreateDirectoriesForFile.mockImplementationOnce(() => gate.then(() => []))
+			const streaming = executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await new Promise<void>((resolve) => setImmediate(resolve))
+			expect(mockedCreateDirectoriesForFile).toHaveBeenCalledTimes(1)
+
+			abortCleanup?.()
+			releaseGate?.()
+			await streaming
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.ask).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+		})
+
+		it("releases the per-task stream state when provider state rejects during a partial delta", async () => {
+			// handlePartial() registers the entry and the TaskAborted listener, then awaits
+			// provider.getState(). A rejection there never reaches the diff view or execute(), so
+			// nothing else releases what the registration acquired. The error still has to surface,
+			// so the boundary rethrows and BaseTool.handle() reports it once.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockRejectedValue(new Error("provider state unavailable")),
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			expect(mockHandleError).toHaveBeenCalledWith(
+				"handling partial write_to_file",
+				expect.objectContaining({ message: "provider state unavailable" }),
+			)
+		})
+
+		it("reports a discard failure without replacing the error the delta produced", async () => {
+			// The delta failed in the pre-streaming setup, and the discard of the preview an
+			// earlier delta left open failed too. Two failures, two channels: BaseTool.handle()
+			// must still report THIS delta's error - wrapping it would change the failure the
+			// caller sees - while the discard failure (debris still on disk) gets its own report.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockRejectedValue(new Error("provider state unavailable")),
+			})
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.discardUnapprovedStream.mockRejectedValue(
+				new Error("EPERM: operation not permitted"),
+			)
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			try {
+				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+				expect(mockCline.say).toHaveBeenCalledWith(
+					"error",
+					expect.stringContaining("could not discard the unapproved preview after the failed stream"),
+				)
+				expect(mockCline.say).toHaveBeenCalledWith(
+					"error",
+					expect.stringContaining("EPERM: operation not permitted"),
+				)
+				const reported = mockHandleError.mock.calls.find(
+					([context]) => context === "handling partial write_to_file",
+				)?.[1] as Error
+				expect(reported.message).toBe("provider state unavailable")
+				expect(reported.name).toBe("Error")
+			} finally {
+				errorSpy.mockRestore()
+			}
+		})
+
+		it("still reports the delta's own error when the discard report cannot be delivered", async () => {
+			// Same guard on the streaming side. The exception this delta produced is what
+			// BaseTool.handle() reports; an undeliverable report must not take its place, or the
+			// caller sees an abort where a provider failure happened.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockRejectedValue(new Error("provider state unavailable")),
+			})
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.discardUnapprovedStream.mockRejectedValue(
+				new Error("EPERM: operation not permitted"),
+			)
+			mockCline.say.mockRejectedValue(new Error("task aborted"))
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			try {
+				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+				const reported = mockHandleError.mock.calls.find(
+					([context]) => context === "handling partial write_to_file",
+				)?.[1] as Error
+				expect(reported.message).toBe("provider state unavailable")
+				expect(mockCline.say).toHaveBeenCalledWith(
+					"error",
+					expect.stringContaining("could not discard the unapproved preview after the failed stream"),
+				)
+			} finally {
+				errorSpy.mockRestore()
+				mockCline.say.mockResolvedValue(undefined)
+			}
+		})
+
+		it("leaves a replacement stream state alone when the delta it replaced resumes", async () => {
+			// Liveness is object identity, not key presence: a test that only clears the entry
+			// passes for an implementation that checks the key. Here a new stream takes over the
+			// same task key while the old delta awaits the filesystem, so the resumed delta must
+			// neither continue its side effects nor write through the replacement's entry.
+			let releaseGate: (() => void) | undefined
+			const gate = new Promise<void>((resolve) => {
+				releaseGate = resolve
+			})
+			// The path must be stabilized by an earlier delta before handlePartial() touches the
+			// filesystem, which is also what registers this task's entry.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			mockedCreateDirectoriesForFile.mockImplementationOnce(() => gate.then(() => []))
+			const streaming = executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await new Promise<void>((resolve) => setImmediate(resolve))
+			expect(mockedCreateDirectoriesForFile).toHaveBeenCalledTimes(1)
+
+			const key = writeToFileTool["getPartialStreamFailureKey"](mockCline as never) as string
+			writeToFileTool["resetTaskPartialState"](mockCline as never)
+			const replacement = writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			replacement.streamFailed = false
+			releaseGate?.()
+			await streaming
+
+			expect(mockCline.ask).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].get(key)).toBe(replacement)
+			expect(replacement.streamFailed).toBe(false)
+			expect(replacement.streamError).toBeUndefined()
+		})
+
+		it("releases the stream state when the setup before the write boundary rejects", async () => {
+			// execute() creates the parent directories for a new file before its write boundary
+			// begins. An EACCES there used to escape execute() entirely - BaseTool.handle() only
+			// reports it - so the map kept this task's entry and its abort listener alive, and a
+			// later write could inherit a stale stream state.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			mockedCreateDirectoriesForFile.mockRejectedValueOnce(new Error("EACCES: permission denied"))
+
+			// The failure itself keeps travelling the path it always took: the boundary releases
+			// and rethrows, so the caller still sees the original error and nothing reports it twice.
+			await expect(executeWriteFileTool({})).rejects.toThrow("EACCES: permission denied")
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			expect(mockHandleError).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
+		})
+
+		it("reports the captured stream error once when the finalized block fails to parse", async () => {
+			// A streaming delta already hit a fatal filesystem error; the finalized block then fails
+			// to parse. The stream error is what the user can act on, so it takes the report slot and
+			// the incidental parse error is suppressed - reporting both would show two bubbles for one
+			// failure, reporting only the parse error would drop the actionable one. The error is
+			// induced through open() rather than assigned, so what gets reported is what production
+			// recorded on the entry.
+			const streamError = new Error("EROFS: read-only file system, open '/ro/test.py'")
+			mockCline.diffViewProvider.open.mockImplementation(async () => {
+				mockCline.diffViewProvider.isEditing = true
+				throw streamError
+			})
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockHandleError.mockClear()
+
+			const block = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: {},
+				// No nativeArgs at all: that is what drives BaseTool's parse-failure path.
+				partial: false,
+			} as ToolUse<"write_to_file">
+			await writeToFileTool.handle(mockCline, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockHandleError).toHaveBeenCalledTimes(1)
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", streamError)
+			expect(mockHandleError).not.toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("reports a failed rollback as the cleanup failure when the finalized block fails to parse", async () => {
+			// The rollback is what keeps unapproved streamed content off disk. When it fails, the
+			// debris is the more actionable failure: it takes the report slot with the stream error
+			// kept behind it as the cause, instead of being logged and continued past.
+			const streamError = new Error("EACCES: permission denied, open '/ro/test.py'")
+			mockCline.diffViewProvider.open.mockImplementation(async () => {
+				mockCline.diffViewProvider.isEditing = true
+				throw streamError
+			})
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+			mockCline.diffViewProvider.discardUnapprovedStream.mockRejectedValue(
+				new Error("EACCES: could not remove the directory created for this write"),
+			)
+			mockHandleError.mockClear()
+
+			const block = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: {},
+				partial: false,
+			} as ToolUse<"write_to_file">
+			await writeToFileTool.handle(mockCline, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockHandleError).toHaveBeenCalledTimes(1)
+			expect(mockHandleError).toHaveBeenCalledWith(
+				"writing file",
+				expect.objectContaining({ message: expect.stringContaining("rollback failed") }),
+			)
+			expect(mockHandleError.mock.calls[0]?.[1]).toHaveProperty("cause", streamError)
+			expect(mockHandleError).not.toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
+		})
+
+		it("discards the unapproved preview and records the stream error when open() rejects", async () => {
+			// open() sits inside the cleanup-owned boundary: the preview is discarded (never saved),
+			// the view reset, the error recorded on this call's entry, and the error rethrown so
+			// BaseTool.handle() reports it exactly once.
+			const failure = new Error("EPERM: could not open the diff editor")
+			mockCline.diffViewProvider.open.mockImplementation(async () => {
+				mockCline.diffViewProvider.isEditing = true
+				throw failure
+			})
+
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+
+			expect(mockHandleError).toHaveBeenCalledTimes(1)
+			expect(mockHandleError).toHaveBeenCalledWith("handling partial write_to_file", failure)
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			// revertChanges() SAVES: an unapproved preview must never be routed through it.
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			const retained = [...writeToFileTool["taskPartialStreamState"].values()][0]
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			expect(retained.streamFailed).toBe(true)
+			expect(retained.streamError).toBe(failure)
+			// The listener goes with whichever teardown ends the call, not with this delta: the
+			// retained entry is what suppresses the rest of the stream.
+			expect(mockCline.off).not.toHaveBeenCalled()
+		})
+
+		it("suppresses the rest of the stream once the diff view has failed for this call", async () => {
+			const failure = new Error("EPERM: could not open the diff editor")
+			mockCline.diffViewProvider.open.mockImplementation(async () => {
+				mockCline.diffViewProvider.isEditing = true
+				throw failure
+			})
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.update.mockClear()
+			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			mockCline.ask.mockClear()
+			mockHandleError.mockClear()
+
+			// A third delta for the same call. Retrying would re-open the diff editor that just
+			// failed and re-ask for a call that already reported its error.
+			await executeWriteFileTool({}, { isPartial: true })
+
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
+			expect(mockCline.ask).not.toHaveBeenCalled()
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("discards the unapproved preview and records the stream error when update() rejects", async () => {
+			// The other half of the boundary: open() succeeded, so the view holds partial content,
+			// and update() is what fails.
+			const failure = new Error("EPERM: could not stream into the diff editor")
+			mockCline.diffViewProvider.open.mockImplementation(async () => {
+				mockCline.diffViewProvider.isEditing = true
+			})
+			mockCline.diffViewProvider.update.mockRejectedValue(failure)
+
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+
+			expect(mockHandleError).toHaveBeenCalledTimes(1)
+			expect(mockHandleError).toHaveBeenCalledWith("handling partial write_to_file", failure)
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			const retained = [...writeToFileTool["taskPartialStreamState"].values()][0]
+			expect(retained.streamFailed).toBe(true)
+			expect(retained.streamError).toBe(failure)
+		})
+
+		it("releases the stream state and deregisters the abort listener when the failed delta's block never completes", async () => {
+			const failure = new Error("EPERM: could not open the diff editor")
+			mockCline.diffViewProvider.open.mockImplementation(async () => {
+				mockCline.diffViewProvider.isEditing = true
+				throw failure
+			})
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+			mockHandleError.mockClear()
+
+			// The stream died mid-parameters, so the finalized block never parses and execute() never
+			// runs: the parse-failure boundary is what ends the call and releases the entry.
+			const block = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: {},
+				partial: false,
+			} as ToolUse<"write_to_file">
+			await writeToFileTool.handle(mockCline, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			// The induced stream error is the actionable one, reported once; the incidental parse
+			// error is suppressed.
+			expect(mockHandleError).toHaveBeenCalledTimes(1)
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", failure)
+			expect(mockHandleError).not.toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
 		})
 	})
 

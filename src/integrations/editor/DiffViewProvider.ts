@@ -33,6 +33,14 @@ export class DiffViewProvider {
 	isEditing = false
 	originalContent: string | undefined
 	private createdDirs: string[] = []
+	/**
+	 * Absolute path of the empty placeholder open() created for a new-file edit, or undefined
+	 * when no placeholder is outstanding. reset() does NOT clear relPath, and saveDirectly()
+	 * sets relPath for a file that was written with approval, so relPath alone cannot tell a
+	 * caller that a file on disk belongs to the abandoned edit. Only this field justifies an
+	 * unlink.
+	 */
+	private placeholderPath: string | undefined
 	private documentWasOpen = false
 	// Tracks whether the target file's tab was pinned before the diff session.
 	// Closing the tab to open the diff drops VS Code's pin state, so we restore
@@ -126,12 +134,18 @@ export class DiffViewProvider {
 		}
 
 		// For new files, create any necessary directories and keep track of new
-		// directories to delete if the user denies the operation.
-		this.createdDirs = await createDirectoriesForFile(absolutePath)
+		// directories to delete if the user denies the operation. Merged rather than
+		// assigned: handlePartial() may have created them first and recorded them, and
+		// overwriting the list would hand those directories back to the leak.
+		this.adoptCreatedDirectories(await createDirectoriesForFile(absolutePath))
 
 		// Make sure the file exists before we open it.
 		if (!fileExists) {
 			await fs.writeFile(absolutePath, "")
+			// From here until the placeholder is removed, THIS edit owns that path. Set after
+			// the write succeeds, so a failed write does not claim ownership of a file we did
+			// not create.
+			this.placeholderPath = absolutePath
 		}
 
 		// If the file was already open, close it (must happen after showing the
@@ -343,6 +357,12 @@ export class DiffViewProvider {
 			await updatedDocument.save()
 		}
 
+		// Ownership is released only once the approved write has landed. A save that rejects leaves
+		// the placeholder as open() created it, and the caller's teardown still has to remove it:
+		// clearing it here would tell discardUnapprovedStream() that nothing this edit created is
+		// left to clean, and an empty or half-written new file would survive the failed write.
+		this.placeholderPath = undefined
+
 		// Stop tracking touches and cancel any pending scroll-to-diff before any
 		// programmatic editor activation below.
 		this.disposeActiveEditorListener()
@@ -513,6 +533,172 @@ export class DiffViewProvider {
 		return JSON.stringify(result)
 	}
 
+	/**
+	 * Release a diff view whose content was never approved: an abandoned partial stream,
+	 * a failed stream, or a write the user was never asked to approve (rooignore denial,
+	 * validation failure). Deliberately NOT the same as revertChanges(), because
+	 * revertChanges() SAVES and neither abandoned case may write to disk:
+	 *
+	 * - create: its new-file branch saves a dirty buffer as-is before deleting the file,
+	 *   which writes partial model output the task never approved - and leaves it on disk
+	 *   if the delete then fails.
+	 * - modify: its branch restores the original content and saves it. That is a write to
+	 *   a file the user never approved, and for a rooignore-denial path a write the
+	 *   policy forbids outright.
+	 *
+	 * Here the target file is never written. A create buffer is emptied FIRST, so the
+	 * only bytes that can ever reach the placeholder are none and the tab is clean enough
+	 * to close without a prompt; a modify buffer is restored to the content already on
+	 * disk in memory only, so the file itself is untouched and the tab (now showing the
+	 * original content, still marked dirty) is left for the user rather than force-closed
+	 * over any edits they may have typed into the preview. The placeholder plus the
+	 * directories this edit created are removed either way.
+	 */
+	async discardUnapprovedStream(): Promise<void> {
+		if (!this.relPath) {
+			return
+		}
+
+		const absolutePath = path.resolve(this.cwd, this.relPath)
+		// Snapshot the directories this edit created BEFORE the editor work below, and
+		// clear the field so nothing else can act on them twice. If an await below
+		// rejects, the caller runs reset(), which drops relPath/createdDirs - this is
+		// then the only chance to remove what the abandoned edit left on disk.
+		const createdDirs = this.createdDirs
+		this.createdDirs = []
+		// Same reason for the placeholder: an await below may reject and the caller then runs
+		// reset(), which drops this field too.
+		const placeholderPath = this.placeholderPath
+		this.placeholderPath = undefined
+
+		let editorFailure: unknown
+		// Whether the buffer still holds unapproved content once the editor work is over. A dirty
+		// buffer is what makes the placeholder unsafe to remove: its tab is still open, and an
+		// unlink would leave that tab pointing at a path with no file behind it.
+		let bufferStillDirty = false
+		// open() creates the directories and the empty placeholder BEFORE it assigns
+		// activeDiffEditor (openDiffEditor() can reject on its 10s timeout or a failed
+		// vscode.diff call), so an abandoned create can leave artifacts on disk with no
+		// editor at all. Only the buffer and tab work needs the editor; the artifact
+		// cleanup below runs either way.
+		if (this.activeDiffEditor) {
+			const document = this.activeDiffEditor.document
+			try {
+				this.disposeActiveEditorListener()
+				this.cancelDeferredScroll()
+
+				if (document.isDirty) {
+					// Restore the buffer to what this edit started from - the empty placeholder for a
+					// create, the content already on disk for a modify. A failed applyEdit leaves the
+					// unapproved streamed content in the buffer, and saving then would persist exactly
+					// what this method exists to discard, so the save is conditional and the failure is
+					// surfaced to the caller as a rollback hazard.
+					const edit = new vscode.WorkspaceEdit()
+					const fullRange = new vscode.Range(
+						document.positionAt(0),
+						document.positionAt(document.getText().length),
+					)
+					const restoredContent =
+						this.editType === "modify" ? this.stripAllBOMs(this.originalContent ?? "") : ""
+					edit.replace(document.uri, fullRange, restoredContent)
+					const applied = await vscode.workspace.applyEdit(edit)
+					if (!applied) {
+						editorFailure = new Error(
+							`Could not restore the diff editor buffer for ${this.relPath}; it may still hold unapproved content.`,
+						)
+					} else if (this.editType !== "modify") {
+						// Only the emptied placeholder is ever saved: this edit created that file, and
+						// closing a dirty tab would prompt. A modify is never saved here - a modify's
+						// restore is an in-memory revert, and saving it would write to a file the user
+						// never approved (see the method comment).
+						const saved = await document.save()
+						if (!saved) {
+							// A save the editor did not perform leaves the unapproved content in the buffer.
+							// Reading it as success would let the cleanup below delete the placeholder under a
+							// dirty tab and still report a restored preview - the next Ctrl+S would then
+							// recreate the file with exactly what this method exists to discard.
+							editorFailure = new Error(
+								`Could not save the restored diff editor buffer for ${this.relPath}; it may still hold unapproved content.`,
+							)
+						}
+					}
+				}
+
+				// Close the diff tabs only now: a vscode.diff tab is dirty while its modified side
+				// holds the streamed content, and closeAllDiffViews() deliberately skips dirty tabs to
+				// avoid a save prompt. Closing before the restore above left that tab open over a file
+				// this method is about to unlink.
+				await this.closeAllDiffViews()
+				await this.closeFileTab(absolutePath)
+			} catch (error) {
+				// Do NOT stop here: the placeholder and the created directories still have
+				// to go. The original failure is re-thrown once the artifacts are dealt with,
+				// so the caller still reports the rollback hazard instead of a silent success.
+				editorFailure = error
+			}
+			bufferStillDirty = document.isDirty
+		}
+
+		// Set when the editor work failed while the buffer still held unapproved content: the
+		// open tab is then the only thing that can still write that content to disk, so the
+		// rollback leaves the artifacts alone rather than orphaning the editor.
+		const keepArtifacts = editorFailure !== undefined && bufferStillDirty
+
+		let cleanupFailure: unknown
+		try {
+			// Only a placeholder THIS edit created may be removed. relPath survives reset(), and
+			// saveDirectly() sets it for a file that was written with approval, so unlinking
+			// absolutePath unconditionally can delete content the user approved.
+			//
+			// A rollback that failed while the buffer was still dirty is a second reason to leave
+			// it alone: the tab is open, so unlinking now would leave it pointing at a path with no
+			// file behind it, and the next Ctrl+S would recreate the file with exactly the
+			// unapproved content this method exists to discard. Keeping the placeholder costs a
+			// stray empty file; the alternative throws the user's save into a phantom. When the
+			// buffer ended clean - or there was never an editor at all, the open()-failed-before-
+			// the-editor case - the artifact really is debris and goes.
+			if (placeholderPath && !keepArtifacts) {
+				await fs.unlink(placeholderPath).catch((error: unknown) => {
+					// open() creates the placeholder; if it is already gone there is nothing
+					// left to remove and the discard did its job.
+					if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+						throw error
+					}
+				})
+			}
+
+			// Remove only the directories this edit created, in reverse order - and not at all
+			// when the placeholder was kept, since the kept file still lives inside the deepest
+			// of them and rmdir would fail on a non-empty directory anyway.
+			if (!keepArtifacts) {
+				for (let i = createdDirs.length - 1; i >= 0; i--) {
+					await fs.rmdir(createdDirs[i]).catch((error: unknown) => {
+						if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+							throw error
+						}
+					})
+				}
+			}
+		} catch (error) {
+			cleanupFailure = error
+			console.error("Error removing abandoned write_to_file artifacts:", error)
+		}
+
+		if (editorFailure) {
+			const primary = editorFailure instanceof Error ? editorFailure : new Error(String(editorFailure))
+			if (keepArtifacts) {
+				// Same error object and type, with the state of the disk appended: the caller
+				// reports this text, and "the rollback failed" is only actionable once the reader
+				// knows what was left where.
+				primary.message = `${primary.message} The placeholder file and the directories this edit created were kept on disk because the editor is still open on them.`
+			}
+			throw primary
+		}
+		if (cleanupFailure) {
+			throw cleanupFailure instanceof Error ? cleanupFailure : new Error(String(cleanupFailure))
+		}
+	}
+
 	async revertChanges(): Promise<void> {
 		if (!this.relPath || !this.activeDiffEditor) {
 			return
@@ -537,6 +723,8 @@ export class DiffViewProvider {
 			// opened tab before deleting it from disk.
 			await this.closeFileTab(absolutePath)
 			await fs.unlink(absolutePath)
+			// The placeholder this edit owned is gone; no later cleanup may unlink that path again.
+			this.placeholderPath = undefined
 
 			// Remove only the directories we created, in reverse order.
 			for (let i = this.createdDirs.length - 1; i >= 0; i--) {
@@ -1099,6 +1287,52 @@ export class DiffViewProvider {
 		return result
 	}
 
+	/**
+	 * Record directories an edit created before the diff view exists.
+	 *
+	 * handlePartial() creates the parent directories early so a later open() cannot hit ENOENT,
+	 * and open() can only record the directories IT creates - which is none, once that earlier
+	 * call has already made them. Every teardown reads createdDirs (the discard and the revert
+	 * both remove it) while reset() merely drops the list, so an unrecorded creation is
+	 * invisible to all of them and survives on disk. Merging rather than assigning keeps
+	 * whichever call made the directories first still accounted for.
+	 */
+	adoptCreatedDirectories(directories: string[]): void {
+		for (const directory of directories) {
+			if (!this.createdDirs.includes(directory)) {
+				this.createdDirs.push(directory)
+			}
+		}
+	}
+
+	/**
+	 * Remove the directories this edit recorded but the diff view never took over.
+	 *
+	 * A delta that created parent directories and then stopped - a cancellation landing during
+	 * the creation, or a setup failure before open() - leaves directories no teardown will
+	 * visit: the discard and the revert only run for a session that reached the editor, and
+	 * reset() drops the list without touching the disk. Deepest first; a directory that is
+	 * already gone or not empty is not this edit's to force away.
+	 */
+	async removeAdoptedDirectories(): Promise<void> {
+		const directories = this.createdDirs
+		this.createdDirs = []
+		for (let i = directories.length - 1; i >= 0; i--) {
+			try {
+				await fs.rmdir(directories[i])
+			} catch (error: unknown) {
+				// A directory that is already gone, or that something else now lives in, is not
+				// this edit's to force away. Anything else - a permission failure, an I/O error -
+				// is a directory left behind that nothing still tracks, so it is reported rather
+				// than swallowed. The remaining directories are attempted either way.
+				const code = (error as NodeJS.ErrnoException)?.code
+				if (code !== "ENOENT" && code !== "ENOTEMPTY") {
+					console.error("Error removing a directory this edit created:", directories[i], error)
+				}
+			}
+		}
+	}
+
 	async reset(): Promise<void> {
 		// Dispose touch listeners and cancel any pending deferred scroll BEFORE any
 		// async editor manipulation. closeAllDiffViews() awaits tab-close operations,
@@ -1113,6 +1347,7 @@ export class DiffViewProvider {
 		this.isEditing = false
 		this.originalContent = undefined
 		this.createdDirs = []
+		this.placeholderPath = undefined
 		this.documentWasOpen = false
 		this.documentWasPinned = false
 		this.activeDiffEditor = undefined
