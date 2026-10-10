@@ -40,6 +40,7 @@ vi.mock("fs", () => ({
 	fsyncSync: vi.fn(),
 	chmodSync: vi.fn(),
 	fchmodSync: vi.fn(),
+	fchownSync: vi.fn(),
 	statSync: vi.fn(),
 	lstatSync: vi.fn(),
 	rmdirSync: vi.fn(),
@@ -88,10 +89,10 @@ function _linkStats(): fsSync.Stats {
 	return s
 }
 
-// Minimal Stats stand-in: the SUT only reads `.mode` from it.
-function _stats(mode: number): fsSync.Stats {
+// Minimal Stats stand-in: the SUT reads `.mode` and, on POSIX, `.gid` from it.
+function _stats(mode: number, gid?: number): fsSync.Stats {
 	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats
-	Object.assign(s, { mode })
+	Object.assign(s, gid === undefined ? { mode } : { mode, gid })
 	return s
 }
 
@@ -1140,6 +1141,61 @@ describe("safeWriteText", () => {
 			// the staging file inherits the target's 0o600 mode and the write commits
 			expect(fsSync.openSync).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), "w", 0o600)
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+		})
+
+		it("keeps the target's group on the staged file before publishing over it", async () => {
+			// The commit is a rename, so the new inode would otherwise take this process's
+			// primary group and a shared 0o664 group-owned file would lose group write access
+			// even with the mode restored. Order matters: chown can clear setgid bits, so it
+			// has to run before the chmod.
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o664, 4321))
+
+			await safeWriteText(targetPath, "data", { platform: "linux" })
+
+			expect(fsSync.fchownSync).toHaveBeenCalledWith(1, -1, 4321)
+			expect(fsSync.fchmodSync).toHaveBeenCalledWith(1, 0o664)
+			expect(vi.mocked(fsSync.fchownSync).mock.invocationCallOrder[0]).toBeLessThan(
+				vi.mocked(fsSync.fchmodSync).mock.invocationCallOrder[0],
+			)
+		})
+
+		it("keeps the target's group when the caller staged the temp file", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(7)
+			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o664, 4321))
+
+			await safeWriteText(targetPath, "data", { platform: "linux", tempPath: "/tmp/test-dir/caller.tmp" })
+
+			expect(fsSync.fchownSync).toHaveBeenCalledWith(7, -1, 4321)
+			expect(fsSync.fchmodSync).toHaveBeenCalledWith(7, 0o664)
+			expect(vi.mocked(fsSync.fchownSync).mock.invocationCallOrder[0]).toBeLessThan(
+				vi.mocked(fsSync.fchmodSync).mock.invocationCallOrder[0],
+			)
+		})
+
+		it("does not attempt a group change on a platform whose identity is the DACL", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// Windows carries no POSIX gid to preserve - its identity is the DACL, which the
+			// save/restore steps own - so the DACL path has to stay reachable here.
+			vi.mocked(fsSync.statSync).mockImplementation(((p: unknown) =>
+				typeof p === "string" && p.includes(".acl.tmp")
+					? { isFile: () => true, size: 256 }
+					: _stats(0o664, 4321)) as never)
+			vi.mocked(execFile).mockImplementation(((...args: unknown[]) => {
+				const cb = args[args.length - 1] as (err: Error | null) => void
+				cb(null)
+			}) as never)
+
+			await safeWriteText(targetPath, "data", { platform: "win32" })
+
+			expect(fsSync.fchownSync).not.toHaveBeenCalled()
+			expect(fsSync.fchmodSync).toHaveBeenCalledWith(1, 0o664)
 		})
 
 		it("falls back to the 0o644 default when the target does not exist yet", async () => {

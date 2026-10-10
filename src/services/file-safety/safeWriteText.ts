@@ -170,6 +170,31 @@ function _fsyncFile(fd: number): void {
 	fsSync.fsyncSync(fd)
 }
 
+/**
+ * Keep the existing target's group on the staged file before it is published.
+ *
+ * The commit is a rename, so the published inode is a new one: it takes the process's
+ * primary group (or the directory's gid when the directory is setgid). A shared 0o664
+ * file owned by group `devs` would therefore lose group write access for every member
+ * whose primary group is not `devs`, even though the fchmod below restores the mode - the
+ * mode fix exists precisely to stop that regression, so the group has to survive too.
+ *
+ * Best-effort: fchown only succeeds when this process belongs to that group, which is the
+ * case that matters; anywhere else the mode fix still stands. It runs BEFORE fchmod
+ * because chown can clear the setgid bits that chmod has just set. Windows carries no
+ * POSIX gid to preserve - its identity is the DACL, handled by the save/restore steps.
+ */
+function _applyTargetOwnership(fd: number, gid: number | undefined, platform: string): void {
+	if (platform === "win32" || typeof gid !== "number") {
+		return
+	}
+	try {
+		fsSync.fchownSync(fd, -1, gid)
+	} catch {
+		// Not a member of the target's group: keep the mode preservation and move on.
+	}
+}
+
 /** Save the DACL of *srcPath* to a dump file on Windows.
  * Returns true when a usable dump exists; false otherwise.
  * Never throws - a false return means no usable dump was produced, which the caller treats
@@ -380,9 +405,12 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			// not be published wider than the file it replaces (a 0o600 target
 			// must not become 0o644 through the atomic rename).
 			let targetMode = 0o644 // default for a fresh target
+			let targetGid: number | undefined
 			let targetExists = false
 			try {
-				targetMode = fsSync.statSync(targetPath).mode & 0o777
+				const targetStats = fsSync.statSync(targetPath)
+				targetMode = targetStats.mode & 0o777
+				targetGid = targetStats.gid
 				targetExists = true
 			} catch (error: unknown) {
 				// Only a genuinely absent target may take the default mode. Any other
@@ -408,6 +436,7 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			// also what the caller-staged branch below does.
 			try {
 				if (targetExists) {
+					_applyTargetOwnership(fd, targetGid, platform)
 					fsSync.fchmodSync(fd, targetMode)
 				}
 				// Loop until every byte is written: writeSync can report a short
@@ -430,8 +459,11 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			// chmodSync on the path before the open would make a read-only target
 			// (0o400/0o444) fail openSync(tempPath, "r+") with EACCES.
 			let targetMode: number | null = null
+			let targetGid: number | undefined
 			try {
-				targetMode = fsSync.statSync(targetPath).mode & 0o777
+				const targetStats = fsSync.statSync(targetPath)
+				targetMode = targetStats.mode & 0o777
+				targetGid = targetStats.gid
 			} catch (error: unknown) {
 				// As above: an unknown target mode must not be replaced by the temp's
 				// own creation mode, which can be wider than the target's.
@@ -440,6 +472,7 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			const fd = fsSync.openSync(tempPath, "r+")
 			try {
 				if (targetMode !== null) {
+					_applyTargetOwnership(fd, targetGid, platform)
 					fsSync.fchmodSync(fd, targetMode)
 				}
 				_fsyncFile(fd)
