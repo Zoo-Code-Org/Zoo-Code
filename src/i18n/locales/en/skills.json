@@ -11,6 +11,8 @@
 		"missing_update_modes_fields": "Missing required fields: skillName or source",
 		"manager_unavailable": "Skills manager not available",
 		"missing_delete_fields": "Missing required fields: skillName or source",
-		"skill_not_found": "Skill \"{{name}}\" not found"
+		"skill_not_found": "Skill \"{{name}}\" not found",
+		"container_skill_read_only": "Skill \"{{name}}\" comes from a symlinked skills folder ({{path}}) and can't be moved or deleted here. Change it in its source folder.",
+		"symlink_escapes_skill": "Can't move the skill: the symlink {{link}} points outside the skill folder and would break at the new location."
 	}
 }

@@ -11,6 +11,8 @@
 		"missing_update_modes_fields": "缺少必填欄位：skillName 或 source",
 		"manager_unavailable": "技能管理器無法使用",
 		"missing_delete_fields": "缺少必填欄位：skillName 或 source",
-		"skill_not_found": "找不到技能「{{name}}」"
+		"skill_not_found": "找不到技能「{{name}}」",
+		"container_skill_read_only": "技能「{{name}}」來自透過符號連結引入的技能資料夾（{{path}}），無法在此移動或刪除。請在其來源資料夾中修改。",
+		"symlink_escapes_skill": "無法移動技能：符號連結 {{link}} 指向技能資料夾之外，移動後會失效。"
 	}
 }

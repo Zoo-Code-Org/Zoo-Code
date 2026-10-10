@@ -11,6 +11,8 @@
 		"missing_update_modes_fields": "Faltan campos obligatorios: skillName o source",
 		"manager_unavailable": "El gestor de habilidades no está disponible",
 		"missing_delete_fields": "Faltan campos obligatorios: skillName o source",
-		"skill_not_found": "No se encontró la habilidad \"{{name}}\""
+		"skill_not_found": "No se encontró la habilidad \"{{name}}\"",
+		"container_skill_read_only": "La habilidad \"{{name}}\" proviene de una carpeta de habilidades enlazada simbólicamente ({{path}}) y no se puede mover ni eliminar aquí. Cámbiala en su carpeta de origen.",
+		"symlink_escapes_skill": "No se puede mover la habilidad: el enlace simbólico {{link}} apunta fuera de la carpeta de la habilidad y se rompería en la nueva ubicación."
 	}
 }

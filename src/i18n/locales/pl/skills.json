@@ -11,6 +11,8 @@
 		"missing_update_modes_fields": "Brakuje wymaganych pól: skillName lub source",
 		"manager_unavailable": "Menedżer umiejętności niedostępny",
 		"missing_delete_fields": "Brakuje wymaganych pól: skillName lub source",
-		"skill_not_found": "Nie znaleziono umiejętności \"{{name}}\""
+		"skill_not_found": "Nie znaleziono umiejętności \"{{name}}\"",
+		"container_skill_read_only": "Umiejętność \"{{name}}\" pochodzi z folderu umiejętności podłączonego dowiązaniem symbolicznym ({{path}}) i nie można jej tutaj przenieść ani usunąć. Zmień ją w folderze źródłowym.",
+		"symlink_escapes_skill": "Nie można przenieść umiejętności: dowiązanie symboliczne {{link}} wskazuje poza folder umiejętności i przestałoby działać w nowej lokalizacji."
 	}
 }

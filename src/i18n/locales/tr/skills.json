@@ -11,6 +11,8 @@
 		"missing_update_modes_fields": "Gerekli alanlar eksik: skillName veya source",
 		"manager_unavailable": "Beceri yöneticisi kullanılamıyor",
 		"missing_delete_fields": "Gerekli alanlar eksik: skillName veya source",
-		"skill_not_found": "\"{{name}}\" becerisi bulunamadı"
+		"skill_not_found": "\"{{name}}\" becerisi bulunamadı",
+		"container_skill_read_only": "\"{{name}}\" becerisi sembolik bağlantılı bir beceri klasöründen ({{path}}) geliyor ve burada taşınamaz veya silinemez. Kaynak klasöründe değiştir.",
+		"symlink_escapes_skill": "Beceri taşınamıyor: {{link}} sembolik bağlantısı beceri klasörünün dışını gösteriyor ve yeni konumda bozulur."
 	}
 }

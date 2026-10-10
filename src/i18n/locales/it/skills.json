@@ -11,6 +11,8 @@
 		"missing_update_modes_fields": "Campi obbligatori mancanti: skillName o source",
 		"manager_unavailable": "Il gestore delle skill non è disponibile",
 		"missing_delete_fields": "Campi obbligatori mancanti: skillName o source",
-		"skill_not_found": "Skill \"{{name}}\" non trovata"
+		"skill_not_found": "Skill \"{{name}}\" non trovata",
+		"container_skill_read_only": "La skill \"{{name}}\" proviene da una cartella di skill collegata tramite symlink ({{path}}) e non può essere spostata o eliminata qui. Modificala nella sua cartella di origine.",
+		"symlink_escapes_skill": "Impossibile spostare la skill: il symlink {{link}} punta fuori dalla cartella della skill e non funzionerebbe nella nuova posizione."
 	}
 }

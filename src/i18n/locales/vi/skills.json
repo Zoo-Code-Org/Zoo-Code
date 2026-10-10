@@ -11,6 +11,8 @@
 		"missing_update_modes_fields": "Thiếu các trường bắt buộc: skillName hoặc source",
 		"manager_unavailable": "Trình quản lý kỹ năng không khả dụng",
 		"missing_delete_fields": "Thiếu các trường bắt buộc: skillName hoặc source",
-		"skill_not_found": "Không tìm thấy kỹ năng \"{{name}}\""
+		"skill_not_found": "Không tìm thấy kỹ năng \"{{name}}\"",
+		"container_skill_read_only": "Kỹ năng \"{{name}}\" đến từ một thư mục kỹ năng được liên kết tượng trưng ({{path}}) nên không thể di chuyển hoặc xóa ở đây. Hãy thay đổi nó trong thư mục nguồn.",
+		"symlink_escapes_skill": "Không thể di chuyển kỹ năng: liên kết tượng trưng {{link}} trỏ ra ngoài thư mục kỹ năng và sẽ bị hỏng ở vị trí mới."
 	}
 }

@@ -11,6 +11,8 @@
 		"missing_update_modes_fields": "Champs obligatoires manquants : skillName ou source",
 		"manager_unavailable": "Le gestionnaire de compétences n'est pas disponible",
 		"missing_delete_fields": "Champs obligatoires manquants : skillName ou source",
-		"skill_not_found": "Compétence \"{{name}}\" introuvable"
+		"skill_not_found": "Compétence \"{{name}}\" introuvable",
+		"container_skill_read_only": "La compétence \"{{name}}\" provient d'un dossier de compétences lié par un lien symbolique ({{path}}) et ne peut pas être déplacée ni supprimée ici. Modifie-la dans son dossier source.",
+		"symlink_escapes_skill": "Impossible de déplacer la compétence : le lien symbolique {{link}} pointe hors du dossier de la compétence et serait cassé au nouvel emplacement."
 	}
 }
