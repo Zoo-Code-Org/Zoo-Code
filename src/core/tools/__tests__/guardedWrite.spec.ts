@@ -534,7 +534,6 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			// Two rapid writes submitted after that settlement must still run one at a
 			// time in submission order. Whether the settled entry has been evicted from the
 			// path map is not observable from here, so the test does not claim it.
-			// chain for in-flight or just-enqueued links).
 			const order: string[] = []
 			mockedSafeWriteText.mockImplementation(async (_path: string, content: string) => {
 				order.push(content)
