@@ -938,10 +938,42 @@ describe("safeWriteText", () => {
 			try {
 				await expect(safeWriteText(targetPath, "data", { platform: "win32" })).resolves.toBeUndefined()
 			} finally {
-				process.env.COMPUTERNAME = savedMachine
+				if (savedMachine === undefined) {
+					delete process.env.COMPUTERNAME
+				} else {
+					process.env.COMPUTERNAME = savedMachine
+				}
 				if (savedDomain !== undefined) {
 					process.env.USERDOMAIN = savedDomain
 				}
+			}
+		})
+
+		it("win32 DACL: a host without COMPUTERNAME is left without it afterwards", async () => {
+			// Canary for the case above: it restores the machine name through the rule below, so on a
+			// host that had no COMPUTERNAME a regression there reaches this test as the string
+			// "undefined" rather than as an absent variable.
+			expect(process.env.COMPUTERNAME).not.toBe("undefined")
+			// Node turns any value assigned to process.env into a string, so restoring an unset
+			// variable by assignment writes the literal "undefined". Every later case then builds its
+			// expected principals from an environment this test invented: on a Linux or macOS
+			// host, where COMPUTERNAME is never set, each one silently accepts undefined\<user> as
+			// an authority. USERDOMAIN already restored this way; this is the same rule for the
+			// machine name, asserted rather than assumed.
+			const savedMachine = process.env.COMPUTERNAME
+			delete process.env.COMPUTERNAME
+			process.env.COMPUTERNAME = "TESTMACHINE"
+			try {
+				expect(process.env.COMPUTERNAME).toBe("TESTMACHINE")
+			} finally {
+				// The rule the case above now follows, held to on its own: an unset host variable comes
+				// back unset, never as the string "undefined".
+				if (savedMachine === undefined) {
+					delete process.env.COMPUTERNAME
+				} else {
+					process.env.COMPUTERNAME = savedMachine
+				}
+				expect(process.env.COMPUTERNAME).toBe(savedMachine)
 			}
 		})
 

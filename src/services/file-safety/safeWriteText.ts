@@ -414,6 +414,21 @@ export async function resolveLockKey(absoluteFilePath: string): Promise<string> 
 	}
 }
 
+/**
+ * Lock key for the path itself: canonical parent directory plus basename, with the final
+ * component never resolved through a link. proper-lockfile writes ${key}.lock, so a key that
+ * keeps an un-canonicalized parent names one file with a different spelling than the key
+ * resolveLockKey returns for it - one file, two lock entries on disk, and two writers that
+ * never serialize. The final component stays unresolved on purpose: a link and its referent
+ * must keep two distinct keys, which is what lets a caller lock both the alias and the referent.
+ * Failure behaviour is canonicalDirKey's, which is also what resolveLockKey already exposes one
+ * line earlier in safeWriteJson: a realpath error that is not ENOENT propagates, and a path
+ * whose every ancestor up to the root is missing keeps its literal spelling.
+ */
+export async function resolveLinkPathLockKey(absoluteFilePath: string): Promise<string> {
+	return await canonicalDirKey(path.resolve(absoluteFilePath))
+}
+
 export async function safeWriteText(
 	filePath: string,
 	content: string | Uint8Array,
