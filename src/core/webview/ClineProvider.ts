@@ -635,9 +635,20 @@ export class ClineProvider
 		// Load initial state from global state into viewLocalState buffer after dependencies used by getState are ready.
 		void this.loadViewState()
 
-		// Initialize MCP Hub through the singleton manager
+		// Initialize MCP Hub through the singleton manager. The hub can resolve after this
+		// provider is already disposed (tab-creation rollback disposes immediately), and by
+		// then disposal has removed the provider from McpServerManager.providers, so a late
+		// hub must not be attached or registered: nothing would ever unregister it.
+		// registerClient only happens in this continuation, so skipping it leaves nothing to
+		// compensate. Disposal deliberately does not await this promise - getInstance waits
+		// on hub.waitUntilReady(), so a hung readiness wait would block teardown; making the
+		// late resolution inert is what finalizes it safely.
 		McpServerManager.getInstance(this.context, this)
 			.then((hub) => {
+				if (this._disposed) {
+					return
+				}
+
 				this.mcpHub = hub
 				this.mcpHub.registerClient()
 			})

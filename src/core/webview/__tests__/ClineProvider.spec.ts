@@ -5185,6 +5185,8 @@ describe("ClineProvider", () => {
 					id: "old-id",
 					apiProvider: providerIdentifiers.anthropic,
 				}),
+				// The activation snapshot also reads the previous per-mode mapping.
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			// The ownership check requires the writer to release the id before the
@@ -8249,6 +8251,9 @@ describe("ClineProvider", () => {
 				saveConfig: vi.fn().mockResolvedValue("shared-id"),
 				listConfig: vi.fn().mockResolvedValue([sharedProfile]),
 				setModeConfig: vi.fn(),
+				// The upsert snapshot reads the prior record and the previous per-mode mapping.
+				getProfile: vi.fn().mockResolvedValue(sharedProfile),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			}
 			vi.spyOn(updater, "postStateToWebview").mockResolvedValue(undefined)
 			await updater.contextProxy.setValue("listApiConfigMeta", [sharedProfile])
@@ -12755,6 +12760,13 @@ describe("ClineProvider", () => {
 					.mockResolvedValue([
 						{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 					]),
+				// The upsert snapshot reads the prior record and the previous per-mode mapping.
+				getProfile: vi.fn().mockResolvedValue({
+					name: "test-config",
+					id: "test-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			} as any
 
 			const testApiConfig = {
