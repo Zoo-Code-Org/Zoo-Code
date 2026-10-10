@@ -226,7 +226,14 @@ export const parseOpenRouterModel = ({
 		cacheWritesPrice,
 		cacheReadsPrice,
 		description: model.description,
-		supportsReasoningEffort: supportedParameters ? supportedParameters.includes("reasoning") : undefined,
+		// Advertise the full effort surface for any model that declares the
+		// "reasoning" parameter, with "disable" first so the settings UI can
+		// offer the opt-out. Tiers are not clamped per model at request time:
+		// if a provider rejects an unsupported effort, the rejection surfaces
+		// through the standard OpenRouter API error path.
+		supportsReasoningEffort: supportedParameters?.includes("reasoning")
+			? ["disable", "low", "medium", "high", "xhigh", "max"]
+			: undefined,
 		supportedParameters: supportedParameters ? supportedParameters.filter(isModelParameter) : undefined,
 	}
 
