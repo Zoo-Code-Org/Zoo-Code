@@ -40,6 +40,10 @@ vitest.mock("../fetchers/modelCache", () => ({
 			"glm-5.1": { ...opencodeGoModels["glm-5.1"] },
 			// Anthropic-format model used to exercise the /v1/messages path.
 			"qwen3.7-max": { ...opencodeGoModels["qwen3.7-max"] },
+			// Anthropic-format Claude model that rejects non-default temperature.
+			"claude-haiku-5-5": { ...opencodeGoModels["claude-haiku-5-5"] },
+			// Anthropic-format model with a long-context price tier.
+			"qwen3.7-plus": { ...opencodeGoModels["qwen3.7-plus"] },
 			// Responses-format model (Zoo-Code-Org/Zoo-Code#1431).
 			"gpt-5.6-luna": { ...opencodeGoModels["gpt-5.6-luna"] },
 		})
@@ -48,6 +52,8 @@ vitest.mock("../fetchers/modelCache", () => ({
 		return Promise.resolve({
 			"glm-5.1": { ...opencodeGoModels["glm-5.1"] },
 			"qwen3.7-max": { ...opencodeGoModels["qwen3.7-max"] },
+			"claude-haiku-5-5": { ...opencodeGoModels["claude-haiku-5-5"] },
+			"qwen3.7-plus": { ...opencodeGoModels["qwen3.7-plus"] },
 			"gpt-5.6-luna": { ...opencodeGoModels["gpt-5.6-luna"] },
 		})
 	}),
@@ -833,6 +839,155 @@ describe("OpencodeGoHandler", () => {
 		})
 	})
 
+	describe("Anthropic-format Claude model (claude-haiku-5-5)", () => {
+		// OpenCode Go serves claude-haiku-5-5 only on /v1/messages, and Claude
+		// Haiku 5.5 answers non-default temperature values with a 400.
+		const claudeOptions: ApiHandlerOptions = {
+			opencodeGoApiKey: "test-key",
+			opencodeGoModelId: "claude-haiku-5-5",
+		}
+		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+		beforeEach(() => {
+			mockAnthropicCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 10,
+								output_tokens: 0,
+								cache_creation_input_tokens: 2,
+								cache_read_input_tokens: 3,
+							},
+						},
+					},
+					{ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+					{ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello" } },
+					{
+						type: "content_block_start",
+						index: 1,
+						content_block: { type: "tool_use", id: "toolu_1", name: "read_file", input: {} },
+					},
+					{
+						type: "content_block_delta",
+						index: 1,
+						delta: { type: "input_json_delta", partial_json: '{"path":' },
+					},
+					{ type: "content_block_stop", index: 1 },
+					{ type: "message_delta", usage: { output_tokens: 5 } },
+					{ type: "message_stop" },
+				]),
+			)
+		})
+
+		it("streams through /v1/messages with its native max tokens and no temperature", async () => {
+			const handler = new OpencodeGoHandler(claudeOptions)
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const request = mockAnthropicCreate.mock.calls[0][0]
+			expect(request).toMatchObject({ model: "claude-haiku-5-5", stream: true, max_tokens: 128_000 })
+			expect(request.temperature).toBeUndefined()
+			expect(mockCreate).not.toHaveBeenCalled()
+			expect(mockResponsesCreate).not.toHaveBeenCalled()
+		})
+
+		it("streams text, tool calls and cache usage, priced at the Go rates", async () => {
+			const handler = new OpencodeGoHandler(claudeOptions)
+
+			const chunks = await collectStream(handler.createMessage("sys", messages))
+
+			expect(chunks).toContainEqual({ type: "text", text: "Hello" })
+			expect(chunks).toContainEqual({
+				type: "tool_call_partial",
+				index: 1,
+				id: "toolu_1",
+				name: "read_file",
+				arguments: undefined,
+			})
+			expect(chunks).toContainEqual({
+				type: "usage",
+				inputTokens: 10,
+				outputTokens: 0,
+				cacheWriteTokens: 2,
+				cacheReadTokens: 3,
+			})
+			// Per 1M tokens: 10 × $0.10 input + 5 × $0.50 output + 2 × $0.125
+			// cache write + 3 × $0.01 cache read.
+			const totalCost = chunks.find((c) => c.type === "usage" && c.totalCost !== undefined)
+			expect(totalCost?.type === "usage" && totalCost.totalCost).toBeCloseTo(3.78e-6, 12)
+		})
+
+		it("completePrompt uses /v1/messages with no temperature", async () => {
+			mockAnthropicCreate.mockResolvedValue({ content: [{ type: "text", text: "ok" }] })
+			const handler = new OpencodeGoHandler(claudeOptions)
+
+			expect(await handler.completePrompt("ping")).toBe("ok")
+
+			const request = mockAnthropicCreate.mock.calls[0][0]
+			expect(request).toMatchObject({ model: "claude-haiku-5-5", stream: false, max_tokens: 128_000 })
+			expect(request.temperature).toBeUndefined()
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("still sends a temperature to Messages models that accept one", async () => {
+			const handler = new OpencodeGoHandler({ opencodeGoApiKey: "test-key", opencodeGoModelId: "qwen3.7-max" })
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			expect(mockAnthropicCreate.mock.calls[0][0].temperature).toBe(0)
+		})
+
+		type StreamUsage = {
+			input_tokens: number
+			cache_creation_input_tokens?: number
+			cache_read_input_tokens?: number
+		}
+
+		const streamedCost = async (options: ApiHandlerOptions, usage: StreamUsage, outputTokens = 0) => {
+			mockAnthropicCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{ type: "message_start", message: { usage: { output_tokens: 0, ...usage } } },
+					{ type: "message_delta", usage: { output_tokens: outputTokens } },
+					{ type: "message_stop" },
+				]),
+			)
+			const chunks = await collectStream(new OpencodeGoHandler(options).createMessage("sys", messages))
+			const cost = chunks.find((c) => c.type === "usage" && c.totalCost !== undefined)
+			return cost?.type === "usage" ? cost.totalCost : undefined
+		}
+
+		it.each([
+			// At or below 100K input tokens: $0.10 per 1M input tokens.
+			{ input_tokens: 100_000, outputTokens: 0, expected: 0.01 },
+			// Above it, every rate is five times higher: $0.50 input ...
+			{ input_tokens: 100_001, outputTokens: 0, expected: 0.0500005 },
+			// ... $2.50 output, $0.625 cache write and $0.05 cache read; cached
+			// tokens count towards the threshold (50K + 30K + 30K).
+			{
+				input_tokens: 50_000,
+				cache_creation_input_tokens: 30_000,
+				cache_read_input_tokens: 30_000,
+				outputTokens: 1_000,
+				expected: 0.04775,
+			},
+		])(
+			"prices $input_tokens input tokens at the matching Go tier",
+			async ({ outputTokens, expected, ...usage }) => {
+				expect(await streamedCost(claudeOptions, usage, outputTokens)).toBeCloseTo(expected, 12)
+			},
+		)
+
+		it("applies the long-context tier of other Messages models too (qwen3.7-plus)", async () => {
+			const qwenOptions: ApiHandlerOptions = { opencodeGoApiKey: "test-key", opencodeGoModelId: "qwen3.7-plus" }
+
+			// $0.40 per 1M input tokens up to 256K, three times that above it.
+			expect(await streamedCost(qwenOptions, { input_tokens: 256_000 })).toBeCloseTo(0.1024, 12)
+			expect(await streamedCost(qwenOptions, { input_tokens: 256_001 })).toBeCloseTo(0.3072012, 12)
+		})
+	})
+
 	describe("Responses-format models (gpt-5.6-luna)", () => {
 		// gpt-5.6-luna is Responses-only on the Go gateway: its chat-completions
 		// adapter fails with an opaque HTTP 500 (Zoo-Code-Org/Zoo-Code#1431),
@@ -1375,7 +1530,8 @@ describe("OpencodeGoHandler", () => {
 	})
 
 	describe("isOpencodeGoAnthropicFormatModel", () => {
-		it("classifies Qwen and MiniMax Go models as Anthropic-format", () => {
+		it("classifies Qwen, MiniMax and Claude Go models as Anthropic-format", () => {
+			expect(isOpencodeGoAnthropicFormatModel("claude-haiku-5-5")).toBe(true)
 			expect(isOpencodeGoAnthropicFormatModel("qwen3.8-flash")).toBe(true)
 			expect(isOpencodeGoAnthropicFormatModel("qwen3.7-max")).toBe(true)
 			expect(isOpencodeGoAnthropicFormatModel("qwen3.7-plus")).toBe(true)

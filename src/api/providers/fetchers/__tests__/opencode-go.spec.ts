@@ -119,6 +119,24 @@ describe("Opencode Go Fetchers", () => {
 			})
 		})
 
+		it("resolves claude-haiku-5-5 from an ID-only catalog entry to its native configuration", async () => {
+			mockedAxios.get.mockResolvedValue({ data: { data: [{ id: "claude-haiku-5-5" }] } })
+
+			const models = await getOpencodeGoModels("k")
+
+			expect(models["claude-haiku-5-5"]).toMatchObject({
+				contextWindow: 1_000_000,
+				maxTokens: 128_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsTemperature: false,
+				inputPrice: 0.1,
+				outputPrice: 0.5,
+				cacheReadsPrice: 0.01,
+				cacheWritesPrice: 0.125,
+			})
+		})
+
 		it("returns an empty map on network error", async () => {
 			mockedAxios.get.mockRejectedValue(new Error("network"))
 			expect(await getOpencodeGoModels("k")).toEqual({})
@@ -212,6 +230,7 @@ describe("Opencode Go Fetchers", () => {
 				"hy4-preview",
 				"hy3",
 				"hy3-preview",
+				"claude-haiku-5-5",
 				"gpt-5.6-luna",
 				"grok-4.5",
 				"grok-4.6",
