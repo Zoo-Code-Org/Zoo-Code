@@ -52,6 +52,19 @@ export const providerProfilesSchema = z.object({
 
 export type ProviderProfiles = z.infer<typeof providerProfilesSchema>
 
+/**
+ * Signals that a profile's configuration no longer exists. Callers that treat an
+ * already-deleted profile as an idempotent no-op branch on this type instead of
+ * matching error message text, which a profile name containing the phrase could
+ * otherwise spoof.
+ */
+export class ProviderSettingsNotFoundError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = "ProviderSettingsNotFoundError"
+	}
+}
+
 export class ProviderSettingsManager {
 	private static readonly SCOPE_PREFIX = "roo_cline_config_"
 	private readonly defaultConfigId = this.generateId()
@@ -419,7 +432,7 @@ export class ProviderSettingsManager {
 					name = params.name
 
 					if (!providerProfiles.apiConfigs[name]) {
-						throw new Error(`Config with name '${name}' not found`)
+						throw new ProviderSettingsNotFoundError(`Config with name '${name}' not found`)
 					}
 
 					providerSettings = providerProfiles.apiConfigs[name]
@@ -431,7 +444,7 @@ export class ProviderSettingsManager {
 					)
 
 					if (!entry) {
-						throw new Error(`Config with ID '${id}' not found`)
+						throw new ProviderSettingsNotFoundError(`Config with ID '${id}' not found`)
 					}
 
 					name = entry[0]
@@ -441,6 +454,13 @@ export class ProviderSettingsManager {
 				return { name, ...providerSettings }
 			})
 		} catch (error) {
+			// A missing profile is an expected, actionable condition, not an I/O failure, and
+			// callers branch on the typed error (deleteProviderProfile prunes a stale list
+			// entry only for that type). Wrapping it here would erase the distinction, so the
+			// typed error is rethrown as-is; every other failure keeps the wrapped context.
+			if (error instanceof ProviderSettingsNotFoundError) {
+				throw error
+			}
 			throw new Error(`Failed to get profile: ${error instanceof Error ? error.message : error}`)
 		}
 	}
@@ -474,7 +494,7 @@ export class ProviderSettingsManager {
 				const providerProfiles = await this.load()
 
 				if (!providerProfiles.apiConfigs[name]) {
-					throw new Error(`Config '${name}' not found`)
+					throw new ProviderSettingsNotFoundError(`Config '${name}' not found`)
 				}
 
 				if (Object.keys(providerProfiles.apiConfigs).length === 1) {
@@ -485,6 +505,11 @@ export class ProviderSettingsManager {
 				await this.store(providerProfiles)
 			})
 		} catch (error) {
+			// A missing config is a caller-meaningful signal, not a failure: rethrow it
+			// unwrapped so callers can branch on the type instead of message text.
+			if (error instanceof ProviderSettingsNotFoundError) {
+				throw error
+			}
 			throw new Error(`Failed to delete config: ${error}`)
 		}
 	}

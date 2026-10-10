@@ -95,6 +95,14 @@ import { getLMStudioModels } from "../../api/providers/fetchers/lmstudio"
 
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 
+// Keys that only host-side, validated paths may write. `apiConfiguration` and
+// `listApiConfigMeta` are resolved by ProviderSettingsManager, which validates a
+// configuration before it can become active, and `viewStates` is the per-view durable
+// map that ClineProvider owns. The generic settings loop below writes straight into
+// the shared store and into this view's local buffer - and getState() prefers the
+// buffer - so a webview payload must not be allowed to carry them.
+const HOST_OWNED_SETTINGS = new Set(["apiConfiguration", "listApiConfigMeta", "viewStates", "currentApiConfigName"])
+
 // Serializes handling of "telemetrySetting" messages. Each invocation reads the previous
 // setting, awaits a persistence write, then applies the new live telemetry state -- with no
 // serialization, two rapid messages (e.g. a fast toggle) can interleave across those awaits:
@@ -580,7 +588,20 @@ export const webviewMessageHandler = async (
 				provider.resolveWebviewThemeFixtureProbe(message.requestId, message.themeFixture)
 			}
 			break
-		case "webviewDidLaunch":
+		case "webviewDidLaunch": {
+			// A failed view-state registration must not abort launch handling: the
+			// initial state, theme and API-configuration sync below still run, and the
+			// provider restores its previous viewStateId on failure (setViewStateId) so
+			// a later launch retries registration and loadViewState instead of
+			// treating the failed id as already handled.
+			try {
+				await provider.setViewStateId(message.viewStateId)
+			} catch (error) {
+				provider.log(
+					`[webviewDidLaunch] view-state registration failed: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+
 			// Load custom modes first
 			const customModes = await provider.customModesManager.getCustomModes()
 			await updateGlobalState("customModes", customModes)
@@ -629,17 +650,36 @@ export const webviewMessageHandler = async (
 						}
 					}
 
-					const currentConfigName = getGlobalState("currentApiConfigName")
+					const currentState = await provider.getState()
+					const currentConfigName = currentState.currentApiConfigName
 
 					if (currentConfigName) {
 						if (!(await provider.providerSettingsManager.hasConfig(currentConfigName))) {
-							// Current config name not valid, get first config in list.
+							// The merged name (which may be this view's durable pin) no longer
+							// resolves. When the shared global selection is still valid, re-pin
+							// only this view so the global selection is left untouched; only
+							// repair the global when it is invalid as well.
+							const globalConfigName = getGlobalState("currentApiConfigName")
+							const globalStillValid =
+								!!globalConfigName &&
+								(await provider.providerSettingsManager.hasConfig(globalConfigName))
 							const name = listApiConfig[0]?.name
-							await updateGlobalState("currentApiConfigName", name)
 
-							if (name) {
-								await provider.activateProviderProfile({ name })
-								return
+							if (globalStillValid && globalConfigName) {
+								// Re-pin this view to the still-valid shared global selection (not the
+								// first listed profile) so the view adopts the shared choice; the
+								// global selection itself is left untouched.
+								await provider.saveViewState("currentApiConfigName", globalConfigName)
+								// Fall through: refresh listApiConfigMeta and post listApiConfig
+								// to this webview below.
+							} else {
+								// Current config name not valid, get first config in list.
+								await updateGlobalState("currentApiConfigName", name)
+
+								if (name) {
+									await provider.activateProviderProfile({ name })
+									return
+								}
 							}
 						}
 					}
@@ -689,6 +729,7 @@ export const webviewMessageHandler = async (
 
 			provider.isViewLaunched = true
 			break
+		}
 		case "newTask":
 			// Initializing new instance of Cline will make sure that any
 			// agentically running promises in old instance don't affect our new
@@ -747,6 +788,17 @@ export const webviewMessageHandler = async (
 				}
 
 				for (const [key, value] of Object.entries(message.updatedSettings)) {
+					if (HOST_OWNED_SETTINGS.has(key)) {
+						// Boundary check, not normalization: these keys reach the runtime through the
+						// profile-management paths, which validate them first. Applying them here would
+						// let an injected webview swap in an attacker-controlled API configuration that
+						// getState() then serves to every consumer.
+						provider.log(
+							`[updateSettings] Ignoring host-owned setting '${key}' supplied by the webview; it must go through the profile-management path.`,
+						)
+						continue
+					}
+
 					let newValue = value
 
 					if (key === "language") {
@@ -856,7 +908,9 @@ export const webviewMessageHandler = async (
 						}
 					}
 
-					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
+					// Route through provider.setValue so view-local buffer/pin sync stays
+					// consistent with the other mutation paths.
+					await provider.setValue(key as keyof RooCodeSettings, newValue)
 				}
 
 				await provider.postStateToWebview()
@@ -2375,18 +2429,22 @@ export const webviewMessageHandler = async (
 
 				const oldName = message.text
 
-				const newName = (await provider.providerSettingsManager.listConfig()).filter(
-					(c) => c.name !== oldName,
-				)[0]?.name
+				const profileToDelete = (await provider.providerSettingsManager.listConfig()).find(
+					(profile) => profile.name === oldName,
+				)
 
-				if (!newName) {
+				if (!profileToDelete) {
 					vscode.window.showErrorMessage(t("common:errors.delete_api_config"))
 					return
 				}
 
 				try {
-					await provider.providerSettingsManager.deleteConfig(oldName)
-					await provider.activateProviderProfile({ name: newName })
+					// Route through the provider: deleteProviderProfile serialises against the other
+					// profile mutations, snapshots and compensates the shared stores, and re-pins every
+					// sibling view still pinned to the deleted profile. Calling
+					// providerSettingsManager.deleteConfig here bypasses all of that and leaves those
+					// views with stale in-memory and persisted state.
+					await provider.deleteProviderProfile(profileToDelete)
 				} catch (error) {
 					provider.log(
 						`Error delete api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,

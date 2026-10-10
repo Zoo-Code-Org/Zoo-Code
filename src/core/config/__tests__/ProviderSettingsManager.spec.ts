@@ -12,7 +12,12 @@ import {
 import { clearAllMocks } from "../../../test-utils/reset"
 import { makeExtensionContext } from "../../../test-utils/vscode"
 
-import { ProviderSettingsManager, ProviderProfiles, SyncCloudProfilesResult } from "../ProviderSettingsManager"
+import {
+	ProviderSettingsManager,
+	ProviderSettingsNotFoundError,
+	ProviderProfiles,
+	SyncCloudProfilesResult,
+} from "../ProviderSettingsManager"
 
 // `export()` builds an API handler per profile to read model capabilities. Mock
 // buildApiHandler with the real @roo-code/types model definitions so the token-field
@@ -745,6 +750,11 @@ describe("ProviderSettingsManager", () => {
 				}),
 			)
 
+			// The typed not-found signal is the contract callers branch on: a profile
+			// name containing "not found" must not be matchable via message text.
+			await expect(providerSettingsManager.deleteConfig("nonexistent")).rejects.toBeInstanceOf(
+				ProviderSettingsNotFoundError,
+			)
 			await expect(providerSettingsManager.deleteConfig("nonexistent")).rejects.toThrow(
 				"Config 'nonexistent' not found",
 			)
@@ -818,6 +828,44 @@ describe("ProviderSettingsManager", () => {
 
 			await expect(providerSettingsManager.activateProfile({ name: "nonexistent" })).rejects.toThrow(
 				"Config with name 'nonexistent' not found",
+			)
+		})
+
+		it("rejects a missing profile lookup with the typed not-found error", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: { default: { config: {}, id: "default" } },
+				}),
+			)
+
+			// Callers branch on the type, not the message: deleteProviderProfile treats a missing
+			// profile as an expected condition to prune from the list, and wraps every OTHER
+			// failure as a real error. A generic wrapper here would erase that distinction.
+			await expect(providerSettingsManager.getProfile({ name: "nonexistent" })).rejects.toThrow(
+				ProviderSettingsNotFoundError,
+			)
+		})
+
+		it("rejects a missing id lookup with the typed error naming that id", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						default: { config: {}, id: "default" },
+						named: { config: {}, id: "known-id" },
+					},
+				}),
+			)
+
+			// The id branch is the one the mode mapping and deleteProviderProfile hit: a stale
+			// mode -> id mapping must surface as a not-found the caller can prune, not as a
+			// generic failure that gets re-wrapped as unexpected.
+			await expect(providerSettingsManager.getProfile({ id: "missing-id" })).rejects.toBeInstanceOf(
+				ProviderSettingsNotFoundError,
+			)
+			await expect(providerSettingsManager.getProfile({ id: "missing-id" })).rejects.toThrow(
+				"Config with ID 'missing-id' not found",
 			)
 		})
 
