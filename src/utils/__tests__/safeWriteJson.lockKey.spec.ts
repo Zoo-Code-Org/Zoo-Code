@@ -91,7 +91,9 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			return async () => {}
 		})
 
-		await safeWriteJson(currentLink, { id: "task-1" })
+		// A confined writer is the one that publishes through the referent, and therefore the one that
+		// locks it; an unscoped write replaces the link and locks the link path instead.
+		await safeWriteJson(currentLink, { id: "task-1" }, { confineTo: dir })
 
 		// The lock key is the key every other writer to this file uses, so the caller
 		// queued behind the peer instead of failing before the lock.
@@ -103,11 +105,17 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// A write that declares no confinement scope no longer resolves the publish target at all,
 		// so the two post-lock resolutions this used to record are gone; the lock key still comes
 		// from the referent, which is what the test is about.
-		expect(order).toEqual(["resolve-failed", "lstat", "resolve", "resolve", "lock", "lstat", "lstat"])
-		// The bytes replaced the link rather than travelling through it to the referent: nobody
-		// authorized the referent here, because no scope was declared.
-		expect(JSON.parse(await fs.readFile(currentLink, "utf8"))).toEqual({ id: "task-1" })
-		await expect(fs.readFile(referent, "utf8")).rejects.toThrow()
+		expect(order.slice(0, 2)).toEqual(["resolve-failed", "lstat"])
+		const lockAt = order.indexOf("lock")
+		expect(order.slice(0, lockAt)).toContain("resolve")
+		// A confined writer resolves its scope root on both sides of the lock, so how many times
+		// the resolution ran is not what this test is about: the caller queued behind the peer on
+		// the referent's lock, and safeWriteText's two staging checks still come last.
+		expect(order.slice(lockAt).filter((entry) => entry === "lstat")).toHaveLength(2)
+		expect(order[order.length - 1]).toBe("lstat")
+		// A confined writer publishes through the referent, which is the file it locked: the bytes
+		// land on the referent and the link keeps pointing at them.
+		expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ id: "task-1" })
 	})
 
 	it("releases the lock when the resolution under the lock rejects", async () => {
@@ -198,3 +206,44 @@ it("does not log a cleanup error when the safety net finds the temp file already
 	unlinkSpy.mockRestore()
 	consoleError.mockRestore()
 })
+	it("locks the link path when the caller declared no confinement scope", async () => {
+		// The lock key must name the file this write replaces. An unscoped write publishes over the
+		// link, so locking the referent would let it run beside another writer that locked the link -
+		// two locks for one publish target, and the lost update the lock exists to prevent.
+		const dir = await makeDir("lockkey-unscoped-")
+		const link = path.join(dir, "link.json")
+		const referent = path.join(dir, "history_item.json")
+		currentLink = link
+		// The doubles say the path is a link to a referent, so a key that resolved the referent is
+		// distinguishable from the link path itself.
+		mockedRealpath.mockImplementation(async (target) => (target === link ? referent : String(target)))
+		mockedReadlink.mockImplementation(async (target) => (target === link ? referent : Promise.reject(new Error("not a link"))))
+		mockedLstat.mockImplementation(async (target) => symlinkStat(target))
+		mockedAcquireFileLock.mockImplementation(async () => async () => {})
+
+		await safeWriteJson(link, { id: "task-2" })
+
+		expect(mockedAcquireFileLock).toHaveBeenCalledWith(link)
+	})
+
+	it("does not merge from a symlink an unscoped write is not going to publish through", async () => {
+		// The merge reads the path the caller named. When that path is a link and the write declares
+		// no confinement scope, the publish replaces the link, so reading through the link would copy
+		// JSON from outside the requested path into the replacement file.
+		const dir = await makeDir("merge-link-")
+		const link = path.join(dir, "link.json")
+		currentLink = link
+		// A real document sits at the path, and the doubles report it as a symlink: reading through
+		// the link would hand the merge that document, which is what this forbids.
+		await fs.writeFile(link, JSON.stringify({ had: "referent content" }), "utf8")
+		mockedRealpath.mockImplementation(async (target) => String(target))
+		mockedLstat.mockImplementation(async (target) =>
+			target === link ? ({ isSymbolicLink: () => true, isFile: () => false } as unknown as BigIntStats) : symlinkStat(target),
+		)
+		mockedAcquireFileLock.mockImplementation(async () => async () => {})
+		const merge = vi.fn((existing: unknown, next: unknown) => ({ had: existing !== null, next }))
+
+		await safeWriteJson(link, { id: "task-3" }, { merge })
+
+		expect(merge).toHaveBeenCalledWith(null, { id: "task-3" })
+	})

@@ -154,7 +154,12 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// symlink alias and its referent share one lock. The key must be computable
 	// while a peer writer is mid-commit (backup mode renames the referent away and
 	// back), so the walk tolerates a dangling link instead of rejecting it here.
-	const lockKey = await resolveLockKey(absoluteFilePath)
+	// The lock key must name the file this write is going to replace. An unscoped write publishes
+	// over the link itself (see below), so it locks the link path; only a caller that declared a
+	// confinement scope publishes through the referent and therefore locks the referent. Locking
+	// the referent while replacing the link lets two writers hold two different locks for one
+	// publish target - the lost update the lock exists to prevent.
+	const lockKey = options?.confineTo ? await resolveLockKey(absoluteFilePath) : absoluteFilePath
 
 	// Confinement, if the caller declared a scope, is checked BEFORE the lock is
 	// taken and before the parent-directory creation below: an out-of-scope target
@@ -215,8 +220,27 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// so a throwing merge still releases the lock.
 		if (options?.merge) {
 			let existing: unknown = null
+			// An unscoped write replaces the link rather than publishing through it, so it must not
+			// read through the link either: reading the referent and writing the replacement would
+			// copy JSON from outside the requested path into a file the caller named. The merge sees
+			// no existing document, exactly as it would if the path did not exist.
+			let mergeTargetIsLink = false
+			if (!options?.confineTo) {
+				try {
+					mergeTargetIsLink = (await fs.lstat(resolvedTargetPath)).isSymbolicLink()
+				} catch (linkError: unknown) {
+					// An absent target is not a link: the read below reports ENOENT and the merge sees no
+					// document, which is the behaviour callers rely on.
+					const code = linkError && typeof linkError === "object" && "code" in linkError ? (linkError as { code?: string }).code : undefined
+					if (code !== "ENOENT") {
+						throw linkError
+					}
+				}
+			}
 			try {
-				existing = JSON.parse(await fs.readFile(resolvedTargetPath, "utf8"))
+				if (!mergeTargetIsLink) {
+					existing = JSON.parse(await fs.readFile(resolvedTargetPath, "utf8"))
+				}
 			} catch (error: unknown) {
 				const code =
 					error && typeof error === "object" && "code" in error ? (error as { code: string }).code : undefined
