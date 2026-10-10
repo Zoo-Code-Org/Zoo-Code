@@ -253,7 +253,14 @@ describe("safeWriteText", () => {
 		// These tests exercise the win32 publish path, whose DACL capture is judged by its
 		// artifact, so the mock world has to produce a usable dump.
 		beforeEach(() => {
-			vi.mocked(fsSync.statSync).mockImplementation((() => ({ isFile: () => true, size: 256 })) as never)
+			// Path-aware: this code stats two different paths - the target, for its mode, and the
+			// dump, to judge the capture. One stub for both paths would let a regression that
+			// stats the target instead of the dump pass, and would silently stage with mode 0
+			// because the stub carries no mode.
+			vi.mocked(fsSync.statSync).mockImplementation(((p: unknown) =>
+				typeof p === "string" && p.includes(".acl.tmp")
+					? { isFile: () => true, size: 256 }
+					: _stats(0o644)) as never)
 		})
 		it("copies target -> backup before commit, deletes backup on success", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
@@ -321,7 +328,14 @@ describe("safeWriteText", () => {
 		// The DACL capture is judged by its artifact, so the mock world has to produce one:
 		// a regular, non-empty dump. Tests that want an unusable artifact override this.
 		beforeEach(() => {
-			vi.mocked(fsSync.statSync).mockImplementation((() => ({ isFile: () => true, size: 256 })) as never)
+			// Path-aware: this code stats two different paths - the target, for its mode, and the
+			// dump, to judge the capture. One stub for both paths would let a regression that
+			// stats the target instead of the dump pass, and would silently stage with mode 0
+			// because the stub carries no mode.
+			vi.mocked(fsSync.statSync).mockImplementation(((p: unknown) =>
+				typeof p === "string" && p.includes(".acl.tmp")
+					? { isFile: () => true, size: 256 }
+					: _stats(0o644)) as never)
 		})
 		it.skipIf(process.platform !== "win32")(
 			"copies target DACL onto staging file via icacls before rename on Windows",
@@ -337,7 +351,9 @@ describe("safeWriteText", () => {
 
 				const saveCall = vi.mocked(execFile).mock.calls[0]
 				expect(saveCall[0]).toBe("icacls")
-				expect(saveCall[1]).toEqual([targetPath, "/save", expect.stringContaining(".acl.tmp"), "/T"])
+				// No /T: with a file path it makes icacls walk the whole tree and save every file of
+				// that name, and the restore then rewrites all of their DACLs.
+				expect(saveCall[1]).toEqual([targetPath, "/save", expect.stringContaining(".acl.tmp")])
 
 				const restoreCall = vi.mocked(execFile).mock.calls[1]
 				expect(restoreCall[0]).toBe("icacls")
@@ -534,7 +550,42 @@ describe("safeWriteText", () => {
 			expect(restoreCalls.length).toBeGreaterThan(0)
 		})
 
-		it("win32 DACL save args are [targetPath, /save, dumpPath, /T] before backup rename", async () => {
+		it("skips the DACL save and restore for the rest of the process once a restore reports the missing privilege", async () => {
+			// The memo is process-wide, so this test runs against a fresh module instance:
+			// otherwise the write below would disable DACL handling for every later test in
+			// the file. vi.mock factories still apply to the re-imported module.
+			vi.resetModules()
+			const { safeWriteText: freshWriteText } = await import("../safeWriteText")
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+			const privilegeFailure = Object.assign(new Error("Access is denied."), { code: 1300 })
+			let calls = 0
+			const runner = vi.fn((...args: unknown[]) => {
+				calls++
+				const cb = args[args.length - 1] as (err: Error | null) => void
+				// The save succeeds; every restore reports the missing privilege.
+				cb(args[1] && String((args[1] as string[])[1]) === "/restore" ? privilegeFailure : null)
+			}) as unknown as typeof execFile
+			const options = { platform: "win32", execFileRunner: runner }
+
+			await freshWriteText(targetPath, "data", options)
+			const callsAfterFirstWrite = calls
+			expect(callsAfterFirstWrite).toBeGreaterThan(0)
+			expect(warn).toHaveBeenCalledWith(expect.stringContaining("cannot restore DACLs"))
+
+			calls = 0
+			warn.mockClear()
+			await freshWriteText(targetPath, "data", options)
+
+			expect(calls).toBe(0)
+			expect(warn).not.toHaveBeenCalled()
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+			warn.mockRestore()
+		})
+
+		it("win32 DACL save args are [targetPath, /save, dumpPath] before backup rename", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
@@ -547,7 +598,7 @@ describe("safeWriteText", () => {
 			// First call: save DACL from target before backup rename
 			const firstCall = vi.mocked(execFile).mock.calls[0]
 			expect(firstCall[0]).toBe("icacls")
-			expect(firstCall[1]).toEqual([targetPath, "/save", expect.stringContaining(".acl.tmp"), "/T"])
+			expect(firstCall[1]).toEqual([targetPath, "/save", expect.stringContaining(".acl.tmp")])
 
 			// Second call: restore DACL onto directory after commit rename
 			const secondCall = vi.mocked(execFile).mock.calls[1]
@@ -1563,6 +1614,20 @@ describe("resolvePublishTarget symlink cycle (S1)", () => {
 
 describe("parent directory creation (safeWriteText.ts:288-290)", () => {
 	beforeEach(() => {
+		// This block sits outside describe("safeWriteText"), so the resetAllMocks there
+		// never runs for it: without its own reset it inherits whatever the previous block
+		// left in the mocks, and a run with -t that selects only these tests gets bare
+		// vi.fn() stubs (undefined stats) and fails for unrelated reasons.
+		vi.resetAllMocks()
+		vi.mocked(fs.mkdir).mockResolvedValue(undefined)
+		vi.mocked(fs.access).mockResolvedValue(undefined)
+		vi.mocked(fs.rename).mockResolvedValue(undefined)
+		vi.mocked(fs.unlink).mockResolvedValue(undefined)
+		vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o644))
+		vi.mocked(fsSync.lstatSync).mockReturnValue(_dirStats())
+		vi.mocked(fsSync.writeSync).mockImplementation((...args: unknown[]) =>
+			typeof args[3] === "number" ? args[3] : 0,
+		)
 		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
 		vi.mocked(fs.mkdir).mockResolvedValue(undefined)
 		vi.mocked(fs.access).mockResolvedValue(undefined)
@@ -1598,6 +1663,21 @@ describe("parent directory creation (safeWriteText.ts:288-290)", () => {
 })
 
 describe("partial backup after a failed copy (backup:true)", () => {
+	beforeEach(() => {
+		// Same isolation reason as the block above: outside the main describe, so nothing
+		// resets the mocks or restores the defaults for it.
+		vi.resetAllMocks()
+		vi.mocked(fs.mkdir).mockResolvedValue(undefined)
+		vi.mocked(fs.access).mockResolvedValue(undefined)
+		vi.mocked(fs.rename).mockResolvedValue(undefined)
+		vi.mocked(fs.unlink).mockResolvedValue(undefined)
+		vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o644))
+		vi.mocked(fsSync.lstatSync).mockReturnValue(_dirStats())
+		vi.mocked(fsSync.writeSync).mockImplementation((...args: unknown[]) =>
+			typeof args[3] === "number" ? args[3] : 0,
+		)
+	})
+
 	it("removes the partial backup when copyFile fails with ENOENT and the publish succeeds", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
