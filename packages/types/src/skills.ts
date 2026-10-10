@@ -20,6 +20,15 @@ export interface SkillMetadata {
 	modeSlugs?: string[]
 }
 
+/** A user-actionable problem found while loading a SKILL.md file. */
+export interface SkillDiagnostic {
+	path: string
+	source: "global" | "project"
+	message: string
+	line?: number
+	column?: number
+}
+
 /**
  * Skill name validation constants per agentskills.io specification:
  * https://agentskills.io/specification
