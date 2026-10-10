@@ -829,6 +829,12 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({}, { isPartial: true })
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
 
+			// A partial delta is not gated by the access check, so the denied call can still be
+			// holding a preview: open() never consults rooignore.
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			mockCline.diffViewProvider.reset.mockClear()
+
 			await executeWriteFileTool({}, { accessAllowed: false })
 
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
@@ -839,6 +845,12 @@ describe("writeToFileTool", () => {
 			)?.[1]
 			expect(abortListener).toBeInstanceOf(Function)
 			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			// The denied preview must not survive for the next write to reuse.
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.discardUnapprovedStream.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.diffViewProvider.reset.mock.invocationCallOrder[0],
+			)
 		})
 
 		it("releases the per-task stream state when a missing parameter returns early", async () => {
@@ -956,7 +968,12 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(1)
 			mockCline.diffViewProvider.open.mockClear()
 			mockCline.diffViewProvider.update.mockClear()
+			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			mockCline.diffViewProvider.reset.mockClear()
 			mockCline.diffViewProvider.open.mockImplementationOnce(async () => {
+				// open() had already marked the session as editing when the abort landed - which
+				// is exactly why the abort cleanup, checking isEditing earlier, could not close it.
+				mockCline.diffViewProvider.isEditing = true
 				writeToFileTool.clearTaskState(mockCline)
 			})
 
@@ -965,6 +982,10 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(1)
 			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			// The view and the placeholder open() wrote are this delta's to close: the abort
+			// cleanup had already run, so nobody else would.
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
 		})
 		it("releases the per-task stream state when the user rejects the diff-view approval", async () => {
 			// A partial delta registers the entry and the TaskAborted listener. The denial then

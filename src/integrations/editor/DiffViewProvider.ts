@@ -611,7 +611,16 @@ export class DiffViewProvider {
 						// closing a dirty tab would prompt. A modify is never saved here - a modify's
 						// restore is an in-memory revert, and saving it would write to a file the user
 						// never approved (see the method comment).
-						await document.save()
+						const saved = await document.save()
+						if (!saved) {
+							// A save the editor did not perform leaves the unapproved content in the buffer.
+							// Reading it as success would let the cleanup below delete the placeholder under a
+							// dirty tab and still report a restored preview - the next Ctrl+S would then
+							// recreate the file with exactly what this method exists to discard.
+							editorFailure = new Error(
+								`Could not save the restored diff editor buffer for ${this.relPath}; it may still hold unapproved content.`,
+							)
+						}
 					}
 				}
 
@@ -1311,8 +1320,15 @@ export class DiffViewProvider {
 		for (let i = directories.length - 1; i >= 0; i--) {
 			try {
 				await fs.rmdir(directories[i])
-			} catch {
-				// Already gone, or something else lives in it: not this edit's to remove.
+			} catch (error: unknown) {
+				// A directory that is already gone, or that something else now lives in, is not
+				// this edit's to force away. Anything else - a permission failure, an I/O error -
+				// is a directory left behind that nothing still tracks, so it is reported rather
+				// than swallowed. The remaining directories are attempted either way.
+				const code = (error as NodeJS.ErrnoException)?.code
+				if (code !== "ENOENT" && code !== "ENOTEMPTY") {
+					console.error("Error removing a directory this edit created:", directories[i], error)
+				}
 			}
 		}
 	}

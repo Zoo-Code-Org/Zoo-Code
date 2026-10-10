@@ -41,7 +41,7 @@ vi.mock("vscode", () => ({
 		onDidOpenTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
 		openTextDocument: vi.fn().mockResolvedValue({
 			isDirty: false,
-			save: vi.fn().mockResolvedValue(undefined),
+			save: vi.fn().mockResolvedValue(true),
 		}),
 		textDocuments: [],
 		fs: {
@@ -875,7 +875,7 @@ describe("DiffViewProvider", () => {
 				document: {
 					getText: vi.fn().mockReturnValue("new content"),
 					isDirty: false,
-					save: vi.fn().mockResolvedValue(undefined),
+					save: vi.fn().mockResolvedValue(true),
 				},
 			}
 			;(diffViewProvider as any).preDiagnostics = []
@@ -1020,7 +1020,7 @@ describe("DiffViewProvider", () => {
 				document: {
 					getText: vi.fn().mockReturnValue("content"),
 					isDirty: false,
-					save: vi.fn().mockResolvedValue(undefined),
+					save: vi.fn().mockResolvedValue(true),
 				},
 			}
 
@@ -1045,7 +1045,7 @@ describe("DiffViewProvider", () => {
 				document: {
 					getText: vi.fn().mockReturnValue("content"),
 					isDirty: false,
-					save: vi.fn().mockResolvedValue(undefined),
+					save: vi.fn().mockResolvedValue(true),
 				},
 			}
 
@@ -1065,7 +1065,7 @@ describe("DiffViewProvider", () => {
 						uri: { fsPath: `${mockCwd}/race.ts`, scheme: "file" },
 						getText: vi.fn().mockReturnValue("a\nCHANGED\nc\nd\n"),
 						isDirty: false,
-						save: vi.fn().mockResolvedValue(undefined),
+						save: vi.fn().mockResolvedValue(true),
 						lineCount: 5,
 						lineAt: vi.fn().mockReturnValue({ text: "" }),
 					},
@@ -1113,7 +1113,7 @@ describe("DiffViewProvider", () => {
 					uri: { fsPath: `${mockCwd}/test.txt` },
 					getText: vi.fn().mockReturnValue("modified"),
 					isDirty: false,
-					save: vi.fn().mockResolvedValue(undefined),
+					save: vi.fn().mockResolvedValue(true),
 					positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
 				},
 			}
@@ -1137,7 +1137,7 @@ describe("DiffViewProvider", () => {
 				uri: { fsPath: mockTargetPath },
 				getText: vi.fn().mockReturnValue("content"),
 				isDirty: false,
-				save: vi.fn().mockResolvedValue(undefined),
+				save: vi.fn().mockResolvedValue(true),
 				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
 			},
 		})
@@ -1263,7 +1263,7 @@ describe("DiffViewProvider", () => {
 				uri: { fsPath: mockTargetPath },
 				getText: vi.fn().mockReturnValue("content"),
 				isDirty: false,
-				save: vi.fn().mockResolvedValue(undefined),
+				save: vi.fn().mockResolvedValue(true),
 				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
 			},
 		})
@@ -1669,7 +1669,7 @@ describe("DiffViewProvider", () => {
 				uri: { fsPath: mockTargetPath },
 				getText: vi.fn().mockReturnValue("content"),
 				isDirty: false,
-				save: vi.fn().mockResolvedValue(undefined),
+				save: vi.fn().mockResolvedValue(true),
 				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
 			},
 		})
@@ -1858,6 +1858,66 @@ describe("DiffViewProvider", () => {
 			expect(vscode.window.showTextDocument).toHaveBeenCalled()
 		})
 	})
+	describe("removeAdoptedDirectories", () => {
+		it("removes the recorded directories deepest first and drops the tracking", async () => {
+			const dirs = [mockCwd + "/early", mockCwd + "/early/nested"]
+			diffViewProvider.adoptCreatedDirectories(dirs)
+
+			await diffViewProvider.removeAdoptedDirectories()
+
+			expect(vi.mocked(fs.rmdir).mock.calls.map((c) => c[0])).toEqual([...dirs].reverse())
+			expect(diffViewProvider["createdDirs"]).toEqual([])
+		})
+
+		it("does not reject when a directory cannot be removed and still attempts the rest", async () => {
+			const dirs = [mockCwd + "/early", mockCwd + "/early/nested"]
+			const failure = Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+			vi.mocked(fs.rmdir).mockRejectedValueOnce(failure)
+			diffViewProvider.adoptCreatedDirectories(dirs)
+
+			await expect(diffViewProvider.removeAdoptedDirectories()).resolves.toBeUndefined()
+
+			expect(fs.rmdir).toHaveBeenCalledTimes(2)
+			expect(fs.rmdir).toHaveBeenCalledWith(dirs[0])
+		})
+
+		it("reports a removal failure that is not an expected cleanup condition", async () => {
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const dir = mockCwd + "/early/nested"
+			vi.mocked(fs.rmdir).mockRejectedValueOnce(Object.assign(new Error("EACCES"), { code: "EACCES" }))
+			diffViewProvider.adoptCreatedDirectories([dir])
+
+			await diffViewProvider.removeAdoptedDirectories()
+
+			expect(errorSpy).toHaveBeenCalledWith(
+				"Error removing a directory this edit created:",
+				dir,
+				expect.any(Error),
+			)
+			errorSpy.mockRestore()
+		})
+
+		it("stays quiet about a directory that is already gone or no longer empty", async () => {
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			vi.mocked(fs.rmdir)
+				.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+				.mockRejectedValueOnce(Object.assign(new Error("ENOTEMPTY"), { code: "ENOTEMPTY" }))
+			diffViewProvider.adoptCreatedDirectories([mockCwd + "/early", mockCwd + "/early/nested"])
+
+			await diffViewProvider.removeAdoptedDirectories()
+
+			expect(fs.rmdir).toHaveBeenCalledTimes(2)
+			expect(errorSpy).not.toHaveBeenCalled()
+			errorSpy.mockRestore()
+		})
+
+		it("does nothing when no directory was recorded", async () => {
+			await expect(diffViewProvider.removeAdoptedDirectories()).resolves.toBeUndefined()
+
+			expect(fs.rmdir).not.toHaveBeenCalled()
+		})
+	})
+
 	describe("discardUnapprovedStream method", () => {
 		const mockTargetPath = `${mockCwd}/mock-target-file.ts`
 
@@ -1866,8 +1926,10 @@ describe("DiffViewProvider", () => {
 			getText: () => "partial model output",
 			positionAt: (offset: number) => ({ line: 0, character: offset }),
 			uri: { fsPath: mockTargetPath, path: mockTargetPath },
+			// TextDocument.save() resolves true on success; the discard reads that result.
 			save: vi.fn(async () => {
 				callOrder.push("save")
+				return true
 			}),
 		})
 
@@ -2172,6 +2234,30 @@ describe("DiffViewProvider", () => {
 			await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow("close rejected")
 		})
 
+		it("treats a save the editor did not perform as a rollback failure and keeps the artifacts", async () => {
+			// TextDocument.save() resolves false when the editor did not write. Reading that as
+			// success deleted the placeholder under a still-dirty tab and still reported a
+			// restored preview - the next Ctrl+S recreates the file holding exactly the content
+			// this method exists to discard.
+			const document = {
+				isDirty: true,
+				getText: () => "partial model output",
+				positionAt: (offset: number) => ({ line: 0, character: offset }),
+				uri: { fsPath: mockTargetPath, path: mockTargetPath },
+				save: vi.fn().mockResolvedValue(false),
+			}
+			openAbandonedView(document, [mockCwd + "/mock-dir"], [])
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+
+			await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow(
+				"Could not save the restored diff editor buffer",
+			)
+
+			expect(fs.unlink).not.toHaveBeenCalled()
+			expect(fs.rmdir).not.toHaveBeenCalled()
+			expect(document.save).toHaveBeenCalledTimes(1)
+		})
+
 		it("leaves a file this edit never created a placeholder for on disk", async () => {
 			// reset() does not clear relPath, and saveDirectly() sets it for an approved write.
 			// Without ownership tracking the discard would unlink that approved file: an approved
@@ -2258,7 +2344,7 @@ describe("DiffViewProvider", () => {
 					uri: { fsPath, scheme: "file" },
 					getText: vi.fn().mockReturnValue(""),
 					isDirty: false,
-					save: vi.fn().mockResolvedValue(undefined),
+					save: vi.fn().mockResolvedValue(true),
 					lineCount: 0,
 				},
 				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
@@ -2302,7 +2388,7 @@ describe("DiffViewProvider", () => {
 					uri: { fsPath, scheme: "file" },
 					getText: vi.fn().mockReturnValue(""),
 					isDirty: false,
-					save: vi.fn().mockResolvedValue(undefined),
+					save: vi.fn().mockResolvedValue(true),
 					lineCount: 0,
 				},
 				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
@@ -2349,7 +2435,7 @@ describe("DiffViewProvider", () => {
 						uri: { fsPath, scheme: "file" },
 						getText: vi.fn().mockReturnValue("approved content"),
 						isDirty: false,
-						save: vi.fn().mockResolvedValue(undefined),
+						save: vi.fn().mockResolvedValue(true),
 					},
 				},
 				closeAllDiffViews: vi.fn().mockResolvedValue(undefined),
@@ -2411,7 +2497,7 @@ describe("DiffViewProvider", () => {
 						uri: { fsPath, scheme: "file" },
 						getText: vi.fn().mockReturnValue("partial content"),
 						isDirty: false,
-						save: vi.fn().mockResolvedValue(undefined),
+						save: vi.fn().mockResolvedValue(true),
 					},
 				},
 				closeAllDiffViews: vi.fn().mockResolvedValue(undefined),
@@ -2450,7 +2536,7 @@ describe("DiffViewProvider", () => {
 						uri: { fsPath, scheme: "file" },
 						getText: vi.fn().mockReturnValue("partial content"),
 						isDirty: false,
-						save: vi.fn().mockResolvedValue(undefined),
+						save: vi.fn().mockResolvedValue(true),
 					},
 				},
 				closeAllDiffViews: vi.fn().mockResolvedValue(undefined),

@@ -340,6 +340,24 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			// state (and only this task's) so the abort listener and any streamFailed guard do
 			// not outlive the call.
 			this.releasePartialStreamBookkeeping(task)
+			// Streaming is not gated by this check - open() never consults rooignore - so the
+			// denied call can still be holding a preview full of content that will never be
+			// approved. Leaving it open hands the next write a live editor containing someone
+			// else's unapproved content.
+			if (task.diffViewProvider.isEditing) {
+				const discardError = await this.discardUnapprovedStreamBeforeReset(task)
+				if (discardError) {
+					await task
+						.say(
+							"error",
+							`write_to_file could not discard the preview for the denied write: ${discardError.message}`,
+						)
+						.catch((sayError) => {
+							console.error("Error reporting write_to_file discard failure:", sayError)
+						})
+				}
+			}
+			await this.resetDiffViewAfterWrite(task)
 			return
 		}
 
@@ -645,6 +663,15 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				// diff view), so streaming the partial content into it now would resurrect a
 				// view for a task that no longer exists.
 				if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+					// open() can finish after the abort cleanup already ran, and that cleanup checked
+					// isEditing at a moment when there was no session yet. The view and the new-file
+					// placeholder open() wrote are then open with nobody left to close them, so this
+					// delta - the one that opened them - owns their teardown.
+					if (task.diffViewProvider.isEditing) {
+						await this.discardUnapprovedStreamBeforeReset(task)
+						await this.resetDiffViewAfterWrite(task)
+					}
+					await this.releaseEarlyDirectories(task)
 					return
 				}
 

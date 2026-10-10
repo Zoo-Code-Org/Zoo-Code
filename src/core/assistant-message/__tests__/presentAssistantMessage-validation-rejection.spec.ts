@@ -220,6 +220,26 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 		expect(mockHandle).not.toHaveBeenCalled()
 	})
 
+	it("does not release the write_to_file stream for a different tool with no native arguments", async () => {
+		// The name check guards this branch too. Without a negative control here, a mutant
+		// that releases for every tool in this branch survives.
+		mockValidate.mockReturnValue(undefined)
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call-read-3",
+				name: "read_file",
+				params: { path: "a.ts" },
+				partial: false,
+			},
+		]
+
+		await presentAssistantMessage(mockTask as unknown as Task)
+
+		expect(mockRelease).not.toHaveBeenCalled()
+		expect(mockHandle).not.toHaveBeenCalled()
+	})
+
 	it("leaves the stream alone when a rejected tool never streamed", async () => {
 		// The release is write_to_file scoped: a rejected read_file must not touch it.
 		mockTask.assistantMessageContent = [
