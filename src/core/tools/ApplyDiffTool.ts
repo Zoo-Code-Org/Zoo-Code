@@ -101,7 +101,6 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				}
 			}
 
-
 			// Apply the diff to the original content
 			const diffResult = (await task.diffStrategy?.applyDiff(
 				originalContent,

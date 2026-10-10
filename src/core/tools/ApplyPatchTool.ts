@@ -111,7 +111,8 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						// With no prior observation there is nothing to carry, and the read stays
 						// incomplete. Carry completeness only when a prior observation exists and still
 						// describes the version that was read.
-						const complete = prior === undefined ? false : prior.complete === true && prior.version === preReadToken
+						const complete =
+							prior === undefined ? false : prior.complete === true && prior.version === preReadToken
 						task.observationRegistry.observe(absolutePath, preReadToken, complete)
 					}
 				}
@@ -256,9 +257,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				diagnosticsEnabled,
 				writeDelayMs,
 				"create",
-					// Seventh parameter is completeOverride (this call claims no completeness of its
-					// own); the eighth is the approval flag for a target outside every workspace root.
-					undefined,
+				// Seventh parameter is completeOverride (this call claims no completeness of its
+				// own); the eighth is the approval flag for a target outside every workspace root.
+				undefined,
 				isOutsideWorkspace,
 				approvedCanonicalTarget,
 			)
