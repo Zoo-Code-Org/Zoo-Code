@@ -30,6 +30,17 @@ import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, Complete
 import { handleOpenAIError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
+type OpenAiUsage =
+	| {
+			prompt_tokens?: number
+			completion_tokens?: number
+			cache_creation_input_tokens?: number
+			cache_read_input_tokens?: unknown
+			prompt_tokens_details?: { cached_tokens?: unknown } | null
+	  }
+	| null
+	| undefined
+
 // TODO: Rename this to OpenAICompatibleHandler. Also, I think the
 // `OpenAINativeHandler` can subclass from this, since it's obviously
 // compatible with the OpenAI API. We can also rename it to `OpenAIHandler`.
@@ -289,13 +300,26 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		}
 	}
 
-	protected processUsageMetrics(usage: any, _modelInfo?: ModelInfo): ApiStreamUsageChunk {
+	protected processUsageMetrics(usage: OpenAiUsage, _modelInfo?: ModelInfo): ApiStreamUsageChunk {
+		const inputTokens = usage?.prompt_tokens || 0
+		const reportedCacheReadTokens = usage?.cache_read_input_tokens ?? usage?.prompt_tokens_details?.cached_tokens
+		const cacheReadTokens =
+			typeof reportedCacheReadTokens === "number" &&
+			Number.isFinite(reportedCacheReadTokens) &&
+			Number.isInteger(reportedCacheReadTokens) &&
+			reportedCacheReadTokens >= 0 &&
+			// Proxy-specific counters may exclude cache reads from prompt_tokens.
+			// Only OpenAI's nested cached_tokens must be a subset of prompt_tokens.
+			(usage?.cache_read_input_tokens != null || reportedCacheReadTokens <= inputTokens)
+				? reportedCacheReadTokens || undefined
+				: undefined
+
 		return {
 			type: "usage",
-			inputTokens: usage?.prompt_tokens || 0,
+			inputTokens,
 			outputTokens: usage?.completion_tokens || 0,
 			cacheWriteTokens: usage?.cache_creation_input_tokens || undefined,
-			cacheReadTokens: usage?.cache_read_input_tokens || undefined,
+			cacheReadTokens,
 		}
 	}
 
@@ -483,11 +507,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			}
 
 			if (chunk.usage) {
-				yield {
-					type: "usage",
-					inputTokens: chunk.usage.prompt_tokens || 0,
-					outputTokens: chunk.usage.completion_tokens || 0,
-				}
+				yield this.processUsageMetrics(chunk.usage)
 			}
 		}
 	}
