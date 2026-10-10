@@ -1,5 +1,4 @@
 import fs from "fs/promises"
-import * as path from "path"
 
 import { getCommand, getCommands } from "../commands"
 
@@ -156,7 +155,7 @@ description: Symlinked command
 			expect(symlinkCmd?.content).toContain("Symlinked Command")
 		})
 
-		it.skipIf(process.platform === "win32")("should discover commands from symlinked directories", async () => {
+		it.skipIf(process.platform === "win32")("should not discover commands from symlinked directories", async () => {
 			const nestedContent = `# Nested Command from Symlinked Dir`
 
 			// Mock lstat for symlink target type checking (lstat doesn't follow symlinks)
@@ -220,21 +219,24 @@ description: Symlinked command
 			// Mock readlink for symlink to directory
 			mockFs.readlink = vi.fn().mockResolvedValue("/mock/shared-commands")
 
-			// Mock readFile for content
+			// Mock readFile for content: nested.md only exists inside the symlink
+			// target, never as a direct file in a commands directory.
 			mockFs.readFile = vi.fn().mockImplementation((filePath: string) => {
 				const normalizedPath = filePath.toString().replace(/\\/g, "/")
-				if (normalizedPath.includes("nested.md")) {
+				if (normalizedPath.includes("shared-commands") && normalizedPath.includes("nested.md")) {
 					return Promise.resolve(nestedContent)
 				}
 				return Promise.reject(new Error("File not found"))
 			})
 
+			// The listing must not surface commands that are only reachable through a
+			// directory symlink: getCommand() only probes direct command files and
+			// file symlinks, so getCommands() applies the same limits.
 			const result = await getCommands("/test/cwd")
+			expect(result.find((c) => c.name === "nested")).toBeUndefined()
 
-			// Find a command that was discovered from the symlinked directory
-			const nestedCmd = result.find((c) => c.name === "nested")
-			expect(nestedCmd).toBeDefined()
-			expect(nestedCmd?.content).toContain("Nested Command from Symlinked Dir")
+			// Execution agrees: the command cannot be resolved either.
+			expect(await getCommand("/test/cwd", "nested")).toBeUndefined()
 		})
 
 		// Note: Nested symlinks (symlink -> symlink -> file) are automatically followed by fs.stat,
