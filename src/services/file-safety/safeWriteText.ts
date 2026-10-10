@@ -85,6 +85,49 @@ export class PostCommitDurabilityError extends Error {
  * is still on disk: its path travels on the error so the caller can remove it, instead
  * of the cleanup silently discarding the only reference to it.
  */
+/**
+ * The target exists but its access rights could not be inspected or saved, so publishing would
+ * replace it with a file that inherits different rights. On Windows the publish fails instead of
+ * warning: a successful write that silently widened who can read the file is not a save the user
+ * can trust, and the failure happens before the commit, so the target still holds its content.
+ */
+export class DaclInspectionError extends Error {
+	constructor(
+		readonly targetPath: string,
+		readonly phase: "inspect" | "save",
+		readonly causeError: unknown,
+	) {
+		const detail = phase === "save" ? "its DACL could not be saved" : "its access rights could not be checked"
+		super(`safeWriteText: refusing to publish over ${targetPath} because ${detail}`)
+		this.name = "DaclInspectionError"
+	}
+}
+
+/**
+ * The content is committed but the saved DACL could not be put back on it, so the file at the
+ * target answers to different access rights than the one it replaced. Reported as an error rather
+ * than a warning: the caller has to know that the publish changed who can read the file.
+ */
+export class DaclRestoreError extends Error {
+	constructor(
+		readonly targetPath: string,
+		readonly causeError: unknown,
+	) {
+		super(`safeWriteText: content committed at ${targetPath}, but its saved access rights could not be restored`)
+		this.name = "DaclRestoreError"
+	}
+}
+
+/** The outcome of a publish: paths this call left on disk that it could not remove. */
+export interface SafeWriteTextResult {
+	/**
+	 * Every leftover this write could not clean up (a backup copy whose unlink kept failing, a DACL
+	 * dump, a staging directory). A warning tells a human about them; this is what the caller has to
+	 * act on - a retry, a startup sweep, or a message that names the path.
+	 */
+	leftoverPaths: string[]
+}
+
 export class OrphanedBackupError extends Error {
 	readonly orphanedBackupPath: string
 	readonly originalError: unknown
@@ -254,12 +297,77 @@ export async function resolveLockKey(absoluteFilePath: string): Promise<string> 
 	}
 }
 
+/**
+ * Remove a backup copy, retrying once: Windows reports EPERM for a file whose handle has not been
+ * released yet, so a single failure is not evidence that the path is stuck. ENOENT counts as
+ * removed - the goal is that the path is gone, not that this call performed the removal. Returns
+ * the error that kept the path on disk, or null when it is gone.
+ */
+/**
+ * Remove this write's own staging directory once its temp file is gone. Best-effort by design: a
+ * failure must not un-commit a published file. The directory is empty and per-write at this point,
+ * so a later sweep of stale .file-safety-staging_* names can remove it without risking another
+ * write's file. Takes the directory as a parameter because control-flow narrowing does not survive
+ * the try/finally boundary above the call site.
+ */
+async function _removeOwnStagingDir(stagingDir: string | null): Promise<void> {
+	if (stagingDir === null) {
+		return
+	}
+	await fs.rmdir(stagingDir).catch(() => {})
+}
+
+async function _removeBackupCopy(backupPath: string): Promise<unknown> {
+	let lastError: unknown = null
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			await fs.unlink(backupPath)
+			return null
+		} catch (error: unknown) {
+			if (errorCode(error) === "ENOENT") {
+				return null
+			}
+			lastError = error
+		}
+	}
+	return lastError
+}
+
 export async function safeWriteText(
 	filePath: string,
 	content: string | Uint8Array,
 	options?: SafeWriteTextOptions,
-): Promise<void> {
+): Promise<SafeWriteTextResult> {
 	const absoluteFilePath = path.resolve(filePath)
+	// Every leftover is recorded here as it is discovered, so a caller gets a structured result
+	// instead of having to parse warnings to learn that content is still on disk.
+	const leftoverPaths: string[] = []
+
+	// Warning delivery must never abort the write: the notices below describe a
+	// committed-but-imperfect publish, and a caller whose callback throws (a UI sink, a logger that
+	// is mid-restart) must not turn that into a failed save. Declared above the try whose failure
+	// handler reports a leftover backup copy, so both sides can reach it.
+	const warn = (message: string) => {
+		const report = (label: string, error: unknown) => {
+			console.warn(`safeWriteText: onWarning callback ${label}: ${error instanceof Error ? error.message : String(error)}`)
+		}
+		try {
+			const sink = options?.onWarning ?? ((m: string) => console.warn(m))
+			const result: unknown = sink(message)
+			// A sink may be async - TypeScript accepts a value-returning callback where
+			// a void one is expected. Awaiting it would let warning delivery delay a
+			// write that has already committed (and hang it if the sink never settles),
+			// while leaving the promise unhandled turns a rejection into an unhandled
+			// rejection, which under Node's default mode can end the process after a
+			// successful write. Attach a handler without awaiting.
+			if (result instanceof Promise) {
+				result.catch((error: unknown) => report("rejected", error))
+			}
+		} catch (error: unknown) {
+			report("failed", error)
+		}
+	}
+
 
 	// Resolve the symlink referent (see resolvePublishTarget).
 	const targetPath = await resolvePublishTarget(absoluteFilePath)
@@ -405,31 +513,23 @@ export async function safeWriteText(
 
 		// -- Step 2 (win32): save DACL BEFORE the backup copy -----------
 		const platform = options?.platform ?? process.platform
-		// Warning delivery must never abort the write: the notices below describe a
-		// committed-but-imperfect publish, and a caller whose callback throws (a UI sink,
-		// a logger that is mid-restart) must not turn that into a failed save.
-		const warn = (message: string) => {
-			const report = (label: string, error: unknown) => {
-				console.warn(
-					`safeWriteText: onWarning callback ${label}: ${error instanceof Error ? error.message : String(error)}`,
-				)
+		// A refusal before the commit has to remove what this call already made: the failure
+		// handler below is out of reach from here, and a staged file stranded beside the target is
+		// residue the caller should not have to discover on its own.
+		const _cleanupBeforeCommit = async (ownDir: string | null): Promise<string[]> => {
+			const stuck: string[] = []
+			const staged = tempPath
+			await fs.unlink(staged).catch(() => {
+				stuck.push(staged)
+			})
+			if (ownDir) {
+				await fs.rmdir(ownDir).catch(() => {
+					stuck.push(ownDir)
+				})
 			}
-			try {
-				const sink = options?.onWarning ?? ((m: string) => console.warn(m))
-				const result: unknown = sink(message)
-				// A sink may be async - TypeScript accepts a value-returning callback where
-				// a void one is expected. Awaiting it would let warning delivery delay a
-				// write that has already committed (and hang it if the sink never settles),
-				// while leaving the promise unhandled turns a rejection into an unhandled
-				// rejection, which under Node's default mode can end the process after a
-				// successful write. Attach a handler without awaiting.
-				if (result instanceof Promise) {
-					result.catch((error: unknown) => report("rejected", error))
-				}
-			} catch (error: unknown) {
-				report("failed", error)
-			}
+			return stuck
 		}
+
 		if (platform === "win32") {
 			let accessError: unknown = null
 			try {
@@ -450,17 +550,21 @@ export async function safeWriteText(
 					// no later step can restore from it.
 					await fs.unlink(dumpPath).catch(() => {})
 					// The target exists and its DACL could not be captured, so the commit rename
-					// replaces it with a file that inherits different access rights. The write still
-					// proceeds - a missing or failing icacls must not leave the user unable to save -
-					// but the replacement is no longer ACL-identical and that has to be visible
-					// instead of silent.
-					warn(`Could not save the DACL of ${targetPath}; the replacement may inherit different access rights.`)
+					// would replace it with a file that inherits different access rights. Nothing here
+					// can verify an equivalent restrictive ACL on the replacement, so the publish is
+					// refused instead of warned about: a save that silently changed who can read the
+					// file is not a save the user can trust. Nothing is committed yet, so the target
+					// still holds its content; the staged file this call already made is removed by
+					// the cleanup below, because the failure handler further down is out of reach.
+					leftoverPaths.push(...(await _cleanupBeforeCommit(stagingDir)))
+					throw new DaclInspectionError(targetPath, "save", null)
 				}
 			} else if (errorCode(accessError) !== "ENOENT") {
-				// Not "absent": the target is there but could not be checked (EACCES, ...), so
-				// DACL preservation was skipped for a reason the caller cannot infer from the
-				// successful write alone.
-				warn(`Could not check ${targetPath} for DACL preservation (${errorCode(accessError) ?? "unknown error"}); the replacement may inherit different access rights.`)
+				// Not "absent": the target is there but its access rights could not be read (EACCES,
+				// ...), so publishing would replace a file whose rights this call never learned. Same
+				// rule as the save failure above: refuse before anything is committed.
+				leftoverPaths.push(...(await _cleanupBeforeCommit(stagingDir)))
+				throw new DaclInspectionError(targetPath, "inspect", accessError)
 			}
 		}
 		try {
@@ -508,22 +612,8 @@ export async function safeWriteText(
 						// released yet); if it still fails the path is carried on the thrown error
 						// instead of being dropped where no caller can act on it.
 						const orphanPath = backupPath
-						let backupCleanupError: unknown = null
-						for (let attempt = 0; attempt < 2; attempt++) {
-							try {
-								await fs.unlink(orphanPath)
-								backupCleanupError = null
-								break
-							} catch (cleanupError: unknown) {
-								if (errorCode(cleanupError) === "ENOENT") {
-									// Already gone: that is exactly the outcome the cleanup wanted, so stop
-									// rather than unlinking the same path a second time.
-									backupCleanupError = null
-									break
-								}
-								backupCleanupError = cleanupError
-							}
-						}
+						// Same rule as the other two backup sites: one retry, ENOENT counts as removed.
+						const backupCleanupError = await _removeBackupCopy(orphanPath)
 						backupPath = null
 						if (backupCleanupError !== null) {
 							throw new OrphanedBackupError(orphanPath, targetPath, backupError, backupCleanupError)
@@ -568,13 +658,13 @@ export async function safeWriteText(
 				const restoredDir = path.dirname(targetPath)
 				const restored = await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
 				if (!restored) {
-					// The content is committed, but the published file may carry a different DACL
-					// from the one that was saved. Failing the write here would break every
-					// publish on machines where icacls cannot reapply the saved ACEs (a plain
-					// temp directory restore fails with "Not all privileges or groups referenced
-					// are assigned to the caller"), so the change of access rights is reported
-					// rather than thrown.
-					warn(`safeWriteText: content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`)
+					// The content is committed, but the published file answers to a different
+					// DACL from the one that was saved, and nothing here verified an equivalent
+					// restrictive ACL on the replacement. This is reported as an error rather than a
+					// warning: the caller has to know that the save changed who can read the file.
+					// Contract change - this used to warn and resolve, which let a publish that
+					// widened access look like an ordinary successful save.
+					throw new DaclRestoreError(targetPath, null)
 				}
 			}
 
@@ -587,29 +677,27 @@ export async function safeWriteText(
 				// persistent failure is reported with the path instead of swallowed. The publish
 				// itself succeeded, so the write still resolves: this is a leftover to clean up,
 				// not a failed save.
-				let backupRemoved = false
-				for (let attempt = 0; attempt < 2 && !backupRemoved; attempt++) {
-					try {
-						await fs.unlink(backupPath)
-						backupRemoved = true
-					} catch (cleanupError: unknown) {
-						if (errorCode(cleanupError) === "ENOENT") {
-							// Already gone: the cleanup goal is met, nothing to report.
-							backupRemoved = true
-						} else if (attempt === 1) {
-							warn(
-								`safeWriteText: committed ${targetPath} but could not remove its backup copy at ${backupPath} (${
-										errorCode(cleanupError) ?? "unknown error"
-									}); the copy of the previous content is still on disk and needs to be removed.`,
-							)
-						}
-					}
+				const cleanupError = await _removeBackupCopy(backupPath)
+				if (cleanupError !== null) {
+					// The publish itself succeeded, so this is a leftover to clean up rather than a
+					// failed save: the path reaches the human through onWarning and the caller through
+					// the structured result, because a full copy of the previous content is still
+					// sitting beside the target.
+					leftoverPaths.push(backupPath)
+					warn(
+						`safeWriteText: committed ${targetPath} but could not remove its backup copy at ${backupPath} (${
+							errorCode(cleanupError) ?? "unknown error"
+						}); the copy of the previous content is still on disk and needs to be removed.`,
+					)
 				}
 			}
 		} finally {
 			// Unlink DACL dump regardless of success/failure in this span.
 			if (daclDumpPath !== null) {
-				await fs.unlink(daclDumpPath).catch(() => {})
+				const dumpPath = daclDumpPath
+				await fs.unlink(dumpPath).catch(() => {
+					leftoverPaths.push(dumpPath)
+				})
 			}
 		}
 
@@ -619,9 +707,11 @@ export async function safeWriteText(
 		// writes only, and only this write's own directory: a per-write directory
 		// cannot be the one another concurrent write is still using. A failure must
 		// never un-commit a published file, so the removal swallows all errors.
-		if (stagingDir) {
-			await fs.rmdir(stagingDir).catch(() => {})
-		}
+		await _removeOwnStagingDir(stagingDir)
+
+		// The result is reported only after this call's own residue has been dealt with: a caller
+		// that receives an empty list knows there is nothing left for it to sweep.
+		return { leftoverPaths }
 	} catch (originalError: unknown) {
 		// The backup is a copy, never a restore source: whether the failure happened before
 		// or after the commit rename, the copy is removed below so no stale duplicate of the
@@ -631,7 +721,18 @@ export async function safeWriteText(
 			// the commit left there - before the commit that is the pre-write content, and
 			// after it the published content. Either way the copy has served its purpose
 			// and must not be left beside the target where no caller can find it.
-			await fs.unlink(backupPath).catch(() => {})
+			// One retry, ENOENT counts as removed - the same rule as the other two backup sites.
+			const stuckBackup = await _removeBackupCopy(backupPath)
+			if (stuckBackup !== null) {
+				// The original error is what the caller needs, so the leftover cannot be thrown; it is
+				// reported with its path instead of dropped, through onWarning and the result.
+				leftoverPaths.push(backupPath)
+				warn(
+					`safeWriteText: the write failed and its backup copy could not be removed from ${backupPath} (${
+						errorCode(stuckBackup) ?? "unknown error"
+					}); a full copy of the previous content is still on disk and needs to be removed.`,
+				)
+			}
 			backupPath = null
 		}
 		try {
