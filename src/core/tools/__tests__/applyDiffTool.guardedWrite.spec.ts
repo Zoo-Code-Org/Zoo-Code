@@ -356,9 +356,12 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		// post-read token the tool cannot prove the version it read, so the read
 		// authorizes nothing and the save falls back to the re-read remediation.
 		const stat = vi.mocked((await import("fs/promises")).default.stat)
-		stat.mockRejectedValue(
-			Object.assign(new Error("EACCES"), { code: "EACCES" }),
-		)
+		// Only the SECOND stat fails. Rejecting every call also fails the pre-read stat, so a
+		// regression that observes the file whenever the pre-read succeeds and ignores the post-read
+		// result would still pass here - the observation would be missing for the wrong reason. The
+		// first call answers with the same identity the harness's default provides.
+		stat.mockImplementationOnce(async () => ({ dev: 1n, ino: 2n, size: 22n, mtimeNs: 100n, ctimeNs: 100n }) as never)
+		stat.mockRejectedValueOnce(Object.assign(new Error("EACCES"), { code: "EACCES" }))
 
 		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
 			askApproval: mockAskApproval,
