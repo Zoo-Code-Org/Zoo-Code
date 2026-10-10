@@ -1961,23 +1961,20 @@ export class ClineProvider
 							savedProfile,
 							existed ? previousProfile : undefined,
 						)
-						if (this._disposed || (epoch !== undefined && epoch !== this.profileMutationEpoch)) return
+						if (epoch !== undefined && epoch !== this.profileMutationEpoch) return
 						if (restored) {
 							await this.updateGlobalState(
 								"listApiConfigMeta",
 								await this.providerSettingsManager.listConfig(),
 							)
 							if (activate) {
-								if (this._disposed || (epoch !== undefined && epoch !== this.profileMutationEpoch))
-									return
+								if (epoch !== undefined && epoch !== this.profileMutationEpoch) return
 								if (previousApiConfigName !== undefined)
 									await this.updateGlobalState("currentApiConfigName", previousApiConfigName)
-								if (this._disposed || (epoch !== undefined && epoch !== this.profileMutationEpoch))
-									return
+								if (epoch !== undefined && epoch !== this.profileMutationEpoch) return
 								if (previousMode && previousModeConfigId !== undefined)
 									await this.providerSettingsManager.setModeConfig(previousMode, previousModeConfigId)
-								if (this._disposed || (epoch !== undefined && epoch !== this.profileMutationEpoch))
-									return
+								if (epoch !== undefined && epoch !== this.profileMutationEpoch) return
 								if (previousProviderSettings) {
 									const currentConfig = this.contextProxy.getValues().currentApiConfigName
 									if (currentConfig === name || currentConfig === previousApiConfigName) {

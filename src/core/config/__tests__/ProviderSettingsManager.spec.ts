@@ -811,6 +811,15 @@ describe("ProviderSettingsManager", () => {
 			const foundByName = await providerSettingsManager.findProfile({ name: "found" })
 			expect(foundByName).toEqual(expect.objectContaining({ name: "found", id: "found-id" }))
 
+			const foundById = await providerSettingsManager.findProfile({ id: "found-id" })
+			expect(foundById).toEqual(
+				expect.objectContaining({
+					name: "found",
+					id: "found-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+			)
+
 			const notFoundByName = await providerSettingsManager.findProfile({ name: "absent" })
 			expect(notFoundByName).toBeUndefined()
 
