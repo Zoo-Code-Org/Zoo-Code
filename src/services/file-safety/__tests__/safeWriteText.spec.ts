@@ -232,6 +232,25 @@ describe("safeWriteText", () => {
 			expect(reported[0]).toContain("could not remove the staging directory")
 		})
 
+		it("treats a staging directory that someone else already removed as a completed cleanup", async () => {
+			// ENOENT from the rmdir is the goal, not a leftover: reporting it would send the reader
+			// looking for a directory that is already gone.
+			const targetPath = "/tmp/test-dir/target.txt"
+			const warnings: string[] = []
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fs.rmdir).mockRejectedValue(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+
+			await expect(
+				safeWriteText(targetPath, "hello", { platform: "linux", onWarning: (m) => warnings.push(m) }),
+			).resolves.toBeUndefined()
+
+			expect(fs.rmdir).toHaveBeenCalledTimes(1)
+			expect(warnings).toEqual([])
+		})
+
 		it("reports a staging directory it could not remove after a failed write, without replacing the write error", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			const warnings: string[] = []
@@ -454,6 +473,46 @@ describe("safeWriteText", () => {
 			// The durability failure is reported, not swallowed - and the backup copy is not
 			// left beside the target where no caller could find it.
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
+		})
+
+		it("does not let the failure cleanup unlink the file the commit already published", async () => {
+			// A tiny filesystem so that "the target is still there" is a STATE assertion: a cleanup
+			// that deleted the published file and a later step that recreated it would both satisfy
+			// a weaker "the content is at the target" check.
+			const targetPath = "/tmp/test-dir/target.txt"
+			const dirPath = path.dirname(targetPath)
+			const files = new Set<string>([targetPath])
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fs.rename).mockImplementation(async (from: unknown, to: unknown) => {
+				files.delete(String(from))
+				files.add(String(to))
+			})
+			vi.mocked(fs.unlink).mockImplementation(async (p: unknown) => {
+				files.delete(String(p))
+			})
+			// The post-commit parent-directory fsync is the failure under test.
+			vi.mocked(fsSync.openSync).mockImplementation((target) => {
+				if (String(target) === dirPath) throw new Error("EBADF")
+				return 1
+			})
+
+			await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).rejects.toThrow(
+				PostCommitDurabilityError,
+			)
+
+			expect(files.has(targetPath)).toBe(true)
+			// The staged path is the committed file from the rename onwards: the cleanup must not
+			// reach for it at all. Before the commit point was tracked, every post-commit
+			// failure (directory fsync, DACL restore, a throwing warning sink) ran the temp
+			// unlink against the name the target now lives under.
+			const stagedPath = String(vi.mocked(fs.rename).mock.calls[0][0])
+			expect(
+				vi.mocked(fs.unlink).mock.calls.filter(function (call) {
+					return String(call[0]) === stagedPath
+				}),
+			).toHaveLength(0)
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+			expect(fs.rename).toHaveBeenCalledTimes(1)
 		})
 	})
 
@@ -697,6 +756,75 @@ describe("safeWriteText", () => {
 				return m.includes(String(tempArg))
 			}),
 		).toBe(true)
+	})
+
+	it("treats an already-gone staging temp as a completed cleanup, not as a leftover", async () => {
+		// ENOENT from the temp unlink means the goal is already met. Retrying it and then
+		// warning claimed an orphan that did not exist - a false alarm that trains the reader
+		// to ignore the leftover reports that matter.
+		const targetPath = "/tmp/test-dir/target.txt"
+		const onWarning = vi.fn()
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.rename).mockRejectedValue(new Error("ENOSPC"))
+		vi.mocked(fs.unlink).mockRejectedValue(
+			Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+		)
+
+		await expect(safeWriteText(targetPath, "data", { platform: "linux", onWarning })).rejects.toThrow("ENOSPC")
+
+		// ENOENT short-circuits: the goal is met, so there is nothing to retry and
+		// nothing to report.
+		expect(fs.unlink).toHaveBeenCalledTimes(1)
+		expect(onWarning).not.toHaveBeenCalled()
+	})
+
+	it("still reports a staging temp that could not be removed for any other reason", async () => {
+		// The tolerance is scoped to ENOENT. EACCES means the staged file is still on disk, and
+		// swallowing it would turn a false alarm into a false silence.
+		const targetPath = "/tmp/test-dir/target.txt"
+		const onWarning = vi.fn()
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.rename).mockRejectedValue(new Error("ENOSPC"))
+		vi.mocked(fs.unlink).mockRejectedValue(
+			Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }),
+		)
+
+		await expect(safeWriteText(targetPath, "data", { platform: "linux", onWarning })).rejects.toThrow("ENOSPC")
+
+		const tempArg = vi.mocked(fs.rename).mock.calls[0][0]
+		expect(onWarning).toHaveBeenCalledTimes(1)
+		expect(String(onWarning.mock.calls[0][0])).toContain("could not remove the staging temp")
+		expect(String(onWarning.mock.calls[0][0])).toContain(String(tempArg))
+		expect(String(onWarning.mock.calls[0][0])).toContain("EACCES")
+	})
+
+	it("treats an already-gone backup copy as removed instead of reporting a phantom orphan", async () => {
+		// Same rule on the backup copy: ENOENT means there is nothing left to recover by hand,
+		// so the warning would point at a file that is not there.
+		const targetPath = "/tmp/test-dir/target.txt"
+		const onWarning = vi.fn()
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		vi.mocked(fs.rename).mockRejectedValue(new Error("ENOSPC"))
+		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		vi.mocked(fs.unlink).mockImplementation(async (p: unknown) => {
+			if (String(p).includes("safeWriteText.bak_")) {
+				throw enoent
+			}
+		})
+
+		await expect(safeWriteText(targetPath, "data", { backup: true, platform: "linux", onWarning })).rejects.toThrow(
+			"ENOSPC",
+		)
+
+		const backupPath = String(vi.mocked(fs.copyFile).mock.calls[0][1])
+		expect(
+			onWarning.mock.calls.filter(function (call) {
+				return String(call[0]).includes(backupPath)
+			}),
+		).toHaveLength(0)
 	})
 
 	it("retries a failed DACL-dump cleanup once and reports the leftover dump path", async () => {
@@ -1020,6 +1148,46 @@ describe("safeWriteText", () => {
 
 			// no dump file created or unlinked
 			expect(fs.unlink).not.toHaveBeenCalled()
+		})
+
+		it("reports a partial DACL dump that the failed capture could not remove", async () => {
+			// A failed icacls /save can leave a partial dump behind. Dropping the path with a
+			// catch(() => {}) meant a transient EPERM - antivirus, a handle still being released -
+			// left a concrete file beside the target whose name nothing could recover.
+			const targetPath = "/tmp/test-dir/target.txt"
+			const onWarning = vi.fn()
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// The capture itself fails, so nothing may be restored onto the committed file.
+			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+				if (typeof cb === "function") {
+					cb(new Error("icacls save error"), "", "")
+				}
+				return fakeChild
+			})
+			vi.mocked(fs.unlink).mockRejectedValue(
+				Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" }),
+			)
+
+			await safeWriteText(targetPath, "data", { platform: "win32", onWarning })
+
+			// The write still proceeds: a failing icacls must not leave the user unable to save.
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+			// The partial dump is retried and then reported with its exact path.
+			const dumpUnlinks = vi.mocked(fs.unlink).mock.calls.filter(function (call) {
+				return String(call[0]).includes("safeWriteText.acl")
+			})
+			expect(dumpUnlinks).toHaveLength(2)
+			expect(
+				onWarning.mock.calls.map(function (call) {
+					return String(call[0])
+				}),
+			).toEqual(
+				expect.arrayContaining([
+					expect.stringContaining("could not remove the DACL dump"),
+					expect.stringContaining("safeWriteText.acl"),
+				]),
+			)
 		})
 	})
 

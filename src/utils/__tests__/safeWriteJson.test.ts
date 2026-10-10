@@ -5,6 +5,7 @@ import * as os from "os"
 
 import { ConfinedPathEscapeError, safeWriteJson } from "../safeWriteJson"
 import * as lockfile from "proper-lockfile"
+import * as fileLockModule from "../fileLock"
 
 // Capture actual implementations before the vi.mock factory runs,
 // so they are never wrapped by vi.fn() — avoids infinite recursion when
@@ -885,6 +886,63 @@ describe("safeWriteJson", () => {
 		const entries = await fs.readdir(tempDir)
 		expect(entries).not.toContain("scope-missing-parent")
 		expect(entries.filter((entry) => entry.endsWith(".lock") || entry.includes(".new_"))).toEqual([])
+	})
+
+	test("re-checks confinement after the lock when a peer moves the referent out of scope", async () => {
+		const projectDir = path.join(tempDir, "race-project")
+		await fs.mkdir(projectDir)
+		const target = path.join(projectDir, "mcp.json")
+		await fsPromisesActuals.writeFile!(target, JSON.stringify({ mcpServers: {} }), "utf8")
+		const outsideDir = path.join(tempDir, "race-outside")
+		await fs.mkdir(outsideDir)
+		const merge = vi.fn()
+		// The pre-lock check canonicalizes the lock key and sees the file inside the scope.
+		// A peer writer then moves it out, so every lookup made after the advisory lock is
+		// held - the publish-target resolution and the in-lock re-check - sees the referent
+		// elsewhere. A confinement check that ran only before the lock would publish onto the
+		// moved file outside the scope.
+		const movedTarget = path.join(outsideDir, "mcp.json")
+		// The move is tied to the lock rather than to a call count: everything the pre-lock
+		// canonicalization sees is still inside the scope, and everything resolved while the
+		// lock is held - the publish target and the in-lock re-check - sees it elsewhere.
+		let lockHeld = false
+		// Captured before the spy is installed: calling the namespace property from inside the
+		// implementation would recurse through the spy itself.
+		const realAcquire = fileLockModule.acquireFileLock
+		const lockSpy = vi.spyOn(fileLockModule, "acquireFileLock").mockImplementation(async (key: string) => {
+			const release = await realAcquire(key)
+			lockHeld = true
+			return release
+		})
+		const realpathSpy = vi.spyOn(fs, "realpath").mockImplementation(async (candidate) => {
+			const p = String(candidate)
+			if (p === target) {
+				return lockHeld ? movedTarget : target
+			}
+			return p
+		})
+		let captured: unknown = null
+		try {
+			await safeWriteJson(target, { mcpServers: {} }, { confineTo: projectDir, merge })
+		} catch (error: unknown) {
+			captured = error
+		} finally {
+			realpathSpy.mockRestore()
+			lockSpy.mockRestore()
+		}
+
+		expect(captured).toBeInstanceOf(ConfinedPathEscapeError)
+		// The rejection came from the check inside the protected block, not from the
+		// pre-lock one: the advisory lock had already been taken. (mockRestore in the
+		// finally clears the spy's call history, so the flag carries the evidence.)
+		expect(lockHeld).toBe(true)
+		// The rejection happens before the merge read and before anything is staged, and the
+		// advisory lock is released rather than left to the stale timeout.
+		expect(merge).not.toHaveBeenCalled()
+		expect(await fs.readdir(projectDir)).toEqual(["mcp.json"])
+		expect(await fs.readdir(outsideDir)).toEqual([])
+		const root = await fs.readdir(tempDir)
+		expect(root.filter((entry) => entry.includes(".new_") || entry.endsWith(".lock"))).toEqual([])
 	})
 
 	test.skipIf(process.platform === "win32")(

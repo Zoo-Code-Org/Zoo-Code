@@ -144,15 +144,17 @@ async function _releaseStagingDir(stagingDir: string, warn: (message: string) =>
 	let cleanupError: unknown = null
 	// Retry once: Windows reports EPERM while a handle inside the directory is still being
 	// released, and the second attempt usually succeeds.
-	try {
-		await fs.rmdir(stagingDir)
-		return
-	} catch {
+	for (let attempt = 0; attempt < 2; attempt++) {
 		try {
 			await fs.rmdir(stagingDir)
 			return
-		} catch (secondError: unknown) {
-			cleanupError = secondError
+		} catch (error: unknown) {
+			// A directory someone else already removed is exactly the goal, not a
+			// leftover to report.
+			if (errorCode(error) === "ENOENT") {
+				return
+			}
+			cleanupError = error
 		}
 	}
 	warn(
@@ -331,6 +333,12 @@ export async function safeWriteText(
 	// with an empty .file-safety-staging directory behind. Track the directory this
 	// write created so its cleanup removes its own directory, not a shared one.
 	let stagingDir: string | null = null
+	// The commit point of this write. Set the moment the rename succeeds: from that instant
+	// tempPath IS the target (the rename moved the staged file onto it), so the failure cleanup
+	// below must not unlink tempPath any more - a post-commit failure (the parent-directory fsync,
+	// the DACL restore, a throwing warning sink) would otherwise delete the file that was just
+	// published. The success path already knows this; the catch is the side that needs the flag.
+	let committed = false
 	let tempPath: string
 	if (options?.tempPath) {
 		// A caller-supplied staging file is only safe when it is the file this
@@ -503,10 +511,13 @@ export async function safeWriteText(
 					// committed file (step 5).
 					daclDumpPath = dumpPath
 				} else {
-					// A failed icacls may have left a partial dump behind;
-					// remove it now (best-effort) so no partial dump survives and
-					// no later step can restore from it.
-					await fs.unlink(dumpPath).catch(() => {})
+					// A failed icacls may have left a partial dump behind; remove it now so
+					// no partial dump survives and no later step can restore from it. The
+					// cleanup is the same retrying, reporting one used for a successful dump:
+					// a partial file is still a concrete file beside the target, and a
+					// transient EPERM (antivirus, a handle still being released) that survives
+					// the retry has to leave the exact path behind, not vanish into a catch.
+					await _discardDaclDump(dumpPath, warn)
 					// The target exists and its DACL could not be captured, so the commit rename
 					// replaces it with a file that inherits different access rights. The write still
 					// proceeds - a missing or failing icacls must not leave the user unable to save -
@@ -597,6 +608,7 @@ export async function safeWriteText(
 
 			// -- Step 4: atomic rename temp -> target ---------------------
 			await fs.rename(tempPath, targetPath)
+			committed = true
 
 			// -- Step 4b (POSIX): fsync the parent directory so the directory entry
 			// changed by the commit rename is durable, not just the file content.
@@ -700,13 +712,20 @@ export async function safeWriteText(
 			// the orphan. The original write error is what propagates; the leftover is
 			// reported through the warning sink with both paths.
 			let cleanupError: unknown = null
-			try {
-				await fs.unlink(backupPath)
-			} catch {
+			for (let attempt = 0; attempt < 2; attempt++) {
 				try {
 					await fs.unlink(backupPath)
-				} catch (secondError: unknown) {
-					cleanupError = secondError
+					cleanupError = null
+					break
+				} catch (error: unknown) {
+					// A copy that is already gone is not a leftover: reporting it would claim a
+					// recoverable orphan that no longer exists, and leaving backupPath set would
+					// tell the reader the copy is still there.
+					if (errorCode(error) === "ENOENT") {
+						cleanupError = null
+						break
+					}
+					cleanupError = error
 				}
 			}
 			if (cleanupError) {
@@ -719,17 +738,32 @@ export async function safeWriteText(
 				backupPath = null
 			}
 		}
-		try {
-			await fs.unlink(tempPath)
-		} catch {
-			try {
-				await fs.unlink(tempPath)
-			} catch (secondError: unknown) {
+		// Only a write that never committed has a staged file to remove. After the commit
+		// rename there is nothing at tempPath but the published target, and unlinking it here
+		// would un-commit the write the caller is being told about.
+		if (!committed) {
+			let cleanupError: unknown = null
+			for (let attempt = 0; attempt < 2; attempt++) {
+				try {
+					await fs.unlink(tempPath)
+					cleanupError = null
+					break
+				} catch (error: unknown) {
+					// ENOENT means the goal is already met - the temp is gone - which is not a
+					// leftover and must not raise the warning below.
+					if (errorCode(error) === "ENOENT") {
+						cleanupError = null
+						break
+					}
+					cleanupError = error
+				}
+			}
+			if (cleanupError) {
 				// A leftover staged temp is not the caller's failure, but its path must not
 				// be dropped silently: report it and keep the original error propagating.
 				warn(
 					`safeWriteText: could not remove the staging temp ${tempPath} (${
-						secondError instanceof Error ? secondError.message : String(secondError)
+						cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
 					})`,
 				)
 			}

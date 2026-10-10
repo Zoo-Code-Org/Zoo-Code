@@ -3,6 +3,8 @@ import * as path from "path"
 
 import type { Mock } from "vitest"
 import type { ExtensionContext, Uri } from "vscode"
+import * as vscode from "vscode"
+import * as pathUtils from "../../../utils/path"
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 
@@ -1090,6 +1092,34 @@ describe("McpHub", () => {
 			const write = vi.mocked(safeWriteJson).mock.calls.find((call) => String(call[0]).includes("mcp.json"))
 			expect(write).toBeDefined()
 			expect(write![2]).toEqual(expect.objectContaining({ confineTo: "/mock/workspace" }))
+		})
+		it("confines a project write through the workspace-path fallback when the provider has no cwd", async () => {
+			// confineForMcpWrite prefers the provider's cwd and falls back to getWorkspacePath()
+			// when the provider is gone or carries no cwd. The fallback root still has to reach
+			// safeWriteJson as confineTo - otherwise the symlink case this confinement exists for
+			// goes unconfined exactly when the provider reference is empty.
+			Object.defineProperty(mockProvider, "cwd", { value: undefined, configurable: true })
+			const workspacePathSpy = vi.spyOn(pathUtils, "getWorkspacePath").mockReturnValue("/fallback/workspace")
+			vi.mocked(fs.readFile).mockResolvedValueOnce(
+				JSON.stringify({
+					mcpServers: {
+						"test-server": { type: "stdio", command: "node", args: ["test.js"], alwaysAllow: [] },
+					},
+				}),
+			)
+			mcpHub.connections = [projectConnection()]
+
+			try {
+				await mcpHub.toggleToolAlwaysAllow("test-server", "project", "fallback-tool", true)
+			} finally {
+				// The spy is on a shared module namespace: leaving it installed would pin every
+				// later test in this file to a workspace that does not exist.
+				workspacePathSpy.mockRestore()
+			}
+
+			const write = vi.mocked(safeWriteJson).mock.calls.find((call) => String(call[0]).includes("mcp.json"))
+			expect(write).toBeDefined()
+			expect(write![2]).toEqual(expect.objectContaining({ confineTo: "/fallback/workspace" }))
 		})
 		it("should add tool to always allow list when enabling", async () => {
 			const mockConfig = {
