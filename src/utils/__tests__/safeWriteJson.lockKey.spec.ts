@@ -108,10 +108,15 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// and the lock was taken, so neither changes which lock the caller queued behind.
 		// A write that declares no confinement scope no longer resolves the publish target at all,
 		// so the two post-lock resolutions this used to record are gone; the lock key still comes
-		// from the referent, which is what the test is about.
+		// from the referent, which is what the test is about. The two extra resolutions before the
+		// keys are the fold that decides whether the referent and the link are one lock: both run
+		// before any lock is taken, so the comparison cannot observe a filesystem that moved
+		// between the two acquisitions.
 		expect(order).toEqual([
 			"resolve-failed",
 			"lstat",
+			"resolve",
+			"resolve",
 			"resolve",
 			"resolve",
 			"history_item.json",
@@ -220,6 +225,82 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			})
 
 			await expect(safeWriteJson(target, { mcpServers: {} })).resolves.toBeUndefined()
+			expect(mockedAcquireFileLock).toHaveBeenCalledTimes(1)
+		},
+	)
+
+	// The second win32 folding a string comparison cannot do: a path component may be spelled as
+	// its 8.3 short name (RUNNER~1 for a long user directory, which is what a CI runner hands
+	// out). The filesystem folds that to the same directory entry, and the lock manager - which
+	// locks `<path>.lock` with realpath:false - therefore places both spellings in ONE lock
+	// directory. Asking twice is a collision with one's own lock, answered as 'Lock file is
+	// already being held' after the retries are spent.
+	it.runIf(process.platform === "win32")(
+		"takes one lock when the requested path names the referent directory by its 8.3 short name",
+		async () => {
+			const dir = await makeDir("lockkey-short-")
+			const referent = path.join(dir, "history_item.json")
+			currentLink = path.join(dir, "link.json")
+			const shortDir = path.join(path.dirname(dir), "LOCKKE~1")
+
+			// The link is named through the short spelling; the canonical form is the real one.
+			const linkViaShort = path.join(shortDir, "link.json")
+			mockedRealpath.mockImplementation(async (probe) => {
+				const p = String(probe)
+				if (p.toLowerCase() === shortDir.toLowerCase()) {
+					return dir
+				}
+				return p
+			})
+			// Nothing here is a symlink and everything the write touches exists, so the probe only
+			mockedLstat.mockImplementation(
+				async () => ({ isSymbolicLink: () => false, isFile: () => true }) as unknown as BigIntStats,
+			)
+			const held = new Set<string>()
+			mockedAcquireFileLock.mockImplementation(async (key) => {
+				const identity = String(key).toLowerCase()
+				if (held.has(identity)) {
+					throw new Error("Lock file is already being held")
+				}
+				held.add(identity)
+				return async () => {
+					held.delete(identity)
+				}
+			})
+
+			await expect(safeWriteJson(linkViaShort, { mcpServers: {} })).resolves.toBeUndefined()
+			expect(mockedAcquireFileLock).toHaveBeenCalledTimes(1)
+		},
+	)
+
+	// The fallback is the common path, not an edge: on a create the target's parent may not exist
+	// yet, so realpath fails and the resolved spelling is all there is. Case folding still has to
+	// apply to that spelling, or the two keys of one not-yet-existing file collide the same way.
+	it.runIf(process.platform === "win32")(
+		"takes one lock when the parent does not exist yet and the two spellings differ by case",
+		async () => {
+			const dir = await makeDir("lockkey-create-")
+			const missing = path.join(dir, "not-yet", "history_item.json")
+			const otherSpelling = path.join(path.dirname(dir), path.basename(dir).toUpperCase(), "history_item.json")
+			mockedRealpath.mockRejectedValue(enoent)
+			// The parent is absent, which is what makes realpath fail above; the file itself is
+			// whatever the write is about to create, so the probe answers as a regular file.
+			mockedLstat.mockImplementation(
+				async () => ({ isSymbolicLink: () => false, isFile: () => true }) as unknown as BigIntStats,
+			)
+			const held = new Set<string>()
+			mockedAcquireFileLock.mockImplementation(async (key) => {
+				const identity = String(key).toLowerCase()
+				if (held.has(identity)) {
+					throw new Error("Lock file is already being held")
+				}
+				held.add(identity)
+				return async () => {
+					held.delete(identity)
+				}
+			})
+
+			await expect(safeWriteJson(otherSpelling, { mcpServers: {} })).resolves.toBeUndefined()
 			expect(mockedAcquireFileLock).toHaveBeenCalledTimes(1)
 		},
 	)

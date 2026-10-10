@@ -163,6 +163,35 @@ function _scopeErrorCode(error: unknown): string | undefined {
  * @param {SafeWriteJsonOptions} options - Optional configuration for JSON formatting.
  * @returns {Promise<void>}
  */
+/**
+ * Fold a path into the identity its advisory lock is actually placed under.
+ *
+ * acquireFileLock locks `<absolute path>.lock` with realpath:false (see fileLock.ts), so the
+ * lock's identity is the directory ENTRY the path names, not the string. On Windows the
+ * filesystem folds two spellings of one entry in two different ways: case anywhere, and short
+ * (8.3) names in a component - `RUNNER~1` against `runneradmin`. A string comparison folds only
+ * the first, so the second leaves two keys that look different and collide on one .lock
+ * directory: the second acquisition answers 'Lock file is already being held' against the
+ * first one's own lock.
+ *
+ * So fold the way the lock is placed: canonical parent directory plus basename, case-folded on
+ * Windows. Canonicalising the parent is what folds a short name, because that folding belongs to
+ * the filesystem rather than to any string rule. When the parent does not exist yet - a create,
+ * the common case - realpath fails and the resolved spelling is all there is; case folding still
+ * applies to it.
+ */
+async function _lockIdentityKey(absoluteFilePath: string): Promise<string> {
+	const parent = path.dirname(absoluteFilePath)
+	let canonicalParent = parent
+	try {
+		canonicalParent = await fs.realpath(parent)
+	} catch {
+		// No canonical form exists yet: the directory is about to be created, so the resolved
+		// spelling is the only spelling.
+	}
+	const folded = path.join(canonicalParent, path.basename(absoluteFilePath))
+	return process.platform === "win32" ? folded.toLowerCase() : folded
+}
 async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJsonOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 	// One release per lock acquired, kept in acquisition order and released in reverse below.
@@ -199,10 +228,14 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// comparison asks for a second lock on the lock directory the first one already holds, and the
 	// write dies with "Lock file is already being held" on Windows alone. Compare the way the
 	// filesystem compares: case-insensitively there, exactly elsewhere.
-	const sameIdentity =
-		process.platform === "win32"
-			? lockKey.toLowerCase() === linkPathLockKey.toLowerCase()
-			: lockKey === linkPathLockKey
+	// Folded once, here, before any lock is taken: a second resolution between the two
+	// acquisitions would compare the pair against a filesystem that may have moved in between,
+	// which is the same mistake as authorising an identity and then re-reading it after approval.
+	const [referentLockIdentity, linkPathLockIdentity] = await Promise.all([
+		_lockIdentityKey(lockKey),
+		_lockIdentityKey(linkPathLockKey),
+	])
+	const sameIdentity = referentLockIdentity === linkPathLockIdentity
 	const lockKeys = publishOverLink
 		? sameIdentity
 			? [linkPathLockKey]
