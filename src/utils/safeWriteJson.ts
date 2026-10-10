@@ -31,8 +31,10 @@ export interface SafeWriteJsonOptions {
 	 * and passed to this function along with the incoming data. The
 	 * return value replaces `data` for the write. This turns a blind
 	 * overwrite into an atomic read-modify-write, preventing cross-process
-	 * lost updates. `existing` is null when the file does not exist or
-	 * cannot be parsed.
+	 * lost updates. `existing` is null when the file does not exist, cannot
+	 * be parsed, or is a symlink that the publish replaces - a write with no
+	 * declared scope replaces the link itself, so the referent's content is
+	 * not this file's previous content.
 	 */
 	merge?: (existing: unknown, incoming: unknown) => unknown
 
@@ -89,7 +91,16 @@ async function _confinedAncestorIdentities(scopeRoot: string, target: string): P
 	}
 	const pinned: DirectoryIdentity[] = []
 	for (const dir of chain) {
-		const stat = await fs.stat(dir, { bigint: true }).catch(() => undefined)
+		// Only ENOENT may drop a directory from the pin: a directory that is not there
+		// cannot be swapped, and the commit re-check (_statDirectoryIdentity, which
+		// reports ENOENT as AncestorReplacedError) plus the rename itself cover that
+		// case. EACCES, EIO or ELOOP means the identity is UNKNOWN - leaving it out
+		// pins fewer directories than the walk passed through and fails the re-check
+		// open, the exact hole the pin exists to close.
+		const stat = await fs.stat(dir, { bigint: true }).catch((error: unknown) => {
+			if (_scopeErrorCode(error) === "ENOENT") return undefined
+			throw error
+		})
 		if (stat) {
 			pinned.push({ dir, dev: stat.dev, ino: stat.ino })
 		}
@@ -337,7 +348,15 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		if (options?.merge) {
 			let existing: unknown = null
 			try {
-				existing = JSON.parse(await fs.readFile(resolvedTargetPath, "utf8"))
+				// A write with no declared scope publishes by replacing the link itself, so the
+				// referent's content is not this file's previous content: reading through the
+				// link would merge bytes the publish never touches and copy outside content
+				// into the workspace. A link therefore merges as "no previous content", the
+				// same way the publish treats it.
+				const targetStat = await fs.lstat(resolvedTargetPath)
+				if (!targetStat.isSymbolicLink()) {
+					existing = JSON.parse(await fs.readFile(resolvedTargetPath, "utf8"))
+				}
 			} catch (error: unknown) {
 				const code =
 					error && typeof error === "object" && "code" in error ? (error as { code: string }).code : undefined
@@ -415,10 +434,6 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// the pre-write bytes and the backup copy was removed by safeWriteText itself.
 		// Clean up the .new file if it still exists (safeWriteText also cleans up its
 		// tempPath on failure; this is a safety net in case its cleanup missed it).
-		// step, so the target still holds the pre-write bytes, and the backup copy it
-		// took is removed by safeWriteText itself. Clean up the .new file if it still
-		// exists (safeWriteText also cleans up its tempPath on failure; this is a
-		// safety net in case its cleanup missed it).
 		if (newFileToCleanupWithinCatch) {
 			try {
 				await fs.unlink(newFileToCleanupWithinCatch)

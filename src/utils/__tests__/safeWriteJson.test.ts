@@ -796,6 +796,70 @@ describe("safeWriteJson", () => {
 		})
 	})
 
+	test("does not merge through an unconfined symlink: the referent's content is not previous content", async () => {
+		const projectDir = path.join(tempDir, "project-merge-link")
+		await fs.mkdir(projectDir)
+		const outside = path.join(tempDir, "outside-merge.json")
+		await fsSyncActual.promises.writeFile(outside, JSON.stringify({ secret: "referent" }), "utf8")
+		const projectConfig = path.join(projectDir, "mcp.json")
+		// The link path carries the referent's bytes on disk, so a read of the link path
+		// returns exactly what a read through a real link would return. Real symlinks are
+		// unavailable on the Windows lane, so the link is simulated the way the
+		// untrusted-link test simulates it: lstat reports a link, readlink names a file
+		// outside the workspace, and nothing here passes confineTo - the McpHub shape.
+		await fsSyncActual.promises.writeFile(projectConfig, JSON.stringify({ secret: "referent" }), "utf8")
+		const enoent = Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+		const realpathSpy = vi.spyOn(fs, "realpath").mockImplementation(async (target) => {
+			if (String(target) === projectConfig) throw enoent
+			return fsSyncActual.promises.realpath(String(target))
+		})
+		const lstatSpy = vi.spyOn(fs, "lstat").mockImplementation(async (target) => {
+			if (String(target) === projectConfig) {
+				return { isSymbolicLink: () => true } as unknown as import("fs").Stats
+			}
+			return fsSyncActual.promises.lstat(String(target))
+		})
+		const readlinkSpy = vi.spyOn(fs, "readlink").mockImplementation(async (target) => {
+			if (String(target) === projectConfig) return outside
+			throw new Error("not a symbolic link")
+		})
+		let mergeCalls = 0
+		let sawExisting: unknown = "merge-never-called"
+		try {
+			await safeWriteJson(
+				projectConfig,
+				{ mcpServers: { local: { url: "http://localhost" } } },
+				{
+					merge: (existing, incoming) => {
+						mergeCalls++
+						sawExisting = existing
+						return { mergedFrom: incoming }
+					},
+				},
+			)
+		} finally {
+			realpathSpy.mockRestore()
+			lstatSpy.mockRestore()
+			readlinkSpy.mockRestore()
+		}
+
+		// The merge ran exactly once and saw NO previous content: the publish replaces the
+		// link itself, so the referent's JSON was never this file's content, and merging it
+		// in would copy outside content into the workspace before the link is replaced.
+		expect(mergeCalls).toBe(1)
+		expect(sawExisting).toBe(null)
+		// The link path was never read as content - count the matching calls rather than
+		// trusting a bare not.toHaveBeenCalled that a second reader could hide.
+		expect(
+			vi.mocked(fs.readFile).mock.calls.filter(([candidate]) => String(candidate) === projectConfig),
+		).toHaveLength(0)
+		// The referent kept its own content; the link path now holds the published file.
+		expect(JSON.parse(await fsSyncActual.promises.readFile(outside, "utf8"))).toEqual({ secret: "referent" })
+		expect(JSON.parse(await fsSyncActual.promises.readFile(projectConfig, "utf8"))).toEqual({
+			mergedFrom: { mcpServers: { local: { url: "http://localhost" } } },
+		})
+	})
+
 	test("a post-commit durability failure leaves the committed bytes at the target and unlinks nothing else", async () => {
 		const dir = path.join(tempDir, "post-commit")
 		await fs.mkdir(dir, { recursive: true })
@@ -1150,6 +1214,42 @@ describe("safeWriteJson", () => {
 			).toEqual([])
 		} finally {
 			realpathSpy.mockRestore()
+		}
+	})
+
+	// The same fail-closed rule on the pin side. The publish re-check only re-stats the
+	// directories that were PINNED, so a directory dropped from the pin is never
+	// re-checked at all: only ENOENT is evidence of absence, exactly as
+	// _statDirectoryIdentity in the publish primitive rules.
+	test("propagates a non-ENOENT ancestor stat failure instead of dropping that ancestor pin", async () => {
+		const scope = path.join(tempDir, "pin-fail-scope")
+		const middle = path.join(scope, "middle")
+		const deep = path.join(middle, "deep")
+		await fs.mkdir(deep, { recursive: true })
+		const target = path.join(deep, "mcp.json")
+		// The pin walks the CANONICAL chain, so the refused directory must be named in
+		// the same canonical spelling the walk builds.
+		const realMiddle = path.join(await fs.realpath(scope), "middle")
+
+		const statSpy = vi.spyOn(fs, "stat").mockImplementation(async (candidate, options) => {
+			if (String(candidate) === realMiddle) {
+				throw Object.assign(new Error("EACCES: permission denied, stat"), { code: "EACCES" })
+			}
+			return fsSyncActual.promises.stat(String(candidate), options)
+		})
+
+		try {
+			await expect(safeWriteJson(target, { mcpServers: {} }, { confineTo: scope })).rejects.toThrow(
+				"EACCES: permission denied, stat",
+			)
+
+			// Nothing was published: an unreadable ancestor has an UNKNOWN identity, and
+			// continuing would pin fewer directories than the confinement walk passed
+			// through - a later swap of that directory could send the commit anywhere.
+			await expect(fs.access(target)).rejects.toThrow()
+			expect(vi.mocked(fs.rename).mock.calls.filter(([, to]) => String(to) === target)).toEqual([])
+		} finally {
+			statSpy.mockRestore()
 		}
 	})
 })
