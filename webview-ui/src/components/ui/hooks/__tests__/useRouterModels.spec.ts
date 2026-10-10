@@ -346,4 +346,27 @@ describe("useRouterModels", () => {
 
 		expect(vscode.postMessage).not.toHaveBeenCalled()
 	})
+
+	it("aborts pending router model fetch and cleans up listener when query is cancelled or unmounted", async () => {
+		const removeListenerSpy = vi.spyOn(window, "removeEventListener")
+		const queryClient = makeQueryClient()
+		const wrapper = ({ children }: { children: React.ReactNode }) =>
+			React.createElement(QueryClientProvider, { client: queryClient }, children)
+
+		const { unmount } = renderHook(() => useRouterModels({ provider: providerIdentifiers.openrouter }), { wrapper })
+
+		await waitFor(() =>
+			expect(vscode.postMessage).toHaveBeenCalledWith({
+				type: RouterModelsMessageType.requestRouterModels,
+				values: { provider: providerIdentifiers.openrouter },
+			}),
+		)
+
+		unmount()
+		queryClient.cancelQueries()
+
+		await waitFor(() => {
+			expect(removeListenerSpy).toHaveBeenCalledWith("message", expect.any(Function))
+		})
+	})
 })

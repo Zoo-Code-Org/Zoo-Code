@@ -660,19 +660,16 @@ export class ProviderSettingsManager {
 		}
 	}
 
-	/**
-	 * Set the API config for a specific mode.
-	 */
-	public async setModeConfig(mode: Mode, configId: string) {
+	public async setModeConfig(mode: Mode, configId?: string) {
 		try {
 			return await this.lock(async () => {
 				const providerProfiles = await this.load()
-				// Ensure the per-mode config map exists
-				if (!providerProfiles.modeApiConfigs) {
-					providerProfiles.modeApiConfigs = {}
+				if (configId === undefined) {
+					if (providerProfiles.modeApiConfigs) delete providerProfiles.modeApiConfigs[mode]
+				} else {
+					if (!providerProfiles.modeApiConfigs) providerProfiles.modeApiConfigs = {}
+					providerProfiles.modeApiConfigs[mode] = configId
 				}
-				// Assign the chosen config ID to this mode
-				providerProfiles.modeApiConfigs[mode] = configId
 				await this.store(providerProfiles)
 			})
 		} catch (error) {

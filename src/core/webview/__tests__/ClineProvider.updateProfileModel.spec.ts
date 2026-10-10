@@ -10,6 +10,7 @@ import {
 	type ProviderSettings,
 	type ProviderSettingsWithId,
 } from "@roo-code/types"
+import { type Mode } from "../../../shared/modes"
 import deepEqual from "fast-deep-equal"
 
 import { ContextProxy } from "../../config/ContextProxy"
@@ -171,6 +172,7 @@ describe("ClineProvider - updateProfileModel", () => {
 			restoreConfigIfMatches: vi.mocked(settingsManager.restoreConfigIfMatches),
 			activateProfile: vi.mocked(settingsManager.activateProfile),
 			setModeConfig: vi.mocked(settingsManager.setModeConfig),
+			getModeConfigId: vi.mocked(settingsManager.getModeConfigId),
 			listConfig: vi.mocked(settingsManager.listConfig),
 		}
 	}
@@ -182,6 +184,7 @@ describe("ClineProvider - updateProfileModel", () => {
 
 	beforeEach(async () => {
 		vi.clearAllMocks()
+		vi.mocked(CloudService.hasInstance).mockReturnValue(true)
 		mockCloudInstance.isAuthenticated.mockReturnValue(false)
 		mockCloudInstance.getOrganizationSettings.mockReturnValue(undefined)
 		mockCloudInstance.getOrganizationId.mockReturnValue(null)
@@ -777,6 +780,19 @@ describe("ClineProvider - updateProfileModel", () => {
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.violated_organization_allowlist")
 	})
 
+	it("rejects model update when CloudService has no instance or is unavailable (fail closed)", async () => {
+		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
+		vi.spyOn(CloudService, "hasInstance").mockReturnValue(false)
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-4.5",
+		})
+
+		expect(manager().updateProfileModel).not.toHaveBeenCalled()
+		expect(manager().saveConfig).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.violated_organization_allowlist")
+	})
+
 	it("refreshes context and task from latest stored profile when another instance updated profile before propagation", async () => {
 		mockStoredProfile({
 			apiProvider: providerIdentifiers.openrouter,
@@ -1352,6 +1368,42 @@ describe("ClineProvider - updateProfileModel", () => {
 			expect.objectContaining({ id: "brand-new-id" }),
 			undefined,
 		)
+	})
+
+	it("deletes mode mapping on upsert rollback when mode mapping was absent before upsert", async () => {
+		vi.spyOn(provider, "getState").mockResolvedValue({
+			...(await provider.getState()),
+			mode: "code" as Mode,
+		})
+		manager().getModeConfigId.mockResolvedValueOnce(undefined)
+		manager().saveConfigWithPrevious.mockResolvedValueOnce({
+			id: "brand-new-id",
+			existed: false,
+			previousProfile: undefined,
+		})
+		manager().restoreConfigIfMatches.mockResolvedValueOnce(true)
+
+		let postSaveFailed = false
+		const origUpdateGlobalState = provider["updateGlobalState"]
+		provider["updateGlobalState"] = vi.fn().mockImplementation(async (key: string, value: unknown) => {
+			if (key === "currentApiConfigName" && !postSaveFailed) {
+				postSaveFailed = true
+				throw new Error("Simulated post-save failure")
+			}
+			return (origUpdateGlobalState as (k: string, v: unknown) => Promise<void>).call(provider, key, value)
+		})
+
+		await provider.upsertProviderProfile("brand-new", {
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4",
+		})
+
+		expect(manager().restoreConfigIfMatches).toHaveBeenCalledWith(
+			"brand-new",
+			expect.objectContaining({ id: "brand-new-id" }),
+			undefined,
+		)
+		expect(manager().setModeConfig).toHaveBeenLastCalledWith("code", undefined)
 	})
 
 	it("does not write context state or update task when provider is disposed while activateProfile is in flight", async () => {

@@ -2260,4 +2260,33 @@ describe("ProviderSettingsManager", () => {
 			expect(result.updatedProfile?.openRouterModelId).toBe("openai/gpt-5")
 		})
 	})
+
+	describe("setModeConfig", () => {
+		it("sets mode config when configId is provided and deletes mode mapping when configId is undefined", async () => {
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "test",
+				apiConfigs: {
+					test: {
+						id: "test-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-7-sonnet",
+					},
+				},
+				modeApiConfigs: {
+					code: "test-id",
+				},
+			}
+			let storedRaw = JSON.stringify(existingConfig)
+			mockSecrets.get.mockImplementation(async () => storedRaw)
+			mockSecrets.store.mockImplementation(async (_key, val) => {
+				storedRaw = val
+			})
+
+			await providerSettingsManager.setModeConfig("code", "new-id")
+			expect(JSON.parse(storedRaw).modeApiConfigs.code).toBe("new-id")
+
+			await providerSettingsManager.setModeConfig("code", undefined)
+			expect(JSON.parse(storedRaw).modeApiConfigs.code).toBeUndefined()
+		})
+	})
 })

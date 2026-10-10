@@ -1932,12 +1932,14 @@ export class ClineProvider
 				const previousProviderSettings = this.contextProxy.getProviderSettings()
 				let previousMode: Mode | undefined
 				let previousModeConfigId: string | undefined
+				let hadPreviousModeConfig = false
 
 				if (activate) {
 					try {
 						const state = await this.getState()
 						previousMode = state.mode
 						previousModeConfigId = await this.providerSettingsManager.getModeConfigId(state.mode)
+						hadPreviousModeConfig = previousModeConfigId !== undefined
 					} catch {
 						// Ignore lookup failures during pre-save capture
 					}
@@ -1955,27 +1957,30 @@ export class ClineProvider
 
 				const rollback = async () => {
 					try {
-						if (epoch !== undefined && epoch !== this.profileMutationEpoch) return
-						if (existed && !previousProfile) return
+						const isStale = () => epoch !== undefined && epoch !== this.profileMutationEpoch
+						if (isStale() || (existed && !previousProfile)) return
 						const restored = await this.providerSettingsManager.restoreConfigIfMatches(
 							name,
 							savedProfile,
 							existed ? previousProfile : undefined,
 						)
-						if (epoch !== undefined && epoch !== this.profileMutationEpoch) return
+						if (isStale()) return
 						if (restored) {
 							await this.updateGlobalState(
 								"listApiConfigMeta",
 								await this.providerSettingsManager.listConfig(),
 							)
 							if (activate) {
-								if (epoch !== undefined && epoch !== this.profileMutationEpoch) return
+								if (isStale()) return
 								if (previousApiConfigName !== undefined)
 									await this.updateGlobalState("currentApiConfigName", previousApiConfigName)
-								if (epoch !== undefined && epoch !== this.profileMutationEpoch) return
-								if (previousMode && previousModeConfigId !== undefined)
-									await this.providerSettingsManager.setModeConfig(previousMode, previousModeConfigId)
-								if (epoch !== undefined && epoch !== this.profileMutationEpoch) return
+								if (isStale()) return
+								if (previousMode)
+									await this.providerSettingsManager.setModeConfig(
+										previousMode,
+										hadPreviousModeConfig ? previousModeConfigId : undefined,
+									)
+								if (isStale()) return
 								if (previousProviderSettings) {
 									const currentConfig = this.contextProxy.getValues().currentApiConfigName
 									if (currentConfig === name || currentConfig === previousApiConfigName) {
@@ -2056,22 +2061,16 @@ export class ClineProvider
 
 	private getOrganizationAllowListForProfileMutation() {
 		if (!CloudService.hasInstance()) {
-			return ORGANIZATION_ALLOW_ALL
+			this.log("CloudService unavailable; rejecting model update")
+			return undefined
 		}
-
 		try {
 			const cloudService = CloudService.instance
-			if (!cloudService.isAuthenticated()) {
-				return ORGANIZATION_ALLOW_ALL
-			}
+			if (!cloudService.isAuthenticated()) return ORGANIZATION_ALLOW_ALL
 			const settings = cloudService.getOrganizationSettings()
-			if (settings) {
-				return settings.allowList ?? ORGANIZATION_ALLOW_ALL
-			}
+			if (settings) return settings.allowList ?? ORGANIZATION_ALLOW_ALL
 			const orgId = cloudService.getOrganizationId?.() ?? cloudService.getUserInfo?.()?.organizationId
-			if (!orgId) {
-				return ORGANIZATION_ALLOW_ALL
-			}
+			if (!orgId) return ORGANIZATION_ALLOW_ALL
 			this.log("Organization policy unavailable for authenticated organization user; rejecting model update")
 			return undefined
 		} catch (error) {
@@ -2117,21 +2116,13 @@ export class ClineProvider
 					return
 				}
 
-				const validateProfileAllowed = (candidate: ProviderSettingsWithId) => {
-					if (
-						!ProfileValidator.isProfileAllowed(
-							candidate as ProviderSettings,
-							authoritativeOrganizationAllowList,
-						)
-					)
-						return false
-					if (
-						!stateOrganizationAllowList.allowAll &&
-						!ProfileValidator.isProfileAllowed(candidate as ProviderSettings, stateOrganizationAllowList)
-					)
-						return false
-					return true
-				}
+				const validateProfileAllowed = (candidate: ProviderSettingsWithId) =>
+					ProfileValidator.isProfileAllowed(
+						candidate as ProviderSettings,
+						authoritativeOrganizationAllowList,
+					) &&
+					(stateOrganizationAllowList.allowAll ||
+						ProfileValidator.isProfileAllowed(candidate as ProviderSettings, stateOrganizationAllowList))
 
 				if (!this.isProfileMutationActive(epoch, signal)) return
 
@@ -2268,43 +2259,21 @@ export class ClineProvider
 		options: { skipCurrentTaskRebuild?: boolean; signal?: AbortSignal; epoch?: number } = {},
 	): Promise<void> {
 		if (options.skipCurrentTaskRebuild) return
-		if (
-			this._disposed ||
-			(options.signal &&
-				options.epoch !== undefined &&
-				!this.isProfileMutationActive(options.epoch, options.signal))
-		)
-			return
+		const checkActive = () =>
+			!this._disposed &&
+			(!options.signal ||
+				options.epoch === undefined ||
+				this.isProfileMutationActive(options.epoch, options.signal))
+		if (!checkActive()) return
 		const task = this.getCurrentTask()
 		if (!task) return
 
 		try {
-			if (
-				this._disposed ||
-				(options.signal &&
-					options.epoch !== undefined &&
-					!this.isProfileMutationActive(options.epoch, options.signal))
-			)
-				return
+			if (!checkActive()) return
 			task.setTaskApiConfigName(apiConfigName)
-
-			if (
-				this._disposed ||
-				(options.signal &&
-					options.epoch !== undefined &&
-					!this.isProfileMutationActive(options.epoch, options.signal))
-			)
-				return
+			if (!checkActive()) return
 			const taskHistoryItem = this.getTaskHistoryItem(task.taskId)
-
-			if (taskHistoryItem) {
-				if (
-					this._disposed ||
-					(options.signal &&
-						options.epoch !== undefined &&
-						!this.isProfileMutationActive(options.epoch, options.signal))
-				)
-					return
+			if (taskHistoryItem && checkActive()) {
 				await this.updateTaskHistory({ ...taskHistoryItem, apiConfigName })
 			}
 		} catch (error) {
@@ -2339,21 +2308,16 @@ export class ClineProvider
 		signal?: AbortSignal,
 		epoch?: number,
 	): Promise<void> {
-		if (this._disposed || (signal && !this.isProfileMutationActive(epoch, signal))) {
-			return
-		}
+		const checkActive = () => !this._disposed && (!signal || this.isProfileMutationActive(epoch, signal))
+		if (!checkActive()) return
 		const { name, id, ...providerSettings } = await this.providerSettingsManager.activateProfile(args)
-
-		if (this._disposed || (signal && !this.isProfileMutationActive(epoch, signal))) {
-			return
-		}
+		if (!checkActive()) return
 
 		const persistModeConfig = options?.persistModeConfig ?? true
 		const persistTaskHistory = options?.persistTaskHistory ?? true
 		const skipCurrentTaskRebuild = options?.skipCurrentTaskRebuild ?? false
 
 		if (!skipCurrentTaskRebuild) {
-			// See `upsertProviderProfile` for a description of what this is doing.
 			await Promise.all([
 				this.contextProxy.setValue("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
 				this.contextProxy.setValue("currentApiConfigName", name),
@@ -2361,35 +2325,21 @@ export class ClineProvider
 			])
 		}
 
-		if (this._disposed || (signal && !this.isProfileMutationActive(epoch, signal))) return
-
+		if (!checkActive()) return
 		const { mode } = await this.getState()
+		if (!checkActive()) return
 
-		if (this._disposed || (signal && !this.isProfileMutationActive(epoch, signal))) return
+		if (id && persistModeConfig) await this.providerSettingsManager.setModeConfig(mode, id)
+		if (!checkActive()) return
 
-		if (id && persistModeConfig) {
-			await this.providerSettingsManager.setModeConfig(mode, id)
-		}
-
-		if (this._disposed || (signal && !this.isProfileMutationActive(epoch, signal))) return
-
-		// Change the provider for the current task.
 		this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true, skipCurrentTaskRebuild })
-
-		// Update the current task's sticky provider profile, unless this activation is
-		// being used purely as a non-persisting restoration (e.g., reopening a task from history).
 		if (persistTaskHistory) {
 			await this.persistStickyProviderProfileToCurrentTask(name, { skipCurrentTaskRebuild, signal, epoch })
 		}
 
-		if (this._disposed || (signal && !this.isProfileMutationActive(epoch, signal))) return
-
-		if (!skipCurrentTaskRebuild) {
-			await this.postStateToWebview()
-		}
-
-		if (this._disposed || (signal && !this.isProfileMutationActive(epoch, signal))) return
-
+		if (!checkActive()) return
+		if (!skipCurrentTaskRebuild) await this.postStateToWebview()
+		if (!checkActive()) return
 		if (providerSettings.apiProvider && !skipCurrentTaskRebuild) {
 			this.emit(RooCodeEventName.ProviderProfileChanged, { name, provider: providerSettings.apiProvider })
 		}
