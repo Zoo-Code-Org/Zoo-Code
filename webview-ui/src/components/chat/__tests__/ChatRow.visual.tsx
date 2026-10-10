@@ -6,11 +6,13 @@ import { applyVisualTheme, visualThemes } from "../../../../playwright/themes"
 test.setTimeout(120_000)
 
 for (const theme of visualThemes.filter(({ name }) => name === "dark" || name === "light")) {
-	test(`renders user, diff and assistant rows in the ${theme.name} theme`, async ({ mount, page }) => {
-		const component = mountedStory(await mount("chat-row-conversation"))
+	test(`renders user, diff and assistant rows in the ${theme.name} theme`, async ({ page }) => {
+		await page.goto("/")
+		await page.waitForFunction(() => typeof window.mount === "function")
+		// DiffView reads the theme on initialization, so apply it before the only mount.
 		await applyVisualTheme(page, theme)
-		// DiffView reads the theme on initialization, so remount with the selected tokens.
 		await page.evaluate(() => window.mount({ story: "chat-row-conversation" }))
+		const component = mountedStory(page.locator("#root"))
 		const conversation = component.getByTestId("chat-row-conversation")
 		await expect(conversation.getByRole("heading", { name: "Verification" })).toBeVisible()
 		await expect(component.getByTestId("chat-row-user_feedback_diff").getByText("Hello Zoo")).toBeVisible()
