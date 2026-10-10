@@ -134,15 +134,13 @@ export async function openFile(filePath: string, options: OpenFileOptions = {}) 
 			}
 		} catch {} // not essential, sometimes tab operations fail
 
-		const document = await vscode.workspace.openTextDocument(uriToProcess)
 		const selection =
 			options.line !== undefined
 				? new vscode.Selection(Math.max(options.line - 1, 0), 0, Math.max(options.line - 1, 0), 0)
 				: undefined
-		await vscode.window.showTextDocument(document, {
-			preview: false,
-			selection,
-		})
+		// `vscode.open` picks the default editor (e.g. image preview); `openTextDocument` rejects binary files.
+		const showOptions: vscode.TextDocumentShowOptions = { preview: false, selection }
+		await vscode.commands.executeCommand("vscode.open", uriToProcess, showOptions)
 	} catch (error) {
 		if (error instanceof Error) {
 			vscode.window.showErrorMessage(t("common:errors.could_not_open_file", { errorMessage: error.message }))
