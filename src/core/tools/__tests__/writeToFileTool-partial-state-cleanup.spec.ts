@@ -59,12 +59,18 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 		// The registration side of the pairing, asserted BEFORE the cleanup runs: the off()
 		// assertion below only proves the right listener was deregistered if this one pins which
 		// listener was registered in the first place.
-		expect((task as unknown as CleanupTask).once).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, state.abortCleanup)
+		expect((task as unknown as CleanupTask).once).toHaveBeenCalledWith(
+			RooCodeEventName.TaskAborted,
+			state.abortCleanup,
+		)
 
 		writeToFileTool.clearTaskState(task)
 
 		expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
-		expect((task as unknown as CleanupTask).off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, state.abortCleanup)
+		expect((task as unknown as CleanupTask).off).toHaveBeenCalledWith(
+			RooCodeEventName.TaskAborted,
+			state.abortCleanup,
+		)
 	})
 
 	it("is a no-op for a task that never streamed", async () => {

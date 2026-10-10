@@ -544,8 +544,6 @@ describe("writeToFileTool", () => {
 			}
 		})
 
-
-
 		it("releases the per-task stream state when provider state rejects during a partial delta", async () => {
 			// handlePartial() registers the entry and the TaskAborted listener, then awaits
 			// provider.getState(). A rejection there never reaches the diff view or execute(), so
@@ -636,7 +634,6 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({}, { isPartial: true })
 			expect(mockCline.ask).toHaveBeenCalledTimes(1)
 		})
-
 	})
 
 	describe("parse-failure reporting and early-return cleanup", () => {
@@ -705,7 +702,7 @@ describe("writeToFileTool", () => {
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 			const abortListener = mockCline.once.mock.calls.find(
 				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
-				)?.[1]
+			)?.[1]
 			expect(abortListener).toBeInstanceOf(Function)
 			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
 			// The ask threw, so the denial result was never pushed: the release cannot depend on it.
@@ -867,7 +864,9 @@ describe("writeToFileTool", () => {
 			expect(mockHandleError).toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
 			// Otherwise the retained streamFailed suppresses the diff preview of every
 			// later write_to_file in this task.
-			expect(writeToFileTool["taskPartialStreamState"].has(`${mockCline.taskId}.${mockCline.instanceId}`)).toBe(false)
+			expect(writeToFileTool["taskPartialStreamState"].has(`${mockCline.taskId}.${mockCline.instanceId}`)).toBe(
+				false,
+			)
 			// ...and the cleanup must stay scoped: the other task is still streaming.
 			expect(writeToFileTool["taskPartialStreamState"].get("task-2.instance-2")?.streamFailed).toBe(true)
 		})
@@ -978,7 +977,6 @@ describe("writeToFileTool", () => {
 			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		})
-
 	})
 
 	describe("user interaction", () => {
@@ -1019,8 +1017,6 @@ describe("writeToFileTool", () => {
 			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 		})
-
-
 
 		it("swallows partial streaming errors instead of surfacing a duplicate error bubble", async () => {
 			// The same filesystem operation is retried in execute() once the block completes,
@@ -1292,14 +1288,6 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(1)
 		})
 
-
-
-
-
-
-
-
-
 		it("keeps partial stream failures isolated per task", async () => {
 			mockCline.diffViewProvider.open.mockRejectedValueOnce(
 				Object.assign(new Error("EROFS: read-only file system, mkdir '/task-a'"), { code: "EROFS" }),
@@ -1324,8 +1312,6 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(2)
 		})
 
-
-
 		it("EROFS in handlePartial does not stall agent loop -- createDirectoriesForFile is not called", async () => {
 			// Regression test: before the fix, createDirectoriesForFile was called in handlePartial
 			// with no .catch() guard. An EROFS throw escaped to BaseTool.handle(), which called
@@ -1346,9 +1332,5 @@ describe("writeToFileTool", () => {
 			expect(mockedCreateDirectoriesForFile).not.toHaveBeenCalled()
 			expect(mockHandleError).not.toHaveBeenCalled()
 		})
-
-
-
-
 	})
 })

@@ -1312,7 +1312,9 @@ describe("DiffViewProvider", () => {
 				editType: "create",
 				createdDirs: [],
 			})
-			vi.mocked(fs.unlink).mockRejectedValueOnce(Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }))
+			vi.mocked(fs.unlink).mockRejectedValueOnce(
+				Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }),
+			)
 
 			await expect(diffViewProvider.revertChanges()).rejects.toThrow("EACCES: permission denied")
 		})
@@ -1608,7 +1610,6 @@ describe("DiffViewProvider", () => {
 			expect(vscode.window.tabGroups.close).not.toHaveBeenCalled()
 			expect(fs.unlink).not.toHaveBeenCalled()
 		})
-
 	})
 
 	describe("userTouchedDiffEditor keep/close behavior", () => {

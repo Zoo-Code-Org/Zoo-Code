@@ -185,10 +185,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 * and true is returned to suppress the incidental parse error - the failure surfaces
 	 * exactly once.
 	 */
-	protected override async releaseStreamStateOnParseFailure(
-		task: Task,
-		callbacks: ToolCallbacks,
-	): Promise<boolean> {
+	protected override async releaseStreamStateOnParseFailure(task: Task, callbacks: ToolCallbacks): Promise<boolean> {
 		const state = this.taskPartialStreamState.get(this.getPartialStreamFailureKey(task))
 		if (!state) {
 			return false
@@ -488,7 +485,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 		try {
 			// Everything from here up to the diff view is setup that can fail before
-				// execute() ever runs; the catch below owns the teardown for that window.
+			// execute() ever runs; the catch below owns the teardown for that window.
 			const provider = task.providerRef.deref()
 			const state = await provider?.getState()
 			// First await since the state was registered: a cancellation during getState() would
@@ -540,8 +537,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			}
 
 			partialMessage = JSON.stringify(sharedMessageProps)
-		await task.ask("tool", partialMessage, block.partial).catch(() => {})
-
+			await task.ask("tool", partialMessage, block.partial).catch(() => {})
 		} catch (error) {
 			// Unexpected failure in the pre-streaming setup (provider state, the filesystem probe,
 			// policy checks, message construction): this delta never reaches the diff view or

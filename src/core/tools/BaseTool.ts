@@ -112,10 +112,7 @@ export abstract class BaseTool<TName extends ToolName> {
 	 * reported exactly once. Per-task only: a global teardown would clobber another task
 	 * that is still streaming through this singleton.
 	 */
-	protected async releaseStreamStateOnParseFailure(
-		_task: Task,
-		_callbacks: ToolCallbacks,
-	): Promise<boolean> {
+	protected async releaseStreamStateOnParseFailure(_task: Task, _callbacks: ToolCallbacks): Promise<boolean> {
 		return false
 	}
 
