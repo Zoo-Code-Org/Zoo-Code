@@ -195,6 +195,41 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 		errorSpy.mockRestore()
 	})
 
+	it("stays silent when the failed-stream cleanup restored the editor", async () => {
+		// Every other case here makes the discard reject, so a cleanup that warned after EVERY
+		// restore still passed. "The editor may hold content you never approved" is only true when
+		// the restore failed; saying it regardless trains the user to ignore the warning.
+		const task = buildTask("failed-stream-clean", "inst-10")
+		const t = task as unknown as CleanupTask
+
+		await writeToFileTool["cleanupFailedPartialStream"](task)
+
+		expect(t.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+		expect(t.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+		expect(t.say).not.toHaveBeenCalled()
+	})
+
+	it("stays silent when the parse-failure teardown restored the editor", async () => {
+		// The same contract on the other teardown boundary: a completed restore is not a hazard,
+		// so nothing is reported and the incidental parse error is left to the caller.
+		const task = buildTask("parse-failure-clean", "inst-11")
+		const t = task as unknown as CleanupTask
+		writeToFileTool["getTaskPartialStreamState"](task)
+		const handleError = vi.fn().mockResolvedValue(undefined)
+
+		const handled = await writeToFileTool["onParameterParseFailure"](
+			task,
+			{ handleError } as unknown as Parameters<(typeof writeToFileTool)["onParameterParseFailure"]>[1],
+			new Error("parameter parse failed"),
+		)
+
+		expect(t.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+		expect(t.say).not.toHaveBeenCalled()
+		expect(handleError).not.toHaveBeenCalled()
+		expect(handled).toBe(false)
+		expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+	})
+
 	it("logs and continues when finalizing the open partial ask fails", async () => {
 		const task = buildTask("finalize-fails", "inst-5")
 		const t = task as unknown as CleanupTask

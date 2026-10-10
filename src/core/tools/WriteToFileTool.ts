@@ -284,9 +284,10 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 			// Returning here skips the cleanup below: release THIS task's stream state (and
 			// only this task's) so the abort listener and any streamFailed guard do not outlive
-			// the call.
+			// the call, and tear down the diff view an earlier streaming delta may have opened -
+			// otherwise its unapproved content sits in the editor until the next write.
 			this.resetTaskPartialState(task)
-			await task.diffViewProvider.reset()
+			await this.cleanupFailedPartialStream(task)
 			return
 		}
 
@@ -297,9 +298,9 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 			// Returning here skips the cleanup below: release THIS task's stream state (and
 			// only this task's) so the abort listener and any streamFailed guard do not outlive
-			// the call.
+			// the call, and tear down the diff view an earlier streaming delta may have opened.
 			this.resetTaskPartialState(task)
-			await task.diffViewProvider.reset()
+			await this.cleanupFailedPartialStream(task)
 			return
 		}
 
@@ -311,12 +312,22 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 			// Returning here skips the cleanup below: release THIS task's stream state (and
 			// only this task's) so the abort listener and any streamFailed guard do not outlive
-			// the call.
+			// the call. The denial can arrive after a streaming delta opened the denied path and
+			// streamed unapproved content into it, so the diff view is torn down here too - the
+			// write never happens, and a later save of that editor would land it anyway.
 			this.resetTaskPartialState(task)
+			await this.cleanupFailedPartialStream(task)
 			return
 		}
 
 		const isWriteProtected = task.rooProtectedController?.isWriteProtected(relPath) || false
+
+		// The point of no return for this write. saveChanges() persists the document and then keeps
+		// working (closing the diff views, tab bookkeeping, diagnostics), and trackFileContext() and
+		// pushToolWriteResult() run after it, so a rejection past this point must not roll back a
+		// write the user already approved: the rollback would restore the previous content, or delete
+		// a file that was created and saved. Set only once the durable write has landed.
+		let writeCommitted = false
 
 		let fileExists: boolean
 		const absolutePath = path.resolve(task.cwd, relPath)
@@ -409,6 +420,13 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				writeApproved = true
 
 				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
+				// saveDirectly() performs the write itself and reports a failing write, so returning means
+				// the content is on disk: from here the rollback has to stand down.
+				// Stryker disable next-line AssignmentExpression: equivalent on this path - the
+				// approval flag already stands the rollback down, so removing the assignment changes no
+				// observable behaviour today. It stays because this branch lands the write without a diff
+				// view, and the commit point is the fact that says so.
+				writeCommitted = true
 			} else {
 				if (!task.diffViewProvider.isEditing) {
 					const partialMessage = JSON.stringify(sharedMessageProps)
@@ -442,7 +460,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 				writeApproved = true
 
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs, () => {
+					// Signalled by saveChanges() at the document save, not when it returns: the editor
+					// bookkeeping and diagnostics that follow can still reject, and by then the file has
+					// already landed.
+					writeCommitted = true
+				})
 			}
 
 			if (relPath) {
@@ -477,7 +500,14 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				// is the user's accepted edit -- keep it in the editor (dirty) so they can
 				// save it manually.
 				let reverted = true
-				if (!writeApproved) {
+				// Two independent stand-downs: the user approved this content, or the write is already
+				// durable. Either one makes a rollback undo something the user wanted rather than
+				// cleaning up this call's debris.
+				// Stryker disable next-line LogicalOperator: writeCommitted is the second, independent
+				// stand-down - every path that sets it has already set writeApproved, so no test can tell &&
+				// from || here. It stays because it names the durable fact the provider signals at the
+				// save, not the approval fact, and it is the guard that survives if the approval flag moves.
+				if (!writeApproved && !writeCommitted) {
 					reverted = await this.discardUnapprovedStreamBeforeReset(task)
 				}
 				await this.resetDiffViewAfterWrite(task)

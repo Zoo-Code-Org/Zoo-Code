@@ -954,7 +954,13 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({}, { accessAllowed: false })
 
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
-			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+			// The teardown has to detach the function this tool registered; expect.any(Function)
+			// also passes when a different callback is removed and the real one keeps firing.
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
 		})
 
 		it("releases the per-task stream state when a missing parameter returns early", async () => {
@@ -968,6 +974,12 @@ describe("writeToFileTool", () => {
 			})
 
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			// An earlier delta may have opened the diff view for this call: the early return has
+			// to discard its unapproved content before reset() drops the state that discard reads.
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.discardUnapprovedStream.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.diffViewProvider.reset.mock.invocationCallOrder[0],
+			)
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 		})
 
@@ -1002,8 +1014,31 @@ describe("writeToFileTool", () => {
 			)?.[1]
 			expect(abortListener).toBeInstanceOf(Function)
 			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
-			// A stream may have opened a diff view for this call; the early return still closes it.
+			// A stream may have opened a diff view for this call; the early return discards
+			// its unapproved content first, then closes it.
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.discardUnapprovedStream.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.diffViewProvider.reset.mock.invocationCallOrder[0],
+			)
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+		})
+
+		it("discards the streamed preview when a rooignore denial returns early", async () => {
+			// The denial can arrive after a streaming delta opened the denied path and streamed
+			// content into it. This branch reported the denial and released the stream state, but
+			// never touched the diff view: the unapproved content sat in a saveable editor, and the
+			// provider kept this call's editType/relPath for whatever write came next.
+			await executeWriteFileTool({}, { isPartial: true })
+
+			await executeWriteFileTool({}, { accessAllowed: false })
+
+			expect(mockCline.say).toHaveBeenCalledWith("rooignore_error", testFilePath)
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.discardUnapprovedStream.mock.invocationCallOrder[0]).toBeLessThan(
+				mockCline.diffViewProvider.reset.mock.invocationCallOrder[0],
+			)
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
 		})
 	})
 
@@ -1341,7 +1376,31 @@ describe("writeToFileTool", () => {
 
 			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
 			expect(mockCline.diffViewProvider.saveChanges).toHaveBeenCalled()
-			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			// The error path restores through discardUnapprovedStream(), not revertChanges(), so the
+			// discard is the call that would have thrown the approved edit away.
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+		})
+
+		it("does not roll back a write whose commit point has already passed", async () => {
+			// saveChanges() signals the commit point at the document save and then keeps working
+			// (closing the diff views, tab bookkeeping, diagnostics). A rejection in that tail is a
+			// failure AFTER a durable write: rolling back here would restore the previous content or
+			// delete a file the user had just approved being created.
+			let signalledAtTheSave = false
+			mockCline.diffViewProvider.saveChanges.mockImplementationOnce(async (...args: unknown[]) => {
+				const onCommit = args[2] as (() => void) | undefined
+				signalledAtTheSave = typeof onCommit === "function"
+				onCommit?.()
+				throw new Error("closeAllDiffViews rejected")
+			})
+
+			await executeWriteFileTool({}, { fileExists: false })
+
+			// The stand-down only works if execute() actually handed saveChanges() the signal.
+			expect(signalledAtTheSave).toBe(true)
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 		})
 
@@ -1598,12 +1657,29 @@ describe("writeToFileTool", () => {
 				expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
 				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(undefined)
 				expect(mockCline.diffViewProvider.saveDirectly).toHaveBeenCalled()
-				expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+				// discardUnapprovedStream() is what the error path actually calls; asserting only on
+				// revertChanges() could never fail.
+				expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
 				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 				expect(mockCline.didEditFile).toBe(false)
 			} finally {
 				consoleErrorSpy.mockRestore()
 			}
+		})
+
+		it("does not roll back a write that saveDirectly already landed", async () => {
+			// The prevent-focus-disruption branch never opens a diff view: saveDirectly() performs
+			// the write itself, so returning means the content is on disk. A failure in what follows
+			// (tracking the file, building the result) must not run the rollback over a landed write.
+			enablePreventFocusDisruption()
+			mockCline.fileContextTracker.trackFileContext.mockRejectedValueOnce(new Error("tracker down"))
+
+			await executeWriteFileTool({}, { fileExists: false })
+
+			expect(mockCline.diffViewProvider.saveDirectly).toHaveBeenCalledTimes(1)
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 		})
 
 		it("skips streaming diff view work when the experiment is enabled", async () => {
@@ -1634,7 +1710,13 @@ describe("writeToFileTool", () => {
 
 			expect(mockCline.ask).not.toHaveBeenCalled()
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
-			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+			// Delta 1 registered the listener; delta 2 must detach THAT function, not merely
+			// some function with the right name.
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
 		})
 
 		it("clears the provider state when prevent-focus approval is denied", async () => {

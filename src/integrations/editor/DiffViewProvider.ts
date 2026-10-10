@@ -343,6 +343,7 @@ export class DiffViewProvider {
 	async saveChanges(
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
+		onCommit?: () => void,
 	): Promise<{
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
@@ -353,15 +354,24 @@ export class DiffViewProvider {
 		}
 
 		const absolutePath = path.resolve(this.cwd, this.relPath)
-		// The write below is the approved one: whatever placeholder open() created at this path
-		// becomes real content, so it is no longer an artifact this edit may remove.
-		this.placeholderPath = undefined
 		const updatedDocument = this.activeDiffEditor.document
 		const editedContent = updatedDocument.getText()
 
 		if (updatedDocument.isDirty) {
 			await updatedDocument.save()
 		}
+
+		// The write is irreversible from here: a clean document already matches disk, and a saved
+		// one has landed. Everything below (closing the diff views, tab bookkeeping, diagnostics)
+		// can still reject, and a caller that rolls the tool call back after this point would undo
+		// a write the user approved - so it is told, at the commit point rather than on return.
+		onCommit?.()
+
+		// Ownership is released only once the approved write has landed. A save that rejects leaves
+		// the placeholder as open() created it, and the caller's teardown still has to remove it:
+		// clearing it here would tell discardUnapprovedStream() that nothing this edit created is
+		// left to clean, and an empty or half-written new file would survive the failed write.
+		this.placeholderPath = undefined
 
 		// Stop tracking touches and cancel any pending scroll-to-diff before any
 		// programmatic editor activation below.
@@ -1065,18 +1075,24 @@ export class DiffViewProvider {
 			)
 
 		for (const tab of tabs) {
+			// tabGroups.close()'s second argument is preserveFocus, not a force-discard flag: a
+			// dirty tab prompts or is refused, which is how unapproved streamed content survived a
+			// "forced" close. Restore the buffer to its pre-stream content and save it clean first,
+			// so close() never sees a dirty tab and nothing unapproved reaches disk.
+			await this.restorePreStreamBuffer(absolutePath)
+			await this.saveBufferClean(absolutePath)
+
 			let closed: boolean
 			let closeError: Error | undefined
 			try {
-				closed = await vscode.window.tabGroups.close(tab, true)
+				closed = await vscode.window.tabGroups.close(tab)
 			} catch (error) {
 				closed = false
 				closeError = error instanceof Error ? error : new Error(String(error))
 			}
 			if (!closed) {
-				await this.restorePreStreamBuffer(absolutePath)
 				throw new Error(
-					`Rollback could not discard the buffer for ${absolutePath}; its unapproved content was restored to the pre-stream state instead.`,
+					`Rollback could not close the restored buffer for ${absolutePath}; its content was put back to the pre-stream state but the tab is still open.`,
 					{ cause: closeError },
 				)
 			}
@@ -1098,6 +1114,20 @@ export class DiffViewProvider {
 		const range = new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length))
 		edit.replace(document.uri, range, this.originalContent ?? "")
 		await vscode.workspace.applyEdit(edit)
+	}
+
+	/**
+	 * Persist a restored buffer so the tab is clean before it is closed: close() refuses or prompts
+	 * on a dirty tab, and a refused close is how unapproved content outlived a "forced" rollback.
+	 * The content being saved here is the pre-stream content, never the streamed partial.
+	 */
+	private async saveBufferClean(absolutePath: string): Promise<void> {
+		const document = vscode.workspace.textDocuments.find(
+			(document) => document.uri.scheme === "file" && arePathsEqual(document.uri.fsPath, absolutePath),
+		)
+		if (document?.isDirty) {
+			await document.save()
+		}
 	}
 
 	private async closeFileTab(absolutePath: string): Promise<void> {
@@ -1364,6 +1394,11 @@ export class DiffViewProvider {
 		await this.closeAllDiffViews()
 		this.editType = undefined
 		this.isEditing = false
+		// A session's path must not outlive the session: revertChanges() reads relPath to decide
+		// what to roll back, and a stale relPath with editType cleared points the next rollback at
+		// whatever file this provider last touched - a file the current edit never created.
+		this.relPath = undefined
+		this.newContent = undefined
 		this.originalContent = undefined
 		this.createdDirs = []
 		this.placeholderPath = undefined
