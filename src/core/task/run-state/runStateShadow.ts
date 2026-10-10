@@ -24,14 +24,14 @@ export type RunRejection = { event: RunEvent; state: RunState }
 
 export const MAX_RUN_REJECTIONS = 100
 
-export const runStateFieldGetters: { [K in keyof RunStateFields]-?: (state: RunState) => RunStateFields[K] } = {
-	abort,
-	abandoned,
-	abortReason,
-	isInitialized,
-	isStreaming,
-	didFinishAbortingStream,
-}
+export const readRunStateFields = (state: RunState): RunStateFields => ({
+	abort: abort(state),
+	abandoned: abandoned(state),
+	abortReason: abortReason(state),
+	isInitialized: isInitialized(state),
+	isStreaming: isStreaming(state),
+	didFinishAbortingStream: didFinishAbortingStream(state),
+})
 
 // The kernel reports didFinishAbortingStream only for a live stream, so a leftover field (race R-1) projects false.
 export function projectRunState(fields: RunStateFields): RunStateFields {

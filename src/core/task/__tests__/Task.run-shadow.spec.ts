@@ -57,6 +57,17 @@ describe("Task run-state write helpers", () => {
 		expect(task.runRejections).toEqual([])
 	})
 
+	it("keeps a stale didFinishAbortingStream on the next stream so the kernel mismatch shows race R-1", () => {
+		task.markInitialized()
+		task.markStreamStarted()
+		task.markStreamCleanupFinished()
+		task.markStreamEnded()
+		task.markStreamStarted()
+
+		expect(task.didFinishAbortingStream).toBe(true)
+		expect(task.runState.stream).toEqual({ tag: "live", generation: 2, cleanupFinished: false })
+	})
+
 	it("requestAbort(false) sets abort only", () => {
 		task.requestAbort(false)
 

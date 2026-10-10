@@ -3,7 +3,7 @@ import {
 	applyRunEvent,
 	MAX_RUN_REJECTIONS,
 	projectRunState,
-	runStateFieldGetters,
+	readRunStateFields,
 	type RunRejection,
 	type RunStateFields,
 } from "../runStateShadow"
@@ -24,17 +24,6 @@ function drive(events: RunEvent[]): RunState {
 		}
 		return result.ok
 	}, initialRunState as RunState)
-}
-
-function kernelFields(state: RunState): RunStateFields {
-	return {
-		abort: runStateFieldGetters.abort(state),
-		abandoned: runStateFieldGetters.abandoned(state),
-		abortReason: runStateFieldGetters.abortReason(state),
-		isInitialized: runStateFieldGetters.isInitialized(state),
-		isStreaming: runStateFieldGetters.isStreaming(state),
-		didFinishAbortingStream: runStateFieldGetters.didFinishAbortingStream(state),
-	}
 }
 
 describe("projectRunState", () => {
@@ -83,7 +72,7 @@ describe("projectRunState", () => {
 			[completed, { ...idle, isInitialized: true }],
 		]
 		for (const [state, fields] of cases) {
-			expect(projectRunState(fields)).toEqual(kernelFields(state))
+			expect(projectRunState(fields)).toEqual(readRunStateFields(state))
 		}
 	})
 })
