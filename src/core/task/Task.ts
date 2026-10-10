@@ -111,6 +111,7 @@ import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
 import { ToolRepetitionDetector } from "../tools/ToolRepetitionDetector"
 import { restoreTodoListForTask } from "../tools/UpdateTodoListTool"
 import { FileContextTracker } from "../context-tracking/FileContextTracker"
+import { ObservationRegistry } from "./observationRegistry"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
@@ -286,6 +287,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly instanceId: string
 	readonly metadata: TaskMetadata
 
+	// The observed on-disk version of each file this task has read. Declared here so the
+	// read tools can record it; a write guard later compares a token against this registry.
+	readonly observationRegistry = new ObservationRegistry()
+
 	todoList?: TodoItem[]
 
 	readonly rootTask: Task | undefined = undefined
@@ -383,6 +388,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	providerRef: WeakRef<ClineProvider>
 	private readonly globalStoragePath: string
 	abort: boolean = false
+	// Monotonic cancellation counter. `abort` is a mutable flag that resumeAfterDelegation
+	// resets to false, so a write still waiting on a path chain cannot tell from `abort`
+	// alone that the task was cancelled while it waited - the flag may be back to false by
+	// the time its turn comes. Every cancellation bumps this counter, and the guarded-write
+	// path compares the value it captured when the write was queued.
+	cancellationGeneration: number = 0
 	currentRequestAbortController?: AbortController
 	/**
 	 * Controller for the waiter on an in-flight `ensureModelFetched()` call (see
@@ -3379,6 +3390,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		this.abort = true
+		this.cancellationGeneration++
 		this.cancelAssistantMessagePersistence()
 		this.abortPromise ??= this.abortTaskOnce()
 		return this.abortPromise
@@ -3464,6 +3476,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// signals below are cancelled and a request already past those checks
 		// could still build tools and call `createMessage()`.
 		this.abort = true
+		this.cancellationGeneration++
 
 		// Cancel any in-progress HTTP request
 		try {
