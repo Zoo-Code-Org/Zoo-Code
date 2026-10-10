@@ -3,6 +3,16 @@ import { Writable } from "stream"
 import * as path from "path"
 import * as os from "os"
 
+// The Windows DACL helpers shell out to icacls, which cannot run under a sandboxed test host:
+// every write would fail the restore check and roll back. Stub that one boundary, the same way
+// safeWriteText.spec.ts does. The DACL semantics are asserted there, where the runner is the
+// subject under test; here it only has to not explode.
+vi.mock("child_process", () => ({
+	execFile: vi.fn((cmd, args, opts, cb) => {
+		if (typeof cb === "function") cb(null)
+	}),
+}))
+
 import { ConfinedPathEscapeError, safeWriteJson } from "../safeWriteJson"
 import * as lockfile from "proper-lockfile"
 

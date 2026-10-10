@@ -1,5 +1,6 @@
 // npx vitest run utils/__tests__/safeWriteJson.lockKey.spec.ts
 
+import { execFile } from "child_process"
 import * as os from "os"
 import path from "path"
 import type { BigIntStats } from "fs"
@@ -7,6 +8,16 @@ import * as fs from "fs/promises"
 import { acquireFileLock } from "../fileLock"
 import { safeWriteJson } from "../safeWriteJson"
 import { resolveLockKey } from "../../services/file-safety/safeWriteText"
+
+// The Windows DACL helpers shell out to icacls, which cannot run under a sandboxed test host:
+// every write would fail the restore check and roll back. Stub that one boundary, the same way
+// safeWriteText.spec.ts does. The DACL semantics are asserted there, where the runner is the
+// subject under test; here it only has to not explode.
+vi.mock("child_process", () => ({
+	execFile: vi.fn((cmd, args, opts, cb) => {
+		if (typeof cb === "function") cb(null)
+	}),
+}))
 
 vi.mock("../fileLock", () => ({
 	acquireFileLock: vi.fn(async () => async () => {}),
@@ -98,6 +109,9 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// The lock key is the key every other writer to this file uses, so the caller
 		// queued behind the peer instead of failing before the lock.
 		expect(mockedAcquireFileLock).toHaveBeenCalledWith(referent)
+		// Exactly one lock: a confined caller publishes through the referent, so the referent lock is
+		// the one that serializes it, and a second lock would name an identity it does not replace.
+		expect(mockedAcquireFileLock).toHaveBeenCalledTimes(1)
 		// The two trailing lstat calls are safeWriteText's staging-path checks: the
 		// regular-file check on the temp file this write created, and the identity check
 		// that the staging path is not the target. Both run after the key was resolved
@@ -206,10 +220,12 @@ it("does not log a cleanup error when the safety net finds the temp file already
 	unlinkSpy.mockRestore()
 	consoleError.mockRestore()
 })
-	it("locks the link path when the caller declared no confinement scope", async () => {
+	it("locks the link path and the referent when the caller declared no confinement scope", async () => {
 		// The lock key must name the file this write replaces. An unscoped write publishes over the
-		// link, so locking the referent would let it run beside another writer that locked the link -
-		// two locks for one publish target, and the lost update the lock exists to prevent.
+		// link, so locking the referent alone would let it run beside another writer that locked the
+		// link - two locks for one publish target, and the lost update the lock exists to prevent.
+		// The referent lock is kept alongside it rather than replaced: while the link exists, that is
+		// the lock serializing this alias against a writer that names the referent directly.
 		const dir = await makeDir("lockkey-unscoped-")
 		const link = path.join(dir, "link.json")
 		const referent = path.join(dir, "history_item.json")
@@ -219,11 +235,15 @@ it("does not log a cleanup error when the safety net finds the temp file already
 		mockedRealpath.mockImplementation(async (target) => (target === link ? referent : String(target)))
 		mockedReadlink.mockImplementation(async (target) => (target === link ? referent : Promise.reject(new Error("not a link"))))
 		mockedLstat.mockImplementation(async (target) => symlinkStat(target))
-		mockedAcquireFileLock.mockImplementation(async () => async () => {})
+		const acquired: string[] = []
+		mockedAcquireFileLock.mockImplementation(async (key) => {
+			acquired.push(String(key))
+			return async () => {}
+		})
 
 		await safeWriteJson(link, { id: "task-2" })
 
-		expect(mockedAcquireFileLock).toHaveBeenCalledWith(link)
+		expect(acquired).toEqual([referent, link].sort())
 	})
 
 	it("does not merge from a symlink an unscoped write is not going to publish through", async () => {
@@ -247,3 +267,47 @@ it("does not log a cleanup error when the safety net finds the temp file already
 
 		expect(merge).toHaveBeenCalledWith(null, { id: "task-3" })
 	})
+it("serializes a writer that names the referent directly while the link still exists", async () => {
+	// The finding this covers, quoted: "Do not replace the referent lock with only the link-path
+	// lock, because the existing contract serializes symlink aliases with direct referent writers
+	// while the link exists." An unscoped write replaces the link, so the link-path lock is the one
+	// that names the inode it replaces - but a writer that opens the referent by name takes the
+	// referent lock, and with only the link-path lock held the two writes overlap and their merge
+	// reads overwrite each other.
+	const dir = await makeDir("lockkey-referent-")
+	const link = path.join(dir, "link.json")
+	const referent = path.join(dir, "history_item.json")
+	currentLink = link
+	await fs.writeFile(referent, JSON.stringify({ had: "referent content" }), "utf8")
+	// The link itself has to exist for real: the DACL capture only runs over an existing target, and
+	// asserting the stub was called is what proves stubbing icacls did not skip the capture.
+	await fs.writeFile(link, JSON.stringify({ had: "link content" }), "utf8")
+
+	const acquired: string[] = []
+	const released: string[] = []
+	mockedRealpath.mockImplementation(async (target) => (target === link ? referent : String(target)))
+	mockedReadlink.mockImplementation(async (target) => (target === link ? referent : Promise.reject(new Error("not a link"))))
+	mockedLstat.mockImplementation(async (target) => symlinkStat(target))
+	mockedAcquireFileLock.mockImplementation(async (key) => {
+		acquired.push(String(key))
+		return async () => {
+			released.push(String(key))
+		}
+	})
+
+	await safeWriteJson(link, { id: "task-4" })
+
+	// Both identities, in sorted key order, so two writers approaching the pair from opposite sides
+	// cannot each hold one and wait for the other; both released, in reverse.
+	expect(acquired).toEqual([referent, link].sort())
+	expect(released).toEqual([...acquired].reverse())
+
+	// The DACL boundary is still exercised on the file this write replaces: stubbing icacls to keep
+	// the sandboxed host from failing the restore must not skip the capture/restore calls themselves.
+	expect(execFile).toHaveBeenCalledWith("icacls", expect.arrayContaining([link, "/save"]), expect.anything(), expect.any(Function))
+
+	// Taking the extra lock must not move the publish target: the bytes land on the link, and the
+	// referent keeps the content its own writer put there.
+	expect(JSON.parse(await fs.readFile(link, "utf8"))).toEqual({ id: "task-4" })
+	expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ had: "referent content" })
+})
