@@ -76,7 +76,9 @@ export class DaclCaptureError extends Error {
 		public readonly targetPath: string,
 		public readonly dumpPath: string,
 	) {
-		super(`safeWriteText: refusing to publish ${targetPath}: its DACL could not be captured (no icacls dump was written at ${dumpPath}). No change was made to the target.`)
+		super(
+			`safeWriteText: refusing to publish ${targetPath}: its DACL could not be captured (no icacls dump was written at ${dumpPath}). No change was made to the target.`,
+		)
 		this.name = "DaclCaptureError"
 	}
 }
@@ -168,10 +170,10 @@ function _fsyncFile(fd: number): void {
 	fsSync.fsyncSync(fd)
 }
 
-	/** Save the DACL of *srcPath* to a dump file on Windows.
-	 * Returns true when a usable dump exists; false otherwise.
-	 * Never throws - a false return means no usable dump was produced, which the caller treats
-	 * as "the security descriptor cannot be preserved" and fails closed before publishing. */
+/** Save the DACL of *srcPath* to a dump file on Windows.
+ * Returns true when a usable dump exists; false otherwise.
+ * Never throws - a false return means no usable dump was produced, which the caller treats
+ * as "the security descriptor cannot be preserved" and fails closed before publishing. */
 async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<boolean> {
 	const runner = execFileRunner ?? execFile
 	try {
@@ -209,7 +211,11 @@ function _dumpIsUsable(dumpPath: string): boolean {
 /** Restore a DACL dump onto *dirPath* on Windows.
  * Returns true when icacls reported success; false otherwise, so the caller can
  * decide whether a lost DACL is tolerable. */
-async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<boolean> {
+async function _restoreDaclWindows(
+	dirPath: string,
+	dumpPath: string,
+	execFileRunner?: typeof execFile,
+): Promise<boolean> {
 	const runner = execFileRunner ?? execFile
 	try {
 		await new Promise<void>((resolve, reject) => {
@@ -323,7 +329,9 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				// surface the retained directory. A leftover staging directory is acceptable, an
 				// invisible one is not.
 				if (attempt === 1) {
-					console.warn(`safeWriteText: staging directory release failed: ${stagingDir} (${code ?? String(error)})`)
+					console.warn(
+						`safeWriteText: staging directory release failed: ${stagingDir} (${code ?? String(error)})`,
+					)
 				}
 			}
 		}
@@ -331,10 +339,10 @@ export async function safeWriteText(filePath: string, content: string, options?:
 
 	let backupPath: string | null = null
 	let backupCreated = false
-		// Set as soon as the backup destination is chosen, before the copy runs: a copyFile that
-		// fails part way can still leave a partial file at that path, and it has to be cleaned up
-		// like a completed backup would be.
-		let backupAttempted = false
+	// Set as soon as the backup destination is chosen, before the copy runs: a copyFile that
+	// fails part way can still leave a partial file at that path, and it has to be cleaned up
+	// like a completed backup would be.
+	let backupAttempted = false
 	// Set when the commit landed but its durability could not be confirmed. The
 	// content is in place, so there is nothing to roll back, but the caller must
 	// not be told the publish is durable.
@@ -444,7 +452,9 @@ export async function safeWriteText(filePath: string, content: string, options?:
 						options?.tempPath ? null : tempPath, // a caller-supplied temp belongs to the caller
 					]
 					for (const artifact of abortArtifacts) {
-						if (!artifact) { continue }
+						if (!artifact) {
+							continue
+						}
 						let removed = false
 						for (let attempt = 0; attempt < 2 && !removed; attempt++) {
 							try {
@@ -455,7 +465,9 @@ export async function safeWriteText(filePath: string, content: string, options?:
 							}
 						}
 						if (!removed) {
-							console.warn(`safeWriteText: aborted before publishing and could not remove ${artifact}; it is retained and must be cleaned up out of band.`)
+							console.warn(
+								`safeWriteText: aborted before publishing and could not remove ${artifact}; it is retained and must be cleaned up out of band.`,
+							)
 						}
 					}
 					throw new DaclCaptureError(targetPath, daclDumpPath)
@@ -471,7 +483,8 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				// Only ENOENT means "there is no target, so there is no DACL to preserve". EACCES or any
 				// other probe error says nothing about the target's security descriptor, and publishing
 				// over a target we could not inspect would replace it without a captured DACL.
-				const probeCode = err && typeof err === "object" && "code" in err ? (err as { code?: string }).code : undefined
+				const probeCode =
+					err && typeof err === "object" && "code" in err ? (err as { code?: string }).code : undefined
 				if (probeCode !== "ENOENT") {
 					throw err
 				}
@@ -579,7 +592,7 @@ export async function safeWriteText(filePath: string, content: string, options?:
 						await fs.unlink(backupPath)
 					} catch (cleanupError: unknown) {
 						console.warn(
-							`safeWriteText: the write to ${targetPath} committed but its backup copy could not be removed at ${backupPath} (${String(cleanupError)}); the copy is left in place.`
+							`safeWriteText: the write to ${targetPath} committed but its backup copy could not be removed at ${backupPath} (${String(cleanupError)}); the copy is left in place.`,
 						)
 					}
 				}
@@ -636,7 +649,7 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				}
 				if (attempt === 1) {
 					console.warn(
-						`safeWriteText: staging temp release failed: ${tempPath} (${code ?? String(cleanupError)})`
+						`safeWriteText: staging temp release failed: ${tempPath} (${code ?? String(cleanupError)})`,
 					)
 				}
 			}
@@ -656,8 +669,7 @@ export async function safeWriteText(filePath: string, content: string, options?:
 	// Raised outside the rollback handler on purpose: the content is committed, so
 	// this is not a failure to roll back, and the backup must survive for recovery.
 	if (durabilityError !== null) {
-		const reason =
-			durabilityError instanceof Error ? durabilityError.message : String(durabilityError)
+		const reason = durabilityError instanceof Error ? durabilityError.message : String(durabilityError)
 		throw new PublishNotDurableError(targetPath, reason)
 	}
 }
