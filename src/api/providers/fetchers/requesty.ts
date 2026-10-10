@@ -63,6 +63,12 @@ export async function getRequestyModels(
 				modelInfo.supportsTemperature = false
 			}
 
+			if (rawModel.id === "anthropic/claude-sonnet-5-5") {
+				modelInfo.supportsReasoningBudget = true
+				modelInfo.supportsReasoningBinary = true
+				modelInfo.supportsTemperature = false
+			}
+
 			if (rawModel.id === "anthropic/claude-opus-5") {
 				modelInfo.supportsReasoningBudget = true
 				modelInfo.supportsReasoningBinary = true

@@ -396,6 +396,21 @@ export const vertexModels = {
 		description:
 			"Claude Sonnet 5 is the best combination of speed and intelligence, optimized for coding, tool use, and agentic workflows.",
 	},
+	"claude-sonnet-5-5": {
+		maxTokens: 128_000, // 128K max output tokens per the Anthropic model card (same across all platforms).
+		contextWindow: 1_000_000, // 1M context window native (no beta header required)
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 2.0, // $2 per million input tokens
+		outputPrice: 10.0, // $10 per million output tokens
+		cacheWritesPrice: 2.5, // $2.50 per million tokens (5m cache write)
+		cacheReadsPrice: 0.2, // $0.20 per million tokens
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+		description:
+			"Claude Sonnet 5.5 is the best combination of speed and intelligence, optimized for coding, tool use, and agentic workflows.",
+	},
 	"claude-haiku-4-5@20251001": {
 		maxTokens: 8192,
 		contextWindow: 200_000,
