@@ -3,6 +3,7 @@ import { CodeIndexManager } from "../manager"
 import { CodeIndexWorkspaceScope } from "../code-index-workspace-scope"
 import { CodeIndexStateManager } from "../state-manager"
 import { WorkspaceIndexingEnablementManager } from "../workspace-indexing-enablement-manager"
+import { WorkspaceIndexingSettingsManager } from "../workspace-indexing-settings-manager"
 
 vi.mock("../state-manager")
 
@@ -14,6 +15,27 @@ vi.mock("../manager", () => ({
 
 describe("CodeIndexWorkspaceScope", () => {
 	beforeEach(() => vi.clearAllMocks())
+
+	it("uses guarded getters to construct dependent managers during initialization", () => {
+		const scope = new CodeIndexWorkspaceScope("/workspace", makeUri("/workspace"), makeExtensionContext())
+		const getter = vi.spyOn(scope, "codeIndexManager", "get")
+		scope.init()
+		expect(getter).toHaveBeenCalledTimes(2)
+		expect(scope.workspaceIndexingSettingsManager["manager"]).toBe(scope.codeIndexManager)
+	})
+
+	it("owns a guarded settings manager and recreates it after disposal", () => {
+		const scope = new CodeIndexWorkspaceScope("/workspace", makeUri("/workspace"), makeExtensionContext())
+		expect(() => scope.workspaceIndexingSettingsManager).toThrow("not initialized")
+		scope.init()
+		const settings = scope.workspaceIndexingSettingsManager
+		expect(settings).toBeInstanceOf(WorkspaceIndexingSettingsManager)
+		expect(settings["manager"]).toBe(scope.codeIndexManager)
+		scope.dispose()
+		expect(() => scope.workspaceIndexingSettingsManager).toThrow("not initialized")
+		scope.init()
+		expect(scope.workspaceIndexingSettingsManager).not.toBe(settings)
+	})
 
 	it("owns a guarded workspace indexing manager and recreates it after disposal", () => {
 		const scope = new CodeIndexWorkspaceScope("/workspace", makeUri("/workspace"), makeExtensionContext())
