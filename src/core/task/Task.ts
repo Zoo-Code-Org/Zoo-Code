@@ -7,6 +7,7 @@ import EventEmitter from "events"
 
 import { AskIgnoredError } from "./AskIgnoredError"
 import { RateLimitClock, createRateLimitClock } from "./RateLimitClock"
+import { ReasoningLoopDetector, RepetitiveReasoningError } from "./ReasoningLoopDetector"
 
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
@@ -3966,6 +3967,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				})
 				let assistantMessage = ""
 				let reasoningMessage = ""
+				const reasoningLoopDetector = new ReasoningLoopDetector()
 				const pendingGroundingSources: GroundingSource[] = []
 				this.isStreaming = true
 
@@ -4002,6 +4004,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					let item = await nextChunkWithAbort()
 					while (!item.done) {
 						const chunk = item.value
+						// Detect a loop before prefetching: the provider may stall on its next read.
+						if (chunk?.type === "reasoning" && reasoningLoopDetector.add(chunk.text)) {
+							this.cancelCurrentRequest()
+							throw new RepetitiveReasoningError()
+						}
 						item = await nextChunkWithAbort()
 						if (!chunk) {
 							// Sometimes chunk is undefined, no idea that can cause
@@ -4469,8 +4476,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							// ??= keeps the first reason; a cancel can land during abortStream after cancelReason was already computed.
 							this.abortReason ??= "user_cancelled"
 							await this.abortTask()
-						} else if (error instanceof OutputTokenLimitError) {
-							// Truncation repeats on an identical request, so never auto-retry it
+						} else if (
+							error instanceof OutputTokenLimitError ||
+							error instanceof RepetitiveReasoningError
+						) {
+							// These failures repeat on an identical request, so never auto-retry them
 							// (even with auto-approval); let the user decide once.
 							const { response } = await this.ask("api_req_failed", rawErrorMessage)
 
@@ -4482,7 +4492,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							stack.push({
 								userContent: currentUserContent,
 								includeFileDetails: false,
-								retryAttempt: 0,
+								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
 							})
 							continue
 						} else {

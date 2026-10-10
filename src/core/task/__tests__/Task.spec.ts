@@ -598,21 +598,110 @@ describe("Cline", () => {
 			expect(askSpy).toHaveBeenCalledWith("api_req_failed", expect.stringContaining("Output token limit reached"))
 		})
 
-		it("retries from a fresh attempt count when the user confirms", async () => {
+		it("advances the retry count without duplicating the user message when the user confirms", async () => {
 			const task = await createAutoApprovedTask()
+			let retryHistory: ApiMessage[] | undefined
 			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
 			const attemptApiRequestSpy = vi
 				.spyOn(task, "attemptApiRequest")
 				.mockImplementationOnce(() => truncatedStream())
-				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "done" }]))
+				.mockImplementationOnce(() => {
+					retryHistory = structuredClone(task.apiConversationHistory)
+					return asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "done" }])
+				})
 				.mockImplementation(() => {
 					throw new Error("stop after retry response")
 				})
 
 			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
 
-			expect(attemptApiRequestSpy.mock.calls.slice(0, 2).map(([retryAttempt]) => retryAttempt)).toEqual([0, 0])
+			expect(attemptApiRequestSpy.mock.calls.slice(0, 2).map(([retryAttempt]) => retryAttempt)).toEqual([0, 1])
+			expect(retryHistory?.filter((message) => message.role === "user")).toHaveLength(1)
 		})
+	})
+
+	describe("repetitive reasoning mid-stream", () => {
+		it.each(["noButtonClicked", "yesButtonClicked"] as const)(
+			"cancels before a stalled read, then handles %s",
+			async (response) => {
+				vi.spyOn(mockProvider, "getState").mockResolvedValue(
+					providerStateWith({ autoApprovalEnabled: true, requestDelaySeconds: 0 }),
+				)
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+				vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+				vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+				let answerFailure!: (answer: TaskAskResult) => void
+				const failureResponse = new Promise<TaskAskResult>((resolve) => {
+					answerFailure = resolve
+				})
+				const askSpy = vi
+					.spyOn(task, "ask")
+					.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+					.mockReturnValueOnce(failureResponse)
+				const cancelSpy = vi.spyOn(task, "cancelCurrentRequest")
+				const controller = new AbortController()
+				let releaseRead!: () => void
+				const stalledRead = new Promise<void>((resolve) => {
+					releaseRead = resolve
+				})
+				let retryHistory: ApiMessage[] | undefined
+				const cycle =
+					"OK.\n\nHmm. Let me read them.\n\nOK.\n\nHmm. Let me just do it.\n\nLet me read the files.\n\n"
+				const attemptApiRequestSpy = vi
+					.spyOn(task, "attemptApiRequest")
+					.mockImplementationOnce(async function* () {
+						task.currentRequestAbortController = controller
+						yield { type: "reasoning", text: cycle.repeat(8) }
+						await stalledRead
+					})
+					.mockImplementationOnce(() => {
+						retryHistory = structuredClone(task.apiConversationHistory)
+						return asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "done" }])
+					})
+					.mockImplementation(() => {
+						throw new Error("stop after retry response")
+					})
+
+				const request = task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
+				try {
+					// The provider's next read and the user's retry decision are still unreleased.
+					await vi.waitFor(() => expect(controller.signal.aborted).toBe(true))
+					expect(cancelSpy).toHaveBeenCalledOnce()
+					expect(attemptApiRequestSpy).toHaveBeenCalledOnce()
+					await vi.waitFor(() =>
+						expect(askSpy).toHaveBeenCalledWith(
+							"api_req_failed",
+							expect.stringContaining("Repetitive reasoning detected"),
+						),
+					)
+				} finally {
+					releaseRead()
+					answerFailure({ response })
+					await request
+				}
+
+				expect(cancelSpy).toHaveBeenCalledOnce()
+				if (response === "yesButtonClicked") {
+					expect(attemptApiRequestSpy.mock.calls.slice(0, 2).map(([retryAttempt]) => retryAttempt)).toEqual([
+						0, 1,
+					])
+					expect(retryHistory?.filter((message) => message.role === "user")).toHaveLength(1)
+					expect(retryHistory?.[0]).toMatchObject({
+						role: "user",
+						content: expect.arrayContaining([{ type: "text", text: "long request" }]),
+					})
+				} else {
+					expect(attemptApiRequestSpy).toHaveBeenCalledOnce()
+					expect(askSpy).toHaveBeenCalledOnce()
+				}
+			},
+		)
 	})
 
 	describe("native tool-call request isolation", () => {

@@ -298,6 +298,32 @@ describe("OpenRouterHandler", () => {
 			)
 		})
 
+		it.each([
+			{
+				modelId: "anthropic/claude-sonnet-4",
+				headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" },
+			},
+			{ modelId: "openai/gpt-4o", headers: undefined },
+		])("passes the abort signal with only the appropriate headers for $modelId", async ({ modelId, headers }) => {
+			const handler = new OpenRouterHandler({ ...mockOptions, openRouterModelId: modelId })
+			const mockCreate = vitest.fn().mockResolvedValue(asyncStreamFrom([]))
+			Object.defineProperty(OpenAI.prototype, "chat", {
+				configurable: true,
+				value: { completions: { create: mockCreate } },
+			})
+			const controller = new AbortController()
+
+			await collectStream(
+				handler.createMessage("test", [], { taskId: "test-task", abortSignal: controller.signal }),
+			)
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: modelId }), {
+				signal: controller.signal,
+				...(headers ? { headers } : {}),
+			})
+			expect(mockCreate.mock.calls[0][1].signal).toBe(controller.signal)
+		})
+
 		it("adds cache control for supported models", async () => {
 			const handler = new OpenRouterHandler(
 				makeApiHandlerOptions({
