@@ -63,6 +63,14 @@ export interface ApiStreamUsageChunk {
 	cacheReadTokens?: number
 	reasoningTokens?: number
 	totalCost?: number
+	/**
+	 * finish/stop reason from the provider stream (e.g. "end_turn", "max_tokens")
+	 * when available. Used to diagnose empty-response retries.
+	 * NOTE: only the Anthropic provider populates this field today; the other providers
+	 * leave it unset. The empty-response diagnostic therefore omits the finish_reason
+	 * field when it is unknown rather than printing "unknown".
+	 */
+	finishReason?: string
 }
 
 export interface ApiStreamGroundingChunk {
