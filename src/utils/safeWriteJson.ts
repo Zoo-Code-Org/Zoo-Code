@@ -3,9 +3,7 @@ import * as fsSync from "fs"
 import * as path from "path"
 import { JsonStreamStringify } from "json-stream-stringify"
 
-
 import { resolvePublishTarget, safeWriteText, type SafeWriteTextOptions } from "../services/file-safety/safeWriteText"
-
 
 import { acquireFileLock } from "./fileLock"
 
@@ -74,36 +72,39 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		throw dirError
 	}
 
-// Every existing ancestor must be checked too, not just the final component: a symlinked
-// directory above the target redirects the payload without leaving a trace on the target path
-// itself (e.g. <workspace>/.roo -> a directory outside the workspace). Only ENOENT stops the
-// walk - a missing ancestor means nothing deeper exists to be a link. Any other inspection
-// error fails closed, because "could not inspect" is not evidence that the path is safe.
-async function _refuseSymlinkedAncestors(absoluteFilePath: string): Promise<void> {
-	let current = path.dirname(absoluteFilePath)
-	for (;;) {
-		let st: fsSync.Stats
-		try {
-			st = await fs.lstat(current)
-		} catch (error: unknown) {
-			const code = error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined
-			if (code === "ENOENT") {
+	// Every existing ancestor must be checked too, not just the final component: a symlinked
+	// directory above the target redirects the payload without leaving a trace on the target path
+	// itself (e.g. <workspace>/.roo -> a directory outside the workspace). Only ENOENT stops the
+	// walk - a missing ancestor means nothing deeper exists to be a link. Any other inspection
+	// error fails closed, because "could not inspect" is not evidence that the path is safe.
+	async function _refuseSymlinkedAncestors(absoluteFilePath: string): Promise<void> {
+		let current = path.dirname(absoluteFilePath)
+		for (;;) {
+			let st: fsSync.Stats
+			try {
+				st = await fs.lstat(current)
+			} catch (error: unknown) {
+				const code =
+					error && typeof error === "object" && "code" in error
+						? (error as { code?: string }).code
+						: undefined
+				if (code === "ENOENT") {
+					return
+				}
+				throw error
+			}
+			if (st.isSymbolicLink()) {
+				throw new Error(
+					`safeWriteJson: refusing to write to ${absoluteFilePath}: ${current} is a symlink, and the payload would be written outside the directory the caller named.`,
+				)
+			}
+			const parent = path.dirname(current)
+			if (parent === current) {
 				return
 			}
-			throw error
+			current = parent
 		}
-		if (st.isSymbolicLink()) {
-			throw new Error(
-				`safeWriteJson: refusing to write to ${absoluteFilePath}: ${current} is a symlink, and the payload would be written outside the directory the caller named.`
-			)
-		}
-		const parent = path.dirname(current)
-		if (parent === current) {
-			return
-		}
-		current = parent
 	}
-}
 
 	// A credential-bearing payload must not be redirected through a link the user
 	// never chose: check the final path component before anything is resolved,
@@ -113,7 +114,8 @@ async function _refuseSymlinkedAncestors(absoluteFilePath: string): Promise<void
 		try {
 			targetStat = await fs.lstat(absoluteFilePath)
 		} catch (error: unknown) {
-			const code = error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined
+			const code =
+				error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined
 			// Only a missing target means there is no link to refuse. Anything else -
 			// a permission error on the parent directory, for example - is not evidence
 			// that the destination is safe to publish into.
@@ -127,12 +129,11 @@ async function _refuseSymlinkedAncestors(absoluteFilePath: string): Promise<void
 			)
 		}
 
-	// The final component alone is not enough: a symlinked ancestor redirects the payload while
-	// leaving the target path looking ordinary. Checked before anything is resolved, staged or
-	// locked, and it fails closed on any inspection error that is not ENOENT.
-	await _refuseSymlinkedAncestors(absoluteFilePath)
+		// The final component alone is not enough: a symlinked ancestor redirects the payload while
+		// leaving the target path looking ordinary. Checked before anything is resolved, staged or
+		// locked, and it fails closed on any inspection error that is not ENOENT.
+		await _refuseSymlinkedAncestors(absoluteFilePath)
 	}
-
 
 	// Resolve the publish target BEFORE acquiring the lock: proper-lockfile keys
 	// the lock by the given path, so a symlink alias and its referent would
@@ -150,47 +151,48 @@ async function _refuseSymlinkedAncestors(absoluteFilePath: string): Promise<void
 	// than writing through a link, so an inserted link gets replaced and its referent
 	// never receives the payload. Every refuseSymlinkTarget writer keys its lock to the
 	// same named path, so the lock still serializes all writers to that entry.
-// Two different paths, for two different jobs. The LOCK is keyed to the resolved referent,
-// because proper-lockfile keys by the given path: an alias and its referent would otherwise
-// take two locks for one underlying file, and a concurrent merge through both aliases could
-// read the same JSON and overwrite one update. The PUBLISH stays on the caller-named path:
-// the commit is a rename, and a rename replaces the directory entry rather than writing
-// through a link, so a link the caller never chose gets replaced instead of receiving a
-// credential payload. That is also the pre-existing safeWriteJson behavior - following the
-// link here would be a new default for every caller.
-const lockTargetPath = options?.refuseSymlinkTarget
-	? absoluteFilePath
-	: await resolvePublishTarget(absoluteFilePath)
-const publishTargetPath = absoluteFilePath
+	// Two different paths, for two different jobs. The LOCK is keyed to the resolved referent,
+	// because proper-lockfile keys by the given path: an alias and its referent would otherwise
+	// take two locks for one underlying file, and a concurrent merge through both aliases could
+	// read the same JSON and overwrite one update. The PUBLISH stays on the caller-named path:
+	// the commit is a rename, and a rename replaces the directory entry rather than writing
+	// through a link, so a link the caller never chose gets replaced instead of receiving a
+	// credential payload. That is also the pre-existing safeWriteJson behavior - following the
+	// link here would be a new default for every caller.
+	const lockTargetPath = options?.refuseSymlinkTarget
+		? absoluteFilePath
+		: await resolvePublishTarget(absoluteFilePath)
+	const publishTargetPath = absoluteFilePath
 
-// The refusal above and this resolution are separate syscalls, so a local writer
-// could replace the final component with a link in between; resolvedTargetPath
-// would then describe a destination the caller never chose. Re-check the component
-// the caller named - once here and again under the lock before publishing - so the
-// refusal stays effective through publication.
-const assertFinalComponentNotReplaced = async (stage: string): Promise<void> => {
-	// Fail closed: only ENOENT (nothing there that could be a link) is tolerated. A lstat
-	// failing for another reason - EACCES on the parent directory, for example - says
-	// nothing about whether the entry is safe, so the write stops instead of publishing
-	// blind through an unexamined destination.
-	let nowStat: fsSync.Stats | undefined
-	try {
-		nowStat = await fs.lstat(absoluteFilePath)
-	} catch (error: unknown) {
-		const code = error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined
-		if (code !== "ENOENT") {
-			throw error
+	// The refusal above and this resolution are separate syscalls, so a local writer
+	// could replace the final component with a link in between; resolvedTargetPath
+	// would then describe a destination the caller never chose. Re-check the component
+	// the caller named - once here and again under the lock before publishing - so the
+	// refusal stays effective through publication.
+	const assertFinalComponentNotReplaced = async (stage: string): Promise<void> => {
+		// Fail closed: only ENOENT (nothing there that could be a link) is tolerated. A lstat
+		// failing for another reason - EACCES on the parent directory, for example - says
+		// nothing about whether the entry is safe, so the write stops instead of publishing
+		// blind through an unexamined destination.
+		let nowStat: fsSync.Stats | undefined
+		try {
+			nowStat = await fs.lstat(absoluteFilePath)
+		} catch (error: unknown) {
+			const code =
+				error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined
+			if (code !== "ENOENT") {
+				throw error
+			}
+		}
+		if (nowStat?.isSymbolicLink()) {
+			throw new Error(
+				`safeWriteJson: refusing to write through the symlink now at ${absoluteFilePath} (${stage}); the payload would land at ${publishTargetPath}, a destination the caller never chose.`,
+			)
 		}
 	}
-	if (nowStat?.isSymbolicLink()) {
-		throw new Error(
-			`safeWriteJson: refusing to write through the symlink now at ${absoluteFilePath} (${stage}); the payload would land at ${publishTargetPath}, a destination the caller never chose.`,
-		)
+	if (options?.refuseSymlinkTarget) {
+		await assertFinalComponentNotReplaced("after resolution")
 	}
-}
-if (options?.refuseSymlinkTarget) {
-	await assertFinalComponentNotReplaced("after resolution")
-}
 
 	// Acquire the lock before any file operations. `acquireFileLock` owns the
 	// shared advisory lock protocol, so callers that lock the same path with it
