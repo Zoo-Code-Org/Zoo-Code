@@ -136,7 +136,11 @@ async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunne
 
 /** Restore a DACL dump onto *dirPath* on Windows.
  * Returns whether icacls succeeded; the caller reports a failure. */
-async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<boolean> {
+async function _restoreDaclWindows(
+	dirPath: string,
+	dumpPath: string,
+	execFileRunner?: typeof execFile,
+): Promise<boolean> {
 	const runner = execFileRunner ?? execFile
 	try {
 		await new Promise<void>((resolve, reject) => {
@@ -463,13 +467,17 @@ export async function safeWriteText(
 					// proceeds - a missing or failing icacls must not leave the user unable to save -
 					// but the replacement is no longer ACL-identical and that has to be visible
 					// instead of silent.
-					warn(`Could not save the DACL of ${targetPath}; the replacement may inherit different access rights.`)
+					warn(
+						`Could not save the DACL of ${targetPath}; the replacement may inherit different access rights.`,
+					)
 				}
 			} else if (errorCode(accessError) !== "ENOENT") {
 				// Not "absent": the target is there but could not be checked (EACCES, ...), so
 				// DACL preservation was skipped for a reason the caller cannot infer from the
 				// successful write alone.
-				warn(`Could not check ${targetPath} for DACL preservation (${errorCode(accessError) ?? "unknown error"}); the replacement may inherit different access rights.`)
+				warn(
+					`Could not check ${targetPath} for DACL preservation (${errorCode(accessError) ?? "unknown error"}); the replacement may inherit different access rights.`,
+				)
 			}
 		}
 		try {
@@ -542,11 +550,7 @@ export async function safeWriteText(
 					// The catch block keeps the backup on this path, so hand the caller the
 					// path of the copy it is keeping - it is a hidden random name and is
 					// otherwise unrecoverable.
-					throw new PostCommitDurabilityError(
-						targetPath,
-						error,
-						releaseBackupOnSuccess ? backupPath : null,
-					)
+					throw new PostCommitDurabilityError(targetPath, error, releaseBackupOnSuccess ? backupPath : null)
 				}
 			}
 
@@ -564,7 +568,9 @@ export async function safeWriteText(
 					// temp directory restore fails with "Not all privileges or groups referenced
 					// are assigned to the caller"), so the change of access rights is reported
 					// rather than thrown.
-					warn(`Content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`)
+					warn(
+						`Content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`,
+					)
 				}
 			}
 

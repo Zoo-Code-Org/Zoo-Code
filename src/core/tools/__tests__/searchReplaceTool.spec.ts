@@ -479,7 +479,10 @@ describe("searchReplaceTool", () => {
 		it("forwards an approved outside-workspace edit as approved, not as completeness", async () => {
 			mockedIsPathOutsideWorkspace.mockReturnValue(true)
 			try {
-				await executeSearchReplaceTool({ old_string: "Line 2", new_string: "Modified Line 2" }, { fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption })
+				await executeSearchReplaceTool(
+					{ old_string: "Line 2", new_string: "Modified Line 2" },
+					{ fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+				)
 				const args = mockCline.diffViewProvider.saveDirectly.mock.calls.at(-1)!
 				expect(args[6]).toBeUndefined()
 				expect(args[7]).toBe(true)

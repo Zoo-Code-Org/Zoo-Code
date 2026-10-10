@@ -264,7 +264,6 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
 
-
 		it("fails closed when the workspace itself cannot be resolved", async () => {
 			// EACCES/ELOOP on the workspace means a symlink inside it would never be resolved, so
 			// the containment decision cannot be made at all: the write is refused rather than
@@ -467,7 +466,8 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			// sees the swapped identity. A baseline taken from any lookup would accept this
 			// write; the identity captured before the approval does not.
 			mockedFsRealpath.mockImplementation(async (p) =>
-				String(p).startsWith("/elsewhere") ? "/elsewhere/victim.txt" : String(p))
+				String(p).startsWith("/elsewhere") ? "/elsewhere/victim.txt" : String(p),
+			)
 			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
 			const task = createMockTask()
 

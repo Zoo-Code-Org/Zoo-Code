@@ -108,12 +108,7 @@ async function _resolveScopeRoot(confineTo: string): Promise<string> {
  */
 function _escapesScope(scopeRoot: string, candidate: string): boolean {
 	const relative = path.relative(scopeRoot, candidate)
-	return (
-		relative === "" ||
-		relative === ".." ||
-		relative.startsWith(".." + path.sep) ||
-		path.isAbsolute(relative)
-	)
+	return relative === "" || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)
 }
 
 /**
@@ -272,7 +267,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			}
 			console.warn(
 				`safeWriteJson: ${resolvedTargetPath ?? absoluteFilePath} is committed, but its directory entry may not be durable: ${
-						error.cause instanceof Error ? error.cause.message : String(error.cause ?? error)
+					error.cause instanceof Error ? error.cause.message : String(error.cause ?? error)
 				}`,
 			)
 		}
