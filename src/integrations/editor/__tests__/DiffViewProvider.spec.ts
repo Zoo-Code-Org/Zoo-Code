@@ -41,7 +41,7 @@ vi.mock("vscode", () => ({
 		onDidOpenTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
 		openTextDocument: vi.fn().mockResolvedValue({
 			isDirty: false,
-			save: vi.fn().mockResolvedValue(undefined),
+			save: vi.fn().mockResolvedValue(true),
 		}),
 		textDocuments: [],
 		fs: {
@@ -875,7 +875,7 @@ describe("DiffViewProvider", () => {
 				document: {
 					getText: vi.fn().mockReturnValue("new content"),
 					isDirty: false,
-					save: vi.fn().mockResolvedValue(undefined),
+					save: vi.fn().mockResolvedValue(true),
 				},
 			}
 			;(diffViewProvider as any).preDiagnostics = []
@@ -1020,7 +1020,7 @@ describe("DiffViewProvider", () => {
 				document: {
 					getText: vi.fn().mockReturnValue("content"),
 					isDirty: false,
-					save: vi.fn().mockResolvedValue(undefined),
+					save: vi.fn().mockResolvedValue(true),
 				},
 			}
 
@@ -1045,7 +1045,7 @@ describe("DiffViewProvider", () => {
 				document: {
 					getText: vi.fn().mockReturnValue("content"),
 					isDirty: false,
-					save: vi.fn().mockResolvedValue(undefined),
+					save: vi.fn().mockResolvedValue(true),
 				},
 			}
 
@@ -1065,7 +1065,7 @@ describe("DiffViewProvider", () => {
 						uri: { fsPath: `${mockCwd}/race.ts`, scheme: "file" },
 						getText: vi.fn().mockReturnValue("a\nCHANGED\nc\nd\n"),
 						isDirty: false,
-						save: vi.fn().mockResolvedValue(undefined),
+						save: vi.fn().mockResolvedValue(true),
 						lineCount: 5,
 						lineAt: vi.fn().mockReturnValue({ text: "" }),
 					},
@@ -1116,7 +1116,7 @@ describe("DiffViewProvider", () => {
 					uri: { fsPath: `${mockCwd}/test.txt` },
 					getText: vi.fn().mockReturnValue("modified"),
 					isDirty: false,
-					save: vi.fn().mockResolvedValue(undefined),
+					save: vi.fn().mockResolvedValue(true),
 					positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
 				},
 			}
@@ -1140,7 +1140,7 @@ describe("DiffViewProvider", () => {
 				uri: { fsPath: mockTargetPath, scheme: "file" },
 				getText: vi.fn().mockReturnValue("content"),
 				isDirty: false,
-				save: vi.fn().mockResolvedValue(undefined),
+				save: vi.fn().mockResolvedValue(true),
 				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
 			},
 		})
@@ -1439,6 +1439,110 @@ describe("DiffViewProvider", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(mockTargetPath)
 		})
 
+		it("revertChanges() restores and saves an existing file through the real rollback path", async () => {
+			// The existing-file branch used to build its own WorkspaceEdit, discard applyEdit()'s boolean,
+			// and save unconditionally, so a refused restore wrote the unapproved streamed content to an
+			// existing file. It now runs through the same contract as the new-file branch. textDocuments is
+			// deliberately left empty: the branch reached this document through activeDiffEditor, and if the
+			// restore resolved it by path again it would find nothing and skip the restore in silence.
+			const editor = buildActiveDiffEditor()
+			editor.document.isDirty = true
+			editor.document.getText = vi.fn().mockReturnValue("streamed content")
+			const originalDocs = Object.getOwnPropertyDescriptor(vscode.workspace, "textDocuments")
+			Object.defineProperty(vscode.workspace, "textDocuments", { get: () => [], configurable: true })
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "modify",
+				createdDirs: [],
+				originalContent: "pre-stream content",
+			})
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["keepOrCloseEditedFile"] = vi.fn().mockResolvedValue(undefined)
+
+			try {
+				await diffViewProvider.revertChanges()
+			} finally {
+				if (originalDocs) {
+					Object.defineProperty(vscode.workspace, "textDocuments", originalDocs)
+				}
+			}
+
+			expect(vscode.workspace.applyEdit).toHaveBeenCalledTimes(1)
+			expect(mockWorkspaceEdit.replace).toHaveBeenCalledWith(
+				editor.document.uri,
+				expect.anything(),
+				"pre-stream content",
+			)
+			expect(editor.document.save).toHaveBeenCalledTimes(1)
+			expect(fs.unlink).not.toHaveBeenCalled()
+		})
+
+		it("revertChanges() does not save an existing file when the editor refuses the restore", async () => {
+			// The user must not be told the write was rolled back while the existing file still holds
+			// content they never approved: the refusal has to reach the reporting layer, and the save
+			// that would persist it must not run.
+			const editor = buildActiveDiffEditor()
+			editor.document.isDirty = true
+			editor.document.getText = vi.fn().mockReturnValue("streamed content")
+			const originalDocs = Object.getOwnPropertyDescriptor(vscode.workspace, "textDocuments")
+			Object.defineProperty(vscode.workspace, "textDocuments", { get: () => [], configurable: true })
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(false)
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "modify",
+				createdDirs: [],
+				originalContent: "pre-stream content",
+			})
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["keepOrCloseEditedFile"] = vi.fn().mockResolvedValue(undefined)
+
+			try {
+				await expect(diffViewProvider.revertChanges()).rejects.toThrow("could not restore the streamed buffer")
+				expect(editor.document.save).not.toHaveBeenCalled()
+				expect(diffViewProvider["keepOrCloseEditedFile"]).not.toHaveBeenCalled()
+			} finally {
+				if (originalDocs) {
+					Object.defineProperty(vscode.workspace, "textDocuments", originalDocs)
+				}
+			}
+		})
+
+		it("revertChanges() reports a save the editor did not perform for an existing file", async () => {
+			// A restore that applied but did not persist leaves a dirty buffer one save away from disk.
+			// save() resolves false in that case, and treating it as success would report a rollback that
+			// never completed.
+			const editor = buildActiveDiffEditor()
+			editor.document.isDirty = true
+			editor.document.getText = vi.fn().mockReturnValue("streamed content")
+			editor.document.save = vi.fn().mockResolvedValue(false)
+			const originalDocs = Object.getOwnPropertyDescriptor(vscode.workspace, "textDocuments")
+			Object.defineProperty(vscode.workspace, "textDocuments", { get: () => [], configurable: true })
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "modify",
+				createdDirs: [],
+				originalContent: "pre-stream content",
+			})
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["keepOrCloseEditedFile"] = vi.fn().mockResolvedValue(undefined)
+
+			try {
+				await expect(diffViewProvider.revertChanges()).rejects.toThrow("could not save the restored buffer")
+				expect(diffViewProvider["keepOrCloseEditedFile"]).not.toHaveBeenCalled()
+			} finally {
+				if (originalDocs) {
+					Object.defineProperty(vscode.workspace, "textDocuments", originalDocs)
+				}
+			}
+		})
 		it("revertChanges() reports a close the editor refused instead of deleting underneath it", async () => {
 			// Even a restored, saved buffer can fail to close (a vetoing editor). Swallowing that let
 			// the rollback delete the file underneath an open tab. The failure must propagate, and
@@ -1620,7 +1724,7 @@ describe("DiffViewProvider", () => {
 				uri: { fsPath: mockTargetPath, scheme: "file" },
 				getText: vi.fn().mockReturnValue("content"),
 				isDirty: false,
-				save: vi.fn().mockResolvedValue(undefined),
+				save: vi.fn().mockResolvedValue(true),
 				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
 			},
 		})
@@ -2109,7 +2213,7 @@ describe("DiffViewProvider", () => {
 				uri: { fsPath: mockTargetPath, scheme: "file" },
 				getText: vi.fn().mockReturnValue("content"),
 				isDirty: false,
-				save: vi.fn().mockResolvedValue(undefined),
+				save: vi.fn().mockResolvedValue(true),
 				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
 			},
 		})

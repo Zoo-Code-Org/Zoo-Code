@@ -599,21 +599,20 @@ export class DiffViewProvider {
 				return
 			}
 
-			// Revert document.
-			const edit = new vscode.WorkspaceEdit()
-
-			const fullRange = new vscode.Range(
-				updatedDocument.positionAt(0),
-				updatedDocument.positionAt(updatedDocument.getText().length),
-			)
-
-			edit.replace(updatedDocument.uri, fullRange, this.stripAllBOMs(this.originalContent ?? ""))
-
-			// Apply the edit and save, since contents shouldn't have changed
-			// this won't show in local history unless of course the user made
+			// Revert the document through the same contract the new-file rollback uses, so a
+			// refused restore cannot be followed by a save here either. The document is passed
+			// explicitly: this branch reached it through activeDiffEditor, and resolving it again
+			// by path could silently pick a different buffer - or none, which would skip the
+			// restore entirely.
+			//
+			// Applying and saving the restore does not show in local history unless the user made
 			// changes and saved during the edit.
-			await vscode.workspace.applyEdit(edit)
-			await updatedDocument.save()
+			await this.restorePreStreamBuffer(
+				absolutePath,
+				updatedDocument,
+				this.stripAllBOMs(this.originalContent ?? ""),
+			)
+			await this.saveBufferClean(absolutePath, updatedDocument)
 
 			await this.closeAllDiffViews()
 
@@ -967,16 +966,22 @@ export class DiffViewProvider {
 	 * content still one save from disk. Returning quietly would be worse than returning false:
 	 * it would swallow the failure.
 	 */
-	private async restorePreStreamBuffer(absolutePath: string): Promise<void> {
-		const document = vscode.workspace.textDocuments.find(
-			(document) => document.uri.scheme === "file" && arePathsEqual(document.uri.fsPath, absolutePath),
-		)
-		if (!document) {
+	private async restorePreStreamBuffer(
+		absolutePath: string,
+		document?: vscode.TextDocument,
+		content?: string,
+	): Promise<void> {
+		const target =
+			document ??
+			vscode.workspace.textDocuments.find(
+				(document) => document.uri.scheme === "file" && arePathsEqual(document.uri.fsPath, absolutePath),
+			)
+		if (!target) {
 			return
 		}
 		const edit = new vscode.WorkspaceEdit()
-		const range = new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length))
-		edit.replace(document.uri, range, this.originalContent ?? "")
+		const range = new vscode.Range(target.positionAt(0), target.positionAt(target.getText().length))
+		edit.replace(target.uri, range, content ?? this.originalContent ?? "")
 		const restored = await vscode.workspace.applyEdit(edit)
 		if (!restored) {
 			throw new Error(
@@ -995,12 +1000,20 @@ export class DiffViewProvider {
 	 * buffer whose restore failed still holds the unapproved content this rollback discards and
 	 * must never be saved.
 	 */
-	private async saveBufferClean(absolutePath: string): Promise<void> {
-		const document = vscode.workspace.textDocuments.find(
-			(document) => document.uri.scheme === "file" && arePathsEqual(document.uri.fsPath, absolutePath),
-		)
-		if (document?.isDirty) {
-			await document.save()
+	private async saveBufferClean(absolutePath: string, document?: vscode.TextDocument): Promise<void> {
+		const target =
+			document ??
+			vscode.workspace.textDocuments.find(
+				(document) => document.uri.scheme === "file" && arePathsEqual(document.uri.fsPath, absolutePath),
+			)
+		if (!target?.isDirty) {
+			return
+		}
+		const saved = await target.save()
+		if (!saved) {
+			throw new Error(
+				`Rollback could not save the restored buffer for ${absolutePath}; the editor did not persist the restored content, so the buffer is still dirty and one save away from holding what this rollback undid.`,
+			)
 		}
 	}
 
