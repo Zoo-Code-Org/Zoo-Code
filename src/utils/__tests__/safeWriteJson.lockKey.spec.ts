@@ -313,13 +313,20 @@ it("serializes a writer that names the referent directly while the link still ex
 	expect(released).toEqual([...acquired].reverse())
 
 	// The DACL boundary is still exercised on the file this write replaces: stubbing icacls to keep
-	// the sandboxed host from failing the restore must not skip the capture/restore calls themselves.
-	expect(execFile).toHaveBeenCalledWith(
-		"icacls",
-		expect.arrayContaining([link, "/save"]),
-		expect.anything(),
-		expect.any(Function),
-	)
+	// the sandboxed host from failing the restore must not skip the capture itself. The capture is
+	// gated on win32 inside safeWriteText, because icacls is a win32 tool, so this assertion follows
+	// that same condition rather than asking a linux runner for a windows command. On another
+	// platform the honest expectation is the opposite one: no DACL command at all.
+	if (process.platform === "win32") {
+		expect(execFile).toHaveBeenCalledWith(
+			"icacls",
+			expect.arrayContaining([link, "/save"]),
+			expect.anything(),
+			expect.any(Function),
+		)
+	} else {
+		expect(execFile).not.toHaveBeenCalled()
+	}
 
 	// Taking the extra lock must not move the publish target: the bytes land on the link, and the
 	// referent keeps the content its own writer put there.
