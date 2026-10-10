@@ -1381,6 +1381,62 @@ describe("DiffViewProvider", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(mockTargetPath)
 		})
 
+		it("revertChanges() restores and saves the buffer once even when no plain text tab is open", async () => {
+			// The document can be open only through the diff editor: the user closed the plain text
+			// tab, so tabGroups.all yields no TabInputText for the path. Restoring inside the tab loop
+			// meant nothing ran, closeAllDiffViews() then skipped the dirty diff tab, and the unlink
+			// left a dirty diff tab holding unapproved content that a later save would recreate.
+			const editor = buildActiveDiffEditor()
+			editor.document.isDirty = true
+			const teardown = diffViewProvider as unknown as {
+				restorePreStreamBuffer: (absolutePath: string) => Promise<void>
+				saveBufferClean: (absolutePath: string) => Promise<void>
+			}
+			const restore = vi.spyOn(teardown, "restorePreStreamBuffer").mockResolvedValue(undefined)
+			const saveClean = vi.spyOn(teardown, "saveBufferClean").mockResolvedValue(undefined)
+			const originalTabs = Object.getOwnPropertyDescriptor(vscode.window.tabGroups, "all")
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				// No plain TabInputText tab for this path - only the diff editor holds the document.
+				get: () => [{ tabs: [] }],
+				configurable: true,
+			})
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "create",
+				createdDirs: [],
+				originalContent: "",
+			})
+
+			let restoreArgs: unknown[] = []
+			let saveArgs: unknown[] = []
+			let restoreOrder = 0
+			let saveOrder = 0
+			try {
+				await diffViewProvider.revertChanges()
+				// mockRestore() clears the recorded history, so the evidence is captured here.
+				restoreArgs = restore.mock.calls.map((args) => args[0])
+				saveArgs = saveClean.mock.calls.map((args) => args[0])
+				restoreOrder = restore.mock.invocationCallOrder[0]
+				saveOrder = saveClean.mock.invocationCallOrder[0]
+			} finally {
+				// Do not leak the fixture: later tests read the module-level tabGroups.all.
+				if (originalTabs) {
+					Object.defineProperty(vscode.window.tabGroups, "all", originalTabs)
+				}
+				restore.mockRestore()
+				saveClean.mockRestore()
+			}
+
+			// Exactly once each, restore before save, even with an empty tab list.
+			expect(restoreArgs).toEqual([mockTargetPath])
+			expect(saveArgs).toEqual([mockTargetPath])
+			expect(saveOrder).toBeGreaterThan(restoreOrder)
+			// The rollback still completed: the file it created was unlinked.
+			expect(fs.unlink).toHaveBeenCalledWith(mockTargetPath)
+		})
+
 		it("revertChanges() reports a close the editor refused instead of deleting underneath it", async () => {
 			// Even a restored, saved buffer can fail to close (a vetoing editor). Swallowing that let
 			// the rollback delete the file underneath an open tab. The failure must propagate, and

@@ -196,16 +196,27 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		}
 		await this.resetDiffViewAfterWrite(task)
 
-		// A failed rollback is the more actionable failure (debris is still on disk), so it takes
-		// the report slot when present; the streaming error is kept behind it as the cause.
+		// A failed rollback is the more actionable failure (debris is still on disk), so when a
+		// streaming error was also captured it takes the report slot and the streaming error is
+		// kept behind it as the cause. Without a captured streaming error there was no streaming
+		// failure to describe: the rollback gets its own message and the parse error stays the
+		// actionable report. These are two distinct failures, so reporting both does not break the
+		// single-report rule.
 		if (rollbackError) {
+			if (state.streamError) {
+				await callbacks.handleError(
+					"writing file",
+					new Error(`write_to_file rollback failed after a streaming error: ${rollbackError.message}`, {
+						cause: state.streamError,
+					}),
+				)
+				return true
+			}
 			await callbacks.handleError(
 				"writing file",
-				new Error(`write_to_file rollback failed after a streaming error: ${rollbackError.message}`, {
-					cause: state.streamError ?? rollbackError,
-				}),
+				new Error(`write_to_file rollback failed: ${rollbackError.message}`, { cause: rollbackError }),
 			)
-			return true
+			return false
 		}
 
 		if (state.streamError) {
@@ -259,8 +270,15 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		const accessAllowed = task.rooIgnoreController?.validateAccess(relPath)
 
 		if (!accessAllowed) {
-			await task.say("rooignore_error", relPath)
-			this.resetTaskPartialState(task)
+			try {
+				await task.say("rooignore_error", relPath)
+			} finally {
+				// The release belongs in a finally: task.say() can reject when the task is cancelled
+				// or disposed mid-ask, and a rejection that skips it leaks this task's stream state and
+				// its TaskAborted listener. finally keeps this branch the same shape as the sibling
+				// units, which run their own cleanup before releasing.
+				this.resetTaskPartialState(task)
+			}
 			pushToolResult(formatResponse.rooIgnoreError(relPath))
 			return
 		}

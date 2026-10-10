@@ -924,14 +924,21 @@ export class DiffViewProvider {
 					arePathsEqual(tab.input.uri.fsPath, absolutePath),
 			)
 
+		// Restore and save once, before the loop and independent of it. The document can be open
+		// only through the diff editor - the user may have closed the plain text tab, leaving
+		// `tabs` empty - and in that shape the loop never ran, so the streamed buffer stayed
+		// dirty: closeAllDiffViews() skips dirty tabs and removeCreatedFile() then unlinks the
+		// file under an unsaved buffer that a later save recreates with the content this rollback
+		// was meant to discard. Hoisting also stops a multi-tab path from restoring and saving the
+		// same document once per tab.
+		await this.restorePreStreamBuffer(absolutePath)
+		await this.saveBufferClean(absolutePath)
+
 		for (const tab of tabs) {
 			// tabGroups.close()'s second argument is preserveFocus, not a force-discard flag: a
 			// dirty tab prompts or is refused, which is how unapproved streamed content survived a
-			// "forced" close. Restore the buffer to its pre-stream content and save it clean first,
-			// so close() never sees a dirty tab and nothing unapproved reaches disk.
-			await this.restorePreStreamBuffer(absolutePath)
-			await this.saveBufferClean(absolutePath)
-
+			// "forced" close. The buffer was restored and saved clean above, so close() never sees
+			// a dirty tab and nothing unapproved reaches disk.
 			let closed: boolean
 			let closeError: Error | undefined
 			try {

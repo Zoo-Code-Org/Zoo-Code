@@ -690,6 +690,28 @@ describe("writeToFileTool", () => {
 			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
 		})
 
+		it("releases the per-task stream state when the rooignore ask itself rejects", async () => {
+			// task.say() can reject when the task is cancelled or disposed mid-ask. The release sits
+			// in a finally, so the stream state and its TaskAborted listener still go away even though
+			// the ask threw; without it the streamFailed guard suppresses every later diff preview in
+			// this task.
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never).streamFailed = true
+			mockCline.say = vi.fn().mockRejectedValue(new Error("task cancelled during the rooignore ask"))
+
+			await expect(executeWriteFileTool({}, { accessAllowed: false })).rejects.toThrow(
+				"task cancelled during the rooignore ask",
+			)
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+				)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			// The ask threw, so the denial result was never pushed: the release cannot depend on it.
+			expect(mockPushToolResult).not.toHaveBeenCalled()
+		})
+
 		it("does not revert the diff view when the parse-failure teardown has no edit in progress", async () => {
 			// One unstabilized delta registers this task's stream state without ever opening a diff
 			// view; the finalized block then arrives without nativeArgs. DiffViewProvider keeps the
@@ -1144,6 +1166,74 @@ describe("writeToFileTool", () => {
 			expect(reported.message).toContain("rollback failed")
 			expect(reported.cause).toBe(captured)
 			expect(mockHandleError).not.toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("reports the captured streaming error once when two real deltas fail and the rollback succeeds", async () => {
+			// The capture-to-report path end to end: two real partial deltas with open() rejecting,
+			// then the completed block without nativeArgs so execute() never runs and
+			// onParameterParseFailure() is the only reporter. The rollback succeeds, so the captured
+			// streaming error - not the incidental parse error - must reach the user exactly once.
+			mockCline.diffViewProvider.open.mockRejectedValue(new Error("EACCES: stream open failed"))
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+			const state = writeToFileTool["taskPartialStreamState"].get(`${mockCline.taskId}.${mockCline.instanceId}`)
+			const captured = state?.streamError
+			expect(captured?.message).toBe("EACCES: stream open failed")
+
+			// The stream left a diff view open; revertChanges() keeps its resolved default, so the
+			// rollback succeeds and nothing re-stamps the captured error.
+			mockCline.diffViewProvider.isEditing = true
+
+			const block = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: {},
+				partial: false,
+			} as ToolUse<"write_to_file">
+			await writeToFileTool.handle(mockCline, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockHandleError).toHaveBeenCalledTimes(1)
+			// Identity, not just text: the report must be the original streaming error object.
+			expect(mockHandleError.mock.calls[0][0]).toBe("writing file")
+			expect(mockHandleError.mock.calls[0][1]).toBe(captured)
+			expect(mockHandleError).not.toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("reports a rollback failure under its own message and keeps the parse error when no stream failed", async () => {
+			// The diff view opened without any streaming failure; the completed block then fails to
+			// parse and the rollback itself fails. Reporting "after a streaming error" would describe
+			// a failure that never happened and would swallow the malformed tool call, so the rollback
+			// reports under its own message and the parse error is still delivered.
+			writeToFileTool["getTaskPartialStreamState"](mockCline as never)
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.revertChanges.mockRejectedValue(new Error("EACCES: rollback failed"))
+
+			const block = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: {},
+				partial: false,
+			} as ToolUse<"write_to_file">
+			await writeToFileTool.handle(mockCline, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockHandleError).toHaveBeenCalledTimes(2)
+			const [context, reported] = mockHandleError.mock.calls[0]
+			expect(context).toBe("writing file")
+			expect(reported.message).toBe("write_to_file rollback failed: EACCES: rollback failed")
+			expect(reported.message).not.toContain("streaming error")
+			expect(reported.cause).toBeInstanceOf(Error)
+			// The parse error is the actionable report for the model: it must still be delivered.
+			expect(mockHandleError.mock.calls[1][0]).toBe("parsing write_to_file args")
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		})
 
