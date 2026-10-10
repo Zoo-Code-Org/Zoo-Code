@@ -6785,7 +6785,9 @@ describe("Cline", () => {
 			const historyGate = new Promise<void>((resolve) => {
 				releaseHistory = resolve
 			})
-			const historySpy = vi.spyOn(mockProvider, "updateTaskHistory").mockImplementation(() => historyGate.then(() => []))
+			const historySpy = vi
+				.spyOn(mockProvider, "updateTaskHistory")
+				.mockImplementation(() => historyGate.then(() => []))
 
 			const task = new Task({
 				provider: mockProvider,

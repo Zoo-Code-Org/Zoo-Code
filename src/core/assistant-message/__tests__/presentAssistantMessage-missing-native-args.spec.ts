@@ -148,12 +148,10 @@ describe("presentAssistantMessage - finalized block without nativeArgs", () => {
 				nativeArgs: { path: "same.ts", content: "same content" },
 			},
 		]
-		vi.mocked(mockTask.toolRepetitionDetector as unknown as { check: unknown }).check = vi
-			.fn()
-			.mockReturnValue({
-				allowExecution: false,
-				askUser: { messageKey: "tool_repetition", messageDetail: "write_to_file" },
-			})
+		vi.mocked(mockTask.toolRepetitionDetector as unknown as { check: unknown }).check = vi.fn().mockReturnValue({
+			allowExecution: false,
+			askUser: { messageKey: "tool_repetition", messageDetail: "write_to_file" },
+		})
 
 		await presentAssistantMessage(mockTask as unknown as Parameters<typeof presentAssistantMessage>[0])
 

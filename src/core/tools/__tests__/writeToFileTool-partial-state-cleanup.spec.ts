@@ -58,7 +58,10 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 		writeToFileTool.clearTaskState(task)
 
 		expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
-		expect((task as unknown as CleanupTask).off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, state.abortCleanup)
+		expect((task as unknown as CleanupTask).off).toHaveBeenCalledWith(
+			RooCodeEventName.TaskAborted,
+			state.abortCleanup,
+		)
 	})
 
 	it("is a no-op for a task that never streamed", async () => {
@@ -89,7 +92,10 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 
 		await writeToFileTool["revertDiffChangesBeforeReset"](task)
 
-		expect(errorSpy).toHaveBeenCalledWith("Error releasing the abandoned write_to_file diff view:", expect.any(Error))
+		expect(errorSpy).toHaveBeenCalledWith(
+			"Error releasing the abandoned write_to_file diff view:",
+			expect.any(Error),
+		)
 	})
 
 	it("reverts while the recovery state exists and reports the hazard when the revert fails", async () => {
@@ -110,7 +116,9 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 			task,
 			// Only handleError is reached when no streaming error was recorded; the
 			// structural double is the existing pattern in this file.
-			{ handleError: vi.fn().mockResolvedValue(undefined) } as unknown as Parameters<typeof writeToFileTool["onParameterParseFailure"]>[1],
+			{ handleError: vi.fn().mockResolvedValue(undefined) } as unknown as Parameters<
+				(typeof writeToFileTool)["onParameterParseFailure"]
+			>[1],
 			new Error("parameter parse failed"),
 		)
 
@@ -138,7 +146,7 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 
 		const handled = await writeToFileTool["onParameterParseFailure"](
 			task,
-			{ handleError } as unknown as Parameters<typeof writeToFileTool["onParameterParseFailure"]>[1],
+			{ handleError } as unknown as Parameters<(typeof writeToFileTool)["onParameterParseFailure"]>[1],
 			new Error("parameter parse failed"),
 		)
 
@@ -163,7 +171,7 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 
 		const handled = await writeToFileTool["onParameterParseFailure"](
 			task,
-			{ handleError } as unknown as Parameters<typeof writeToFileTool["onParameterParseFailure"]>[1],
+			{ handleError } as unknown as Parameters<(typeof writeToFileTool)["onParameterParseFailure"]>[1],
 			new Error("parameter parse failed"),
 		)
 
