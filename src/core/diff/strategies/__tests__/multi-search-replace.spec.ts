@@ -905,6 +905,29 @@ replacement content here
 			expect(error).toContain("Best Match Length: 0 characters")
 		})
 
+		it("should include a whole-lines tip when no sufficiently similar match is found", async () => {
+			const originalContent = "line one\nline two"
+			const diffContent = `test.ts
+<<<<<<< SEARCH
+:start_line:999
+-------
+non-existent content that cannot be found in the file
+=======
+replacement content here
+>>>>>>> REPLACE`
+
+			const result = await strategy.applyDiff(originalContent, diffContent)
+			expect(result.success).toBe(false)
+			const error =
+				!result.success && result.failParts?.[0]
+					? "error" in result.failParts[0]
+						? result.failParts[0].error
+						: ""
+					: ""
+			expect(error).toContain("No sufficiently similar match found")
+			expect(error).toContain("Tip: The SEARCH block must contain complete, whole lines")
+		})
+
 		it("should include scoped original content when search fails with start_line that has a low-score match", async () => {
 			const originalContent = "function existing() {\n    return 42;\n}\n"
 			const diffContent = `test.ts
