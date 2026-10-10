@@ -43,7 +43,9 @@ export interface SafeWriteJsonOptions {
 	 * symlinks before this check runs, so a caller that picked the path from a
 	 * known scope (a workspace, a project settings directory) can refuse a write
 	 * that a planted symlink would land somewhere else. The check runs before the
-	 * advisory lock is taken and before anything is staged.
+	 * advisory lock is taken and before anything is staged. An empty string is a
+	 * declared scope, not an absent one: it resolves, like every other relative path
+	 * here, against the current working directory.
 	 */
 	confineTo?: string
 }
@@ -244,7 +246,16 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// each other. Lock both identities when they differ. A confined caller publishes through the
 	// referent, so it keeps the single referent lock that already serializes it against writers that
 	// name the referent directly.
-	const publishOverLink = options?.confineTo === undefined
+	// Confinement presence is decided ONCE, here, with an explicit undefined comparison, and every
+	// reader below - publishOverLink, both scope checks, the ancestor pin and the publish options -
+	// obeys this one value. An empty string is a DECLARED scope: _resolveScopeRoot canonicalizes it
+	// through path.resolve(""), which names the current working directory, the same base every other
+	// path in this primitive resolves against. A truthiness test at any reader would let confineTo: ""
+	// skip the scope checks and the pin while publishOverLink still published through the referent -
+	// confined in shape, confining nothing in fact.
+	const confineTo = options?.confineTo
+	const confinementDeclared = confineTo !== undefined
+	const publishOverLink = !confinementDeclared
 	const linkPathLockKey = absoluteFilePath
 	// Whether the two names denote ONE file is part of the correctness of taking two locks, not a
 	// detail. On Windows the canonical form can differ from the requested form only in case (the
@@ -274,8 +285,8 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// directory surface a lock-acquisition error after retries instead of
 	// ConfinedPathEscapeError). Repeated on the resolved publish target inside the
 	// lock, since a peer writer may move the referent in between.
-	if (options?.confineTo) {
-		const scopeRoot = await _resolveScopeRoot(options.confineTo)
+	if (confinementDeclared) {
+		const scopeRoot = await _resolveScopeRoot(confineTo)
 		_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(lockKey), scopeRoot)
 	}
 
@@ -335,8 +346,8 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// would move the commit outside the scope while every check above still passed.
 		let confinedTarget: string | undefined
 		let confinedAncestors: DirectoryIdentity[] | undefined
-		if (options?.confineTo) {
-			const scopeRoot = await _resolveScopeRoot(options.confineTo)
+		if (confinementDeclared) {
+			const scopeRoot = await _resolveScopeRoot(confineTo)
 			confinedTarget = await _resolveScopeRoot(resolvedTargetPath)
 			_assertWithinScope(absoluteFilePath, confinedTarget, scopeRoot)
 			confinedAncestors = await _confinedAncestorIdentities(scopeRoot, confinedTarget)
