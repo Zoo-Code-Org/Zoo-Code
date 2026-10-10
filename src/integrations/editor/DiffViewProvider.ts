@@ -1291,14 +1291,28 @@ export class DiffViewProvider {
 			}
 
 			if (newProblems.length > 0) {
-				await task?.say("error", `New problems detected after saving file: ${relPath}\n\n${newProblems}`)
+				// This tail runs writeDelayMs after saveDirectly resolved, so the task has usually
+				// moved on and may be sitting in ask() waiting for the user - the next tool's
+				// approval, completion_result. say() bumps lastMessageTs unless the message is
+				// non-interactive, and ask()'s pWaitFor reads a moved lastMessageTs as
+				// "superseded": the pending ask would throw AskIgnoredError even though the user
+				// never answered. These diagnostics are informational, so they must not be able to
+				// cancel an ask; the "error" channel and the text stay exactly as they were.
+				await task?.say(
+					"error",
+					`New problems detected after saving file: ${relPath}\n\n${newProblems}`,
+					undefined /* images */,
+					undefined /* partial */,
+					undefined /* checkpoint */,
+					undefined /* progressStatus */,
+					{ isNonInteractive: true } /* options */,
+				)
 			}
 		} catch (error) {
 			// Abort-safe: never let a post-save diagnostic emit become an
 			// unhandled rejection (say() rejects when the task is aborted).
 			console.warn(`Post-save diagnostics emit failed: ${error}`)
-		}
-		finally {
+		} finally {
 			this.postSaveTails.delete(controller)
 		}
 	}

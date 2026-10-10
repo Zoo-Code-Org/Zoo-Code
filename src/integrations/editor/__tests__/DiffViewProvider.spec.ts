@@ -911,12 +911,35 @@ describe("DiffViewProvider", () => {
 
 			expect(mockDelay).toHaveBeenCalledWith(100, expect.objectContaining({ signal: expect.any(AbortSignal) }))
 			expect(mockTask.say).toHaveBeenCalledTimes(1)
-			// The existing "error" ClineSay type is used, with the new-problems text.
-			expect(mockTask.say).toHaveBeenCalledWith(
-				"error",
-				expect.stringContaining("New problems detected after saving file: test.ts"),
-			)
+			// The existing "error" ClineSay type is used, with the new-problems text. Asserted
+			// by position so this test stays about the channel and the text, not the arity.
+			expect(mockTask.say.mock.calls[0]?.[0]).toBe("error")
+			expect(mockTask.say.mock.calls[0]?.[1]).toContain("New problems detected after saving file: test.ts")
 			expect(mockTask.say.mock.calls[0]?.[1]).toContain("boom")
+		})
+
+		it("emits the post-save diagnostics as a non-interactive say so a pending ask survives", async () => {
+			// The tail runs writeDelayMs after saveDirectly resolved, so the task has usually
+			// moved on and may be waiting in ask() for the user. say() bumps lastMessageTs
+			// unless the message is non-interactive, and ask()'s pWaitFor treats a moved
+			// lastMessageTs as "superseded" - the pending ask would throw AskIgnoredError even
+			// though the user never answered.
+			const newDiag: vscode.Diagnostic = {
+				severity: vscode.DiagnosticSeverity.Error,
+				range: new vscode.Range(0, 0, 0, 1),
+				message: "boom",
+			}
+			const postDiagnostics: [vscode.Uri, vscode.Diagnostic[]][] = [[makeUri(`${mockCwd}/test.ts`), [newDiag]]]
+			vi.mocked(vscode.languages.getDiagnostics).mockReturnValueOnce([]).mockReturnValue(postDiagnostics)
+
+			await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 100)
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			expect(mockTask.say).toHaveBeenCalledTimes(1)
+			expect(mockTask.say.mock.calls[0]?.[6]).toEqual({ isNonInteractive: true })
+			// Only the interactivity flag differs: the channel and the text are unchanged.
+			expect(mockTask.say.mock.calls[0]?.[0]).toBe("error")
+			expect(mockTask.say.mock.calls[0]?.[1]).toContain("New problems detected after saving file: test.ts")
 		})
 
 		it("does not start a post-save diagnostics tail once the tails have been cancelled", async () => {
