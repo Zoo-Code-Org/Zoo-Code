@@ -1113,6 +1113,69 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(setModeConfig).not.toHaveBeenCalled()
 		})
 
+		it("restores the shared selection and the acting view pin separately when an activating upsert is rejected", async () => {
+			// A sibling activation leaves the shared selection on one profile while this view stays
+			// pinned to another. Restoring the shared name with setValue moves the pin with it, so the
+			// view ends up reporting the shared profile next to its own settings - getState merges the
+			// view-local state over the shared state.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("tab-split-rollback")
+			await provider.setValue("currentApiConfigName", "profile-a")
+			await provider.contextProxy.setValue("currentApiConfigName", "profile-b")
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("profile-a")
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("profile-b")
+
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				{ name: "profile-a", id: "id-a" },
+				{ name: "profile-b", id: "id-b" },
+			])
+
+			const manager = provider.providerSettingsManager
+			const previousProfile = {
+				id: "id-b",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "old-b",
+			}
+			vi.spyOn(manager, "getProfile").mockResolvedValue({ name: "profile-b", ...previousProfile })
+			vi.spyOn(manager, "getModeConfigId").mockResolvedValue("mode-id-a")
+			vi.spyOn(manager, "saveConfig").mockResolvedValue("id-b")
+			vi.spyOn(manager, "setModeConfig").mockResolvedValue(undefined)
+			vi.spyOn(manager, "listConfig").mockResolvedValue([{ name: "profile-b", id: "id-b" }])
+
+			// The shared provider settings fan out to several globalState keys and the first of them
+			// rejects, after the profile record, the profile list, the mode mapping and the shared
+			// name had all landed: the compensation runs with the selection already durable.
+			let settingsWrites = 0
+			vi.mocked(mockContext.globalState.update).mockImplementation(async (key: string) => {
+				if (key === "apiKey") {
+					settingsWrites += 1
+					if (settingsWrites === 1) {
+						throw new Error("settings persist failed")
+					}
+				}
+				return Promise.resolve()
+			})
+
+			await expect(
+				provider.upsertProviderProfile(
+					"profile-b",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "new-b" },
+					true,
+				),
+			).resolves.toBeUndefined()
+
+			// The shared selection returns to the shared pre-operation value and the view keeps the
+			// pin it had, rather than inheriting the shared one.
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("profile-b")
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("profile-a")
+		})
+
 		it("surfaces an explicit inconsistent-state error when the compensation itself fails", async () => {
 			const provider = new ClineProvider(
 				mockContext,

@@ -242,6 +242,7 @@ interface ProfileActivationSnapshot {
 	entries: ProviderSettingsEntry[]
 	modeConfigId: string | undefined
 	selection: string | undefined
+	viewSelection: string | undefined
 	sharedProviderSettings: ProviderSettings
 	viewOverlay: ProviderSettings | undefined
 }
@@ -2524,6 +2525,7 @@ export class ClineProvider
 			entries: this.getProviderProfileEntries(),
 			modeConfigId: mode === undefined ? undefined : await this.providerSettingsManager.getModeConfigId(mode),
 			selection: currentApiConfigName,
+			viewSelection: this.viewLocalState.currentApiConfigName,
 			sharedProviderSettings: this.contextProxy.getProviderSettings(),
 			viewOverlay: this.viewLocalState.apiConfiguration,
 		}
@@ -2564,12 +2566,20 @@ export class ClineProvider
 		}
 
 		if (landed.selection) {
+			// The shared selection and this view's pin are two stores. setValue moves both, so a rollback
+			// that only means to restore the shared name would also overwrite a pin that legitimately
+			// differed from it: a sibling activation leaves the shared selection on another profile while
+			// this view stays pinned to its own. Restore them separately, and clear the pin when this
+			// view had none before the call.
 			try {
-				// setValue keeps the shared name and this view's pin in step, which is the pairing
-				// the failed activation broke in the first place.
-				await this.setValue("currentApiConfigName", snapshot.selection)
+				await this.contextProxy.setValue("currentApiConfigName", snapshot.selection)
 			} catch (error: unknown) {
 				failures.push(`shared selection: ${describeFailure(error)}`)
+			}
+			try {
+				await this._saveViewLocalStateFromMutation({ currentApiConfigName: snapshot.viewSelection })
+			} catch (error: unknown) {
+				failures.push(`view profile pin: ${describeFailure(error)}`)
 			}
 		}
 
