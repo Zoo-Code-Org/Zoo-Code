@@ -1574,6 +1574,88 @@ describe("authorized-target pin (confinement TOCTOU)", () => {
 		expect((error as AncestorReplacedError).message).toContain("no longer exists")
 		expect(fs.rename).not.toHaveBeenCalled()
 	})
+
+	it("refuses the publish when a parent this write created is swapped for a link", async () => {
+		// The caller could only pin the directories that existed when it authorized the target,
+		// and a recursive mkdir does not report what it made, so the components this write
+		// creates had no recorded identity: the re-check walked a list that was missing exactly
+		// the directories most likely to appear between the check and the commit. A local process
+		// that replaces one of them with a link to outside the scope sends the commit somewhere
+		// the confinement decision never made, while every recorded identity still matches - the
+		// names are unchanged. So the primitive, which measures the missing tail before creating
+		// it, has to pin what it created and hand that to the same re-check.
+		const dir = path.resolve("/tmp/test-dir")
+		const created = path.join(dir, "new-parent")
+		const targetPath = path.join(created, "target.txt")
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		const probes = new Map<string, number>()
+		vi.mocked(fs.stat).mockImplementation(async (probe) => {
+			const key = String(probe)
+			const seen = (probes.get(key) ?? 0) + 1
+			probes.set(key, seen)
+			if (key === dir) {
+				return _fileStatsWithIdentity(100n, 1n)
+			}
+			if (key === created) {
+				// 1: measuring the missing tail, before anything is created.
+				if (seen === 1) {
+					throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+				}
+				// 2: the identity of the directory this write has just created.
+				if (seen === 2) {
+					return _fileStatsWithIdentity(200n, 1n)
+				}
+				// 3: at the re-check it is a different directory - the swap.
+				return _fileStatsWithIdentity(999n, 1n)
+			}
+			return _fileStatsWithIdentity(1n, 1n)
+		})
+
+		const error = await safeWriteText(targetPath, "data", {
+			expectedResolvedPath: targetPath,
+			expectedAncestorIdentities: [{ dir, dev: 1n, ino: 100n }],
+			platform: "linux",
+		}).catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(AncestorReplacedError)
+		expect((error as AncestorReplacedError).directory).toBe(created)
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("publishes when a parent this write created keeps the identity it was given", async () => {
+		// Pinning what was created must not reject the ordinary case: a confined write into a
+		// directory tree it had to make itself is the common shape, not an attack.
+		const dir = path.resolve("/tmp/test-dir")
+		const created = path.join(dir, "new-parent")
+		const targetPath = path.join(created, "target.txt")
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+		const probes = new Map<string, number>()
+		vi.mocked(fs.stat).mockImplementation(async (probe) => {
+			const key = String(probe)
+			const seen = (probes.get(key) ?? 0) + 1
+			probes.set(key, seen)
+			if (key === dir) {
+				return _fileStatsWithIdentity(100n, 1n)
+			}
+			if (key === created) {
+				if (seen === 1) {
+					throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+				}
+				return _fileStatsWithIdentity(200n, 1n)
+			}
+			return _fileStatsWithIdentity(1n, 1n)
+		})
+
+		await safeWriteText(targetPath, "data", {
+			expectedResolvedPath: targetPath,
+			expectedAncestorIdentities: [{ dir, dev: 1n, ino: 100n }],
+			platform: "linux",
+		})
+
+		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+	})
 })
 
 // ── Parent directories this write creates must not outlive a failed write ────
