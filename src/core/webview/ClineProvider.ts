@@ -1576,6 +1576,13 @@ export class ClineProvider
 		}
 
 		this._disposed = true
+		// Unregister at the START of disposal, synchronously and before the first await below.
+		// The teardown awaits task eviction and several managers, and while it runs a provider that
+		// is already _disposed but still in activeInstances is enumerated by getAllInstances(),
+		// getVisibleInstance() and getInstanceForView() - so a sibling profile mutation could persist
+		// durable view state and post to a view that is on its way out. Unregistering here makes that
+		// window zero-length; no teardown step below looks this instance up in the registry.
+		ClineProvider.activeInstances.delete(this)
 		this._postStateToWebviewThrottled.cancel()
 		this.stopWebviewWatchdog()
 		this.diagnosticsRecorder.record({ boundary: "provider", phase: "start", type: "dispose" })
@@ -1627,8 +1634,9 @@ export class ClineProvider
 		}
 
 		// Each teardown step gets its own guard: a rejecting step must not strand the steps after
-		// it, and the unregistration below must run no matter what - _disposed is already set, so
-		// a half-disposed provider would never get another chance to finish here.
+		// it. The registry unregistration already happened at the top of dispose(), so a step
+		// that throws can no longer leave this provider enumerable; the remaining steps still run,
+		// because _disposed is set and this provider never gets another chance to finish here.
 		const cleanupFailures: string[] = []
 		const attemptCleanup = async (label: string, step: () => unknown) => {
 			try {
@@ -1658,7 +1666,6 @@ export class ClineProvider
 			this.log("Disposed all disposables")
 		}
 
-		ClineProvider.activeInstances.delete(this)
 		this.diagnosticsRequestBroker.dispose()
 
 		// Clean up any event listeners attached to this provider
@@ -4329,7 +4336,9 @@ export class ClineProvider
 		providerSettings: ProviderSettings,
 	): Promise<void> {
 		const affected = ClineProvider.getAllInstances().filter(
-			(instance) => instance !== this && instance.pinnedProfileName === name,
+			// Direct private access: compile-time safe across sibling instances. A sibling that has
+			// begun disposal must not be written to - see the note in the loop below.
+			(instance) => instance !== this && !instance._disposed && instance.pinnedProfileName === name,
 		)
 
 		if (affected.length === 0) {
@@ -4338,8 +4347,21 @@ export class ClineProvider
 
 		await Promise.all(
 			affected.map(async (instance) => {
+				// A provider that has begun disposal owns an orphaned viewStates key: viewId comes from
+				// the monotonic nextViewId counter, so no future view ever reads that entry again and
+				// prunePersistedViewStates() bounds it. Skipping work on such an instance is therefore
+				// safe; performing it is the defect - writing durable state and posting to a webview that
+				// is already being torn down.
+				// Re-checked before every operation, not just at enumeration: this sibling can start
+				// disposing after the filter above ran.
+				if (instance._disposed) {
+					return
+				}
 				// Direct private access: compile-time safe across sibling instances.
 				await instance._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
+				if (instance._disposed) {
+					return
+				}
 
 				// The active task of a pinned view holds its own API handler built from
 				// the profile's settings: rebuild it with the saved settings or the
@@ -4369,7 +4391,10 @@ export class ClineProvider
 		replacementSettings: ProviderSettings | undefined,
 	): Promise<void> {
 		const affected = ClineProvider.getAllInstances().filter(
-			(instance) => instance !== this && instance.pinnedProfileName === deletedProfileName,
+			// Direct private access: compile-time safe across sibling instances. A sibling that has
+			// begun disposal is excluded from the deletion's re-pin set entirely.
+			(instance) =>
+				instance !== this && !instance._disposed && instance.pinnedProfileName === deletedProfileName,
 		)
 
 		if (affected.length === 0) {
@@ -4397,8 +4422,21 @@ export class ClineProvider
 				// the new name.
 				values.apiConfiguration = replacementSettings
 
+				// A provider that has begun disposal owns an orphaned viewStates key: viewId comes from
+				// the monotonic nextViewId counter, so no future view ever reads that entry again and
+				// prunePersistedViewStates() bounds it. Skipping work on such an instance is therefore
+				// safe; performing it is the defect - writing durable state and posting to a webview that
+				// is already being torn down.
+				// Re-checked before every operation, not just at enumeration: the sibling can start
+				// disposing while earlier siblings are already being written.
+				if (snapshot.instance._disposed) {
+					return
+				}
 				// Direct private access: compile-time safe across sibling instances.
 				await snapshot.instance._saveViewLocalStateFromMutation(values)
+				if (snapshot.instance._disposed) {
+					return
+				}
 				// The active task of a view pinned to the deleted profile holds its own API
 				// handler and sticky profile name built from the deleted profile: rebuild
 				// the handler with the replacement's settings and re-point the sticky name,
@@ -4428,6 +4466,14 @@ export class ClineProvider
 			// leaves the view re-pointed. Each restore is awaited on its own so one failing restore
 			// cannot skip the next one.
 			for (const snapshot of snapshots) {
+				// A provider that has begun disposal owns an orphaned viewStates key: viewId comes from
+				// the monotonic nextViewId counter, so no future view ever reads that entry again and
+				// prunePersistedViewStates() bounds it. Re-checked here too: the sibling can start
+				// disposal while the re-pin is already in flight, and compensating through a provider
+				// that is tearing down is the defect this guard exists to avoid.
+				if (snapshot.instance._disposed) {
+					continue
+				}
 				try {
 					await snapshot.instance._saveViewLocalStateFromMutation({
 						currentApiConfigName: snapshot.previousPin,
