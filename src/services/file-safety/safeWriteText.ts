@@ -28,10 +28,12 @@ export interface SafeWriteTextOptions {
 	execFileRunner?: typeof execFile
 
 	/**
-	 * Sink for non-fatal safety notices. A Windows DACL that could not be captured means the
-	 * committed file may inherit different access rights: the write still proceeds (a missing or
-	 * failing icacls must not block saving), but the caller is told instead of the change being
-	 * silent. Defaults to console.warn.
+	 * Sink for non-fatal safety notices. The notices that still reach it are the leftover ones: a copy
+	 * of the previous content this write could not remove, reported with its path whether the
+	 * publish committed or failed. A Windows DACL that could not be captured is no longer a notice
+	 * here - the publish is refused with DaclInspectionError before anything is committed - and a
+	 * saved DACL that could not be put back after the commit arrives as DaclRestoreError rather
+	 * than a warning, so neither reaches this sink. Defaults to console.warn.
 	 */
 	onWarning?: (message: string) => void
 
@@ -80,12 +82,6 @@ export class PostCommitDurabilityError extends Error {
 }
 
 /**
- * The backup copy could not be created AND the partial copy could not be removed.
- * The write failed either way, but the leftover is a copy of the previous content that
- * is still on disk: its path travels on the error so the caller can remove it, instead
- * of the cleanup silently discarding the only reference to it.
- */
-/**
  * The target exists but its access rights could not be inspected or saved, so publishing would
  * replace it with a file that inherits different rights. On Windows the publish fails instead of
  * warning: a successful write that silently widened who can read the file is not a save the user
@@ -128,6 +124,12 @@ export interface SafeWriteTextResult {
 	leftoverPaths: string[]
 }
 
+/**
+ * The backup copy could not be created AND the partial copy could not be removed.
+ * The write failed either way, but the leftover is a copy of the previous content that
+ * is still on disk: its path travels on the error so the caller can remove it, instead
+ * of the cleanup silently discarding the only reference to it.
+ */
 export class OrphanedBackupError extends Error {
 	readonly orphanedBackupPath: string
 	readonly originalError: unknown
@@ -298,12 +300,6 @@ export async function resolveLockKey(absoluteFilePath: string): Promise<string> 
 }
 
 /**
- * Remove a backup copy, retrying once: Windows reports EPERM for a file whose handle has not been
- * released yet, so a single failure is not evidence that the path is stuck. ENOENT counts as
- * removed - the goal is that the path is gone, not that this call performed the removal. Returns
- * the error that kept the path on disk, or null when it is gone.
- */
-/**
  * Remove this write's own staging directory once its temp file is gone. Best-effort by design: a
  * failure must not un-commit a published file. The directory is empty and per-write at this point,
  * so a later sweep of stale .file-safety-staging_* names can remove it without risking another
@@ -317,6 +313,12 @@ async function _removeOwnStagingDir(stagingDir: string | null): Promise<void> {
 	await fs.rmdir(stagingDir).catch(() => {})
 }
 
+/**
+ * Remove a backup copy, retrying once: Windows reports EPERM for a file whose handle has not been
+ * released yet, so a single failure is not evidence that the path is stuck. ENOENT counts as
+ * removed - the goal is that the path is gone, not that this call performed the removal. Returns
+ * the error that kept the path on disk, or null when it is gone.
+ */
 async function _removeBackupCopy(backupPath: string): Promise<unknown> {
 	let lastError: unknown = null
 	for (let attempt = 0; attempt < 2; attempt++) {

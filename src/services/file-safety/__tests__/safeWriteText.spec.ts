@@ -754,7 +754,22 @@ describe("safeWriteText", () => {
 				return fakeChild
 			})
 
-			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toBeInstanceOf(DaclInspectionError)
+			// Captured once: calling safeWriteText twice here would double-count the single icacls
+			// attempt asserted below.
+			const refusal = await safeWriteText(targetPath, "data", { platform: "win32" }).catch(
+				(error: unknown) => error,
+			)
+
+			expect(refusal).toBeInstanceOf(DaclInspectionError)
+			// The class alone does not pin the contract: swapping the phase or dropping the target path
+			// still satisfies toBeInstanceOf, and both are caller-visible - the phase says which check
+			// refused, the path says which file the caller must not assume was saved.
+			expect(refusal).toMatchObject({
+				name: "DaclInspectionError",
+				phase: "save",
+				targetPath,
+				message: expect.stringContaining("its DACL could not be saved"),
+			})
 
 			// Contract change (Security Boundaries row): a target whose DACL could not be saved is
 			// no longer replaced by a file that inherits different rights. Nothing is committed.
@@ -796,9 +811,22 @@ describe("safeWriteText", () => {
 		})
 		const warnings: string[] = []
 
-		await expect(
-			safeWriteText(targetPath, "data", { platform: "win32", onWarning: (m) => warnings.push(m) }),
-		).rejects.toBeInstanceOf(DaclInspectionError)
+		// Captured once: a second call would double-count the assertions below.
+		const refusal = await safeWriteText(targetPath, "data", {
+			platform: "win32",
+			onWarning: (m) => warnings.push(m),
+		}).catch((error: unknown) => error)
+
+		expect(refusal).toBeInstanceOf(DaclInspectionError)
+		// The class alone does not pin the contract: swapping the phase or dropping the target path
+		// still satisfies toBeInstanceOf, and both are caller-visible - the phase says which check
+		// refused, the path says which file the caller must not assume was saved.
+		expect(refusal).toMatchObject({
+			name: "DaclInspectionError",
+			phase: "inspect",
+			targetPath,
+			message: expect.stringContaining("its access rights could not be checked"),
+		})
 
 		// Contract change: "there but unreadable" is no longer a reason to publish blind. The
 		// publish is refused before any icacls runs, and nothing is warned about a write that did
