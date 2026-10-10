@@ -8,20 +8,18 @@ import { extractTextFromXLSX } from "./extract-text-from-xlsx"
 import { readWithSlice } from "./indentation-reader"
 import { DEFAULT_LINE_LIMIT } from "../../core/prompts/tools/native-tools/read_file"
 
-async function extractTextFromPDF(filePath: string): Promise<string> {
-	const dataBuffer = await fs.readFile(filePath)
-	const data = await pdf(dataBuffer)
+async function extractTextFromPDF(source: Buffer): Promise<string> {
+	const data = await pdf(source)
 	return addLineNumbers(data.text)
 }
 
-async function extractTextFromDOCX(filePath: string): Promise<string> {
-	const result = await mammoth.extractRawText({ path: filePath })
+async function extractTextFromDOCX(source: Buffer): Promise<string> {
+	const result = await mammoth.extractRawText({ buffer: source })
 	return addLineNumbers(result.value)
 }
 
-async function extractTextFromIPYNB(filePath: string): Promise<string> {
-	const data = await fs.readFile(filePath, "utf8")
-	const notebook = JSON.parse(data)
+async function extractTextFromIPYNB(source: Buffer): Promise<string> {
+	const notebook = JSON.parse(source.toString("utf8"))
 	let extractedText = ""
 
 	for (const cell of notebook.cells) {
@@ -91,7 +89,8 @@ export async function extractTextFromFileWithMetadata(
 	const extractor = SUPPORTED_BINARY_FORMATS[fileExtension as keyof typeof SUPPORTED_BINARY_FORMATS]
 	if (extractor) {
 		// For binary formats, extract and count lines
-		const content = await extractor(filePath)
+		const source = await fs.readFile(filePath)
+		const content = await extractor(source)
 		const lines = content.split("\n")
 		return {
 			content,
@@ -113,7 +112,7 @@ export async function extractTextFromFileWithMetadata(
 			totalLines: result.totalLines,
 			returnedLines: result.returnedLines,
 			wasTruncated: result.wasTruncated,
-			linesShown: result.includedRanges.length > 0 ? result.includedRanges[0] : undefined,
+			linesShown: result.includedRanges[0],
 		}
 	} else {
 		throw new Error(`Cannot read text for file type: ${fileExtension}`)
@@ -131,6 +130,24 @@ export async function extractTextFromFileWithMetadata(
 export async function extractTextFromFile(filePath: string): Promise<string> {
 	const result = await extractTextFromFileWithMetadata(filePath)
 	return result.content
+}
+
+/**
+ * Extracts formatted text exclusively from supplied bytes, without pathname I/O.
+ * filePath is only format/diagnostic metadata, never a source of file contents.
+ */
+export async function extractTextFromBuffer(source: Buffer, filePath: string): Promise<string> {
+	const fileExtension = path.extname(filePath).toLowerCase()
+	const extractor = SUPPORTED_BINARY_FORMATS[fileExtension as keyof typeof SUPPORTED_BINARY_FORMATS]
+	if (extractor) {
+		return extractor(source)
+	}
+
+	if (await isBinaryFile(source).catch(() => false)) {
+		throw new Error(`Cannot read text for file type: ${fileExtension}`)
+	}
+
+	return readWithSlice(source.toString("utf8"), 0, DEFAULT_LINE_LIMIT).content
 }
 
 export function addLineNumbers(content: string, startLine: number = 1): string {
@@ -187,16 +204,8 @@ export function stripLineNumbers(content: string, aggressive: boolean = false): 
 
 	// Join back with original line endings (carriage return (\r) + line feed (\n) or just line feed (\n))
 	const lineEnding = content.includes("\r\n") ? "\r\n" : "\n"
-	let result = processedLines.join(lineEnding)
-
-	// Preserve trailing newline if present in original content
-	if (content.endsWith(lineEnding)) {
-		if (!result.endsWith(lineEnding)) {
-			result += lineEnding
-		}
-	}
-
-	return result
+	// split() preserves the trailing empty element, so join() also preserves the trailing newline.
+	return processedLines.join(lineEnding)
 }
 
 /**
@@ -354,7 +363,7 @@ export function applyRunLengthEncoding(content: string): string {
 				result += prevLine
 			}
 		}
-	} else if (prevLine !== null) {
+	} else {
 		result += prevLine
 	}
 
@@ -499,7 +508,7 @@ function processLineWithCarriageReturns(
 			} else {
 				// Partial overwrite - need to check for multi-byte character boundary issues
 				const potentialPartialChar = curLine.charAt(segment.length)
-				const segmentLastCharCode = segment.length > 0 ? segment.charCodeAt(segment.length - 1) : 0
+				const segmentLastCharCode = segment.charCodeAt(segment.length - 1)
 				const partialCharCode = potentialPartialChar.charCodeAt(0)
 
 				// Simplified condition for multi-byte character detection

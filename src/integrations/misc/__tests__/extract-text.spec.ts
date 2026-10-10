@@ -1,5 +1,16 @@
+import fs from "fs/promises"
+import os from "os"
+import path from "path"
+import * as binaryFile from "isbinaryfile"
+import ExcelJS from "exceljs"
+import mammoth from "mammoth"
+import { DEFAULT_LINE_LIMIT } from "../../../core/prompts/tools/native-tools/read_file"
 import {
 	addLineNumbers,
+	extractTextFromBuffer,
+	extractTextFromFile,
+	extractTextFromFileWithMetadata,
+	getSupportedBinaryFormats,
 	everyLineHasLineNumbers,
 	stripLineNumbers,
 	truncateOutput,
@@ -7,6 +18,290 @@ import {
 	processCarriageReturns,
 	processBackspaces,
 } from "../extract-text"
+
+const { parsePdf } = vi.hoisted(() => ({
+	parsePdf: vi.fn<(source: Buffer) => Promise<{ text: string }>>(),
+}))
+
+vi.mock("pdf-parse/lib/pdf-parse", () => ({ default: parsePdf }))
+
+describe("document decoders", () => {
+	afterEach(() => {
+		vi.restoreAllMocks()
+		parsePdf.mockReset()
+	})
+
+	it("lists supported document extensions without exposing the decoder registry", () => {
+		const formats = getSupportedBinaryFormats()
+		expect(formats).toEqual([".pdf", ".docx", ".ipynb", ".xlsx"])
+		formats.pop()
+		expect(getSupportedBinaryFormats()).toEqual([".pdf", ".docx", ".ipynb", ".xlsx"])
+	})
+
+	it.each([
+		["first page\nsecond page\n", "1 | first page\n2 | second page\n"],
+		["", ""],
+	])("formats PDF parser text %j from the exact supplied bytes", async (text, expected) => {
+		const source = Buffer.from("%PDF-1.7 approved document bytes")
+		parsePdf.mockResolvedValue({ text })
+		const access = vi.spyOn(fs, "access").mockRejectedValue(new Error("Unexpected pathname access"))
+		const readFile = vi.spyOn(fs, "readFile").mockRejectedValue(new Error("Unexpected pathname read"))
+
+		expect(await extractTextFromBuffer(source, "missing.PDF")).toBe(expected)
+		expect(parsePdf).toHaveBeenCalledExactlyOnceWith(source)
+		expect(parsePdf.mock.calls[0][0]).toBe(source)
+		expect(access).not.toHaveBeenCalled()
+		expect(readFile).not.toHaveBeenCalled()
+	})
+
+	it.each([
+		["first paragraph\n\nsecond paragraph\n", "1 | first paragraph\n2 | \n3 | second paragraph\n"],
+		["", ""],
+	])("formats DOCX parser text %j from the exact supplied bytes", async (value, expected) => {
+		const source = Buffer.from("PK approved document bytes")
+		const parser = vi.spyOn(mammoth, "extractRawText").mockResolvedValue({ value, messages: [] })
+		const access = vi.spyOn(fs, "access").mockRejectedValue(new Error("Unexpected pathname access"))
+		const readFile = vi.spyOn(fs, "readFile").mockRejectedValue(new Error("Unexpected pathname read"))
+
+		expect(await extractTextFromBuffer(source, "missing.DOCX")).toBe(expected)
+		expect(parser).toHaveBeenCalledExactlyOnceWith({ buffer: source })
+		const input = parser.mock.calls[0][0]
+		expect("buffer" in input && input.buffer).toBe(source)
+		expect(access).not.toHaveBeenCalled()
+		expect(readFile).not.toHaveBeenCalled()
+	})
+
+	it("propagates PDF parser failures instead of treating document bytes as text", async () => {
+		const source = Buffer.from("%PDF corrupted document")
+		const failure = new Error("Invalid PDF document")
+		parsePdf.mockRejectedValue(failure)
+		const probe = vi.spyOn(binaryFile, "isBinaryFile")
+
+		await expect(extractTextFromBuffer(source, "corrupted.pdf")).rejects.toBe(failure)
+		expect(parsePdf).toHaveBeenCalledExactlyOnceWith(source)
+		expect(probe).not.toHaveBeenCalled()
+	})
+
+	it("propagates DOCX parser failures instead of treating document bytes as text", async () => {
+		const source = Buffer.from("PK corrupted document")
+		const failure = new Error("Invalid DOCX archive")
+		const parser = vi.spyOn(mammoth, "extractRawText").mockRejectedValue(failure)
+		const probe = vi.spyOn(binaryFile, "isBinaryFile")
+
+		await expect(extractTextFromBuffer(source, "corrupted.docx")).rejects.toBe(failure)
+		expect(parser).toHaveBeenCalledExactlyOnceWith({ buffer: source })
+		expect(probe).not.toHaveBeenCalled()
+	})
+})
+
+describe("buffer input", () => {
+	afterEach(() => vi.restoreAllMocks())
+
+	it("returns supplied ordinary-text bytes without pathname I/O", async () => {
+		const access = vi.spyOn(fs, "access").mockResolvedValue(undefined)
+		const readFile = vi.spyOn(fs, "readFile").mockResolvedValue("unapproved disk content")
+		const probe = vi.spyOn(binaryFile, "isBinaryFile").mockResolvedValue(false)
+		const source = Buffer.from("approved first line\napproved second line")
+
+		const content = await extractTextFromBuffer(source, "metadata-only.txt")
+
+		expect(content).toBe("1 | approved first line\n2 | approved second line")
+		expect(access).not.toHaveBeenCalled()
+		expect(readFile).not.toHaveBeenCalled()
+		expect(probe).not.toHaveBeenCalledWith("metadata-only.txt")
+	})
+
+	it("preserves empty-text formatting for an empty supplied buffer without pathname I/O", async () => {
+		const access = vi.spyOn(fs, "access").mockRejectedValue(new Error("Unexpected pathname access"))
+		const readFile = vi.spyOn(fs, "readFile").mockRejectedValue(new Error("Unexpected pathname read"))
+		const probe = vi.spyOn(binaryFile, "isBinaryFile")
+		const source = Buffer.alloc(0)
+
+		const content = await extractTextFromBuffer(source, "missing.txt")
+
+		expect(content).toBe("1 | ")
+		expect(access).not.toHaveBeenCalled()
+		expect(readFile).not.toHaveBeenCalled()
+		expect(probe).not.toHaveBeenCalledWith("missing.txt")
+	})
+
+	it("rejects unsupported binary bytes without pathname I/O", async () => {
+		const access = vi.spyOn(fs, "access").mockRejectedValue(new Error("Unexpected pathname access"))
+		const readFile = vi.spyOn(fs, "readFile").mockRejectedValue(new Error("Unexpected pathname read"))
+		const probe = vi.spyOn(binaryFile, "isBinaryFile")
+		const source = Buffer.from([0, 1, 2, 0, 255])
+
+		await expect(extractTextFromBuffer(source, "missing.BIN")).rejects.toThrow(
+			"Cannot read text for file type: .bin",
+		)
+
+		expect(access).not.toHaveBeenCalled()
+		expect(readFile).not.toHaveBeenCalled()
+		expect(probe).not.toHaveBeenCalledWith("missing.BIN")
+	})
+
+	it("falls back to supplied text bytes when binary detection fails", async () => {
+		const source = Buffer.from("approved text\nsecond line")
+		const probe = vi.spyOn(binaryFile, "isBinaryFile").mockRejectedValue(new Error("Detection failed"))
+		const access = vi.spyOn(fs, "access").mockRejectedValue(new Error("Unexpected pathname access"))
+		const readFile = vi.spyOn(fs, "readFile").mockRejectedValue(new Error("Unexpected pathname read"))
+
+		expect(await extractTextFromBuffer(source, "missing.txt")).toBe("1 | approved text\n2 | second line")
+		expect(probe).toHaveBeenCalledExactlyOnceWith(source)
+		expect(access).not.toHaveBeenCalled()
+		expect(readFile).not.toHaveBeenCalled()
+	})
+
+	it("decodes notebook bytes with historical line numbering and trailing newline", async () => {
+		const access = vi.spyOn(fs, "access").mockRejectedValue(new Error("Unexpected pathname access"))
+		const readFile = vi.spyOn(fs, "readFile").mockRejectedValue(new Error("Unexpected pathname read"))
+		const source = Buffer.from(
+			JSON.stringify({
+				cells: [
+					{ cell_type: "markdown", source: ["Heading"] },
+					{ cell_type: "code", source: ["first", "second"] },
+					{ cell_type: "raw", source: ["ignored"] },
+				],
+			}),
+		)
+
+		expect(await extractTextFromBuffer(source, "missing.IPYNB")).toBe("1 | Heading\n2 | first\n3 | second\n")
+		expect(access).not.toHaveBeenCalled()
+		expect(readFile).not.toHaveBeenCalled()
+	})
+
+	it("preserves empty notebook output without pathname I/O", async () => {
+		const access = vi.spyOn(fs, "access").mockRejectedValue(new Error("Unexpected pathname access"))
+		const readFile = vi.spyOn(fs, "readFile").mockRejectedValue(new Error("Unexpected pathname read"))
+		const source = Buffer.from(JSON.stringify({ cells: [] }))
+
+		expect(await extractTextFromBuffer(source, "missing.ipynb")).toBe("")
+		expect(access).not.toHaveBeenCalled()
+		expect(readFile).not.toHaveBeenCalled()
+	})
+
+	it("decodes XLSX bytes and preserves visible-sheet formatting without pathname I/O", async () => {
+		const workbook = new ExcelJS.Workbook()
+		workbook.addWorksheet("Data").addRow(["approved cell", 42])
+		const hidden = workbook.addWorksheet("Hidden", { state: "hidden" })
+		hidden.addRow(["hidden cell"])
+		const source = Buffer.from(await workbook.xlsx.writeBuffer())
+		const access = vi.spyOn(fs, "access").mockRejectedValue(new Error("Unexpected pathname access"))
+		const readFile = vi.spyOn(fs, "readFile").mockRejectedValue(new Error("Unexpected pathname read"))
+
+		expect(await extractTextFromBuffer(source, "missing.XLSX")).toBe("--- Sheet: Data ---\napproved cell\t42")
+		expect(access).not.toHaveBeenCalled()
+		expect(readFile).not.toHaveBeenCalled()
+	})
+})
+
+describe("path input", () => {
+	afterEach(() => vi.restoreAllMocks())
+
+	it("rejects unsupported binary paths after probing without loading the whole file", async () => {
+		vi.spyOn(fs, "access").mockResolvedValue(undefined)
+		const readFile = vi.spyOn(fs, "readFile").mockRejectedValue(new Error("Unexpected whole-file read"))
+		const probe = vi.spyOn(binaryFile, "isBinaryFile").mockResolvedValue(true)
+
+		await expect(extractTextFromFileWithMetadata("large.bin")).rejects.toThrow(
+			"Cannot read text for file type: .bin",
+		)
+
+		expect(probe).toHaveBeenCalledWith("large.bin")
+		expect(readFile).not.toHaveBeenCalled()
+	})
+
+	it("loads document bytes from the path and preserves document metadata", async () => {
+		vi.spyOn(fs, "access").mockResolvedValue(undefined)
+		const source = Buffer.from(JSON.stringify({ cells: [{ cell_type: "code", source: ["first", "second"] }] }))
+		const readFile = vi.spyOn(fs, "readFile").mockResolvedValue(source)
+
+		expect(await extractTextFromFileWithMetadata("document.ipynb", 1)).toEqual({
+			content: "1 | first\n2 | second\n",
+			totalLines: 3,
+			returnedLines: 3,
+			wasTruncated: false,
+		})
+		expect(readFile).toHaveBeenCalledWith("document.ipynb")
+	})
+})
+
+describe("text path adapters", () => {
+	let directory: string
+
+	beforeEach(async () => {
+		directory = await fs.mkdtemp(path.join(os.tmpdir(), "extract-text-"))
+	})
+
+	afterEach(async () => {
+		vi.restoreAllMocks()
+		await fs.rm(directory, { recursive: true, force: true })
+	})
+
+	it("returns truncation metadata and the actual included range for a text file", async () => {
+		const filePath = path.join(directory, "notes.txt")
+		await fs.writeFile(filePath, "first\nsecond\nthird")
+
+		expect(await extractTextFromFileWithMetadata(filePath, 2)).toEqual({
+			content: "1 | first\n2 | second",
+			totalLines: 3,
+			returnedLines: 2,
+			wasTruncated: true,
+			linesShown: [1, 2],
+		})
+	})
+
+	it("preserves the single blank line and its metadata for an empty text file", async () => {
+		const filePath = path.join(directory, "empty.txt")
+		await fs.writeFile(filePath, "")
+
+		expect(await extractTextFromFileWithMetadata(filePath)).toEqual({
+			content: "1 | ",
+			totalLines: 1,
+			returnedLines: 1,
+			wasTruncated: false,
+			linesShown: [1, 1],
+		})
+	})
+
+	it("keeps the legacy content-only path adapter and default line limit", async () => {
+		const filePath = path.join(directory, "large.txt")
+		const source = Buffer.from(Array.from({ length: DEFAULT_LINE_LIMIT + 1 }, (_, i) => `line ${i + 1}`).join("\n"))
+		await fs.writeFile(filePath, source)
+
+		const content = await extractTextFromFile(filePath)
+
+		expect(content.split("\n")).toHaveLength(DEFAULT_LINE_LIMIT)
+		expect(content).toContain(`${DEFAULT_LINE_LIMIT} | line ${DEFAULT_LINE_LIMIT}`)
+		expect(content).not.toContain(`line ${DEFAULT_LINE_LIMIT + 1}`)
+		expect(await extractTextFromBuffer(source, "metadata-only.txt")).toBe(content)
+	})
+
+	it("continues reading text when pathname binary detection fails", async () => {
+		const filePath = path.join(directory, "notes.txt")
+		await fs.writeFile(filePath, "first\nsecond")
+		const probe = vi.spyOn(binaryFile, "isBinaryFile").mockRejectedValue(new Error("Detection failed"))
+
+		expect(await extractTextFromFileWithMetadata(filePath)).toEqual({
+			content: "1 | first\n2 | second",
+			totalLines: 2,
+			returnedLines: 2,
+			wasTruncated: false,
+			linesShown: [1, 2],
+		})
+		expect(probe).toHaveBeenCalledExactlyOnceWith(filePath)
+	})
+
+	it("reports a missing text path before probing or loading content", async () => {
+		const filePath = path.join(directory, "missing.txt")
+		const probe = vi.spyOn(binaryFile, "isBinaryFile")
+		const readFile = vi.spyOn(fs, "readFile")
+
+		await expect(extractTextFromFileWithMetadata(filePath)).rejects.toThrow(`File not found: ${filePath}`)
+		expect(probe).not.toHaveBeenCalled()
+		expect(readFile).not.toHaveBeenCalled()
+	})
+})
 
 describe("addLineNumbers", () => {
 	it("should add line numbers starting from 1 by default", () => {
@@ -132,6 +427,19 @@ describe("stripLineNumbers", () => {
 		const input = "1 | line one\r\n2 | line two\r\n3 | line three"
 		const expected = "line one\r\nline two\r\nline three"
 		expect(stripLineNumbers(input)).toBe(expected)
+	})
+
+	it.each([false, true])("preserves trailing LF and CRLF including blank lines (aggressive=%s)", (aggressive) => {
+		for (const newline of ["\n", "\r\n"]) {
+			expect(stripLineNumbers(`1 | first${newline}2 | ${newline}${newline}`, aggressive)).toBe(
+				`first${newline}${newline}${newline}`,
+			)
+			expect(stripLineNumbers(newline, aggressive)).toBe(newline)
+		}
+	})
+
+	it("normalizes mixed line endings to CRLF while preserving the trailing blank line", () => {
+		expect(stripLineNumbers("1 | first\n2 | second\r\n")).toBe("first\r\nsecond\r\n")
 	})
 
 	it("should handle content with varying line number widths", () => {
@@ -502,8 +810,33 @@ describe("truncateOutput", () => {
 describe("applyRunLengthEncoding", () => {
 	it("should handle empty input", () => {
 		expect(applyRunLengthEncoding("")).toBe("")
-		expect(applyRunLengthEncoding(null as any)).toBe(null as any)
-		expect(applyRunLengthEncoding(undefined as any)).toBe(undefined as any)
+	})
+
+	it.each(["single line", "single line\n", "first\nsecond\nlast", "first\nsecond\nlast\n"])(
+		"preserves distinct lines and their final newline in %j",
+		(input) => {
+			expect(applyRunLengthEncoding(input)).toBe(input)
+		},
+	)
+
+	it("flushes separate compressible runs without carrying their repeat counts across a divider", () => {
+		const first = "first long repeated log entry with enough text to compress\n"
+		const second = "second long repeated log entry with enough text to compress\n"
+		const input = first.repeat(3) + "divider\n" + second.repeat(4) + "last line"
+
+		expect(applyRunLengthEncoding(input)).toBe(
+			first +
+				"<previous line repeated 2 additional times>\n" +
+				"divider\n" +
+				second +
+				"<previous line repeated 3 additional times>\n" +
+				"last line",
+		)
+	})
+
+	it("retains a short repeated run before a different final line when compression would expand it", () => {
+		const input = "x\nx\nx\nfinal line"
+		expect(applyRunLengthEncoding(input)).toBe(input)
 	})
 
 	it("should compress repeated single lines when beneficial", () => {
@@ -522,6 +855,23 @@ describe("processCarriageReturns", () => {
 	it("should return original input if no carriage returns (\r) present", () => {
 		const input = "Line 1\nLine 2\nLine 3"
 		expect(processCarriageReturns(input)).toBe(input)
+	})
+
+	it("handles a terminal chunk ending with a high surrogate during a partial overwrite", () => {
+		// An emoji split across chunks can leave a high surrogate at the end of the replacement segment.
+		expect(processCarriageReturns("abcdef\r\ud83d")).toBe("\ud83d cdef")
+	})
+
+	it("preserves a complete emoji replacement and the remaining suffix", () => {
+		expect(processCarriageReturns("abcdef\r🚀")).toBe("🚀cdef")
+	})
+
+	it("detects a surrogate pair beginning at the overwrite boundary", () => {
+		expect(processCarriageReturns("a🚀tail\rb")).toBe("b \ude80tail")
+	})
+
+	it("does not treat private-use BMP characters at the overwrite boundary as surrogates", () => {
+		expect(processCarriageReturns("a\ue000tail\rb")).toBe("b\ue000tail")
 	})
 
 	it("should process basic progress bar with carriage returns (\r)", () => {

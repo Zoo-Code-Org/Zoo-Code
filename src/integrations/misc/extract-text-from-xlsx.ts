@@ -1,4 +1,13 @@
 import ExcelJS from "exceljs"
+import type { Buffer as NodeBuffer } from "node:buffer"
+
+// ExcelJS 4.4.0 declares its Buffer as an ArrayBuffer, but its Node loader accepts
+// Node Buffers directly. Correct that boundary without casts or copying the input.
+declare module "exceljs" {
+	interface Xlsx {
+		load(buffer: NodeBuffer, options?: Partial<XlsxReadOptions>): Promise<Workbook>
+	}
+}
 
 const ROW_LIMIT = 50000
 
@@ -40,16 +49,14 @@ function formatCellValue(cell: ExcelJS.Cell): string {
 	return value.toString()
 }
 
-export async function extractTextFromXLSX(filePathOrWorkbook: string | ExcelJS.Workbook): Promise<string> {
-	let workbook: ExcelJS.Workbook
-	let excelText = ""
+export async function extractTextFromXLSX(source: Buffer): Promise<string> {
+	const workbook = new ExcelJS.Workbook()
+	await workbook.xlsx.load(source)
+	return formatWorkbook(workbook)
+}
 
-	if (typeof filePathOrWorkbook === "string") {
-		workbook = new ExcelJS.Workbook()
-		await workbook.xlsx.readFile(filePathOrWorkbook)
-	} else {
-		workbook = filePathOrWorkbook
-	}
+export function formatWorkbook(workbook: ExcelJS.Workbook): string {
+	let excelText = ""
 
 	workbook.eachSheet((worksheet, sheetId) => {
 		if (worksheet.state === "hidden" || worksheet.state === "veryHidden") {
