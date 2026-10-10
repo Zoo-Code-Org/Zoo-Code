@@ -62,6 +62,15 @@ vi.mock("../../../api/providers/fetchers/modelCache", () => ({
 	flushModels: (...args: any[]) => flushModelsMock(...args),
 }))
 
+// The refactor routes model-list fetches through an ApiHandler built by buildApiHandler.
+// Real provider handlers eagerly fetch models in their constructors, which would add
+// spurious getModels() calls. Mock it so the handler is a lightweight double.
+vi.mock("../../../api", () => ({
+	buildApiHandler: vi.fn().mockReturnValue({
+		getModel: vi.fn().mockReturnValue({ id: "claude-3-sonnet" }),
+	}),
+}))
+
 describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 	let mockProvider: ClineProvider & {
 		postMessageToWebview: ReturnType<typeof vi.fn>
@@ -136,9 +145,11 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		expect(routerModels.moonshot).toEqual({})
 		expect(getModelsMock).not.toHaveBeenCalledWith(
 			expect.objectContaining({ provider: providerIdentifiers.deepseek }),
+			expect.anything(),
 		)
 		expect(getModelsMock).not.toHaveBeenCalledWith(
 			expect.objectContaining({ provider: providerIdentifiers.moonshot }),
+			expect.anything(),
 		)
 	})
 
@@ -176,11 +187,14 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			} as any,
 		)
 
-		expect(getModelsMock).toHaveBeenCalledWith({
-			provider: providerIdentifiers.deepseek,
-			apiKey: "stored-deepseek-key",
-			baseUrl: "https://deepseek.example.com",
-		})
+		expect(getModelsMock).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.deepseek,
+				apiKey: "stored-deepseek-key",
+				baseUrl: "https://deepseek.example.com",
+			},
+			expect.anything(),
+		)
 
 		const call = (mockProvider.postMessageToWebview as any).mock.calls.find(
 			(c: any[]) => c[0]?.type === RouterModelsMessageType.routerModels,
@@ -276,10 +290,13 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 
 		expect(getKimiCodeAccessTokenMock).not.toHaveBeenCalled()
 		expect(getModelsMock).toHaveBeenCalledTimes(1)
-		expect(getModelsMock).toHaveBeenCalledWith({
-			provider: providerIdentifiers.kimiCode,
-			apiKey: "preview-kimi-api-key",
-		})
+		expect(getModelsMock).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.kimiCode,
+				apiKey: "preview-kimi-api-key",
+			},
+			expect.anything(),
+		)
 
 		const response = mockProvider.postMessageToWebview.mock.calls.find(
 			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
@@ -302,10 +319,13 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 
 		expect(getKimiCodeAccessTokenMock).toHaveBeenCalledTimes(1)
 		expect(getModelsMock).toHaveBeenCalledTimes(1)
-		expect(getModelsMock).toHaveBeenCalledWith({
-			provider: providerIdentifiers.kimiCode,
-			apiKey: "kimi-oauth-token",
-		})
+		expect(getModelsMock).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.kimiCode,
+				apiKey: "kimi-oauth-token",
+			},
+			expect.anything(),
+		)
 	})
 
 	it("excludes Kimi Code from model fetching when OAuth has no access token", async () => {
@@ -346,6 +366,7 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		// flushModels should have been called for litellm with refresh=true and credentials
 		expect(flushModelsMock).toHaveBeenCalledWith(
 			{ provider: providerIdentifiers.litellm, apiKey: "test-api-key", baseUrl: "http://localhost:4000" },
+			expect.anything(),
 			true,
 		)
 
@@ -414,8 +435,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			apiKey: "new-poe-key",
 			baseUrl: "https://poe.example.com/v1",
 		}
-		expect(flushModelsMock).toHaveBeenCalledWith(poeOptions, true)
-		expect(getModelsMock).toHaveBeenCalledWith(poeOptions)
+		expect(flushModelsMock).toHaveBeenCalledWith(poeOptions, expect.anything(), true)
+		expect(getModelsMock).toHaveBeenCalledWith(poeOptions, expect.anything())
 
 		const response = mockProvider.postMessageToWebview.mock.calls.find(
 			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
@@ -443,8 +464,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			apiKey: "stored-deepseek-key",
 			baseUrl: "https://preview.deepseek.example.com",
 		}
-		expect(flushModelsMock).toHaveBeenCalledWith(deepSeekOptions, true)
-		expect(getModelsMock).toHaveBeenCalledWith(deepSeekOptions)
+		expect(flushModelsMock).toHaveBeenCalledWith(deepSeekOptions, expect.anything(), true)
+		expect(getModelsMock).toHaveBeenCalledWith(deepSeekOptions, expect.anything())
 	})
 
 	it("fetches Moonshot models when stored Moonshot credentials exist", async () => {
@@ -481,11 +502,14 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			} as any,
 		)
 
-		expect(getModelsMock).toHaveBeenCalledWith({
-			provider: providerIdentifiers.moonshot,
-			apiKey: "stored-moonshot-key",
-			baseUrl: "https://api.moonshot.ai/v1",
-		})
+		expect(getModelsMock).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.moonshot,
+				apiKey: "stored-moonshot-key",
+				baseUrl: "https://api.moonshot.ai/v1",
+			},
+			expect.anything(),
+		)
 
 		const call = (mockProvider.postMessageToWebview as any).mock.calls.find(
 			(c: any[]) => c[0]?.type === RouterModelsMessageType.routerModels,

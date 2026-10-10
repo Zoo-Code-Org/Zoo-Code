@@ -68,9 +68,9 @@ vi.mock("../fetchers/modelCache", () => ({
 			"vertex_ai/gemini-3-pro": { ...litellmDefaultModelInfo, maxTokens: 8192 },
 		})
 	}),
-	refreshModels: vi.fn(async (options) => {
+	refreshModels: vi.fn(async (options, handler) => {
 		const { getModels } = await import("../fetchers/modelCache")
-		return getModels(options)
+		return getModels(options, handler)
 	}),
 	getModelsFromCache: vi.fn().mockReturnValue(undefined),
 }))
@@ -1378,6 +1378,13 @@ describe("LiteLLMHandler", () => {
 
 			const requestHeaders = mockCreate.mock.calls[0][1]?.headers
 			expect(requestHeaders).not.toHaveProperty("X-Zoo-Session-ID")
+		})
+	})
+
+	describe("model catalog", () => {
+		it("reports its cache scope", () => {
+			const handler = new LiteLLMHandler(mockOptions)
+			expect(handler.getModelCacheScope()).toEqual({ urlScoped: true, keyScoped: true, authScoped: false })
 		})
 	})
 })

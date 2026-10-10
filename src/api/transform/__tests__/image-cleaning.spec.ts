@@ -18,6 +18,11 @@ describe("maybeRemoveImageBlocks", () => {
 			}),
 			createMessage: vitest.fn(),
 			countTokens: vitest.fn(),
+			getModelCacheScope: vitest.fn().mockReturnValue({
+				urlScoped: false,
+				keyScoped: false,
+				authScoped: false,
+			}),
 		}
 	}
 

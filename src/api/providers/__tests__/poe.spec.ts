@@ -142,11 +142,14 @@ describe("PoeHandler", () => {
 			const handler = new PoeHandler(options)
 			const result = handler.getModel()
 
-			expect(getModelsFromCache).toHaveBeenCalledWith({
-				provider: providerIdentifiers.poe,
-				apiKey: options.poeApiKey,
-				baseUrl: options.poeBaseUrl,
-			})
+			expect(getModelsFromCache).toHaveBeenCalledWith(
+				{
+					provider: providerIdentifiers.poe,
+					apiKey: options.poeApiKey,
+					baseUrl: options.poeBaseUrl,
+				},
+				expect.anything(),
+			)
 			expect(result.id).toBe("anthropic/claude-sonnet-4")
 			expect(result.info.contextWindow).toBe(200_000)
 			expect(result.info.maxTokens).toBe(10_000)
