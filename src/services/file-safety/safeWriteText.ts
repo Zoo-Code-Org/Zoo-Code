@@ -213,6 +213,20 @@ async function _missingDirectoryTail(dirPath: string): Promise<string[]> {
 }
 
 /**
+ * Stat a directory for identity purposes. "Gone" is reported as the boundary failure the
+ * caller's re-check already speaks; any other failure is not evidence of absence, so it
+ * propagates and the write fails rather than publishing under an unverified ancestry.
+ */
+async function _statDirectoryIdentity(dir: string): Promise<fsSync.BigIntStats> {
+	return fs.stat(dir, { bigint: true }).catch((error: unknown) => {
+		if (errorCode(error) === "ENOENT") {
+			throw new AncestorReplacedError(dir, "no longer exists")
+		}
+		throw error
+	})
+}
+
+/**
  * Remove directories this write created, innermost outward. rmdir only succeeds on an
  * empty directory, which is the guarantee the caller relies on: a directory that
  * acquired content in the meantime is left alone.
@@ -597,6 +611,10 @@ export async function safeWriteText(
 	// from here on must not leave an empty directory tree beside the target, and the
 	// cleanup must not remove a directory that already existed.
 	const createdDirs = await _missingDirectoryTail(dirPath)
+	// Identities of the directories created below, filled in after the mkdir. The caller
+	// could only pin what already existed, so without this the re-check walks a list that
+	// omits exactly the components that appeared during this write.
+	let createdIdentities: DirectoryIdentity[] = []
 
 	let backupPath: string | null = null
 	let releaseBackupOnSuccess = false
@@ -610,6 +628,17 @@ export async function safeWriteText(
 		// a freshly created parent tree behind for a write that never happened.
 		await fs.mkdir(dirPath, { recursive: true })
 		await fs.access(dirPath)
+
+		if (options?.expectedAncestorIdentities && createdDirs.length > 0) {
+			// Only for a confined publication, where the directory chain IS the boundary; an
+			// unconfined write has no scope for a swap to escape.
+			createdIdentities = await Promise.all(
+				createdDirs.map(async (dir) => {
+					const stat = await _statDirectoryIdentity(dir)
+					return { dir, dev: stat.dev, ino: stat.ino }
+				}),
+			)
+		}
 
 		// -- Step 1: write content to staging temp file -------------------
 		if (!options?.tempPath && !options?.staging) {
@@ -755,14 +784,10 @@ export async function safeWriteText(
 			// caller never authorized, even though expectedResolvedPath still matches (the
 			// name is unchanged). Compare each recorded identity now, before anything is
 			// moved into place.
-			if (options?.expectedAncestorIdentities) {
-				for (const expected of options.expectedAncestorIdentities) {
-					const current = await fs.stat(expected.dir, { bigint: true }).catch((error: unknown) => {
-						if (errorCode(error) === "ENOENT") {
-							throw new AncestorReplacedError(expected.dir, "no longer exists")
-						}
-						throw error
-					})
+			const authorizedAncestors = [...(options?.expectedAncestorIdentities ?? []), ...createdIdentities]
+			if (authorizedAncestors.length > 0) {
+				for (const expected of authorizedAncestors) {
+					const current = await _statDirectoryIdentity(expected.dir)
 					if (current.dev !== expected.dev || current.ino !== expected.ino) {
 						throw new AncestorReplacedError(expected.dir, "is no longer the directory that was authorized")
 					}
