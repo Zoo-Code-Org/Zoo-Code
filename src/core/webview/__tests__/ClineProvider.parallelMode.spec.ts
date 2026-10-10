@@ -469,7 +469,7 @@ vi.mock("../../../integrations/terminal/Terminal", () => ({
 }))
 
 // Mock McpHub and McpServerManager
-vi.mock("../../services/mcp/McpHub", () => ({
+vi.mock("../../../services/mcp/McpHub", () => ({
 	McpHub: vi.fn().mockImplementation(function () {
 		return {
 			registerClient: vi.fn(),
@@ -479,7 +479,7 @@ vi.mock("../../services/mcp/McpHub", () => ({
 	}),
 }))
 
-vi.mock("../../services/mcp/McpServerManager", () => ({
+vi.mock("../../../services/mcp/McpServerManager", () => ({
 	McpServerManager: {
 		getInstance: vi.fn().mockResolvedValue({
 			registerClient: vi.fn(),
@@ -491,7 +491,7 @@ vi.mock("../../services/mcp/McpServerManager", () => ({
 }))
 
 // Mock SkillsManager
-vi.mock("../../services/skills/SkillsManager", () => ({
+vi.mock("../../../services/skills/SkillsManager", () => ({
 	SkillsManager: vi.fn().mockImplementation(function () {
 		return {
 			initialize: vi.fn().mockResolvedValue(undefined),
@@ -501,7 +501,7 @@ vi.mock("../../services/skills/SkillsManager", () => ({
 }))
 
 // Mock MarketplaceManager
-vi.mock("../../services/marketplace", () => ({
+vi.mock("../../../services/marketplace", () => ({
 	MarketplaceManager: vi.fn().mockImplementation(function () {
 		return {
 			cleanup: vi.fn(),
