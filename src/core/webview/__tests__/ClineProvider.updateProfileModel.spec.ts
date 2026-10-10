@@ -1186,7 +1186,7 @@ describe("ClineProvider - updateProfileModel", () => {
 		expect(secondMutationStarted).toBe(true)
 	})
 
-	it("allows subsequent mutations to proceed when a prior mutation never settles and ignores abort", async () => {
+	it("serializes mutations until prior mutation and rollback settle after timeout", async () => {
 		vi.useFakeTimers()
 		try {
 			mockStoredProfile({
@@ -1194,28 +1194,47 @@ describe("ClineProvider - updateProfileModel", () => {
 				openRouterModelId: "openai/gpt-4",
 			})
 
-			// Stalled mutation that never settles and ignores abort
-			const stalledMutationPromise = new Promise<never>(() => {})
-			manager().updateProfileModel.mockImplementationOnce(async () => stalledMutationPromise)
+			let resolveFirstMutation!: () => void
+			const firstMutationSettledPromise = new Promise<void>((res) => {
+				resolveFirstMutation = res
+			})
+
+			const originalUpdateProfileModel = manager().updateProfileModel.getMockImplementation()!
+			manager().updateProfileModel.mockImplementationOnce(async () => {
+				await firstMutationSettledPromise
+				return { success: false, reason: "not_found" }
+			})
+
+			let secondMutationStarted = false
+			manager().updateProfileModel.mockImplementationOnce(async (name, provider, patch, validate) => {
+				secondMutationStarted = true
+				return originalUpdateProfileModel(name, provider, patch, validate)
+			})
 
 			const firstMutation = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
 				openRouterModelId: "openai/gpt-hung",
 			})
 
-			// Advance fake timers past timeout + drain window so first mutation times out and queue drains
-			await vi.advanceTimersByTimeAsync(
-				ClineProvider.PENDING_OPERATION_TIMEOUT_MS + ClineProvider.MUTATION_DRAIN_TIMEOUT_MS + 100,
-			)
+			// Advance fake timers past timeout so first caller times out
+			await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 100)
 			await firstMutation
 
-			// Now run a second mutation that succeeds
+			// Queue second mutation
 			const secondMutation = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
 				openRouterModelId: "openai/gpt-4.5",
 			})
 
+			// Second mutation should NOT have started yet because first mutation has not settled
+			await vi.advanceTimersByTimeAsync(500)
+			expect(secondMutationStarted).toBe(false)
+
+			// Now let first mutation finish settling
+			resolveFirstMutation()
 			await vi.advanceTimersByTimeAsync(100)
 			await secondMutation
 
+			// Second mutation should now have completed
+			expect(secondMutationStarted).toBe(true)
 			expect(manager().saveConfig).toHaveBeenCalledWith(
 				"test-config",
 				expect.objectContaining({ openRouterModelId: "openai/gpt-4.5" }),

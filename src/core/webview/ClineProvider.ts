@@ -261,7 +261,6 @@ export class ClineProvider
 	}
 
 	private profileMutationEpoch = 0
-	public static readonly MUTATION_DRAIN_TIMEOUT_MS = 1000
 
 	private isProfileMutationActive(epoch: number | undefined, signal: AbortSignal): boolean {
 		return !this._disposed && !signal.aborted && (epoch === undefined || epoch === this.profileMutationEpoch)
@@ -308,8 +307,6 @@ export class ClineProvider
 		// Run fn after either outcome so a rejected mutation never poisons the queue.
 		const run = this.providerProfileMutationQueue.then(invoke, invoke).finally(removeDisposeListener)
 		const callerResult = this.withProviderProfileMutationTimeout(Promise.race([run, queuedRejectPromise]), () => {
-			// Disarm the active mutation epoch so late writes or rollbacks cannot touch shared state
-			this.profileMutationEpoch++
 			controller.abort()
 			this.log("Provider profile mutation timed out; aborting in-flight mutation")
 		}).finally(removeDisposeListener)
@@ -332,26 +329,10 @@ export class ClineProvider
 		)
 
 		// Keep serialization in place until the mutation and any rollback settle before starting next mutation.
-		// If aborted, provide a bounded drain window so a never-settling operation cannot block the queue forever.
-		const queueSettled = (async () => {
-			const runSettled = run.then(
-				() => undefined,
-				() => undefined,
-			)
-			const drainOnAbort = new Promise<void>((resolve) => {
-				let drainTimer: ReturnType<typeof setTimeout> | undefined
-				const startDrain = () => {
-					drainTimer = setTimeout(resolve, ClineProvider.MUTATION_DRAIN_TIMEOUT_MS)
-				}
-				if (controller.signal.aborted) startDrain()
-				else controller.signal.addEventListener("abort", startDrain, { once: true })
-				void runSettled.then(() => {
-					if (drainTimer) clearTimeout(drainTimer)
-					resolve()
-				})
-			})
-			await Promise.race([runSettled, drainOnAbort])
-		})()
+		const queueSettled = run.then(
+			() => undefined,
+			() => undefined,
+		)
 
 		this.providerProfileMutationQueue = queueSettled
 		return callerResult
@@ -902,7 +883,6 @@ export class ClineProvider
 
 		this._disposed = true
 		this._postStateToWebviewThrottled.cancel()
-		this.profileMutationEpoch++
 		this.providerProfileMutationAbortController.abort()
 		this.providerProfileMutationQueue = Promise.resolve()
 		this.log("Disposing ClineProvider...")
@@ -1966,43 +1946,44 @@ export class ClineProvider
 					return undefined
 				}
 
-				let id: string
-				let existed = false
-				let previousProfile: ProviderSettingsWithId | undefined
-
-				if (typeof this.providerSettingsManager.saveConfigWithPrevious === "function") {
-					const result = await this.providerSettingsManager.saveConfigWithPrevious(name, providerSettings)
-					id = result.id
-					existed = result.existed
-					previousProfile = result.previousProfile
-				} else {
-					const existing = await this.providerSettingsManager.findProfile?.({ name })
-					existed = !!existing
-					previousProfile = existing ? { ...existing } : undefined
-					id = await this.providerSettingsManager.saveConfig(name, providerSettings)
-				}
+				const { id, existed, previousProfile } = await this.providerSettingsManager.saveConfigWithPrevious(
+					name,
+					providerSettings,
+				)
 				const savedProfile: ProviderSettingsWithId = { ...providerSettings, id }
 
 				const rollback = async () => {
 					try {
+						if (epoch !== undefined && epoch !== this.profileMutationEpoch) return
 						if (existed && !previousProfile) return
 						const restored = await this.providerSettingsManager.restoreConfigIfMatches(
 							name,
 							savedProfile,
 							existed ? previousProfile : undefined,
 						)
+						if (this._disposed || (epoch !== undefined && epoch !== this.profileMutationEpoch)) return
 						if (restored) {
 							await this.updateGlobalState(
 								"listApiConfigMeta",
 								await this.providerSettingsManager.listConfig(),
 							)
 							if (activate) {
+								if (this._disposed || (epoch !== undefined && epoch !== this.profileMutationEpoch))
+									return
 								if (previousApiConfigName !== undefined)
 									await this.updateGlobalState("currentApiConfigName", previousApiConfigName)
+								if (this._disposed || (epoch !== undefined && epoch !== this.profileMutationEpoch))
+									return
 								if (previousMode && previousModeConfigId !== undefined)
 									await this.providerSettingsManager.setModeConfig(previousMode, previousModeConfigId)
-								if (previousProviderSettings)
-									await this.contextProxy.setProviderSettings(previousProviderSettings)
+								if (this._disposed || (epoch !== undefined && epoch !== this.profileMutationEpoch))
+									return
+								if (previousProviderSettings) {
+									const currentConfig = this.contextProxy.getValues().currentApiConfigName
+									if (currentConfig === name || currentConfig === previousApiConfigName) {
+										await this.contextProxy.setProviderSettings(previousProviderSettings)
+									}
+								}
 							}
 						}
 					} catch (rollbackError) {
@@ -2045,7 +2026,7 @@ export class ClineProvider
 						this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
 
 						// Keep the current task's sticky provider profile in sync with the newly-activated profile.
-						await this.persistStickyProviderProfileToCurrentTask(name)
+						await this.persistStickyProviderProfileToCurrentTask(name, { signal, epoch })
 					} else {
 						await this.updateGlobalState(
 							"listApiConfigMeta",
@@ -2184,16 +2165,19 @@ export class ClineProvider
 						throw new Error("Provider profile mutation aborted")
 				} catch (updateError) {
 					try {
+						if (epoch !== undefined && epoch !== this.profileMutationEpoch) throw updateError
 						const restored = await this.providerSettingsManager.restoreConfigIfMatches(
 							name,
 							updatedProfile,
 							previousProfile,
 						)
+						if (epoch !== undefined && epoch !== this.profileMutationEpoch) throw updateError
 						if (restored) {
 							await this.updateGlobalState(
 								"listApiConfigMeta",
 								await this.providerSettingsManager.listConfig(),
 							)
+							if (epoch !== undefined && epoch !== this.profileMutationEpoch) throw updateError
 							const currentConfigName = this.contextProxy.getValues().currentApiConfigName
 							const currentContextModel = getModelId(this.contextProxy.getProviderSettings())
 							const isNewerModelSet =
@@ -2202,6 +2186,7 @@ export class ClineProvider
 									currentContextModel !== getModelId(updatedProfile as ProviderSettings) &&
 									currentContextModel !== getModelId(previousProfile as ProviderSettings))
 							if (shouldRollbackContext && !isNewerModelSet) {
+								if (epoch !== undefined && epoch !== this.profileMutationEpoch) throw updateError
 								await this.contextProxy.setProviderSettings(previousProfile as ProviderSettings)
 							}
 						} else {
@@ -2210,6 +2195,7 @@ export class ClineProvider
 							)
 						}
 					} catch (rollbackError) {
+						if (rollbackError === updateError) throw updateError
 						this.log(
 							`Failed to rollback profile '${name}' after update failure: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
 						)
@@ -2230,7 +2216,7 @@ export class ClineProvider
 
 				if (isSameTask) {
 					this.updateTaskApiHandlerIfNeeded(updatedProfile as ProviderSettings, { forceRebuild: true })
-					await this.persistStickyProviderProfileToCurrentTask(name)
+					await this.persistStickyProviderProfileToCurrentTask(name, { signal, epoch })
 				}
 
 				if (!this.isProfileMutationActive(epoch, signal)) return
@@ -2267,26 +2253,49 @@ export class ClineProvider
 
 	private async persistStickyProviderProfileToCurrentTask(
 		apiConfigName: string,
-		options: { skipCurrentTaskRebuild?: boolean } = {},
+		options: { skipCurrentTaskRebuild?: boolean; signal?: AbortSignal; epoch?: number } = {},
 	): Promise<void> {
 		if (options.skipCurrentTaskRebuild) return
-		const task = this.getCurrentTask()
-		if (!task) {
+		if (
+			this._disposed ||
+			(options.signal &&
+				options.epoch !== undefined &&
+				!this.isProfileMutationActive(options.epoch, options.signal))
+		)
 			return
-		}
+		const task = this.getCurrentTask()
+		if (!task) return
 
 		try {
-			// Update in-memory state immediately so sticky behavior works even before the task has
-			// been persisted into taskHistory (it will be captured on the next save).
+			if (
+				this._disposed ||
+				(options.signal &&
+					options.epoch !== undefined &&
+					!this.isProfileMutationActive(options.epoch, options.signal))
+			)
+				return
 			task.setTaskApiConfigName(apiConfigName)
 
+			if (
+				this._disposed ||
+				(options.signal &&
+					options.epoch !== undefined &&
+					!this.isProfileMutationActive(options.epoch, options.signal))
+			)
+				return
 			const taskHistoryItem = this.getTaskHistoryItem(task.taskId)
 
 			if (taskHistoryItem) {
+				if (
+					this._disposed ||
+					(options.signal &&
+						options.epoch !== undefined &&
+						!this.isProfileMutationActive(options.epoch, options.signal))
+				)
+					return
 				await this.updateTaskHistory({ ...taskHistoryItem, apiConfigName })
 			}
 		} catch (error) {
-			// If persistence fails, log the error but don't fail the profile switch.
 			this.log(
 				`Failed to persist provider profile switch for task ${task.taskId}: ${
 					error instanceof Error ? error.message : String(error)
@@ -2358,7 +2367,7 @@ export class ClineProvider
 		// Update the current task's sticky provider profile, unless this activation is
 		// being used purely as a non-persisting restoration (e.g., reopening a task from history).
 		if (persistTaskHistory) {
-			await this.persistStickyProviderProfileToCurrentTask(name, { skipCurrentTaskRebuild })
+			await this.persistStickyProviderProfileToCurrentTask(name, { skipCurrentTaskRebuild, signal, epoch })
 		}
 
 		if (this._disposed || (signal && !this.isProfileMutationActive(epoch, signal))) return
