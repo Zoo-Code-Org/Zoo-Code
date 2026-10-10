@@ -1608,6 +1608,17 @@ describe("ReadFileTool", () => {
 				expect(calledPath).toContain("existing.ts")
 				expect(calledVersion).toMatch(/^\d+:\d+:\d+:\d+:\d+$/)
 
+				// The token is built from nanosecond fields, so both stats the read takes around the
+				// file must be the bigint variant. Counting the calls that asked for it is what makes
+				// this load-bearing: the mocked stat answers any options with bigint fields, so a
+				// looser assertion would pass while one of the two calls silently dropped the option
+				// and threw on a real filesystem, where mtimeNs and ctimeNs are undefined.
+				const bigintStats = mockedFsStat.mock.calls.filter((call) => {
+					const options = call[1] as { bigint?: boolean } | undefined
+					return options?.bigint === true && String(call[0]).includes("existing.ts")
+				})
+				expect(bigintStats).toHaveLength(2)
+
 				// Verify get() returns the same data using the spy-captured key.
 				const obs = reg.get(calledPath)
 				expect(obs).toBeDefined()
@@ -1665,6 +1676,19 @@ describe("ReadFileTool", () => {
 				const [calledPath, calledVersion] = observeSpy.mock.calls[0]
 				expect(calledPath).toContain("legacy.ts")
 				expect(calledVersion).toMatch(/^\d+:\d+:\d+:\d+:\d+$/)
+
+				// Same requirement on the legacy multi-file path, which resolves its own stats.
+
+				// The token is built from nanosecond fields, so both stats the read takes around the
+				// file must be the bigint variant. Counting the calls that asked for it is what makes
+				// this load-bearing: the mocked stat answers any options with bigint fields, so a
+				// looser assertion would pass while one of the two calls silently dropped the option
+				// and threw on a real filesystem, where mtimeNs and ctimeNs are undefined.
+				const bigintStats = mockedFsStat.mock.calls.filter((call) => {
+					const options = call[1] as { bigint?: boolean } | undefined
+					return options?.bigint === true && String(call[0]).includes("legacy.ts")
+				})
+				expect(bigintStats).toHaveLength(2)
 			})
 
 			it("does not observe when the file mutates between the pre-read and post-read stats", async () => {
