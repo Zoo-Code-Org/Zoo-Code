@@ -464,6 +464,7 @@ export type EditQueuedMessagePayload = Pick<QueuedMessage, "id" | "text" | "imag
 
 export interface WebviewMessage {
 	type:
+		| "cancelModelRequest"
 		| "updateTodoList"
 		| "deleteMultipleTasksWithIds"
 		| "currentApiConfigName"

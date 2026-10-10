@@ -1,3 +1,4 @@
+import { ProviderSettingsManager } from "../../config/ProviderSettingsManager"
 import { WebviewFocusTracker } from "../WebviewFocusTracker"
 // npx vitest core/webview/__tests__/ClineProvider.apiHandlerRebuild.spec.ts
 
@@ -244,6 +245,8 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		// Mock providerSettingsManager
 		;(provider as any).providerSettingsManager = {
 			saveConfig: vi.fn().mockResolvedValue("test-id"),
+			hasConfig: vi.fn().mockResolvedValue(true),
+			deleteConfig: vi.fn(),
 			listConfig: vi.fn().mockResolvedValue([
 				{
 					name: "test-config",
@@ -426,6 +429,202 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			// Should not call buildApiHandler when there's no task
 			expect(buildApiHandlerMock).not.toHaveBeenCalled()
 		})
+
+		test("rolls back in-memory provider state when a failure occurs after mutation", async () => {
+			// Seed a known previously-active state.
+			await provider["contextProxy"].setProviderSettings({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			})
+			await provider["updateGlobalState"]("currentApiConfigName", "previous-config")
+
+			// Fail the first state broadcast — which happens only after the
+			// in-memory state has already been mutated — to simulate a partial
+			// failure. The rollback's own broadcast should still succeed.
+			const postSpy = vi
+				.spyOn(provider, "postStateToWebview")
+				.mockRejectedValueOnce(new Error("broadcast failed"))
+
+			const result = await provider.upsertProviderProfile(
+				"new-config",
+				{
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "claude-3-5-sonnet-20241022",
+				},
+				true,
+			)
+
+			// The half-applied profile must not survive: the previous settings and
+			// profile name are restored so the store and in-memory context stay in sync.
+			expect(result).toBeUndefined()
+			expect(provider["contextProxy"].getProviderSettings()).toMatchObject({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			})
+			expect(provider["contextProxy"].getValue("currentApiConfigName")).toBe("previous-config")
+
+			postSpy.mockRestore()
+		})
+	})
+
+	describe("persisted profile compensation", () => {
+		const oldSettings = { apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" }
+		const newSettings = { apiProvider: providerIdentifiers.openrouter, openRouterModelId: "new-model" }
+		beforeEach(async () => {
+			Object.defineProperty(provider, "providerSettingsManager", {
+				value: new ProviderSettingsManager(mockContext),
+				configurable: true,
+			})
+			await provider.contextProxy.setValue("mode", "code")
+			await provider.providerSettingsManager.saveConfig("existing", oldSettings)
+			await provider.providerSettingsManager.setModeConfig("code", undefined)
+			await provider.contextProxy.setProviderSettings(oldSettings)
+			await provider.contextProxy.setValue("currentApiConfigName", "existing")
+			await provider.contextProxy.setValue(
+				"listApiConfigMeta",
+				await provider.providerSettingsManager.listConfig(),
+			)
+		})
+
+		test.each(["list", "activation", "broadcast"] as const)(
+			"restores existing and removes new profiles after %s failure",
+			async (phase) => {
+				const manager = provider.providerSettingsManager
+				const previous = await manager.getProfile({ name: "existing" })
+				const previousMeta = provider.contextProxy.getValue("listApiConfigMeta")
+				const task = new Task({ ...defaultTaskOptions, apiConfiguration: oldSettings })
+				await provider.addClineToStack(task)
+				for (const name of ["existing", "new-profile"]) {
+					if (phase === "list")
+						vi.spyOn(manager, "listConfig").mockRejectedValueOnce(new Error("list failed"))
+					if (phase === "activation")
+						vi.spyOn(provider.contextProxy, "setProviderSettings").mockRejectedValueOnce(
+							new Error("activation failed"),
+						)
+					if (phase === "broadcast")
+						vi.spyOn(provider, "postStateToWebview").mockRejectedValueOnce(new Error("broadcast failed"))
+					expect(await provider.upsertProviderProfile(name, newSettings)).toBeUndefined()
+					expect(await manager.getProfile({ name: "existing" })).toEqual(previous)
+					expect(await manager.hasConfig("new-profile")).toBe(false)
+					expect(await manager.getModeConfigId("code")).toBeUndefined()
+					expect(provider.contextProxy.getProviderSettings()).toMatchObject(oldSettings)
+					expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("existing")
+					expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual(previousMeta)
+					expect(task.apiConfiguration).toEqual(oldSettings)
+					expect(task.setTaskApiConfigName).not.toHaveBeenCalled()
+				}
+			},
+		)
+
+		test("holds later model updates until a timed-out save finishes compensation", async () => {
+			vi.useFakeTimers()
+			try {
+				const manager = provider.providerSettingsManager
+				const save = manager.saveConfig.bind(manager)
+				let releaseBroadcast!: () => void
+				let releaseRollback!: () => void
+				const broadcast = vi.spyOn(provider, "postStateToWebview").mockImplementationOnce(
+					() =>
+						new Promise<void>((resolve) => {
+							releaseBroadcast = resolve
+						}),
+				)
+				const saves = vi
+					.spyOn(manager, "saveConfig")
+					.mockImplementationOnce(save)
+					.mockImplementationOnce(async (name, settings) => {
+						await new Promise<void>((resolve) => {
+							releaseRollback = resolve
+						})
+						return save(name, settings)
+					})
+				const first = provider.upsertProviderProfile("existing", newSettings)
+				await vi.advanceTimersByTimeAsync(0)
+				expect(broadcast).toHaveBeenCalledTimes(1)
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				expect(await first).toBeUndefined()
+
+				const finalSettings = { ...oldSettings, openRouterModelId: "final-model" }
+				let secondSettled = false
+				const second = provider.upsertProviderProfile("existing", finalSettings).then((result) => {
+					secondSettled = true
+					return result
+				})
+				await vi.advanceTimersByTimeAsync(0)
+				expect(saves).toHaveBeenCalledTimes(1)
+				releaseBroadcast()
+				await vi.advanceTimersByTimeAsync(0)
+				expect(saves).toHaveBeenCalledTimes(2)
+				expect(saves.mock.calls[1][1]).toMatchObject(oldSettings)
+				// Waiting for compensation must not consume the next save's execution window.
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
+				expect(secondSettled).toBe(false)
+				expect(saves).toHaveBeenCalledTimes(2)
+				releaseRollback()
+				expect(await second).toBeTruthy()
+				expect(saves).toHaveBeenCalledTimes(3)
+				const reloaded = new ProviderSettingsManager(mockContext)
+				const profile = await reloaded.getProfile({ name: "existing" })
+				expect(profile).toMatchObject(finalSettings)
+				expect(await reloaded.getModeConfigId("code")).toBe(profile.id)
+				expect(provider.contextProxy.getProviderSettings()).toMatchObject(finalSettings)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		test("keeps a later update queued until persisted rollback completes", async () => {
+			const manager = provider.providerSettingsManager
+			const save = manager.saveConfig.bind(manager)
+			let releaseRollback!: () => void
+			vi.spyOn(manager, "saveConfig")
+				.mockImplementationOnce(save)
+				.mockImplementationOnce(async (name, settings) => {
+					await new Promise<void>((resolve) => {
+						releaseRollback = resolve
+					})
+					return save(name, settings)
+				})
+			vi.spyOn(provider, "postStateToWebview").mockRejectedValueOnce(new Error("broadcast failed"))
+			const first = provider.upsertProviderProfile("existing", newSettings)
+			await vi.waitFor(() => expect(manager.saveConfig).toHaveBeenCalledTimes(2))
+			const finalSettings = { ...oldSettings, openRouterModelId: "final-model" }
+			const second = provider.upsertProviderProfile("existing", finalSettings)
+			await Promise.resolve()
+			expect(manager.saveConfig).toHaveBeenCalledTimes(2)
+			releaseRollback()
+			expect(await first).toBeUndefined()
+			expect(await second).toBeTruthy()
+			expect(await manager.getProfile({ name: "existing" })).toMatchObject(finalSettings)
+			expect(provider.contextProxy.getProviderSettings()).toMatchObject(finalSettings)
+		})
+
+		test("snapshots queued updates after the prior mutation and finishes rollback before the next", async () => {
+			let release!: () => void
+			const broadcast = vi
+				.spyOn(provider, "postStateToWebview")
+				.mockImplementationOnce(
+					() =>
+						new Promise<void>((resolve) => {
+							release = resolve
+						}),
+				)
+				.mockRejectedValueOnce(new Error("second broadcast failed"))
+			const first = provider.upsertProviderProfile("existing", newSettings)
+			await vi.waitFor(() => expect(broadcast).toHaveBeenCalledTimes(1))
+			const second = provider.upsertProviderProfile("existing", {
+				...newSettings,
+				openRouterModelId: "failed-model",
+			})
+			release()
+			expect(await first).toBeTruthy()
+			expect(await second).toBeUndefined()
+			expect(await provider.providerSettingsManager.getProfile({ name: "existing" })).toMatchObject(newSettings)
+			expect(provider.contextProxy.getProviderSettings()).toMatchObject(newSettings)
+			expect(await provider.providerSettingsManager.getModeConfigId("code")).toBe(
+				(await provider.providerSettingsManager.getProfile({ name: "existing" })).id,
+			)
+		})
 	})
 
 	describe("activateProviderProfile", () => {
@@ -490,7 +689,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "second-profile")
 		})
 
-		test("timed-out mutations abort before writing state and advance the queue", async () => {
+		test("timed-out mutations abort before writing state and release the queue after settling", async () => {
 			vi.useFakeTimers()
 			const logSpy = vi.spyOn(provider, "log")
 			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
@@ -522,9 +721,9 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
 				await firstResult
 
-				// Queue advanced immediately on timeout — second enqueues now.
+				// The caller timed out, but the underlying activation still owns the queue.
 				const second = provider.activateProviderProfile({ name: "second-profile" })
-				// activateProfile not yet called for second (it runs in the next microtask).
+				await vi.advanceTimersByTimeAsync(0)
 				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(1)
 
 				// Resolve the first activation's inner promise so its in-flight mock can return.
@@ -536,6 +735,44 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "first-profile")
 				expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "second-profile")
 				expect(logSpy).toHaveBeenCalledWith("Provider profile mutation timed out; aborting in-flight mutation")
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		test("bounds queue waits and skips expired mutations when the blocked write eventually settles", async () => {
+			vi.useFakeTimers()
+			try {
+				let release!: () => void
+				const first = provider["enqueueProviderProfileMutation"](
+					() =>
+						new Promise<void>((resolve) => {
+							release = resolve
+						}),
+				)
+				const firstResult = expect(first).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				await firstResult
+
+				const expiredWrite = vi.fn(async () => {})
+				const second = provider["enqueueProviderProfileMutation"](expiredWrite)
+				const onRejected = vi.fn()
+				void second.catch(onRejected)
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS * 2)
+				expect(onRejected).toHaveBeenCalledWith(
+					expect.objectContaining({ message: "Provider profile mutation timed out" }),
+				)
+				expect(expiredWrite).not.toHaveBeenCalled()
+
+				const nextWrite = vi.fn(async () => {})
+				const third = provider["enqueueProviderProfileMutation"](nextWrite)
+				await vi.advanceTimersByTimeAsync(0)
+				expect(nextWrite).not.toHaveBeenCalled()
+				release()
+				await third
+				expect(expiredWrite).not.toHaveBeenCalled()
+				expect(nextWrite).toHaveBeenCalledTimes(1)
+				expect(vi.getTimerCount()).toBe(0)
 			} finally {
 				vi.useRealTimers()
 			}

@@ -1,3 +1,5 @@
+import { getEventListeners } from "events"
+
 import { getKimiCodeModels, kimiCodeModelSchema, mapKimiCodeModel } from "../kimi-code"
 
 describe("Kimi Code model discovery", () => {
@@ -83,6 +85,23 @@ describe("Kimi Code model discovery", () => {
 		expect(models["model-b"].supportsReasoningEffort).toEqual(["low", "high", "max"])
 	})
 
+	it.each(["success", "failure"])("cleans up caller listeners and timeout on %s", async (outcome) => {
+		vi.useFakeTimers()
+		const controller = new AbortController()
+		const transport = vi.spyOn(globalThis, "fetch")
+		const failure = new Error("network failed")
+		if (outcome === "success") transport.mockResolvedValue(new Response(JSON.stringify({ data: [] })))
+		else transport.mockRejectedValue(failure)
+
+		const result = getKimiCodeModels("token", { signal: controller.signal })
+		if (outcome === "success") await expect(result).resolves.toEqual({})
+		else await expect(result).rejects.toBe(failure)
+		expect(getEventListeners(controller.signal, "abort")).toHaveLength(0)
+		expect(vi.getTimerCount()).toBe(0)
+		controller.abort()
+		expect(transport.mock.calls[0][1]?.signal?.aborted).toBe(false)
+	})
+
 	it("aborts model discovery after its deadline", async () => {
 		vi.useFakeTimers()
 		vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
@@ -90,11 +109,13 @@ describe("Kimi Code model discovery", () => {
 				init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true })
 			})
 		})
-		const result = expect(getKimiCodeModels("token")).rejects.toThrow("timed out")
+		const controller = new AbortController()
+		const result = expect(getKimiCodeModels("token", { signal: controller.signal })).rejects.toThrow("timed out")
 
 		await vi.advanceTimersByTimeAsync(10_000)
 		await result
 		expect(vi.mocked(fetch).mock.calls[0][1]?.signal?.aborted).toBe(true)
+		expect(getEventListeners(controller.signal, "abort")).toHaveLength(0)
 		expect(vi.getTimerCount()).toBe(0)
 	})
 

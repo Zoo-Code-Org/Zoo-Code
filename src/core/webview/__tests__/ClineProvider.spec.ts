@@ -2630,8 +2630,10 @@ describe("ClineProvider", () => {
 				.mockResolvedValue([
 					{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 				]),
+			hasConfig: vi.fn().mockResolvedValue(false),
 			saveConfig: vi.fn().mockResolvedValue("test-id"),
 			setModeConfig: vi.fn(),
+			getModeConfigId: vi.fn().mockResolvedValue(undefined),
 		} as any
 
 		// Update API configuration
@@ -3366,7 +3368,11 @@ describe("ClineProvider", () => {
 			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 			;(provider as any).providerSettingsManager = {
+				hasConfig: vi.fn().mockResolvedValue(false),
+				deleteConfig: vi.fn(),
 				setModeConfig: vi.fn().mockRejectedValue(new Error("Failed to update mode config")),
+				saveConfig: vi.fn().mockResolvedValue("test-id"),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
 					.mockResolvedValue([
@@ -3399,8 +3405,11 @@ describe("ClineProvider", () => {
 			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 			;(provider as any).providerSettingsManager = {
+				hasConfig: vi.fn().mockResolvedValue(false),
+				deleteConfig: vi.fn(),
 				setModeConfig: vi.fn(),
 				saveConfig: vi.fn().mockResolvedValue(undefined),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
 					.mockResolvedValue([
@@ -3444,8 +3453,11 @@ describe("ClineProvider", () => {
 				throw new Error("API handler error")
 			})
 			;(provider as any).providerSettingsManager = {
+				hasConfig: vi.fn().mockResolvedValue(false),
+				deleteConfig: vi.fn(),
 				setModeConfig: vi.fn(),
 				saveConfig: vi.fn().mockResolvedValue(undefined),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
 					.mockResolvedValue([
@@ -3475,11 +3487,11 @@ describe("ClineProvider", () => {
 			)
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.create_api_config")
 
-			// Verify state was still updated
+			// The initial metadata write is followed by restoration of the snapshot.
+			expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("test-config")
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("listApiConfigMeta", [
 				{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 			])
-			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "test-config")
 		})
 
 		test("handles successful saveApiConfiguration", async () => {

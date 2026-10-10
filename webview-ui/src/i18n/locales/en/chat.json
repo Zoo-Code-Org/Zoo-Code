@@ -1,5 +1,9 @@
 {
 	"greeting": "Welcome to Zoo Code!",
+	"clearSearch": "Clear search",
+	"searchModel": "Search models...",
+	"modelListEmpty": "No models available for this provider",
+	"useCustomModel": "Use custom model: {{modelId}}",
 	"task": {
 		"title": "Task",
 		"expand": "Expand task",

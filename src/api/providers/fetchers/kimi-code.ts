@@ -1,5 +1,7 @@
 import { z } from "zod"
 
+import { throwIfAborted } from "../utils/abort-signal"
+
 import {
 	KIMI_CODE_BASE_URL,
 	kimiCodeDefaultModelInfo,
@@ -37,9 +39,12 @@ export function mapKimiCodeModel(model: z.infer<typeof kimiCodeModelSchema>): Mo
 	}
 }
 
-export async function getKimiCodeModels(apiKey?: string): Promise<ModelRecord> {
+export async function getKimiCodeModels(apiKey?: string, opts?: { signal?: AbortSignal }): Promise<ModelRecord> {
+	throwIfAborted(opts?.signal)
 	if (!apiKey) throw new Error("Kimi Code authentication is required to fetch models")
 	const controller = new AbortController()
+	const onAbort = () => controller.abort(opts?.signal?.reason)
+	opts?.signal?.addEventListener("abort", onAbort, { once: true })
 	const timeout = setTimeout(
 		() => controller.abort(new Error("Kimi Code models request timed out")),
 		KIMI_CODE_MODELS_TIMEOUT_MS,
@@ -58,5 +63,6 @@ export async function getKimiCodeModels(apiKey?: string): Promise<ModelRecord> {
 		return Object.fromEntries(parsed.data.map((model) => [model.id, mapKimiCodeModel(model)]))
 	} finally {
 		clearTimeout(timeout)
+		opts?.signal?.removeEventListener("abort", onAbort)
 	}
 }

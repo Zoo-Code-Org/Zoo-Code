@@ -2,6 +2,8 @@ import axios from "axios"
 
 import type { ModelInfo } from "@roo-code/types"
 
+import { throwIfAborted } from "../utils/abort-signal"
+
 import type { ApiHandlerOptions } from "../../../shared/api"
 import { getZooCodeBaseUrl, resolveZooGatewaySessionToken } from "../../../services/zoo-code-auth"
 
@@ -20,7 +22,11 @@ const MODEL_DISCOVERY_TIMEOUT_MS = 15_000
  * Fetches models from the Zoo Gateway API. Requires authentication via the zoo_ext_ token.
  */
 
-export async function getZooGatewayModels(options?: ApiHandlerOptions): Promise<Record<string, ModelInfo>> {
+export async function getZooGatewayModels(
+	options?: ApiHandlerOptions,
+	opts?: { signal?: AbortSignal },
+): Promise<Record<string, ModelInfo>> {
+	throwIfAborted(opts?.signal)
 	const models: Record<string, ModelInfo> = {}
 	const baseURL = options?.zooGatewayBaseUrl ?? `${getZooCodeBaseUrl()}/api/gateway/v1`
 
@@ -37,6 +43,7 @@ export async function getZooGatewayModels(options?: ApiHandlerOptions): Promise<
 		const response = await axios.get(`${baseURL}/models`, {
 			headers,
 			timeout: MODEL_DISCOVERY_TIMEOUT_MS,
+			signal: opts?.signal,
 		})
 		const result = vercelAiGatewayModelsResponseSchema.safeParse(response.data)
 
@@ -57,6 +64,7 @@ export async function getZooGatewayModels(options?: ApiHandlerOptions): Promise<
 			models[id] = parseZooGatewayModel({ id, model })
 		}
 	} catch (error) {
+		throwIfAborted(opts?.signal)
 		// Log only safe fields; never serialize the full error object because it
 		// includes request config/headers which carry the bearer session token.
 		const err = error as {
