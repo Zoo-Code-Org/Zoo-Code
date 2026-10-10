@@ -133,6 +133,7 @@ import {
 import { readTaskMessages } from "../task-persistence/taskMessages"
 import { getNonce } from "./getNonce"
 import { getUri } from "./getUri"
+import { omitOriginalContentFromExtensionMessage } from "./stripOriginalContent"
 import { REQUESTY_BASE_URL } from "../../shared/utils/requesty"
 import { validateAndFixToolResultIds } from "../task/validateToolResultIds"
 import { PendingEditOperationStore, type PendingEditOperationInput } from "./PendingEditOperationStore"
@@ -326,7 +327,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "oct-2026-v3.86.0-models-aborts-tool-streaming" // v3.86.0 models, aborts, and tool/UI streaming fixes
+	public readonly latestAnnouncementId = "oct-2026-v3.88.0-providers-tasks-speed" // v3.88.0 provider/model support, task reliability, faster editing and chat
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -1473,7 +1474,7 @@ export class ClineProvider
 		}
 
 		try {
-			await this.view?.webview.postMessage(message)
+			await this.view?.webview.postMessage(omitOriginalContentFromExtensionMessage(message))
 		} catch {
 			// View disposed, drop message silently
 		}
