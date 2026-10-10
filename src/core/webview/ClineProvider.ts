@@ -216,6 +216,19 @@ class ProfileActivationInconsistentError extends Error {
 }
 
 /**
+ * Raised when a cancelled mode switch had already persisted the new mode and the
+ * compensating write failed too. The shared mode and the acting view's pin may now
+ * disagree, which is not the ordinary "cancelled before anything happened" outcome the
+ * caller's early return would suggest.
+ */
+class ModeSwitchInconsistentError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = "ModeSwitchInconsistentError"
+	}
+}
+
+/**
  * The durable stores a profile activation or upsert rewrites, captured before the first
  * write so a rejected mutation can put every landed write back. `mode` is undefined when
  * the caller never touches the per-mode mapping, and `previousProfileSettings` is
@@ -2299,8 +2312,13 @@ export class ClineProvider
 		// If the durable write fails, roll the shared write back so getValues()
 		// cannot mix a fresh shared mode with the stale pre-switch buffer.
 		const previousMode = this.getValue("mode")
+		let modeWriteLanded = false
 		try {
 			await this.setValue("mode", newMode)
+			// Marked once setValue resolves. It writes the shared key and the acting view's pin, so
+			// from here the switch is durable in both stores: an early return after this point would
+			// leave a changed mode with no activation behind it.
+			modeWriteLanded = true
 		} catch (error) {
 			try {
 				await this.contextProxy.setValue("mode", previousMode)
@@ -2315,6 +2333,28 @@ export class ClineProvider
 				`[handleModeSwitch] Failed to persist mode "${newMode}": ${error instanceof Error ? error.message : String(error)}`,
 			)
 			throw error
+		}
+
+		// An abort that lands after the durable write still has to be undone. The mutation queue has
+		// already advanced, so a newer mutation can start while this cancelled switch is still
+		// running; emitting or writing profile/list state now would land behind it. Compensate
+		// through the same setValue so the shared key and the per-view pin move back together, and
+		// surface an explicit inconsistent state when that compensation cannot finish.
+		if (signal?.aborted) {
+			if (modeWriteLanded) {
+				try {
+					await this.setValue("mode", previousMode)
+				} catch (compensationError) {
+					throw new ModeSwitchInconsistentError(
+						`[ClineProvider] A cancelled switch to mode "${newMode}" could not restore the previous mode "${String(
+							previousMode,
+						)}"; the shared mode and the per-view pin may disagree: ${
+							compensationError instanceof Error ? compensationError.message : String(compensationError)
+						}`,
+					)
+				}
+			}
+			return
 		}
 
 		this.emit(RooCodeEventName.ModeChanged, newMode)

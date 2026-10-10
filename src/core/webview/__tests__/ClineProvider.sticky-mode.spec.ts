@@ -598,6 +598,125 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", "architect")
 		})
 
+		it("compensates the durable mode write when the signal aborts after it lands", async () => {
+			// The abort lands once setValue("mode") has already persisted the new mode and the
+			// acting view's pin. Returning early there would leave the mode changed with no
+			// activation behind it, while the mutation queue has already moved on.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			// A switch always starts from a persisted mode; that is the value the compensation has
+			// to put back. Seed it through the provider so the ContextProxy cache holds it as well,
+			// then drop the setup calls so the assertions below see only the switch itself.
+			const updateMock = vi.mocked(mockContext.globalState.update)
+			await provider.setValue("mode", "code")
+			updateMock.mockClear()
+
+			const controller = new AbortController()
+			// The abort is raised by the durable write itself, so it lands exactly in the window
+			// the pre-write check cannot cover.
+			vi.mocked(mockContext.globalState.update).mockImplementation(async (key: string) => {
+				if (key === "mode") {
+					controller.abort()
+				}
+				return Promise.resolve()
+			})
+			const emitSpy = vi.spyOn(provider, "emit")
+
+			await provider["handleModeSwitchUnlocked"]("architect", mockTask, controller.signal)
+
+			// The cancelled switch is undone through the same path that wrote it, so the shared key
+			// and the per-view pin move back together: the durable writes are the new mode, then the
+			// previous mode, and the per-view overlay is rewritten with it.
+			const modeWrites = updateMock.mock.calls
+				.filter(([key]) => key === "mode")
+				.map(([, value]) => value)
+			expect(modeWrites).toEqual(["architect", "code"])
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("viewStates", expect.anything())
+			expect(emitSpy).not.toHaveBeenCalledWith("modeChanged", "architect")
+			// Nothing a completed switch would do may follow an aborted one.
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("listApiConfigMeta", expect.anything())
+		})
+
+		it("reports an inconsistent state when the cancelled mode switch cannot restore the previous mode", async () => {
+			// Same window, failing compensation: the shared mode and the per-view pin may disagree,
+			// which the caller must not read as a clean cancellation.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			// A switch always starts from a persisted mode; that is the value the compensation has
+			// to put back. Seed it through the provider so the ContextProxy cache holds it as well,
+			// then drop the setup calls so the assertions below see only the switch itself.
+			const updateMock = vi.mocked(mockContext.globalState.update)
+			await provider.setValue("mode", "code")
+			updateMock.mockClear()
+
+			const controller = new AbortController()
+			let modeWrites = 0
+			vi.mocked(mockContext.globalState.update).mockImplementation(async (key: string) => {
+				if (key === "mode") {
+					modeWrites += 1
+					controller.abort()
+					if (modeWrites === 2) {
+						return Promise.reject(new Error("compensation write failed"))
+					}
+				}
+				return Promise.resolve()
+			})
+
+			await expect(provider["handleModeSwitchUnlocked"]("architect", mockTask, controller.signal)).rejects.toThrow(
+				/ModeSwitchInconsistentError|could not restore the previous mode/,
+			)
+		})
+
 		it("keeps the cancellation result when the abort rollback write itself fails", async () => {
 			const mockTask = Object.assign(
 				{} as Task,
