@@ -996,9 +996,7 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		expect(clearIndex).toBeGreaterThanOrEqual(0)
 		// ...and push the corrected state: the launch flow already posted state once, with the
 		// missing pin still in it, and only listApiConfig is posted afterwards.
-		const clearOrder = vi
-			.mocked(mockClineProvider.saveViewState)
-			.mock.invocationCallOrder[clearIndex]
+		const clearOrder = vi.mocked(mockClineProvider.saveViewState).mock.invocationCallOrder[clearIndex]
 		const posts = vi.mocked(mockClineProvider.postStateToWebview).mock.invocationCallOrder
 		expect(posts[posts.length - 1]).toBeGreaterThan(clearOrder)
 	})

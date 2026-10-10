@@ -3719,9 +3719,7 @@ export class ClineProvider
 				this.log(
 					`deleteProviderProfile: cancelled before the selection/settings rewrite; the deletion stopped with the profile list already updated.`,
 				)
-				throw new Error(
-					"Profile deletion was cancelled before the selection and settings rewrite",
-				)
+				throw new Error("Profile deletion was cancelled before the selection and settings rewrite")
 			}
 
 			// Capture this view's pin before any rewrite: a view pinned to the

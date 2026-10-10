@@ -1,6 +1,5 @@
 // pnpm --filter roo-cline test core/webview/__tests__/ClineProvider.spec.ts
 
-
 import fs from "fs"
 import * as path from "path"
 import { TaskRegistry } from "../../task/TaskRegistry"
@@ -4158,7 +4157,6 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
-
 		it("rolls the shared viewStates cache back when the storage write rejects", async () => {
 			const provider = new ClineProvider(
 				mockContext,
@@ -4179,15 +4177,13 @@ describe("ClineProvider", () => {
 			// Only the first viewStates write fails; the rollback write and other keys pass.
 			const originalUpdate = mockContext.globalState.update.bind(mockContext.globalState)
 			let failed = false
-			const updateSpy = vi.spyOn(mockContext.globalState, "update").mockImplementation(
-				async (key, value) => {
-					if (key === "viewStates" && !failed) {
-						failed = true
-						throw new Error("storage down")
-					}
-					return originalUpdate(key, value)
-				},
-			)
+			const updateSpy = vi.spyOn(mockContext.globalState, "update").mockImplementation(async (key, value) => {
+				if (key === "viewStates" && !failed) {
+					failed = true
+					throw new Error("storage down")
+				}
+				return originalUpdate(key, value)
+			})
 
 			await expect(provider.saveViewState("mode", "code")).rejects.toThrow("storage down")
 
@@ -5157,9 +5153,9 @@ describe("ClineProvider", () => {
 			await writer["setViewStateId"]("shared-view")
 			await writer.saveViewState("currentApiConfigName", "old-profile")
 
-		// The reload this models has the previous provider disposed; a live view
-		// that still holds the id keeps it (ownership check in setViewStateId).
-		await writer.dispose()
+			// The reload this models has the previous provider disposed; a live view
+			// that still holds the id keeps it (ownership check in setViewStateId).
+			await writer.dispose()
 
 			const profile: ProviderSettingsEntry = {
 				name: "new-profile",
@@ -8125,17 +8121,17 @@ describe("ClineProvider", () => {
 				getProfile: vi.fn().mockImplementation(({ name }: { name: string }) =>
 					name === "doomed-profile"
 						? Promise.resolve({
-							name: "doomed-profile",
-							id: "doomed-id",
-							apiProvider: providerIdentifiers.openrouter,
-							openRouterApiKey: "doomed-secret",
-						})
+								name: "doomed-profile",
+								id: "doomed-id",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterApiKey: "doomed-secret",
+							})
 						: Promise.resolve({
-							name: "keeper-profile",
-							id: "keeper-id",
-							apiProvider: providerIdentifiers.anthropic,
-							apiKey: "keeper-secret",
-						}),
+								name: "keeper-profile",
+								id: "keeper-id",
+								apiProvider: providerIdentifiers.anthropic,
+								apiKey: "keeper-secret",
+							}),
 				),
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
 				saveConfig: saveConfigSpy,
@@ -8147,7 +8143,9 @@ describe("ClineProvider", () => {
 				.spyOn(provider.contextProxy, "setProviderSettings")
 				.mockRejectedValue(new Error("provider settings write failed"))
 
-			await expect(provider.deleteProviderProfile(doomedProfile)).rejects.toThrow("provider settings write failed")
+			await expect(provider.deleteProviderProfile(doomedProfile)).rejects.toThrow(
+				"provider settings write failed",
+			)
 			setProviderSettingsSpy.mockRestore()
 
 			// The settings are back under their original id...
@@ -8196,11 +8194,11 @@ describe("ClineProvider", () => {
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
 				getProfile: vi.fn().mockResolvedValue({
-				name: "doomed-profile",
-				id: "doomed-id",
-				apiProvider: providerIdentifiers.openrouter,
-				apiKey: "doomed-secret",
-			}),
+					name: "doomed-profile",
+					id: "doomed-id",
+					apiProvider: providerIdentifiers.openrouter,
+					apiKey: "doomed-secret",
+				}),
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
 				// The settings are already gone and cannot be put back: the caller must not be
 				// able to read this as a clean rollback.
@@ -8335,11 +8333,11 @@ describe("ClineProvider", () => {
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
 				getProfile: vi.fn().mockResolvedValue({
-				name: "keeper-profile",
-				id: "keeper-id",
-				apiProvider: providerIdentifiers.anthropic,
-				apiKey: "keeper-secret",
-			}),
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "keeper-secret",
+				}),
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
 				saveConfig: vi.fn().mockResolvedValue("doomed-id"),
 			}
@@ -8369,9 +8367,13 @@ describe("ClineProvider", () => {
 
 		it("rolls back the sibling views whose re-pin write succeeded when another sibling fails", async () => {
 			const provider = new ClineProvider(
-				mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext), new WebviewFocusTracker(),
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
 			)
-		// healthySibling
+			// healthySibling
 			// This sibling's writes all land: it is the one that has to be undone when the OTHER
 			// sibling's re-pin fails.
 			const healthySibling = new ClineProvider(
@@ -8383,14 +8385,17 @@ describe("ClineProvider", () => {
 			)
 			await healthySibling["setViewStateId"]("healthy-sibling-view")
 			await healthySibling.saveViewState("currentApiConfigName", "doomed-profile")
-		// failingSibling
+			// failingSibling
 			const failingSiblingContext = {
 				...mockContext,
 				globalState: {
 					...mockContext.globalState,
 					update: (key: string, value: unknown) => {
 						const states = value as Record<string, { currentApiConfigName?: string }> | undefined
-						if ( key === "viewStates" && states?.["failing-sibling-view"]?.currentApiConfigName === "keeper-profile") {
+						if (
+							key === "viewStates" &&
+							states?.["failing-sibling-view"]?.currentApiConfigName === "keeper-profile"
+						) {
 							return Promise.reject(new Error("sibling pin write failed"))
 						}
 						return mockContext.globalState.update(key, value)
@@ -8407,17 +8412,25 @@ describe("ClineProvider", () => {
 			await failingSibling["setViewStateId"]("failing-sibling-view")
 			await failingSibling.saveViewState("currentApiConfigName", "doomed-profile")
 			const doomedProfile: ProviderSettingsEntry = {
-				name: "doomed-profile", id: "doomed-id", apiProvider: providerIdentifiers.openrouter,
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
 			}
 			const keeperProfile: ProviderSettingsEntry = {
-				name: "keeper-profile", id: "keeper-id", apiProvider: providerIdentifiers.anthropic,
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
 			}
 			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
 			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
-				getProfile: vi.fn().mockResolvedValue({ name: "keeper-profile", id: "keeper-id", apiProvider: providerIdentifiers.anthropic }),
+				getProfile: vi.fn().mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
 				saveConfig: vi.fn().mockResolvedValue("doomed-id"),
 			}
@@ -8474,23 +8487,23 @@ describe("ClineProvider", () => {
 					}
 					return name === "doomed-profile"
 						? {
-							name: "doomed-profile",
-							id: "doomed-id",
-							apiProvider: providerIdentifiers.openrouter,
-							openRouterApiKey: "doomed-secret",
-						}
+								name: "doomed-profile",
+								id: "doomed-id",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterApiKey: "doomed-secret",
+							}
 						: {
-							name: "keeper-profile",
-							id: "keeper-id",
-							apiProvider: providerIdentifiers.anthropic,
-							apiKey: "keeper-secret",
-						}
+								name: "keeper-profile",
+								id: "keeper-id",
+								apiProvider: providerIdentifiers.anthropic,
+								apiKey: "keeper-secret",
+							}
 				}),
 			}
 
-			await expect(
-				provider["deleteProviderProfileUnlocked"](doomedProfile, controller.signal),
-			).rejects.toThrow("Profile deletion was cancelled before the selection and settings rewrite")
+			await expect(provider["deleteProviderProfileUnlocked"](doomedProfile, controller.signal)).rejects.toThrow(
+				"Profile deletion was cancelled before the selection and settings rewrite",
+			)
 
 			// The list write landed before the cancellation point...
 			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([keeperProfile])
@@ -8535,17 +8548,17 @@ describe("ClineProvider", () => {
 				getProfile: vi.fn().mockImplementation(async ({ name }) =>
 					name === "doomed-profile"
 						? {
-							name: "doomed-profile",
-							id: "doomed-id",
-							apiProvider: providerIdentifiers.openrouter,
-							openRouterApiKey: "doomed-key",
-						}
+								name: "doomed-profile",
+								id: "doomed-id",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterApiKey: "doomed-key",
+							}
 						: {
-							name: "keeper-profile",
-							id: "keeper-id",
-							apiProvider: providerIdentifiers.anthropic,
-							apiKey: "keeper-key",
-						}
+								name: "keeper-profile",
+								id: "keeper-id",
+								apiProvider: providerIdentifiers.anthropic,
+								apiKey: "keeper-key",
+							},
 				),
 			}
 			// The failure lands after the shared provider keys were replaced with the survivor's:
@@ -15170,7 +15183,9 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				})
 				vi.spyOn(provider, "upsertProviderProfile").mockResolvedValue("profile-id")
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-				const saveConfigSpy = vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("profile-id")
+				const saveConfigSpy = vi
+					.spyOn(provider.providerSettingsManager, "saveConfig")
+					.mockResolvedValue("profile-id")
 				vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
 					{ id: "zoo-gateway", name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
 					{ id: "backup-zoo", name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway },
@@ -15201,7 +15216,6 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				)
 				expect(provider["viewLocalState"].apiConfiguration).toMatchObject({ zooSessionToken: "new-token" })
 			})
-
 
 			it("updates every zoo-gateway profile and activates only the active one", async () => {
 				vi.spyOn(provider, "getState").mockResolvedValue({
