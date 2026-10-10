@@ -379,7 +379,6 @@ describe("DiffViewProvider", () => {
 
 			expect(diffViewProvider["createdDirs"]).toEqual([`${mockCwd}/new-parent`])
 		})
-
 	})
 
 	describe("scrollToFirstDiff method", () => {
@@ -1333,7 +1332,9 @@ describe("DiffViewProvider", () => {
 				editType: "create",
 				createdDirs: [],
 			})
-			vi.mocked(fs.unlink).mockRejectedValueOnce(Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }))
+			vi.mocked(fs.unlink).mockRejectedValueOnce(
+				Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }),
+			)
 
 			await expect(diffViewProvider.revertChanges()).rejects.toThrow("EACCES: permission denied")
 		})
@@ -1364,7 +1365,6 @@ describe("DiffViewProvider", () => {
 
 			expect(diffViewProvider["relPath"]).toBeUndefined()
 		})
-
 
 		it("reset() drops adopted directories so a later transaction cannot remove a previous one's", async () => {
 			// Adoption is per transaction: a stale list would make the next rollback rmdir

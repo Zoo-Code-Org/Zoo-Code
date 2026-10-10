@@ -168,7 +168,7 @@ describe("writeToFileTool", () => {
 			originalContent: "",
 			open: vi.fn().mockResolvedValue(undefined),
 			update: vi.fn().mockResolvedValue(undefined),
-		adoptCreatedDirs: vi.fn(),
+			adoptCreatedDirs: vi.fn(),
 			reset: vi.fn().mockResolvedValue(undefined),
 			revertChanges: vi.fn().mockResolvedValue(undefined),
 			saveChanges: vi.fn().mockResolvedValue({
@@ -1117,7 +1117,9 @@ describe("writeToFileTool", () => {
 
 			await executeWriteFileTool({})
 
-			expect(writeToFileTool["taskPartialStreamState"].get(`${mockCline.taskId}.${mockCline.instanceId}`)).toBeUndefined()
+			expect(
+				writeToFileTool["taskPartialStreamState"].get(`${mockCline.taskId}.${mockCline.instanceId}`),
+			).toBeUndefined()
 		})
 
 		it("reports user edits with diff feedback", async () => {
@@ -1210,8 +1212,6 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 		})
-
-
 
 		it("swallows partial streaming errors instead of surfacing a duplicate error bubble", async () => {
 			// The same filesystem operation is retried in execute() once the block completes,
@@ -1396,12 +1396,6 @@ describe("writeToFileTool", () => {
 			}
 		})
 
-
-
-
-
-
-
 		it("keeps partial stream failures isolated per task", async () => {
 			mockCline.diffViewProvider.open.mockRejectedValueOnce(
 				Object.assign(new Error("EROFS: read-only file system, mkdir '/task-a'"), { code: "EROFS" }),
@@ -1426,8 +1420,6 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(2)
 		})
 
-
-
 		it("EROFS in handlePartial does not stall agent loop -- createDirectoriesForFile is not called", async () => {
 			// Regression test: before the fix, createDirectoriesForFile was called in handlePartial
 			// with no .catch() guard. An EROFS throw escaped to BaseTool.handle(), which called
@@ -1448,10 +1440,6 @@ describe("writeToFileTool", () => {
 			expect(mockedCreateDirectoriesForFile).not.toHaveBeenCalled()
 			expect(mockHandleError).not.toHaveBeenCalled()
 		})
-
-
-
-
 	})
 
 	describe("partial-stream failure teardown and directory ownership", () => {
