@@ -3465,6 +3465,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// could still build tools and call `createMessage()`.
 		this.abort = true
 
+		// Stop post-save diagnostics tails that are still waiting on their delay. A
+		// disposed task cannot receive their say() emit, and without this the timer (and
+		// the provider + diagnostics snapshot it holds) survives the teardown.
+		try {
+			this.diffViewProvider.cancelPostSaveDiagnosticsTails()
+		} catch (error) {
+			console.error("Error cancelling post-save diagnostics tails:", error)
+		}
+
 		// Cancel any in-progress HTTP request
 		try {
 			this.cancelCurrentRequest()
