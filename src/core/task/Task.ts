@@ -1842,8 +1842,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			console.error("Failed to save task metadata:", error)
 			return false
 		}
-
-		return true
 	}
 
 	private findMessageByTimestamp(ts: number): ClineMessage | undefined {
