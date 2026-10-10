@@ -2160,7 +2160,11 @@ describe("ReadFileTool", () => {
 					includedRanges: [[3, 4]],
 				})
 
-				await readFileTool.execute({ path: "clipped-slice.ts", offset: 3 }, mockTask as unknown as Task, callbacks)
+				await readFileTool.execute(
+					{ path: "clipped-slice.ts", offset: 3 },
+					mockTask as unknown as Task,
+					callbacks,
+				)
 
 				const pushed = callbacks.pushToolResult.mock.calls[0][0]
 				expect(pushed).toContain("clipped in this view")
