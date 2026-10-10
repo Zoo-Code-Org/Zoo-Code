@@ -58,7 +58,6 @@ import {
 	Eye,
 	FileDiff,
 	ListTree,
-	User,
 	Edit,
 	Trash2,
 	MessageCircleQuestionMark,
@@ -67,7 +66,6 @@ import {
 	PocketKnife,
 	FolderTree,
 	SquareTerminal,
-	MessageCircle,
 	Repeat2,
 	Split,
 	ArrowRight,
@@ -1208,13 +1206,10 @@ export const ChatRowContent = ({
 				case "text":
 					return (
 						<div className="group">
-							<div style={headerStyle}>
-								<MessageCircle className="w-4 shrink-0" aria-label="Speech bubble icon" />
-								<span style={{ fontWeight: "bold" }}>{t("chat:text.rooSaid")}</span>
-								<div style={{ flexGrow: 1 }} />
-								<OpenMarkdownPreviewButton markdown={message.text} />
-							</div>
-							<div className="pl-6">
+							<div className="pl-6 relative">
+								<div className="absolute top-0 right-0 z-10">
+									<OpenMarkdownPreviewButton markdown={message.text} />
+								</div>
 								<Markdown markdown={message.text} partial={message.partial} />
 								{message.images && message.images.length > 0 && (
 									<div style={{ marginTop: "10px" }}>
@@ -1228,17 +1223,13 @@ export const ChatRowContent = ({
 					)
 				case "user_feedback":
 					return (
-						<div className="group">
-							<div style={headerStyle}>
-								<User className="w-4 shrink-0" aria-label="User icon" />
-								<span style={{ fontWeight: "bold" }}>{t("chat:feedback.youSaid")}</span>
-							</div>
+						<div className="group w-fit max-w-[70%] ml-auto flex flex-col items-end gap-1">
 							<div
 								className={cn(
-									"ml-6 border rounded-sm overflow-hidden whitespace-pre-wrap",
+									"border rounded-sm overflow-hidden whitespace-pre-wrap",
 									isEditing
 										? "bg-vscode-editor-background text-vscode-editor-foreground"
-										: "cursor-text p-1 bg-vscode-editor-foreground/70 text-vscode-editor-background",
+										: "cursor-text p-1 bg-vscode-list-hoverBackground text-vscode-foreground",
 								)}>
 								{isEditing ? (
 									<div className="flex flex-col gap-2">
@@ -1261,50 +1252,50 @@ export const ChatRowContent = ({
 										/>
 									</div>
 								) : (
-									<div className="flex justify-between">
-										<div
-											className="flex-grow px-2 py-1 wrap-anywhere rounded-lg transition-colors"
-											onClick={(e) => {
-												e.stopPropagation()
-												if (!isStreaming) {
-													handleEditClick()
-												}
-											}}
-											title={t("chat:queuedMessages.clickToEdit")}>
-											<Mention text={message.text} withShadow />
-										</div>
-										<div className="flex gap-2 pr-1">
-											<div
-												className="cursor-pointer shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-												style={{ visibility: isStreaming ? "hidden" : "visible" }}
-												onClick={(e) => {
-													e.stopPropagation()
-													handleEditClick()
-												}}>
-												<Edit className="w-4 shrink-0" aria-label="Edit message icon" />
-											</div>
-											<div
-												className="cursor-pointer shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-												style={{ visibility: isStreaming ? "hidden" : "visible" }}
-												onClick={(e) => {
-													e.stopPropagation()
-													vscode.postMessage({ type: "deleteMessage", value: message.ts })
-												}}>
-												<Trash2 className="w-4 shrink-0" aria-label="Delete message icon" />
-											</div>
-										</div>
+									<div
+										className="px-2 py-1 wrap-anywhere rounded-lg transition-colors"
+										onClick={(e) => {
+											e.stopPropagation()
+											if (!isStreaming) {
+												handleEditClick()
+											}
+										}}
+										title={t("chat:queuedMessages.clickToEdit")}>
+										<Mention text={message.text} withShadow />
 									</div>
 								)}
 								{!isEditing && message.images && message.images.length > 0 && (
 									<Thumbnails images={message.images} style={{ marginTop: "8px" }} />
 								)}
 							</div>
+							{!isEditing && (
+								<div className="flex gap-2 pr-1">
+									<div
+										className="cursor-pointer shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+										style={{ visibility: isStreaming ? "hidden" : "visible" }}
+										onClick={(e) => {
+											e.stopPropagation()
+											handleEditClick()
+										}}>
+										<Edit className="w-4 shrink-0" aria-label="Edit message icon" />
+									</div>
+									<div
+										className="cursor-pointer shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+										style={{ visibility: isStreaming ? "hidden" : "visible" }}
+										onClick={(e) => {
+											e.stopPropagation()
+											vscode.postMessage({ type: "deleteMessage", value: message.ts })
+										}}>
+										<Trash2 className="w-4 shrink-0" aria-label="Delete message icon" />
+									</div>
+								</div>
+							)}
 						</div>
 					)
 				case "user_feedback_diff":
 					const tool = safeJsonParse<ClineSayTool>(message.text)
 					return (
-						<div style={{ marginTop: -10, width: "100%" }}>
+						<div className="max-w-[70%] ml-auto" style={{ marginTop: -10, width: "100%" }}>
 							<CodeAccordion
 								code={tool?.diff}
 								language="diff"
