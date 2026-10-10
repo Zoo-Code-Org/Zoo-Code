@@ -1396,7 +1396,7 @@
 	},
 	"services/code-index/processors/__tests__/file-watcher.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 25
+			"count": 24
 		}
 	},
 	"services/code-index/processors/__tests__/parser.spec.ts": {
@@ -1411,7 +1411,7 @@
 	},
 	"services/code-index/processors/file-watcher.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 2
+			"count": 1
 		}
 	},
 	"services/code-index/processors/scanner.ts": {
