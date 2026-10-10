@@ -577,7 +577,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				isProtected: isWriteProtected,
 			}
 
-				partialMessage = JSON.stringify(sharedMessageProps)
+			partialMessage = JSON.stringify(sharedMessageProps)
 			await task.ask("tool", partialMessage, block.partial).catch(() => {})
 
 			// Cancelled while the partial ask was in flight: the teardown released this task's
@@ -596,7 +596,6 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			}
 			throw error
 		}
-
 
 		if (newContent) {
 			try {

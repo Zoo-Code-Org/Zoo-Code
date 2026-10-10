@@ -620,7 +620,8 @@ export class DiffViewProvider {
 						document.positionAt(0),
 						document.positionAt(document.getText().length),
 					)
-					const restoredContent = this.editType === "modify" ? this.stripAllBOMs(this.originalContent ?? "") : ""
+					const restoredContent =
+						this.editType === "modify" ? this.stripAllBOMs(this.originalContent ?? "") : ""
 					edit.replace(document.uri, fullRange, restoredContent)
 					const applied = await vscode.workspace.applyEdit(edit)
 					if (!applied) {
@@ -686,7 +687,6 @@ export class DiffViewProvider {
 		}
 	}
 
-
 	async revertChanges(): Promise<void> {
 		if (!this.relPath) {
 			return
@@ -733,7 +733,6 @@ export class DiffViewProvider {
 			for (let i = this.createdDirs.length - 1; i >= 0; i--) {
 				await this.removeCreatedDir(this.createdDirs[i])
 			}
-
 		} else {
 			// Only reachable after a successful open(), so the editor exists.
 			const updatedDocument = this.activeDiffEditor?.document
@@ -1096,10 +1095,7 @@ export class DiffViewProvider {
 			return
 		}
 		const edit = new vscode.WorkspaceEdit()
-		const range = new vscode.Range(
-			document.positionAt(0),
-			document.positionAt(document.getText().length),
-		)
+		const range = new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length))
 		edit.replace(document.uri, range, this.originalContent ?? "")
 		await vscode.workspace.applyEdit(edit)
 	}

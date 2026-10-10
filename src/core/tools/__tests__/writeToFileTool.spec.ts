@@ -1046,8 +1046,6 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 		})
 
-
-
 		it("swallows partial streaming errors instead of surfacing a duplicate error bubble", async () => {
 			// The same filesystem operation is retried in execute() once the block completes,
 			// and that authoritative non-partial path reports the error to the user. Surfacing

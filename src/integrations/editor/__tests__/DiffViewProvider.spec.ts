@@ -1276,7 +1276,9 @@ describe("DiffViewProvider", () => {
 				editType: "create",
 				createdDirs: [],
 			})
-			vi.mocked(fs.unlink).mockRejectedValueOnce(Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }))
+			vi.mocked(fs.unlink).mockRejectedValueOnce(
+				Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }),
+			)
 
 			await expect(diffViewProvider.revertChanges()).rejects.toThrow("EACCES: permission denied")
 		})
@@ -2077,7 +2079,7 @@ describe("DiffViewProvider", () => {
 				callOrder.push("save")
 			}),
 		})
-		
+
 		const openAbandonedView = (document: unknown, createdDirs: string[], callOrder: string[]) =>
 			Object.assign(diffViewProvider, {
 				relPath: "mock-target-file.ts",
@@ -2093,7 +2095,7 @@ describe("DiffViewProvider", () => {
 					callOrder.push("closeFileTab")
 				}),
 			})
-		
+
 		it("never persists the unapproved buffer: blanks it with an empty replacement, then deletes the placeholder", async () => {
 			const callOrder: string[] = []
 			const document = makeAbandonedDocument(callOrder)
@@ -2102,9 +2104,9 @@ describe("DiffViewProvider", () => {
 				callOrder.push("applyEdit")
 				return true
 			})
-		
+
 			await diffViewProvider.discardUnapprovedStream()
-		
+
 			expect(callOrder).toEqual(["applyEdit", "save", "closeDiffViews", "closeFileTab"])
 			// The only content the discard may write is an empty buffer, and it must be
 			// written to THIS document before the save that would otherwise persist the
@@ -2170,23 +2172,25 @@ describe("DiffViewProvider", () => {
 			openAbandonedView(document, [], callOrder)
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(false)
 
-			await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow(/could not restore the diff editor buffer/i)
+			await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow(
+				/could not restore the diff editor buffer/i,
+			)
 
 			expect(document.save).not.toHaveBeenCalled()
 			// The artifacts still have to go: the caller runs reset() next, which drops
 			// placeholderPath/createdDirs and leaves nothing else able to remove them.
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("mock-target-file.ts"))
 		})
-		
+
 		it("removes the directories this edit created in reverse order, after the placeholder unlink", async () => {
 			const callOrder: string[] = []
 			const document = makeAbandonedDocument(callOrder)
 			const createdDirs = [`${mockCwd}/mock-dir`, `${mockCwd}/mock-dir/nested`]
 			openAbandonedView(document, createdDirs, callOrder)
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
-		
+
 			await diffViewProvider.discardUnapprovedStream()
-		
+
 			expect(fs.unlink).toHaveBeenCalledTimes(1)
 			expect(fs.rmdir).toHaveBeenCalledTimes(createdDirs.length)
 			// Reverse order, so a parent is never removed before the child inside it, and
@@ -2197,37 +2201,37 @@ describe("DiffViewProvider", () => {
 				expect(order).toBeGreaterThan(unlinkOrder)
 			}
 		})
-		
+
 		it("does not save when the abandoned buffer is already clean", async () => {
 			const callOrder: string[] = []
 			const document = makeAbandonedDocument(callOrder, false)
 			openAbandonedView(document, [], callOrder)
-		
+
 			await diffViewProvider.discardUnapprovedStream()
-		
+
 			expect(vscode.workspace.applyEdit).not.toHaveBeenCalled()
 			expect(document.save).not.toHaveBeenCalled()
 			expect(mockWorkspaceEdit.replace).not.toHaveBeenCalled()
 			expect(fs.unlink).toHaveBeenCalledTimes(1)
 		})
-		
+
 		it("still removes the placeholder and the created directories when the editor work rejects, and reports the failure", async () => {
 			const callOrder: string[] = []
 			const document = makeAbandonedDocument(callOrder)
 			const createdDirs = [`${mockCwd}/mock-dir`]
 			openAbandonedView(document, createdDirs, callOrder)
 			vi.mocked(vscode.workspace.applyEdit).mockRejectedValue(new Error("applyEdit rejected"))
-		
+
 			// The caller (releaseAbandonedDiffView) treats a throw as "rollback hazard", so
 			// the failure must still surface - but only after the artifacts are gone, because
 			// the caller then runs reset(), which drops relPath/createdDirs and leaves
 			// nothing else able to remove them.
 			await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow("applyEdit rejected")
-		
+
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("mock-target-file.ts"))
 			expect(fs.rmdir).toHaveBeenCalledWith(`${mockCwd}/mock-dir`)
 		})
-		
+
 		it("removes the placeholder and created directories even when open() failed before activeDiffEditor was assigned", async () => {
 			// open() creates the directories (line 130) and the empty placeholder (line 134)
 			// BEFORE openDiffEditor() assigns activeDiffEditor (line 173). If that call rejects
@@ -2307,7 +2311,10 @@ describe("DiffViewProvider", () => {
 			// Both directories were attempted; the assertion is on the paths, not the order.
 			expect(fs.rmdir).toHaveBeenCalledWith(dirA)
 			expect(fs.rmdir).toHaveBeenCalledWith(dirB)
-			expect(errorSpy).not.toHaveBeenCalledWith("Error removing abandoned write_to_file artifacts:", expect.anything())
+			expect(errorSpy).not.toHaveBeenCalledWith(
+				"Error removing abandoned write_to_file artifacts:",
+				expect.anything(),
+			)
 
 			// beforeEach only clears call data, not implementations, so put the default back.
 			vi.mocked(fs.rmdir).mockResolvedValue(undefined)
@@ -2506,11 +2513,10 @@ describe("DiffViewProvider", () => {
 
 		it("does nothing when no abandoned view is open", async () => {
 			Object.assign(diffViewProvider, { relPath: undefined, activeDiffEditor: undefined })
-		
+
 			await diffViewProvider.discardUnapprovedStream()
-		
+
 			expect(fs.unlink).not.toHaveBeenCalled()
 		})
 	})
-
 })
