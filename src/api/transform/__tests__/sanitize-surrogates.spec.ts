@@ -86,4 +86,29 @@ describe("sanitizeSurrogatesDeep", () => {
 		expect(sanitizeSurrogatesDeep(undefined)).toBe(undefined)
 		expect(sanitizeSurrogatesDeep(true)).toBe(true)
 	})
+
+	it("reports a cycle instead of recursing to the stack limit", () => {
+		const circular: Record<string, unknown> = {}
+		circular.self = circular
+		expect(() => sanitizeSurrogatesDeep(circular)).toThrow(/circular/)
+	})
+
+	it("still sanitizes a node reached twice, which is not a cycle", () => {
+		const shared = { path: "bad\uD800end" }
+		expect(sanitizeSurrogatesDeep({ a: shared, b: shared })).toEqual({
+			a: { path: "bad\uFFFDend" },
+			b: { path: "bad\uFFFDend" },
+		})
+	})
+	it("still sanitizes a shared array reached twice, which is not a cycle", () => {
+		const lone = "bad\uD800end"
+		const sanitized = "bad\uFFFDend"
+		const shared = [lone]
+		// The array branch has its own cleanup; without it the second visit would
+		// be read as a cycle and throw.
+		expect(sanitizeSurrogatesDeep({ a: shared, b: shared })).toEqual({
+			a: [sanitized],
+			b: [sanitized],
+		})
+	})
 })
