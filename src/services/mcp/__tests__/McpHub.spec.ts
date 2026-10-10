@@ -1043,7 +1043,9 @@ describe("McpHub", () => {
 
 			await mcpHub.updateServerTimeout("test-server", 120)
 
-			const writes = vi.mocked(safeWriteJson).mock.calls.filter((call) => String(call[0]).includes("mcp_settings"))
+			const writes = vi
+				.mocked(safeWriteJson)
+				.mock.calls.filter((call) => String(call[0]).includes("mcp_settings"))
 			expect(writes.length).toBeGreaterThan(0)
 			for (const write of writes) {
 				expect(write[2]?.confineTo).toBeUndefined()
@@ -1070,7 +1072,9 @@ describe("McpHub", () => {
 
 			await mcpHub.deleteServer("test-server", "global")
 
-			const writes = vi.mocked(safeWriteJson).mock.calls.filter((call) => String(call[0]).includes("mcp_settings"))
+			const writes = vi
+				.mocked(safeWriteJson)
+				.mock.calls.filter((call) => String(call[0]).includes("mcp_settings"))
 			expect(writes.length).toBeGreaterThan(0)
 			for (const write of writes) {
 				expect(write[2]?.confineTo).toBeUndefined()
