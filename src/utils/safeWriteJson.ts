@@ -108,12 +108,7 @@ async function _resolveScopeRoot(confineTo: string): Promise<string> {
  */
 function _assertWithinScope(requestedPath: string, candidatePath: string, scopeRoot: string): void {
 	const relative = path.relative(scopeRoot, candidatePath)
-	if (
-		relative === "" ||
-		relative === ".." ||
-		relative.startsWith(".." + path.sep) ||
-		path.isAbsolute(relative)
-	) {
+	if (relative === "" || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)) {
 		throw new ConfinedPathEscapeError(requestedPath, candidatePath, scopeRoot)
 	}
 }
@@ -177,8 +172,6 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
 		throw dirError
 	}
-
-
 
 	// immediately, and releaseLock stays a no-op so the finally block does not try
 	// to release an unacquired lock.
