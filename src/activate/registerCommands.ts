@@ -293,11 +293,7 @@ type OpenClineInNewTabOptions = {
 	webviewFocusTracker: WebviewFocusTracker
 }
 
-export const openClineInNewTab = async ({
-	context,
-	outputChannel,
-	webviewFocusTracker,
-}: OpenClineInNewTabOptions) => {
+export const openClineInNewTab = async ({ context, outputChannel, webviewFocusTracker }: OpenClineInNewTabOptions) => {
 	if (pendingTabPanelCreation) {
 		return pendingTabPanelCreation
 	}
@@ -365,11 +361,7 @@ async function disposeFailedTabCreation(
 
 // The unserialized tab-creation body. Only openClineInNewTab may call it,
 // after it has stored the shared in-flight promise.
-const createTabPanelUnlocked = async ({
-	context,
-	outputChannel,
-	webviewFocusTracker,
-}: OpenClineInNewTabOptions) => {
+const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTracker }: OpenClineInNewTabOptions) => {
 	// Reuse the tracked tab instead of opening a second one: a repeated
 	// "Open in editor" click reveals the existing tab's panel.
 	if (tabPanel) {

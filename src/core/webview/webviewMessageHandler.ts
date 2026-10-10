@@ -101,12 +101,7 @@ const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 // map that ClineProvider owns. The generic settings loop below writes straight into
 // the shared store and into this view's local buffer - and getState() prefers the
 // buffer - so a webview payload must not be allowed to carry them.
-const HOST_OWNED_SETTINGS = new Set([
-	"apiConfiguration",
-	"listApiConfigMeta",
-	"viewStates",
-	"currentApiConfigName",
-])
+const HOST_OWNED_SETTINGS = new Set(["apiConfiguration", "listApiConfigMeta", "viewStates", "currentApiConfigName"])
 
 // Serializes handling of "telemetrySetting" messages. Each invocation reads the previous
 // setting, awaits a persistence write, then applies the new live telemetry state -- with no

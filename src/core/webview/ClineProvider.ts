@@ -777,9 +777,7 @@ export class ClineProvider
 		if (typeof viewStateId !== "string") {
 			// A crafted postMessage can carry any JSON value here even though the message
 			// type declares a string; the persisted key must stay a string.
-			this.log(
-				`[setViewStateId] Ignoring a non-string viewStateId for view ${this.viewId}.`,
-			)
+			this.log(`[setViewStateId] Ignoring a non-string viewStateId for view ${this.viewId}.`)
 			return
 		}
 
@@ -1365,9 +1363,7 @@ export class ClineProvider
 		await attemptCleanup("task history store", () => this.taskHistoryStore.dispose())
 
 		if (cleanupFailures.length > 0) {
-			this.log(
-				`Disposal was incomplete (${cleanupFailures.join("; ")}); the provider was unregistered anyway.`,
-			)
+			this.log(`Disposal was incomplete (${cleanupFailures.join("; ")}); the provider was unregistered anyway.`)
 		} else {
 			this.log("Disposed all disposables")
 		}
@@ -1967,16 +1963,16 @@ export class ClineProvider
 		// turn after a mode switch). Message ordering is enforced by the message seq, not the ack.
 		// Promise.resolve() normalizes non-promise returns (e.g. test doubles) before the catch.
 		try {
-			void Promise.resolve(
-				webview.postMessage(omitOriginalContentFromExtensionMessage(message)),
-			).catch((error) => {
-				// Swallow: postMessage rejects when the webview is disposed in flight.
-				// Log the dropped message type so a wedged webview channel is diagnosable
-				// instead of silently losing state updates.
-				this.log(
-					`[postMessageToWebview] dropped message type=${message.type}: ${error instanceof Error ? error.message : String(error)}`,
-				)
-			})
+			void Promise.resolve(webview.postMessage(omitOriginalContentFromExtensionMessage(message))).catch(
+				(error) => {
+					// Swallow: postMessage rejects when the webview is disposed in flight.
+					// Log the dropped message type so a wedged webview channel is diagnosable
+					// instead of silently losing state updates.
+					this.log(
+						`[postMessageToWebview] dropped message type=${message.type}: ${error instanceof Error ? error.message : String(error)}`,
+					)
+				},
+			)
 		} catch {
 			// View disposed, drop message silently
 		}
@@ -2550,7 +2546,10 @@ export class ClineProvider
 				if (snapshot.previousProfileSettings === undefined) {
 					await this.providerSettingsManager.deleteConfig(snapshot.profileName)
 				} else {
-					await this.providerSettingsManager.saveConfig(snapshot.profileName, snapshot.previousProfileSettings)
+					await this.providerSettingsManager.saveConfig(
+						snapshot.profileName,
+						snapshot.previousProfileSettings,
+					)
 				}
 			} catch (error: unknown) {
 				failures.push(`profile-manager record: ${describeFailure(error)}`)
@@ -2766,11 +2765,11 @@ export class ClineProvider
 		const previousGlobalSelection = globalSettings.currentApiConfigName
 		const previousViewPin = this.viewLocalState.currentApiConfigName
 		const previousViewOverlay = this.viewLocalState.apiConfiguration
-			// The shared provider keys are a fifth durable store this method rewrites: without the
-			// same snapshot the compensation would restore the profile list and the selection while
-			// leaving the survivor's provider keys in place, i.e. the restored profile's name paired
-			// with another profile's configuration.
-			const previousSharedProviderSettings = this.contextProxy.getProviderSettings()
+		// The shared provider keys are a fifth durable store this method rewrites: without the
+		// same snapshot the compensation would restore the profile list and the selection while
+		// leaving the survivor's provider keys in place, i.e. the restored profile's name paired
+		// with another profile's configuration.
+		const previousSharedProviderSettings = this.contextProxy.getProviderSettings()
 		// Which writes have actually landed: only those need compensation.
 		let listWriteLanded = false
 		let selectionWriteLanded = false
@@ -2818,9 +2817,7 @@ export class ClineProvider
 				this.log(
 					`deleteProviderProfile: cancelled before the selection/settings rewrite; the deletion stopped with the profile list already updated.`,
 				)
-				throw new Error(
-					"Profile deletion was cancelled before the selection and settings rewrite",
-				)
+				throw new Error("Profile deletion was cancelled before the selection and settings rewrite")
 			}
 
 			// Capture this view's pin before any rewrite: a view pinned to the
@@ -2850,7 +2847,7 @@ export class ClineProvider
 				// the shared provider keys still carry its settings; replace them so
 				// getState() reports the surviving profile's configuration.
 				await this.contextProxy.setProviderSettings(survivingSettings)
-					providerSettingsWriteLanded = true
+				providerSettingsWriteLanded = true
 
 				if (viewWasPinnedToDeleted) {
 					// This view's nested overlay (viewLocalState.apiConfiguration, seeded
@@ -2905,9 +2902,7 @@ export class ClineProvider
 				try {
 					await this.contextProxy.setProviderSettings(previousSharedProviderSettings)
 				} catch (compensationError: unknown) {
-					compensationFailures.push(
-						`shared provider settings: ${describeFailure(compensationError)}`,
-					)
+					compensationFailures.push(`shared provider settings: ${describeFailure(compensationError)}`)
 				}
 			}
 
@@ -3199,9 +3194,7 @@ export class ClineProvider
 			}),
 		)
 
-		const rejected = results.filter(
-			(result): result is PromiseRejectedResult => result.status === "rejected",
-		)
+		const rejected = results.filter((result): result is PromiseRejectedResult => result.status === "rejected")
 		if (rejected.length > 0) {
 			// Undo every affected view, not just the failing one: _saveViewLocalStateFromMutation
 			// fills the in-memory buffer before the durable write settles, so even a rejected write

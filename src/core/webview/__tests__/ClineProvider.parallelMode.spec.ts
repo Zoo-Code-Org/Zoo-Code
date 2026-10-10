@@ -678,7 +678,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 	describe("persisted view state pruning edge cases", () => {
 		it("should drop the entry without updatedAt first when the cap is exceeded", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -710,7 +710,7 @@ const provider = new ClineProvider(
 		})
 
 		it("should keep the earliest inserted entries when updatedAt values tie", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -736,7 +736,7 @@ const provider = new ClineProvider(
 
 	describe("sibling view consistency after a profile activation", () => {
 		const makeProvider = () =>
-new ClineProvider(
+			new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"sidebar",
@@ -801,9 +801,7 @@ new ClineProvider(
 			// shared store.
 			viewB["viewLocalState"].currentApiConfigName = "profile-b"
 
-			const getProfile = vi
-				.spyOn(viewA.providerSettingsManager, "getProfile")
-				.mockResolvedValue(pinnedElsewhere)
+			const getProfile = vi.spyOn(viewA.providerSettingsManager, "getProfile").mockResolvedValue(pinnedElsewhere)
 
 			await viewA["refreshViewLocalStateForUpdatedProfile"]("profile-a", activated)
 
@@ -902,7 +900,7 @@ new ClineProvider(
 
 	describe("durable editor view state retention (#1065)", () => {
 		it("should preserve persisted viewStates entry when an editor provider is disposed during teardown", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"editor",
@@ -926,7 +924,7 @@ const provider = new ClineProvider(
 
 	describe("shared setting and per-view pin are updated atomically", () => {
 		it("restores the shared value when the per-view pin cannot be persisted", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"editor",
@@ -955,7 +953,7 @@ const provider = new ClineProvider(
 		})
 
 		it("restores every shared value a batch had written when its pin write fails", async () => {
-const provider = new ClineProvider(
+			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
 				"editor",
@@ -994,7 +992,10 @@ const provider = new ClineProvider(
 			await provider["setViewStateId"]("tab-upsert-rollback")
 			await provider.setValue("currentApiConfigName", "profile-a")
 
-			const previousEntries = [{ name: "profile-a", id: "id-a" }, { name: "profile-b", id: "id-b" }]
+			const previousEntries = [
+				{ name: "profile-a", id: "id-a" },
+				{ name: "profile-b", id: "id-b" },
+			]
 			await provider.contextProxy.setValue("listApiConfigMeta", previousEntries)
 			const previousSettings = { apiProvider: providerIdentifiers.openrouter, apiKey: "shared-a" }
 			await provider.contextProxy.setProviderSettings(previousSettings)
@@ -1015,7 +1016,6 @@ const provider = new ClineProvider(
 				{ name: "profile-b", id: "id-b" },
 				{ name: "profile-c", id: "id-c" },
 			])
-
 
 			const settingsBeforeUpsert = provider.contextProxy.getProviderSettings()
 			const setProviderSettings = vi.spyOn(provider.contextProxy, "setProviderSettings")
@@ -1065,7 +1065,10 @@ const provider = new ClineProvider(
 			await provider["setViewStateId"]("tab-activate-rollback")
 			await provider.setValue("currentApiConfigName", "profile-a")
 
-			const previousEntries = [{ name: "profile-a", id: "id-a" }, { name: "profile-b", id: "id-b" }]
+			const previousEntries = [
+				{ name: "profile-a", id: "id-a" },
+				{ name: "profile-b", id: "id-b" },
+			]
 			await provider.contextProxy.setValue("listApiConfigMeta", previousEntries)
 
 			const manager = provider.providerSettingsManager
