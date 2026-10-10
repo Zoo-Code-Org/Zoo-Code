@@ -1,0 +1,445 @@
+import * as fs from "fs/promises"
+import * as fsSync from "fs"
+import * as path from "path"
+import { execFile } from "child_process"
+
+/**
+ * Options for safeWriteText atomic text publish primitive.
+ */
+export interface SafeWriteTextOptions {
+	/**
+	 * When true, preserve the old-file semantics: rename target -> backup first,
+	 * after commit rename delete the backup; on failure roll the backup back to
+	 * the target path.  When false (default) the atomic rename simply replaces
+	 * the target -- crash-safe window is zero.
+	 */
+	backup?: boolean
+
+	/**
+	 * Platform override for testing.  When omitted the real process.platform
+	 * value is used.  Set to "win32" or "linux" / "darwin" from tests so that
+	 * both branches are reachable without needing a real Windows runner.
+	 */
+	platform?: string
+
+	/**
+	 * Custom execFile runner for testing (e.g. vi.fn).  When omitted the real
+	 * child_process.execFile is used.
+	 */
+	execFileRunner?: typeof execFile
+
+	/**
+	 * Pre-written temp path to use for the commit phase.  When provided,
+	 * safeWriteText skips creating its own staging file and uses this path
+	 * instead (it still fsyncs before rename).  Useful when a caller has
+	 * already written data to a temp file via a custom stream.
+	 */
+	tempPath?: string
+
+	/**
+	 * Set when the caller has already resolved the publish target and guarded the
+	 * symlink window itself (safeWriteJson resolves, locks, and re-checks the final
+	 * component). safeWriteText then uses filePath as-is: resolving a second time would
+	 * re-open the window the caller just closed, because a link installed after the
+	 * caller's check would be followed here and the content committed to its referent.
+	 */
+	targetPathIsResolved?: boolean
+
+	/**
+	 * Pre-commit verification hook (A4a guarded write, epic #1375).  Invoked
+	 * immediately before the commit rename and BEFORE any backup rename moves the
+	 * target aside, so a caller can re-check the target's state and reject
+	 * publication when it changed since the caller's earlier verification.  When the
+	 * hook rejects, no commit rename is performed and no backup has been taken yet,
+	 * so there is nothing to roll back: the staged temp file is discarded and the
+	 * hook's rejection is propagated to the caller.
+	 *
+	 * Scope: the hook narrows - it does not close - the check-to-rename window for
+	 * writers that the caller serializes (guardedWrite's per-path FIFO chain); an
+	 * external process can still publish between the hook and the rename
+	 * (documented in guardedWrite).
+	 */
+	verifyBeforeCommit?: () => Promise<void>
+}
+
+// -- helpers ---------------------------------------------------------------
+
+/** Generate a unique temp file name in the given directory. */
+function _tempName(dir: string, prefix: string): string {
+	return path.join(dir, "." + prefix + "_" + Date.now() + "_" + Math.random().toString(36).substring(2) + ".tmp")
+}
+
+/** Create a private staging sub-directory inside *dir* so that multiple
+ * concurrent writes never collide on their temp names. */
+function _stagingDir(dir: string): string {
+	const sd = path.join(dir, ".file-safety-staging")
+	// mode:0o700 protects a freshly created staging dir; the best-effort chmod
+	// repairs a pre-existing one (mkdirSync with recursive:true never chmods an
+	// existing directory), so staged temp files are never group/world readable.
+	fsSync.mkdirSync(sd, { recursive: true, mode: 0o700 })
+	try {
+		fsSync.chmodSync(sd, 0o700)
+	} catch {
+		// best-effort: chmod denied or unavailable; a fresh dir was still
+		// created with the requested mode
+	}
+	return sd
+}
+
+/** Remove the staging sub-directory when nothing is staged in it any more.
+ * rmdirSync fails on a non-empty directory (a concurrent write is still using it)
+ * and on a directory that is already gone, so the last write to finish cleans up
+ * and the others leave it to that writer - no shared bookkeeping is needed, and a
+ * persistent hidden directory is never left in the user's workspace. */
+function _removeStagingDirIfEmpty(dir: string): void {
+	try {
+		fsSync.rmdirSync(dir)
+	} catch {
+		// non-empty (a concurrent write is still staging there) or already removed
+	}
+}
+
+/**
+ * fsync a file descriptor so its data is durable before the atomic rename.
+ * Uses the sync form because this repo's @types/node does not declare
+ * fs.promises.fsync; the staging file is small, so the blocking window is bounded.
+ */
+function _fsyncFile(fd: number): void {
+	fsSync.fsyncSync(fd)
+}
+
+/** Save the DACL of *srcPath* to a dump file on Windows.
+ * Returns true when the dump was written successfully; false otherwise.
+ * Never throws — callers treat failure as "skip DACL handling". */
+async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<boolean> {
+	const runner = execFileRunner ?? execFile
+	try {
+		await new Promise<void>((resolve, reject) => {
+			runner("icacls", [srcPath, "/save", dumpPath, "/T"], { windowsHide: true }, (err) =>
+				err ? reject(err) : resolve(),
+			)
+		})
+		return true
+	} catch {
+		return false
+	}
+}
+
+/** Restore a DACL dump onto *dirPath* on Windows.
+ * Best-effort: content is already committed, so failure is non-fatal. */
+async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<void> {
+	const runner = execFileRunner ?? execFile
+	try {
+		await new Promise<void>((resolve, reject) => {
+			runner("icacls", [dirPath, "/restore", dumpPath], { windowsHide: true }, (err) =>
+				err ? reject(err) : resolve(),
+			)
+		})
+	} catch {
+		// best-effort; content already committed
+	}
+}
+
+// -- public API ------------------------------------------------------------
+
+/**
+ * Atomic text publish primitive.
+ *
+ * 1. Write content to a temp file in a private per-write staging subdir
+ *    (same volume -> atomic rename guaranteed).
+ * 2. fsync the temp file, then close it.
+ * 3. win32 only: if target exists save its DACL dump BEFORE backup rename.
+ * 4. Optionally run the pre-commit verification hook (verifyBeforeCommit) before
+ *    the target is moved aside, so it observes the state the rename replaces;
+ *    a rejection aborts the publish (no commit rename, no backup taken yet) and
+ *    propagates.
+ * 5. Optionally rename target -> backup (when backup:true).
+ * 6. Atomic rename temp -> target.
+ * 7. win32 only: restore DACL onto the directory AFTER commit rename.
+ * 8. On success: delete backup (if any) and unlink DACL dump; remove the staging
+ *    sub-directory when it is empty.
+ * 9. On failure: rollback backup to target path; clean up temp + dump, and remove
+ *    the staging sub-directory when it is empty.
+ */
+
+/**
+ * Resolve the publish target: the symlink referent when the given path is an
+ * existing symlink, the path itself otherwise. Only ENOENT (target absent yet)
+ * may fall back to the given path; any other resolution error (EACCES, EIO, ...)
+ * propagates so a broken or unreadable symlink is never written through its
+ * link path. Callers that stage a temp file themselves must stage it beside
+ * the resolved path: the commit is a rename onto the referent, and a rename
+ * across filesystems fails with EXDEV.
+ */
+export async function resolvePublishTarget(absoluteFilePath: string): Promise<string> {
+	return fs.realpath(absoluteFilePath).catch((error: unknown) => {
+		const code =
+			typeof error === "object" && error !== null && "code" in error
+				? (error as { code?: string }).code
+				: undefined
+		if (code !== "ENOENT") throw error
+		return absoluteFilePath
+	})
+}
+
+/**
+ * Raised when the commit rename failed AND the backup could not be renamed back onto the
+ * target: the target path is absent and the previous content survives only under the
+ * randomized backup path. The primary failure is preserved as originalError so callers
+ * keep the reason the publish failed while also learning where the saved state is.
+ */
+class RollbackFailedError extends Error {
+	readonly originalError: unknown
+
+	constructor(
+		public readonly filePath: string,
+		public readonly backupPath: string,
+		rollbackError: unknown,
+		originalError: unknown,
+	) {
+		super(_rollbackFailureMessage(filePath, backupPath, rollbackError, originalError), {
+			cause: rollbackError,
+		})
+		this.name = "RollbackFailedError"
+		this.originalError = originalError
+	}
+}
+
+function _rollbackFailureMessage(
+	filePath: string,
+	backupPath: string,
+	rollbackError: unknown,
+	originalError: unknown,
+): string {
+	const primary = originalError instanceof Error ? originalError.message : String(originalError)
+	const rollback = rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+	return (
+		`Publish to ${filePath} failed (${primary}) and the backup could not be restored (${rollback}). ` +
+		`The previous content is still at ${backupPath}.`
+	)
+}
+
+export async function safeWriteText(filePath: string, content: string, options?: SafeWriteTextOptions): Promise<void> {
+	const absoluteFilePath = path.resolve(filePath)
+
+	// Resolve the symlink referent (see resolvePublishTarget) - unless the caller
+	// already resolved it and closed the substitution window itself.
+	const targetPath = options?.targetPathIsResolved ? absoluteFilePath : await resolvePublishTarget(absoluteFilePath)
+	const dirPath = path.dirname(targetPath)
+
+	// Ensure parent directory exists (mirrors safeWriteJson behaviour).
+	await fs.mkdir(dirPath, { recursive: true })
+	await fs.access(dirPath)
+
+	// Create the staging directory only when we generate the temp file there;
+	// callers supplying their own tempPath (e.g. safeWriteJson) must not be left
+	// with an empty .file-safety-staging directory behind.
+	let stagingDirPath: string | null = null
+	let tempPath: string
+	if (options?.tempPath) {
+		tempPath = options.tempPath
+	} else {
+		stagingDirPath = _stagingDir(dirPath)
+		tempPath = _tempName(stagingDirPath, "safeWriteText")
+	}
+
+	let backupPath: string | null = null
+	let releaseBackupOnSuccess = false
+	let daclDumpPath: string | null = null // tracked for cleanup in finally
+	let daclSaved = false // the restore step runs only when the save succeeded
+
+	try {
+		// -- Step 1: write content to staging temp file -------------------
+		if (!options?.tempPath) {
+			// Preserve the existing target's permissions: the staging file must
+			// not be published wider than the file it replaces (a 0o600 target
+			// must not become 0o644 through the atomic rename).
+			let targetMode = 0o644 // default for a fresh target
+			let targetExists = false
+			try {
+				targetMode = fsSync.statSync(targetPath).mode & 0o777
+				targetExists = true
+			} catch {
+				// target does not exist yet - keep the default
+			}
+			const fd = fsSync.openSync(tempPath, "w", targetMode)
+			try {
+				// openSync applies the process umask to the requested mode, so a 0o664
+				// or 0o666 target would be staged as 0o644 under the common umask 022 and
+				// lose group write through the rename. Set the mode on the fd instead, the
+				// same way the caller-staged branch below does - but only when a target
+				// actually existed to preserve. For a new target the creation mask must win:
+				// forcing the 0o644 default back on with fchmod would undo a restrictive
+				// umask (0o600 under umask 077) and publish a group/world-readable file.
+				if (targetExists) {
+					fsSync.fchmodSync(fd, targetMode)
+				}
+				// Loop until every byte is written: writeSync can report a short
+				// (partial) write, and publishing a truncated staging file would
+				// commit corrupt content.
+				const buffer = Buffer.from(content, "utf8")
+				let offset = 0
+				while (offset < buffer.length) {
+					offset += fsSync.writeSync(fd, buffer, offset, buffer.length - offset)
+				}
+				_fsyncFile(fd)
+			} finally {
+				fsSync.closeSync(fd)
+			}
+		} else {
+			// Preserve the existing target's mode (CWE-732): the caller-staged
+			// temp carries its own creation mode, and publishing it as-is would
+			// widen a restrictive target (e.g. 0o600 -> 0o644) through rename.
+			// The mode is applied with fchmodSync on the open fd (AFTER openSync):
+			// chmodSync on the path before the open would make a read-only target
+			// (0o400/0o444) fail openSync(tempPath, "r+") with EACCES.
+			let targetMode: number | null = null
+			try {
+				targetMode = fsSync.statSync(targetPath).mode & 0o777
+			} catch {
+				// target does not exist yet - keep the temp's default mode
+			}
+			const fd = fsSync.openSync(tempPath, "r+")
+			try {
+				if (targetMode !== null) {
+					fsSync.fchmodSync(fd, targetMode)
+				}
+				_fsyncFile(fd)
+			} finally {
+				fsSync.closeSync(fd)
+			}
+		}
+
+		// -- Step 2 (win32): save DACL BEFORE backup rename ---------------
+		const platform = options?.platform ?? process.platform
+		if (platform === "win32") {
+			try {
+				await fs.access(targetPath) // target exists?
+				daclDumpPath = targetPath + ".acl.tmp"
+				const saved = await _saveDaclWindows(targetPath, daclDumpPath, options?.execFileRunner)
+				if (!saved) {
+					// Skip the RESTORE step only. icacls can create a partial dump and still exit
+					// non-zero, so the path stays tracked: dropping it here would leave that file
+					// next to the target with nothing left to remove it.
+					daclSaved = false
+				} else {
+					daclSaved = true
+				}
+			} catch {
+				// target does not exist or access failed — no DACL handling
+				daclDumpPath = null
+			}
+		}
+
+		try {
+			// -- Step 3a (A4a): pre-commit verification --------------------------
+			// Runs before the target is moved aside, so a conditional publication
+			// (guardedWrite's createIfAbsent / replaceIfVersion) validates against the state
+			// the commit rename will actually replace. Running it after the backup rename
+			// would make the target look absent: a version check would fail with ENOENT and
+			// an absence check would pass vacuously. A rejection skips the commit rename and
+			// discards the staged temp; no backup has been taken yet, so there is nothing to
+			// roll back.
+			if (options?.verifyBeforeCommit) {
+				await options.verifyBeforeCommit()
+			}
+
+			// -- Step 3b (backup:true): rename target -> backup --------------
+			if (options?.backup) {
+				try {
+					await fs.access(targetPath)
+					backupPath = _tempName(dirPath, "safeWriteText.bak")
+					await fs.rename(targetPath, backupPath)
+					releaseBackupOnSuccess = true
+				} catch (err: unknown) {
+					const code =
+						typeof err === "object" && err !== null && "code" in err
+							? (err as { code?: string }).code
+							: undefined
+					if (code !== "ENOENT") throw err
+				}
+			}
+
+			// -- Step 4: atomic rename temp -> target ---------------------
+			await fs.rename(tempPath, targetPath)
+
+			// -- Step 4b (POSIX): fsync the parent directory so the directory entry
+			// changed by the commit rename is durable, not just the file content.
+			if (platform !== "win32") {
+				try {
+					const dirFd = fsSync.openSync(dirPath, "r")
+					try {
+						_fsyncFile(dirFd)
+					} finally {
+						fsSync.closeSync(dirFd)
+					}
+				} catch {
+					// best-effort: the content rename already committed
+				}
+			}
+
+			// -- Step 5 (win32): restore DACL AFTER commit rename ---------
+			if (platform === "win32" && daclSaved && daclDumpPath !== null) {
+				const restoredDir = path.dirname(targetPath)
+				await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
+			}
+
+			// -- Step 6 (backup:true): delete backup on success -----------
+			if (releaseBackupOnSuccess && backupPath) {
+				try {
+					await fs.unlink(backupPath)
+				} catch {
+					// non-fatal — orphaned backup is acceptable
+				}
+			}
+		} finally {
+			// Unlink DACL dump regardless of success/failure in this span.
+			if (daclDumpPath !== null) {
+				await fs.unlink(daclDumpPath).catch(() => {})
+			}
+		}
+
+		// tempPath is now the committed file; no cleanup needed. Remove the staging
+		// directory when this write was the last one using it.
+		if (stagingDirPath !== null) {
+			_removeStagingDirIfEmpty(stagingDirPath)
+		}
+	} catch (originalError: unknown) {
+		// -- Rollback / cleanup on failure ----------------------------------
+		let rollbackFailure: { backupPath: string; error: unknown } | null = null
+		if (backupPath && releaseBackupOnSuccess) {
+			try {
+				await fs.rename(backupPath, targetPath)
+			} catch (rollbackError: unknown) {
+				// The commit failed AND the restore failed: the target path is absent and the
+				// previous content survives only under the randomized backup name. Reporting only
+				// the primary failure leaves the caller unable to find that copy, so both are
+				// surfaced - the primary error stays reachable as originalError and in the text.
+				rollbackFailure = { backupPath, error: rollbackError }
+			}
+		}
+
+		// Always clean up the staging temp file on failure.
+		try {
+			await fs.unlink(tempPath).catch(() => {})
+		} catch {
+			// cleanup failure is non-fatal
+		}
+
+		// The temp is gone, so the staging directory is ours to remove when no other
+		// write is staging in it; a non-empty rmdir leaves it for that writer.
+		if (stagingDirPath !== null) {
+			_removeStagingDirIfEmpty(stagingDirPath)
+		}
+
+		if (daclDumpPath !== null) {
+			await fs.unlink(daclDumpPath).catch(() => {})
+		}
+
+		if (rollbackFailure !== null) {
+			throw new RollbackFailedError(targetPath, rollbackFailure.backupPath, rollbackFailure.error, originalError)
+		}
+
+		throw originalError
+	}
+}

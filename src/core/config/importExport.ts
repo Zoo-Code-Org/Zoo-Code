@@ -344,7 +344,7 @@ export const exportSettings = async ({ providerSettingsManager, contextProxy }: 
 
 		const dirname = path.dirname(uri.fsPath)
 		await fs.mkdir(dirname, { recursive: true })
-		await safeWriteJson(uri.fsPath, { providerProfiles, globalSettings })
+		await safeWriteJson(uri.fsPath, { providerProfiles, globalSettings }, { refuseSymlinkTarget: true })
 	} catch (e) {
 		console.error("Failed to export settings:", e)
 		// Don't re-throw - the UI will handle showing error messages
