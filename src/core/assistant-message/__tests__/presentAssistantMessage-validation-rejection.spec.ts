@@ -199,12 +199,10 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 		// The release is scoped by tool name in every branch. A repeated read_file must not
 		// reach through to write_to_file's state.
 		mockValidate.mockReturnValue(undefined)
-		mockTask.toolRepetitionDetector.check = vi
-			.fn()
-			.mockReturnValue({
-				allowExecution: false,
-				askUser: { messageKey: "mistake_limit_reached", messageDetail: "repeated" },
-			})
+		mockTask.toolRepetitionDetector.check = vi.fn().mockReturnValue({
+			allowExecution: false,
+			askUser: { messageKey: "mistake_limit_reached", messageDetail: "repeated" },
+		})
 		mockTask.assistantMessageContent = [
 			{
 				type: "tool_use",
