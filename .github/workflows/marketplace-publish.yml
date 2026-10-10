@@ -61,6 +61,12 @@ jobs:
     environment: marketplace-production
     permissions:
       contents: write
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      source_sha: ${{ github.sha }}
+      release_url: ${{ steps.release.outputs.release_url }}
+      changes: ${{ steps.release.outputs.changes }}
 
     steps:
       - name: Checkout code
@@ -149,6 +155,7 @@ jobs:
           echo "Published ZooCodeOrganization.zoo-code ${package_version} to Open VSX Registry"
 
       - name: Create GitHub release
+        id: release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -180,3 +187,77 @@ jobs:
               --target "$GITHUB_SHA" \
               "$vsix_path"
           fi
+
+          # Expose release context for the docs dispatch job so the payload is
+          # rebuilt deterministically from what was actually published.
+          release_url=$(gh release view "$tag_name" --json url --jq .url)
+          echo "version=${package_version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag_name}" >> "$GITHUB_OUTPUT"
+          echo "release_url=${release_url}" >> "$GITHUB_OUTPUT"
+          {
+            echo "changes<<__ZOO_CHANGELOG_EOF__"
+            printf "%s\n" "$changelog_content"
+            echo "__ZOO_CHANGELOG_EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+  # Fire-and-forget docs release trigger. The docs release runs in
+  # Zoo-Code-Org/Zoo-Code-Docs and must never invalidate or roll back an
+  # already-published extension, so this job is continue-on-error and surfaces
+  # problems as warning annotations only. The payload is rebuilt from
+  # publish-stable outputs, so re-running this job re-sends the identical
+  # event for the same release (the docs repo dedupes on it).
+  dispatch-docs-release:
+    needs: [publish-stable]
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      # Cross-repo dispatch intentionally does NOT use GITHUB_TOKEN.
+      # One-time setup (human): create a GitHub App with `contents: write` on
+      # Zoo-Code-Org/Zoo-Code-Docs ONLY (repository_dispatch requires contents
+      # write on the target repo), install it on that repo, and store its
+      # credentials in this repo as the DOCS_DISPATCH_APP_ID and
+      # DOCS_DISPATCH_APP_PRIVATE_KEY secrets.
+      - name: Mint least-privilege token for Zoo-Code-Docs
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.DOCS_DISPATCH_APP_ID }}
+          private-key: ${{ secrets.DOCS_DISPATCH_APP_PRIVATE_KEY }}
+          owner: Zoo-Code-Org
+          repositories: Zoo-Code-Docs
+          permission-contents: write
+
+      - name: Dispatch zoo-stable-release to Zoo-Code-Docs
+        id: dispatch
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          VERSION: ${{ needs.publish-stable.outputs.version }}
+          TAG: ${{ needs.publish-stable.outputs.tag }}
+          SOURCE_SHA: ${{ needs.publish-stable.outputs.source_sha }}
+          RELEASE_URL: ${{ needs.publish-stable.outputs.release_url }}
+          CHANGES: ${{ needs.publish-stable.outputs.changes }}
+        run: |
+          jq -n \
+            --arg version "$VERSION" \
+            --arg tag "$TAG" \
+            --arg source_sha "$SOURCE_SHA" \
+            --arg release_url "$RELEASE_URL" \
+            --arg changes "$CHANGES" \
+            '{
+              event_type: "zoo-stable-release",
+              client_payload: {
+                version: $version,
+                tag: $tag,
+                source_sha: $source_sha,
+                release_url: $release_url,
+                changes: $changes
+              }
+            }' | gh api repos/Zoo-Code-Org/Zoo-Code-Docs/dispatches --input -
+          echo "Dispatched zoo-stable-release for ${TAG} to Zoo-Code-Org/Zoo-Code-Docs"
+
+      - name: Warn on dispatch failure (non-blocking)
+        if: always() && (steps.app-token.outcome == 'failure' || steps.dispatch.outcome == 'failure')
+        run: |
+          echo "::warning::Docs release dispatch for ${{ needs.publish-stable.outputs.tag }} did not complete. The published extension is unaffected. Re-run failed jobs to retry the dispatch, or check the DOCS_DISPATCH_APP_ID / DOCS_DISPATCH_APP_PRIVATE_KEY secrets and the GitHub App installation on Zoo-Code-Org/Zoo-Code-Docs."
