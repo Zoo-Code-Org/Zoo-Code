@@ -214,10 +214,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 * context execute()'s catch uses, and return true to suppress the incidental parse error -
 	 * the failure then surfaces exactly once.
 	 */
-	protected override async releaseStreamStateOnParseFailure(
-		task: Task,
-		callbacks: ToolCallbacks,
-	): Promise<boolean> {
+	protected override async releaseStreamStateOnParseFailure(task: Task, callbacks: ToolCallbacks): Promise<boolean> {
 		const state = this.taskPartialStreamState.get(this.getPartialStreamFailureKey(task))
 		if (!state) {
 			return false
@@ -446,7 +443,6 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		const relPath: string | undefined = block.params.path
 		const newContent: string | undefined = block.params.content
 
-
 		// Get (or create) this task's state; registers the TaskAborted teardown listener
 		// once, so abandoned streams are torn down even if execute() never runs.
 		const partialStreamState = this.getTaskPartialStreamState(task)
@@ -471,7 +467,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 		try {
 			// Everything from here up to the diff view is setup that can fail before
-				// execute() ever runs; the catch below owns the teardown for that window.
+			// execute() ever runs; the catch below owns the teardown for that window.
 			const provider = task.providerRef.deref()
 			const state = await provider?.getState()
 

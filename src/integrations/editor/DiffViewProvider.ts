@@ -590,7 +590,8 @@ export class DiffViewProvider {
 						document.positionAt(0),
 						document.positionAt(document.getText().length),
 					)
-					const restoredContent = this.editType === "modify" ? this.stripAllBOMs(this.originalContent ?? "") : ""
+					const restoredContent =
+						this.editType === "modify" ? this.stripAllBOMs(this.originalContent ?? "") : ""
 					edit.replace(document.uri, fullRange, restoredContent)
 					const applied = await vscode.workspace.applyEdit(edit)
 					if (!applied) {

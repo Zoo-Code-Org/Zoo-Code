@@ -55,7 +55,10 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 		writeToFileTool.clearTaskState(task)
 
 		expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
-		expect((task as unknown as CleanupTask).off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, state.abortCleanup)
+		expect((task as unknown as CleanupTask).off).toHaveBeenCalledWith(
+			RooCodeEventName.TaskAborted,
+			state.abortCleanup,
+		)
 	})
 
 	it("is a no-op for a task that never streamed", async () => {
@@ -86,7 +89,10 @@ describe("WriteToFileTool per-task partial-state cleanup", () => {
 
 		const failure = await writeToFileTool["discardUnapprovedStreamBeforeReset"](task)
 
-		expect(errorSpy).toHaveBeenCalledWith("Error discarding the unapproved write_to_file diff view:", expect.any(Error))
+		expect(errorSpy).toHaveBeenCalledWith(
+			"Error discarding the unapproved write_to_file diff view:",
+			expect.any(Error),
+		)
 		// Returned, not dropped: the caller reports the debris instead of continuing past it.
 		expect(failure?.message).toBe("discard failed")
 	})

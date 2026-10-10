@@ -471,11 +471,6 @@ describe("writeToFileTool", () => {
 			expect(mockCline.ask).not.toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
 		})
-
-
-
-
-
 	})
 
 	describe("path stabilization predicate", () => {
@@ -608,7 +603,6 @@ describe("writeToFileTool", () => {
 	})
 
 	describe("early-exit stream state cleanup", () => {
-
 		it("releases this task's stream state when the completed block fails to parse", async () => {
 			// The streaming deltas registered this task's entry; the finalized block then arrives
 			// without nativeArgs, so execute() never runs and none of its teardown runs either.
@@ -1197,7 +1191,6 @@ describe("writeToFileTool", () => {
 			// Second call with same path - path is now stabilized, error occurs
 			await executeWriteFileTool({}, { isPartial: true })
 			expect(mockHandleError).toHaveBeenCalledWith("handling partial write_to_file", expect.any(Error))
-
 		})
 	})
 })
