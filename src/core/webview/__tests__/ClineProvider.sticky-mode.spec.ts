@@ -652,9 +652,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			// The cancelled switch is undone through the same path that wrote it, so the shared key
 			// and the per-view pin move back together: the durable writes are the new mode, then the
 			// previous mode, and the per-view overlay is rewritten with it.
-			const modeWrites = updateMock.mock.calls
-				.filter(([key]) => key === "mode")
-				.map(([, value]) => value)
+			const modeWrites = updateMock.mock.calls.filter(([key]) => key === "mode").map(([, value]) => value)
 			expect(modeWrites).toEqual(["architect", "code"])
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("viewStates", expect.anything())
 			expect(emitSpy).not.toHaveBeenCalledWith("modeChanged", "architect")
