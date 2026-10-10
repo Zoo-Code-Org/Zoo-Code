@@ -1149,6 +1149,68 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 		})
 
+		it("reports the rollback failure even when the diff-view reset rejects", async () => {
+			// The catch used a bare diffViewProvider.reset(): when that rejected, the rollback report
+			// after it never ran, so the user saw only the write error while the editor still held
+			// content nobody approved. The teardown now goes through the same resilient helper the
+			// parse-failure and partial-stream teardowns already use.
+			mockCline.diffViewProvider.open.mockRejectedValue(new Error("open failed"))
+			mockCline.diffViewProvider.revertChanges.mockRejectedValue(new Error("revert failed"))
+			mockCline.diffViewProvider.reset.mockRejectedValue(new Error("reset failed"))
+
+			await executeWriteFileTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			expect(mockCline.say).toHaveBeenCalledWith("error", expect.stringContaining("could not be restored"))
+		})
+
+		it("resets the diff-view provider when the prevent-focus-disruption approval is rejected", async () => {
+			// This branch never opens a diff view, but the preflight already adopted the created
+			// directories and set editType/originalContent on the per-task provider. Left behind, the
+			// next write's open() folds those directories into its own createdDirs and its rollback
+			// rmdirs directories belonging to this rejected write - ENOTEMPTY once a later file lives
+			// in one of them.
+			mockCline.providerRef = {
+				deref: vi.fn().mockReturnValue({
+					getState: vi.fn().mockResolvedValue({
+						diagnosticsEnabled: true,
+						writeDelayMs: 1000,
+						experiments: { preventFocusDisruption: true },
+					}),
+				}),
+			}
+			mockCline.diffViewProvider.saveDirectly = vi.fn().mockResolvedValue({
+				newProblemsMessage: "",
+				userEdits: undefined,
+				finalContent: "final content",
+			})
+			mockAskApproval = vi.fn().mockResolvedValue(false)
+
+			await executeWriteFileTool({})
+
+			expect(mockCline.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+		})
+
+		it("does not roll back a write that saveChanges already committed", async () => {
+			// saveChanges() persists the document and then keeps working, and trackFileContext() runs
+			// after it. A failure past that point used to restore the previous content - or unlink a
+			// file the user had just approved being created - to clean up an unrelated error.
+			mockCline.diffViewProvider.saveChanges.mockImplementation(
+				async (_diagnosticsEnabled: boolean, _writeDelayMs: number, onCommit?: () => void) => {
+					onCommit?.()
+					return { newProblemsMessage: "", userEdits: undefined, finalContent: "final content" }
+				},
+			)
+			mockCline.fileContextTracker.trackFileContext.mockRejectedValue(new Error("context tracking failed"))
+
+			await executeWriteFileTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+		})
+
 
 
 		it("swallows partial streaming errors instead of surfacing a duplicate error bubble", async () => {

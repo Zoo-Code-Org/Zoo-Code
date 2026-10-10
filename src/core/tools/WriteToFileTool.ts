@@ -324,6 +324,13 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 		const isWriteProtected = task.rooProtectedController?.isWriteProtected(relPath) || false
 
+		// The point of no return for this write. saveChanges() persists the document and then keeps
+		// working (closing the diff views, tab bookkeeping, diagnostics), and trackFileContext() and
+		// pushToolWriteResult() run after it, so a rejection past this point must not roll back a
+		// write the user already approved: the rollback would restore the previous content, or delete
+		// a file that was created and saved. Set only once the durable write has landed.
+		let writeCommitted = false
+
 		try {
 			// The guarded scope starts before the preflight filesystem work: a throw from
 			// fileExistsAtPath or createDirectoriesForFile must report and tear down like any other
@@ -410,10 +417,19 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					// task, which suppresses the diff preview of every later write_to_file, and
 					// the TaskAborted listener leaks.
 					super.resetPartialState()
+					// This branch never opened a diff view, but the preflight above already adopted
+					// this call's created directories and set editType/originalContent on the
+					// per-task provider. A rejection that leaves them behind hands them to the next
+					// write's open(), whose rollback would then rmdir directories that belong to
+					// this rejected write - and fail with ENOTEMPTY once a later file lives in one.
+					await this.resetDiffViewAfterWrite(task)
 					return
 				}
 
 				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
+				// saveDirectly() performs the write itself and reports a failing write, so returning
+				// means the content is on disk: from here the rollback has to stand down.
+				writeCommitted = true
 			} else {
 				if (!task.diffViewProvider.isEditing) {
 					const partialMessage = JSON.stringify(sharedMessageProps)
@@ -449,7 +465,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					return
 				}
 
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs, () => {
+					// Signalled by saveChanges() at the document save, not when it returns: the editor
+					// bookkeeping and diagnostics that follow can still reject, and by then the file
+					// has already landed.
+					writeCommitted = true
+				})
 			}
 
 			if (relPath) {
@@ -490,8 +511,14 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			// an existing file. Report it the same way the parse-failure teardown and
 			// cleanupFailedPartialStream() do - after the reset, so the report is the last thing the
 			// failed write leaves behind.
-			const reverted = await this.revertDiffChangesBeforeReset(task)
-			await task.diffViewProvider.reset()
+			// After the commit point the write is durable, so restoring the previous content
+			// (or unlinking a newly created file) would undo an approved write to clean up an
+			// unrelated failure. Treat the rollback as done rather than performing it.
+			const reverted = writeCommitted ? true : await this.revertDiffChangesBeforeReset(task)
+			// The resilient helper, as in the other two teardowns: a reset that rejects must not
+			// skip the report below, or the user sees only the write error while the editor still
+			// holds content nobody approved.
+			await this.resetDiffViewAfterWrite(task)
 			super.resetPartialState()
 
 			if (!reverted) {

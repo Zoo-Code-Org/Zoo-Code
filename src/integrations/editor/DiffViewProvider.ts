@@ -344,6 +344,7 @@ export class DiffViewProvider {
 	async saveChanges(
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
+		onCommit?: () => void,
 	): Promise<{
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
@@ -360,6 +361,12 @@ export class DiffViewProvider {
 		if (updatedDocument.isDirty) {
 			await updatedDocument.save()
 		}
+
+		// The write is irreversible from here: a clean document already matches disk, and a saved
+		// one has landed. Everything below (closing the diff views, tab bookkeeping, diagnostics)
+		// can still reject, and a caller that rolls the tool call back after this point would undo
+		// a write the user approved - so it is told, at the commit point rather than on return.
+		onCommit?.()
 
 		// Stop tracking touches and cancel any pending scroll-to-diff before any
 		// programmatic editor activation below.

@@ -970,6 +970,33 @@ describe("DiffViewProvider", () => {
 			expect(mockDelay).toHaveBeenCalledWith(5000)
 			expect(vscode.languages.getDiagnostics).toHaveBeenCalled()
 		})
+
+		it("signals the commit point once the document write has landed", async () => {
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			const onCommit = vi.fn()
+
+			await diffViewProvider.saveChanges(false, 0, onCommit)
+
+			// The shared document is clean, so nothing is written: the file already matches the
+			// buffer, which is just as irreversible. The caller stops rolling back here.
+			expect(onCommit).toHaveBeenCalledTimes(1)
+		})
+
+		it("does not signal the commit point when the document save rejects", async () => {
+			const save = vi.fn().mockRejectedValue(new Error("save failed"))
+			// Structural double carrying only the members saveChanges() reaches before the commit
+			// point; the full TextEditor shape needs a live editor host - hence the assertion.
+			diffViewProvider["activeDiffEditor"] = {
+				document: { getText: vi.fn().mockReturnValue("new content"), isDirty: true, save },
+			} as unknown as vscode.TextEditor
+			const onCommit = vi.fn()
+
+			await expect(diffViewProvider.saveChanges(false, 0, onCommit)).rejects.toThrow("save failed")
+
+			// A rejected save leaves the file absent or holding the previous content: the caller has
+			// to keep the rollback available, so signalling here would lose the write's debris.
+			expect(onCommit).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("preEditScrollLine capture and restore", () => {
