@@ -147,6 +147,8 @@ import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
+import { initialRunState, type Ask, type RunEvent, type RunState } from "./run-state/runState"
+import { applyRunEvent, type RunRejection } from "./run-state/runStateShadow"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
@@ -402,6 +404,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	abandoned = false
 	abortReason?: ClineApiReqCancelReason
 	isInitialized = false
+
+	runState: RunState = initialRunState
+	readonly runRejections: RunRejection[] = []
 
 	// API
 	apiConfiguration: ProviderSettings
@@ -3363,6 +3368,65 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const tokenUsage = this.getTokenUsage()
 		this.debouncedEmitTokenUsage(tokenUsage, this.toolUsage)
 		this.debouncedEmitTokenUsage.flush()
+	}
+
+	markInitialized(): void {
+		this.isInitialized = true
+		this.driveRunEvent({ tag: "initialized" })
+	}
+
+	markStreamStarted(): void {
+		this.isStreaming = true
+		this.driveRunEvent({ tag: "streamStarted" })
+	}
+
+	markStreamCleanupFinished(): void {
+		this.didFinishAbortingStream = true
+		this.driveRunEvent({ tag: "streamCleanupFinished" })
+	}
+
+	markStreamEnded(): void {
+		this.isStreaming = false
+		this.driveRunEvent({ tag: "streamEnded" })
+	}
+
+	markAskStarted(ask: Exclude<Ask, { tag: "none" }>): void {
+		this.driveRunEvent({ tag: "askStarted", ask })
+	}
+
+	markAskSettled(askTs: number): void {
+		this.driveRunEvent({ tag: "askSettled", askTs })
+	}
+
+	markCompletionAccepted(askTs: number): void {
+		this.driveRunEvent({ tag: "completionAccepted", askTs })
+	}
+
+	setAbortReason(reason: ClineApiReqCancelReason): void {
+		this.abortReason ??= reason
+		this.driveRunEvent({ tag: "reasonSet", reason })
+	}
+
+	requestAbort(isAbandoned: boolean): void {
+		if (isAbandoned) {
+			this.abandoned = true
+		}
+		this.abort = true
+		this.driveRunEvent({ tag: "abortRequested", abandoned: isAbandoned })
+	}
+
+	requestAbandon(): void {
+		this.abandoned = true
+		this.driveRunEvent({ tag: "abandonRequested" })
+	}
+
+	requestDispose(): void {
+		this.abort = true
+		this.driveRunEvent({ tag: "disposeRequested" })
+	}
+
+	private driveRunEvent(event: RunEvent): void {
+		this.runState = applyRunEvent(this.runState, event, this.runRejections)
 	}
 
 	public abortTask(isAbandoned = false): Promise<void> {
