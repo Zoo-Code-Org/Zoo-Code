@@ -14,11 +14,48 @@ concurrency:
     cancel-in-progress: true
 
 jobs:
+    # The open pull request map is read in a job that never checks out or runs pull-request
+    # code, so the token cannot reach anything the contributor controls. Only the filtered map
+    # crosses into the job that runs the gate.
+    stacked_map:
+        name: Resolve the stacked parent
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        permissions:
+            contents: read
+            pull-requests: read
+        outputs:
+            stacked_map: ${{ steps.read_map.outputs.stacked_map }}
+        steps:
+            - name: Read the open pull request heads
+              id: read_map
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  # The fallback must itself be a command: this step runs bash with -e, so a bare '[]'
+                  # is executed as a program name and an API failure would abort the job instead of
+                  # measuring against the event base.
+                  # --jq runs once per page, so a paginated call emits one JSON array per page; the
+                  # gate reads that stream, not a single array.
+                  STACKED_MAP="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" --jq '[.[] | {number: .number, headSha: .head.sha}]')" || STACKED_MAP="$(printf '[]')"
+                  # Publish the whole value as one record from a validated string, and let a failed
+                  # write abort the job: a truncated or skipped output would leave the gate measuring
+                  # against the event base while still reporting success.
+                  case "$STACKED_MAP" in
+                      "["*) ;;
+                      *) echo "::error title=Stacked unit base::The stacked map is not a JSON array" >&2; exit 1 ;;
+                  esac
+                  printf 'stacked_map<<EOF\n%s\nEOF\n' "$STACKED_MAP" >> "$GITHUB_OUTPUT"
+
     mutation-diff:
         name: mutation-diff
+        needs: stacked_map
         if: github.event_name == 'merge_group' || github.event.pull_request.draft == false
         runs-on: ubuntu-latest
         timeout-minutes: 30
+        env:
+            # Only the filtered map crosses into this job; the token stays in the job that read it.
+            STACKED_MAP: ${{ needs.stacked_map.outputs.stacked_map }}
         steps:
             - name: Record merge-queue enforcement
               if: github.event_name == 'merge_group'
@@ -52,7 +89,11 @@ jobs:
                   HEAD_SHA: ${{ github.sha }}
               run: |
                   BASE_SHA="$(git rev-parse "$HEAD_SHA^1")"
-                  node scripts/stryker-diff.mjs ci --base "$BASE_SHA" --head "$HEAD_SHA"
+                  # The merge commit's second parent is the pull request head. When that head's own
+                  # parent is another open pull request's head, this PR is a stacked unit, so the gate
+                  # measures only this unit's delta instead of every unmerged ancestor.
+                  PR_HEAD_SHA="$(git rev-parse "$HEAD_SHA^2" 2>/dev/null || git rev-parse "$HEAD_SHA")"
+                  node scripts/stryker-diff.mjs ci --base "$BASE_SHA" --head "$HEAD_SHA" --pr-head "$PR_HEAD_SHA" --stacked-map "$STACKED_MAP"
 
             - name: Upload mutation reports
               id: mutation_report

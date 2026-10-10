@@ -281,10 +281,53 @@ export function resolvePullRequestBase(repoRoot, baseSha, headSha) {
 	return parents[0]
 }
 
-export function selectFromGit(repoRoot, baseSha, headSha) {
+// A stacked unit branch is built on the previous unit's head, so the pull request's own base (main)
+// attributes every unmerged ancestor to this pull request. When the head commit's first parent is the
+// head of another open pull request, that parent is the unit's real base and the diff contains only
+// this unit's delta. A pull request whose parent is not another pull request's head keeps the event
+// base, so a multi-commit pull request is never charged only its last commit.
+export function resolveStackedUnitBase(repoRoot, eventBaseSha, prHeadSha, openPullRequests = []) {
+	validateSha(eventBaseSha, "base SHA")
+	validateSha(prHeadSha, "pull request head SHA")
+	const parents = git(repoRoot, ["rev-list", "--parents", "-n", "1", prHeadSha]).trim().split(/\s+/).slice(1)
+	// A unit is one commit on top of its parent. A head with more than one parent is a merge on the
+	// unit branch itself, so its diff is not a single unit delta and the event base is kept even when
+	// one of those parents is an open pull request head.
+	if (parents.length !== 1) return { baseSha: eventBaseSha, stackedOn: null }
+	const parentSha = parents[0].toLowerCase()
+	const parent = openPullRequests.find((pr) => String(pr.headSha).toLowerCase() === parentSha)
+	if (!parent) return { baseSha: eventBaseSha, stackedOn: null }
+	return { baseSha: parentSha, stackedOn: parent.number }
+}
+
+// The ci command decides two things from the commit graph: which base to charge this pull request
+// to, and which commit to diff against. A stacked unit diffs against its own pull request head,
+// because the merge commit also carries whatever main advanced since the parent unit. A plain
+// pull request keeps the merge commit as the diff head.
+export function resolveCiInvocation(repoRoot, eventBaseSha, mergeCommitSha, prHeadSha, openPullRequests = []) {
+	const resolved = resolveStackedUnitBase(repoRoot, eventBaseSha, prHeadSha, openPullRequests)
+	return { baseSha: resolved.baseSha, diffHead: resolved.stackedOn ? prHeadSha : mergeCommitSha, stackedOn: resolved.stackedOn }
+}
+
+// Selection, source reads, and Stryker must all see the same tree. The workflow checks out
+// GitHub's merge commit, which also carries whatever main advanced since the parent unit, so for
+// a stacked unit the working tree is moved to the unit head before mutation runs; otherwise the
+// selectors come from one tree and the mutated source comes from another.
+export function alignExecutionTree(repoRoot, diffHeadSha) {
+	validateSha(diffHeadSha, "diff head SHA")
+	const current = git(repoRoot, ["rev-parse", "HEAD"]).trim().toLowerCase()
+	const wanted = String(diffHeadSha).toLowerCase()
+	if (current === wanted) return false
+	git(repoRoot, ["checkout", "--quiet", wanted])
+	return true
+}
+
+export function selectFromGit(repoRoot, baseSha, headSha, options = {}) {
 	validateSha(baseSha, "base SHA")
 	validateSha(headSha, "head SHA")
-	baseSha = resolvePullRequestBase(repoRoot, baseSha, headSha)
+	// A stacked base was resolved from the pull request head, not from the merge commit, so it must
+	// survive: re-deriving it from the merge commit would charge the whole unmerged chain to this unit.
+	if (!options.preserveBase) baseSha = resolvePullRequestBase(repoRoot, baseSha, headSha)
 	const mergeBase = git(repoRoot, ["merge-base", baseSha, headSha]).trim()
 	const nameStatus = git(repoRoot, ["diff", "--name-status", "-z", "--find-renames", `${mergeBase}...${headSha}`])
 	const entries = parseNameStatus(nameStatus)
@@ -566,12 +609,17 @@ export function formatBlockingMutants(blockingMutants, packageRoot) {
 }
 
 export function formatSummary(rows, advisories, manifest = {}) {
-	const lines = [
-		"## Changed-code mutation testing",
-		"",
+	const lines = ["## Changed-code mutation testing", ""]
+	if (manifest.stackedOn) {
+		lines.push(
+			`Stacked unit: measured against the head of parent PR #${manifest.stackedOn}, not the event base.`,
+			"",
+		)
+	}
+	lines.push(
 		"| Package | Changed executable lines | Valid | Killed | Timeout | Survived | No coverage | Result |",
 		"| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
-	]
+	)
 	for (const row of rows) {
 		lines.push(
 			`| ${row.id} | ${row.changedLines} | ${row.valid} | ${row.killed} | ${row.timeout} | ${row.survived} | ${row.noCoverage} | ${row.result} |`,
@@ -796,18 +844,83 @@ function argument(name) {
 	return index === -1 ? undefined : process.argv[index + 1]
 }
 
+// The workflow passes the open pull requests as JSON of { number, headSha }. gh api --paginate
+// emits one array per page, so the map can be a stream of arrays rather than one document; accept
+// both shapes. An unparsable map must not change the gate's base, so it degrades to the event base
+// instead of throwing.
+export function parseStackedMap(value) {
+	if (!value) return []
+	// gh api --paginate emits one JSON array per page, so the input is a stream of arrays rather
+	// than a single array. Consume the whole stream: if any part of it cannot be parsed, the map
+	// is not trustworthy as a whole and the caller must fall back to the event base instead of
+	// keeping a partial entry that could select a parent base.
+	const text = String(value)
+	const entries = []
+	let index = 0
+	while (index < text.length) {
+		while (index < text.length && /[\s,]/.test(text[index])) index += 1
+		if (index >= text.length) break
+		if (text[index] !== "[") return []
+		let depth = 0
+		let inString = false
+		let end = -1
+		for (let i = index; i < text.length; i++) {
+			const char = text[i]
+			if (inString) {
+				if (char === "\\") { i += 1; continue }
+				if (char === "\"") inString = false
+				continue
+			}
+			if (char === "\"") { inString = true; continue }
+			if (char === "[") depth += 1
+			else if (char === "]") {
+				depth -= 1
+				if (depth === 0) { end = i; break }
+			}
+		}
+		if (depth !== 0 || end < 0) return []
+		let parsed
+		try {
+			parsed = JSON.parse(text.slice(index, end + 1))
+		} catch {
+			return []
+		}
+		if (!Array.isArray(parsed)) return []
+		entries.push(...parsed.filter((entry) => entry && entry.number && /^[0-9a-f]{40}$/i.test(String(entry.headSha))))
+		index = end + 1
+	}
+	return entries
+}
+
 function main() {
 	const command = process.argv[2]
 	if (command !== "ci")
-		throw new Error("Usage: node scripts/stryker-diff.mjs ci --base <sha> --head <sha> [--reports <path>]")
+		throw new Error(
+			"Usage: node scripts/stryker-diff.mjs ci --base <sha> --head <sha> [--pr-head <sha>] [--reports <path>] [--stacked-map <json>]",
+		)
 
 	const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 	const baseSha = argument("--base")
 	const headSha = argument("--head")
 	if (!baseSha || !headSha) throw new Error("--base and --head are required")
 
+	const openPullRequests = parseStackedMap(argument("--stacked-map"))
+	// --pr-head is the pull request head itself. The workflow runs on GitHub's merge commit, whose
+	// first parent is the base tip, so the merge commit cannot identify the stacked unit; its second
+	// parent can. A plain pull request keeps the merge commit as the diff head; a stacked unit
+	// uses its own head, and the working tree is aligned to that head below.
+	const prHeadSha = argument("--pr-head") ?? headSha
+	const invocation = resolveCiInvocation(repoRoot, baseSha, headSha, prHeadSha, openPullRequests)
+	if (invocation.stackedOn) console.log(`Stacked unit: measured against the head of parent PR #${invocation.stackedOn}, not the event base.`)
+	if (invocation.stackedOn && alignExecutionTree(repoRoot, invocation.diffHead)) {
+		console.log(`Aligned the working tree to the diff head ${invocation.diffHead.slice(0, 12)} so selection, source reads, and mutation run on the same tree.`)
+	}
+
 	const reportRoot = path.resolve(repoRoot, argument("--reports") ?? "reports/mutation")
-	const manifest = selectFromGit(repoRoot, baseSha, headSha)
+	const manifest = {
+		...selectFromGit(repoRoot, invocation.baseSha, invocation.diffHead, { preserveBase: Boolean(invocation.stackedOn) }),
+		stackedOn: invocation.stackedOn,
+	}
 	if (manifest.packages.length === 0) {
 		appendSummary([], manifest.advisories, manifest)
 		console.log("No changed executable lines in mutation-tested packages; mutation testing is not applicable.")
