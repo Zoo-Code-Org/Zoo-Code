@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs"
+import { Readable } from "stream"
 
 const ROW_LIMIT = 50000
 
@@ -40,13 +41,17 @@ function formatCellValue(cell: ExcelJS.Cell): string {
 	return value.toString()
 }
 
-export async function extractTextFromXLSX(filePathOrWorkbook: string | ExcelJS.Workbook): Promise<string> {
+export async function extractTextFromXLSX(
+	filePathOrWorkbook: string | ExcelJS.Workbook,
+	source?: Buffer,
+): Promise<string> {
 	let workbook: ExcelJS.Workbook
 	let excelText = ""
 
 	if (typeof filePathOrWorkbook === "string") {
 		workbook = new ExcelJS.Workbook()
-		await workbook.xlsx.readFile(filePathOrWorkbook)
+		if (source) await workbook.xlsx.read(Readable.from([source]))
+		else await workbook.xlsx.readFile(filePathOrWorkbook)
 	} else {
 		workbook = filePathOrWorkbook
 	}

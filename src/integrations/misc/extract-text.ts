@@ -8,29 +8,31 @@ import { extractTextFromXLSX } from "./extract-text-from-xlsx"
 import { readWithSlice } from "./indentation-reader"
 import { DEFAULT_LINE_LIMIT } from "../../core/prompts/tools/native-tools/read_file"
 
-async function extractTextFromPDF(filePath: string): Promise<string> {
-	const dataBuffer = await fs.readFile(filePath)
+async function extractTextFromPDF(filePath: string, source?: Buffer, lineNumbers = true): Promise<string> {
+	const dataBuffer = source ?? (await fs.readFile(filePath))
 	const data = await pdf(dataBuffer)
-	return addLineNumbers(data.text)
+	return lineNumbers ? addLineNumbers(data.text) : data.text
 }
 
-async function extractTextFromDOCX(filePath: string): Promise<string> {
-	const result = await mammoth.extractRawText({ path: filePath })
-	return addLineNumbers(result.value)
+async function extractTextFromDOCX(filePath: string, source?: Buffer, lineNumbers = true): Promise<string> {
+	const result = await mammoth.extractRawText(source ? { buffer: source } : { path: filePath })
+	return lineNumbers ? addLineNumbers(result.value) : result.value
 }
 
-async function extractTextFromIPYNB(filePath: string): Promise<string> {
-	const data = await fs.readFile(filePath, "utf8")
+async function extractTextFromIPYNB(filePath: string, source?: Buffer, lineNumbers = true): Promise<string> {
+	const data = source ? source.toString("utf8") : await fs.readFile(filePath, "utf8")
 	const notebook = JSON.parse(data)
-	let extractedText = ""
+	const cells: string[] = []
 
 	for (const cell of notebook.cells) {
 		if ((cell.cell_type === "markdown" || cell.cell_type === "code") && cell.source) {
-			extractedText += cell.source.join("\n") + "\n"
+			cells.push(cell.source.join("\n"))
 		}
 	}
 
-	return addLineNumbers(extractedText)
+	const content = cells.join("\n")
+	// Keep the historical formatted API, but do not append a display-only line to raw source.
+	return lineNumbers ? addLineNumbers(cells.length ? `${content}\n` : "") : content
 }
 
 /**
@@ -78,11 +80,14 @@ export interface ExtractTextResult {
 export async function extractTextFromFileWithMetadata(
 	filePath: string,
 	limit: number = DEFAULT_LINE_LIMIT,
+	source?: Buffer,
 ): Promise<ExtractTextResult> {
-	try {
-		await fs.access(filePath)
-	} catch (error) {
-		throw new Error(`File not found: ${filePath}`)
+	if (!source) {
+		try {
+			await fs.access(filePath)
+		} catch (error) {
+			throw new Error(`File not found: ${filePath}`)
+		}
 	}
 
 	const fileExtension = path.extname(filePath).toLowerCase()
@@ -91,7 +96,7 @@ export async function extractTextFromFileWithMetadata(
 	const extractor = SUPPORTED_BINARY_FORMATS[fileExtension as keyof typeof SUPPORTED_BINARY_FORMATS]
 	if (extractor) {
 		// For binary formats, extract and count lines
-		const content = await extractor(filePath)
+		const content = await extractor(filePath, source)
 		const lines = content.split("\n")
 		return {
 			content,
@@ -102,10 +107,10 @@ export async function extractTextFromFileWithMetadata(
 	}
 
 	// Handle other files
-	const isBinary = await isBinaryFile(filePath).catch(() => false)
+	const isBinary = await isBinaryFile(source ?? filePath).catch(() => false)
 
 	if (!isBinary) {
-		const rawContent = await fs.readFile(filePath, "utf8")
+		const rawContent = source ? source.toString("utf8") : await fs.readFile(filePath, "utf8")
 		const result = readWithSlice(rawContent, 0, limit)
 
 		return {
@@ -128,9 +133,34 @@ export async function extractTextFromFileWithMetadata(
  * @returns Promise resolving to the extracted text content with line numbers
  * @throws {Error} If file not found or unsupported binary format
  */
-export async function extractTextFromFile(filePath: string): Promise<string> {
-	const result = await extractTextFromFileWithMetadata(filePath)
+export async function extractTextFromFile(filePath: string, source?: Buffer): Promise<string> {
+	const result = await extractTextFromFileWithMetadata(filePath, DEFAULT_LINE_LIMIT, source)
 	return result.content
+}
+
+/** Extracts supported document content without adding display line numbers. */
+export async function extractRawTextFromFile(filePath: string, source?: Buffer): Promise<string> {
+	if (!source) {
+		try {
+			await fs.access(filePath)
+		} catch {
+			throw new Error(`File not found: ${filePath}`)
+		}
+	}
+
+	const extension = path.extname(filePath).toLowerCase()
+	switch (extension) {
+		case ".pdf":
+			return extractTextFromPDF(filePath, source, false)
+		case ".docx":
+			return extractTextFromDOCX(filePath, source, false)
+		case ".ipynb":
+			return extractTextFromIPYNB(filePath, source, false)
+		case ".xlsx":
+			return extractTextFromXLSX(filePath, source)
+		default:
+			throw new Error(`Cannot extract document text for file type: ${extension}`)
+	}
 }
 
 export function addLineNumbers(content: string, startLine: number = 1): string {

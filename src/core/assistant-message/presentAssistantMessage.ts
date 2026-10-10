@@ -17,7 +17,7 @@ import { AskIgnoredError } from "../task/AskIgnoredError"
 import { Task } from "../task/Task"
 
 import { listFilesTool } from "../tools/ListFilesTool"
-import { readFileTool } from "../tools/ReadFileTool"
+import { ReadFileTool } from "../tools/file-reading/ReadFileTool"
 import { readCommandOutputTool } from "../tools/ReadCommandOutputTool"
 import { writeToFileTool } from "../tools/WriteToFileTool"
 import { editTool } from "../tools/EditTool"
@@ -43,6 +43,8 @@ import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
 
 import { formatResponse } from "../prompts/responses"
 import { sanitizeToolUseId } from "../../utils/tool-id"
+
+const defaultReadFileTool = new ReadFileTool()
 
 /**
  * Maps a raw, potentially model-controlled tool name to a safe analytics key.
@@ -86,7 +88,10 @@ export function toTelemetryToolName(
  * as it becomes available.
  */
 
-export async function presentAssistantMessage(cline: Task) {
+export async function presentAssistantMessage(
+	cline: Task,
+	readFileTool: Pick<ReadFileTool, "handle" | "getReadFileToolDescription"> = defaultReadFileTool,
+) {
 	if (cline.abort) {
 		return
 	}
@@ -103,7 +108,7 @@ export async function presentAssistantMessage(cline: Task) {
 		// The last pending check and the release below run in the same
 		// synchronous step, so no update can be stranded behind the lock.
 		do {
-			await presentAssistantMessageBlock(cline)
+			await presentAssistantMessageBlock(cline, readFileTool)
 		} while (!cline.abort && cline.presentAssistantMessageHasPendingUpdates)
 	} finally {
 		// Tool handlers and provider-state reads can reject. Never strand the
@@ -112,7 +117,10 @@ export async function presentAssistantMessage(cline: Task) {
 	}
 }
 
-async function presentAssistantMessageBlock(cline: Task): Promise<void> {
+async function presentAssistantMessageBlock(
+	cline: Task,
+	readFileTool: Pick<ReadFileTool, "handle" | "getReadFileToolDescription">,
+): Promise<void> {
 	if (cline.abort) {
 		return
 	}
@@ -1124,7 +1132,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 		if (cline.currentStreamingContentIndex < cline.assistantMessageContent.length) {
 			// There are already more content blocks to stream, so we'll call
 			// this function ourselves.
-			return await presentAssistantMessageBlock(cline)
+			return await presentAssistantMessageBlock(cline, readFileTool)
 		} else {
 			// CRITICAL FIX: If we're out of bounds and the stream is complete, set userMessageContentReady
 			// This handles the case where assistantMessageContent is empty or becomes empty after processing

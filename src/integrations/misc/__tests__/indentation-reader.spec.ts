@@ -255,6 +255,38 @@ describe("formatWithLineNumbers", () => {
 // ─── readWithSlice Tests ──────────────────────────────────────────────────────
 
 describe("readWithSlice", () => {
+	it("returns an error result for a directly supplied zero limit", () => {
+		const result = readWithSlice(SIMPLE_CODE, 0, 0)
+
+		expect(result).toMatchObject({
+			content: expect.stringContaining("Error: limit must be a positive integer"),
+			includedRanges: [],
+			totalLines: 7,
+			returnedLines: 0,
+			wasTruncated: false,
+		})
+	})
+
+	it.each([-1, 0.5, NaN, Infinity])("rejects a malformed zero-based offset %s without clamping", (offset) => {
+		const result = readWithSlice(SIMPLE_CODE, offset, 1)
+
+		expect(result.content).toContain("Error: offset must be a nonnegative integer")
+		expect(result.includedRanges).toEqual([])
+		expect(result.returnedLines).toBe(0)
+	})
+
+	it("treats null optional slice numbers as defaults for untyped callers", () => {
+		expect(Reflect.apply(readWithSlice, undefined, [SIMPLE_CODE, null, null])).toEqual(readWithSlice(SIMPLE_CODE))
+	})
+
+	it.each([-1, 1.5, NaN, Infinity])("returns an error result for invalid limit %s", (limit) => {
+		expect(readWithSlice(SIMPLE_CODE, 0, limit)).toMatchObject({
+			content: expect.stringContaining("Error: limit"),
+			includedRanges: [],
+			returnedLines: 0,
+		})
+	})
+
 	it("should read from beginning with default offset", () => {
 		const result = readWithSlice(SIMPLE_CODE, 0, 10)
 
@@ -286,17 +318,69 @@ describe("readWithSlice", () => {
 		expect(result.content).toContain("Error")
 	})
 
-	it("should handle negative offset", () => {
+	it("should return an error for negative offset", () => {
 		const result = readWithSlice(SIMPLE_CODE, -5, 10)
 
-		// Should normalize to 0
-		expect(result.includedRanges[0][0]).toBe(1)
+		expect(result.content).toContain("Error: offset must be a nonnegative integer")
+		expect(result.includedRanges).toEqual([])
 	})
 })
 
 // ─── readWithIndentation Tests ────────────────────────────────────────────────
 
 describe("readWithIndentation", () => {
+	it("returns an error result instead of throwing when a direct caller omits the required anchor", () => {
+		const options = { anchorLine: 1 }
+		Object.defineProperty(options, "anchorLine", { value: undefined })
+
+		expect(readWithIndentation(SIMPLE_CODE, options)).toMatchObject({
+			content: expect.stringContaining("Error: anchor_line"),
+			includedRanges: [],
+			returnedLines: 0,
+		})
+	})
+
+	it("returns an error for a zero hard cap even when the expansion limit is valid", () => {
+		const result = readWithIndentation(SIMPLE_CODE, { anchorLine: 3, limit: 10, maxLines: 0 })
+
+		expect(result).toMatchObject({
+			content: expect.stringContaining("Error: max_lines must be a positive integer"),
+			includedRanges: [],
+			totalLines: 7,
+			returnedLines: 0,
+			wasTruncated: false,
+		})
+	})
+
+	it("treats null optional indentation numbers as defaults", () => {
+		const options = { anchorLine: 3, includeHeader: false }
+		Object.defineProperties(options, {
+			maxLevels: { value: null },
+			limit: { value: null },
+			maxLines: { value: null },
+		})
+
+		expect(readWithIndentation(SIMPLE_CODE, options)).toEqual(
+			readWithIndentation(SIMPLE_CODE, { anchorLine: 3, includeHeader: false, maxLevels: 0 }),
+		)
+	})
+
+	it.each(
+		["anchorLine", "maxLevels", "limit", "maxLines"].flatMap((name) =>
+			[-1, 1.5, NaN, Infinity, "1"].map((value) => ({ name, value })),
+		),
+	)("returns an error result for malformed $name=$value without throwing", ({ name, value }) => {
+		const options = { anchorLine: 3 }
+		Object.defineProperty(options, name, { value })
+
+		expect(readWithIndentation(SIMPLE_CODE, options)).toMatchObject({
+			content: expect.stringContaining("Error:"),
+			includedRanges: [],
+			returnedLines: 0,
+			wasTruncated: false,
+		})
+	})
+
 	describe("basic block extraction", () => {
 		it("should extract content around the anchor line", () => {
 			const result = readWithIndentation(PYTHON_CODE, {

@@ -894,11 +894,6 @@
 			"count": 1
 		}
 	},
-	"core/tools/ReadFileTool.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
 	"core/tools/ToolRepetitionDetector.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
@@ -974,11 +969,6 @@
 			"count": 26
 		}
 	},
-	"core/tools/__tests__/readFileTool.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 96
-		}
-	},
 	"core/tools/__tests__/runSlashCommandTool.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
@@ -1012,6 +1002,11 @@
 	"core/tools/__tests__/writeToFileTool.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 5
+		}
+	},
+	"core/tools/file-reading/__tests__/readFileTool.spec.ts": {
+		"@typescript-eslint/no-explicit-any": {
+			"count": 94
 		}
 	},
 	"core/tools/helpers/toolResultFormatting.ts": {

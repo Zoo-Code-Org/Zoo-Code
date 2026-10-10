@@ -5,6 +5,7 @@ import type { ModelInfo } from "@roo-code/types"
 import { BaseProvider } from "../base-provider"
 import type { ApiStream } from "../../transform/stream"
 import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
+import { createReadFileTool } from "../../../core/prompts/tools/native-tools/read_file"
 
 // Create a concrete implementation for testing
 class TestProvider extends BaseProvider {
@@ -270,6 +271,37 @@ describe("BaseProvider", () => {
 		expect(result.properties.only.type).toBe("null")
 	})
 	describe("convertToolsForOpenAI", () => {
+		it("preserves read_file integer minima while requiring properties for strict mode", () => {
+			const result = provider.testConvertToolsForOpenAI([createReadFileTool()])
+
+			expect(result?.[0]).toMatchObject({
+				function: {
+					strict: true,
+					parameters: {
+						required: ["path", "mode", "offset", "limit", "indentation"],
+						properties: {
+							offset: { type: "integer", minimum: 1 },
+							limit: { type: "integer", minimum: 1 },
+							indentation: {
+								required: [
+									"anchor_line",
+									"max_levels",
+									"include_siblings",
+									"include_header",
+									"max_lines",
+								],
+								properties: {
+									anchor_line: { type: "integer", minimum: 1 },
+									max_levels: { type: "integer", minimum: 0 },
+									max_lines: { type: "integer", minimum: 1 },
+								},
+							},
+						},
+					},
+				},
+			})
+		})
+
 		it("should return undefined for undefined input", () => {
 			const result = provider.testConvertToolsForOpenAI(undefined)
 			expect(result).toBeUndefined()

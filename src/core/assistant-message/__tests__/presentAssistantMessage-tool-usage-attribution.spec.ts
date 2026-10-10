@@ -4,6 +4,7 @@ import type { Anthropic } from "@anthropic-ai/sdk"
 import { describe, it, expect, beforeEach, vi, type Mock } from "vitest"
 import { presentAssistantMessage } from "../presentAssistantMessage"
 import { validateToolUse } from "../../tools/validateToolUse"
+import { ReadFileTool } from "../../tools/file-reading/ReadFileTool"
 import { getModeBySlug } from "../../../shared/modes"
 import type { Task } from "../../task/Task"
 
@@ -153,6 +154,127 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 		expect(mockTask.recordToolUsage).toHaveBeenCalledWith("read_file")
 		expect(TelemetryService.instance.captureToolUsage).toHaveBeenCalledTimes(1)
 		expect(TelemetryService.instance.captureToolUsage).toHaveBeenCalledWith(mockTask.taskId, "read_file")
+	})
+
+	describe("shared read_file tool", () => {
+		it("reuses one instance for partial and complete calls across tasks", async () => {
+			const handle = vi.spyOn(ReadFileTool.prototype, "handle").mockResolvedValue(undefined)
+			const otherTask = { ...mockTask, taskId: "other-task-id", instanceId: "other-instance" }
+
+			try {
+				for (const task of [mockTask, otherTask]) {
+					for (const partial of [true, false]) {
+						task.assistantMessageContent = [
+							{
+								type: "tool_use",
+								id: `call_${task.taskId}`,
+								name: "read_file",
+								params: { path: "test.txt" },
+								nativeArgs: { path: "test.txt" },
+								partial,
+							},
+						]
+
+						// This dispatch double omits Task fields unrelated to tool presentation.
+						await presentAssistantMessage(task as unknown as Task)
+					}
+				}
+
+				expect(handle).toHaveBeenCalledTimes(4)
+				const sharedInstance = handle.mock.contexts[0]
+				expect(sharedInstance).toBeInstanceOf(ReadFileTool)
+				for (const instance of handle.mock.contexts) {
+					expect(instance).toBe(sharedInstance)
+				}
+			} finally {
+				handle.mockRestore()
+			}
+		})
+
+		it("preserves the injected reader when recursively processing tool calls", async () => {
+			const reader = {
+				handle: vi.fn<ReadFileTool["handle"]>().mockResolvedValue(undefined),
+				getReadFileToolDescription: vi.fn(() => ""),
+			}
+			mockTask.assistantMessageContent = ["first.txt", "second.txt"].map((path, index) => ({
+				type: "tool_use",
+				id: `call_read_${index}`,
+				name: "read_file",
+				params: { path },
+				nativeArgs: { path },
+				partial: false,
+			}))
+
+			// This dispatch double omits Task fields unrelated to tool presentation.
+			await presentAssistantMessage(mockTask as unknown as Task, reader)
+
+			expect(reader.handle).toHaveBeenCalledTimes(2)
+			for (const instance of reader.handle.mock.contexts) {
+				expect(instance).toBe(reader)
+			}
+		})
+
+		it("preserves the injected reader when processing pending streaming updates", async () => {
+			const reader = {
+				handle: vi
+					.fn<ReadFileTool["handle"]>()
+					.mockResolvedValue(undefined)
+					.mockImplementationOnce(async (task) => {
+						task.presentAssistantMessageHasPendingUpdates = true
+					}),
+				getReadFileToolDescription: vi.fn(() => ""),
+			}
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "call_streaming_read",
+					name: "read_file",
+					params: { path: "test.txt" },
+					nativeArgs: { path: "test.txt" },
+					partial: true,
+				},
+			]
+
+			// This dispatch double omits Task fields unrelated to tool presentation.
+			await presentAssistantMessage(mockTask as unknown as Task, reader)
+
+			expect(reader.handle).toHaveBeenCalledTimes(2)
+			for (const instance of reader.handle.mock.contexts) {
+				expect(instance).toBe(reader)
+			}
+		})
+
+		it.each([
+			{ nativeArgs: { path: "native.txt" }, expectedPath: "native.txt" },
+			{ nativeArgs: undefined, expectedPath: "legacy.txt" },
+		])("uses the injected reader to describe $expectedPath", async ({ nativeArgs, expectedPath }) => {
+			const reader = new ReadFileTool()
+			const describeTool = vi.spyOn(reader, "getReadFileToolDescription")
+			mockTask.didRejectTool = true
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: "call_rejected_read",
+					name: "read_file",
+					params: { path: "legacy.txt" },
+					nativeArgs,
+					partial: false,
+				},
+			]
+
+			try {
+				// This dispatch double omits Task fields unrelated to tool presentation.
+				await presentAssistantMessage(mockTask as unknown as Task, reader)
+
+				expect(describeTool).toHaveBeenCalledExactlyOnceWith("read_file", { path: expectedPath })
+				expect(describeTool.mock.contexts[0]).toBe(reader)
+				expect(mockTask.pushToolResultToUserContent).toHaveBeenCalledWith(
+					expect.objectContaining({ content: expect.stringContaining(expectedPath) }),
+				)
+			} finally {
+				describeTool.mockRestore()
+			}
+		})
 	})
 
 	it("records a valid dynamic mcp_ tool name as use_mcp_tool", async () => {

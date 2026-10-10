@@ -134,7 +134,8 @@ describe("Unicode clipping through the existing readers", () => {
 			wasTruncated: false,
 		})
 		expect(readWithIndentation(longLine, { anchorLine: 0 })).toEqual({
-			content: "Error: anchor_line 0 is out of range (1-1)",
+			content:
+				"Error: anchor_line must be a 1-indexed line number (got 0). Line numbers start at 1 and must be positive integers.",
 			includedRanges: [],
 			totalLines: 1,
 			returnedLines: 0,

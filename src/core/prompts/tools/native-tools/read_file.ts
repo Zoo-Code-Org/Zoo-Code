@@ -1,15 +1,9 @@
 import type OpenAI from "openai"
+import { DEFAULT_LINE_LIMIT, MAX_LINE_LENGTH } from "../../../tools/file-reading/readFileConstants"
+import { READ_FILE_NUMERIC_CONSTRAINTS } from "../../../tools/file-reading/readFileValidation"
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-/** Default maximum lines to return per file (Codex-inspired predictable limit) */
-export const DEFAULT_LINE_LIMIT = 2000
-
-/** Maximum characters per line before truncation */
-export const MAX_LINE_LENGTH = 2000
-
-/** Default indentation levels to include above anchor (0 = unlimited) */
-export const DEFAULT_MAX_LEVELS = 0
+// Preserve older imports without making runtime readers depend on this tool definition.
+export { DEFAULT_LINE_LIMIT, MAX_LINE_LENGTH, DEFAULT_MAX_LEVELS } from "../../../tools/file-reading/readFileConstants"
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
 
@@ -21,7 +15,7 @@ export const DEFAULT_MAX_LEVELS = 0
  */
 function getReadFileSupportsNote(supportsImages: boolean): string {
 	if (supportsImages) {
-		return `Supports text extraction from PDF and DOCX files. Automatically processes and returns image files (PNG, JPG, JPEG, GIF, BMP, SVG, WEBP, ICO, AVIF) for visual analysis. May not handle other binary files properly.`
+		return `Supports text extraction from PDF and DOCX files. Automatically processes and returns image files (PNG, JPG, JPEG, GIF, WEBP) for visual analysis. Other binary image formats are not supported by the shared image-block contract. May not handle other binary files properly.`
 	}
 	return `Supports text extraction from PDF and DOCX files, but may not handle other binary files properly.`
 }
@@ -83,12 +77,12 @@ export function createReadFileTool(options: ReadFileToolOptions = {}): OpenAI.Ch
 
 	const indentationProperties: Record<string, unknown> = {
 		anchor_line: {
-			type: "integer",
+			...READ_FILE_NUMERIC_CONSTRAINTS.anchor_line,
 			description:
 				"1-based line number to anchor the extraction. REQUIRED for meaningful indentation mode results. The extractor finds the semantic block (function, method, class) containing this line and returns it completely. Without anchor_line, indentation mode defaults to line 1 and returns only imports/header content. Obtain anchor_line from: search results, error stack traces, definition lookups, codebase_search results, or condensed file summaries (e.g., '14--28 | export class UserService' means anchor_line=14).",
 		},
 		max_levels: {
-			type: "integer",
+			...READ_FILE_NUMERIC_CONSTRAINTS.max_levels,
 			description: `Maximum indentation levels to include above the anchor (indentation mode, 0 = unlimited (default)). Higher values include more parent context.`,
 		},
 		include_siblings: {
@@ -102,7 +96,7 @@ export function createReadFileTool(options: ReadFileToolOptions = {}): OpenAI.Ch
 				"Include file header content (imports, module-level comments) at the top of output (indentation mode, default: true).",
 		},
 		max_lines: {
-			type: "integer",
+			...READ_FILE_NUMERIC_CONSTRAINTS.max_lines,
 			description:
 				"Hard cap on lines returned for indentation mode. Acts as a separate limit from the top-level 'limit' parameter.",
 		},
@@ -120,11 +114,11 @@ export function createReadFileTool(options: ReadFileToolOptions = {}): OpenAI.Ch
 				"Reading mode. 'slice' (default): read lines sequentially with offset/limit - use for general file exploration or when you don't have a target line number (may truncate code mid-function). 'indentation': extract complete semantic code blocks containing anchor_line - PREFERRED when you have a line number because it guarantees complete, valid code blocks. WARNING: Do not use indentation mode without specifying indentation.anchor_line, or you will only get header content.",
 		},
 		offset: {
-			type: "integer",
+			...READ_FILE_NUMERIC_CONSTRAINTS.offset,
 			description: "1-based line offset to start reading from (slice mode, default: 1)",
 		},
 		limit: {
-			type: "integer",
+			...READ_FILE_NUMERIC_CONSTRAINTS.limit,
 			description: `Maximum number of lines to return (slice mode, default: ${DEFAULT_LINE_LIMIT})`,
 		},
 		indentation: {

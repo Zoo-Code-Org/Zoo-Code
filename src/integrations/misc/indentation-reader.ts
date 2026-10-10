@@ -17,7 +17,8 @@ import {
 	DEFAULT_LINE_LIMIT,
 	DEFAULT_MAX_LEVELS,
 	MAX_LINE_LENGTH,
-} from "../../core/prompts/tools/native-tools/read_file"
+} from "../../core/tools/file-reading/readFileConstants"
+import { validateReadFileNumber, validateReadFileNumbers } from "../../core/tools/file-reading/readFileValidation"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -290,17 +291,29 @@ function computeIncludedRanges(lines: LineRecord[]): Array<[number, number]> {
  * @returns The extracted content with metadata
  */
 export function readWithIndentation(content: string, options: IndentationReadOptions): IndentationReadResult {
-	const {
-		anchorLine,
-		maxLevels = DEFAULT_MAX_LEVELS,
-		includeSiblings = false,
-		includeHeader = true,
-		limit = DEFAULT_LINE_LIMIT,
-		maxLines,
-	} = options
+	const { anchorLine, includeSiblings = false, includeHeader = true, maxLines } = options
+	const maxLevels = options.maxLevels ?? DEFAULT_MAX_LEVELS
+	const limit = options.limit ?? DEFAULT_LINE_LIMIT
 
 	const lines = parseLines(content)
 	const totalLines = lines.length
+
+	// Unlike the optional read_file anchor, this numerical API requires an anchor.
+	const validationError =
+		validateReadFileNumber("anchor_line", anchorLine, undefined, false) ??
+		validateReadFileNumbers({
+			limit,
+			indentation: { max_levels: maxLevels, max_lines: maxLines },
+		})
+	if (validationError) {
+		return {
+			content: `Error: ${validationError}`,
+			includedRanges: [],
+			totalLines,
+			returnedLines: 0,
+			wasTruncated: false,
+		}
+	}
 
 	// Validate anchor line
 	if (anchorLine < 1 || anchorLine > totalLines) {
@@ -440,11 +453,24 @@ export function readWithSlice(
 	offset: number = 0,
 	limit: number = DEFAULT_LINE_LIMIT,
 ): IndentationReadResult {
+	offset = offset ?? 0
+	limit = limit ?? DEFAULT_LINE_LIMIT
 	const lines = parseLines(content)
 	const totalLines = lines.length
 
+	// This lower-level slice API uses a zero-based offset, unlike read_file.
+	const validationError = validateReadFileNumber("offset", offset, 0) ?? validateReadFileNumbers({ limit })
+	if (validationError) {
+		return {
+			content: `Error: ${validationError}`,
+			includedRanges: [],
+			totalLines,
+			returnedLines: 0,
+			wasTruncated: false,
+		}
+	}
+
 	// Validate offset
-	if (offset < 0) offset = 0
 	if (offset >= totalLines) {
 		return {
 			content: `Error: offset ${offset} is beyond file end (${totalLines} lines)`,

@@ -11,6 +11,7 @@ import {
 	toolParamNames,
 } from "../../shared/tools"
 import { resolveToolAlias } from "../prompts/tools/filter-tools-for-mode"
+import { validateReadFileNumbers } from "../tools/file-reading/readFileValidation"
 import type {
 	ApiStreamToolCallStartChunk,
 	ApiStreamToolCallDeltaChunk,
@@ -831,6 +832,11 @@ export class NativeToolCallParser {
 					}
 					// New format: { path: "...", mode: "..." }
 					if (!nativeArgs && args.path !== undefined) {
+						const validationError = validateReadFileNumbers(args)
+						if (validationError) {
+							console.error(`Invalid read_file parameters: ${validationError}`)
+							return null
+						}
 						nativeArgs = {
 							path: args.path,
 							mode: args.mode,

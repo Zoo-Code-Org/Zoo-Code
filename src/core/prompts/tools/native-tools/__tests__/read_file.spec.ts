@@ -1,5 +1,6 @@
 import type OpenAI from "openai"
 import { createReadFileTool } from "../read_file"
+import { normalizeToolSchema, ToolInputSchema } from "../../../../../utils/json-schema"
 
 // Helper type to access function tools
 type FunctionTool = OpenAI.Chat.ChatCompletionTool & { type: "function" }
@@ -8,6 +9,31 @@ type FunctionTool = OpenAI.Chat.ChatCompletionTool & { type: "function" }
 const getFunctionDef = (tool: OpenAI.Chat.ChatCompletionTool) => (tool as FunctionTool).function
 
 describe("createReadFileTool", () => {
+	it("keeps integer lower bounds in the native and normalized strict schemas", () => {
+		const schema = getFunctionDef(createReadFileTool()).parameters
+		if (!schema) throw new Error("read_file parameters are required")
+		const expected = {
+			properties: {
+				offset: { type: "integer", minimum: 1 },
+				limit: { type: "integer", minimum: 1 },
+				indentation: {
+					properties: {
+						anchor_line: { type: "integer", minimum: 1 },
+						max_levels: { type: "integer", minimum: 0 },
+						max_lines: { type: "integer", minimum: 1 },
+					},
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		}
+
+		expect(schema).toMatchObject(expected)
+		expect(ToolInputSchema.parse(schema)).toMatchObject(expected)
+		expect(normalizeToolSchema(schema)).toMatchObject(expected)
+	})
+
 	describe("single-file-per-call documentation", () => {
 		it("should indicate single-file-per-call and suggest parallel tool calls", () => {
 			const tool = createReadFileTool()
@@ -52,22 +78,21 @@ describe("createReadFileTool", () => {
 	})
 
 	describe("supportsImages option", () => {
-		it("should include image format documentation when supportsImages is true", () => {
+		it("should advertise only shared-contract image formats when supportsImages is true", () => {
 			const tool = createReadFileTool({ supportsImages: true })
 			const description = getFunctionDef(tool).description
 
 			expect(description).toContain(
-				"Automatically processes and returns image files (PNG, JPG, JPEG, GIF, BMP, SVG, WEBP, ICO, AVIF) for visual analysis",
+				"Automatically processes and returns image files (PNG, JPG, JPEG, GIF, WEBP) for visual analysis",
 			)
+			expect(description).toContain("Other binary image formats are not supported")
 		})
 
 		it("should not include image format documentation when supportsImages is false", () => {
 			const tool = createReadFileTool({ supportsImages: false })
 			const description = getFunctionDef(tool).description
 
-			expect(description).not.toContain(
-				"Automatically processes and returns image files (PNG, JPG, JPEG, GIF, BMP, SVG, WEBP, ICO, AVIF) for visual analysis",
-			)
+			expect(description).not.toContain("Automatically processes and returns image files")
 			expect(description).toContain("may not handle other binary files properly")
 		})
 
@@ -75,9 +100,7 @@ describe("createReadFileTool", () => {
 			const tool = createReadFileTool({})
 			const description = getFunctionDef(tool).description
 
-			expect(description).not.toContain(
-				"Automatically processes and returns image files (PNG, JPG, JPEG, GIF, BMP, SVG, WEBP, ICO, AVIF) for visual analysis",
-			)
+			expect(description).not.toContain("Automatically processes and returns image files")
 		})
 
 		it("should always include PDF and DOCX support in description", () => {

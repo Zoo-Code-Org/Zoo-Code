@@ -1,5 +1,6 @@
 import path from "path"
 import * as fs from "fs/promises"
+import type { FileHandle } from "fs/promises"
 import { t } from "../../../i18n"
 import prettyBytes from "pretty-bytes"
 
@@ -72,8 +73,13 @@ export interface ImageProcessingResult {
 /**
  * Reads an image file and returns both the data URL and buffer
  */
-export async function readImageAsDataUrlWithBuffer(filePath: string): Promise<{ dataUrl: string; buffer: Buffer }> {
-	const fileBuffer = await fs.readFile(filePath)
+export async function readImageAsDataUrlWithBuffer(
+	filePath: string,
+	file?: FileHandle,
+	checkCancelled?: () => void,
+): Promise<{ dataUrl: string; buffer: Buffer }> {
+	const fileBuffer = await (file ? file.readFile() : fs.readFile(filePath))
+	checkCancelled?.()
 	const base64 = fileBuffer.toString("base64")
 	const ext = path.extname(filePath).toLowerCase()
 
@@ -99,6 +105,7 @@ export async function validateImageForProcessing(
 	maxImageFileSize: number,
 	maxTotalImageSize: number,
 	currentTotalMemoryUsed: number,
+	file?: FileHandle,
 ): Promise<ImageValidationResult> {
 	// Check if model supports images
 	if (!supportsImages) {
@@ -109,7 +116,7 @@ export async function validateImageForProcessing(
 		}
 	}
 
-	const imageStats = await fs.stat(fullPath)
+	const imageStats = await (file ? file.stat() : fs.stat(fullPath))
 	const imageSizeInMB = imageStats.size / (1024 * 1024)
 
 	// Check individual file size limit
@@ -147,9 +154,15 @@ export async function validateImageForProcessing(
 /**
  * Processes an image file and returns the result
  */
-export async function processImageFile(fullPath: string): Promise<ImageProcessingResult> {
-	const imageStats = await fs.stat(fullPath)
-	const { dataUrl, buffer } = await readImageAsDataUrlWithBuffer(fullPath)
+export async function processImageFile(
+	fullPath: string,
+	file?: FileHandle,
+	checkCancelled?: () => void,
+): Promise<ImageProcessingResult> {
+	const imageStats = await (file ? file.stat() : fs.stat(fullPath))
+	checkCancelled?.()
+	const { dataUrl, buffer } = await readImageAsDataUrlWithBuffer(fullPath, file, checkCancelled)
+	checkCancelled?.()
 	const imageSizeInKB = Math.round(imageStats.size / 1024)
 	const imageSizeInMB = imageStats.size / (1024 * 1024)
 	const noticeText = t("tools:readFile.imageWithSize", { size: imageSizeInKB })

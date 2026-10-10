@@ -3,6 +3,82 @@ import { NativeToolCallParser, type ToolCallStreamEvent } from "../NativeToolCal
 describe("NativeToolCallParser", () => {
 	describe("parseToolCall", () => {
 		describe("read_file tool", () => {
+			it("rejects a zero limit instead of constructing successful read arguments", () => {
+				const result = NativeToolCallParser.parseToolCall({
+					id: "invalid_limit",
+					name: "read_file",
+					arguments: JSON.stringify({ path: "test.ts", limit: 0 }),
+				})
+
+				expect(result).toBeNull()
+			})
+
+			it.each(
+				["offset", "limit", "anchor_line", "max_levels", "max_lines"].flatMap((name) =>
+					[-1, 1.5, "1", "NaN", true, [], {}].map((value) => ({ name, value })),
+				),
+			)("rejects malformed supplied $name=$value before coercion", ({ name, value }) => {
+				const args =
+					name === "offset" || name === "limit"
+						? { path: "test.ts", [name]: value }
+						: { path: "test.ts", mode: "slice", indentation: { [name]: value } }
+
+				expect(
+					NativeToolCallParser.parseToolCall({
+						id: "invalid_number",
+						name: "read_file",
+						arguments: JSON.stringify(args),
+					}),
+				).toBeNull()
+			})
+
+			it.each(["offset", "limit", "anchor_line", "max_lines"])("rejects zero for positive integer %s", (name) => {
+				const args =
+					name === "offset" || name === "limit"
+						? { path: "test.ts", [name]: 0 }
+						: { path: "test.ts", indentation: { [name]: 0 } }
+
+				expect(
+					NativeToolCallParser.parseToolCall({
+						id: "invalid_zero",
+						name: "read_file",
+						arguments: JSON.stringify(args),
+					}),
+				).toBeNull()
+			})
+
+			it("rejects a nonfinite number produced by JSON exponent overflow", () => {
+				expect(
+					NativeToolCallParser.parseToolCall({
+						id: "nonfinite",
+						name: "read_file",
+						arguments: '{"path":"test.ts","limit":1e309}',
+					}),
+				).toBeNull()
+			})
+
+			it.each([
+				{ offset: 1, limit: 1, indentation: { anchor_line: 1, max_levels: 0, max_lines: 1 } },
+				{ offset: null, limit: null, indentation: { anchor_line: null, max_levels: null, max_lines: null } },
+				{ indentation: null },
+			])("keeps valid boundary values and null-as-unset numbers: %j", (numbers) => {
+				const result = NativeToolCallParser.parseToolCall({
+					id: "valid_numbers",
+					name: "read_file",
+					arguments: JSON.stringify({ path: "test.ts", ...numbers }),
+				})
+
+				expect(result).toMatchObject({ type: "tool_use", nativeArgs: { path: "test.ts" } })
+				if (result?.type !== "tool_use" || !result.nativeArgs || "files" in result.nativeArgs) {
+					throw new Error("Expected modern read_file arguments")
+				}
+				expect(result.nativeArgs.offset).toBe(numbers.offset ?? undefined)
+				expect(result.nativeArgs.limit).toBe(numbers.limit ?? undefined)
+				expect(result.nativeArgs.indentation?.anchor_line).toBe(numbers.indentation?.anchor_line ?? undefined)
+				expect(result.nativeArgs.indentation?.max_levels).toBe(numbers.indentation?.max_levels ?? undefined)
+				expect(result.nativeArgs.indentation?.max_lines).toBe(numbers.indentation?.max_lines ?? undefined)
+			})
+
 			it("should parse minimal single-file read_file args", () => {
 				const toolCall = {
 					id: "toolu_123",
