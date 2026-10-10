@@ -436,6 +436,10 @@ export class ClineProvider
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
 	private providerProfileMutationQueue = Promise.resolve()
 	private historyTaskCreationQueue = Promise.resolve()
+	// Ownership token for the shared mode. A timed-out mutation keeps running after the queue
+	// advances, so a newer switch can commit while the cancelled one is still in flight; only the
+	// operation that still owns the latest mode mutation may write the mode again.
+	private modeMutationGeneration = 0
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
 		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
