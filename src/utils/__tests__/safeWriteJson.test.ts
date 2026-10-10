@@ -819,4 +819,61 @@ describe("safeWriteJson", () => {
 		expect(entries).not.toContain("scope-missing-parent")
 		expect(entries.filter((entry) => entry.endsWith(".lock") || entry.includes(".new_"))).toEqual([])
 	})
+
+	// A caller that declares a scope must never get the unconstrained path: an
+	// empty confineTo is a declared scope, not an absent one. This value occurs in
+	// practice - McpHub.confineForMcpWrite returns getWorkspacePath(), which is ""
+	// while no workspace folder is open. The truthiness checks skipped both
+	// confinement gates for "", so the write followed any symlink with no scope
+	// check at all.
+	test("rejects a declared-but-empty confineTo instead of writing unconstrained", async () => {
+		const error = await safeWriteJson(currentTestFilePath, { mcpServers: {} }, { confineTo: "" }).then(
+			() => undefined,
+			(reason: unknown) => reason,
+		)
+		expect(error).toBeInstanceOf(ConfinedPathEscapeError)
+		if (error instanceof ConfinedPathEscapeError) {
+			// The rejection must name the declared empty root: a substituted root
+			// (path.resolve("") is the process cwd) would mean confining the write
+			// to a directory nobody declared.
+			expect(error.confineTo).toBe("")
+		}
+		// The write did not proceed: the target keeps its pre-existing content.
+		expect(await readFileContent(currentTestFilePath)).toEqual({ initial: "content" })
+	})
+
+	test("rejects an empty confineTo before creating the target parent directory", async () => {
+		// The same fail-closed decision pinned at the ordering the pre-lock check
+		// guarantees: a rejected confined write must not create the missing parent
+		// directory of the target.
+		const outside = path.join(tempDir, "empty-scope-missing-parent", "nested.json")
+
+		const error = await safeWriteJson(outside, { mcpServers: {} }, { confineTo: "" }).then(
+			() => undefined,
+			(reason: unknown) => reason,
+		)
+		expect(error).toBeInstanceOf(ConfinedPathEscapeError)
+		if (error instanceof ConfinedPathEscapeError) {
+			expect(error.confineTo).toBe("")
+		}
+
+		const entries = await fs.readdir(tempDir)
+		expect(entries).not.toContain("empty-scope-missing-parent")
+		expect(entries.filter((entry) => entry.endsWith(".lock") || entry.includes(".new_"))).toEqual([])
+	})
+
+	test("rejects a whitespace-only confineTo and names the declared root", async () => {
+		// path.resolve("   ") is a directory named "   " under the process cwd - a
+		// scope nobody declared. Whitespace-only fails closed with the declared
+		// root, the same decision as the empty string.
+		const error = await safeWriteJson(currentTestFilePath, { mcpServers: {} }, { confineTo: "   " }).then(
+			() => undefined,
+			(reason: unknown) => reason,
+		)
+		expect(error).toBeInstanceOf(ConfinedPathEscapeError)
+		if (error instanceof ConfinedPathEscapeError) {
+			expect(error.confineTo).toBe("   ")
+		}
+		expect(await readFileContent(currentTestFilePath)).toEqual({ initial: "content" })
+	})
 })

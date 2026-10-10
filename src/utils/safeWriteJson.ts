@@ -38,7 +38,9 @@ export interface SafeWriteJsonOptions {
 	 * symlinks before this check runs, so a caller that picked the path from a
 	 * known scope (a workspace, a project settings directory) can refuse a write
 	 * that a planted symlink would land somewhere else. The check runs before the
-	 * advisory lock is taken and before anything is staged.
+	 * advisory lock is taken and before anything is staged. Confinement is active
+	 * whenever this option is DEFINED: a declared root that is empty or
+	 * whitespace-only is rejected rather than silently disabling the checks.
 	 */
 	confineTo?: string
 }
@@ -120,6 +122,26 @@ function _scopeErrorCode(error: unknown): string | undefined {
 }
 
 /**
+ * The scope root a caller declared, or undefined when no scope was declared.
+ * Confinement is active whenever confineTo is DEFINED: a declared root that is
+ * empty or whitespace-only cannot contain any canonicalized path - path.resolve("")
+ * is the process cwd, not the scope the caller named - so it fails closed here
+ * instead of silently disabling the checks below, which would let the write
+ * follow any symlink with no scope check at all. Both confinement checks key off
+ * this single decision, so they can never disagree about whether a scope is
+ * active.
+ */
+function _declaredScopeRoot(confineTo: string | undefined, requestedPath: string): string | undefined {
+	if (confineTo === undefined) {
+		return undefined
+	}
+	if (confineTo.trim() === "") {
+		throw new ConfinedPathEscapeError(requestedPath, requestedPath, confineTo)
+	}
+	return confineTo
+}
+
+/**
  * Safely writes JSON data to a file.
  * - Creates parent directories if they don't exist
  * - Uses 'proper-lockfile' for inter-process advisory locking to prevent concurrent writes to the same path.
@@ -145,6 +167,12 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// the target when the resolution itself rejects.
 	let resolvedTargetPath: string | undefined
 
+	// Confinement is decided once, up front, so both checks below agree on whether a
+	// scope is active: active whenever confineTo is defined, with a declared-but-empty
+	// root failing closed before the lock key is resolved, before the lock is taken,
+	// before any directory is created, and before anything is staged.
+	const confinementRoot = _declaredScopeRoot(options?.confineTo, absoluteFilePath)
+
 	// Lock key: the symlink referent when the path is an existing symlink, so a
 	// symlink alias and its referent share one lock. The key must be computable
 	// while a peer writer is mid-commit (backup mode renames the referent away and
@@ -160,8 +188,8 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// directory would surface a lock-acquisition error after retries instead of
 	// ConfinedPathEscapeError). Repeated on the resolved publish target inside the
 	// lock, since a peer writer may move the referent in between.
-	if (options?.confineTo) {
-		const scopeRoot = await _resolveScopeRoot(options.confineTo)
+	if (confinementRoot !== undefined) {
+		const scopeRoot = await _resolveScopeRoot(confinementRoot)
 		_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(lockKey), scopeRoot)
 	}
 
@@ -192,8 +220,8 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// does not exist yet still carries the alias components of the path it was
 		// given. This runs before the merge read and before anything is staged, so a
 		// rejected write leaves nothing behind.
-		if (options?.confineTo) {
-			const scopeRoot = await _resolveScopeRoot(options.confineTo)
+		if (confinementRoot !== undefined) {
+			const scopeRoot = await _resolveScopeRoot(confinementRoot)
 			_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(resolvedTargetPath), scopeRoot)
 		}
 
