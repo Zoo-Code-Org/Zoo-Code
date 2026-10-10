@@ -7,12 +7,16 @@ import {
 	completeDelegatedChild,
 	delegateTaskToChild,
 	interruptDelegatedChild,
+	resumeInterruptedTask,
 	settleRejectedCreateSubtaskAction,
 } from "../src/core/task-persistence/taskLifecycle"
 
 const taskIds = ["parent", "child-a", "child-b"] as const
 type TaskId = (typeof taskIds)[number]
-type ModelState = Record<TaskId, HistoryItem | undefined>
+interface ModelTask extends HistoryItem {
+	modelWasResumed?: boolean
+}
+type ModelState = Record<TaskId, ModelTask | undefined>
 
 interface Transition {
 	name: string
@@ -33,10 +37,10 @@ interface WitnessContext {
 	transition: Transition
 }
 
-const MAX_DEPTH = 12
+const MAX_DEPTH = 13
 const MAX_STATES = 10_000
 const actionIds = ["action-1", "action-2"] as const
-const expectedActions = ["delegate", "interrupt", "complete", "abandon", "stage", "settle-rejected"] as const
+const expectedActions = ["delegate", "interrupt", "resume", "complete", "abandon", "stage", "settle-rejected"] as const
 const semanticLandmarks = {
 	"interrupted-child-redelegation": (state: ModelState) =>
 		state.parent?.status === "delegated" &&
@@ -47,6 +51,12 @@ const semanticLandmarks = {
 		state.parent.awaitingChildId === "child-a" &&
 		state["child-a"]?.status === "delegated" &&
 		state["child-a"].awaitingChildId === "child-b",
+	"resumed-interrupted-child-nested-delegation": (state: ModelState) =>
+		state.parent?.status === "delegated" &&
+		state.parent.awaitingChildId === "child-a" &&
+		state["child-a"]?.status === "delegated" &&
+		state["child-a"].awaitingChildId === "child-b" &&
+		state["child-a"].modelWasResumed === true,
 } satisfies Record<string, (state: ModelState) => boolean>
 const semanticWitnesses = {
 	"interrupted-pending-delegation-settled": ({ prev, next, transition }: WitnessContext) =>
@@ -101,7 +111,7 @@ const semanticWitnesses = {
 	},
 } satisfies Record<string, (context: WitnessContext) => boolean>
 
-function task(id: TaskId, parentTaskId?: TaskId): HistoryItem {
+function task(id: TaskId, parentTaskId?: TaskId): ModelTask {
 	return {
 		id,
 		number: taskIds.indexOf(id),
@@ -132,7 +142,7 @@ function initialState(): ModelState {
 	return { parent: task("parent"), "child-a": undefined, "child-b": undefined }
 }
 
-function replace(state: ModelState, ...updates: HistoryItem[]): ModelState {
+function replace(state: ModelState, ...updates: ModelTask[]): ModelState {
 	const next = { ...state }
 	for (const update of updates) next[update.id as TaskId] = update
 	return next
@@ -175,6 +185,18 @@ function transitions(state: ModelState): Transition[] {
 					settlement: { taskId: parentId, actionId },
 				})
 			}
+		}
+
+		const lineageParent = parent.parentTaskId ? state[parent.parentTaskId as TaskId] : undefined
+		const resumeValid =
+			parent.status === "interrupted" &&
+			(!parent.parentTaskId ||
+				(lineageParent?.status === "delegated" && lineageParent.awaitingChildId === parent.id))
+		if (resumeValid) {
+			result.push({
+				name: `resume(${parentId})`,
+				next: replace(state, { ...resumeInterruptedTask(parent, parent.parentTaskId), modelWasResumed: true }),
+			})
 		}
 	}
 
@@ -416,11 +438,19 @@ function runRepresentativeScenarios(): void {
 	assert.throws(() => delegateTaskToChild(delegated, "child-b", "active"), /not interrupted/)
 
 	const interruptedA = interruptDelegatedChild(delegated, childA)
+	const resumedA = resumeInterruptedTask(interruptedA, parent.id)
+	const resumedNested = delegateTaskToChild(resumedA, "child-b")
+	assert.equal(resumedNested.status, "delegated")
+	assert.equal(resumedNested.awaitingChildId, "child-b")
 	const redelegated = delegateTaskToChild(delegated, "child-b", interruptedA.status)
 	assert.throws(() => completeDelegatedChild(redelegated, interruptedA, "stale"), /not delegated to child/)
 
 	const abandoned = abandonDelegatedChild(delegated, interruptedA)
 	assert.throws(() => completeDelegatedChild(abandoned.parent, abandoned.child, "late"), /not delegated to child/)
+	// A resume approved against the old linkage cannot revive an abandoned child.
+	assert.throws(() => resumeInterruptedTask(abandoned.child, parent.id), /parent linkage changed/)
+	assert.throws(() => resumeInterruptedTask(interruptedA), /parent linkage changed/)
+	assert.equal(resumeInterruptedTask(abandoned.child).status, "active")
 
 	const childB = task("child-b", "child-a")
 	const nestedParent = delegateTaskToChild(childA, childB.id)

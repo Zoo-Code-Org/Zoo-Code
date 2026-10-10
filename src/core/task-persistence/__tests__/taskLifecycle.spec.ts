@@ -6,6 +6,7 @@ import {
 	delegateTaskToChild,
 	interruptDelegatedChild,
 	LifecycleTransitionError,
+	resumeInterruptedTask,
 	settleRejectedCreateSubtaskAction,
 } from "../taskLifecycle"
 
@@ -57,6 +58,24 @@ describe("task lifecycle transitions", () => {
 			awaitingChildId: "new-child",
 			childIds: ["old-child", "new-child"],
 		})
+	})
+
+	it("allows an explicitly resumed interrupted child to delegate without weakening generic transitions", () => {
+		const interruptedChild = item("child", { status: "interrupted", parentTaskId: "parent" })
+
+		expect(() => delegateTaskToChild(interruptedChild, "grandchild")).toThrow(
+			"Invalid task status transition: interrupted → delegated",
+		)
+		expect(delegateTaskToChild(resumeInterruptedTask(interruptedChild, "parent"), "grandchild")).toMatchObject({
+			status: "delegated",
+			parentTaskId: "parent",
+			awaitingChildId: "grandchild",
+			delegatedToId: "grandchild",
+		})
+	})
+
+	it("rejects explicit resume for a task that is no longer interrupted", () => {
+		expect(() => resumeInterruptedTask(item("child"))).toThrow(LifecycleTransitionError)
 	})
 
 	it("interrupts a child without clearing the parent's ownership", () => {

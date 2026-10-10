@@ -1342,19 +1342,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	static create(options: TaskOptions): [Task, Promise<void>] {
 		const instance = new Task({ ...options, startTask: false })
 		const { images, task, historyItem } = options
-		let promise
-
-		instance.startIdleTelemetryCheck()
-
-		if (images || task) {
-			promise = instance.startTask(task, images)
-		} else if (historyItem) {
-			promise = instance.resumeTaskFromHistory()
-		} else {
+		if (!images && !task && !historyItem) {
 			throw new Error("Either historyItem or task/images must be provided")
 		}
 
-		return [instance, promise]
+		return [instance, instance.run()]
 	}
 
 	// API Messages
@@ -1772,6 +1764,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			const provider = this.providerRef.deref()
 			const existingStatus = provider?.taskHistoryStore.get(this.taskId)?.status
+			if (this.initialStatus === "interrupted") {
+				// A rehydrated task's links may have been severed by another host.
+				// Only lifecycle operations own lineage after interruption, not message saves.
+				delete historyItem.parentTaskId
+				delete historyItem.rootTaskId
+			}
 			await provider?.updateTaskHistory(existingStatus ? { ...historyItem, status: existingStatus } : historyItem)
 		} catch (error) {
 			// The message array was persisted above; a metadata or task-history failure must
@@ -3108,6 +3106,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.isInitialized = true
 
 			const { response, text, images } = await this.ask(askType) // Calls `postStateToWebview`.
+			if (this.abort || this.abandoned || (response !== "yesButtonClicked" && response !== "messageResponse")) {
+				return
+			}
+			if (this.initialStatus === "interrupted") {
+				const provider = this.providerRef.deref()
+				if (!provider) {
+					throw new Error(`[Task#resumeTaskFromHistory] Provider unavailable for task ${this.taskId}`)
+				}
+				await provider.resumeInterruptedTask(this.taskId, this.parentTaskId)
+			}
 
 			let responseText: string | undefined
 			let responseImages: string[] | undefined

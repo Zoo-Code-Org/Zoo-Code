@@ -622,7 +622,7 @@ export class ClineProvider
 	}
 
 	private async cleanupFailedHistoryTask(task: Task, error: unknown): Promise<void> {
-		if (!(error instanceof PendingActionSettlementError)) {
+		if (!(error instanceof PendingActionSettlementError || error instanceof LifecycleTransitionError)) {
 			return
 		}
 
@@ -776,6 +776,32 @@ export class ClineProvider
 			this.recentTasksCache = undefined
 		}
 		return cleared
+	}
+
+	public async resumeInterruptedTask(taskId: string, parentTaskId?: string): Promise<void> {
+		const resume = async () => {
+			if (parentTaskId) {
+				await this.taskHistoryStore.invalidate(parentTaskId)
+				const parent = this.taskHistoryStore.get(parentTaskId)
+				if (parent?.status !== "delegated" || parent.awaitingChildId !== taskId) {
+					throw new LifecycleTransitionError(
+						`Cannot resume task ${taskId}: parent ${parentTaskId} no longer awaits it`,
+					)
+				}
+			}
+
+			const resumed = await this.taskHistoryStore.resumeInterruptedTask(taskId, parentTaskId)
+			this.recentTasksCache = undefined
+			if (this.isViewLaunched) {
+				await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: resumed })
+			}
+		}
+
+		if (parentTaskId) {
+			await this.runDelegationTransition(parentTaskId, resume)
+		} else {
+			await resume()
+		}
 	}
 
 	// Pending Edit Operations Management

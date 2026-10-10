@@ -4,6 +4,7 @@ import { describe, it, expect, vi, type MockedFunction } from "vitest"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { TaskRegistry } from "../core/task/TaskRegistry"
 import { PendingActionSettlementError, type Task } from "../core/task/Task"
+import { LifecycleTransitionError } from "../core/task-persistence/taskLifecycle"
 import { makeProviderStub } from "./helpers/provider-stub"
 
 type MockTask = Pick<Task, "taskId" | "instanceId"> &
@@ -178,35 +179,34 @@ describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation
 })
 
 describe("ClineProvider failed history restoration cleanup", () => {
-	it("removes the failed task, its listeners, and its resources without saving stale history", async () => {
-		const cleanupListener = vi.fn()
-		const task = {
-			taskId: "failed-history-task",
-			instanceId: "inst-1",
-			emit: vi.fn(),
-			dispose: vi.fn().mockResolvedValue(undefined),
-		} as unknown as Task
-		const taskRegistry = new TaskRegistry()
-		taskRegistry.push(task)
-		const taskEventListeners = new Map([[task, [cleanupListener]]])
-		const provider = {
-			taskRegistry,
-			taskEventListeners,
-			log: vi.fn(),
-		} as unknown as ClineProvider
+	it.each([new PendingActionSettlementError("settlement failed"), new LifecycleTransitionError("resume rejected")])(
+		"removes the failed task without saving stale history after %s",
+		async (error) => {
+			const cleanupListener = vi.fn()
+			const task = {
+				taskId: "failed-history-task",
+				instanceId: "inst-1",
+				emit: vi.fn(),
+				dispose: vi.fn().mockResolvedValue(undefined),
+			} as unknown as Task
+			const taskRegistry = new TaskRegistry()
+			taskRegistry.push(task)
+			const taskEventListeners = new Map([[task, [cleanupListener]]])
+			const provider = {
+				taskRegistry,
+				taskEventListeners,
+				log: vi.fn(),
+			} as unknown as ClineProvider
 
-		await privateClineProvider.cleanupFailedHistoryTask.call(
-			provider,
-			task,
-			new PendingActionSettlementError("settlement failed"),
-		)
+			await privateClineProvider.cleanupFailedHistoryTask.call(provider, task, error)
 
-		expect(taskRegistry.getById(task.taskId)).toBeUndefined()
-		expect(taskRegistry.current).toBeUndefined()
-		expect(cleanupListener).toHaveBeenCalledOnce()
-		expect(taskEventListeners.has(task)).toBe(false)
-		expect(task.dispose).toHaveBeenCalledOnce()
-	})
+			expect(taskRegistry.getById(task.taskId)).toBeUndefined()
+			expect(taskRegistry.current).toBeUndefined()
+			expect(cleanupListener).toHaveBeenCalledOnce()
+			expect(taskEventListeners.has(task)).toBe(false)
+			expect(task.dispose).toHaveBeenCalledOnce()
+		},
+	)
 
 	it("keeps the task active after an unrelated history resume failure", async () => {
 		const cleanupListener = vi.fn()

@@ -10,7 +10,12 @@ import { GlobalFileNames } from "../../shared/globalFileNames"
 import { LOCK_STALE_MS, withFileLock } from "../../utils/fileLock"
 import { safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
-import { assertValidTransition, settleRejectedCreateSubtaskAction, type HistoryItemStatus } from "./taskLifecycle"
+import {
+	assertValidTransition,
+	resumeInterruptedTask as resumeInterruptedTaskRecord,
+	settleRejectedCreateSubtaskAction,
+	type HistoryItemStatus,
+} from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
 
 export { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
@@ -1070,6 +1075,47 @@ export class TaskHistoryStore {
 				await this.onWrite(all)
 			}
 			return all
+		})
+	}
+
+	/**
+	 * Disk-authoritative transition used only after the user accepts a resume
+	 * prompt. Generic writes intentionally reject interrupted → active so stale
+	 * task snapshots cannot revive cancelled work.
+	 */
+	public async resumeInterruptedTask(taskId: string, expectedParentTaskId?: string): Promise<HistoryItem> {
+		return this.withLock(async () => {
+			const cached = this.cache.get(taskId)
+			if (!cached) {
+				throw new Error(`[TaskHistoryStore] resumeInterruptedTask: task ${taskId} not found in cache`)
+			}
+
+			const filePath = await this.getTaskFilePath(taskId)
+			let authoritative: HistoryItem = cached
+			await safeWriteJson(filePath, cached, {
+				merge: (existing) => {
+					const parsed = historyItemSchema.safeParse(existing)
+					if (!parsed.success || parsed.data.id !== taskId) {
+						this.cache.delete(taskId)
+						this.taskFileMtimes.delete(taskId)
+						throw new Error(
+							`[TaskHistoryStore] resumeInterruptedTask: task ${taskId} has no valid disk record`,
+						)
+					}
+
+					// Abandonment commits child detachment before releasing the parent.
+					// Compare the caller's linkage under this same child-file lock.
+					this.cache.set(taskId, existing as HistoryItem)
+					authoritative = resumeInterruptedTaskRecord(existing as HistoryItem, expectedParentTaskId)
+					return authoritative
+				},
+			})
+
+			this.cache.set(taskId, authoritative)
+			if (this.onWrite) {
+				await this.onWrite(this.getAll())
+			}
+			return authoritative
 		})
 	}
 

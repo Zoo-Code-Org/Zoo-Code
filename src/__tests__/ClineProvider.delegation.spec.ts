@@ -9,7 +9,9 @@ import type { HistoryItem } from "@roo-code/types"
 import { providerIdentifiers, RooCodeEventName } from "@roo-code/types"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { TaskScheduler } from "../core/task/TaskScheduler"
-import { LifecycleTransitionError } from "../core/task-persistence"
+import { LifecycleTransitionError, TaskHistoryStore } from "../core/task-persistence"
+import { abandonDelegatedChild } from "../core/task-persistence/taskLifecycle"
+import { makeProviderStub } from "./helpers/provider-stub"
 
 const parentHistoryItem: HistoryItem = {
 	id: "parent-1",
@@ -50,6 +52,92 @@ const makeParentTask = () =>
 		flushPendingToolResultsToHistory: vi.fn().mockResolvedValue(true),
 		retrySaveApiConversationHistory: vi.fn(),
 	}) as any
+
+describe("ClineProvider.resumeInterruptedTask()", () => {
+	it("resumes a delegated child only while its parent still awaits it", async () => {
+		const resumed = { id: "child-1", status: "active" } as HistoryItem
+		const taskHistoryStore = {
+			invalidate: vi.fn().mockResolvedValue(undefined),
+			get: vi.fn().mockReturnValue({ id: "parent-1", status: "delegated", awaitingChildId: "child-1" }),
+			resumeInterruptedTask: vi.fn().mockResolvedValue(resumed),
+		}
+		const provider = makeProviderStub({ taskHistoryStore, isViewLaunched: false })
+
+		await ClineProvider.prototype.resumeInterruptedTask.call(provider, "child-1", "parent-1")
+
+		expect(taskHistoryStore.invalidate).toHaveBeenCalledWith("parent-1")
+		expect(taskHistoryStore.resumeInterruptedTask).toHaveBeenCalledWith("child-1", "parent-1")
+	})
+
+	it("rejects abandonment committed by another host after the parent precheck", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "resume-abandon-"))
+		const storeA = new TaskHistoryStore(storagePath)
+		const storeB = new TaskHistoryStore(storagePath)
+		const parent: HistoryItem = {
+			id: "parent",
+			number: 1,
+			ts: 1,
+			task: "Parent",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+			status: "delegated",
+			awaitingChildId: "child",
+			delegatedToId: "child",
+			childIds: ["child"],
+		}
+		const child: HistoryItem = {
+			...parent,
+			id: "child",
+			status: "interrupted",
+			parentTaskId: "parent",
+			rootTaskId: "parent",
+			awaitingChildId: undefined,
+			delegatedToId: undefined,
+			childIds: [],
+		}
+		try {
+			await storeA.initialize()
+			await storeA.upsert(parent)
+			await storeA.upsert(child)
+			await storeB.initialize()
+			const resume = storeA.resumeInterruptedTask.bind(storeA)
+			vi.spyOn(storeA, "resumeInterruptedTask").mockImplementationOnce(async (id, expectedParent) => {
+				// This hook runs after the provider's parent check. Commit only the
+				// first half of abandonment: the parent still appears to await this child.
+				await storeB.atomicReadAndUpdate("child", (current) => abandonDelegatedChild(parent, current).child)
+				return resume(id, expectedParent)
+			})
+			const provider = makeProviderStub({ taskHistoryStore: storeA, isViewLaunched: false })
+			await expect(
+				ClineProvider.prototype.resumeInterruptedTask.call(provider, "child", "parent"),
+			).rejects.toThrow("parent linkage changed")
+			await storeB.invalidate("child")
+			expect(storeA.get("child")).toEqual(storeB.get("child"))
+			expect(storeB.get("child")).toMatchObject({ status: "interrupted" })
+			expect(storeB.get("child")?.parentTaskId).toBeUndefined()
+			expect(storeB.get("child")?.rootTaskId).toBeUndefined()
+		} finally {
+			storeA.dispose()
+			storeB.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
+	it("rejects a stale interrupted child after its parent delegates elsewhere", async () => {
+		const taskHistoryStore = {
+			invalidate: vi.fn().mockResolvedValue(undefined),
+			get: vi.fn().mockReturnValue({ id: "parent-1", status: "delegated", awaitingChildId: "child-2" }),
+			resumeInterruptedTask: vi.fn(),
+		}
+		const provider = makeProviderStub({ taskHistoryStore, isViewLaunched: false })
+
+		await expect(
+			ClineProvider.prototype.resumeInterruptedTask.call(provider, "child-1", "parent-1"),
+		).rejects.toThrow("parent parent-1 no longer awaits it")
+		expect(taskHistoryStore.resumeInterruptedTask).not.toHaveBeenCalled()
+	})
+})
 
 describe("ClineProvider.delegateParentAndOpenChild()", () => {
 	it("rejects a stale restored action before delegation side effects", async () => {
