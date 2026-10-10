@@ -457,12 +457,12 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 			// Check if destination path is outside workspace
 			const isMoveOutsideWorkspace = isPathOutsideWorkspace(moveAbsolutePath)
-			// Bound at classification time: the patch approval covers the whole patch, so the
-			// destination's identity is captured here - before the publish and before the FIFO
-			// queue - and the guard refuses a destination that no longer resolves to it.
-			const moveCanonicalTarget = isMoveOutsideWorkspace
-				? await canonicalizeForApproval(moveAbsolutePath, change.movePath)
-				: undefined
+			// A destination outside every workspace root is refused right here, so the publish at the
+			// end of this branch is always an inside-workspace one: it needs neither the approval flag
+			// nor a canonical identity. Capturing the identity here instead - as this did - ran
+			// canonicalizeForApproval for a destination that was about to be refused, so a destination
+			// whose name could not be resolved surfaced an exception where the user should get the tool
+			// error below.
 			if (isMoveOutsideWorkspace) {
 				task.consecutiveMistakeCount++
 				task.recordToolError("apply_patch")
@@ -528,9 +528,10 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					writeDelayMs,
 					"create",
 					sourceComplete,
-					// The user approved the whole patch, which names this destination.
-					isPathOutsideWorkspace(moveAbsolutePath),
-					moveCanonicalTarget,
+					// Guaranteed by the refusal above: this destination is inside a workspace root,
+					// so the guard's own containment check is what applies and no approval is claimed.
+					false,
+					undefined,
 				)
 			} else {
 				// Write to new path and delete old file

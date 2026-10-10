@@ -661,10 +661,6 @@ describe("safeWriteJson", () => {
 		}
 	})
 
-	// CWE-732 regression: safeWriteJson stages the temp itself and passes it
-	// via tempPath, so safeWriteText must apply the existing target's mode to
-	// the staged temp before the atomic rename — otherwise a 0o600 target is
-	// published as 0o644. POSIX-only assertion (Windows ignores POSIX modes).
 	test("rejects a confined write whose target is outside the confined directory", async () => {
 		const scope = path.join(tempDir, "project")
 		await fs.mkdir(scope)
@@ -815,6 +811,10 @@ describe("safeWriteJson", () => {
 		},
 	)
 
+	// CWE-732 regression: safeWriteJson stages the temp itself and passes it
+	// via tempPath, so safeWriteText must apply the existing target's mode to
+	// the staged temp before the atomic rename — otherwise a 0o600 target is
+	// published as 0o644. POSIX-only assertion (Windows ignores POSIX modes).
 	test.skipIf(process.platform === "win32")(
 		"preserves a restrictive 0o600 target mode through the atomic publish",
 		async () => {
