@@ -18,17 +18,13 @@ for (const theme of visualThemes) {
 		await expect(story).toHaveScreenshot(`auto-approve-settings-${theme.name}.png`)
 	})
 
+	// Behavioral assertions for the slider (minimum, current value, and the zero-timeout
+	// description) live in AutoApproveSettings.spec.tsx. This visual test establishes a
+	// deterministic zero-timeout state and makes the focused screenshot assertion.
 	test(`renders the zero follow-up timeout in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
 		const component = mountedStory(await mount("auto-approve-settings", { followupAutoApproveTimeoutMs: 0 }))
 		await applyVisualTheme(page, theme)
 		const story = component.getByTestId("auto-approve-settings-story")
-		const slider = story.getByTestId("followup-timeout-slider").getByRole("slider")
-		await expect(slider).toBeVisible()
-		await expect(slider).toHaveAttribute("aria-valuemin", "0")
-		await expect(slider).toHaveAttribute("aria-valuenow", "0")
-		await expect(
-			story.getByText("Set to 0 to never auto-select — always wait for you to choose an answer manually"),
-		).toBeVisible()
 		await expect(story).toHaveScreenshot(`auto-approve-settings-followup-zero-${theme.name}.png`)
 	})
 }
