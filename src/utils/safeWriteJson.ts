@@ -3,6 +3,13 @@ import * as fsSync from "fs"
 import * as path from "path"
 import { JsonStreamStringify } from "json-stream-stringify"
 
+import {
+	resolvePublishTarget,
+	safeWriteText,
+	PublishNotDurableError,
+	type SafeWriteTextOptions,
+} from "../services/file-safety/safeWriteText"
+
 import { acquireFileLock } from "./fileLock"
 
 /**
@@ -32,7 +39,7 @@ export interface SafeWriteJsonOptions {
  * Safely writes JSON data to a file.
  * - Creates parent directories if they don't exist
  * - Uses 'proper-lockfile' for inter-process advisory locking to prevent concurrent writes to the same path.
- * - Writes to a temporary file first.
+ * - Writes to a temporary file first via JsonStreamStringify streaming.
  * - If the target file exists, it's backed up before being replaced.
  * - Attempts to roll back and clean up in case of errors.
  * - Supports pretty-printing with indentation while maintaining streaming efficiency.
@@ -42,20 +49,24 @@ export interface SafeWriteJsonOptions {
  * @param {SafeWriteJsonOptions} options - Optional configuration for JSON formatting.
  * @returns {Promise<void>}
  */
-
 async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJsonOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 	let releaseLock = async () => {} // Initialized to a no-op
 
+	// Resolve the publish target (the symlink referent when the path is a symlink)
+	// BEFORE the lock is taken. The lock, the merge read, the staged file and the
+	// commit rename must all key off this one canonical path: if the lock is keyed on
+	// the caller's alias while the publish lands on the referent, two writers reaching
+	// the same file through different names (the link and its referent) serialize on
+	// different locks and silently lose each other's merged updates.
+	const canonicalPath = await resolvePublishTarget(absoluteFilePath)
+
 	// For directory creation
-	const dirPath = path.dirname(absoluteFilePath)
+	const dirPath = path.dirname(canonicalPath)
 
 	// Ensure directory structure exists with improved reliability
 	try {
-		// Create directory with recursive option
 		await fs.mkdir(dirPath, { recursive: true })
-
-		// Verify directory exists after creation attempt
 		await fs.access(dirPath)
 	} catch (dirError: any) {
 		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
@@ -69,11 +80,10 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// remains a no-op, so the finally block in the main file operations
 	// try-catch-finally won't try to release an unacquired lock if this
 	// path is taken.
-	releaseLock = await acquireFileLock(absoluteFilePath)
+	releaseLock = await acquireFileLock(canonicalPath)
 
-	// Variables to hold the actual paths of temp files if they are created.
+	// Variables to hold the actual path of the temp file if it is created.
 	let actualTempNewFilePath: string | null = null
-	let actualTempBackupFilePath: string | null = null
 
 	try {
 		// If a merge callback was provided, read the current file under the lock
@@ -82,7 +92,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		if (options?.merge) {
 			let existing: unknown = null
 			try {
-				existing = JSON.parse(await fs.readFile(absoluteFilePath, "utf8"))
+				existing = JSON.parse(await fs.readFile(canonicalPath, "utf8"))
 			} catch (error: unknown) {
 				const code =
 					error && typeof error === "object" && "code" in error ? (error as { code: string }).code : undefined
@@ -93,79 +103,67 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			data = options.merge(existing, data)
 		}
 
-		// Step 1: Write data to a new temporary file.
+		// Stage it beside the canonical target: safeWriteText commits by renaming onto
+		// that referent, and a rename across filesystems would fail with EXDEV.
 		actualTempNewFilePath = path.join(
-			path.dirname(absoluteFilePath),
-			`.${path.basename(absoluteFilePath)}.new_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
+			path.dirname(canonicalPath),
+			".new_" + Date.now() + "_" + Math.random().toString(36).substring(2) + ".tmp",
 		)
 
-		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
-
-		// Step 2: Check if the target file exists. If so, rename it to a backup path.
+		// The staged file holds the entire new content while it exists, so it must not
+		// be created with the process default (0o666 & ~umask, i.e. 0o644) next to a
+		// target that is deliberately narrower - a 0o600 settings file in a shared
+		// directory, for example. Mirror the existing target's mode, but always keep the
+		// owner read/write bits: safeWriteText reopens the staged file with "r+" before it
+		// applies the target mode with fchmod, so a read-only mirror (0o400/0o444) would
+		// fail that open with EACCES. A target that does not exist yet keeps the ordinary
+		// default; any other stat failure is surfaced instead of silently widening the
+		// creation mode.
+		let stagingMode: number | undefined
 		try {
-			// Check for target file existence
-			await fs.access(absoluteFilePath)
-			// Target exists, create a backup path and rename.
-			actualTempBackupFilePath = path.join(
-				path.dirname(absoluteFilePath),
-				`.${path.basename(absoluteFilePath)}.bak_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
-			)
-			await fs.rename(absoluteFilePath, actualTempBackupFilePath)
-		} catch (accessError: any) {
-			// Explicitly type accessError
-			if (accessError.code !== "ENOENT") {
-				// An error other than "file not found" occurred during access check.
-				throw accessError
+			stagingMode = (fsSync.statSync(canonicalPath).mode & 0o777) | 0o600
+		} catch (statError: unknown) {
+			const statCode =
+				typeof statError === "object" && statError !== null && "code" in statError
+					? (statError as { code?: string }).code
+					: undefined
+			if (statCode !== "ENOENT") {
+				throw statError
 			}
-			// Target file does not exist, so no backup is made. actualTempBackupFilePath remains null.
+			stagingMode = undefined
 		}
 
-		// Step 3: Rename the new temporary file to the target file path.
-		// This is the main "commit" step.
-		await fs.rename(actualTempNewFilePath, absoluteFilePath)
+		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint, stagingMode)
+
+		// Step 2: Delegate the atomic commit to safeWriteText with the pre-written
+		// temp path. The publish is a single rename, so the target stays intact on
+		// failure and no backup copy is needed. safeWriteText still captures the
+		// Windows DACL before the commit rename and restores it afterwards.
+		const textOptions: SafeWriteTextOptions = {
+			tempPath: actualTempNewFilePath,
+		}
+
+		await safeWriteText(canonicalPath, "", textOptions)
 
 		// If we reach here, the new file is successfully in place.
-		// The original actualTempNewFilePath is now the main file, so we shouldn't try to clean it up as "temp".
-		// Mark as "used" or "committed"
 		actualTempNewFilePath = null
-
-		// Step 4: If a backup was created, attempt to delete it.
-		if (actualTempBackupFilePath) {
-			try {
-				await fs.unlink(actualTempBackupFilePath)
-				// Mark backup as handled
-				actualTempBackupFilePath = null
-			} catch (unlinkBackupError) {
-				// Log this error, but do not re-throw. The main operation was successful.
-				// actualTempBackupFilePath remains set, indicating an orphaned backup.
-				console.error(
-					`Successfully wrote ${absoluteFilePath}, but failed to clean up backup ${actualTempBackupFilePath}:`,
-					unlinkBackupError,
-				)
-			}
-		}
 	} catch (originalError) {
 		console.error(`Operation failed for ${absoluteFilePath}: [Original Error Caught]`, originalError)
 
-		const newFileToCleanupWithinCatch = actualTempNewFilePath
-		const backupFileToRollbackOrCleanupWithinCatch = actualTempBackupFilePath
-
-		// Attempt rollback if a backup was made
-		if (backupFileToRollbackOrCleanupWithinCatch) {
-			try {
-				await fs.rename(backupFileToRollbackOrCleanupWithinCatch, absoluteFilePath)
-				// Mark as handled, prevent later unlink of this path
-				actualTempBackupFilePath = null
-			} catch (rollbackError) {
-				// actualTempBackupFilePath (outer scope) remains pointing to backupFileToRollbackOrCleanupWithinCatch
-				console.error(
-					`[Catch] Failed to restore backup ${backupFileToRollbackOrCleanupWithinCatch} to ${absoluteFilePath}:`,
-					rollbackError,
-				)
-			}
+		// PublishNotDurableError is the one failure where the commit rename DID land:
+		// the staged path was renamed onto the target, so it is no longer a leftover
+		// temp file and must never be treated as one below. Only the durability of the
+		// directory entry is unconfirmed; the content is in place.
+		if (originalError instanceof PublishNotDurableError) {
+			actualTempNewFilePath = null
 		}
 
-		// Cleanup the .new file if it exists
+		const newFileToCleanupWithinCatch = actualTempNewFilePath
+
+		// Any other failure means the commit rename never landed, so the target still
+		// holds the previous bytes. Clean up the staged file if it still exists
+		// (safeWriteText also cleans up its tempPath on failure; this is a safety net
+		// in case its cleanup missed it).
 		if (newFileToCleanupWithinCatch) {
 			try {
 				await fs.unlink(newFileToCleanupWithinCatch)
@@ -177,26 +175,12 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			}
 		}
 
-		// Cleanup the .bak file if it still needs to be (i.e., wasn't successfully restored)
-		if (actualTempBackupFilePath) {
-			try {
-				await fs.unlink(actualTempBackupFilePath)
-			} catch (cleanupError) {
-				console.error(
-					`[Catch] Failed to clean up temporary backup file ${actualTempBackupFilePath}:`,
-					cleanupError,
-				)
-			}
-		}
 		throw originalError // This MUST be the error that rejects the promise.
 	} finally {
 		// Release the lock in the main finally block.
 		try {
-			// releaseLock will be the actual unlock function if lock was acquired,
-			// or the initial no-op if acquisition failed.
 			await releaseLock()
 		} catch (unlockError) {
-			// Do not re-throw here, as the originalError from the try/catch (if any) is more important.
 			console.error(`Failed to release lock for ${absoluteFilePath}:`, unlockError)
 		}
 	}
@@ -209,9 +193,14 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
  * @param prettyPrint Whether to format the JSON with indentation.
  * @returns Promise<void>
  */
-async function _streamDataToFile(targetPath: string, data: any, prettyPrint = false): Promise<void> {
+async function _streamDataToFile(targetPath: string, data: any, prettyPrint = false, mode?: number): Promise<void> {
 	// Stream data to avoid high memory usage for large JSON objects.
-	const fileWriteStream = fsSync.createWriteStream(targetPath, { encoding: "utf8" })
+	// mode is explicit because createWriteStream defaults to 0o666 (& ~umask): the
+	// staged file is readable by others until the commit renames it onto the target.
+	const fileWriteStream = fsSync.createWriteStream(targetPath, {
+		encoding: "utf8",
+		...(mode !== undefined ? { mode } : {}),
+	})
 
 	// JsonStreamStringify traverses the object and streams tokens directly
 	// The 'spaces' parameter adds indentation during streaming, not via a separate pass

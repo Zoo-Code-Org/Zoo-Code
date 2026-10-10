@@ -16,6 +16,14 @@ vi.mock("fs/promises", () => ({
 	readFile: vi.fn().mockResolvedValue("file content"),
 	writeFile: vi.fn().mockResolvedValue(undefined),
 	access: vi.fn().mockResolvedValue(undefined),
+	mkdir: vi.fn().mockResolvedValue(undefined),
+	rename: vi.fn().mockResolvedValue(undefined),
+	unlink: vi.fn().mockResolvedValue(undefined),
+}))
+
+// Mock safeWriteText (used by saveDirectly)
+vi.mock("../../../services/file-safety/safeWriteText", () => ({
+	safeWriteText: vi.fn().mockResolvedValue(undefined),
 }))
 
 // Mock utils
@@ -27,6 +35,8 @@ vi.mock("../../../utils/fs", () => ({
 vi.mock("path", () => ({
 	resolve: vi.fn((cwd, relPath) => `${cwd}/${relPath}`),
 	basename: vi.fn((path) => path.split("/").pop()),
+	dirname: vi.fn((path) => path.split("/").slice(0, -1).join("/") || "/"),
+	join: (...args: string[]) => args.join("/"),
 }))
 
 // Mock vscode
@@ -780,6 +790,66 @@ describe("DiffViewProvider", () => {
 	})
 
 	describe("saveDirectly method", () => {
+		it("rejects a save over a read-only target instead of renaming onto it", async () => {
+			const fs = await import("fs/promises")
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			vi.mocked(safeWriteText).mockClear()
+			const eacces = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+			vi.mocked(fs.access).mockRejectedValueOnce(eacces)
+
+			await expect(diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200)).rejects.toThrow(
+				"EACCES",
+			)
+
+			// The old fs.writeFile path failed the same way; safeWriteText must not run.
+			expect(safeWriteText).not.toHaveBeenCalled()
+			vi.mocked(fs.access).mockResolvedValue(undefined)
+		})
+
+		it("still writes when the target does not exist yet", async () => {
+			const fs = await import("fs/promises")
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			vi.mocked(safeWriteText).mockClear()
+			vi.mocked(fs.access).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200)
+
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			// Call counts alone would still pass if the publish ran but the caller reported
+			// nothing about the content it wrote.
+			expect(result.finalContent).toBe("new content")
+			expect(result.userEdits).toBeUndefined()
+			vi.mocked(fs.access).mockResolvedValue(undefined)
+		})
+
+		it("checks write permission on the absolute target before publishing", async () => {
+			const fs = await import("fs/promises")
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			vi.mocked(safeWriteText).mockClear()
+			vi.mocked(fs.access).mockClear()
+
+			await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200)
+
+			// safeWriteText publishes with rename, which only needs write permission on the
+			// DIRECTORY. The contract this unit preserves requires it on the FILE, so the guard
+			// must be handed the absolute target - not the relative path the caller passed.
+			const calls = vi.mocked(fs.access).mock.calls
+			const accessIndex = calls.findIndex((call) => String(call[0]).endsWith("test.ts"))
+			expect(accessIndex).toBeGreaterThanOrEqual(0)
+			expect(calls[accessIndex][0]).toBe(`${mockCwd}/test.ts`)
+
+			// An existence-only check would not catch a read-only target: the guard has to be handed
+			// the write bit, otherwise the read-only contract this unit preserves is silently gone.
+			const { constants } = await import("fs")
+			expect(calls[accessIndex][1]).toBe(constants.W_OK)
+
+			// The check is only meaningful before the publish; after it, an EACCES target would
+			// already have been renamed over.
+			expect(vi.mocked(fs.access).mock.invocationCallOrder[accessIndex]).toBeLessThan(
+				vi.mocked(safeWriteText).mock.invocationCallOrder[0],
+			)
+		})
+
 		beforeEach(() => {
 			// Mock vscode functions
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue({} as any)
@@ -792,9 +862,9 @@ describe("DiffViewProvider", () => {
 
 			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 2000)
 
-			// Verify file was written
-			const fs = await import("fs/promises")
-			expect(fs.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
+			// Verify file was written via safeWriteText
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
 
 			// Verify file was opened without focus
 			expect(vscode.window.showTextDocument).toHaveBeenCalledWith(
@@ -815,9 +885,9 @@ describe("DiffViewProvider", () => {
 		it("should not open file when openWithoutFocus is false", async () => {
 			await diffViewProvider.saveDirectly("test.ts", "new content", false, true, 1000)
 
-			// Verify file was written
-			const fs = await import("fs/promises")
-			expect(fs.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
+			// Verify file was written via safeWriteText
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
 
 			// Verify file was NOT opened
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
@@ -830,9 +900,9 @@ describe("DiffViewProvider", () => {
 
 			await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 1000)
 
-			// Verify file was written
-			const fs = await import("fs/promises")
-			expect(fs.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
+			// Verify file was written via safeWriteText
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
 
 			// Verify delay was NOT called
 			expect(mockDelay).not.toHaveBeenCalled()

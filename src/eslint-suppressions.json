@@ -1686,7 +1686,7 @@
 	},
 	"utils/__tests__/safeWriteJson.test.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 27
+			"count": 26
 		}
 	},
 	"utils/__tests__/shell.spec.ts": {
@@ -1716,7 +1716,7 @@
 	},
 	"utils/safeWriteJson.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 4
+			"count": 3
 		}
 	},
 	"utils/tts.ts": {

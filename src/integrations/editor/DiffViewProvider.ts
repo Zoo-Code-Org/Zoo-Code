@@ -1,6 +1,7 @@
 import * as vscode from "vscode"
 import * as path from "path"
 import * as fs from "fs/promises"
+import { constants as fsConstants } from "fs"
 import * as diff from "diff"
 import stripBom from "strip-bom"
 import delay from "delay"
@@ -18,6 +19,7 @@ import { arePathsEqual, getReadablePath } from "../../utils/path"
 import { formatResponse } from "../../core/prompts/responses"
 import { diagnosticsToProblemsString, getNewDiagnostics } from "../diagnostics"
 import { Task } from "../../core/task/Task"
+import { safeWriteText } from "../../services/file-safety/safeWriteText"
 
 import { DecorationController } from "./DecorationController"
 
@@ -1156,7 +1158,20 @@ export class DiffViewProvider {
 
 		// Write the content directly to the file
 		await createDirectoriesForFile(absolutePath)
-		await fs.writeFile(absolutePath, content, "utf-8")
+		// safeWriteText publishes with rename, which only needs write permission on the
+		// DIRECTORY. The previous fs.writeFile required it on the file itself, so a target
+		// the user marked read-only used to fail with EACCES; keep that contract instead of
+		// silently renaming over it. A not-yet-existing target stays creatable.
+		try {
+			await fs.access(absolutePath, fsConstants.W_OK)
+		} catch (error: unknown) {
+			const code =
+				typeof error === "object" && error !== null && "code" in error
+					? (error as { code?: string }).code
+					: undefined
+			if (code !== "ENOENT") throw error
+		}
+		await safeWriteText(absolutePath, content)
 
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory
