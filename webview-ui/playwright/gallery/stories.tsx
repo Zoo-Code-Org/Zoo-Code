@@ -119,10 +119,16 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
-	"auto-approve-settings": async () => {
+	"auto-approve-settings": async ({ followupAutoApproveTimeoutMs }) => {
 		const { AutoApproveSettingsStory } =
 			await import("@/components/settings/__tests__/AutoApproveSettings.visual.fixture")
-		return <AutoApproveSettingsStory />
+		return (
+			<AutoApproveSettingsStory
+				followupAutoApproveTimeoutMs={
+					typeof followupAutoApproveTimeoutMs === "number" ? followupAutoApproveTimeoutMs : undefined
+				}
+			/>
+		)
 	},
 	"chat-text-area": async () => {
 		const { ChatTextAreaStory } = await import("@/components/chat/__tests__/ChatTextArea.visual.fixture")
