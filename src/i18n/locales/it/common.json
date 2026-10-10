@@ -147,7 +147,8 @@
 			"unexpectedStreamError": "Unexpected error processing response stream",
 			"completionError": "OpenAI Codex completion error: {{message}}"
 		},
-		"rooHistoryImport": "Impossibile importare la cronologia di Roo Code: {{error}}"
+		"rooHistoryImport": "Impossibile importare la cronologia di Roo Code: {{error}}",
+		"settingsSaveFailed": "Impossibile salvare alcune impostazioni. Seleziona Salva per riprovare. {{keys}}"
 	},
 	"warnings": {
 		"no_terminal_content": "Nessun contenuto del terminale selezionato",

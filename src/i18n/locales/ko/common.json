@@ -147,7 +147,8 @@
 			"unexpectedStreamError": "Unexpected error processing response stream",
 			"completionError": "OpenAI Codex completion error: {{message}}"
 		},
-		"rooHistoryImport": "Roo Code 기록 가져오기 실패: {{error}}"
+		"rooHistoryImport": "Roo Code 기록 가져오기 실패: {{error}}",
+		"settingsSaveFailed": "일부 설정을 저장하지 못했습니다. 저장을 선택하여 다시 시도하세요. {{keys}}"
 	},
 	"warnings": {
 		"no_terminal_content": "선택된 터미널 내용이 없습니다",

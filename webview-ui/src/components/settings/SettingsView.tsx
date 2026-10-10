@@ -32,6 +32,7 @@ import {
 } from "lucide-react"
 
 import {
+	type ExtensionMessage,
 	type ProviderSettings,
 	type ExperimentId,
 	type TelemetrySetting,
@@ -152,6 +153,50 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const confirmDialogHandler = useRef<() => void>()
 
 	const [cachedState, setCachedState] = useState(() => extensionState)
+	const pendingSave = useRef<{
+		requests: Map<string, string>
+		unsavedSettings: string[]
+		state: ExtensionStateContextType
+		timeoutId: ReturnType<typeof setTimeout>
+	}>()
+	const [saveError, setSaveError] = useState<string[]>()
+	const [isSaving, setIsSaving] = useState(false)
+
+	useEffect(() => {
+		return () => {
+			if (pendingSave.current) {
+				clearTimeout(pendingSave.current.timeoutId)
+				pendingSave.current = undefined
+			}
+		}
+	}, [])
+
+	useEffect(() => {
+		const handleSaveResult = (event: MessageEvent<ExtensionMessage>) => {
+			const message = event.data
+			const pending = pendingSave.current
+			if (message.type !== "settingsSaveResult" || !pending || !message.requestId) return
+			const setting = pending.requests.get(message.requestId)
+			if (!setting) return
+			pending.requests.delete(message.requestId)
+			if (!message.success) {
+				pending.unsavedSettings.push(...(message.unsavedSettings?.length ? message.unsavedSettings : [setting]))
+			}
+			if (pending.requests.size > 0) return
+			clearTimeout(pending.timeoutId)
+			pendingSave.current = undefined
+			setIsSaving(false)
+			if (pending.unsavedSettings.length === 0) {
+				setSaveError(undefined)
+				if (cachedState === pending.state) setChangeDetected(false)
+			} else {
+				setSaveError(pending.unsavedSettings)
+				setChangeDetected(true)
+			}
+		}
+		window.addEventListener("message", handleSaveResult)
+		return () => window.removeEventListener("message", handleSaveResult)
+	}, [cachedState])
 
 	const {
 		alwaysAllowReadOnly,
@@ -214,6 +259,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		reasoningBlockCollapsed,
 		chatFontSize,
 		enterBehavior,
+		chatInputEffect,
+		tableStriped,
 		includeCurrentTime,
 		includeCurrentCost,
 		maxGitStatusFiles,
@@ -380,9 +427,34 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const isSettingValid = !errorMessage
 
 	const handleSubmit = () => {
-		if (isSettingValid) {
+		if (isSettingValid && !pendingSave.current) {
+			const requestId = crypto.randomUUID()
+			const apiRequestId = crypto.randomUUID()
+			const telemetryRequestId = crypto.randomUUID()
+			const debugRequestId = crypto.randomUUID()
+			pendingSave.current = {
+				requests: new Map([
+					[requestId, "updateSettings"],
+					[apiRequestId, "apiConfiguration"],
+					[telemetryRequestId, "telemetrySetting"],
+					[debugRequestId, "debug"],
+				]),
+				unsavedSettings: [],
+				state: cachedState,
+				timeoutId: setTimeout(() => {
+					const pending = pendingSave.current
+					if (!pending) return
+					pendingSave.current = undefined
+					setIsSaving(false)
+					setSaveError([...pending.unsavedSettings, ...pending.requests.values()])
+					setChangeDetected(true)
+				}, 30_000),
+			}
+			setIsSaving(true)
+			setSaveError(undefined)
 			vscode.postMessage({
 				type: "updateSettings",
+				requestId,
 				updatedSettings: {
 					language,
 					alwaysAllowReadOnly: alwaysAllowReadOnly ?? undefined,
@@ -441,6 +513,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					reasoningBlockCollapsed: reasoningBlockCollapsed ?? true,
 					chatFontSize: chatFontSize ?? null,
 					enterBehavior: enterBehavior ?? "send",
+					chatInputEffect: chatInputEffect ?? "marquee",
+					tableStriped: tableStriped ?? false,
 					includeCurrentTime: includeCurrentTime ?? true,
 					includeCurrentCost: includeCurrentCost ?? true,
 					maxGitStatusFiles: maxGitStatusFiles ?? 0,
@@ -459,11 +533,14 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 			// These have more complex logic so they aren't (yet) handled
 			// by the `updateSettings` message.
-			vscode.postMessage({ type: "upsertApiConfiguration", text: currentApiConfigName, apiConfiguration })
-			vscode.postMessage({ type: "telemetrySetting", text: telemetrySetting })
-			vscode.postMessage({ type: "debugSetting", bool: cachedState.debug })
-
-			setChangeDetected(false)
+			vscode.postMessage({
+				type: "upsertApiConfiguration",
+				requestId: apiRequestId,
+				text: currentApiConfigName,
+				apiConfiguration,
+			})
+			vscode.postMessage({ type: "telemetrySetting", requestId: telemetryRequestId, text: telemetrySetting })
+			vscode.postMessage({ type: "debugSetting", requestId: debugRequestId, bool: cachedState.debug })
 		}
 	}
 
@@ -694,13 +771,19 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 							variant={isSettingValid ? "primary" : "secondary"}
 							className={!isSettingValid ? "!border-vscode-errorForeground" : ""}
 							onClick={handleSubmit}
-							disabled={!isChangeDetected || !isSettingValid}
+							disabled={isSaving || !isChangeDetected || !isSettingValid}
 							data-testid="save-button">
 							{t("settings:common.save")}
 						</Button>
 					</StandardTooltip>
 				</div>
 			</TabHeader>
+
+			{saveError && (
+				<div role="alert" className="px-4 py-2 text-vscode-errorForeground">
+					{t("settings:common.saveFailed")} {saveError.join(", ")}
+				</div>
+			)}
 
 			{/* Vertical tabs layout */}
 			<div ref={containerRef} className={cn(settingsTabsContainer, isCompactMode && "narrow")}>
@@ -940,7 +1023,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 							<UISettings
 								reasoningBlockCollapsed={reasoningBlockCollapsed ?? true}
 								enterBehavior={enterBehavior ?? "send"}
+								chatInputEffect={chatInputEffect ?? "marquee"}
 								chatFontSize={chatFontSize ?? undefined}
+								tableStriped={tableStriped ?? false}
 								autoCloseZooOpenedFiles={autoCloseZooOpenedFiles}
 								autoCloseZooOpenedFilesAfterUserEdited={autoCloseZooOpenedFilesAfterUserEdited}
 								autoCloseZooOpenedNewFiles={autoCloseZooOpenedNewFiles}

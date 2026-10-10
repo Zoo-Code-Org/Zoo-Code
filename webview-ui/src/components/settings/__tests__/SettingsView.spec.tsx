@@ -1,7 +1,9 @@
 // pnpm --filter @roo-code/vscode-webview test src/components/settings/__tests__/SettingsView.spec.tsx
 
-import { renderWithExtensionState, screen, fireEvent, within, waitFor } from "@/utils/test-utils"
-import { act } from "@testing-library/react"
+import type { ChangeEvent, ComponentProps } from "react"
+
+import { makeExtensionState, renderWithExtensionState, screen, fireEvent, within, waitFor } from "@/utils/test-utils"
+import { act, cleanup } from "@testing-library/react"
 
 import { vscode } from "@/utils/vscode"
 import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, type ProviderSettings } from "@roo-code/types"
@@ -95,6 +97,26 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 			data-testid={dataTestId}
 			role="textbox"
 		/>
+	),
+	VSCodeDropdown: ({
+		children,
+		value,
+		onChange,
+		"data-testid": dataTestId,
+		...props
+	}: ComponentProps<"select"> & { "data-testid"?: string }) => (
+		<select
+			data-testid={dataTestId}
+			value={value}
+			onChange={(e: ChangeEvent<HTMLSelectElement>) => onChange?.(e)}
+			{...props}>
+			{children}
+		</select>
+	),
+	VSCodeOption: ({ children, value, ...props }: ComponentProps<"option">) => (
+		<option value={value} {...props}>
+			{children}
+		</option>
 	),
 }))
 
@@ -190,8 +212,13 @@ vi.mock("@/components/ui", () => ({
 			data-testid={dataTestId}
 		/>
 	),
-	Button: ({ children, onClick, variant, className, "data-testid": dataTestId }: any) => (
-		<button onClick={onClick} data-variant={variant} className={className} data-testid={dataTestId}>
+	Button: ({ children, onClick, variant, className, disabled, "data-testid": dataTestId }: any) => (
+		<button
+			onClick={onClick}
+			disabled={disabled}
+			data-variant={variant}
+			className={className}
+			data-testid={dataTestId}>
 			{children}
 		</button>
 	),
@@ -334,7 +361,7 @@ const renderSettingsView = (initialState: any = {}) => {
 	// Helper to get elements within the settings content (not the indexing container)
 	const getSettingsContent = () => screen.getByTestId("settings-content")
 
-	return { onDone, activateTab, getSettingsContent }
+	return { onDone, activateTab, getSettingsContent, unmount: result.unmount }
 }
 
 describe("SettingsView - Sound Settings", () => {
@@ -446,6 +473,16 @@ describe("SettingsView - Sound Settings", () => {
 				updatedSettings: expect.objectContaining({ chatFontSize: 18 }),
 			}),
 		)
+
+		for (const [request] of vi.mocked(vscode.postMessage).mock.calls.slice(-4)) {
+			act(() =>
+				window.dispatchEvent(
+					new MessageEvent("message", {
+						data: { type: "settingsSaveResult", requestId: request.requestId, success: true },
+					}),
+				),
+			)
+		}
 
 		// Reset clears the override; it is persisted as null (not undefined).
 		fireEvent.click(within(getSettingsContent()).getByTestId("chat-font-size-reset"))
@@ -1006,5 +1043,354 @@ describe("SettingsView - openAiStrictToolSchemas save round trip", () => {
 		fireEvent.click(screen.getByTestId("save-button"))
 		expect(posted()?.apiConfiguration?.openAiBaseUrl).toBe("https://example.test")
 		expect(posted()?.apiConfiguration?.openAiStrictToolSchemas).toBeUndefined()
+	})
+})
+
+describe("SettingsView - Chat Appearance Save Payload", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("saves the selected chat input effect and table striping", () => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="ui" />, {
+			state: makeExtensionState({ chatInputEffect: "marquee", tableStriped: false }),
+		})
+		const content = within(screen.getByTestId("settings-content"))
+
+		fireEvent.change(content.getByTestId("chat-input-effect-dropdown"), { target: { value: "breathing" } })
+		fireEvent.click(content.getByTestId("table-striped-checkbox"))
+
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "updateSettings" }))
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ chatInputEffect: "breathing", tableStriped: true }),
+			}),
+		)
+	})
+
+	it("saves false when table striping is turned off", () => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="ui" />, {
+			state: makeExtensionState({ tableStriped: true }),
+		})
+		const content = within(screen.getByTestId("settings-content"))
+
+		fireEvent.click(content.getByTestId("table-striped-checkbox"))
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ tableStriped: false }),
+			}),
+		)
+	})
+
+	it("saves marquee and unstriped tables when the settings are unset", () => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="ui" />, {
+			state: makeExtensionState({ chatInputEffect: undefined, tableStriped: undefined }),
+		})
+		const content = within(screen.getByTestId("settings-content"))
+
+		// Make an unrelated edit so Save is enabled while both appearance settings remain unset.
+		fireEvent.change(content.getByTestId("chat-font-size-slider"), { target: { value: "18" } })
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ chatInputEffect: "marquee", tableStriped: false }),
+			}),
+		)
+	})
+})
+
+describe("settings save acknowledgment", () => {
+	function beginSave() {
+		const view = renderSettingsView()
+		view.activateTab("notifications")
+		const checkbox = within(view.getSettingsContent()).getByTestId("tts-enabled-checkbox")
+		fireEvent.click(checkbox)
+		const save = screen.getByTestId("save-button")
+		fireEvent.click(save)
+		const request = vi
+			.mocked(vscode.postMessage)
+			.mock.calls.filter(([message]) => message.type === "updateSettings")
+			.at(-1)?.[0]
+		expect(request?.requestId).toBeDefined()
+		return { save, checkbox, requestId: request?.requestId, onDone: view.onDone, unmount: view.unmount }
+	}
+
+	function respond(requestId: string | undefined, success: boolean) {
+		act(() =>
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "settingsSaveResult",
+						requestId,
+						success,
+						unsavedSettings: success ? [] : ["chatInputEffect", "tableStriped"],
+					},
+				}),
+			),
+		)
+	}
+
+	function respondToOtherWrites() {
+		for (const [request] of vi.mocked(vscode.postMessage).mock.calls.slice(-3)) {
+			respond(request.requestId, true)
+		}
+	}
+
+	it.each(["updateSettings", "upsertApiConfiguration", "telemetrySetting", "debugSetting"])(
+		"waits for every write and retains dirty state when %s fails",
+		(failedType) => {
+			const { save } = beginSave()
+			const requests = vi
+				.mocked(vscode.postMessage)
+				.mock.calls.slice(-4)
+				.map(([message]) => message)
+			expect(new Set(requests.map((request) => request.requestId)).size).toBe(4)
+			const failed = requests.find((request) => request.type === failedType)!
+			// Complete in reverse order, leaving the failure until last.
+			for (const request of [...requests].reverse().filter((request) => request !== failed)) {
+				respond(request.requestId, true)
+				expect(save).toBeDisabled()
+				respond(request.requestId, true) // Duplicate acknowledgements cannot complete a save.
+				expect(save).toBeDisabled()
+			}
+			respond(failed.requestId, false)
+			expect(save).toBeEnabled()
+			expect(screen.getByRole("alert")).toBeInTheDocument()
+		},
+	)
+
+	it("clears dirty state only after all four writes succeed", () => {
+		const { save, requestId, onDone } = beginSave()
+		respond(requestId, true)
+		expect(save).toBeDisabled()
+		respondToOtherWrites()
+		expect(save).toBeDisabled()
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+		fireEvent.click(screen.getByRole("button", { name: "settings:common.done" }))
+		expect(onDone).toHaveBeenCalledTimes(1)
+	})
+
+	it("retains dirty edits on partial failure and clears them only after a successful retry", () => {
+		const { save, checkbox, requestId } = beginSave()
+		expect(save).toBeDisabled()
+		respond("unrelated", true)
+		expect(save).toBeDisabled()
+		respond(requestId, false)
+		respondToOtherWrites()
+		expect(screen.getByRole("alert")).toHaveTextContent("chatInputEffect, tableStriped")
+		expect(checkbox).toBeChecked()
+		expect(save).toBeEnabled()
+		fireEvent.click(save)
+		const retry = vi
+			.mocked(vscode.postMessage)
+			.mock.calls.filter(([message]) => message.type === "updateSettings")
+			.at(-1)?.[0]
+		expect(retry?.requestId).not.toBe(requestId)
+		respond(requestId, false)
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+		respond(retry?.requestId, true)
+		respondToOtherWrites()
+		expect(save).toBeDisabled()
+	})
+
+	it("keeps newer edits dirty when an earlier save succeeds", () => {
+		const { save, checkbox, requestId } = beginSave()
+		fireEvent.click(checkbox)
+		respond(requestId, true)
+		respondToOtherWrites()
+		expect(checkbox).not.toBeChecked()
+		expect(save).toBeEnabled()
+	})
+
+	describe("save timeout", () => {
+		beforeEach(() => {
+			vi.clearAllMocks()
+			vi.useFakeTimers()
+		})
+
+		afterEach(() => {
+			cleanup()
+			vi.useRealTimers()
+			vi.restoreAllMocks()
+		})
+
+		it("reports missing results after 30 seconds and ignores late results during a retry", () => {
+			const { save, checkbox } = beginSave()
+			const expiredRequests = vi
+				.mocked(vscode.postMessage)
+				.mock.calls.slice(-4)
+				.map(([message]) => message)
+			act(() => vi.advanceTimersByTime(29_999))
+			expect(save).toBeDisabled()
+			expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+			act(() => vi.advanceTimersByTime(1))
+			expect(screen.getByRole("alert")).toHaveTextContent(
+				"updateSettings, apiConfiguration, telemetrySetting, debug",
+			)
+			expect(checkbox).toBeChecked()
+			expect(save).toBeEnabled()
+
+			fireEvent.click(save)
+			for (const request of expiredRequests) respond(request.requestId, true)
+			expect(save).toBeDisabled()
+			expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+			for (const [request] of vi.mocked(vscode.postMessage).mock.calls.slice(-4)) respond(request.requestId, true)
+			act(() => vi.advanceTimersByTime(30_000))
+			expect(save).toBeDisabled()
+			expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+		})
+
+		it("preserves failures and reports only outstanding requests even after another edit", () => {
+			const { save, checkbox, requestId } = beginSave()
+			respond(requestId, false)
+			const requests = vi
+				.mocked(vscode.postMessage)
+				.mock.calls.slice(-4)
+				.map(([message]) => message)
+			for (const request of requests.slice(2)) respond(request.requestId, true)
+			fireEvent.click(checkbox)
+			act(() => vi.advanceTimersByTime(30_000))
+			expect(screen.getByRole("alert")).toHaveTextContent("chatInputEffect, tableStriped, apiConfiguration")
+			expect(screen.getByRole("alert")).not.toHaveTextContent("telemetrySetting")
+			expect(screen.getByRole("alert")).not.toHaveTextContent("debug")
+			expect(save).toBeEnabled()
+		})
+
+		it.each([true, false])("clears the timeout when all results arrive (success: %s)", (success) => {
+			const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout")
+			const { save, requestId } = beginSave()
+			clearTimeoutSpy.mockClear()
+			respond(requestId, success)
+			respondToOtherWrites()
+			expect(clearTimeoutSpy).toHaveBeenCalledTimes(1)
+			act(() => vi.advanceTimersByTime(30_000))
+			if (success) {
+				expect(save).toBeDisabled()
+				expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+			} else {
+				expect(save).toBeEnabled()
+				expect(screen.getByRole("alert")).toHaveTextContent("chatInputEffect, tableStriped")
+			}
+		})
+
+		it("clears the timeout on unmount", () => {
+			const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout")
+			const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout")
+			const addEventListenerSpy = vi.spyOn(window, "addEventListener")
+			const removeEventListenerSpy = vi.spyOn(window, "removeEventListener")
+			const { unmount, requestId } = beginSave()
+			const handleSaveResult = addEventListenerSpy.mock.calls
+				.filter(
+					([type, listener]) =>
+						type === "message" && typeof listener === "function" && listener.name === "handleSaveResult",
+				)
+				.at(-1)?.[1]
+			expect(handleSaveResult).toBeDefined()
+			const timerIndex = setTimeoutSpy.mock.calls.findIndex(([, delay]) => delay === 30_000)
+			expect(timerIndex).toBeGreaterThanOrEqual(0)
+			const timeoutId = setTimeoutSpy.mock.results[timerIndex].value
+			clearTimeoutSpy.mockClear()
+			removeEventListenerSpy.mockClear()
+			unmount()
+			expect(clearTimeoutSpy).toHaveBeenCalledWith(timeoutId)
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("message", handleSaveResult)
+			respond(requestId, true)
+			act(() => vi.advanceTimersByTime(30_000))
+		})
+
+		it("ignores a stale timeout callback once a later save completes", () => {
+			const { save, requestId } = beginSave()
+			respond(requestId, true)
+			respondToOtherWrites()
+			// Completing the save clears pendingSave, so the leaked timeout must be a no-op.
+			act(() => vi.advanceTimersByTime(30_000))
+			expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+			expect(save).toBeDisabled()
+		})
+	})
+
+	it("falls back to the tracked setting name when a failed result omits its unsaved keys", () => {
+		const { save, requestId } = beginSave()
+		act(() =>
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "settingsSaveResult", requestId, success: false, unsavedSettings: [] },
+				}),
+			),
+		)
+		respondToOtherWrites()
+		expect(save).toBeEnabled()
+		expect(screen.getByRole("alert")).toHaveTextContent("updateSettings")
+	})
+
+	describe("save button gating", () => {
+		it("stays disabled until an edit is made, then re-disables while a save is in flight", () => {
+			vi.mocked(vscode.postMessage).mockClear()
+			const view = renderSettingsView()
+			view.activateTab("notifications")
+			const save = screen.getByTestId("save-button")
+			// No edits yet: nothing to save.
+			expect(save).toBeDisabled()
+			fireEvent.click(within(view.getSettingsContent()).getByTestId("tts-enabled-checkbox"))
+			expect(save).toBeEnabled()
+			fireEvent.click(save)
+			// A second click while the save is pending is a no-op and leaves it disabled.
+			expect(save).toBeDisabled()
+			fireEvent.click(save)
+			const updateRequests = vi
+				.mocked(vscode.postMessage)
+				.mock.calls.filter(([message]) => message.type === "updateSettings")
+			expect(updateRequests).toHaveLength(1)
+		})
+	})
+})
+
+describe("SettingsView - save payload fallbacks", () => {
+	it("persists unset command and file lists as empty arrays", () => {
+		vi.mocked(vscode.postMessage).mockClear()
+		const view = renderSettingsView({
+			allowedCommands: undefined,
+			deniedCommands: undefined,
+			allowedReadFiles: undefined,
+			allowedWriteFiles: undefined,
+		})
+		view.activateTab("autoApprove")
+		fireEvent.click(within(view.getSettingsContent()).getByTestId("always-allow-execute-toggle"))
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({
+					allowedCommands: [],
+					deniedCommands: [],
+					allowedReadFiles: [],
+					allowedWriteFiles: [],
+				}),
+			}),
+		)
+	})
+
+	it("unmounting without a pending save is a no-op", () => {
+		const addEventListenerSpy = vi.spyOn(window, "addEventListener")
+		const removeEventListenerSpy = vi.spyOn(window, "removeEventListener")
+		const view = renderSettingsView()
+		const handleSaveResult = addEventListenerSpy.mock.calls
+			.filter(
+				([type, listener]) =>
+					type === "message" && typeof listener === "function" && listener.name === "handleSaveResult",
+			)
+			.at(-1)?.[1]
+		// No save has been started, so pendingSave.current is undefined on unmount.
+		view.unmount()
+		expect(removeEventListenerSpy).toHaveBeenCalledWith("message", handleSaveResult)
 	})
 })

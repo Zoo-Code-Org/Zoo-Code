@@ -360,13 +360,13 @@ export class ContextProxy {
 		return value !== undefined ? value : defaultValue
 	}
 
-	updateGlobalState<K extends GlobalStateKey>(key: K, value: GlobalState[K]) {
+	async updateGlobalState<K extends GlobalStateKey>(key: K, value: GlobalState[K]) {
 		if (isPassThroughStateKey(key)) {
 			return this.originalContext.globalState.update(key, value)
 		}
 
+		await this.originalContext.globalState.update(key, value)
 		this.stateCache[key] = value
-		return this.originalContext.globalState.update(key, value)
 	}
 
 	private getAllGlobalState(): GlobalState {
@@ -382,14 +382,11 @@ export class ContextProxy {
 		return this.secretCache[key]
 	}
 
-	storeSecret(key: SecretStateKey, value?: string) {
-		// Update cache.
-		this.secretCache[key] = value
-
-		// Write directly to context.
-		return value === undefined
+	async storeSecret(key: SecretStateKey, value?: string) {
+		await (value === undefined
 			? this.originalContext.secrets.delete(key)
-			: this.originalContext.secrets.store(key, value)
+			: this.originalContext.secrets.store(key, value))
+		this.secretCache[key] = value
 	}
 
 	/**

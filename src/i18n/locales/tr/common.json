@@ -147,7 +147,8 @@
 			"unexpectedStreamError": "Unexpected error processing response stream",
 			"completionError": "OpenAI Codex completion error: {{message}}"
 		},
-		"rooHistoryImport": "Roo Code geçmişi içe aktarılamadı: {{error}}"
+		"rooHistoryImport": "Roo Code geçmişi içe aktarılamadı: {{error}}",
+		"settingsSaveFailed": "Bazı ayarlar kaydedilemedi. Tekrar denemek için Kaydet’i seçin. {{keys}}"
 	},
 	"warnings": {
 		"no_terminal_content": "Seçili terminal içeriği yok",

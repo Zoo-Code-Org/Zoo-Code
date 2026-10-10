@@ -1977,6 +1977,28 @@ describe("ClineProvider", () => {
 		expect(state).toHaveProperty("writeDelayMs")
 	})
 
+	describe.each(["getState", "getStateToPostToWebview"] as const)("%s chat appearance settings", (method) => {
+		test.each([
+			{ chatInputEffect: "breathing", tableStriped: true },
+			{ chatInputEffect: "marquee", tableStriped: false },
+		] as const)(
+			"returns saved chatInputEffect=$chatInputEffect and tableStriped=$tableStriped",
+			async (settings) => {
+				await provider.resolveWebviewView(mockWebviewView)
+				await provider.contextProxy.setValue("chatInputEffect", settings.chatInputEffect)
+				await provider.contextProxy.setValue("tableStriped", settings.tableStriped)
+
+				expect(await provider[method]()).toMatchObject(settings)
+			},
+		)
+
+		test("defaults unset chatInputEffect to marquee and tableStriped to false", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			expect(await provider[method]()).toMatchObject({ chatInputEffect: "marquee", tableStriped: false })
+		})
+	})
+
 	test("getState and getStateToPostToWebview return the complete NanoGPT configuration", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		await provider.contextProxy.setProviderSettings({

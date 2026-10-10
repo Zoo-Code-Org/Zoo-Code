@@ -16,7 +16,7 @@ interface ReasoningBlockProps {
 
 export const ReasoningBlock = ({ content, isStreaming, isLast }: ReasoningBlockProps) => {
 	const { t } = useTranslation()
-	const { reasoningBlockCollapsed } = useExtensionState()
+	const { reasoningBlockCollapsed, tableStriped } = useExtensionState()
 
 	const [isCollapsed, setIsCollapsed] = useState(reasoningBlockCollapsed)
 
@@ -51,7 +51,13 @@ export const ReasoningBlock = ({ content, isStreaming, isLast }: ReasoningBlockP
 				onClick={handleToggle}>
 				<div className="flex items-center gap-2">
 					<Lightbulb className="w-4" />
-					<span className="font-bold text-vscode-foreground">{t("chat:reasoning.thinking")}</span>
+					<span
+						className={cn(
+							"font-bold",
+							isLast && isStreaming ? "animate-thinking-shine" : "text-vscode-foreground",
+						)}>
+						{t("chat:reasoning.thinking")}
+					</span>
 					{elapsed > 0 && (
 						<span className="text-sm text-vscode-descriptionForeground mt-0.5">{secondsLabel}</span>
 					)}
@@ -69,7 +75,7 @@ export const ReasoningBlock = ({ content, isStreaming, isLast }: ReasoningBlockP
 				<div
 					ref={contentRef}
 					className="border-l border-vscode-descriptionForeground/20 ml-2 pl-4 pb-1 text-vscode-descriptionForeground break-words">
-					<MarkdownBlock markdown={content} />
+					<MarkdownBlock markdown={content} striped={tableStriped ?? false} />
 				</div>
 			)}
 		</div>

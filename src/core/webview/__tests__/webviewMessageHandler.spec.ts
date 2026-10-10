@@ -69,6 +69,9 @@ vi.mock("@roo-code/telemetry", () => ({
 	},
 }))
 
+import { ContextProxy } from "../../config/ContextProxy"
+import { makeExtensionContext } from "../../../test-utils/vscode"
+
 import type { ModelRecord } from "@roo-code/types"
 
 import { webviewMessageHandler } from "../webviewMessageHandler"
@@ -116,6 +119,7 @@ const mockClineProvider = {
 		getValue: vi.fn(),
 	},
 	log: vi.fn(),
+	upsertProviderProfile: vi.fn(),
 	postStateToWebview: vi.fn(),
 	resolveWebviewThemeFixtureProbe: vi.fn(),
 	getCurrentTask: vi.fn(),
@@ -169,7 +173,7 @@ describe("webviewMessageHandler - theme fixture probes", () => {
 	})
 })
 
-import { t } from "../../../i18n"
+import { changeLanguage, t } from "../../../i18n"
 
 vi.mock("vscode", () => {
 	const showInformationMessage = vi.fn()
@@ -178,6 +182,7 @@ vi.mock("vscode", () => {
 	const showTextDocument = vi.fn().mockResolvedValue(undefined)
 
 	return {
+		ConfigurationTarget: { Global: 1 },
 		window: {
 			showInformationMessage,
 			showErrorMessage,
@@ -213,6 +218,7 @@ vi.mock("../../../i18n", () => ({
 		}
 		return key
 	}),
+	changeLanguage: vi.fn(),
 }))
 
 vi.mock("fs/promises", () => {
@@ -2305,5 +2311,668 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		await Promise.resolve()
 
 		expect(TelemetryService.instance.updateTelemetryState).not.toHaveBeenCalled()
+	})
+})
+
+describe("bulk settings save results", () => {
+	beforeEach(() => vi.clearAllMocks())
+
+	it("escapes untrusted setting names and error names in persistence failure logs", async () => {
+		const key = "unknown\r\nForged entry\t\u001b[31m"
+		// Runtime webview messages can contain keys absent from the TypeScript type.
+		const updatedSettings = { chatInputEffect: "breathing" as const, [key]: true }
+		const error = new Error("secret value")
+		error.name = "Error\nForged error"
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockRejectedValueOnce(error)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "untrusted-settings",
+			updatedSettings,
+		})
+
+		expect(mockClineProvider.log).toHaveBeenCalledExactlyOnceWith(
+			`Failed to save settings: ${JSON.stringify(["chatInputEffect", key])}; error: ${JSON.stringify(error.name)}`,
+		)
+		expect(vi.mocked(mockClineProvider.log).mock.calls[0][0]).not.toContain("\n")
+		expect(vi.mocked(mockClineProvider.log).mock.calls[0][0]).not.toContain("secret value")
+	})
+
+	it("persists a changed retry after a save stalled past the webview timeout", async () => {
+		vi.useFakeTimers()
+		const context = makeExtensionContext()
+		const persisted = new Map<string, unknown>()
+		let releaseWrite!: () => void
+		let writeStarted!: () => void
+		const delayedWrite = new Promise<void>((resolve) => {
+			releaseWrite = resolve
+		})
+		const started = new Promise<void>((resolve) => {
+			writeStarted = resolve
+		})
+		const update = vi.mocked(context.globalState.update).mockImplementation(async (key, value) => {
+			if (key === "chatInputEffect" && value === "breathing") {
+				writeStarted()
+				await delayedWrite
+			}
+			persisted.set(key, value)
+		})
+		const contextProxy = new ContextProxy(context)
+		const provider = { ...mockClineProvider, contextProxy } as ClineProvider
+		const first = webviewMessageHandler(provider, {
+			type: "updateSettings",
+			requestId: "timed-out-save",
+			updatedSettings: { chatInputEffect: "breathing", tableStriped: true },
+		})
+		let retry: Promise<void> | undefined
+		try {
+			await started
+			// SettingsView releases its UI lock after 30 seconds without cancelling the host write.
+			await vi.advanceTimersByTimeAsync(30_001)
+			retry = webviewMessageHandler(provider, {
+				type: "updateSettings",
+				requestId: "retry",
+				updatedSettings: { chatInputEffect: "marquee", tableStriped: false },
+			})
+			await vi.advanceTimersByTimeAsync(0)
+			expect(update).toHaveBeenCalledExactlyOnceWith("chatInputEffect", "breathing")
+			expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+		} finally {
+			releaseWrite()
+			await Promise.all([first, retry])
+			vi.useRealTimers()
+		}
+		expect(contextProxy.getValue("chatInputEffect")).toBe("marquee")
+		expect(contextProxy.getValue("tableStriped")).toBe(false)
+		expect(persisted.get("chatInputEffect")).toBe("marquee")
+		expect(persisted.get("tableStriped")).toBe(false)
+		expect(provider.postMessageToWebview).toHaveBeenLastCalledWith({
+			type: "settingsSaveResult",
+			requestId: "retry",
+			success: true,
+			unsavedSettings: [],
+		})
+	})
+
+	it("acknowledges unset experiments and customSupportPrompts without persisting them", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "skipped-settings",
+			updatedSettings: { experiments: undefined, customSupportPrompts: undefined },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+			type: "settingsSaveResult",
+			requestId: "skipped-settings",
+			success: true,
+			unsavedSettings: [],
+		})
+	})
+
+	it("excludes skipped experiments and customSupportPrompts when a later write fails", async () => {
+		const setValue = vi.mocked(mockClineProvider.contextProxy.setValue)
+		setValue.mockRejectedValueOnce(new Error("storage unavailable"))
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "skipped-settings-with-failure",
+			updatedSettings: { experiments: undefined, customSupportPrompts: undefined, tableStriped: true },
+		})
+
+		expect(setValue).toHaveBeenCalledExactlyOnceWith("tableStriped", true)
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+			type: "settingsSaveResult",
+			requestId: "skipped-settings-with-failure",
+			success: false,
+			unsavedSettings: ["tableStriped"],
+		})
+	})
+
+	it("shows the unsaved keys when a write fails without a request ID", async () => {
+		const setValue = vi.mocked(mockClineProvider.contextProxy.setValue)
+		setValue.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("storage unavailable"))
+		const errorMessage = "Could not save settings: chatInputEffect, tableStriped"
+		vi.mocked(t).mockReturnValueOnce(errorMessage)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { soundEnabled: true, chatInputEffect: "breathing", tableStriped: true },
+		})
+
+		expect(setValue).toHaveBeenCalledTimes(2)
+		expect(mockClineProvider.log).toHaveBeenCalledExactlyOnceWith(
+			'Failed to save settings: ["chatInputEffect","tableStriped"]; error: "Error"',
+		)
+		expect(t).toHaveBeenCalledWith("common:errors.settingsSaveFailed", {
+			keys: "chatInputEffect, tableStriped",
+		})
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledExactlyOnceWith(errorMessage)
+		expect(mockClineProvider.postMessageToWebview).not.toHaveBeenCalledWith(
+			expect.objectContaining({ type: "settingsSaveResult" }),
+		)
+	})
+
+	it("reports the failed and unattempted keys, then permits a successful retry", async () => {
+		const setValue = vi.mocked(mockClineProvider.contextProxy.setValue)
+		setValue.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("storage unavailable"))
+		const updatedSettings = { soundEnabled: true, chatInputEffect: "breathing" as const, tableStriped: true }
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "failed-save",
+			updatedSettings,
+		})
+		expect(setValue).toHaveBeenCalledTimes(2)
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "settingsSaveResult",
+			requestId: "failed-save",
+			success: false,
+			unsavedSettings: ["chatInputEffect", "tableStriped"],
+		})
+		setValue.mockResolvedValue(undefined)
+		await webviewMessageHandler(mockClineProvider, { type: "updateSettings", requestId: "retry", updatedSettings })
+		expect(setValue).toHaveBeenLastCalledWith("tableStriped", true)
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "settingsSaveResult",
+			requestId: "retry",
+			success: true,
+			unsavedSettings: [],
+		})
+	})
+
+	it("reports all keys when the first write fails", async () => {
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockRejectedValueOnce(new Error("disk full"))
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "first-failure",
+			updatedSettings: { chatInputEffect: "breathing", tableStriped: true },
+		})
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "settingsSaveResult",
+			requestId: "first-failure",
+			success: false,
+			unsavedSettings: ["chatInputEffect", "tableStriped"],
+		})
+	})
+})
+
+describe("individual settings save acknowledgments", () => {
+	beforeEach(() => vi.clearAllMocks())
+
+	it.each(["upsertApiConfiguration", "telemetrySetting", "debugSetting"] as const)(
+		"acknowledges %s only after persistence completes, and reports failures",
+		async (type) => {
+			const write = vi.fn<() => Promise<string | undefined>>()
+			if (type === "upsertApiConfiguration") {
+				vi.mocked(mockClineProvider.upsertProviderProfile).mockImplementation(write)
+			} else if (type === "telemetrySetting") {
+				vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(async () => {
+					await write()
+				})
+			} else {
+				vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ update: write } as never)
+			}
+			let resolveWrite!: (value: string) => void
+			write.mockReturnValueOnce(
+				new Promise((resolve) => {
+					resolveWrite = resolve
+				}),
+			)
+			const message = { type, requestId: "save", text: "enabled", bool: true, apiConfiguration: {} }
+			const saving = webviewMessageHandler(mockClineProvider, message)
+			await vi.waitFor(() => expect(write).toHaveBeenCalledOnce())
+			expect(mockClineProvider.postMessageToWebview).not.toHaveBeenCalled()
+			resolveWrite("profile-id")
+			await saving
+			expect(mockClineProvider.postMessageToWebview).toHaveBeenLastCalledWith({
+				type: "settingsSaveResult",
+				requestId: "save",
+				success: true,
+				unsavedSettings: [],
+			})
+			write.mockRejectedValueOnce(new TypeError("secret error text"))
+			await webviewMessageHandler(mockClineProvider, message)
+			const key =
+				type === "upsertApiConfiguration" ? "apiConfiguration" : type === "debugSetting" ? "debug" : type
+			expect(mockClineProvider.postMessageToWebview).toHaveBeenLastCalledWith({
+				type: "settingsSaveResult",
+				requestId: "save",
+				success: false,
+				unsavedSettings: [key],
+			})
+			expect(mockClineProvider.log).toHaveBeenLastCalledWith(
+				`Failed to save settings: ${JSON.stringify([key])}; error: "TypeError"`,
+			)
+			write.mockResolvedValue("profile-id")
+			await webviewMessageHandler(mockClineProvider, message)
+			expect(mockClineProvider.postMessageToWebview).toHaveBeenLastCalledWith({
+				type: "settingsSaveResult",
+				requestId: "save",
+				success: true,
+				unsavedSettings: [],
+			})
+		},
+	)
+
+	it("reports profile persistence failures returned as undefined", async () => {
+		vi.mocked(mockClineProvider.upsertProviderProfile).mockResolvedValueOnce(undefined)
+		await webviewMessageHandler(mockClineProvider, {
+			type: "upsertApiConfiguration",
+			requestId: "save",
+			text: "default",
+			apiConfiguration: {},
+		})
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenLastCalledWith({
+			type: "settingsSaveResult",
+			requestId: "save",
+			success: false,
+			unsavedSettings: ["apiConfiguration"],
+		})
+	})
+
+	it("rejects an upsertApiConfiguration save that arrives without a profile payload", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "upsertApiConfiguration",
+			requestId: "save",
+		})
+		// The handler must fail fast instead of silently succeeding when the webview forgot the payload.
+		expect(mockClineProvider.upsertProviderProfile).not.toHaveBeenCalled()
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenLastCalledWith({
+			type: "settingsSaveResult",
+			requestId: "save",
+			success: false,
+			unsavedSettings: ["apiConfiguration"],
+		})
+	})
+
+	it("ignores an upsertApiConfiguration message without a payload when no requestId is supplied", async () => {
+		// Legacy callers omit the profile payload and the requestId; the handler must stay a no-op.
+		await webviewMessageHandler(mockClineProvider, { type: "upsertApiConfiguration" })
+		expect(mockClineProvider.upsertProviderProfile).not.toHaveBeenCalled()
+		expect(mockClineProvider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	it("defaults the debug setting to false when the value is omitted", async () => {
+		const update = vi.fn().mockResolvedValue(undefined)
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ update } as never)
+		await webviewMessageHandler(mockClineProvider, { type: "debugSetting" })
+		expect(update).toHaveBeenCalledWith("debug", false, 1)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+})
+
+describe("webviewMessageHandler - updateSettings branch handling", () => {
+	let updateConfig: ReturnType<typeof vi.fn>
+	let setValue: ReturnType<typeof vi.fn>
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		updateConfig = vi.fn().mockResolvedValue(undefined)
+		setValue = vi.mocked(mockClineProvider.contextProxy.setValue)
+		setValue.mockResolvedValue(undefined as never)
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ get: vi.fn(), update: updateConfig } as never)
+		;(mockClineProvider as unknown as { getMcpHub: ReturnType<typeof vi.fn> }).getMcpHub = vi
+			.fn()
+			.mockReturnValue(undefined)
+		Terminal.setTerminalProfile(undefined)
+	})
+
+	afterEach(() => {
+		Terminal.setTerminalProfile(undefined)
+	})
+
+	it("applies command and file allow/deny lists, dropping blank entries", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "lists",
+			updatedSettings: {
+				allowedCommands: ["a", "", "  ", "b"],
+				deniedCommands: ["x", ""],
+				allowedReadFiles: ["src/**", "  "],
+				allowedWriteFiles: [],
+			},
+		})
+
+		expect(updateConfig).toHaveBeenCalledWith("allowedCommands", ["a", "b"], 1)
+		expect(updateConfig).toHaveBeenCalledWith("deniedCommands", ["x"], 1)
+		expect(setValue).toHaveBeenCalledWith("allowedReadFiles", ["src/**"])
+		expect(setValue).toHaveBeenCalledWith("allowedWriteFiles", [])
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenLastCalledWith({
+			type: "settingsSaveResult",
+			requestId: "lists",
+			success: true,
+			unsavedSettings: [],
+		})
+	})
+
+	it("applies the language, TTS and generic default branches", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "misc",
+			updatedSettings: {
+				language: "fr",
+				ttsEnabled: false,
+				ttsSpeed: 2.5,
+				soundEnabled: true,
+			},
+		})
+
+		expect(vi.mocked(changeLanguage)).toHaveBeenCalledWith("fr")
+		expect(setValue).toHaveBeenCalledWith("language", "fr")
+		expect(setValue).toHaveBeenCalledWith("ttsEnabled", false)
+		expect(setValue).toHaveBeenCalledWith("ttsSpeed", 2.5)
+		expect(setValue).toHaveBeenCalledWith("soundEnabled", true)
+	})
+
+	it("applies every terminal setting branch, including the profile reset that closes idle terminals", async () => {
+		const closeIdleTerminalsSpy = vi.spyOn(TerminalRegistry, "closeIdleTerminals").mockImplementation(() => {})
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "terminal",
+			updatedSettings: {
+				terminalShellIntegrationTimeout: 30,
+				terminalShellIntegrationDisabled: true,
+				terminalCommandDelay: 75,
+				terminalPowershellCounter: true,
+				terminalZshClearEolMark: true,
+				terminalZshOhMy: true,
+				terminalZshP10k: true,
+				terminalZdotdir: true,
+				terminalProfile: "Git Bash",
+				execaShellPath: "/bin/bash",
+			},
+		})
+
+		expect(Terminal.getShellIntegrationTimeout()).toBe(30)
+		expect(Terminal.getCommandDelay()).toBe(75)
+		expect(Terminal.getTerminalProfile()).toBe("Git Bash")
+		expect(closeIdleTerminalsSpy).toHaveBeenCalled()
+		expect(setValue).toHaveBeenCalledWith("terminalProfile", "Git Bash")
+		expect(setValue).toHaveBeenCalledWith("execaShellPath", "/bin/bash")
+	})
+
+	it("notifies the MCP hub when mcpEnabled changes", async () => {
+		const handleMcpEnabledChange = vi.fn().mockResolvedValue(undefined)
+		;(mockClineProvider as unknown as { getMcpHub: ReturnType<typeof vi.fn> }).getMcpHub = vi
+			.fn()
+			.mockReturnValue({ handleMcpEnabledChange })
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "mcp",
+			updatedSettings: { mcpEnabled: false },
+		})
+
+		expect(handleMcpEnabledChange).toHaveBeenCalledWith(false)
+		expect(setValue).toHaveBeenCalledWith("mcpEnabled", false)
+	})
+
+	it("acknowledges unset experiments and customSupportPrompts without persisting them", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "unset",
+			updatedSettings: { experiments: undefined, customSupportPrompts: undefined },
+		})
+
+		expect(setValue).not.toHaveBeenCalledWith("experiments", expect.anything())
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenLastCalledWith({
+			type: "settingsSaveResult",
+			requestId: "unset",
+			success: true,
+			unsavedSettings: [],
+		})
+	})
+
+	it("reports a failed bulk save with requestId and permits a later retry", async () => {
+		setValue.mockRejectedValueOnce(new Error("storage unavailable")).mockResolvedValue(undefined as never)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "bulk-fail",
+			updatedSettings: { soundEnabled: true, chatInputEffect: "breathing" },
+		})
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "settingsSaveResult",
+			requestId: "bulk-fail",
+			success: false,
+			unsavedSettings: ["soundEnabled", "chatInputEffect"],
+		})
+		expect(vi.mocked(vscode.window.showErrorMessage)).not.toHaveBeenCalled()
+	})
+
+	it("surfaces a legacy bulk save failure without a requestId via showErrorMessage", async () => {
+		setValue.mockRejectedValueOnce(new Error("disk full"))
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { soundEnabled: true, chatInputEffect: "breathing" },
+		})
+
+		expect(vi.mocked(vscode.window.showErrorMessage)).toHaveBeenCalledWith("common:errors.settingsSaveFailed")
+		expect(mockClineProvider.postMessageToWebview).not.toHaveBeenCalledWith(
+			expect.objectContaining({ type: "settingsSaveResult" }),
+		)
+	})
+
+	it("defaults a null language to en and applies the tts fallbacks", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "defaults",
+			updatedSettings: { language: undefined, ttsEnabled: undefined, ttsSpeed: undefined },
+		})
+
+		expect(vi.mocked(changeLanguage)).toHaveBeenCalledWith("en")
+		expect(setValue).toHaveBeenCalledWith("language", "en")
+		expect(setValue).toHaveBeenCalledWith("ttsEnabled", true)
+		expect(setValue).toHaveBeenCalledWith("ttsSpeed", 1.0)
+	})
+
+	it("drops a non-array command list and a non-array file pattern list", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "non-array",
+			updatedSettings: {
+				allowedCommands: "rm -rf /" as unknown as string[],
+				deniedCommands: "rm -rf /" as unknown as string[],
+				allowedReadFiles: "src/**" as unknown as string[],
+				allowedWriteFiles: "src/**" as unknown as string[],
+			},
+		})
+
+		expect(updateConfig).toHaveBeenCalledWith("allowedCommands", [], 1)
+		expect(updateConfig).toHaveBeenCalledWith("deniedCommands", [], 1)
+		expect(setValue).toHaveBeenCalledWith("allowedReadFiles", [])
+		expect(setValue).toHaveBeenCalledWith("allowedWriteFiles", [])
+	})
+
+	it("tolerates a missing command or file list by treating it as empty", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "missing-lists",
+			updatedSettings: {
+				allowedCommands: undefined,
+				deniedCommands: undefined,
+				allowedReadFiles: undefined,
+				allowedWriteFiles: undefined,
+			},
+		})
+
+		expect(updateConfig).toHaveBeenCalledWith("allowedCommands", [], 1)
+		expect(updateConfig).toHaveBeenCalledWith("deniedCommands", [], 1)
+		expect(setValue).toHaveBeenCalledWith("allowedReadFiles", [])
+		expect(setValue).toHaveBeenCalledWith("allowedWriteFiles", [])
+	})
+
+	it("leaves terminal settings untouched when their values are undefined", async () => {
+		const closeIdleTerminalsSpy = vi.spyOn(TerminalRegistry, "closeIdleTerminals").mockImplementation(() => {})
+		Terminal.setTerminalProfile(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "terminal-undefined",
+			updatedSettings: {
+				terminalShellIntegrationTimeout: undefined,
+				terminalShellIntegrationDisabled: undefined,
+				terminalCommandDelay: undefined,
+				terminalPowershellCounter: undefined,
+				terminalZshClearEolMark: undefined,
+				terminalZshOhMy: undefined,
+				terminalZshP10k: undefined,
+				terminalZdotdir: undefined,
+			},
+		})
+
+		// Every terminal branch guards on `value !== undefined`, so the profile-change
+		// side effect must not fire and the values are stored as-is.
+		expect(closeIdleTerminalsSpy).not.toHaveBeenCalled()
+		expect(setValue).toHaveBeenCalledWith("terminalShellIntegrationTimeout", undefined)
+	})
+
+	it("treats a non-string terminalProfile as unset and does not close terminal state", async () => {
+		const closeIdleTerminalsSpy = vi.spyOn(TerminalRegistry, "closeIdleTerminals").mockImplementation(() => {})
+		Terminal.setTerminalProfile(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "terminal-nonstring",
+			updatedSettings: { terminalProfile: 123 as unknown as string },
+		})
+
+		expect(Terminal.getTerminalProfile()).toBeUndefined()
+		expect(closeIdleTerminalsSpy).not.toHaveBeenCalled()
+	})
+
+	it("does not touch the MCP hub when none is available", async () => {
+		;(mockClineProvider as unknown as { getMcpHub: ReturnType<typeof vi.fn> }).getMcpHub = vi
+			.fn()
+			.mockReturnValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "mcp-missing",
+			updatedSettings: { mcpEnabled: true },
+		})
+
+		expect(setValue).toHaveBeenCalledWith("mcpEnabled", true)
+	})
+
+	it("defaults mcpEnabled to true when the value is unset", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "mcp-default",
+			updatedSettings: { mcpEnabled: undefined },
+		})
+
+		expect(setValue).toHaveBeenCalledWith("mcpEnabled", true)
+	})
+
+	it("merges a truthy experiments payload over the stored values or the defaults", async () => {
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "experiments" ? { customTools: true } : undefined,
+		)
+		setValue.mockClear()
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "experiments-on",
+			updatedSettings: { experiments: { runSlashCommand: true } },
+		})
+		expect(setValue).toHaveBeenCalledWith(
+			"experiments",
+			expect.objectContaining({ customTools: true, runSlashCommand: true }),
+		)
+
+		// With no stored value the default experiment set is used as the base.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		setValue.mockClear()
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "experiments-default",
+			updatedSettings: { experiments: { parallelToolExecution: true } },
+		})
+		expect(setValue).toHaveBeenCalledWith("experiments", expect.objectContaining({ parallelToolExecution: true }))
+	})
+
+	it("persists a truthy customSupportPrompts payload as-is", async () => {
+		setValue.mockClear()
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "prompts-on",
+			updatedSettings: { customSupportPrompts: { review: "Review this" } },
+		})
+
+		expect(setValue).toHaveBeenCalledWith("customSupportPrompts", { review: "Review this" })
+	})
+
+	it("logs Unknown when a bulk save fails with a non-Error value", async () => {
+		setValue.mockRejectedValueOnce("boom")
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "bulk-nonerror",
+			updatedSettings: { soundEnabled: true, chatInputEffect: "breathing" },
+		})
+
+		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining('"Unknown"'))
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "settingsSaveResult",
+			requestId: "bulk-nonerror",
+			success: false,
+			unsavedSettings: ["soundEnabled", "chatInputEffect"],
+		})
+	})
+
+	it("logs Unknown when an individual save throws a non-Error value", async () => {
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+			get: vi.fn(),
+			update: vi.fn().mockRejectedValue("no-permission"),
+		} as never)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "debugSetting",
+			requestId: "debug-nonerror",
+			bool: true,
+		})
+
+		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining('"Unknown"'))
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "settingsSaveResult",
+			requestId: "debug-nonerror",
+			success: false,
+			unsavedSettings: ["debug"],
+		})
+	})
+})
+
+describe("webviewMessageHandler - serialized settings saves", () => {
+	it("keeps processing later saves after an earlier save throws", async () => {
+		;(mockClineProvider as unknown as { getMcpHub: () => undefined }).getMcpHub = () => undefined
+		// debugSetting without a requestId rethrows its write failure, which is what
+		// exercises the queue's failure swallow.
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+			get: vi.fn(),
+			update: vi.fn().mockRejectedValue(new Error("storage unavailable")),
+		} as never)
+
+		await expect(webviewMessageHandler(mockClineProvider, { type: "debugSetting", bool: true })).rejects.toThrow(
+			"storage unavailable",
+		)
+
+		// The queue stored the guarded version, so a following save still runs to completion.
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockResolvedValue(undefined as never)
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "after-failure",
+			updatedSettings: { soundVolume: 0.3 },
+		})
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenLastCalledWith({
+			type: "settingsSaveResult",
+			requestId: "after-failure",
+			success: true,
+			unsavedSettings: [],
+		})
 	})
 })

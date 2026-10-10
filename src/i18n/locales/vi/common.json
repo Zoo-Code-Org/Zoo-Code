@@ -147,7 +147,8 @@
 			"unexpectedStreamError": "Unexpected error processing response stream",
 			"completionError": "OpenAI Codex completion error: {{message}}"
 		},
-		"rooHistoryImport": "Không thể nhập lịch sử Roo Code: {{error}}"
+		"rooHistoryImport": "Không thể nhập lịch sử Roo Code: {{error}}",
+		"settingsSaveFailed": "Không thể lưu một số cài đặt. Chọn Lưu để thử lại. {{keys}}"
 	},
 	"warnings": {
 		"no_terminal_content": "Không có nội dung terminal được chọn",
