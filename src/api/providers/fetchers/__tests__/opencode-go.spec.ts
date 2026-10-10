@@ -75,6 +75,22 @@ describe("Opencode Go Fetchers", () => {
 			})
 		})
 
+		it("uses Responses defaults for an uncurated numeric gpt model", async () => {
+			mockedAxios.get.mockResolvedValue({ data: { data: [{ id: "gpt-7-luna" }] } })
+
+			const models = await getOpencodeGoModels("k")
+
+			expect(models["gpt-7-luna"]).toMatchObject({
+				contextWindow: 1_050_000,
+				maxTokens: 128_000,
+				supportsMaxTokens: true,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+				reasoningEffort: "medium",
+			})
+		})
+
 		it("falls back to default context/max tokens for an unknown model when metadata is absent", async () => {
 			mockedAxios.get.mockResolvedValue({ data: { data: [{ id: "some-unknown-model" }] } })
 
@@ -213,6 +229,7 @@ describe("Opencode Go Fetchers", () => {
 				"hy3",
 				"hy3-preview",
 				"gpt-5.6-luna",
+				"gpt-6-luna",
 				"grok-4.5",
 				"grok-4.6",
 				"muse-spark-1.3-contributor",
@@ -296,6 +313,19 @@ describe("Opencode Go Fetchers", () => {
 			expect(info.inputPrice).toBe(1.4)
 			expect(info.outputPrice).toBe(4.4)
 			expect(info.cacheReadsPrice).toBe(0.26)
+		})
+
+		it("uses Responses defaults when parsing an uncurated numeric gpt model", () => {
+			const info = parseOpencodeGoModel({ id: "gpt-7-foo" })
+			expect(info).toMatchObject({
+				contextWindow: 1_050_000,
+				maxTokens: 128_000,
+				supportsMaxTokens: true,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+				reasoningEffort: "medium",
+			})
 		})
 
 		it("falls back to defaults for an unknown model with no cache pricing", () => {

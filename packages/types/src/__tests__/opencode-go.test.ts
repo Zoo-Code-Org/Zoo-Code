@@ -5,6 +5,7 @@ import {
 	OPENCODE_GO_DEFAULT_TEMPERATURE,
 	OPENCODE_GO_ANTHROPIC_FORMAT_MODELS,
 	OPENCODE_GO_RESPONSES_FORMAT_MODELS,
+	OPENCODE_GO_RESPONSES_FORMAT_REGEX,
 	isOpencodeGoAnthropicFormatModel,
 	isOpencodeGoResponsesFormatModel,
 	getOpencodeGoModelInfo,
@@ -37,12 +38,7 @@ describe("opencode-go registry", () => {
 		"omen-alpha",
 		"grok-4.5",
 	]
-	const responsesFormatModels = [
-		"gpt-5.6-luna",
-		"grok-4.6",
-		"muse-spark-1.3-contributor",
-		"muse-spark-1.2-contributor",
-	]
+	const responsesFormatModels = ["grok-4.6", "muse-spark-1.3-contributor", "muse-spark-1.2-contributor"]
 
 	describe("isOpencodeGoAnthropicFormatModel", () => {
 		it("classifies Qwen and MiniMax models as Anthropic-format", () => {
@@ -142,6 +138,15 @@ describe("opencode-go registry", () => {
 	})
 
 	describe("OPENCODE_GO_RESPONSES_FORMAT_MODELS", () => {
+		it("classifies later numeric GPT models through the Responses regex", () => {
+			expect(OPENCODE_GO_RESPONSES_FORMAT_REGEX.some((regex) => regex.test("gpt-5.6-luna"))).toBe(true)
+			expect(OPENCODE_GO_RESPONSES_FORMAT_REGEX.some((regex) => regex.test("gpt-6-luna"))).toBe(true)
+			expect(isOpencodeGoResponsesFormatModel("gpt-6-luna")).toBe(true)
+			expect(isOpencodeGoResponsesFormatModel("gpt-7-luna")).toBe(true)
+			expect(isOpencodeGoResponsesFormatModel("gpt-5.5-pro")).toBe(false)
+			expect(isOpencodeGoResponsesFormatModel("gpt-oss-20b")).toBe(false)
+		})
+
 		it("contains exactly the Responses-only models", () => {
 			expect([...OPENCODE_GO_RESPONSES_FORMAT_MODELS].sort()).toEqual([...responsesFormatModels].sort())
 		})
@@ -186,6 +191,20 @@ describe("opencode-go registry", () => {
 					cacheWritesPriceMultiplier: 2,
 					cacheReadsPriceMultiplier: 2,
 				},
+			})
+		})
+
+		it("curates gpt-6-luna with its Go pricing and capabilities", () => {
+			expect(getOpencodeGoModelInfo("gpt-6-luna")).toMatchObject({
+				maxTokens: 128_000,
+				supportsMaxTokens: true,
+				contextWindow: 1_050_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				inputPrice: 0.1,
+				outputPrice: 0.5,
+				cacheWritesPrice: 0.13,
+				cacheReadsPrice: 0.01,
 			})
 		})
 

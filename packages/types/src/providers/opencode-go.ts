@@ -658,6 +658,27 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"Muse Spark 1.2 Contributor is Meta's multimodal coding model with a 1M context window. Available via the Opencode Go plan.",
 	},
+	"gpt-6-luna": {
+		maxTokens: 128_000,
+		contextWindow: 1_050_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+		reasoningEffort: "medium",
+		inputPrice: 0.1,
+		outputPrice: 0.5,
+		cacheWritesPrice: 0.13,
+		cacheReadsPrice: 0.01,
+		longContextPricing: {
+			thresholdTokens: 272_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 1.5,
+			cacheWritesPriceMultiplier: 2,
+			cacheReadsPriceMultiplier: 2,
+		},
+		description: "GPT-6 Luna via the OpenCode Go Responses API.",
+	},
 }
 
 /**
@@ -694,26 +715,20 @@ export const OPENCODE_GO_ANTHROPIC_FORMAT_MODELS = new Set<string>([
  * (`/v1/responses`), not the OpenAI-compatible Chat Completions endpoint
  * (`/v1/chat/completions`).
  *
- * The Go gateway maps every model to exactly one wire format. Responses-only
- * models are explicitly curated in `opencodeGoModels`: the gateway's
- * `/v1/chat/completions` adapter for these models can fail with an opaque HTTP 500
- * (`{"type":"error","error":{"type":"error","message":"Internal server error"}}`),
- * while `/v1/responses` succeeds (Zoo-Code-Org/Zoo-Code#1431).
- *
- * Drive routing from this set rather than from the model ID string so the
- * gateway's protocol contract stays explicit, testable, and easy to extend
- * when the next Responses-only model lands. Unknown model IDs default to the
- * OpenAI-compatible chat completions format.
+ * The Go gateway maps known non-GPT Responses models explicitly, while GPT-5.6
+ * and later numeric GPT generations are routed by pattern. The separate `gpt-oss`
+ * family remains on Chat Completions.
  */
 export const OPENCODE_GO_RESPONSES_FORMAT_MODELS = new Set<string>([
-	// --- OpenAI ---
-	"gpt-5.6-luna",
-	// --- xAI ---
 	"grok-4.6",
-	// --- Meta ---
 	"muse-spark-1.3-contributor",
 	"muse-spark-1.2-contributor",
 ])
+
+export const OPENCODE_GO_RESPONSES_FORMAT_REGEX: RegExp[] = [
+	// gpt-5.6 and above are routed by pattern for automatic discovery
+	/^gpt-(?:5\.(?:[6-9]|\d{2,})|[6-9]\d*(?:[.-]|$)|\d{2,}(?:[.-]|$))/i,
+]
 
 /**
  * Returns `true` when the given Go-plan model ID must be requested via the
@@ -732,7 +747,10 @@ export function isOpencodeGoAnthropicFormatModel(modelId: string): boolean {
  * format, matching the gateway's default routing.
  */
 export function isOpencodeGoResponsesFormatModel(modelId: string): boolean {
-	return OPENCODE_GO_RESPONSES_FORMAT_MODELS.has(modelId)
+	return (
+		OPENCODE_GO_RESPONSES_FORMAT_MODELS.has(modelId) ||
+		OPENCODE_GO_RESPONSES_FORMAT_REGEX.some((regex) => regex.test(modelId))
+	)
 }
 
 /**

@@ -2,7 +2,7 @@ import axios from "axios"
 import { z } from "zod"
 
 import type { ModelInfo } from "@roo-code/types"
-import { opencodeGoDefaultModelInfo, getOpencodeGoModelInfo } from "@roo-code/types"
+import { getOpencodeGoModelInfo, isOpencodeGoResponsesFormatModel, opencodeGoDefaultModelInfo } from "@roo-code/types"
 
 import { throwIfAborted } from "../utils/abort-signal"
 
@@ -32,6 +32,19 @@ const opencodeGoModelsResponseSchema = z.object({
 	data: z.array(opencodeGoModelSchema),
 })
 
+// Capability defaults for uncurated Responses-format models. This lets newly
+// discovered GPT models route and expose their output-token control without
+// inventing model-specific pricing; prices remain available only for curated IDs.
+const opencodeGoResponsesModelDefaults: ModelInfo = {
+	maxTokens: 128_000,
+	contextWindow: 1_050_000,
+	supportsImages: true,
+	supportsPromptCache: true,
+	supportsMaxTokens: true,
+	supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+	reasoningEffort: "medium",
+}
+
 /**
  * Maps a raw Opencode Go model entry to the internal {@link ModelInfo} shape.
  *
@@ -47,8 +60,8 @@ const opencodeGoModelsResponseSchema = z.object({
  *      is curated, including its capabilities and pricing.
  *   2. Override static limits and image support with live `/models` values when
  *      present, keeping the gateway authoritative for volatile fields.
- *   3. Fall back to {@link opencodeGoDefaultModelInfo} for an unknown model,
- *      ensuring downstream consumers always receive a fully-populated object.
+ *   3. Use Responses-specific capability defaults for uncurated Responses
+ *      models; otherwise use {@link opencodeGoDefaultModelInfo} for unknowns.
  *
  * @param model - Validated model entry from the `/models` response.
  * @returns Normalised model metadata suitable for the model picker.
@@ -68,6 +81,16 @@ export const parseOpencodeGoModel = (model: OpencodeGoModel): ModelInfo => {
 			...(liveMaxTokens !== undefined && { maxTokens: liveMaxTokens }),
 			...(liveSupportsImages !== undefined && { supportsImages: liveSupportsImages }),
 			description: model.description ?? model.name ?? native.description,
+		}
+	}
+
+	if (isOpencodeGoResponsesFormatModel(model.id)) {
+		return {
+			...opencodeGoResponsesModelDefaults,
+			...(liveContextWindow !== undefined && { contextWindow: liveContextWindow }),
+			...(liveMaxTokens !== undefined && { maxTokens: liveMaxTokens }),
+			...(liveSupportsImages !== undefined && { supportsImages: liveSupportsImages }),
+			description: model.description ?? model.name,
 		}
 	}
 

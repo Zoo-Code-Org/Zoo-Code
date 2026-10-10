@@ -40,8 +40,9 @@ vitest.mock("../fetchers/modelCache", () => ({
 			"glm-5.1": { ...opencodeGoModels["glm-5.1"] },
 			// Anthropic-format model used to exercise the /v1/messages path.
 			"qwen3.7-max": { ...opencodeGoModels["qwen3.7-max"] },
-			// Responses-format model (Zoo-Code-Org/Zoo-Code#1431).
+			// Responses-format models (Zoo-Code-Org/Zoo-Code#1431 and #1979).
 			"gpt-5.6-luna": { ...opencodeGoModels["gpt-5.6-luna"] },
+			"gpt-6-luna": { ...opencodeGoModels["gpt-6-luna"] },
 		})
 	}),
 	refreshModels: vitest.fn().mockImplementation(function () {
@@ -49,6 +50,7 @@ vitest.mock("../fetchers/modelCache", () => ({
 			"glm-5.1": { ...opencodeGoModels["glm-5.1"] },
 			"qwen3.7-max": { ...opencodeGoModels["qwen3.7-max"] },
 			"gpt-5.6-luna": { ...opencodeGoModels["gpt-5.6-luna"] },
+			"gpt-6-luna": { ...opencodeGoModels["gpt-6-luna"] },
 		})
 	}),
 	getModelsFromCache: vitest.fn().mockReturnValue(undefined),
@@ -1362,8 +1364,11 @@ describe("OpencodeGoHandler", () => {
 			}).rejects.toThrow("Opencode Go completion error: internal server error")
 		})
 
-		it("classifies documented Responses models as Responses-format and other models as not", () => {
+		it("classifies documented and numeric Responses models, excluding gpt-oss", () => {
 			expect(isOpencodeGoResponsesFormatModel("gpt-5.6-luna")).toBe(true)
+			expect(isOpencodeGoResponsesFormatModel("gpt-6-luna")).toBe(true)
+			expect(isOpencodeGoResponsesFormatModel("gpt-5.4-nano")).toBe(false)
+			expect(isOpencodeGoResponsesFormatModel("gpt-oss-20b")).toBe(false)
 			expect(isOpencodeGoResponsesFormatModel("grok-4.5")).toBe(false)
 			expect(isOpencodeGoResponsesFormatModel("grok-4.6")).toBe(true)
 			expect(isOpencodeGoResponsesFormatModel("muse-spark-1.3-contributor")).toBe(true)

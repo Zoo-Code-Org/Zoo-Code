@@ -71,9 +71,9 @@ type OpencodeGoFormat = "anthropic" | "openai" | "responses"
  *   - Anthropic Messages (`/v1/messages`) — used by Qwen (qwen3.8-max,
  *     qwen3.7-max, qwen3.7-plus, qwen3.6-plus) and MiniMax (minimax-m3,
  *     minimax-m2.7, minimax-m2.5) models.
- *   - OpenAI Responses (`/v1/responses`) — used by gpt-5.6-luna, whose
- *     chat-completions adapter fails with an opaque HTTP 500
- *     (Zoo-Code-Org/Zoo-Code#1431).
+ *   - OpenAI Responses (`/v1/responses`) — used by numeric GPT models from
+ *     GPT-5.6 onward, such as `gpt-5.6-luna` and `gpt-6-luna`. Earlier numeric
+ *     GPT models and the separate `gpt-oss` family use chat completions.
  *
  * Sending an Anthropic-format model to the chat completions endpoint is
  * rejected with `401 Model <id> is not supported for format oa-compat`, so this
@@ -182,10 +182,10 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	 * reasoning, partial tool calls, and token usage.
 	 *
 	 * Anthropic-format models (Qwen/MiniMax) are streamed via
-	 * {@link streamAnthropicMessage} against `/v1/messages`; Responses-format
-	 * models (gpt-5.6-luna) are streamed via {@link streamResponsesMessage}
-	 * against `/v1/responses`; all other models use the OpenAI-compatible chat
-	 * completions endpoint.
+	 * {@link streamAnthropicMessage} against `/v1/messages`; numeric GPT models
+	 * from GPT-5.6 onward, excluding `gpt-oss`, use
+	 * {@link streamResponsesMessage} against `/v1/responses`; all other models use
+	 * the OpenAI-compatible chat completions endpoint.
 	 *
 	 * For OpenAI-format models that require reasoning_content to be passed back
 	 * during multi-turn tool calls (`preserveReasoning`), messages are
@@ -292,7 +292,8 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 
 	/**
 	 * Streams an OpenAI Responses-format completion for Go models that only
-	 * accept the `/v1/responses` endpoint (currently gpt-5.6-luna).
+	 * accept the `/v1/responses` endpoint (numeric GPT model IDs from GPT-5.6
+	 * onward, excluding `gpt-oss`).
 	 *
 	 * Follows the focused xAI handler pattern: the conversation is converted
 	 * with the shared {@link convertToResponsesApiInput} transform, the system
@@ -690,8 +691,9 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	 * Performs a non-streaming chat completion and returns the full response text.
 	 *
 	 * Anthropic-format models are completed via the `/v1/messages` endpoint;
-	 * Responses-format models via `/v1/responses`; all other
-	 * models use the OpenAI-compatible chat completions endpoint.
+	 * numeric GPT models from GPT-5.6 onward, excluding `gpt-oss`, use
+	 * `/v1/responses`; all other models use the OpenAI-compatible chat completions
+	 * endpoint.
 	 *
 	 * @param prompt - The user prompt to send as a single user message.
 	 * @returns The model's reply text, or an empty string if no content is returned.
