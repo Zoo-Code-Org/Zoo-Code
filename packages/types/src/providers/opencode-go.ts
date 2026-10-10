@@ -565,8 +565,8 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 	},
 
 	// --- OpenAI Responses ---
-	// Luna is curated here because the Go gateway's model catalogue does not
-	// currently provide its capability metadata. These values intentionally
+	// Luna models are curated here because the Go gateway's model catalogue does
+	// not currently provide their capability metadata. These values intentionally
 	// describe the Go Responses route, not the OpenAI-native or Codex routes.
 	"gpt-5.6-luna": {
 		maxTokens: 128_000,
@@ -589,6 +589,27 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		},
 		description:
 			"GPT-5.6 Luna is OpenAI's fast reasoning model with a 1M context window. Available via the Opencode Go plan.",
+	},
+	"gpt-6-luna": {
+		maxTokens: 128_000,
+		contextWindow: 1_050_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+		reasoningEffort: "medium",
+		inputPrice: 0.1,
+		outputPrice: 0.5,
+		cacheWritesPrice: 0.125,
+		cacheReadsPrice: 0.01,
+		longContextPricing: {
+			thresholdTokens: 272_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 1.5,
+			cacheWritesPriceMultiplier: 2,
+			cacheReadsPriceMultiplier: 2,
+		},
+		description: "GPT-6 Luna via the OpenCode Go Responses API.",
 	},
 	"grok-4.5": {
 		maxTokens: 500_000,
@@ -708,6 +729,7 @@ export const OPENCODE_GO_ANTHROPIC_FORMAT_MODELS = new Set<string>([
 export const OPENCODE_GO_RESPONSES_FORMAT_MODELS = new Set<string>([
 	// --- OpenAI ---
 	"gpt-5.6-luna",
+	"gpt-6-luna",
 	// --- xAI ---
 	"grok-4.6",
 	// --- Meta ---
