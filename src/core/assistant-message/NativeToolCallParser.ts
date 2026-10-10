@@ -51,12 +51,27 @@ export type ToolCallStreamEvent = ApiStreamToolCallStartChunk | ApiStreamToolCal
  * provider-level raw chunks into start/delta/end events.
  */
 export class NativeToolCallParser {
-	// Streaming state management for argument accumulation (keyed by tool call id)
+	// Streaming state management for argument accumulation (keyed by compound id+name)
+	// Using compound key to distinguish different tools that may share the same backend id
 	// Note: name is string to accommodate dynamic MCP tools (mcp--serverName--toolName)
 	private static streamingToolCallsByScope = new WeakMap<
 		object,
 		Map<string, { id: string; name: string; argumentsAccumulator: string }>
 	>()
+
+	/**
+	 * Generate a compound key from id and name for streaming tool call tracking.
+	 *
+	 * The encoding is injective: the delimiter is escaped inside each segment, so distinct
+	 * (id, name) pairs — e.g. ("a::b", "c") and ("a", "b::c") — never share a key.
+	 */
+	public static makeStreamingKey(id: string, name: string): string {
+		// Escape the escape character first, then every colon: a segment can then never
+		// contain a raw colon (let alone the :: delimiter), and a trailing escaped
+		// backslash cannot fuse with the delimiter to forge a new escape pair.
+		const encode = (value: string) => value.split("\\").join("\\\\").split(":").join("\\:")
+		return `${encode(id)}::${encode(name)}`
+	}
 
 	// Raw chunk tracking state (keyed by index from one API stream)
 	private static rawChunkTrackersByScope = new WeakMap<
@@ -152,7 +167,11 @@ export class NativeToolCallParser {
 		if (id) {
 			tracked.id = id
 		}
-		if (name !== undefined) {
+
+		// Lock the name once the tool call has started: the end events and the
+		// consumer's compound keys use the start name, so a later chunk carrying a
+		// different name must not rekey the tracked entry and orphan its state.
+		if (name !== undefined && !tracked.hasStarted) {
 			tracked.name = name
 			tracked.nameSeen = true
 		}
@@ -173,6 +192,7 @@ export class NativeToolCallParser {
 				events.push({
 					type: "tool_call_delta",
 					id: startedId,
+					name: tracked.name,
 					delta: bufferedDelta,
 				})
 			}
@@ -185,6 +205,7 @@ export class NativeToolCallParser {
 				events.push({
 					type: "tool_call_delta",
 					id: tracked.id,
+					name: tracked.name,
 					delta: args,
 				})
 			} else {
@@ -209,6 +230,7 @@ export class NativeToolCallParser {
 					events.push({
 						type: "tool_call_end",
 						id: tracked.id,
+						name: tracked.name,
 					})
 				}
 			}
@@ -232,7 +254,8 @@ export class NativeToolCallParser {
 	 * Accepts string to support both ToolName and dynamic MCP tools (mcp--serverName--toolName).
 	 */
 	public static startStreamingToolCall(id: string, name: string, scope: object): void {
-		this.getStreamingToolCalls(scope).set(id, {
+		const key = this.makeStreamingKey(id, name)
+		this.getStreamingToolCalls(scope).set(key, {
 			id,
 			name,
 			argumentsAccumulator: "",
@@ -257,12 +280,41 @@ export class NativeToolCallParser {
 	}
 
 	/**
+	 * Get the name of a streaming tool call by its compound key (id + name).
+	 * Returns undefined if the tool call is not found.
+	 */
+	public static getStreamingToolName(key: string, scope: object): string | undefined {
+		return this.streamingToolCallsByScope.get(scope)?.get(key)?.name
+	}
+
+	/**
+	 * Get a streaming tool call entry by its id (legacy lookup for backward compatibility).
+	 * Returns the first matching entry if multiple tools share the same id.
+	 * @deprecated Use getStreamingToolName with compound key instead.
+	 */
+	public static getStreamingToolCallById(
+		id: string,
+		scope: object,
+	): { id: string; name: string; argumentsAccumulator: string } | null {
+		const streamingToolCalls = this.streamingToolCallsByScope.get(scope)
+		if (!streamingToolCalls) {
+			return null
+		}
+		for (const entry of streamingToolCalls.values()) {
+			if (entry.id === id) {
+				return entry
+			}
+		}
+		return null
+	}
+
+	/**
 	 * Process a chunk of JSON arguments for a streaming tool call.
 	 * Uses partial-json-parser to extract values from incomplete JSON immediately.
 	 * Returns a partial ToolUse with currently parsed parameters.
 	 */
-	public static processStreamingChunk(id: string, chunk: string, scope: object): ToolUse | null {
-		const toolCall = this.streamingToolCallsByScope.get(scope)?.get(id)
+	public static processStreamingChunk(key: string, chunk: string, scope: object): ToolUse | null {
+		const toolCall = this.streamingToolCallsByScope.get(scope)?.get(key)
 		if (!toolCall) {
 			return null
 		}
@@ -305,12 +357,12 @@ export class NativeToolCallParser {
 	 * Finalize a streaming tool call.
 	 * Parses the complete JSON and returns the final ToolUse or McpToolUse.
 	 */
-	public static finalizeStreamingToolCall(id: string, scope: object): ToolUse | McpToolUse | null {
+	public static finalizeStreamingToolCall(key: string, scope: object): ToolUse | McpToolUse | null {
 		const streamingToolCalls = this.streamingToolCallsByScope.get(scope)
 		if (!streamingToolCalls) {
 			return null
 		}
-		const toolCall = streamingToolCalls.get(id)
+		const toolCall = streamingToolCalls.get(key)
 		if (!toolCall) {
 			return null
 		}
@@ -324,7 +376,7 @@ export class NativeToolCallParser {
 		})
 
 		// Clean up streaming state
-		streamingToolCalls.delete(id)
+		streamingToolCalls.delete(key)
 		// Stryker disable next-line ConditionalExpression: the guard and delete are both GC-only; observability is equivalent to the CallExpression rationale below.
 		if (streamingToolCalls.size === 0) {
 			// Stryker disable next-line CallExpression: deleting an empty WeakMap value is only observable as GC eligibility.

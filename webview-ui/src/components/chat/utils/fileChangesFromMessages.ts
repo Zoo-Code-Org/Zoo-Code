@@ -10,6 +10,11 @@ export interface FileChangeEntry {
 	diffStats?: { added: number; removed: number }
 	/** Original file content before first edit (for merged diff display) */
 	originalContent?: string
+	/** Identity of the message this entry comes from; used to request `originalContent` when the extension omitted it */
+	ts: number
+	messageId?: string
+	/** True when the edit has an original (inline, or omitted by the extension and requestable by `ts`) */
+	hasOriginalContent: boolean
 }
 
 /**
@@ -44,6 +49,9 @@ export function fileChangesFromMessages(messages: ClineMessage[] | undefined): F
 						path: file.path,
 						diff: content,
 						diffStats: file.diffStats,
+						ts: msg.ts,
+						messageId: msg.messageId,
+						hasOriginalContent: false,
 					})
 				}
 			}
@@ -59,6 +67,9 @@ export function fileChangesFromMessages(messages: ClineMessage[] | undefined): F
 				diff,
 				diffStats: tool.diffStats,
 				originalContent: tool.originalContent,
+				ts: msg.ts,
+				messageId: msg.messageId,
+				hasOriginalContent: tool.originalContent !== undefined || (tool.originalContentLength ?? 0) > 0,
 			})
 		}
 	}
