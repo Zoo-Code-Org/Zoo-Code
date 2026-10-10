@@ -22,6 +22,7 @@ vitest.mock("@roo-code/telemetry", () => ({
 import { Anthropic } from "@anthropic-ai/sdk"
 
 import { ApiStreamChunk } from "../../transform/stream"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
 import { t } from "i18next"
 import { VertexHandler } from "../vertex"
@@ -38,7 +39,7 @@ describe("VertexHandler", () => {
 		const mockGetGenerativeModel = vitest.fn()
 
 		handler = new VertexHandler({
-			apiModelId: "gemini-1.5-pro-001",
+			apiModelId: "gemini-3.7-flash",
 			vertexProjectId: "test-project",
 			vertexRegion: "us-central1",
 		})
@@ -94,6 +95,89 @@ describe("VertexHandler", () => {
 
 			// Since we're directly mocking createMessage, we don't need to verify
 			// that generateContentStream was called
+		})
+
+		it("appends a user continuation when Vertex history ends with an assistant turn", async () => {
+			const generateContentStream = vitest.mocked(handler["client"].models.generateContentStream)
+			generateContentStream.mockResolvedValue(asyncStreamFrom([]))
+
+			await collectStream(handler.createMessage(systemPrompt, mockMessages))
+
+			expect(generateContentStream).toHaveBeenCalledWith(
+				expect.objectContaining({
+					contents: [
+						{ role: "user", parts: [{ text: "Hello" }] },
+						{ role: "model", parts: [{ text: "Hi there!" }] },
+						{ role: "user", parts: [{ text: "Continue." }] },
+					],
+				}),
+			)
+		})
+
+		it("does not append a continuation when Vertex history ends with a user turn", async () => {
+			const generateContentStream = vitest.mocked(handler["client"].models.generateContentStream)
+			generateContentStream.mockResolvedValue(asyncStreamFrom([]))
+			const userEndingMessages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Hello" },
+				{ role: "assistant", content: "Hi there!" },
+				{ role: "user", content: "Please continue" },
+			]
+
+			await collectStream(handler.createMessage(systemPrompt, userEndingMessages))
+
+			expect(generateContentStream).toHaveBeenCalledWith(
+				expect.objectContaining({
+					contents: [
+						{ role: "user", parts: [{ text: "Hello" }] },
+						{ role: "model", parts: [{ text: "Hi there!" }] },
+						{ role: "user", parts: [{ text: "Please continue" }] },
+					],
+				}),
+			)
+		})
+
+		it("synthesizes a functionResponse when Vertex history ends with an unanswered functionCall", async () => {
+			const generateContentStream = vitest.mocked(handler["client"].models.generateContentStream)
+			generateContentStream.mockResolvedValue(asyncStreamFrom([]))
+			const interruptedToolCallMessages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Read the file" },
+				{
+					role: "assistant",
+					content: [
+						{ type: "text", text: "Reading the file." },
+						{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "foo.ts" } },
+					],
+				},
+			]
+
+			await collectStream(handler.createMessage(systemPrompt, interruptedToolCallMessages))
+
+			const contents = generateContentStream.mock.calls[0][0].contents as Array<{
+				role?: string
+				parts?: Array<{ functionCall?: { name?: string }; functionResponse?: unknown; text?: string }>
+			}>
+
+			// The trailing model turn ends with the unanswered functionCall.
+			const lastModelTurn = contents.at(-2)
+			expect(lastModelTurn?.role).toBe("model")
+			expect(lastModelTurn?.parts?.at(-1)?.functionCall?.name).toBe("read_file")
+
+			// The continuation pairs that functionCall with a synthesized functionResponse
+			// instead of a plain-text turn, preserving Gemini's required pairing.
+			expect(contents.at(-1)).toEqual({
+				role: "user",
+				parts: [
+					{
+						functionResponse: {
+							name: "read_file",
+							response: {
+								name: "read_file",
+								content: expect.any(String),
+							},
+						},
+					},
+				],
+			})
 		})
 	})
 
