@@ -1,4 +1,37 @@
 items:
+  - id: anysearch
+    name: AnySearch
+    description: Search infrastructure for AI agents over MCP — general web search, vertical domain search, parallel batch
+      search, and web page extraction. Gives AI agents up-to-date web knowledge for research, documentation lookup, and
+      fact-checking.
+    author: anysearch-team
+    url: https://anysearch.com
+    tags:
+      - search-engine
+      - web-search
+      - ai-agents
+      - content-extraction
+      - research
+    content:
+      - name: Remote Server
+        content: |
+          {
+            "type": "streamable-http",
+            "url": "https://api.anysearch.com/mcp",
+            "headers": {
+              "Authorization": "Bearer {{ANYSEARCH_API_KEY}}"
+            }
+          }
+        parameters:
+          - name: AnySearch API Key
+            key: ANYSEARCH_API_KEY
+            placeholder: your_anysearch_api_key
+      - name: Remote Server (Anonymous)
+        content: |
+          {
+            "type": "streamable-http",
+            "url": "https://api.anysearch.com/mcp"
+          }
   - id: apify
     name: Apify Actors
     description: Enables AI assistants to interact with Apify's web scraping and automation actors, providing access to
