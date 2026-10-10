@@ -992,8 +992,9 @@ describe("OpencodeGoHandler", () => {
 			const handler = new OpencodeGoHandler(gpt6LunaOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 
-			await collectStream(handler.createMessage("sys", messages))
+			const chunks = await collectStream(handler.createMessage("sys", messages))
 
+			expect(chunks).toContainEqual({ type: "text", text: "Hello" })
 			expect(mockResponsesCreate).toHaveBeenCalledWith(
 				expect.objectContaining({ model: "gpt-6-luna", stream: true }),
 				expect.anything(),
