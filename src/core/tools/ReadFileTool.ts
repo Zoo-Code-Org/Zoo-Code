@@ -247,7 +247,11 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 						if (preReadStats && postReadStats && !task.abort) {
 							const preReadToken = versionTokenOfStat(preReadStats)
 							if (preReadToken === versionTokenOfStat(postReadStats)) {
-								task.observationRegistry.observe(fullPath, preReadToken, processed.complete && !lossyDecode)
+								task.observationRegistry.observe(
+									fullPath,
+									preReadToken,
+									processed.complete && !lossyDecode,
+								)
 							}
 						}
 					}
