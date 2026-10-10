@@ -685,34 +685,36 @@ describe("safeWriteJson", () => {
 	test.each([
 		["the confined scope itself", "EACCES", "scope-eacces"],
 		["an ancestor of a missing scope", "ELOOP", "scope-eloop"],
-	])(
-		"fails closed when canonicalizing the confined scope hits %s",
-		async (_label, code, dirName) => {
-			const target = path.join(tempDir, "scope-failure-target.json")
-			const scope = path.join(tempDir, dirName)
-			// _resolveScopeRoot walks up to the nearest existing ancestor only for ENOENT. Any
-			// other errno means the scope cannot be canonicalized, and continuing would decide
-			// the confinement from a partly lexical guess - so the write must stop.
-			const spy = vi.spyOn(fs, "realpath").mockImplementation(async (p) => {
-				const text = String(p)
-				if (code === "EACCES" && text === scope) {
-					throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
-				}
-				if (code === "ELOOP" && text === path.dirname(scope)) {
-					throw Object.assign(new Error("ELOOP: too many symbolic links"), { code: "ELOOP" })
-				}
-				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
-			})
-
-			try {
-				await expect(safeWriteJson(target, { written: true }, { confineTo: scope })).rejects.toThrow(code)
-			} finally {
-				// Restore even when the assertion fails: a leaked ENOENT realpath mock turns one
-				// failure into every later test in the file.
-				spy.mockRestore()
+	])("fails closed when canonicalizing the confined scope hits %s", async (_label, code, dirName) => {
+		const target = path.join(tempDir, "scope-failure-target.json")
+		const scope = path.join(tempDir, dirName)
+		// _resolveScopeRoot walks up to the nearest existing ancestor only for ENOENT. Any
+		// other errno means the scope cannot be canonicalized, and continuing would decide
+		// the confinement from a partly lexical guess - so the write must stop.
+		const spy = vi.spyOn(fs, "realpath").mockImplementation(async (p) => {
+			const text = String(p)
+			if (code === "EACCES" && text === scope) {
+				throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
 			}
-			// Nothing was staged or published: the scope failure is detected before any I/O.
-			expect(fsSyncActual.readdirSync(tempDir).filter(function (entry) { return entry.includes("scope-failure-target") })).toEqual([])
+			if (code === "ELOOP" && text === path.dirname(scope)) {
+				throw Object.assign(new Error("ELOOP: too many symbolic links"), { code: "ELOOP" })
+			}
+			throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+		})
+
+		try {
+			await expect(safeWriteJson(target, { written: true }, { confineTo: scope })).rejects.toThrow(code)
+		} finally {
+			// Restore even when the assertion fails: a leaked ENOENT realpath mock turns one
+			// failure into every later test in the file.
+			spy.mockRestore()
+		}
+		// Nothing was staged or published: the scope failure is detected before any I/O.
+		expect(
+			fsSyncActual.readdirSync(tempDir).filter(function (entry) {
+				return entry.includes("scope-failure-target")
+			}),
+		).toEqual([])
 	})
 
 	test.skipIf(process.platform === "win32")(
@@ -728,16 +730,18 @@ describe("safeWriteJson", () => {
 			const projectConfig = path.join(projectDir, "mcp.json")
 			await fs.symlink(outside, projectConfig)
 
-			await expect(
-				safeWriteJson(projectConfig, { mcpServers: {} }, { confineTo: projectDir }),
-			).rejects.toThrow(ConfinedPathEscapeError)
+			await expect(safeWriteJson(projectConfig, { mcpServers: {} }, { confineTo: projectDir })).rejects.toThrow(
+				ConfinedPathEscapeError,
+			)
 
 			// The linked file is untouched and nothing was staged beside it.
 			expect(JSON.parse(await fsSyncActual.promises.readFile(outside, "utf8"))).toEqual({ secret: "original" })
 			const entries = await fs.readdir(tempDir)
 			expect(entries).toContain("outside.json")
 			expect(
-				entries.filter((entry) => entry.includes(".new_") || entry.includes("safeWriteText") || entry.endsWith(".lock")),
+				entries.filter(
+					(entry) => entry.includes(".new_") || entry.includes("safeWriteText") || entry.endsWith(".lock"),
+				),
 			).toEqual([])
 		},
 	)
@@ -895,7 +899,11 @@ describe("safeWriteJson", () => {
 
 			// Confining is about the scope, not about forbidding links: a link that stays
 			// inside the project still publishes to its referent.
-			await safeWriteJson(alias, { mcpServers: { local: { url: "http://localhost" } } }, { confineTo: projectDir })
+			await safeWriteJson(
+				alias,
+				{ mcpServers: { local: { url: "http://localhost" } } },
+				{ confineTo: projectDir },
+			)
 
 			expect(JSON.parse(await fsSyncActual.promises.readFile(referent, "utf8"))).toEqual({
 				mcpServers: { local: { url: "http://localhost" } },

@@ -1063,7 +1063,9 @@ describe("McpHub", () => {
 			// travel with the write or a planted link would be replaced outside the workspace.
 			Object.defineProperty(mockProvider, "cwd", { value: "/mock/workspace", configurable: true })
 			vi.mocked(fs.readFile).mockResolvedValueOnce(
-				JSON.stringify({ mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"], timeout: 1000 } } }),
+				JSON.stringify({
+					mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"], timeout: 1000 } },
+				}),
 			)
 			mcpHub.connections = [projectConnection()]
 
@@ -1077,7 +1079,9 @@ describe("McpHub", () => {
 		it("confines a project-scoped server deletion to the workspace", async () => {
 			Object.defineProperty(mockProvider, "cwd", { value: "/mock/workspace", configurable: true })
 			vi.mocked(fs.readFile).mockResolvedValueOnce(
-				JSON.stringify({ mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"] } } }),
+				JSON.stringify({
+					mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"] } },
+				}),
 			)
 			mcpHub.connections = [projectConnection()]
 

@@ -98,12 +98,7 @@ export class OrphanedBackupError extends Error {
 	}
 }
 
-function _orphanedBackupMessage(
-	targetPath: string,
-	backupPath: string,
-	cause: unknown,
-	cleanupError: unknown,
-): string {
+function _orphanedBackupMessage(targetPath: string, backupPath: string, cause: unknown, cleanupError: unknown): string {
 	const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 	return (
 		`safeWriteText: could not create the backup of ${targetPath} (${reason(cause)}), and the ` +
@@ -219,7 +214,11 @@ async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunne
 
 /** Restore a DACL dump onto *dirPath* on Windows.
  * Returns whether icacls succeeded; the caller reports a failure. */
-async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRunner?: typeof execFile): Promise<boolean> {
+async function _restoreDaclWindows(
+	dirPath: string,
+	dumpPath: string,
+	execFileRunner?: typeof execFile,
+): Promise<boolean> {
 	const runner = execFileRunner ?? execFile
 	try {
 		await new Promise<void>((resolve, reject) => {
@@ -394,31 +393,31 @@ export async function safeWriteText(
 	// Non-null only when the win32 step-2 block saved a successful DACL dump:
 	// it gates the step-5 restore and is tracked for the cleanup unlinks.
 	let daclDumpPath: string | null = null
-		// Warning delivery must never abort the write: the notices below describe a
-		// committed-but-imperfect publish, and a caller whose callback throws (a UI sink,
-		// a logger that is mid-restart) must not turn that into a failed save.
-		const warn = (message: string) => {
-			const report = (label: string, error: unknown) => {
-				console.warn(
-					`safeWriteText: onWarning callback ${label}: ${error instanceof Error ? error.message : String(error)}`,
-				)
-			}
-			try {
-				const sink = options?.onWarning ?? ((m: string) => console.warn(m))
-				const result: unknown = sink(message)
-				// A sink may be async - TypeScript accepts a value-returning callback where
-				// a void one is expected. Awaiting it would let warning delivery delay a
-				// write that has already committed (and hang it if the sink never settles),
-				// while leaving the promise unhandled turns a rejection into an unhandled
-				// rejection, which under Node's default mode can end the process after a
-				// successful write. Attach a handler without awaiting.
-				if (result instanceof Promise) {
-					result.catch((error: unknown) => report("rejected", error))
-				}
-			} catch (error: unknown) {
-				report("failed", error)
-			}
+	// Warning delivery must never abort the write: the notices below describe a
+	// committed-but-imperfect publish, and a caller whose callback throws (a UI sink,
+	// a logger that is mid-restart) must not turn that into a failed save.
+	const warn = (message: string) => {
+		const report = (label: string, error: unknown) => {
+			console.warn(
+				`safeWriteText: onWarning callback ${label}: ${error instanceof Error ? error.message : String(error)}`,
+			)
 		}
+		try {
+			const sink = options?.onWarning ?? ((m: string) => console.warn(m))
+			const result: unknown = sink(message)
+			// A sink may be async - TypeScript accepts a value-returning callback where
+			// a void one is expected. Awaiting it would let warning delivery delay a
+			// write that has already committed (and hang it if the sink never settles),
+			// while leaving the promise unhandled turns a rejection into an unhandled
+			// rejection, which under Node's default mode can end the process after a
+			// successful write. Attach a handler without awaiting.
+			if (result instanceof Promise) {
+				result.catch((error: unknown) => report("rejected", error))
+			}
+		} catch (error: unknown) {
+			report("failed", error)
+		}
+	}
 
 	try {
 		// -- Step 1: write content to staging temp file -------------------
@@ -513,13 +512,17 @@ export async function safeWriteText(
 					// proceeds - a missing or failing icacls must not leave the user unable to save -
 					// but the replacement is no longer ACL-identical and that has to be visible
 					// instead of silent.
-					warn(`Could not save the DACL of ${targetPath}; the replacement may inherit different access rights.`)
+					warn(
+						`Could not save the DACL of ${targetPath}; the replacement may inherit different access rights.`,
+					)
 				}
 			} else if (errorCode(accessError) !== "ENOENT") {
 				// Not "absent": the target is there but could not be checked (EACCES, ...), so
 				// DACL preservation was skipped for a reason the caller cannot infer from the
 				// successful write alone.
-				warn(`Could not check ${targetPath} for DACL preservation (${errorCode(accessError) ?? "unknown error"}); the replacement may inherit different access rights.`)
+				warn(
+					`Could not check ${targetPath} for DACL preservation (${errorCode(accessError) ?? "unknown error"}); the replacement may inherit different access rights.`,
+				)
 			}
 		}
 		try {
@@ -630,7 +633,9 @@ export async function safeWriteText(
 					// temp directory restore fails with "Not all privileges or groups referenced
 					// are assigned to the caller"), so the change of access rights is reported
 					// rather than thrown.
-					warn(`safeWriteText: content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`)
+					warn(
+						`safeWriteText: content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`,
+					)
 				}
 			}
 
@@ -655,8 +660,8 @@ export async function safeWriteText(
 						} else if (attempt === 1) {
 							warn(
 								`safeWriteText: committed ${targetPath} but could not remove its backup copy at ${backupPath} (${
-										errorCode(cleanupError) ?? "unknown error"
-									}); the copy of the previous content is still on disk and needs to be removed.`,
+									errorCode(cleanupError) ?? "unknown error"
+								}); the copy of the previous content is still on disk and needs to be removed.`,
 							)
 						}
 					}

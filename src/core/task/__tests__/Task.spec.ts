@@ -1001,7 +1001,6 @@ describe("Cline", () => {
 		})
 	})
 
-
 	describe("constructor", () => {
 		it.each([{ apiConfigName: "parent-local-profile" }, { apiConfigName: undefined }])(
 			"uses an explicit delegated-child context without shared state or startup persistence",
