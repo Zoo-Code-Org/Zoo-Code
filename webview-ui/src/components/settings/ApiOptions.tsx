@@ -746,11 +746,30 @@ const ApiOptions = ({
 								apiConfiguration={apiConfiguration}
 								setApiConfigurationField={setApiConfigurationField}
 								defaultModelId={getDefaultModelIdForProvider(activeSelectedProvider, apiConfiguration)}
-								models={getStaticModelsForProvider(
-									activeSelectedProvider,
-									t("settings:labels.useCustomArn"),
-									apiConfiguration,
-								)}
+								models={
+									// MiMo has no dedicated picker component, so it shares the
+									// generic static picker with DeepSeek. MiMo ships new model
+									// generations frequently (the V2.5 line is EOL), so the
+									// host-fetched catalog is merged in here: the picker stays
+									// populated before the router response arrives and post-V2.6
+									// releases become selectable without an extension update.
+									// DeepSeek uses this picker without the merge; Moonshot has
+									// its own router-only picker.
+									activeSelectedProvider === providerIdentifiers.mimo
+										? {
+												...getStaticModelsForProvider(
+													activeSelectedProvider,
+													t("settings:labels.useCustomArn"),
+													apiConfiguration,
+												),
+												...routerModels?.[providerIdentifiers.mimo],
+											}
+										: getStaticModelsForProvider(
+												activeSelectedProvider,
+												t("settings:labels.useCustomArn"),
+												apiConfiguration,
+											)
+								}
 								modelIdKey="apiModelId"
 								serviceName={getProviderServiceConfig(activeSelectedProvider).serviceName}
 								serviceUrl={getProviderServiceConfig(activeSelectedProvider).serviceUrl}
