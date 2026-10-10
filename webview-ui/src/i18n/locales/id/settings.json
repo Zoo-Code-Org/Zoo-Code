@@ -1104,6 +1104,10 @@
 	"limitMaxTokensDescription": "Batasi jumlah maksimum token dalam respons",
 	"maxOutputTokensLabel": "Token output maksimum",
 	"maxTokensGenerateDescription": "Token maksimum untuk dihasilkan dalam respons",
+	"openAiCodexWebSocket": {
+		"label": "Gunakan WebSocket",
+		"description": "Menjaga koneksi ChatGPT tetap terbuka di antara permintaan. Menggunakan HTTP jika koneksi WebSocket tidak dapat dibuat."
+	},
 	"openAiCodexSpeed": {
 		"label": "Kecepatan",
 		"tooltip": "Mode Cepat menggunakan pemrosesan prioritas Codex untuk kecepatan sekitar 1,5x dan memakai lebih banyak kuota langganan.",

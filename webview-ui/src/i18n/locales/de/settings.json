@@ -1104,6 +1104,10 @@
 	"limitMaxTokensDescription": "Begrenze die maximale Anzahl von Tokens in der Antwort",
 	"maxOutputTokensLabel": "Maximale Ausgabe-Tokens",
 	"maxTokensGenerateDescription": "Maximale Tokens, die in der Antwort generiert werden",
+	"openAiCodexWebSocket": {
+		"label": "WebSocket verwenden",
+		"description": "Hält die Verbindung zu ChatGPT zwischen Anfragen offen. Verwendet HTTP, wenn keine WebSocket-Verbindung hergestellt werden kann."
+	},
 	"openAiCodexSpeed": {
 		"label": "Geschwindigkeit",
 		"tooltip": "Der schnelle Modus nutzt die priorisierte Codex-Verarbeitung für etwa 1,5-fache Geschwindigkeit und verbraucht mehr von deinem Abonnementkontingent.",

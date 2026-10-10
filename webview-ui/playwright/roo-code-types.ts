@@ -1,4 +1,5 @@
 export { DEFAULT_MODES } from "../../packages/types/src/mode"
+export { DEFAULT_OPEN_AI_CODEX_USE_WEBSOCKET } from "../../packages/types/src/provider-settings/openai-codex"
 
 export const DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES = false
 export const DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED = false

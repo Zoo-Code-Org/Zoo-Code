@@ -1131,6 +1131,10 @@
 	"limitMaxTokensDescription": "限制回應中的最大 Token 數量",
 	"maxOutputTokensLabel": "最大輸出 Token 數",
 	"maxTokensGenerateDescription": "回應中產生的最大 Token 數",
+	"openAiCodexWebSocket": {
+		"label": "使用 WebSocket",
+		"description": "在請求之間保持與 ChatGPT 的連線。如果無法建立 WebSocket 連線，則使用 HTTP。"
+	},
 	"openAiCodexSpeed": {
 		"label": "速度",
 		"tooltip": "快速模式使用 Codex 優先處理，速度約為 1.5 倍，但會消耗更多訂閱配額。",

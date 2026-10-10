@@ -1104,6 +1104,10 @@
 	"limitMaxTokensDescription": "Yanıttaki maksimum token sayısını sınırla",
 	"maxOutputTokensLabel": "Maksimum çıktı tokenları",
 	"maxTokensGenerateDescription": "Yanıtta oluşturulacak maksimum token sayısı",
+	"openAiCodexWebSocket": {
+		"label": "WebSocket kullan",
+		"description": "İstekler arasında ChatGPT bağlantısını açık tutar. WebSocket bağlantısı kurulamazsa HTTP kullanır."
+	},
 	"openAiCodexSpeed": {
 		"label": "Hız",
 		"tooltip": "Hızlı mod, yaklaşık 1,5 kat hız için Codex öncelikli işlemeyi kullanır ve daha fazla abonelik kotası tüketir.",

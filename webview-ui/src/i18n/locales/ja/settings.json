@@ -1104,6 +1104,10 @@
 	"limitMaxTokensDescription": "レスポンスの最大トークン数を制限する",
 	"maxOutputTokensLabel": "最大出力トークン",
 	"maxTokensGenerateDescription": "レスポンスで生成する最大トークン数",
+	"openAiCodexWebSocket": {
+		"label": "WebSocket を使用",
+		"description": "リクエスト間で ChatGPT への接続を維持する。WebSocket 接続を確立できない場合は HTTP を使用する。"
+	},
 	"openAiCodexSpeed": {
 		"label": "速度",
 		"tooltip": "高速モードは Codex の優先処理を使用して約1.5倍の速度を実現し、サブスクリプションの利用枠をより多く消費します。",

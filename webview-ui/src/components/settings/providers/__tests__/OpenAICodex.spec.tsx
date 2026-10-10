@@ -17,6 +17,7 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 		t: (key: string) =>
 			({
 				"settings:openAiCodexSpeed.label": "Speed",
+				"settings:openAiCodexWebSocket.label": "Use WebSocket",
 				"settings:openAiCodexSpeed.tooltip":
 					"Fast uses Codex priority processing for about 1.5x speed and consumes more subscription quota.",
 				"settings:openAiCodexSpeed.standard": "Standard",
@@ -94,4 +95,27 @@ describe("OpenAICodex speed selector", () => {
 		)
 		expect(postMessage).not.toHaveBeenCalled()
 	})
+})
+
+describe("OpenAICodex WebSocket preference", () => {
+	it.each([undefined, false, true])(
+		"renders saved preference %s and edits through the cached settings callback",
+		(enabled) => {
+			const setApiConfigurationField = vi.fn()
+			const configuration: ProviderSettings = {
+				apiProvider: providerIdentifiers.openaiCodex,
+				openAiCodexUseWebSocket: enabled,
+			}
+			render(<OpenAICodex apiConfiguration={configuration} setApiConfigurationField={setApiConfigurationField} />)
+			const checkbox = screen.getByRole("checkbox", { name: "Use WebSocket" })
+			if (enabled) expect(checkbox).toBeChecked()
+			else expect(checkbox).not.toBeChecked()
+			fireEvent.click(checkbox)
+			expect(setApiConfigurationField).toHaveBeenLastCalledWith("openAiCodexUseWebSocket", !enabled)
+			expect(configuration.openAiCodexUseWebSocket).toBe(enabled)
+			expect(vscode.postMessage).not.toHaveBeenCalledWith(
+				expect.objectContaining({ type: "upsertApiConfiguration" }),
+			)
+		},
+	)
 })

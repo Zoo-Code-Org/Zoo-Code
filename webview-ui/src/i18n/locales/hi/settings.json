@@ -1104,6 +1104,10 @@
 	"limitMaxTokensDescription": "प्रतिक्रिया में टोकन की अधिकतम संख्या सीमित करें",
 	"maxOutputTokensLabel": "अधिकतम आउटपुट टोकन",
 	"maxTokensGenerateDescription": "प्रतिक्रिया में उत्पन्न करने के लिए अधिकतम टोकन",
+	"openAiCodexWebSocket": {
+		"label": "WebSocket का उपयोग करो",
+		"description": "अनुरोधों के बीच ChatGPT का कनेक्शन खुला रखता है। WebSocket कनेक्शन स्थापित न हो पाने पर HTTP का उपयोग करता है।"
+	},
 	"openAiCodexSpeed": {
 		"label": "गति",
 		"tooltip": "तेज़ मोड लगभग 1.5 गुना गति के लिए Codex की प्राथमिकता प्रोसेसिंग का उपयोग करता है और अधिक सदस्यता कोटा खर्च करता है।",

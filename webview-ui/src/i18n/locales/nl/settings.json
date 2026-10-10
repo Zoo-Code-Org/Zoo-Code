@@ -1104,6 +1104,10 @@
 	"limitMaxTokensDescription": "Beperk het maximale aantal tokens in het antwoord",
 	"maxOutputTokensLabel": "Maximale output tokens",
 	"maxTokensGenerateDescription": "Maximale tokens om te genereren in het antwoord",
+	"openAiCodexWebSocket": {
+		"label": "WebSocket gebruiken",
+		"description": "Houdt de verbinding met ChatGPT open tussen verzoeken. Gebruikt HTTP als er geen WebSocket-verbinding kan worden gemaakt."
+	},
 	"openAiCodexSpeed": {
 		"label": "Snelheid",
 		"tooltip": "De snelle modus gebruikt prioriteitsverwerking van Codex voor ongeveer 1,5 keer hogere snelheid en verbruikt meer abonnementquotum.",
