@@ -231,6 +231,7 @@ describe("ClineProvider failed history restoration cleanup", () => {
 			lastSeenPartialPath: undefined,
 			streamFailed: false,
 			streamError: undefined,
+			rollbackFailure: undefined,
 			task,
 			abortCleanup: () => {},
 		})

@@ -34,6 +34,11 @@ interface TaskPartialStreamState {
 	 * by onParameterParseFailure() when the final block fails to parse (so
 	 * execute() never runs and would never report it). */
 	streamError: Error | undefined
+	/** Set when the rollback after a streaming failure was itself refused: the dirty
+	 * streamed buffer survives reset(), so the next execute() must fail closed - open()
+	 * would save that unapproved buffer before approval. Reported once by execute() (or by
+	 * onParameterParseFailure() when the final block never parses). */
+	rollbackFailure: Error | undefined
 	/** The task that owns this state; target for abort-listener deregistration. */
 	task: Task
 	/** TaskAborted listener that tears this state down; registered once per task. */
@@ -93,6 +98,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			lastSeenPartialPath: undefined,
 			streamFailed: false,
 			streamError: undefined,
+			rollbackFailure: undefined,
 			task,
 			abortCleanup: () => this.resetTaskPartialState(task),
 		}
@@ -247,6 +253,19 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		// Set when this execute() opens its own partial tool ask (diff-view branch), so
 		// the catch below can finalize it. Undefined on the saveDirectly branch.
 		let pendingPartialAsk: string | undefined
+
+		// Fail closed on a refused streaming rollback: the dirty streamed buffer survived
+		// reset(), and open() saves a dirty existing document BEFORE approval - retrying the
+		// write here would persist content the user never approved. Report the recorded failure
+		// once and touch no write path (no open/update/save, no directory creation). The state
+		// is released here, so the parse-failure path - which only runs when execute() never
+		// did - can never report the same failure a second time.
+		const streamState = this.taskPartialStreamState.get(this.getPartialStreamFailureKey(task))
+		if (streamState?.rollbackFailure) {
+			this.resetTaskPartialState(task)
+			await handleError("writing file", streamState.rollbackFailure)
+			return
+		}
 
 		if (!relPath) {
 			task.consecutiveMistakeCount++
@@ -596,10 +615,16 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					// logged-only revert failure hides exactly that, so the rollback failure becomes the
 					// failure this stream reports - the original streaming error stays reachable as the
 					// cause, and the report still happens exactly once (on the parse-failure path).
-					partialStreamState.streamError = new Error(
+					const rollbackFailure = new Error(
 						`write_to_file rollback failed after a streaming error: ${rollbackError.message}`,
 						{ cause: partialStreamState.streamError },
 					)
+					partialStreamState.streamError = rollbackFailure
+					// Fail closed for the next execute(): reset() cannot close the dirty diff tab the
+					// refused restore left behind, so a retry would re-open the view and save the
+					// unapproved streamed content before approval. Record the failure on this task's
+					// state; execute() reports it once and touches no write path.
+					partialStreamState.rollbackFailure = rollbackFailure
 				}
 				await this.resetDiffViewAfterWrite(task)
 			}

@@ -580,6 +580,7 @@ describe("writeToFileTool", () => {
 				lastSeenPartialPath,
 				streamFailed: false,
 				streamError: undefined,
+				rollbackFailure: undefined,
 				task: mockCline,
 				abortCleanup: () => {},
 			}
@@ -669,6 +670,43 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 		})
+		it("keeps the generic parse error when no per-task stream state exists", async () => {
+			// BaseTool.handle() delegates every missing-nativeArgs error to
+			// releaseStreamStateOnParseFailure() before reporting the parse error. With no prior
+			// partial delta there is no state to release: the hook must return false so the
+			// ordinary parse error still reaches the user - suppressing it here would silence
+			// every malformed write_to_file call in a task that never streamed.
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+
+			const block = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: {},
+				// No nativeArgs: this drives BaseTool's parse-failure path.
+				partial: false,
+			} as ToolUse<"write_to_file">
+			await writeToFileTool.handle(mockCline, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			// Counted by context rather than toHaveBeenCalledWith: a count of matching calls
+			// cannot auto-pass when handleError fires more than once.
+			const parseCalls = mockHandleError.mock.calls.filter(
+				([context]) => context === "parsing write_to_file args",
+			)
+			const writeCalls = mockHandleError.mock.calls.filter(([context]) => context === "writing file")
+			expect(parseCalls).toHaveLength(1)
+			expect(writeCalls).toHaveLength(0)
+			expect(mockHandleError).toHaveBeenCalledTimes(1)
+			expect(parseCalls[0][1]).toBeInstanceOf(Error)
+			// The no-state branch returns before touching the diff view or registering anything.
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
 		it("releases the per-task stream state when execute() returns early on a denied path", async () => {
 			// The rooignore branch returns before execute()'s success/catch cleanup; without
 			// this the abort listener and the streamFailed guard outlive the call and suppress
@@ -1091,6 +1129,53 @@ describe("writeToFileTool", () => {
 			expect((state?.streamError?.cause as Error | undefined)?.message).toBe(
 				"EACCES: permission denied, open '/ro/test.py'",
 			)
+		})
+
+		it("fails closed without retrying any write path when the streaming rollback was refused", async () => {
+			// update() fails mid-stream and the rollback that follows is refused: the dirty
+			// streamed buffer survives reset(), which cannot close a dirty diff tab. The next
+			// execute() would call open() again, and open() saves a dirty existing document
+			// BEFORE approval - persisting content the user never approved. execute() must fail
+			// closed on the recorded rollback failure instead of retrying.
+			mockCline.diffViewProvider.update.mockRejectedValue(
+				Object.assign(new Error("EROFS: read-only file system, write '/ro/test.py'"), { code: "EROFS" }),
+			)
+			mockCline.diffViewProvider.revertChanges.mockRejectedValue(
+				Object.assign(new Error("EACCES: rollback failed"), { code: "EACCES" }),
+			)
+
+			// First delta pins the path, second reaches update() and hits the refused rollback.
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+
+			const state = writeToFileTool["taskPartialStreamState"].get(`${mockCline.taskId}.${mockCline.instanceId}`)
+			const recorded = state?.rollbackFailure
+			expect(recorded).toBeInstanceOf(Error)
+			expect(recorded?.message).toContain("rollback failed")
+			// The original streaming error stays reachable behind the reported failure.
+			expect((recorded?.cause as Error | undefined)?.message).toBe(
+				"EROFS: read-only file system, write '/ro/test.py'",
+			)
+
+			// The valid final block arrives: execute() must not touch any write path.
+			await executeWriteFileTool({})
+
+			// Only the delta's own open()/update() ran; execute() never re-opened the diff view,
+			// so the dirty buffer could not be saved and no file write or directory creation
+			// happened - and no approval was even requested.
+			expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.update).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockedCreateDirectoriesForFile).not.toHaveBeenCalled()
+			expect(mockAskApproval).not.toHaveBeenCalled()
+			expect(mockPushToolResult).not.toHaveBeenCalled()
+
+			// The recorded failure is the single report (counted, not toHaveBeenCalledWith),
+			// reported with its identity, and the per-task state is released.
+			const writeCalls = mockHandleError.mock.calls.filter(([context]) => context === "writing file")
+			expect(writeCalls).toHaveLength(1)
+			expect(writeCalls[0][1]).toBe(recorded)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		})
 
 		it("reports only the execute() failure when the write is retried after a failed stream", async () => {
