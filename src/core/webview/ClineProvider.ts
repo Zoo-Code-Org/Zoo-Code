@@ -10,6 +10,7 @@ import axios from "axios"
 import debounce from "lodash.debounce"
 import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
+import deepEqual from "fast-deep-equal"
 
 import {
 	type TaskProviderLike,
@@ -2064,7 +2065,15 @@ export class ClineProvider
 				return ORGANIZATION_ALLOW_ALL
 			}
 			const settings = cloudService.getOrganizationSettings()
-			return settings ? (settings.allowList ?? ORGANIZATION_ALLOW_ALL) : ORGANIZATION_ALLOW_ALL
+			if (settings) {
+				return settings.allowList ?? ORGANIZATION_ALLOW_ALL
+			}
+			const orgId = cloudService.getOrganizationId?.() ?? cloudService.getUserInfo?.()?.organizationId
+			if (!orgId) {
+				return ORGANIZATION_ALLOW_ALL
+			}
+			this.log("Organization policy unavailable for authenticated organization user; rejecting model update")
+			return undefined
 		} catch (error) {
 			this.log(
 				`Unable to read organization allow-list for model update: ${error instanceof Error ? error.message : String(error)}`,
@@ -2147,15 +2156,21 @@ export class ClineProvider
 
 				const updatedProfile = result.updatedProfile!
 				const previousProfile = result.previousProfile!
+				let appliedProfile: ProviderSettings = updatedProfile as ProviderSettings
 				let shouldRollbackContext = false
 				try {
 					if (!this.isProfileMutationActive(epoch, signal))
 						throw new Error("Provider profile mutation aborted")
 
+					const currentStored = await this.providerSettingsManager.findProfile({ name })
+					const { name: _n, ...storedWithoutName } = currentStored ?? {}
+					const isMatchingStored = !currentStored || deepEqual(storedWithoutName, updatedProfile)
+					appliedProfile = (isMatchingStored ? updatedProfile : currentStored) as ProviderSettings
+
 					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
 					if (name === currentApiConfigName) {
-						shouldRollbackContext = true
-						await this.contextProxy.setProviderSettings(updatedProfile as ProviderSettings)
+						shouldRollbackContext = isMatchingStored
+						await this.contextProxy.setProviderSettings(appliedProfile)
 					}
 
 					if (!this.isProfileMutationActive(epoch, signal))
@@ -2212,7 +2227,7 @@ export class ClineProvider
 					currentTask.instanceId === initialInstanceId
 
 				if (isSameTask) {
-					this.updateTaskApiHandlerIfNeeded(updatedProfile as ProviderSettings, { forceRebuild: true })
+					this.updateTaskApiHandlerIfNeeded(appliedProfile, { forceRebuild: true })
 					await this.persistStickyProviderProfileToCurrentTask(name, { signal, epoch })
 				}
 

@@ -133,6 +133,7 @@ const { mockCloudInstance } = vi.hoisted(() => ({
 		isAuthenticated: vi.fn().mockReturnValue(false),
 		getAllowList: vi.fn().mockReturnValue({ allowAll: true }),
 		getOrganizationSettings: vi.fn().mockReturnValue(undefined),
+		getOrganizationId: vi.fn().mockReturnValue(null),
 		getUserInfo: vi.fn().mockReturnValue(null),
 		on: vi.fn(),
 		off: vi.fn(),
@@ -183,6 +184,8 @@ describe("ClineProvider - updateProfileModel", () => {
 		vi.clearAllMocks()
 		mockCloudInstance.isAuthenticated.mockReturnValue(false)
 		mockCloudInstance.getOrganizationSettings.mockReturnValue(undefined)
+		mockCloudInstance.getOrganizationId.mockReturnValue(null)
+		mockCloudInstance.getUserInfo.mockReturnValue(null)
 		mockCloudInstance.getAllowList.mockReturnValue({ allowAll: true })
 
 		storedProfiles = {
@@ -757,6 +760,64 @@ describe("ClineProvider - updateProfileModel", () => {
 			expect.objectContaining({ openRouterModelId: "openai/gpt-4.5" }),
 		)
 		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+	})
+
+	it("rejects model update when user belongs to an organization but organization settings are undefined (fail closed)", async () => {
+		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
+		mockCloudInstance.isAuthenticated.mockReturnValue(true)
+		mockCloudInstance.getOrganizationId.mockReturnValue("org-123")
+		mockCloudInstance.getOrganizationSettings.mockReturnValue(undefined)
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-4.5",
+		})
+
+		expect(manager().updateProfileModel).not.toHaveBeenCalled()
+		expect(manager().saveConfig).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.violated_organization_allowlist")
+	})
+
+	it("refreshes context and task from latest stored profile when another instance updated profile before propagation", async () => {
+		mockStoredProfile({
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4",
+		})
+
+		const mockTask = new Task({} as unknown as ConstructorParameters<typeof Task>[0])
+		Object.defineProperty(mockTask, "taskApiConfigName", { value: "test-config" })
+		await provider.addClineToStack(mockTask)
+
+		// After updateProfileModel commits Model A, another instance updates storage to Model B
+		manager().updateProfileModel.mockImplementationOnce(async (name) => {
+			storedProfiles[name] = {
+				name,
+				id: "test-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-5-concurrent",
+			}
+			return {
+				success: true,
+				updatedProfile: {
+					name,
+					id: "test-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4.5",
+				},
+				previousProfile: {
+					name,
+					id: "test-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4",
+				},
+			}
+		})
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-4.5",
+		})
+
+		// Context should be refreshed to Model B rather than stale Model A
+		expect(provider.contextProxy.getValues().openRouterModelId).toBe("openai/gpt-5-concurrent")
 	})
 
 	it("aborts model update without writing profile when reading organization settings throws an error (fail closed)", async () => {
