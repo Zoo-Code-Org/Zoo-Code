@@ -701,8 +701,11 @@ export async function safeWriteText(
 				// documented default for a fresh file rather than the staging file's private 0600:
 				// the handle is created 0600 so nobody can read content that is not yet published,
 				// but publishing that mode as-is would make every new file owner-only, which is a
-				// change in who can read the file, decided by a staging detail.
-				fsSync.fchmodSync(fd, targetMode === null ? 0o644 : targetMode)
+				// change in who can read the file, decided by a staging detail. fchmodSync does
+				// not apply the process umask the way openSync does, so the fresh-file default
+				// is masked here - otherwise a restrictive umask would be honored for a
+				// self-staged new file and silently ignored for a staging-handle one.
+				fsSync.fchmodSync(fd, targetMode === null ? 0o644 & ~process.umask() : targetMode)
 				_fsyncFile(fd)
 			} finally {
 				fsSync.closeSync(fd)
