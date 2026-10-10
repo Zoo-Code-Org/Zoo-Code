@@ -957,8 +957,11 @@ describe("safeWriteText", () => {
 
 			await safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" })
 
-			// no existing target, so nothing to preserve and no fchmod on the temp
-			expect(fsSync.fchmodSync).not.toHaveBeenCalled()
+			// No existing target means nothing to preserve, but the published file still gets the
+			// documented default for a fresh file: the staging file is created 0600 so unpublished
+			// content is private, and publishing that mode unchanged would make every new file
+			// owner-only. Contract change: this test used to assert no fchmod at all.
+			expect(fsSync.fchmodSync).toHaveBeenCalledWith(2, 0o644)
 			expect(fs.rename).toHaveBeenCalledWith(customTempPath, targetPath)
 		})
 
@@ -1340,9 +1343,14 @@ describe("caller-supplied staging path", () => {
 		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
 
 		// Renaming a link over the target publishes whatever the link points at.
+		// The staging path has to sit in a private staging directory, or the location rule
+		// refuses it before the symlink check runs and this test proves nothing about symlinks.
 		await expect(
-			safeWriteText(targetPath, "data", { tempPath: "/tmp/test-dir/x.tmp", platform: "linux" }),
-		).rejects.toThrow(StagingPathError)
+			safeWriteText(targetPath, "data", {
+				tempPath: "/tmp/test-dir/.file-safety-staging_peer/x.tmp",
+				platform: "linux",
+			}),
+		).rejects.toThrow(/symlink/i)
 		expect(fsSync.openSync).not.toHaveBeenCalled()
 		expect(fs.rename).not.toHaveBeenCalled()
 	})
@@ -1728,5 +1736,23 @@ describe("parent directory setup failures", () => {
 		// outward (the parent is spelled as the write derived it, not as path.resolve would).
 		expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
 		expect(fs.rmdir).toHaveBeenCalledWith("/tmp/test-dir")
+	})
+})
+describe("staging handle failures", () => {
+	beforeEach(() => {
+		mockDefaults()
+	})
+
+	it("removes the directory it created when the handle cannot be handed out", async () => {
+		// createStagingFile makes the private staging directory before it can hand anything back,
+		// so a failure after that point has no other owner: an empty .file-safety-staging_* beside
+		// the target would otherwise be residue nothing ever cleans.
+		const boom = Object.assign(new Error("EIO on lstat"), { code: "EIO" })
+		vi.mocked(fs.lstat).mockRejectedValue(boom)
+
+		await expect(createStagingFile("/tmp/test-dir/target.txt")).rejects.toBe(boom)
+
+		expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
 	})
 })

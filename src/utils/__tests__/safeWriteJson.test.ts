@@ -687,7 +687,7 @@ describe("safeWriteJson", () => {
 
 		const left = await fs.readdir(tempDir)
 		expect(left).not.toContain("elsewhere.json")
-		expect(left.filter((entry) => entry.includes(".new_") || entry.endsWith(".lock"))).toEqual([])
+		expect(left.filter((entry) => entry.includes(".new_") || entry.startsWith(".file-safety-staging") || entry.endsWith(".lock"))).toEqual([])
 	})
 
 	test.skipIf(process.platform === "win32")(
@@ -712,7 +712,7 @@ describe("safeWriteJson", () => {
 			const entries = await fs.readdir(tempDir)
 			expect(entries).toContain("outside.json")
 			expect(
-				entries.filter((entry) => entry.includes(".new_") || entry.includes("safeWriteText") || entry.endsWith(".lock")),
+				entries.filter((entry) => entry.includes(".new_") || entry.includes("safeWriteText") || entry.startsWith(".file-safety-staging") || entry.endsWith(".lock")),
 			).toEqual([])
 		},
 	)
@@ -812,7 +812,7 @@ describe("safeWriteJson", () => {
 		// And cleanup touched nothing: neither the published target nor the staging name the
 		// commit consumed.
 		const unlinked = vi.mocked(fs.unlink).mock.calls.map((call) => String(call[0]))
-		expect(unlinked.filter((p) => p === target || p.includes(".new_"))).toEqual([])
+		expect(unlinked.filter((p) => p === target || p.includes(".new_") || p.includes(".file-safety-staging"))).toEqual([])
 	})
 
 
@@ -860,7 +860,11 @@ describe("safeWriteJson", () => {
 				const entries = await fs.readdir(dir)
 				expect(
 					entries.filter(
-						(entry) => entry.includes(".new_") || entry.includes("safeWriteText") || entry.endsWith(".lock"),
+						(entry) =>
+				entry.includes(".new_") ||
+				entry.includes("safeWriteText") ||
+				entry.startsWith(".file-safety-staging") ||
+				entry.endsWith(".lock"),
 					),
 				).toEqual([])
 			}
@@ -905,7 +909,11 @@ describe("safeWriteJson", () => {
 				const entries = await fs.readdir(dir)
 				expect(
 					entries.filter(
-						(entry) => entry.includes(".new_") || entry.includes("safeWriteText") || entry.endsWith(".lock"),
+						(entry) =>
+				entry.includes(".new_") ||
+				entry.includes("safeWriteText") ||
+				entry.startsWith(".file-safety-staging") ||
+				entry.endsWith(".lock"),
 					),
 				).toEqual([])
 			}
@@ -972,7 +980,7 @@ describe("safeWriteJson", () => {
 			)
 			expect(lockMockFn).not.toHaveBeenCalled()
 			const entries = await fs.readdir(tempDir)
-			expect(entries.filter((entry) => entry.endsWith(".lock") || entry.includes(".new_"))).toEqual([])
+			expect(entries.filter((entry) => entry.endsWith(".lock") || entry.includes(".new_") || entry.startsWith(".file-safety-staging"))).toEqual([])
 		} finally {
 			vi.doUnmock("proper-lockfile")
 			vi.resetModules()
@@ -1045,7 +1053,7 @@ describe("safeWriteJson", () => {
 
 		const entries = await fs.readdir(tempDir)
 		expect(entries).not.toContain("scope-missing-parent")
-		expect(entries.filter((entry) => entry.endsWith(".lock") || entry.includes(".new_"))).toEqual([])
+		expect(entries.filter((entry) => entry.endsWith(".lock") || entry.includes(".new_") || entry.startsWith(".file-safety-staging"))).toEqual([])
 	})
 
 	// A scope that cannot be canonicalized must not fall back to a lexical root: a partly
@@ -1116,5 +1124,42 @@ describe("safeWriteJson", () => {
 		} finally {
 			realpathSpy.mockRestore()
 		}
+	})
+})
+describe("staging directory cleanup", () => {
+	const dir = fsSyncActual.mkdtempSync(path.join(os.tmpdir(), "swj-staging-"))
+
+	afterAll(() => {
+		fsSyncActual.rmSync(dir, { recursive: true, force: true })
+	})
+
+	class FailingWriteStream extends Writable {
+		override _write(_chunk: unknown, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
+			callback(new Error("stream failed"))
+		}
+	}
+
+	it("removes the private staging directory when streaming the document fails", async () => {
+		// The staging file and its directory exist before the commit is delegated, so a failure in
+		// the streaming step never reaches safeWriteText's own cleanup. The caller that asked for
+		// the handle is the only one that can remove what it left beside the target.
+		const target = path.join(dir, "state.json")
+		// WriteStream has no constructor a test can call, so the fields the writer inspects are
+		// assigned onto a Writable instance and handed over with a single double assertion.
+		const failing = Object.assign(new FailingWriteStream(), {
+			close: () => {},
+			bytesWritten: 0,
+			pending: false,
+			path: target,
+		})
+
+		const spy = vi
+			.spyOn(fsSyncActual, "createWriteStream")
+			.mockImplementationOnce(() => failing as unknown as ReturnType<typeof fsSyncActual.createWriteStream>)
+
+		await expect(safeWriteJson(target, { a: 1 })).rejects.toThrow("stream failed")
+		spy.mockRestore()
+
+		expect(fsSyncActual.readdirSync(dir).filter((entry) => entry.startsWith(".file-safety-staging"))).toEqual([])
 	})
 })

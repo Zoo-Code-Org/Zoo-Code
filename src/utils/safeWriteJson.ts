@@ -216,6 +216,10 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 	// Variables to hold the actual path of the temp file if it is created.
 	let actualTempNewFilePath: string | null = null
+	// The private staging directory belongs to whoever asked createStagingFile for it: safeWriteText
+	// removes a directory it created itself, but a handle handed in from outside leaves the directory
+	// owned by its holder, so this call has to be the one that removes it on a failure.
+	let stagingDirToCleanup: string | undefined
 
 	try {
 		// Resolve the publish target under the lock: the peer has committed by now, so
@@ -276,6 +280,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// here chose.
 		const staging = await createStagingFile(resolvedTargetPath)
 		actualTempNewFilePath = staging.tempPath
+		stagingDirToCleanup = staging.stagingDir
 
 		await _streamDataToFile(staging.tempPath, data, options?.prettyPrint)
 
@@ -353,6 +358,14 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 					)
 				}
 			}
+		}
+
+		// The staging directory is this call's residue: a failure before the commit leaves it
+		// empty beside the target, and a failure inside createStagingFile or the streaming step
+		// never reached safeWriteText's own cleanup. A PostCommitDurabilityError means the commit
+		// consumed the staging file and safeWriteText already removed the directory with it.
+		if (stagingDirToCleanup && !(originalError instanceof PostCommitDurabilityError)) {
+			await fs.rmdir(stagingDirToCleanup).catch(() => {})
 		}
 
 		throw originalError // This MUST be the error that rejects the promise.
