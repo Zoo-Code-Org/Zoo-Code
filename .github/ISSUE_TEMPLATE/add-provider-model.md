@@ -7,7 +7,7 @@ assignees: ""
 type: Task
 ---
 
-<!-- Writing style: write in Simplified Technical English: short sentences, plain words, active voice, one idea per sentence. Keep the title short and specific. -->
+<!-- Writing style: write in Simplified Technical English (ASD-STE100): short sentences, plain words, active voice, one idea per sentence, no contractions. Keep the title short and specific. -->
 
 Name of model: (GPT 5.4)
 Model creator: (i.e. Open AI)
