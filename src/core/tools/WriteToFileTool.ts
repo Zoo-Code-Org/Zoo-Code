@@ -641,13 +641,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				isProtected: isWriteProtected,
 			}
 
-				partialMessage = JSON.stringify(sharedMessageProps)
+			partialMessage = JSON.stringify(sharedMessageProps)
 			await task.ask("tool", partialMessage, block.partial).catch(() => {})
 
 			if (!this.isPartialStreamStillLive(task, partialStreamState)) {
-			return
-		}
-
+				return
+			}
 		} catch (error) {
 			// Unexpected failure in the pre-streaming setup (provider state, the filesystem probe, the
 			// partial ask): this delta never reaches the diff view or execute(), so nothing else
@@ -677,6 +676,18 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					everyLineHasLineNumbers(newContent) ? stripLineNumbers(newContent) : newContent,
 					false,
 				)
+
+				// Cancellation can land while update() is in flight. The view it streamed into
+				// already existed when the TaskAborted teardown ran, so that teardown owns it:
+				// starting a second discard here would roll the same buffer back twice and report
+				// the hazard twice. Wait for the task's own reversion instead, then drop the
+				// provider references this released stream still points at. Without the re-check
+				// the continuation returns as if it still owned a live stream.
+				if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+					await task.waitForDiffReversion()
+					await this.resetDiffViewAfterWrite(task)
+					return
+				}
 			} catch (error) {
 				// A cancellation that lands while open() or update() is in flight runs the
 				// TaskAborted teardown - which releases this task's stream state, reverts or

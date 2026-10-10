@@ -1,3 +1,4 @@
+import { writeToFileTool } from "../../tools/WriteToFileTool"
 import path from "node:path"
 
 import { type ProviderSettings, RooCodeEventName } from "@roo-code/types"
@@ -471,5 +472,33 @@ describe("Task.run() idempotency", () => {
 		await p1
 		await t.dispose()
 		startTaskSpy.mockRestore()
+	})
+
+	test("dispose() releases the write_to_file stream state this task registered", async () => {
+		// The per-task stream state lives in a tool singleton and is normally released by the
+		// TaskAborted listener registered with it. dispose() removes every listener, so a task
+		// disposed directly - the path ClineProvider.cleanupFailedHistoryTask() takes - would
+		// leave the singleton holding this task, its provider, and a stream that can never
+		// advance again.
+		// Spied before construction: a constructor that fails can start the disposal itself,
+		// and that path has to release the state too. The release is captured in a local
+		// rather than read back off the spy, because mockRestore() clears the spy's call
+		// history and the assertion below runs after it.
+		const released: unknown[] = []
+		const clearTaskState = vi.spyOn(writeToFileTool, "clearTaskState").mockImplementation((disposed) => {
+			released.push(disposed)
+		})
+		const t = new Task({
+			provider: mockProvider as unknown as ClineProvider,
+			apiConfiguration: mockApiConfiguration,
+			task: "hello",
+			startTask: false,
+		})
+		try {
+			await t.dispose()
+		} finally {
+			clearTaskState.mockRestore()
+		}
+		expect(released).toEqual([t])
 	})
 })

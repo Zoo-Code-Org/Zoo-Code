@@ -110,6 +110,7 @@ import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
 // core modules
 import { ToolRepetitionDetector } from "../tools/ToolRepetitionDetector"
 import { restoreTodoListForTask } from "../tools/UpdateTodoListTool"
+import { writeToFileTool } from "../tools/WriteToFileTool"
 import { FileContextTracker } from "../context-tracking/FileContextTracker"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
@@ -3540,6 +3541,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		// Remove all event listeners to prevent memory leaks.
 		try {
+			// The per-task write_to_file stream state lives in a tool singleton and is
+			// normally released by the TaskAborted listener registered with it. removeAllListeners
+			// above drops that listener, so a task disposed directly - without an abort - would
+			// leave the singleton holding this task, its provider, and a stream that can never
+			// advance again. Release it here, where every disposal path passes.
+			writeToFileTool.clearTaskState(this)
 			this.removeAllListeners()
 		} catch (error) {
 			console.error("Error removing event listeners:", error)
@@ -3608,11 +3615,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// persistTaskMetadata() awaits that promise and teardown must not wait on it. Once the name
 		// is known the await is skipped inside persistTaskMetadata(), so the repair is safe to run
 		// and skipping it would leave the history entry stale for a task that could repair it.
-		if (this.pendingTaskMetadataRepair && (this.taskApiConfigReadySettled || this._taskApiConfigName !== undefined)) {
+		if (
+			this.pendingTaskMetadataRepair &&
+			(this.taskApiConfigReadySettled || this._taskApiConfigName !== undefined)
+		) {
 			await this.persistTaskMetadata()
 		}
 
 		await pendingCleanup
+		await this.diffReversionPromise
+	}
+
+	/**
+	 * The diff teardown this disposal started, for a continuation that observes its own
+	 * stream released mid-await. Single-owner by construction: the in-flight
+	 * handlePartial() waits for the discard Task.dispose() already started instead of
+	 * running an independent one over the same buffer.
+	 */
+	public async waitForDiffReversion(): Promise<void> {
 		await this.diffReversionPromise
 	}
 

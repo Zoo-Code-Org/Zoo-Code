@@ -590,7 +590,8 @@ export class DiffViewProvider {
 						document.positionAt(0),
 						document.positionAt(document.getText().length),
 					)
-					const restoredContent = this.editType === "modify" ? this.stripAllBOMs(this.originalContent ?? "") : ""
+					const restoredContent =
+						this.editType === "modify" ? this.stripAllBOMs(this.originalContent ?? "") : ""
 					edit.replace(document.uri, fullRange, restoredContent)
 					const applied = await vscode.workspace.applyEdit(edit)
 					if (!applied) {
@@ -642,6 +643,20 @@ export class DiffViewProvider {
 			cleanupFailure = error
 			console.error("Error removing abandoned write_to_file artifacts:", error)
 		}
+
+		// The stream session is over whichever way this returns. Task.dispose() runs no reset()
+		// after the discard, so leaving isEditing true with the editor still referenced would
+		// keep a disposed task pointing at a live diff view - and the idempotency guard in
+		// WriteToFileTool.discardDiffViewOpenedAfterRelease() reads isEditing to decide whether
+		// a late continuation still has work to do. reset() itself is not called here: it closes
+		// the diff views again, and the callers that do run it still do.
+		this.isEditing = false
+		this.editType = undefined
+		this.activeDiffEditor = undefined
+		this.originalContent = undefined
+		this.streamedLines = []
+		this.userTouchedDocument = false
+		this.userTouchedDiffEditor = false
 
 		if (editorFailure) {
 			throw editorFailure instanceof Error ? editorFailure : new Error(String(editorFailure))

@@ -514,10 +514,7 @@ describe("writeToFileTool", () => {
 
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
-			expect(mockCline.say).toHaveBeenCalledWith(
-				"error",
-				expect.stringContaining("could not be restored"),
-			)
+			expect(mockCline.say).toHaveBeenCalledWith("error", expect.stringContaining("could not be restored"))
 		})
 
 		it("discards a modify teardown too, because revertChanges() would save it", async () => {
@@ -557,7 +554,6 @@ describe("writeToFileTool", () => {
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		})
 
-
 		it("stops before updating the diff view when the task is cancelled while open() is in flight", async () => {
 			// open() is the first provider await after the ask. If TaskAborted lands while
 			// it is in flight, the teardown has already released this task's stream state
@@ -577,6 +573,37 @@ describe("writeToFileTool", () => {
 
 			expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(1)
 			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
+		it("waits for the task's own discard instead of starting a second one when the abort lands during update()", async () => {
+			// The view update() streams into already existed when the TaskAborted teardown ran, so
+			// that teardown owns it. Without a re-check after the await the continuation returns as
+			// if it still owned a live stream; with an independent discard it would roll the same
+			// buffer back twice and report the hazard twice.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.update.mockClear()
+			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			mockCline.diffViewProvider.revertChanges.mockClear()
+			mockCline.diffViewProvider.reset.mockClear()
+			mockCline.waitForDiffReversion = vi.fn().mockResolvedValue(undefined)
+			// The cancellation lands inside update(), the last provider await of the delta.
+			mockCline.diffViewProvider.update.mockImplementationOnce(async () => {
+				writeToFileTool.clearTaskState(mockCline)
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.diffViewProvider.update).toHaveBeenCalledTimes(1)
+			// Single owner: the continuation waits for the discard the disposal already started.
+			expect(mockCline.waitForDiffReversion).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			// It still drops the provider references the released stream points at.
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		})
 		it("discards the diff view that open() publishes after the stream state was released", async () => {
