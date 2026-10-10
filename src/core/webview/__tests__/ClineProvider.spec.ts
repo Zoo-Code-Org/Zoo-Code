@@ -684,6 +684,43 @@ describe("ClineProvider", () => {
 				),
 			)
 		})
+
+		it("unregisters the provider before its awaited cleanup finishes", async () => {
+			// The unregistration used to sit after every awaited teardown step, so a provider that was
+			// already _disposed stayed enumerable for the whole cleanup window - long enough for a
+			// sibling profile mutation to persist durable view state and post to a view that is gone.
+			const disposing = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// Own view object, so the lookup below cannot resolve to the shared test provider.
+			disposing["view"] = { dispose: vi.fn(), visible: false } as never
+			// Hold the last teardown step open so the assertions run while dispose() is still awaiting.
+			let releaseCleanup: () => void = () => {}
+			const cleanupGate = new Promise<void>((resolve) => {
+				releaseCleanup = resolve
+			})
+			// taskHistoryStore is readonly, so the double assertion is the narrowest way to swap in a
+			// gate; bracket access alone cannot reassign a readonly field.
+			const store = disposing as unknown as { taskHistoryStore: { dispose: () => Promise<void> } }
+			store.taskHistoryStore = { dispose: () => cleanupGate }
+
+			const disposal = disposing.dispose()
+			// Drain the microtask chain that carries dispose() to its pending await.
+			for (let round = 0; round < 3; round++) {
+				await new Promise((resolve) => setImmediate(resolve))
+			}
+			
+			expect(ClineProvider.getAllInstances()).not.toContain(disposing)
+			expect(ClineProvider.getInstanceForView(disposing["view"] as vscode.WebviewView)).toBeUndefined()
+
+			releaseCleanup()
+			await disposal
+			expect(ClineProvider.getAllInstances()).not.toContain(disposing)
+		})
 	})
 
 	test("reports an unresolved webview as not visible", () => {
@@ -3756,6 +3793,281 @@ const provider = new ClineProvider(
 			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([doomedProfile, keeperProfile])
 			await provider.dispose()
 			await healthySibling.dispose()
+			await failingSibling.dispose()
+		})
+
+		it("refreshes a live sibling but leaves one that has started disposing", async () => {
+			// dispose() unregisters at its start, so a disposed sibling is normally not enumerated at all;
+			// this pins the second line of defence the row asks for. The live sibling is the positive
+			// control: it proves the refresh reaches siblings at all, so the disposing assertion cannot
+			// pass by accident.
+			const updater = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const live = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const disposing = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await live["setViewStateId"]("live-sibling-view")
+			await live.saveViewState("currentApiConfigName", "shared-profile")
+			await live.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "stale-key",
+			})
+			await disposing["setViewStateId"]("disposing-refresh-view")
+			await disposing.saveViewState("currentApiConfigName", "shared-profile")
+			await disposing.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "stale-key",
+			})
+			const livePost = vi.spyOn(live, "postStateToWebview").mockResolvedValue(undefined)
+			const disposingPost = vi.spyOn(disposing, "postStateToWebview").mockResolvedValue(undefined)
+			disposing["_disposed"] = true
+			expect(live["pinnedProfileName"]).toBe("shared-profile")
+			expect(disposing["pinnedProfileName"]).toBe("shared-profile")
+
+			await updater["refreshViewLocalStateForUpdatedProfile"]("shared-profile", {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "fresh-key",
+			})
+
+			// Positive control: the live sibling's overlay is replaced and it is posted to.
+			expect(live["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "fresh-key",
+			})
+			expect(livePost).toHaveBeenCalledTimes(1)
+			// The disposing sibling keeps its own overlay and receives no post.
+			expect(disposing["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "stale-key",
+			})
+			expect(disposingPost).not.toHaveBeenCalled()
+
+			// Reset the seeded flag so dispose() can unregister this instance again.
+			disposing["_disposed"] = false
+			await updater.dispose()
+			await live.dispose()
+			await disposing.dispose()
+		})
+
+		it("stops before posting to a sibling that starts disposing mid-refresh", async () => {
+			// Reachable window: the affected set is enumerated before any await, so a sibling can begin
+			// disposal after the filter ran and before its post. The re-check between the persistence and
+			// the post is what keeps the post off a webview that is already gone.
+			const updater = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await sibling["setViewStateId"]("midflight-refresh-view")
+			await sibling.saveViewState("currentApiConfigName", "shared-profile")
+			const siblingPostSpy = vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+			// Double assertion: the method is private and vi.spyOn needs a property holder; house idiom in
+			// this spec (see the teardown spies elsewhere in this file).
+			const teardown = sibling as unknown as {
+				_saveViewLocalStateFromMutation: (values: never) => Promise<void>
+			}
+			const persist = vi.spyOn(teardown, "_saveViewLocalStateFromMutation").mockImplementation(async () => {
+				// Disposal starts while this sibling's own write is in flight.
+				sibling["_disposed"] = true
+			})
+
+			await updater["refreshViewLocalStateForUpdatedProfile"]("shared-profile", {
+				apiProvider: providerIdentifiers.anthropic,
+			})
+
+			expect(persist).toHaveBeenCalledTimes(1)
+			expect(siblingPostSpy).not.toHaveBeenCalled()
+			sibling["_disposed"] = false
+			await updater.dispose()
+			await sibling.dispose()
+		})
+
+		it("re-pins a live sibling but leaves one that has started disposing", async () => {
+			// Same second line of defence on the deletion path, with the live sibling as the positive
+			// control: it proves the deletion really reaches the sibling re-pin set, so the disposing
+			// assertion is a guard and not an accident of setup.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const live = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const disposing = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await live["setViewStateId"]("live-repin-view")
+			await live.saveViewState("currentApiConfigName", "doomed-profile")
+			await disposing["setViewStateId"]("disposing-repin-view")
+			await disposing.saveViewState("currentApiConfigName", "doomed-profile")
+			const livePost = vi.spyOn(live, "postStateToWebview").mockResolvedValue(undefined)
+			const disposingPost = vi.spyOn(disposing, "postStateToWebview").mockResolvedValue(undefined)
+			disposing["_disposed"] = true
+			expect(live["pinnedProfileName"]).toBe("doomed-profile")
+			expect(disposing["pinnedProfileName"]).toBe("doomed-profile")
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn().mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue("doomed-id"),
+			}
+
+			await provider.deleteProviderProfile(doomedProfile)
+
+			// Positive control: the live sibling is re-pinned onto the survivor and posted to.
+			expect(live["viewLocalState"].currentApiConfigName).toBe("keeper-profile")
+			expect(livePost).toHaveBeenCalled()
+			// The disposing sibling is left on its own pin with no post.
+			expect(disposing["viewLocalState"].currentApiConfigName).toBe("doomed-profile")
+			expect(disposingPost).not.toHaveBeenCalled()
+
+			disposing["_disposed"] = false
+			await provider.dispose()
+			await live.dispose()
+			await disposing.dispose()
+		})
+
+		it("skips both the post and the compensating restore for a sibling that starts disposing mid-re-pin", async () => {
+			// Two siblings: the first one's re-pin write lands and then it begins disposing; the second
+			// one's write fails, so the deletion rolls back. Both remaining guards apply to the first - the
+			// post guard and the compensating-restore guard. Its viewStates key is orphaned once it is
+			// disposed (viewId comes from the monotonic counter), so leaving it alone is the right call.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const disposingSibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await disposingSibling["setViewStateId"]("disposing-sibling-view")
+			await disposingSibling.saveViewState("currentApiConfigName", "doomed-profile")
+			const disposingPostSpy = vi.spyOn(disposingSibling, "postStateToWebview").mockResolvedValue(undefined)
+			// Double assertion: private method, vi.spyOn needs a property holder (house idiom in this spec).
+			const teardown = disposingSibling as unknown as {
+				_saveViewLocalStateFromMutation: (values: never) => Promise<void>
+			}
+			const realPersist = teardown._saveViewLocalStateFromMutation.bind(disposingSibling)
+			vi.spyOn(teardown, "_saveViewLocalStateFromMutation").mockImplementation(async (values: never) => {
+				await realPersist(values)
+				disposingSibling["_disposed"] = true
+			})
+			const failingContext = {
+				...mockContext,
+				globalState: {
+					...mockContext.globalState,
+					update: (key: string, value: unknown) => {
+						const states = value as Record<string, { currentApiConfigName?: string }> | undefined
+						if (key === "viewStates" && states?.["failing-repin-view"]?.currentApiConfigName === "keeper-profile") {
+							return Promise.reject(new Error("sibling pin write failed"))
+						}
+						return mockContext.globalState.update(key, value)
+					},
+				},
+			}
+			const failingSibling = new ClineProvider(
+				failingContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(failingContext),
+				new WebviewFocusTracker(),
+			)
+			await failingSibling["setViewStateId"]("failing-repin-view")
+			await failingSibling.saveViewState("currentApiConfigName", "doomed-profile")
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn().mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue("doomed-id"),
+			}
+
+			await expect(provider.deleteProviderProfile(doomedProfile)).rejects.toThrow("sibling pin write failed")
+
+			// The disposing sibling gets no post after its write and no compensating restore: it keeps the
+			// survivor pin its own write put in place.
+			expect(disposingPostSpy).not.toHaveBeenCalled()
+			expect(disposingSibling["viewLocalState"].currentApiConfigName).toBe("keeper-profile")
+			// The failing sibling is still rolled back to its own pin.
+			expect(failingSibling["viewLocalState"].currentApiConfigName).toBe("doomed-profile")
+			disposingSibling["_disposed"] = false
+			await provider.dispose()
+			await disposingSibling.dispose()
 			await failingSibling.dispose()
 		})
 
