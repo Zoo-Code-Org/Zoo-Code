@@ -494,10 +494,17 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			if (task.diffViewProvider.isEditing) {
 				const discardError = await this.discardUnapprovedStreamBeforeReset(task)
 				if (discardError) {
-					await task.say(
-						"error",
-						`write_to_file could not discard the unapproved preview after the failed write: ${discardError.message}`,
-					)
+					// The report must not own the teardown: Task.say() throws once the task is
+					// aborted, and a rejection here would skip the reset() and the bookkeeping
+					// release below - leaking exactly what this block exists to clean up.
+					await task
+						.say(
+							"error",
+							`write_to_file could not discard the unapproved preview after the failed write: ${discardError.message}`,
+						)
+						.catch((sayError) => {
+							console.error("Error reporting write_to_file discard failure:", sayError)
+						})
 				}
 			}
 			await task.diffViewProvider.reset()
@@ -654,10 +661,16 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					// the caller sees. The discard failure is a separate, actionable condition - the
 					// placeholder or the created directories are still on disk and the buffer may still hold
 					// unapproved content - so it gets its own report instead of only a console line.
-					await task.say(
-						"error",
-						`write_to_file could not discard the unapproved preview after the failed stream: ${discardError.message}`,
-					)
+					// A rejected report must not swallow the exception this delta produced: the
+					// throw below is the caller's contract.
+					await task
+						.say(
+							"error",
+							`write_to_file could not discard the unapproved preview after the failed stream: ${discardError.message}`,
+						)
+						.catch((sayError) => {
+							console.error("Error reporting write_to_file discard failure:", sayError)
+						})
 				}
 			}
 			throw error

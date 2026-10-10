@@ -656,6 +656,36 @@ describe("writeToFileTool", () => {
 				errorSpy.mockRestore()
 			}
 		})
+
+		it("finishes the teardown when the discard report itself cannot be delivered", async () => {
+			// Task.say() throws once the task is aborted. Awaiting the report unguarded let that
+			// rejection escape the catch, skipping the reset() and the bookkeeping release below -
+			// so the abort that made the report fail also leaked the state the report described.
+			mockCline.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.discardUnapprovedStream.mockRejectedValue(
+				new Error("EPERM: operation not permitted"),
+			)
+			mockCline.say.mockRejectedValue(new Error("task aborted"))
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			writeToFileTool["getTaskPartialStreamState"](mockCline)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			try {
+				await executeWriteFileTool({})
+
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+				expect(mockHandleError).toHaveBeenCalledWith(
+					"writing file",
+					expect.objectContaining({ message: "save failed" }),
+				)
+			} finally {
+				errorSpy.mockRestore()
+				mockCline.say.mockResolvedValue(undefined)
+				writeToFileTool["taskPartialStreamState"].clear()
+			}
+		})
 	})
 
 	describe("early-exit stream state cleanup", () => {
@@ -1044,6 +1074,38 @@ describe("writeToFileTool", () => {
 				expect(reported.name).toBe("Error")
 			} finally {
 				errorSpy.mockRestore()
+			}
+		})
+
+		it("still reports the delta's own error when the discard report cannot be delivered", async () => {
+			// Same guard on the streaming side. The exception this delta produced is what
+			// BaseTool.handle() reports; an undeliverable report must not take its place, or the
+			// caller sees an abort where a provider failure happened.
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockRejectedValue(new Error("provider state unavailable")),
+			})
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.discardUnapprovedStream.mockRejectedValue(
+				new Error("EPERM: operation not permitted"),
+			)
+			mockCline.say.mockRejectedValue(new Error("task aborted"))
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			try {
+				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+				const reported = mockHandleError.mock.calls.find(
+					([context]) => context === "handling partial write_to_file",
+				)?.[1] as Error
+				expect(reported.message).toBe("provider state unavailable")
+				expect(mockCline.say).toHaveBeenCalledWith(
+					"error",
+					expect.stringContaining("could not discard the unapproved preview after the failed stream"),
+				)
+			} finally {
+				errorSpy.mockRestore()
+				mockCline.say.mockResolvedValue(undefined)
 			}
 		})
 
