@@ -1,5 +1,56 @@
 # Zoo Code Changelog
 
+## [3.88.0]
+
+- ✨ **Provider and model support:** Use Grok Build and improved custom-model support. This release also fixes Bedrock model limits and sends the Codex verbosity setting.
+- 🧭 **Task reliability:** This release fixes cancellation handling, tool-turn continuation, and task-message saving.
+- ⚡ **Faster editing and chat:** File writes no longer use artificial delays by default. Chat messages carry less file data, and code actions reach the last active chat.
+
+### Provider and Model Support
+
+- Add Grok Build model metadata for xAI (#407 by @edelauna, PR #1687 by @myk1yt)
+- Honor custom model IDs for OpenAI-compatible providers (#1845 by @p12tic, PR #1846 by @p12tic)
+- Update OpenAI sane-default parameter values for custom models (#1845 by @p12tic, PR #1847 by @p12tic)
+- Add an `openAiStrictToolSchemas` setting for OpenAI-compatible gateways (#1827 by @easonLiangWorldedtech, PR #1828 by @easonLiangWorldedtech)
+- Send the Codex verbosity setting in requests (#1958 by @WebMad, PR #1977 by @tosinxt)
+- Expose the Opus 5.5 output token limit on Bedrock (PR #1903 by @PierrunoYT)
+- Resolve custom ARN capabilities from the underlying Bedrock model (#1968 by @kw-bivanov, PR #1970 by @kw-bivanov)
+
+### Task Reliability
+
+- Recover completed tool-turn continuation (#1883 by @jaszhix, PR #1884 by @jaszhix)
+- Make task-message saving stage-independent and finalize open partial tool asks (#1933 by @easonLiangWorldedtech, PR #1927 by @easonLiangWorldedtech)
+- Check abort before an ask row posts (#1803 by @edelauna, PR #1895 by @edelauna)
+- Add shared abort-signal cancellation-scope helpers (PR #1651 by @easonLiangWorldedtech)
+- Forward the task abort signal in OpenAI and LM Studio handlers (#1450 by @allo-, PR #1686 by @myk1yt)
+- Fix permanent DeepSeek and OpenAI request failures from lone UTF-16 surrogates in task history (#461 by @yoloseeyou, PR #1831 by @app/zoomote)
+- Reject unsupported MIME types in image blocks (PR #1961 by @WebMad)
+
+### Faster Editing and Chat
+
+- Remove artificial write delays by default (part of #1375) (PR #1381 by @easonLiangWorldedtech)
+- Omit `originalContent` from webview messages and fetch it on demand (#1885 by @daewoongoh, PR #1943 by @daewoongoh)
+- Route code actions to the last active chat (#1944 by @WebMad, PR #1946 by @WebMad)
+- Preserve Unicode when clipping file lines (PR #1960 by @WebMad)
+- Keep the streamed read path empty until content is available (PR #1962 by @WebMad)
+
+### Safety, Code Index, and Maintenance
+
+- Add blanket auto-deny for unapproved commands in hands-free mode (#1569 by @DaubnerF, PR #1760 by @DaubnerF)
+- Remove automatic startup embedder validation (PR #1879 by @WebMad)
+- Refresh code-index status routing on workspace-folder changes (#1857 by @WebMad, PR #1957 by @tosinxt)
+- Parse MCP tool names with double underscores in server names (#1731 by @myk1yt, PR #1737 by @myk1yt)
+- Add the pure run-state kernel module (RSK-01) (#1791 by @edelauna, PR #1942 by @edelauna)
+- Remove the dead Task.isPaused field (RSK-12) (#1793 by @edelauna, PR #1894 by @edelauna)
+- Disable extensions when launching the Extension Host for debugging (#1859 by @daewoongoh, PR #1860 by @daewoongoh)
+- Revert the `apply_diff` line-number prompt guidance (PR #1908 by @app/zoomote)
+- Add packages/types to changed-code mutation testing (#1892 by @edelauna, PR #1893 by @app/zoomote)
+- Wait for the resolved context window in the visual chat scenario (PR #1941 by @p12tic)
+- Remove the stray tab before the Tool Use Guidelines heading (#1415 by @daewoongoh, PR #1440 by @easonLiangWorldedtech)
+- Update posthog-js to v1.435.3 (PR #1586 by @app/renovate)
+- Update posthog-node to v5.55.0 (PR #1587 by @app/renovate)
+- Merge the **previous v3.86.0 release preparation** after its publication; this is prior-release housekeeping, not a v3.88.0 feature (PR #1897 by @taltas)
+
 ## [3.86.0]
 
 - ✨ **New model support:** Use GPT-6.1 Sol, get the corrected Claude Opus 5.5 output budget, and select DeepSeek V4.1 Flash on OpenCode Go.

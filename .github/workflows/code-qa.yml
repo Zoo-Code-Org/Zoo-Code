@@ -86,6 +86,8 @@ jobs:
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
             - name: Setup Node.js and pnpm
               uses: ./.github/actions/setup-node-pnpm
+            - name: Check formatting
+              run: pnpm format:check
             - name: Lint
               run: pnpm lint
             - name: Check types

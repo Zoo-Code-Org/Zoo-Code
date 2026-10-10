@@ -668,7 +668,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 		const fullPath = filePath ? path.resolve(task.cwd, filePath) : ""
 		const sharedMessageProps: ClineSayTool = {
 			tool: "readFile",
-			path: getReadablePath(task.cwd, filePath),
+			path: filePath ? getReadablePath(task.cwd, filePath) : "",
 			isOutsideWorkspace: filePath ? isPathOutsideWorkspace(fullPath) : false,
 		}
 		const partialMessage = JSON.stringify({

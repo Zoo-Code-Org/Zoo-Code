@@ -47,11 +47,11 @@ Zoo Code parteix de la base creada per Roo Code i continua ampliant-la amb:
 - **Fluxos de terminal i edició més fiables** — correccions per a la finalització prematura del terminal, les condicions de cursa en l'estat de les tasques, la gestió del context, l'edició de diff i l'ús d'eines específiques de cada proveïdor.
 - **Més control sobre el teu espai de treball** — gestió de regles, restriccions MCP per mode, controls de rutes multiarrel, opcions de raonament dels models i accions per revisar els canvis en completar una tasca.
 
-## Novetats a la v3.86.0
+## Novetats a la v3.88.0
 
-- ✨ **Compatibilitat amb nous models:** Utilitza GPT-6.1 Sol, aprofita el límit de sortida corregit de Claude Opus 5.5 i selecciona DeepSeek V4.1 Flash a OpenCode Go.
-- 🧭 **Aturades i interrupcions de tasques fiables:** Conserva el primer motiu de l'aturada, reinicia l'estat d'interrupció del flux per a cada sol·licitud i evita que les tasques interrompudes tornin a executar subtasques rebutjades.
-- 🛠️ **Eines, prompts i transmissió de la interfície fiables:** Mantén intactes els arguments de les eines transmesos en flux, aplica la política d'eines MCP, evita números de línia inventats i fes més fluides les actualitzacions del xat.
+- ✨ **Suport de proveïdors i models:** Fes servir Grok Build i un suport millorat de models personalitzats. Aquesta versió també corregeix els límits de models de Bedrock i envia la configuració de verbositat de Codex.
+- 🧭 **Fiabilitat de les tasques:** Aquesta versió corregeix la gestió de les cancel·lacions, la continuació dels torns d'eines i el desat dels missatges de tasca.
+- ⚡ **Edició i xat més ràpids:** Les escriptures de fitxers ja no utilitzen retards artificials per defecte. Els missatges del xat porten menys dades de fitxers, i les accions de codi arriben a l'últim xat actiu.
 
 ## Què pot fer Zoo Code per TU?
 

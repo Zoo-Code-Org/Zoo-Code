@@ -46,11 +46,11 @@ Zoo Code dikembangkan di atas fondasi yang dibuat oleh Roo Code dan terus memper
 - **Workflow terminal dan pengeditan yang lebih andal** — perbaikan untuk terminal yang selesai terlalu dini, race condition status task, pengelolaan konteks, pengeditan diff, dan penggunaan tool khusus provider.
 - **Kontrol lebih besar atas workspace kamu** — pengelolaan rules, pembatasan MCP per mode, kontrol path multi-root, opsi reasoning model, dan tindakan untuk meninjau perubahan saat selesai.
 
-## Yang Baru di v3.86.0
+## Yang Baru di v3.88.0
 
-- ✨ **Dukungan model baru:** Gunakan GPT-6.1 Sol, manfaatkan batas output Claude Opus 5.5 yang telah diperbaiki, dan pilih DeepSeek V4.1 Flash di OpenCode Go.
-- 🧭 **Pembatalan dan interupsi task yang andal:** Pertahankan alasan pembatalan pertama, reset status pembatalan stream pada setiap request, dan cegah task yang terinterupsi menjalankan ulang subtask yang ditolak.
-- 🛠️ **Tools, prompts, dan streaming UI yang andal:** Jaga argumen tool yang diterima melalui stream tetap utuh, terapkan kebijakan tool MCP, cegah nomor baris rekaan, dan buat pembaruan chat lebih lancar.
+- ✨ **Dukungan provider dan model:** Gunakan Grok Build dan dukungan model kustom yang lebih baik. Rilis ini juga memperbaiki batas model Bedrock dan mengirim pengaturan verbosity Codex.
+- 🧭 **Keandalan task:** Rilis ini memperbaiki penanganan pembatalan, kelanjutan tool turn, dan penyimpanan pesan task.
+- ⚡ **Pengeditan dan chat lebih cepat:** Penulisan file tidak lagi memakai penundaan buatan secara bawaan. Pesan chat membawa lebih sedikit data file, dan code action mencapai chat yang terakhir aktif.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 
