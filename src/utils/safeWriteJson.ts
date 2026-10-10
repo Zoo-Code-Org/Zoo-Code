@@ -135,37 +135,28 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		await _refuseSymlinkedAncestors(absoluteFilePath)
 	}
 
-	// Resolve the publish target BEFORE acquiring the lock: proper-lockfile keys
-	// the lock by the given path, so a symlink alias and its referent would
-	// otherwise take two distinct locks for one underlying file - a concurrent
-	// merge through both aliases could then read the same JSON and overwrite one
-	// update. Locking the resolved referent coordinates every alias through one
-	// lock. resolvePublishTarget tolerates a not-yet-existing file (it returns
-	// the given path on ENOENT), preserving the previous create-from-absent flow.
-	// With refuseSymlinkTarget the caller-named path IS the publish target: resolving
-	// it through realpath would hand back a referent the caller never chose if a link is
-	// planted between the refusal check and this resolution (the later lstat re-checks
-	// would then pass, because the link was already removed, while the publish still
-	// landed on the referent). Publishing onto the named path is no-follow for the final
-	// component: the commit is a rename, and rename replaces the directory entry rather
-	// than writing through a link, so an inserted link gets replaced and its referent
-	// never receives the payload. Every refuseSymlinkTarget writer keys its lock to the
-	// same named path, so the lock still serializes all writers to that entry.
-	// Two different paths, for two different jobs. The LOCK is keyed to the resolved referent,
-	// because proper-lockfile keys by the given path: an alias and its referent would otherwise
-	// take two locks for one underlying file, and a concurrent merge through both aliases could
-	// read the same JSON and overwrite one update. The PUBLISH stays on the caller-named path:
-	// the commit is a rename, and a rename replaces the directory entry rather than writing
-	// through a link, so a link the caller never chose gets replaced instead of receiving a
-	// credential payload. That is also the pre-existing safeWriteJson behavior - following the
-	// link here would be a new default for every caller.
+	// Two paths, for two different jobs: lock identity and publication destination.
+	// The LOCK is keyed to the resolved referent, because proper-lockfile keys by the path it
+	// is given: an alias and its referent would otherwise take two locks for one underlying
+	// file, and a concurrent merge through both aliases could read the same JSON and overwrite
+	// one update. Resolution happens before the lock for that reason, and resolvePublishTarget
+	// tolerates a not-yet-existing file (it returns the given path on ENOENT), preserving the
+	// create-from-absent flow.
+	// The PUBLISH stays on the caller-named path in both modes: the commit is a rename, and a
+	// rename replaces the directory entry rather than writing through a link, so a link the
+	// caller never chose gets replaced instead of receiving the payload. That is the
+	// pre-existing behaviour - publishing onto the referent instead would be a new default for
+	// every caller. With refuseSymlinkTarget the named path is also the lock path: resolving it
+	// here would hand back a referent the caller never chose if a link is planted between the
+	// refusal check and this resolution, and every such writer keys its lock to the same named
+	// path, so the lock still serializes all writers to that entry.
 	const lockTargetPath = options?.refuseSymlinkTarget
 		? absoluteFilePath
 		: await resolvePublishTarget(absoluteFilePath)
 	const publishTargetPath = absoluteFilePath
 
 	// The refusal above and this resolution are separate syscalls, so a local writer
-	// could replace the final component with a link in between; resolvedTargetPath
+	// could replace the final component with a link in between; the resolved path
 	// would then describe a destination the caller never chose. Re-check the component
 	// the caller named - once here and again under the lock before publishing - so the
 	// refusal stays effective through publication.
@@ -224,7 +215,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		// Step 1: Write data to a new temporary file via JSON streaming.
 		// Stage it beside the *resolved* target (the symlink referent when the path is
-		// a symlink; resolvedTargetPath above): safeWriteText commits by renaming
+		// a symlink; the resolved path above): safeWriteText commits by renaming
 		// onto that referent, and a rename across filesystems would fail with EXDEV.
 		actualTempNewFilePath = path.join(
 			path.dirname(publishTargetPath),
