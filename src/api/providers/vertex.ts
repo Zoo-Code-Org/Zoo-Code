@@ -14,8 +14,46 @@ export class VertexHandler extends GeminiHandler implements SingleCompletionHand
 
 	override getModel() {
 		const modelId = this.options.apiModelId
-		const id = modelId && modelId in vertexModels ? (modelId as VertexModelId) : vertexDefaultModelId
-		let info: ModelInfo = vertexModels[id]
+		let id: string
+		let info: ModelInfo
+
+		if (modelId && Object.hasOwn(vertexModels, modelId)) {
+			id = modelId
+			info = vertexModels[modelId as VertexModelId]
+		} else if (
+			modelId?.endsWith(":thinking") &&
+			Object.hasOwn(vertexModels, modelId.slice(0, -":thinking".length))
+		) {
+			const baseModelId = modelId.slice(0, -":thinking".length) as VertexModelId
+			id = modelId
+			info = vertexModels[baseModelId]
+		} else if (modelId && modelId.toLowerCase().startsWith("gemini-")) {
+			id = modelId
+			// Arms above guarantee the id (and its :thinking base, if any) is NOT a
+			// vertexModels key, so resolve params from the newest Gemini entry.
+			const fallbackModelId: VertexModelId =
+				"gemini-3.7-flash" in vertexModels
+					? "gemini-3.7-flash"
+					: "gemini-3.1-pro-preview" in vertexModels
+						? "gemini-3.1-pro-preview"
+						: vertexDefaultModelId
+			const baseInfo = vertexModels[fallbackModelId] || vertexModels[vertexDefaultModelId]
+			info = {
+				...baseInfo,
+				inputPrice: undefined,
+				outputPrice: undefined,
+				cacheReadsPrice: undefined,
+				cacheWritesPrice: undefined,
+				tiers: undefined,
+			}
+		} else {
+			// An absent (or unrecognized non-Gemini) model id resolves to the
+			// shared vertex default so persisted-config consumers and the UI
+			// keep a single source of truth for the fallback.
+			id = vertexDefaultModelId
+			info = vertexModels[vertexDefaultModelId]
+		}
+
 		const params = getModelParams({
 			format: "gemini",
 			modelId: id,
@@ -34,7 +72,8 @@ export class VertexHandler extends GeminiHandler implements SingleCompletionHand
 		// The `:thinking` suffix indicates that the model is a "Hybrid"
 		// reasoning model and that reasoning is required to be enabled.
 		// The actual model ID honored by Gemini's API does not have this
-		// suffix.
-		return { id: id.endsWith(":thinking") ? id.replace(":thinking", "") : id, info, ...params }
+		// suffix. Strip only a TRAILING suffix (endsWith + slice) so a mid-ID
+		// occurrence such as "gemini-:thinking-flash:thinking" survives intact.
+		return { id: id.endsWith(":thinking") ? id.slice(0, -":thinking".length) : id, info, ...params }
 	}
 }
