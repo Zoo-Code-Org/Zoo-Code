@@ -178,7 +178,13 @@ async function _saveDaclWindows(srcPath: string, dumpPath: string, execFileRunne
 	const runner = execFileRunner ?? execFile
 	try {
 		await new Promise<void>((resolve, reject) => {
-			runner("icacls", [srcPath, "/save", dumpPath, "/T"], { windowsHide: true }, (err) =>
+			// No /T: with a file path, /T makes icacls walk the whole directory tree and save every
+			// file that shares the name (a save of <root>\package.json also walks node_modules),
+			// and the matching /restore then rewrites the DACL of every one of those files rather
+			// than only the target's. An inaccessible subdirectory can also make /save exit
+			// non-zero, leaving the fail-closed check to depend on a dump that may not contain the
+			// target's own entry.
+			runner("icacls", [srcPath, "/save", dumpPath], { windowsHide: true }, (err) =>
 				err ? reject(err) : resolve(),
 			)
 		})
@@ -209,13 +215,16 @@ function _dumpIsUsable(dumpPath: string): boolean {
 }
 
 /** Restore a DACL dump onto *dirPath* on Windows.
- * Returns true when icacls reported success; false otherwise, so the caller can
- * decide whether a lost DACL is tolerable. */
+ * `restored` reports whether icacls succeeded; the caller decides whether a lost DACL is
+ * tolerable. `privilegeUnavailable` separates the one failure that will never fix itself
+ * from a transient one: on a non-elevated host /restore always exits 1300 (measured), so
+ * retrying it on every later write costs three process spawns per write for a DACL that
+ * cannot be restored. A transient failure must not disable preservation for the process. */
 async function _restoreDaclWindows(
 	dirPath: string,
 	dumpPath: string,
 	execFileRunner?: typeof execFile,
-): Promise<boolean> {
+): Promise<{ restored: boolean; privilegeUnavailable: boolean }> {
 	const runner = execFileRunner ?? execFile
 	try {
 		await new Promise<void>((resolve, reject) => {
@@ -223,11 +232,23 @@ async function _restoreDaclWindows(
 				err ? reject(err) : resolve(),
 			)
 		})
-		return true
-	} catch {
-		return false
+		return { restored: true, privilegeUnavailable: false }
+	} catch (error: unknown) {
+		// execFile reports a non-zero exit as an error carrying that exit code.
+		const code =
+			error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : undefined
+		return { restored: false, privilegeUnavailable: code === _ICACLS_PRIVILEGE_EXIT_CODE }
 	}
 }
+
+// Set once a restore has failed with the missing-privilege exit code: from then on the
+// process skips the save/restore pair instead of paying for it on every write and warning
+// about the same host limitation each time. The DACL is then simply not preserved - the
+// outcome these writes already had - and the reason is logged once, when the memo is set.
+let daclRestorePrivilegeUnavailable = false
+
+// icacls exit code for "a required privilege is not held by the client".
+const _ICACLS_PRIVILEGE_EXIT_CODE = 1300
 
 // -- public API ------------------------------------------------------------
 
@@ -350,6 +371,8 @@ export async function safeWriteText(filePath: string, content: string, options?:
 	let daclDumpPath: string | null = null // tracked for cleanup in finally
 	let daclSaved = false // restore step runs only when the save succeeded
 
+	const platform = options?.platform ?? process.platform
+
 	try {
 		// -- Step 1: write content to staging temp file -------------------
 		if (!options?.tempPath) {
@@ -426,8 +449,10 @@ export async function safeWriteText(filePath: string, content: string, options?:
 		}
 
 		// -- Step 2 (win32): save DACL BEFORE backup rename ---------------
-		const platform = options?.platform ?? process.platform
-		if (platform === "win32") {
+		// Once a restore has proven this host cannot restore at all, saving a dump it cannot
+		// apply is three process spawns per write for nothing, so the pair is skipped. The
+		// skip is decided here, not in step 5, because the save is the expensive half.
+		if (platform === "win32" && !daclRestorePrivilegeUnavailable) {
 			try {
 				await fs.access(targetPath) // target exists?
 				// Unique per call: two concurrent writes to the same target must not share one dump,
@@ -557,14 +582,21 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			// -- Step 5 (win32): restore DACL AFTER commit rename ---------
 			if (platform === "win32" && daclSaved && daclDumpPath !== null) {
 				const restoredDir = path.dirname(targetPath)
-				let restored = await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
-				if (!restored) {
-					// One retry: icacls can fail transiently while another process still holds
-					// the just-renamed file open.
-					restored = await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
+				let attempt = await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
+				if (!attempt.restored && !attempt.privilegeUnavailable) {
+					// One retry, and only for a failure that could be transient: icacls can fail
+					// while another process still holds the just-renamed file open. A host without
+					// the privilege fails identically every time, so retrying it is pure cost.
+					attempt = await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
 				}
-				if (!restored) {
+				if (!attempt.restored) {
 					daclRestoreFailed = true
+					if (attempt.privilegeUnavailable && !daclRestorePrivilegeUnavailable) {
+						daclRestorePrivilegeUnavailable = true
+						console.warn(
+							"safeWriteText: this host cannot restore DACLs (icacls /restore reports a missing privilege), so later writes in this process will skip saving and restoring them.",
+						)
+					}
 					// Not fatal for the content: on a non-elevated host /restore cannot succeed at
 					// all, and the new content is already committed. It is fatal for the recovery
 					// state, so the backup is kept below and the situation is surfaced here.
