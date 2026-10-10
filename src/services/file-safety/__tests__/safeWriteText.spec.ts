@@ -859,6 +859,67 @@ describe("safeWriteText", () => {
 			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toThrow(DaclRestoreError)
 		})
 
+		it("win32 DACL: a narrowing granted to a same-named account in another domain is not accepted", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
+				const argv = args as unknown as string[]
+				const callback = cb as unknown as (err: unknown, stdout: string, stderr: string) => void
+				if (argv[1] === "/restore") {
+					callback(new Error("icacls restore error"), "", "")
+				} else if (argv[1] === undefined) {
+					// The read-back names a different domain's account that happens to share the
+					// local account's name. It is not the principal this process granted.
+					callback(null, `${argv[0]} OTHERDOMAIN\\${os.userInfo().username}:(F)`, "")
+				} else {
+					callback(null, "", "")
+				}
+				return fakeChild
+			})
+
+			// Accepting a principal on its account name alone would call this a verified narrowing
+			// and publish under a DACL that grants someone else.
+			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toThrow(DaclRestoreError)
+		})
+
+		it("win32 DACL: a narrowing reported under the machine name is accepted", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			// The machine name is fixed here rather than read from the host, so the assertion says
+			// which authority the report is qualified against.
+			const savedMachine = process.env.COMPUTERNAME
+			const savedDomain = process.env.USERDOMAIN
+			process.env.COMPUTERNAME = "TESTMACHINE"
+			delete process.env.USERDOMAIN
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
+				const argv = args as unknown as string[]
+				const callback = cb as unknown as (err: unknown, stdout: string, stderr: string) => void
+				if (argv[1] === "/restore") {
+					callback(new Error("icacls restore error"), "", "")
+				} else if (argv[1] === undefined) {
+					// What icacls really prints for a local account: the machine-qualified name,
+					// in its own casing. The grant used the bare account name.
+					callback(null, `${argv[0]} testmachine\\${os.userInfo().username}:(F)`, "")
+				} else {
+					callback(null, "", "")
+				}
+				return fakeChild
+			})
+
+			// The qualified report has to satisfy the verification, or every real narrowing on a
+			// local account would be reported as a failure.
+			try {
+				await expect(safeWriteText(targetPath, "data", { platform: "win32" })).resolves.toBeUndefined()
+			} finally {
+				process.env.COMPUTERNAME = savedMachine
+				if (savedDomain !== undefined) {
+					process.env.USERDOMAIN = savedDomain
+				}
+			}
+		})
+
 		it("win32 DACL save args are [targetPath, /save, dumpPath, /T] before backup rename", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)

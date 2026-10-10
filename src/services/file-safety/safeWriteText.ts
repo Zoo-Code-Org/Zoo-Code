@@ -217,14 +217,35 @@ async function _restoreDaclWindows(dirPath: string, dumpPath: string, execFileRu
  * "NT AUTHORITY\\SY:\\Users:(RX)" or "DESKTOP\\bob:(I)(F)". Entries are taken from the lines after
  * the header, so the path - which usually contains the user's own name - can never satisfy the
  * check on its own. An entry is accepted only when it carries no "(I)" inherited component and its
- * principal is exactly the identity the narrowing granted.
+ * principal is exactly the identity the narrowing granted, compared as a whole name.
  */
+/**
+ * The principal names icacls can report for the account the narrowing granted. The grant names a
+ * bare account name and icacls reports it qualified - with the domain for a domain account, with
+ * the machine name for a local one - so each qualified form is compared in full. Windows account
+ * names are case-insensitive, hence the lowercasing. Nothing matches on a prefix or a suffix: a
+ * principal can contain spaces, and "OTHERDOMAIN\bob" ends with "\bob" while granting a different
+ * account than the local "bob".
+ */
+function _expectedAcePrincipals(identity: string): string[] {
+	const expected = [identity.toLowerCase()]
+	// The two environment values name the authority the account is qualified against: COMPUTERNAME
+	// is the machine a local account belongs to, USERDOMAIN the domain of a domain account. Both are
+	// read at call time so a process that changed them is not compared against a stale name.
+	const prefixes = [process.env.COMPUTERNAME ?? "", process.env.USERDOMAIN ?? ""]
+	for (const prefix of prefixes) {
+		if (prefix !== "") {
+			expected.push(`${prefix}\\${identity}`.toLowerCase())
+		}
+	}
+	return expected
+}
 function _aclEntriesAreNarrowedTo(report: string, identity: string): boolean {
 	// Every "principal:(flags)" pair in the report is an entry; the file path that icacls prints
 	// ahead of the first entry is stripped below so it cannot satisfy the check by containing the
 	// user's name.
 	const pattern = /([^:()]+):\(([^()]*)\)/g
-	const wanted = identity.toLowerCase()
+	const expectedPrincipals = _expectedAcePrincipals(identity)
 	let count = 0
 	for (const match of report.matchAll(pattern)) {
 		let principal = match[1].trim()
@@ -239,9 +260,7 @@ function _aclEntriesAreNarrowedTo(report: string, identity: string): boolean {
 		if (flags.includes("(I)")) {
 			return false
 		}
-		const lower = principal.toLowerCase()
-		const isWanted = lower === wanted || lower === `${wanted}` || lower.endsWith(`\\${wanted}`) || lower.endsWith(`/${wanted}`)
-		if (!isWanted) {
+		if (!expectedPrincipals.includes(principal.toLowerCase())) {
 			return false
 		}
 		count++
