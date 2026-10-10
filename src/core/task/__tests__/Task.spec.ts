@@ -4595,7 +4595,12 @@ describe("Cline", () => {
 		})
 
 		it("cancels post-save diagnostics tails when the task is disposed", async () => {
-			const task = new Task({ provider: mockProvider, apiConfiguration: mockApiConfig, task: "test task", startTask: false })
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
 			const cancelSpy = vi
 				.spyOn(task.diffViewProvider, "cancelPostSaveDiagnosticsTails")
 				.mockImplementation(() => {})
@@ -4605,7 +4610,12 @@ describe("Cline", () => {
 		})
 
 		it("continues disposal when cancelling the post-save diagnostics tails throws", async () => {
-			const task = new Task({ provider: mockProvider, apiConfiguration: mockApiConfig, task: "test task", startTask: false })
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
 			vi.spyOn(task.diffViewProvider, "cancelPostSaveDiagnosticsTails").mockImplementation(() => {
 				throw new Error("cancel boom")
 			})
