@@ -854,12 +854,21 @@ describe("writeToFileTool", () => {
 		})
 
 		it("removes the directories a delta adopted before resetting a denied write", async () => {
-			// An empty partial content can stabilize onto a new nested path: handlePartial() creates
-			// and adopts the parent directories without opening a diff view. The rooignore denial then
-			// reaches the reset with isEditing false, and reset() drops the adopted list without
+			// The first delta only records the path; a second delta on the same path is what stabilizes
+			// it, and only then does handlePartial() create the parent directories and hand them to the
+			// diff view. Empty content keeps that delta from opening a diff view, so the rooignore
+			// denial reaches the reset with isEditing false, and reset() drops the adopted list without
 			// touching disk - the directories of a write nobody approved would stay on disk.
-			await executeWriteFileTool({}, { isPartial: true })
+			const adoptedDirs = ["/mock-workspace/test/nested"]
+			mockedCreateDirectoriesForFile.mockResolvedValue(adoptedDirs)
+			await executeWriteFileTool({ content: "" }, { isPartial: true })
+			// The first delta stops at the stabilization gate, so nothing is adopted yet.
+			expect(mockCline.diffViewProvider.adoptCreatedDirectories).not.toHaveBeenCalled()
+			await executeWriteFileTool({ content: "" }, { isPartial: true })
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			// The adopted list the cleanup below removes really holds directories: with only the first
+			// delta it is empty, the provider removes nothing, and the assertion below cannot fail.
+			expect(mockCline.diffViewProvider.adoptCreatedDirectories).toHaveBeenCalledWith(adoptedDirs)
 			expect(mockCline.diffViewProvider.isEditing).toBe(false)
 			mockCline.diffViewProvider.removeAdoptedDirectories.mockClear()
 			mockCline.diffViewProvider.reset.mockClear()
@@ -876,11 +885,17 @@ describe("writeToFileTool", () => {
 		})
 
 		it("removes the directories a delta adopted before the validation-rejection release", async () => {
-			// The same leak on the other exit that skips execute()'s teardown: a partial delta
-			// opens a stream, then validateToolUse() rejects the completed block, so none of the
-			// normal cleanup runs.
-			await executeWriteFileTool({}, { isPartial: true })
+			// The same leak on the other exit that skips execute()'s teardown: the stabilized delta
+			// adopts directories without opening a diff view, then validateToolUse() rejects the
+			// completed block, so none of the normal cleanup runs.
+			const adoptedDirs = ["/mock-workspace/test/nested"]
+			mockedCreateDirectoriesForFile.mockResolvedValue(adoptedDirs)
+			await executeWriteFileTool({ content: "" }, { isPartial: true })
+			await executeWriteFileTool({ content: "" }, { isPartial: true })
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			// Same reason as the test above: the adopted list has to hold something before the
+			// removal can mean anything.
+			expect(mockCline.diffViewProvider.adoptCreatedDirectories).toHaveBeenCalledWith(adoptedDirs)
 			expect(mockCline.diffViewProvider.isEditing).toBe(false)
 			mockCline.diffViewProvider.removeAdoptedDirectories.mockClear()
 			mockCline.diffViewProvider.reset.mockClear()
