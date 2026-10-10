@@ -834,9 +834,7 @@ describe("openClineInNewTab", () => {
 			expect(created.dispose).toHaveBeenCalledTimes(1)
 			expect(panel.dispose).toHaveBeenCalledTimes(1)
 			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
-				expect.stringContaining(
-					"cleanup was incomplete (provider: dispose hung; panel: panel gone)",
-				),
+				expect.stringContaining("cleanup was incomplete (provider: dispose hung; panel: panel gone)"),
 			)
 		} finally {
 			// Restore the saved implementation rather than mockRestore(): this file's beforeEach
