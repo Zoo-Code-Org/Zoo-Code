@@ -14,14 +14,10 @@ for (const theme of visualThemes) {
 		await expect(editor).toBeVisible()
 		await expect(story).toHaveScreenshot(`chat-composer-resting-${theme.name}.png`)
 
-		await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
-		for (
-			let index = 0;
-			index < 10 && !(await editor.evaluate((element) => element === document.activeElement));
-			index++
-		) {
-			await page.keyboard.press("Tab")
-		}
+		// Re-enter the editor by keyboard without depending on the composer's tab-stop count.
+		await editor.focus()
+		await page.keyboard.press("Tab")
+		await page.keyboard.press("Shift+Tab")
 		await expect(editor).toBeFocused()
 		await expect(story).toHaveScreenshot(`chat-composer-focus-${theme.name}.png`)
 		await expectBoundedLayout(page, story, {

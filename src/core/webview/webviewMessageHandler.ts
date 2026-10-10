@@ -30,6 +30,7 @@ import {
 	RouterModelsMessageType,
 	VsCodeLmModelsMessageType,
 	isTelemetryOptedIn,
+	ORGANIZATION_ALLOW_ALL,
 } from "@roo-code/types"
 import { customToolRegistry } from "@roo-code/core"
 import { CloudService } from "@roo-code/cloud"
@@ -43,6 +44,8 @@ import { ClineProvider } from "./ClineProvider"
 import { findOriginalContent } from "./stripOriginalContent"
 import { handleCheckpointRestoreOperation } from "./checkpointRestoreHandler"
 import { generateErrorDiagnostics } from "./diagnosticsHandler"
+import { ProfileValidator } from "../../shared/ProfileValidator"
+import { OrganizationAllowListViolationError } from "../../utils/errors"
 import {
 	handleRequestSkills,
 	handleCreateSkill,
@@ -1407,6 +1410,7 @@ export const webviewMessageHandler = async (
 					type: OllamaModelsMessageType.ollamaModels,
 					ollamaModels: {},
 					error: errorMsg,
+					requestId: message.requestId,
 				})
 				break
 			}
@@ -1416,7 +1420,11 @@ export const webviewMessageHandler = async (
 
 				// Always post a response so the webview refresh status can
 				// transition out of "loading" — even when no models are found.
-				await provider.postMessageToWebview({ type: OllamaModelsMessageType.ollamaModels, ollamaModels })
+				await provider.postMessageToWebview({
+					type: OllamaModelsMessageType.ollamaModels,
+					ollamaModels,
+					requestId: message.requestId,
+				})
 			} catch (error) {
 				const errorMsg = error instanceof Error ? error.message : String(error)
 				provider.log(`[requestOllamaModels] Failed to read models for ${logBaseUrl}: ${errorMsg}`)
@@ -1424,6 +1432,7 @@ export const webviewMessageHandler = async (
 					type: OllamaModelsMessageType.ollamaModels,
 					ollamaModels: {},
 					error: errorMsg,
+					requestId: message.requestId,
 				})
 			}
 			break
@@ -1451,6 +1460,7 @@ export const webviewMessageHandler = async (
 					await provider.postMessageToWebview({
 						type: LmStudioModelsMessageType.lmStudioModels,
 						lmStudioModels: lmStudioModels,
+						requestId: message.requestId,
 					})
 				}
 			} catch (error) {
@@ -1476,14 +1486,22 @@ export const webviewMessageHandler = async (
 					message?.values?.openAiHeaders,
 				)
 
-				await provider.postMessageToWebview({ type: OpenAiModelsMessageType.openAiModels, openAiModels })
+				await provider.postMessageToWebview({
+					type: OpenAiModelsMessageType.openAiModels,
+					openAiModels,
+					requestId: message.requestId,
+				})
 			}
 
 			break
 		case VsCodeLmModelsMessageType.requestVsCodeLmModels:
 			const vsCodeLmModels = await getVsCodeLmModels()
 			// TODO: Cache like we do for OpenRouter, etc?
-			await provider.postMessageToWebview({ type: VsCodeLmModelsMessageType.vsCodeLmModels, vsCodeLmModels })
+			await provider.postMessageToWebview({
+				type: VsCodeLmModelsMessageType.vsCodeLmModels,
+				vsCodeLmModels,
+				requestId: message.requestId,
+			})
 			break
 		case "openImage":
 			await openImage(message.text!, { values: message.values })
@@ -2291,6 +2309,20 @@ export const webviewMessageHandler = async (
 		case "saveApiConfiguration":
 			if (message.text && message.apiConfiguration) {
 				try {
+					// Enforce the organization allowlist at the persistence
+					// boundary, not only in the webview, so a crafted or stale
+					// profile update cannot bypass the policy.
+					const { organizationAllowList } = await provider.getState()
+					if (
+						!ProfileValidator.isProfileAllowed(
+							message.apiConfiguration,
+							organizationAllowList ?? ORGANIZATION_ALLOW_ALL,
+						)
+					) {
+						throw new OrganizationAllowListViolationError(
+							t("common:errors.violated_organization_allowlist"),
+						)
+					}
 					await provider.providerSettingsManager.saveConfig(message.text, message.apiConfiguration)
 					const listApiConfig = await provider.providerSettingsManager.listConfig()
 					await updateGlobalState("listApiConfigMeta", listApiConfig)
@@ -2298,13 +2330,42 @@ export const webviewMessageHandler = async (
 					provider.log(
 						`Error save api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 					)
-					vscode.window.showErrorMessage(t("common:errors.save_api_config"))
+					vscode.window.showErrorMessage(
+						error instanceof OrganizationAllowListViolationError
+							? error.message
+							: t("common:errors.save_api_config"),
+					)
 				}
 			}
 			break
 		case "upsertApiConfiguration":
 			if (message.text && message.apiConfiguration) {
-				await provider.upsertProviderProfile(message.text, message.apiConfiguration)
+				try {
+					// Enforce the organization allowlist at the persistence
+					// boundary, not only in the webview, so a crafted or stale
+					// profile update cannot bypass the policy.
+					const { organizationAllowList } = await provider.getState()
+					if (
+						!ProfileValidator.isProfileAllowed(
+							message.apiConfiguration,
+							organizationAllowList ?? ORGANIZATION_ALLOW_ALL,
+						)
+					) {
+						throw new OrganizationAllowListViolationError(
+							t("common:errors.violated_organization_allowlist"),
+						)
+					}
+					await provider.upsertProviderProfile(message.text, message.apiConfiguration)
+				} catch (error) {
+					provider.log(
+						`Error upsert api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
+					)
+					vscode.window.showErrorMessage(
+						error instanceof OrganizationAllowListViolationError
+							? error.message
+							: t("common:errors.save_api_config"),
+					)
+				}
 			}
 			break
 		case "renameApiConfiguration":

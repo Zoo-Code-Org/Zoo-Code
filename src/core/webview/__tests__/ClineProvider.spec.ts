@@ -2632,6 +2632,7 @@ describe("ClineProvider", () => {
 				]),
 			saveConfig: vi.fn().mockResolvedValue("test-id"),
 			setModeConfig: vi.fn(),
+			getModeConfigId: vi.fn().mockResolvedValue(undefined),
 		} as any
 
 		// Update API configuration
@@ -3401,6 +3402,7 @@ describe("ClineProvider", () => {
 			;(provider as any).providerSettingsManager = {
 				setModeConfig: vi.fn(),
 				saveConfig: vi.fn().mockResolvedValue(undefined),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
 					.mockResolvedValue([
@@ -3446,6 +3448,7 @@ describe("ClineProvider", () => {
 			;(provider as any).providerSettingsManager = {
 				setModeConfig: vi.fn(),
 				saveConfig: vi.fn().mockResolvedValue(undefined),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
 					.mockResolvedValue([
@@ -3475,11 +3478,12 @@ describe("ClineProvider", () => {
 			)
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.create_api_config")
 
-			// Verify state was still updated
+			// The partial failure is rolled back: the persisted profile list is
+			// re-read and the in-memory state is restored rather than left pointing
+			// at a half-applied profile.
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("listApiConfigMeta", [
 				{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 			])
-			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "test-config")
 		})
 
 		test("handles successful saveApiConfiguration", async () => {

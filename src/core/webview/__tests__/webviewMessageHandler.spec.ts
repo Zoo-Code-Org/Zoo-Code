@@ -169,6 +169,57 @@ describe("webviewMessageHandler - theme fixture probes", () => {
 	})
 })
 
+describe("webviewMessageHandler - organization allowlist enforcement", () => {
+	// Provider narrowed to a single model; anything else is disallowed.
+	const restrictiveAllowList = {
+		allowAll: false,
+		providers: {
+			[providerIdentifiers.anthropic]: { allowAll: false, models: ["claude-sonnet-4-20250514"] },
+		},
+	}
+
+	const setUpsertSpy = (spy: ReturnType<typeof vi.fn>) => {
+		;(mockClineProvider as unknown as { upsertProviderProfile: ReturnType<typeof vi.fn> }).upsertProviderProfile =
+			spy
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockClineProvider.getState = vi.fn().mockResolvedValue({ organizationAllowList: restrictiveAllowList })
+	})
+
+	it("rejects a disallowed model on upsertApiConfiguration without persisting", async () => {
+		const upsertProviderProfile = vi.fn().mockResolvedValue("id")
+		setUpsertSpy(upsertProviderProfile)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "upsertApiConfiguration",
+			text: "profile",
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiModelId: "claude-opus-4-20250514" },
+		})
+
+		expect(upsertProviderProfile).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+	})
+
+	it("allows an allow-listed model on upsertApiConfiguration", async () => {
+		const upsertProviderProfile = vi.fn().mockResolvedValue("id")
+		setUpsertSpy(upsertProviderProfile)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "upsertApiConfiguration",
+			text: "profile",
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiModelId: "claude-sonnet-4-20250514" },
+		})
+
+		expect(upsertProviderProfile).toHaveBeenCalledWith(
+			"profile",
+			expect.objectContaining({ apiModelId: "claude-sonnet-4-20250514" }),
+		)
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+	})
+})
+
 import { t } from "../../../i18n"
 
 vi.mock("vscode", () => {

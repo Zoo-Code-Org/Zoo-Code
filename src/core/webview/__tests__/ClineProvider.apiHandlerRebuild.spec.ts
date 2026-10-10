@@ -426,6 +426,42 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			// Should not call buildApiHandler when there's no task
 			expect(buildApiHandlerMock).not.toHaveBeenCalled()
 		})
+
+		test("rolls back in-memory provider state when a failure occurs after mutation", async () => {
+			// Seed a known previously-active state.
+			await provider["contextProxy"].setProviderSettings({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			})
+			await provider["updateGlobalState"]("currentApiConfigName", "previous-config")
+
+			// Fail the first state broadcast — which happens only after the
+			// in-memory state has already been mutated — to simulate a partial
+			// failure. The rollback's own broadcast should still succeed.
+			const postSpy = vi
+				.spyOn(provider, "postStateToWebview")
+				.mockRejectedValueOnce(new Error("broadcast failed"))
+
+			const result = await provider.upsertProviderProfile(
+				"new-config",
+				{
+					apiProvider: providerIdentifiers.anthropic,
+					apiModelId: "claude-3-5-sonnet-20241022",
+				},
+				true,
+			)
+
+			// The half-applied profile must not survive: the previous settings and
+			// profile name are restored so the store and in-memory context stay in sync.
+			expect(result).toBeUndefined()
+			expect(provider["contextProxy"].getProviderSettings()).toMatchObject({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+			})
+			expect(provider["contextProxy"].getValue("currentApiConfigName")).toBe("previous-config")
+
+			postSpy.mockRestore()
+		})
 	})
 
 	describe("activateProviderProfile", () => {

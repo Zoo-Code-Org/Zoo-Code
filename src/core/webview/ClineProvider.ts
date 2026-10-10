@@ -1877,6 +1877,17 @@ export class ClineProvider
 		providerSettings: ProviderSettings,
 		activate: boolean = true,
 	): Promise<string | undefined> {
+		// Snapshot the active profile state so that a partial failure can be
+		// rolled back instead of leaving the persisted store and the in-memory
+		// context (global state + provider settings) out of sync.
+		const previousProviderSettings = this.contextProxy.getProviderSettings()
+		const previousCurrentApiConfigName = this.contextProxy.getValue("currentApiConfigName")
+		// Snapshot the active mode's profile binding so it too can be restored if a
+		// later write in the activation sequence fails.
+		let previousModeConfigId: string | undefined
+		let mutatedMode: Mode | undefined
+		let didMutateState = false
+
 		try {
 			return await this.enqueueProviderProfileMutation(async (signal) => {
 				// TODO: Do we need to be calling `activateProfile`? It's not
@@ -1890,6 +1901,8 @@ export class ClineProvider
 
 				if (activate) {
 					const { mode } = await this.getState()
+					previousModeConfigId = await this.providerSettingsManager.getModeConfigId(mode)
+					mutatedMode = mode
 
 					// These promises do the following:
 					// 1. Adds or updates the list of provider profiles.
@@ -1901,8 +1914,10 @@ export class ClineProvider
 					// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
 					// We should probably switch to that and verify that it works.
 					// I left the original implementation in just to be safe.
+					const listApiConfig = await this.providerSettingsManager.listConfig()
+					didMutateState = true
 					await Promise.all([
-						this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+						this.updateGlobalState("listApiConfigMeta", listApiConfig),
 						this.updateGlobalState("currentApiConfigName", name),
 						this.providerSettingsManager.setModeConfig(mode, id),
 						this.contextProxy.setProviderSettings(providerSettings),
@@ -1915,13 +1930,38 @@ export class ClineProvider
 					// Keep the current task's sticky provider profile in sync with the newly-activated profile.
 					await this.persistStickyProviderProfileToCurrentTask(name)
 				} else {
-					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
+					const listApiConfig = await this.providerSettingsManager.listConfig()
+					didMutateState = true
+					await this.updateGlobalState("listApiConfigMeta", listApiConfig)
 				}
 
 				await this.postStateToWebview()
 				return id
 			})
 		} catch (error) {
+			// Restore the previously-persisted profile state so a failure does not
+			// leave the context pointing at a half-written profile. The provider
+			// settings store (`saveConfig`) is itself atomic, so only the context
+			// copy needs restoring.
+			if (didMutateState) {
+				try {
+					this.updateTaskApiHandlerIfNeeded(previousProviderSettings, { forceRebuild: true })
+					await this.contextProxy.setProviderSettings(previousProviderSettings)
+					await this.updateGlobalState("currentApiConfigName", previousCurrentApiConfigName)
+					if (mutatedMode && previousModeConfigId) {
+						await this.providerSettingsManager.setModeConfig(mutatedMode, previousModeConfigId)
+					}
+					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
+					await this.postStateToWebview()
+				} catch (rollbackError) {
+					this.log(
+						`Failed to roll back provider profile state: ${
+							rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+						}`,
+					)
+				}
+			}
+
 			this.log(
 				`Error create new api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 			)
