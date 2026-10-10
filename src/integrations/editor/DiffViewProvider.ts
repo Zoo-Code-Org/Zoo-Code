@@ -960,6 +960,13 @@ export class DiffViewProvider {
 	 * Replace an open buffer's content with what it held before streaming started. Runs before
 	 * the rollback closes the tab, so an unapproved buffer is never handed to close() dirty and
 	 * never survives a close that the editor vetoes.
+	 *
+	 * A refused WorkspaceEdit is a failed restore, not a no-op: the buffer still holds content the
+	 * user never approved. Throwing is this method's own contract rather than a caller policy -
+	 * the save that follows cannot run, so nothing saveable survives, and the caller reports the
+	 * rollback as failed instead of telling the user the write was rolled back with unapproved
+	 * content still one save from disk. Returning quietly would be worse than returning false:
+	 * it would swallow the failure.
 	 */
 	private async restorePreStreamBuffer(absolutePath: string): Promise<void> {
 		const document = vscode.workspace.textDocuments.find(
@@ -974,7 +981,12 @@ export class DiffViewProvider {
 			document.positionAt(document.getText().length),
 		)
 		edit.replace(document.uri, range, this.originalContent ?? "")
-		await vscode.workspace.applyEdit(edit)
+		const restored = await vscode.workspace.applyEdit(edit)
+		if (!restored) {
+			throw new Error(
+				`Rollback could not restore the streamed buffer for ${absolutePath}; the editor refused the restore, so the unapproved content is still in the buffer and unsaved.`,
+			)
+		}
 	}
 
 	/**
@@ -982,6 +994,10 @@ export class DiffViewProvider {
 	 * force-discard parameter, so a dirty tab would prompt or be refused; saving the restored
 	 * content is what makes the close unconditional. For a new file the placeholder is unlinked
 	 * a moment later, so the saved content is transient by design.
+	 *
+	 * Only ever reached after a successful restore: a refused restore throws above, because a
+	 * buffer whose restore failed still holds the unapproved content this rollback discards and
+	 * must never be saved.
 	 */
 	private async saveBufferClean(absolutePath: string): Promise<void> {
 		const document = vscode.workspace.textDocuments.find(

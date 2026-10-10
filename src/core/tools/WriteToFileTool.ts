@@ -157,6 +157,14 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		return undefined
 	}
 
+	/**
+	 * Whether this task can still act on a partial delta. Mirrors the guard Task uses to bail
+	 * out of its own loops, so a delta never does work for a task that has already stopped.
+	 */
+	private isStreamCancelled(task: Task): boolean {
+		return task.abort === true || task.abandoned === true
+	}
+
 	private async finalizePartialToolAskAfterFailure(task: Task, text?: string): Promise<void> {
 		await task.finalizePartialToolAsk(text).catch((finalizeError) => {
 			console.error("Error finalizing write_to_file partial tool ask:", finalizeError)
@@ -454,6 +462,17 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			return
 		}
 
+		// A task that was aborted or abandoned can no longer reach execute()'s teardown, so this
+		// delta must not register per-task state at all: the abort listener would outlive a stream
+		// that never produces another delta, and the entry's failure mark would suppress the diff
+		// preview of a later write in a task that already moved on. Same two flags Task itself
+		// bails on, and the same cancellation-aware shape #1929 established for the streamFailed
+		// guard: check before acquiring state, then re-check after every await before the next
+		// observable effect.
+		if (this.isStreamCancelled(task)) {
+			return
+		}
+
 		// Get (or create) this task's state; registers the TaskAborted teardown listener
 		// once, so abandoned streams are torn down even if execute() never runs.
 		const partialStreamState = this.getTaskPartialStreamState(task)
@@ -472,6 +491,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				// execute() ever runs; the catch below owns the teardown for that window.
 			const provider = task.providerRef.deref()
 			const state = await provider?.getState()
+			// First await since the state was registered: a cancellation during getState() would
+			// otherwise continue into the partial ask below.
+			if (this.isStreamCancelled(task)) {
+				this.resetTaskPartialState(task)
+				return
+			}
 			const isPreventFocusDisruptionEnabled = experiments.isEnabled(
 				state?.experiments ?? {},
 				EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION,
@@ -496,6 +521,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				fileExists = await fileExistsAtPath(absolutePath)
 				task.diffViewProvider.editType = fileExists ? "modify" : "create"
 			}
+			// The filesystem probe is another await boundary, and the ask below is the first thing
+			// the user can see: a task that stopped must not produce it.
+			if (this.isStreamCancelled(task)) {
+				this.resetTaskPartialState(task)
+				return
+			}
 
 			const isWriteProtected = task.rooProtectedController?.isWriteProtected(relPath!) || false
 			const isOutsideWorkspace = isPathOutsideWorkspace(absolutePath)
@@ -519,6 +550,14 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			// error once, and the diff-view failure path above keeps its own single-report handling.
 			this.resetTaskPartialState(task)
 			throw error
+		}
+
+		// Last await before the diff view: the ask above can be answered (or the task aborted)
+		// while it is in flight, and opening a preview for a task that already stopped would
+		// leave a diff view nobody owns.
+		if (this.isStreamCancelled(task)) {
+			this.resetTaskPartialState(task)
+			return
 		}
 
 		if (newContent) {
