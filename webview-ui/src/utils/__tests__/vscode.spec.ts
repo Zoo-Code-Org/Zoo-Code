@@ -362,4 +362,53 @@ describe("VSCodeAPIWrapper", () => {
 		backing.vscodeState = JSON.stringify({ mode: "code", viewStateId: "recovered-view", external: true })
 		expect(wrapper.getState()).toEqual({ mode: "code", viewStateId: "recovered-view", external: true })
 	})
+
+	it("returns the in-memory fallback instead of throwing when the persisted JSON is malformed", () => {
+		// Corrupt storage: every read yields JSON that cannot be parsed while writes keep
+		// succeeding, so storageWriteFailed stays false and the JSON.parse failure path runs.
+		const storage: MockStorage = {
+			getItem: vi.fn(() => '{"viewStateId":'),
+			setItem: vi.fn(),
+			removeItem: vi.fn(),
+			clear: vi.fn(),
+		}
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+		wrapper.setState({ viewStateId: "memory-view" })
+
+		// The corrupt record must not surface as an exception to webview callers.
+		expect(() => wrapper.getState()).not.toThrow()
+		expect(wrapper.getState()).toEqual({ viewStateId: "memory-view" })
+		expect(storage.getItem).toHaveBeenCalledWith("vscodeState")
+	})
+
+	it("mints and persists a stable replacement viewStateId when the persisted JSON is malformed", () => {
+		const randomUUID = vi.fn().mockReturnValue("replacement-view")
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: { randomUUID },
+		})
+		// Reads always return the corrupt record; writes succeed, so the id can only stay
+		// stable through the in-memory fallback rather than through persisted JSON.
+		const storage: MockStorage = {
+			getItem: vi.fn(() => "{not json at all"),
+			setItem: vi.fn(),
+			removeItem: vi.fn(),
+			clear: vi.fn(),
+		}
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		expect(wrapper.getViewStateId()).toBe("replacement-view")
+		expect(storage.setItem).toHaveBeenCalledWith("vscodeState", JSON.stringify({ viewStateId: "replacement-view" }))
+		// A second read of the same corrupt record must reuse the minted id.
+		expect(wrapper.getViewStateId()).toBe("replacement-view")
+		expect(randomUUID).toHaveBeenCalledTimes(1)
+	})
 })

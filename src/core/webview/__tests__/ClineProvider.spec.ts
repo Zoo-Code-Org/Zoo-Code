@@ -2795,6 +2795,8 @@ const provider = new ClineProvider(
 					id: "old-id",
 					apiProvider: providerIdentifiers.anthropic,
 				}),
+				// The activation snapshot also reads the previous per-mode mapping.
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			await provider.contextProxy.setValue(
@@ -2830,6 +2832,10 @@ const provider = new ClineProvider(
 				saveConfig: vi.fn().mockResolvedValue("fresh-id"),
 				listConfig: vi.fn().mockResolvedValue([profile]),
 				setModeConfig: vi.fn(),
+				// The activation snapshot reads the prior record (none - this call creates the
+				// profile) and the previous per-mode mapping.
+				getProfile: vi.fn().mockRejectedValue(new ProviderSettingsNotFoundError("fresh-profile")),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			await provider.setValue("currentApiConfigName", "stale-profile")
@@ -3263,6 +3269,9 @@ const provider = new ClineProvider(
 				saveConfig: vi.fn().mockResolvedValue("shared-id"),
 				listConfig: vi.fn().mockResolvedValue([sharedProfile]),
 				setModeConfig: vi.fn(),
+				// The upsert snapshot reads the prior record and the previous per-mode mapping.
+				getProfile: vi.fn().mockResolvedValue(sharedProfile),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			}
 			vi.spyOn(updater, "postStateToWebview").mockResolvedValue(undefined)
 			await updater.contextProxy.setValue("listApiConfigMeta", [sharedProfile])
@@ -5418,6 +5427,8 @@ const provider = new ClineProvider(
 			activateProfile: vi.fn().mockResolvedValue(profile),
 			listConfig: vi.fn().mockResolvedValue([profile]),
 			setModeConfig: vi.fn(),
+			// The activation snapshot reads the prior record and the previous per-mode mapping.
+			getProfile: vi.fn().mockResolvedValue(profile),
 			getModeConfigId: vi.fn().mockResolvedValue(undefined),
 		} as any
 
@@ -5445,6 +5456,8 @@ const provider = new ClineProvider(
 			activateProfile: vi.fn().mockResolvedValue(profile),
 			listConfig: vi.fn().mockResolvedValue([profile]),
 			setModeConfig: vi.fn(),
+			// The activation snapshot reads the prior record and the previous per-mode mapping.
+			getProfile: vi.fn().mockResolvedValue(profile),
 			getModeConfigId: vi.fn().mockResolvedValue(undefined),
 		} as any
 
@@ -5625,6 +5638,13 @@ const provider = new ClineProvider(
 				]),
 			saveConfig: vi.fn().mockResolvedValue("test-id"),
 			setModeConfig: vi.fn(),
+			// The upsert snapshot reads the prior record and the previous per-mode mapping.
+			getProfile: vi.fn().mockResolvedValue({
+				name: "test-config",
+				id: "test-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}),
+			getModeConfigId: vi.fn().mockResolvedValue(undefined),
 		} as any
 
 		// Update API configuration
@@ -6403,6 +6423,13 @@ const provider = new ClineProvider(
 					.mockResolvedValue([
 						{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 					]),
+				// The upsert snapshot reads the prior record and the previous per-mode mapping.
+				getProfile: vi.fn().mockResolvedValue({
+					name: "test-config",
+					id: "test-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			} as any
 
 			const testApiConfig = {
@@ -6448,6 +6475,13 @@ const provider = new ClineProvider(
 					.mockResolvedValue([
 						{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 					]),
+				// The upsert snapshot reads the prior record and the previous per-mode mapping.
+				getProfile: vi.fn().mockResolvedValue({
+					name: "test-config",
+					id: "test-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			} as any
 
 			// Setup Task instance with auto-mock from the top of the file
@@ -6491,6 +6525,13 @@ const provider = new ClineProvider(
 					.mockResolvedValue([
 						{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 					]),
+				// The upsert snapshot reads the prior record and the previous per-mode mapping.
+				getProfile: vi.fn().mockResolvedValue({
+					name: "test-config",
+					id: "test-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			} as any
 
 			const testApiConfig = {

@@ -917,7 +917,10 @@ describe("openClineInNewTab", () => {
 	})
 
 	it("falls back to an undefined MdmService when MdmService.getInstance throws", async () => {
-		;(MdmService.getInstance as Mock).mockImplementation(() => {
+		// Scoped to the single lookup openClineInNewTab performs: this file's beforeEach only
+		// clears call history, so a plain mockImplementation would keep throwing for every
+		// later test in this file.
+		;(MdmService.getInstance as Mock).mockImplementationOnce(() => {
 			throw new Error("MDM service not initialized")
 		})
 
@@ -947,6 +950,12 @@ describe("openClineInNewTab", () => {
 		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
 			"[openClineInNewTab] MDM service unavailable, continuing without it: Error: MDM service not initialized",
 		)
+	})
+	it("does not leak the MdmService failure into later tab creations", () => {
+		// This file's beforeEach only clears call history, so an implementation installed with
+		// mockImplementation would still throw for every later test in this file. The throwing
+		// double above must be scoped to the single lookup that test exercises.
+		expect(() => MdmService.getInstance()).not.toThrow()
 	})
 
 	it("opens a new group to the right and targets ViewColumn.Two when no editors are visible", async () => {
