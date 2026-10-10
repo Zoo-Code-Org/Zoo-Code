@@ -630,6 +630,28 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"Grok 4.6 is xAI's multimodal reasoning and agent model with a 500k context window. Available via the Opencode Go plan.",
 	},
+	"grok-4.7": {
+		// xAI publishes no separate output cap for Grok 4.7, so, as for
+		// grok-4.6, the max output equals the 500k context window.
+		maxTokens: 500_000,
+		contextWindow: 500_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh"],
+		reasoningEffort: "high",
+		inputPrice: 2.0,
+		outputPrice: 6.0,
+		cacheReadsPrice: 0.5,
+		longContextPricing: {
+			thresholdTokens: 200_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 2,
+			cacheReadsPriceMultiplier: 2,
+		},
+		description:
+			"Grok 4.7 is xAI's multimodal reasoning model with function calling and a 500k context window. Available via the Opencode Go plan.",
+	},
 	"muse-spark-1.3-contributor": {
 		maxTokens: 131_072,
 		contextWindow: 1_048_576,
@@ -710,6 +732,7 @@ export const OPENCODE_GO_RESPONSES_FORMAT_MODELS = new Set<string>([
 	"gpt-5.6-luna",
 	// --- xAI ---
 	"grok-4.6",
+	"grok-4.7",
 	// --- Meta ---
 	"muse-spark-1.3-contributor",
 	"muse-spark-1.2-contributor",

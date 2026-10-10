@@ -124,6 +124,24 @@ describe("Opencode Go Fetchers", () => {
 			expect(await getOpencodeGoModels("k")).toEqual({})
 		})
 
+		it("resolves grok-4.7 from an ID-only catalog entry to its native configuration", async () => {
+			mockedAxios.get.mockResolvedValue({ data: { data: [{ id: "grok-4.7" }] } })
+
+			const models = await getOpencodeGoModels("k")
+
+			expect(models["grok-4.7"]).toMatchObject({
+				contextWindow: 500_000,
+				maxTokens: 500_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsReasoningEffort: ["low", "medium", "high", "xhigh"],
+				reasoningEffort: "high",
+				inputPrice: 2.0,
+				outputPrice: 6.0,
+				cacheReadsPrice: 0.5,
+			})
+		})
+
 		it("falls back to an empty array when response.data.data is not an array", async () => {
 			mockedAxios.get.mockResolvedValue({ data: { data: null } })
 			expect(await getOpencodeGoModels("k")).toEqual({})
@@ -215,6 +233,7 @@ describe("Opencode Go Fetchers", () => {
 				"gpt-5.6-luna",
 				"grok-4.5",
 				"grok-4.6",
+				"grok-4.7",
 				"muse-spark-1.3-contributor",
 				"muse-spark-1.2-contributor",
 				"omen-alpha",

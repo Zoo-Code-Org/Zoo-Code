@@ -42,6 +42,8 @@ vitest.mock("../fetchers/modelCache", () => ({
 			"qwen3.7-max": { ...opencodeGoModels["qwen3.7-max"] },
 			// Responses-format model (Zoo-Code-Org/Zoo-Code#1431).
 			"gpt-5.6-luna": { ...opencodeGoModels["gpt-5.6-luna"] },
+			// Responses-format xAI model with a long-context price tier.
+			"grok-4.7": { ...opencodeGoModels["grok-4.7"] },
 		})
 	}),
 	refreshModels: vitest.fn().mockImplementation(function () {
@@ -49,6 +51,7 @@ vitest.mock("../fetchers/modelCache", () => ({
 			"glm-5.1": { ...opencodeGoModels["glm-5.1"] },
 			"qwen3.7-max": { ...opencodeGoModels["qwen3.7-max"] },
 			"gpt-5.6-luna": { ...opencodeGoModels["gpt-5.6-luna"] },
+			"grok-4.7": { ...opencodeGoModels["grok-4.7"] },
 		})
 	}),
 	getModelsFromCache: vitest.fn().mockReturnValue(undefined),
@@ -1366,11 +1369,122 @@ describe("OpencodeGoHandler", () => {
 			expect(isOpencodeGoResponsesFormatModel("gpt-5.6-luna")).toBe(true)
 			expect(isOpencodeGoResponsesFormatModel("grok-4.5")).toBe(false)
 			expect(isOpencodeGoResponsesFormatModel("grok-4.6")).toBe(true)
+			expect(isOpencodeGoResponsesFormatModel("grok-4.7")).toBe(true)
 			expect(isOpencodeGoResponsesFormatModel("muse-spark-1.3-contributor")).toBe(true)
 			expect(isOpencodeGoResponsesFormatModel("muse-spark-1.2-contributor")).toBe(true)
 			expect(isOpencodeGoResponsesFormatModel("glm-5.3")).toBe(false)
 			expect(isOpencodeGoResponsesFormatModel("qwen3.7-max")).toBe(false)
 			expect(isOpencodeGoResponsesFormatModel("some-unknown-model")).toBe(false)
+		})
+	})
+
+	describe("Responses-format xAI model (grok-4.7)", () => {
+		// OpenCode Go serves grok-4.7 only on /v1/responses.
+		const grokOptions: ApiHandlerOptions = {
+			opencodeGoApiKey: "test-key",
+			opencodeGoModelId: "grok-4.7",
+		}
+		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+		const completedWith = (usage: Record<string, unknown>) =>
+			asyncStreamFrom([{ type: "response.completed", response: { usage } }])
+
+		beforeEach(() => {
+			mockResponsesCreate.mockImplementation(async () => completedWith({ input_tokens: 10, output_tokens: 5 }))
+		})
+
+		it("streams through /v1/responses with Grok's default reasoning effort and no temperature", async () => {
+			const handler = new OpencodeGoHandler(grokOptions)
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const callArgs = mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs).toMatchObject({ model: "grok-4.7", stream: true, reasoning: { effort: "high" } })
+			// 500K context window; the shared max-output rule clamps to 20% of it.
+			expect(callArgs.max_output_tokens).toBe(100_000)
+			expect(callArgs.temperature).toBeUndefined()
+			expect(mockCreate).not.toHaveBeenCalled()
+			expect(mockAnthropicCreate).not.toHaveBeenCalled()
+		})
+
+		it("streams tool calls and cached usage, priced at the Go rates", async () => {
+			mockResponsesCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "response.function_call_arguments.delta",
+						call_id: "call_1",
+						name: "read_file",
+						delta: '{"path":',
+						index: 0,
+					},
+					{
+						type: "response.output_item.done",
+						item: { type: "function_call", call_id: "call_2", name: "list_files", arguments: "{}" },
+					},
+					{
+						type: "response.completed",
+						response: {
+							usage: {
+								input_tokens: 100,
+								output_tokens: 50,
+								input_tokens_details: { cached_tokens: 40 },
+							},
+						},
+					},
+				]),
+			)
+			const handler = new OpencodeGoHandler(grokOptions)
+
+			const chunks = await collectStream(handler.createMessage("sys", messages))
+
+			expect(chunks.filter((c) => c.type === "tool_call_partial")[0]).toMatchObject({
+				id: "call_1",
+				name: "read_file",
+				arguments: '{"path":',
+			})
+			expect(chunks.filter((c) => c.type === "tool_call")[0]).toMatchObject({
+				id: "call_2",
+				name: "list_files",
+				arguments: "{}",
+			})
+			const usage = chunks.find((c) => c.type === "usage")
+			expect(usage).toMatchObject({ inputTokens: 100, outputTokens: 50, cacheReadTokens: 40 })
+			// Per 1M tokens: 60 × $2 input + 40 × $0.50 cache read + 50 × $6 output.
+			expect(usage?.type === "usage" && usage.totalCost).toBeCloseTo(4.4e-4, 12)
+		})
+
+		it("completePrompt uses /v1/responses with Grok's default reasoning effort", async () => {
+			mockResponsesCreate.mockResolvedValue({ output_text: "ok" })
+			const handler = new OpencodeGoHandler(grokOptions)
+
+			expect(await handler.completePrompt("ping")).toBe("ok")
+
+			const callArgs = mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs).toMatchObject({ model: "grok-4.7", reasoning: { effort: "high" } })
+			expect(callArgs.temperature).toBeUndefined()
+			expect(mockCreate).not.toHaveBeenCalled()
+			expect(mockAnthropicCreate).not.toHaveBeenCalled()
+		})
+
+		it.each([
+			// At or below 200K input tokens: $2 per 1M input tokens.
+			{ usage: { input_tokens: 200_000, output_tokens: 0 }, expected: 0.4 },
+			// Above it, input is $4 per 1M ...
+			{ usage: { input_tokens: 200_001, output_tokens: 0 }, expected: 0.800004 },
+			// ... output $12 and cached input $1 (cached tokens count towards
+			// the threshold: 250K input including 50K cached).
+			{
+				usage: { input_tokens: 250_000, output_tokens: 1_000, input_tokens_details: { cached_tokens: 50_000 } },
+				expected: 0.862,
+			},
+		])("prices $usage.input_tokens input tokens at the matching Go tier", async ({ usage, expected }) => {
+			mockResponsesCreate.mockImplementationOnce(async () => completedWith(usage))
+			const handler = new OpencodeGoHandler(grokOptions)
+
+			const chunks = await collectStream(handler.createMessage("sys", messages))
+
+			const usageChunk = chunks.find((c) => c.type === "usage")
+			expect(usageChunk?.type === "usage" && usageChunk.totalCost).toBeCloseTo(expected, 12)
 		})
 	})
 
