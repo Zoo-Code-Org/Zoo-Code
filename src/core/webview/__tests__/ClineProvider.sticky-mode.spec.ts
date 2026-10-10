@@ -715,6 +715,70 @@ describe("ClineProvider - Sticky Mode", () => {
 			).rejects.toThrow(/ModeSwitchInconsistentError|could not restore the previous mode/)
 		})
 
+		it("does not compensate over a mode that a newer mutation committed", async () => {
+			// The regression case for the compensation itself: the first write stalls past the
+			// mutation timeout, the queue advances, a newer switch commits, and only then does the
+			// cancelled switch resume. Compensating there would put this switch's stale previous
+			// mode back over the newer selection.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			const updateMock = vi.mocked(mockContext.globalState.update)
+			await provider.setValue("mode", "code")
+			updateMock.mockClear()
+
+			let releaseWrite!: () => void
+			updateMock.mockImplementation(async (key: string, value: unknown) => {
+				if (key === "mode" && value === "architect") {
+					await new Promise<void>((resolve) => {
+						releaseWrite = resolve
+					})
+				}
+				return Promise.resolve()
+			})
+
+			const controller = new AbortController()
+			const cancelled = provider["handleModeSwitchUnlocked"]("architect", mockTask, controller.signal)
+			await vi.waitFor(() => {
+				expect(updateMock).toHaveBeenCalledWith("mode", "architect")
+			})
+
+			// The timeout aborts the stalled switch and the queue advances; a newer switch then
+			// commits its own mode before the cancelled one gets its write back.
+			controller.abort()
+			await provider["handleModeSwitchUnlocked"]("design", null)
+			releaseWrite()
+			await cancelled
+
+			const modeWrites = updateMock.mock.calls.filter(([key]) => key === "mode").map(([, value]) => value)
+			expect(modeWrites).toEqual(["architect", "design"])
+			expect(modeWrites).not.toContain("code")
+		})
+
 		it("keeps the cancellation result when the abort rollback write itself fails", async () => {
 			const mockTask = Object.assign(
 				{} as Task,

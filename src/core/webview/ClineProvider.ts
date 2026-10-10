@@ -318,6 +318,10 @@ export class ClineProvider
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
 	private providerProfileMutationQueue = Promise.resolve()
 	private historyTaskCreationQueue = Promise.resolve()
+	// Ownership token for the shared mode. A timed-out mutation keeps running after the queue
+	// advances, so a newer switch can commit while the cancelled one is still in flight; only the
+	// operation that still owns the latest mode mutation may write the mode again.
+	private modeMutationGeneration = 0
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
 		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
@@ -2312,6 +2316,7 @@ export class ClineProvider
 		// If the durable write fails, roll the shared write back so getValues()
 		// cannot mix a fresh shared mode with the stale pre-switch buffer.
 		const previousMode = this.getValue("mode")
+		const generation = ++this.modeMutationGeneration
 		let modeWriteLanded = false
 		try {
 			await this.setValue("mode", newMode)
@@ -2341,7 +2346,11 @@ export class ClineProvider
 		// through the same setValue so the shared key and the per-view pin move back together, and
 		// surface an explicit inconsistent state when that compensation cannot finish.
 		if (signal?.aborted) {
-			if (modeWriteLanded) {
+			// Only the operation that still owns the latest mode mutation may compensate. A cancelled
+			// switch whose write stalled past the mutation timeout resumes after the queue advanced,
+			// and a newer switch may have committed in the meantime: restoring the mode then would
+			// overwrite that newer selection with this switch's stale previous mode and pin.
+			if (modeWriteLanded && generation === this.modeMutationGeneration) {
 				try {
 					await this.setValue("mode", previousMode)
 				} catch (compensationError) {
@@ -2353,6 +2362,10 @@ export class ClineProvider
 						}`,
 					)
 				}
+			} else if (modeWriteLanded) {
+				this.log(
+					`[handleModeSwitch] Skipped the compensation for the cancelled switch to mode "${newMode}": a newer mode mutation owns the value.`,
+				)
 			}
 			return
 		}
