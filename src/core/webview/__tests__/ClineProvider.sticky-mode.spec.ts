@@ -660,6 +660,196 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("listApiConfigMeta", expect.anything())
 		})
 
+		it("compensates the durable mode write when the abort lands while the profile lookups are in flight", async () => {
+			// The named gap: the mode and the acting view's pin are already durable when the timeout
+			// aborts during getModeConfigId. Returning bare from the post-lookup check left the
+			// incomplete new selection persisted, so a reload restored it without the activation.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			// A switch always starts from a persisted mode; that is the value the compensation has
+			// to put back. Seed it through the provider so the ContextProxy cache holds it as well,
+			// then drop the setup calls so the assertions below see only the switch itself.
+			const updateMock = vi.mocked(mockContext.globalState.update)
+			await provider.setValue("mode", "code")
+			updateMock.mockClear()
+
+			// The lookup stalls; the abort lands while it is in flight, the window the pre-write
+			// check cannot cover because the durable write had already settled.
+			let releaseLookup!: () => void
+			const getModeConfigIdSpy = vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockImplementation(
+				() =>
+					new Promise<string | undefined>((resolve) => {
+						releaseLookup = () => resolve(undefined)
+					}),
+			)
+
+			const controller = new AbortController()
+			const switchPromise = provider["handleModeSwitchUnlocked"]("architect", mockTask, controller.signal)
+			await vi.waitFor(() => {
+				expect(getModeConfigIdSpy).toHaveBeenCalledWith("architect")
+			})
+			controller.abort()
+			releaseLookup()
+			await expect(switchPromise).resolves.toBeUndefined()
+
+			// Both stores move back through the same setValue: the shared key is written the new mode
+			// and then the previous mode, and the per-view pin follows the same value.
+			const modeWrites = updateMock.mock.calls.filter(([key]) => key === "mode").map(([, value]) => value)
+			expect(modeWrites).toEqual(["architect", "code"])
+			expect(provider["viewLocalState"].mode).toBe("code")
+			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]]
+			expect(persisted?.mode).toBe("code")
+			// The cancelled switch never reaches the list write that follows the lookups.
+			expect(updateMock).not.toHaveBeenCalledWith("listApiConfigMeta", expect.anything())
+		})
+
+		it("compensates when the abort lands between the durable write and the profile lookups", async () => {
+			// Same durable window, earlier exit: the abort fires while ModeChanged is emitted, so the
+			// pre-lookup checkpoint is the first check that sees it. The switch must undo the mode
+			// and the pin there instead of falling through into the profile lookups.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			// A switch always starts from a persisted mode; that is the value the compensation has
+			// to put back. Seed it through the provider so the ContextProxy cache holds it as well,
+			// then drop the setup calls so the assertions below see only the switch itself.
+			const updateMock = vi.mocked(mockContext.globalState.update)
+			await provider.setValue("mode", "code")
+			updateMock.mockClear()
+
+			const controller = new AbortController()
+			const getModeConfigIdSpy = vi.spyOn(provider.providerSettingsManager, "getModeConfigId")
+			vi.spyOn(provider, "emit").mockImplementation((event: string | symbol) => {
+				if (event === "modeChanged") {
+					controller.abort()
+				}
+				return true
+			})
+
+			await provider["handleModeSwitchUnlocked"]("architect", mockTask, controller.signal)
+
+			const modeWrites = updateMock.mock.calls.filter(([key]) => key === "mode").map(([, value]) => value)
+			expect(modeWrites).toEqual(["architect", "code"])
+			// The undo happened at the pre-lookup checkpoint: the profile lookups never started.
+			expect(getModeConfigIdSpy).not.toHaveBeenCalled()
+			expect(updateMock).not.toHaveBeenCalledWith("listApiConfigMeta", expect.anything())
+		})
+
+		it("compensates when the abort lands while the activation profile is being read", async () => {
+			// The last durable window the switch itself owns: the mode and pin are persisted, the
+			// activation is selected, and the abort lands while its profile is read. The switch must
+			// undo both stores instead of leaving the new mode with no activation behind it.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			// A switch always starts from a persisted mode; that is the value the compensation has
+			// to put back. Seed it through the provider so the ContextProxy cache holds it as well,
+			// then drop the setup calls so the assertions below see only the switch itself.
+			const updateMock = vi.mocked(mockContext.globalState.update)
+			await provider.setValue("mode", "code")
+			updateMock.mockClear()
+
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("cfg-1")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "p1", id: "cfg-1", apiProvider: providerIdentifiers.anthropic },
+			])
+			const activateProfileSpy = vi.spyOn(provider.providerSettingsManager, "activateProfile")
+			let releaseProfile!: () => void
+			const getProfileSpy = vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						releaseProfile = () =>
+							resolve({ name: "p1", id: "cfg-1", apiProvider: providerIdentifiers.anthropic })
+					}),
+			)
+
+			const controller = new AbortController()
+			const switchPromise = provider["handleModeSwitchUnlocked"]("architect", mockTask, controller.signal)
+			await vi.waitFor(() => {
+				expect(getProfileSpy).toHaveBeenCalledWith({ name: "p1" })
+			})
+			controller.abort()
+			releaseProfile()
+			await expect(switchPromise).resolves.toBeUndefined()
+
+			const modeWrites = updateMock.mock.calls.filter(([key]) => key === "mode").map(([, value]) => value)
+			expect(modeWrites).toEqual(["architect", "code"])
+			// The activation never started, so the switch could not have completed on its own.
+			expect(activateProfileSpy).not.toHaveBeenCalled()
+		})
 		it("reports an inconsistent state when the cancelled mode switch cannot restore the previous mode", async () => {
 			// Same window, failing compensation: the shared mode and the per-view pin may disagree,
 			// which the caller must not read as a clean cancellation.

@@ -2318,13 +2318,11 @@ export class ClineProvider
 		// cannot mix a fresh shared mode with the stale pre-switch buffer.
 		const previousMode = this.getValue("mode")
 		const generation = ++this.modeMutationGeneration
-		let modeWriteLanded = false
 		try {
+			// setValue writes the shared key and the acting view's pin, so once it resolves the switch
+			// is durable in both stores: every abort checkpoint below has to undo it again, not just
+			// the one right after this write.
 			await this.setValue("mode", newMode)
-			// Marked once setValue resolves. It writes the shared key and the acting view's pin, so
-			// from here the switch is durable in both stores: an early return after this point would
-			// leave a changed mode with no activation behind it.
-			modeWriteLanded = true
 		} catch (error) {
 			try {
 				await this.contextProxy.setValue("mode", previousMode)
@@ -2341,33 +2339,11 @@ export class ClineProvider
 			throw error
 		}
 
-		// An abort that lands after the durable write still has to be undone. The mutation queue has
-		// already advanced, so a newer mutation can start while this cancelled switch is still
-		// running; emitting or writing profile/list state now would land behind it. Compensate
-		// through the same setValue so the shared key and the per-view pin move back together, and
-		// surface an explicit inconsistent state when that compensation cannot finish.
+		// An abort that lands after the durable write still has to be undone: the mutation queue has
+		// already advanced, so emitting or writing profile/list state now would land behind the next
+		// mutation. Compensate through the shared mode-switch rollback.
 		if (signal?.aborted) {
-			// Only the operation that still owns the latest mode mutation may compensate. A cancelled
-			// switch whose write stalled past the mutation timeout resumes after the queue advanced,
-			// and a newer switch may have committed in the meantime: restoring the mode then would
-			// overwrite that newer selection with this switch's stale previous mode and pin.
-			if (modeWriteLanded && generation === this.modeMutationGeneration) {
-				try {
-					await this.setValue("mode", previousMode)
-				} catch (compensationError) {
-					throw new ModeSwitchInconsistentError(
-						`[ClineProvider] A cancelled switch to mode "${newMode}" could not restore the previous mode "${String(
-							previousMode,
-						)}"; the shared mode and the per-view pin may disagree: ${
-							compensationError instanceof Error ? compensationError.message : String(compensationError)
-						}`,
-					)
-				}
-			} else if (modeWriteLanded) {
-				this.log(
-					`[handleModeSwitch] Skipped the compensation for the cancelled switch to mode "${newMode}": a newer mode mutation owns the value.`,
-				)
-			}
+			await this.compensateCancelledModeSwitch(newMode, previousMode, generation)
 			return
 		}
 
@@ -2382,13 +2358,25 @@ export class ClineProvider
 			return
 		}
 
-		if (signal?.aborted) return
+		// An abort that landed after the durable write but before the profile lookups must undo the
+		// mode and the acting view's pin too: the activation below is the only thing that completes
+		// the switch, and it never starts on a cancelled operation.
+		if (signal?.aborted) {
+			await this.compensateCancelledModeSwitch(newMode, previousMode, generation)
+			return
+		}
 
 		// Load the saved API config for the new mode if it exists.
 		const savedConfigId = await this.providerSettingsManager.getModeConfigId(newMode)
 		const listApiConfig = await this.providerSettingsManager.listConfig()
 
-		if (signal?.aborted) return
+		// Same contract after the lookups: returning bare here used to leave the new mode and the
+		// per-view pin persisted with no mode-specific activation behind them, so a reload restored
+		// the incomplete new selection.
+		if (signal?.aborted) {
+			await this.compensateCancelledModeSwitch(newMode, previousMode, generation)
+			return
+		}
 
 		// Update listApiConfigMeta first to ensure UI has latest data.
 		await this.updateGlobalState("listApiConfigMeta", listApiConfig)
@@ -2408,6 +2396,13 @@ export class ClineProvider
 				const hasActualSettings = !!fullProfile.apiProvider
 
 				if (hasActualSettings) {
+					// The activation is the last persistence step of the switch. An abort that landed
+					// while its profile was being read has to undo the durable mode write as well, or
+					// storage keeps the new mode with no activation behind it.
+					if (signal?.aborted) {
+						await this.compensateCancelledModeSwitch(newMode, previousMode, generation)
+						return
+					}
 					await this.activateProviderProfileUnlocked(
 						{ name: profile.name },
 						targetTask === null ? { skipCurrentTaskRebuild: true } : undefined,
@@ -2434,6 +2429,41 @@ export class ClineProvider
 
 		if (targetTask !== null) {
 			await this.postStateToWebview()
+		}
+	}
+
+	/**
+	 * Undoes a cancelled mode switch whose durable write already landed. Compensates through the
+	 * same awaited setValue so the shared key and the acting view's pin move back together.
+	 *
+	 * Only the operation that still owns the latest mode mutation may compensate: a cancelled
+	 * switch whose write stalled past the mutation timeout resumes after the queue advanced, and a
+	 * newer switch may have committed in the meantime, so restoring the mode then would overwrite
+	 * that newer selection with this switch's stale previous mode and pin. A compensation that
+	 * cannot finish surfaces as an explicit inconsistent-state error instead of a clean
+	 * cancellation.
+	 */
+	private async compensateCancelledModeSwitch(
+		newMode: Mode,
+		previousMode: Mode | undefined,
+		generation: number,
+	): Promise<void> {
+		if (generation !== this.modeMutationGeneration) {
+			this.log(
+				`[handleModeSwitch] Skipped the compensation for the cancelled switch to mode "${newMode}": a newer mode mutation owns the value.`,
+			)
+			return
+		}
+		try {
+			await this.setValue("mode", previousMode)
+		} catch (compensationError) {
+			throw new ModeSwitchInconsistentError(
+				`[ClineProvider] A cancelled switch to mode "${newMode}" could not restore the previous mode "${String(
+					previousMode,
+				)}"; the shared mode and the per-view pin may disagree: ${
+					compensationError instanceof Error ? compensationError.message : String(compensationError)
+				}`,
+			)
 		}
 	}
 
