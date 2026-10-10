@@ -319,7 +319,9 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			await store.upsert(makeHistoryItem({ id: "lock-enoent" }))
 			vi.mocked(fs.unlink).mockClear()
 			onWrite.mockClear()
-			vi.mocked(withFileLock).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			// Once, not for good: mockClear() does not reset implementations, and this test only needs
+			// the next lock attempt to fail - a mock still rejecting would decide later tests for us.
+			vi.mocked(withFileLock).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
 
 			await expect(store.delete("lock-enoent")).rejects.toThrow(TaskHistoryDeleteError)
 

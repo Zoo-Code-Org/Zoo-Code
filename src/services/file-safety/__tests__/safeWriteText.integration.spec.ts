@@ -32,14 +32,16 @@ describe("safeWriteText against a real filesystem", () => {
 	})
 
 	it("leaves the target bytes untouched when the commit cannot replace it", async () => {
-		// A regular file cannot be renamed over a directory, so the backup copy and
-		// the commit both fail on a real filesystem with no mocking at all.
+		// A regular file cannot be renamed over a directory, so the commit rename itself fails on a
+		// real filesystem with no mocking at all. No backup is asked for: with backup:true the run
+		// stopped one step earlier, at the backup copy hitting the same EISDIR, and the commit rename
+		// this test is named for never ran.
 		const targetPath = path.join(dir, "target-dir")
 		await fs.mkdir(targetPath)
 		const inside = path.join(targetPath, "payload.txt")
 		await fs.writeFile(inside, "original bytes")
 
-		await expect(safeWriteText(targetPath, "new data", { backup: true })).rejects.toThrow()
+		await expect(safeWriteText(targetPath, "new data")).rejects.toThrow()
 
 		// The directory and its content are exactly as they were, and no backup copy
 		// or staging directory was left behind next to them.

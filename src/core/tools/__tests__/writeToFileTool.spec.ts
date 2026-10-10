@@ -528,17 +528,20 @@ describe("writeToFileTool", () => {
 			const { realpath } = await import("fs/promises")
 			vi.mocked(realpath).mockRejectedValue({ code: "EPERM" })
 			mockedIsPathOutsideWorkspace.mockReturnValue(true)
+			try {
+				await executeWriteFileTool({}, { fileExists: true, experiments: focusDisruption })
 
-			await executeWriteFileTool({}, { fileExists: true, experiments: focusDisruption })
-
-			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
-			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
-			expect(mockCline.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
-
-			// Reset both doubles: later tests in this file assume an in-workspace target that
-			// resolves to itself.
-			vi.mocked(realpath).mockImplementation(async (p) => String(p))
-			mockedIsPathOutsideWorkspace.mockReturnValue(false)
+				expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+				expect(mockCline.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
+			} finally {
+				// Restore both doubles here rather than after the assertions: a failing assertion would
+				// leave realpath rejecting and the target flagged outside-workspace, and every later
+				// test in this file - which assumes an in-workspace target that resolves to itself -
+				// would then fail for the wrong reason. The test above this one uses the same pattern.
+				vi.mocked(realpath).mockImplementation(async (p) => String(p))
+				mockedIsPathOutsideWorkspace.mockReturnValue(false)
+			}
 		})
 
 		it("surfaces the unobserved-existing remediation as a tool error and publishes nothing", async () => {
