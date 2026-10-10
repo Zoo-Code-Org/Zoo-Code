@@ -27,7 +27,7 @@ import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, Complete
 import { RouterProvider } from "./router-provider"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 import { DEFAULT_HEADERS } from "./constants"
-import { calculateApiCostAnthropic, calculateApiCostOpenAI } from "../../shared/cost"
+import { applyLongContextPricing, calculateApiCostAnthropic, calculateApiCostOpenAI } from "../../shared/cost"
 import {
 	convertOpenAIToolsToAnthropic,
 	convertOpenAIToolChoiceToAnthropic,
@@ -489,7 +489,9 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 				this.options.includeMaxTokens === true
 					? this.options.modelMaxTokens || maxTokens || 16_384
 					: (maxTokens ?? 16_384),
-			temperature: this.supportsTemperature(modelId) ? (temperature ?? 1.0) : undefined,
+			// `temperature` is undefined for models that reject one
+			// (`supportsTemperature: false`), so send it as computed.
+			temperature: this.supportsTemperature(modelId) ? temperature : undefined,
 			system: systemBlocks,
 			messages: supportsPromptCache
 				? this.addAnthropicCacheControl(sanitizedMessages, cacheControl)
@@ -634,8 +636,13 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 
 		// Calculate and yield final cost
 		if (inputTokens > 0 || outputTokens > 0 || cacheWriteTokens > 0 || cacheReadTokens > 0) {
+			// calculateApiCostAnthropic ignores longContextPricing, so apply the
+			// Go tier here: Messages models such as claude-haiku-5-5 and
+			// qwen3.7-plus cost more above their input-token threshold, which
+			// counts cached tokens too.
+			const pricedInfo = applyLongContextPricing(info, inputTokens + cacheWriteTokens + cacheReadTokens)
 			const { totalCost } = calculateApiCostAnthropic(
-				info,
+				pricedInfo,
 				inputTokens,
 				outputTokens,
 				cacheWriteTokens,
@@ -712,7 +719,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 						this.options.includeMaxTokens === true
 							? this.options.modelMaxTokens || maxTokens || 16_384
 							: (maxTokens ?? 16_384),
-					temperature: this.supportsTemperature(modelId) ? (temperature ?? 1.0) : undefined,
+					temperature: this.supportsTemperature(modelId) ? temperature : undefined,
 					messages: [{ role: "user", content: prompt }],
 					stream: false,
 				})

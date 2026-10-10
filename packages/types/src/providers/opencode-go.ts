@@ -428,6 +428,33 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 			"Qwen3.8 Flash is Alibaba's fast multimodal reasoning model with a 1M context window. Available via the Opencode Go plan.",
 	},
 
+	// --- Anthropic ---
+	"claude-haiku-5-5": {
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		// Claude Haiku 5.5 answers non-default temperature/top_p/top_k values
+		// with a 400 on every request. Thinking is adaptive (on by default,
+		// default effort "medium"); the Go Messages path sends no thinking or
+		// effort controls, so no effort setting is advertised.
+		supportsTemperature: false,
+		inputPrice: 0.1,
+		outputPrice: 0.5,
+		cacheReadsPrice: 0.01,
+		cacheWritesPrice: 0.125,
+		longContextPricing: {
+			thresholdTokens: 100_000,
+			inputPriceMultiplier: 5,
+			outputPriceMultiplier: 5,
+			cacheWritesPriceMultiplier: 5,
+			cacheReadsPriceMultiplier: 5,
+		},
+		description:
+			"Claude Haiku 5.5 is Anthropic's fastest model for high-volume, latency-sensitive tasks, with a 1M context window, 128K max output and adaptive thinking. Available via the Opencode Go plan.",
+	},
+
 	// --- DeepSeek ---
 	"deepseek-v4-pro": {
 		displayName: "DeepSeek V4 Pro 0813",
@@ -687,6 +714,8 @@ export const OPENCODE_GO_ANTHROPIC_FORMAT_MODELS = new Set<string>([
 	"minimax-m3",
 	"minimax-m2.7",
 	"minimax-m2.5",
+	// --- Anthropic ---
+	"claude-haiku-5-5",
 ])
 
 /**

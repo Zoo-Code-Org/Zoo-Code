@@ -20,6 +20,7 @@ describe("opencode-go registry", () => {
 		"minimax-m3",
 		"minimax-m2.7",
 		"minimax-m2.5",
+		"claude-haiku-5-5",
 	]
 	const openaiFormatModels = [
 		"glm-5",
@@ -45,7 +46,7 @@ describe("opencode-go registry", () => {
 	]
 
 	describe("isOpencodeGoAnthropicFormatModel", () => {
-		it("classifies Qwen and MiniMax models as Anthropic-format", () => {
+		it("classifies Qwen, MiniMax and Claude models as Anthropic-format", () => {
 			for (const id of anthropicFormatModels) {
 				expect(isOpencodeGoAnthropicFormatModel(id)).toBe(true)
 			}
@@ -127,8 +128,32 @@ describe("opencode-go registry", () => {
 	})
 
 	describe("OPENCODE_GO_ANTHROPIC_FORMAT_MODELS", () => {
-		it("contains exactly the Qwen and MiniMax models", () => {
+		it("contains exactly the Qwen, MiniMax and Claude models", () => {
 			expect([...OPENCODE_GO_ANTHROPIC_FORMAT_MODELS].sort()).toEqual([...anthropicFormatModels].sort())
+		})
+
+		it("curates claude-haiku-5-5 with its Go Messages configuration", () => {
+			const info = getOpencodeGoModelInfo("claude-haiku-5-5")
+			expect(info).toMatchObject({
+				maxTokens: 128_000,
+				contextWindow: 1_000_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsTemperature: false,
+				inputPrice: 0.1,
+				outputPrice: 0.5,
+				cacheReadsPrice: 0.01,
+				cacheWritesPrice: 0.125,
+				longContextPricing: {
+					thresholdTokens: 100_000,
+					inputPriceMultiplier: 5,
+					outputPriceMultiplier: 5,
+					cacheWritesPriceMultiplier: 5,
+					cacheReadsPriceMultiplier: 5,
+				},
+			})
+			// The Messages route sends no thinking or effort controls, so none are advertised.
+			expect(info?.supportsReasoningEffort).toBeUndefined()
 		})
 
 		// The PR description calls out that the format-routing set must stay in

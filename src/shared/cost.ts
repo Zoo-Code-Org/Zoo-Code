@@ -6,7 +6,11 @@ export interface ApiCostResult {
 	totalCost: number
 }
 
-function applyLongContextPricing(modelInfo: ModelInfo, totalInputTokens: number, serviceTier?: ServiceTier): ModelInfo {
+export function applyLongContextPricing(
+	modelInfo: ModelInfo,
+	totalInputTokens: number,
+	serviceTier?: ServiceTier,
+): ModelInfo {
 	const pricing = modelInfo.longContextPricing
 	if (!pricing || totalInputTokens <= pricing.thresholdTokens) {
 		return modelInfo
