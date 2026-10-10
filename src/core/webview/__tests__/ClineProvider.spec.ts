@@ -3520,6 +3520,106 @@ describe("ClineProvider", () => {
 			])
 		})
 	})
+
+	describe("deleteProviderProfile", () => {
+		const currentProfile: ProviderSettingsEntry = {
+			name: "current-config",
+			id: "current-id",
+			apiProvider: providerIdentifiers.anthropic,
+		}
+		const otherProfile: ProviderSettingsEntry = {
+			name: "other-config",
+			id: "other-id",
+			apiProvider: providerIdentifiers.openrouter,
+		}
+
+		const mockProviderSettingsManager = () => {
+			const profiles: ProviderSettingsEntry[] = [currentProfile, otherProfile]
+
+			Object.assign(provider, {
+				providerSettingsManager: {
+					deleteConfig: vi.fn().mockImplementation(async (name: string) => {
+						const index = profiles.findIndex((profile) => profile.name === name)
+						if (index !== -1) {
+							profiles.splice(index, 1)
+						}
+					}),
+					listConfig: vi.fn().mockImplementation(async () => profiles),
+					activateProfile: vi.fn().mockImplementation(async ({ name }: { name: string }) => {
+						const profile = profiles.find((entry) => entry.name === name)
+						if (!profile) {
+							throw new Error(`Config '${name}' not found`)
+						}
+						// Include a distinguishing setting so tests can assert the
+						// effective provider settings, not just the name pointers.
+						return { ...profile, openRouterModelId: "other-model" }
+					}),
+					setModeConfig: vi.fn(),
+				},
+			})
+
+			return profiles
+		}
+
+		beforeEach(async () => {
+			await provider.contextProxy.setValue("currentApiConfigName", "current-config")
+			await provider.contextProxy.setValue("listApiConfigMeta", [currentProfile, otherProfile])
+		})
+
+		test("purges the deleted profile from ProviderSettingsManager", async () => {
+			mockProviderSettingsManager()
+
+			await provider.deleteProviderProfile(otherProfile)
+
+			expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("other-config")
+			expect(await provider.providerSettingsManager.listConfig()).toEqual([currentProfile])
+			expect(provider.getProviderProfileEntries()).toEqual([currentProfile])
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "current-config")
+			// Deleting a non-active profile must not trigger activation side effects.
+			expect(provider.providerSettingsManager.activateProfile).not.toHaveBeenCalled()
+			expect(provider.providerSettingsManager.setModeConfig).not.toHaveBeenCalled()
+		})
+
+		test("switches the active profile when deleting it and purges it from ProviderSettingsManager", async () => {
+			mockProviderSettingsManager()
+
+			await provider.deleteProviderProfile(currentProfile)
+
+			expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("current-config")
+			// The replacement is activated through the standard activation path.
+			expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith({ name: "other-config" })
+			expect(await provider.providerSettingsManager.listConfig()).toEqual([otherProfile])
+			expect(provider.getProviderProfileEntries()).toEqual([otherProfile])
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "other-config")
+			// The effective provider settings match the replacement, not just the name pointers.
+			expect(provider.contextProxy.getProviderSettings()).toMatchObject({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "other-model",
+			})
+			// Same side effects as the webview activation path: the mode config is persisted.
+			expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("code", "other-id")
+		})
+
+		test("fails fast without writing ContextProxy state when the config purge rejects", async () => {
+			Object.assign(provider, {
+				providerSettingsManager: {
+					deleteConfig: vi.fn().mockRejectedValue(new Error("Config 'other-config' not found")),
+					listConfig: vi.fn().mockResolvedValue([currentProfile, otherProfile]),
+				},
+			})
+
+			const setValuesSpy = vi.spyOn(provider.contextProxy, "setValues")
+			const updateCallsBefore = vi.mocked(mockContext.globalState.update).mock.calls.length
+
+			await expect(provider.deleteProviderProfile(otherProfile)).rejects.toThrow(
+				"Config 'other-config' not found",
+			)
+
+			expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("other-config")
+			expect(setValuesSpy).not.toHaveBeenCalled()
+			expect(vi.mocked(mockContext.globalState.update).mock.calls.length).toBe(updateCallsBefore)
+		})
+	})
 })
 
 describe("webviewMessageHandler no-floating-promises coverage", () => {
