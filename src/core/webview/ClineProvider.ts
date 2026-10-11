@@ -203,6 +203,46 @@ type GetStateOptions = {
 	includeTaskHistory?: boolean
 }
 
+/**
+ * Raised when a profile activation or upsert failed after durable writes landed and at least one
+ * compensating write failed too. The persisted profile stores may now disagree, which is not the
+ * ordinary "the save failed and nothing changed" outcome the caller's `undefined` would suggest.
+ */
+class ProfileActivationInconsistentError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = "ProfileActivationInconsistentError"
+	}
+}
+
+/**
+ * The durable stores a profile activation or upsert rewrites, captured before the first write so a
+ * rejected mutation can put every landed write back. `mode` is undefined when the caller never
+ * touches the per-mode mapping, and `previousProfileSettings` is undefined when the profile did not
+ * exist yet - the creation case the compensation must delete rather than restore.
+ */
+interface ProfileActivationSnapshot {
+	profileName: string
+	mode: Mode | undefined
+	previousProfileSettings: ProviderSettingsWithId | undefined
+	entries: ProviderSettingsEntry[]
+	modeConfigId: string | undefined
+	selection: string | undefined
+	viewSelection: string | undefined
+	sharedProviderSettings: ProviderSettings
+	viewOverlay: ProviderSettings | undefined
+}
+
+/** Which of the snapshotted stores this mutation actually committed. */
+interface ProfileActivationLanded {
+	profileRecord: boolean
+	profileList: boolean
+	modeMapping: boolean
+	selection: boolean
+	sharedProviderSettings: boolean
+	viewOverlay: boolean
+}
+
 export class ClineProvider
 	extends EventEmitter<TaskProviderEvents>
 	implements vscode.WebviewViewProvider, TelemetryPropertiesProvider, TaskProviderLike
@@ -2452,6 +2492,153 @@ export class ClineProvider
 		return !!this.getProviderProfileEntry(name)
 	}
 
+	/**
+	 * Snapshot every durable store that profile activation and upsert are about to rewrite. The
+	 * stores are independent - the profile-manager record, the profile list, the per-mode mapping,
+	 * the shared current name, the shared provider settings blob, and this view's own buffer - so a
+	 * partial commit is user visible: `getState()` merges the shared blob with the per-view buffer,
+	 * which can pair the previous profile's name with the new profile's settings.
+	 */
+	private async snapshotProfileActivationStores(
+		profileName: string,
+		mode: Mode | undefined,
+	): Promise<ProfileActivationSnapshot> {
+		let previousProfileSettings: ProviderSettingsWithId | undefined
+
+		try {
+			const { name: _name, ...profile } = await this.providerSettingsManager.getProfile({ name: profileName })
+			previousProfileSettings = profile as ProviderSettingsWithId
+		} catch (error: unknown) {
+			if (!(error instanceof ProviderSettingsNotFoundError)) {
+				// Without the prior record there is no way to put an updated profile back, so fail
+				// before the first write instead of discovering it in the compensation path.
+				throw error
+			}
+			// Not-found is the creation case: compensation deletes the new record again.
+		}
+
+		const { currentApiConfigName } = this.contextProxy.getValues()
+
+		return {
+			profileName,
+			mode,
+			previousProfileSettings,
+			entries: this.getProviderProfileEntries(),
+			modeConfigId: mode === undefined ? undefined : await this.providerSettingsManager.getModeConfigId(mode),
+			selection: currentApiConfigName,
+			viewSelection: this.viewLocalState.currentApiConfigName,
+			sharedProviderSettings: this.contextProxy.getProviderSettings(),
+			viewOverlay: this.viewLocalState.apiConfiguration,
+		}
+	}
+
+	/**
+	 * Roll a failed profile activation or upsert back store by store, newest write first. Only the
+	 * stores whose write landed are touched: replaying one this call never wrote would clobber a
+	 * value another mutation committed in the meantime. Restore failures are collected rather than
+	 * thrown immediately so one broken store cannot strand the rest, and a partial rollback
+	 * surfaces as an explicit inconsistent-state error - the silent `undefined` callers used to
+	 * receive is exactly what hid a half-applied activation.
+	 */
+	private async compensateProfileActivation(
+		snapshot: ProfileActivationSnapshot,
+		landed: ProfileActivationLanded,
+		operation: string,
+		cause: unknown,
+		managerCurrentNameRewritten: boolean,
+	): Promise<void> {
+		const describeFailure = (e: unknown) => (e instanceof Error ? e.message : String(e))
+		const failures: string[] = []
+
+		if (landed.viewOverlay) {
+			try {
+				await this._saveViewLocalStateFromMutation({ apiConfiguration: snapshot.viewOverlay })
+			} catch (error: unknown) {
+				failures.push(`view-local buffer: ${describeFailure(error)}`)
+			}
+		}
+
+		if (landed.sharedProviderSettings) {
+			try {
+				await this.contextProxy.setProviderSettings(snapshot.sharedProviderSettings)
+			} catch (error: unknown) {
+				failures.push(`shared provider settings: ${describeFailure(error)}`)
+			}
+		}
+
+		if (landed.selection) {
+			// The shared selection and this view's pin are two stores. setValue moves both, so a
+			// rollback that only means to restore the shared name would also overwrite a pin that
+			// legitimately differed from it: a sibling activation leaves the shared selection on
+			// another profile while this view stays pinned to its own. Restore them separately, and
+			// clear the pin when this view had none before the call.
+			try {
+				await this.contextProxy.setValue("currentApiConfigName", snapshot.selection)
+			} catch (error: unknown) {
+				failures.push(`shared selection: ${describeFailure(error)}`)
+			}
+			try {
+				await this._saveViewLocalStateFromMutation({ currentApiConfigName: snapshot.viewSelection })
+			} catch (error: unknown) {
+				failures.push(`view profile pin: ${describeFailure(error)}`)
+			}
+		}
+
+		if (landed.modeMapping && snapshot.mode !== undefined) {
+			try {
+				// The manager serializes modeApiConfigs through JSON, which drops undefined
+				// values, so writing the previous undefined id back clears the mapping instead of
+				// storing a bogus id.
+				await this.providerSettingsManager.setModeConfig(snapshot.mode, snapshot.modeConfigId as string)
+			} catch (error: unknown) {
+				failures.push(`mode mapping: ${describeFailure(error)}`)
+			}
+		}
+
+		if (landed.profileList) {
+			try {
+				// Only the list is replayed: writing back the whole settings snapshot would also
+				// rewrite unrelated keys (viewStates included) with this view's cached copy.
+				await this.contextProxy.setValue("listApiConfigMeta", snapshot.entries)
+			} catch (error: unknown) {
+				failures.push(`profile list: ${describeFailure(error)}`)
+			}
+		}
+
+		if (landed.profileRecord) {
+			try {
+				if (snapshot.previousProfileSettings === undefined) {
+					await this.providerSettingsManager.deleteConfig(snapshot.profileName)
+				} else {
+					await this.providerSettingsManager.saveConfig(
+						snapshot.profileName,
+						snapshot.previousProfileSettings,
+					)
+				}
+			} catch (error: unknown) {
+				failures.push(`profile-manager record: ${describeFailure(error)}`)
+			}
+		}
+
+		if (managerCurrentNameRewritten && snapshot.selection && snapshot.selection !== snapshot.profileName) {
+			try {
+				// `activateProfile` rewrote the profile manager's own current-profile record; put
+				// the previous name back so a later load cannot resolve the aborted activation.
+				await this.providerSettingsManager.activateProfile({ name: snapshot.selection })
+			} catch (error: unknown) {
+				failures.push(`profile-manager current profile: ${describeFailure(error)}`)
+			}
+		}
+
+		if (failures.length > 0) {
+			throw new ProfileActivationInconsistentError(
+				`${operation}: the profile change failed after durable writes landed and the rollback was incomplete (${failures.join("; ")}); the persisted profile stores may now disagree. Original failure: ${describeFailure(cause)}`,
+			)
+		}
+
+		this.log(`${operation}: rolled back the profile writes that had landed after ${describeFailure(cause)}`)
+	}
+
 	async upsertProviderProfile(
 		name: string,
 		providerSettings: ProviderSettings,
@@ -2464,51 +2651,74 @@ export class ClineProvider
 				// we rely on the `ContextProxy`'s data store and in other cases
 				// we rely on the `ProviderSettingsManager`'s data store. It might
 				// be simpler to unify these two.
-				const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
+				// The mode is read before the first write because the per-mode mapping is one of
+				// the durable stores the snapshot below captures.
+				const mode = activate ? (await this.getState()).mode : undefined
+				const snapshot = await this.snapshotProfileActivationStores(name, mode)
+				const landed: ProfileActivationLanded = {
+					profileRecord: false,
+					profileList: false,
+					modeMapping: false,
+					selection: false,
+					sharedProviderSettings: false,
+					viewOverlay: false,
+				}
+				let id: string
 
-				if (signal.aborted) return id
+				try {
+					id = await this.providerSettingsManager.saveConfig(name, providerSettings)
+					landed.profileRecord = true
 
-				if (activate) {
-					const { mode } = await this.getState()
+					if (signal.aborted) return id
 
-					// These promises do the following:
-					// 1. Adds or updates the list of provider profiles.
-					// 2. Sets the current provider profile.
-					// 3. Sets the current mode's provider profile.
-					// 4. Copies the provider settings to the context.
-					//
-					// Note: 1, 2, and 4 can be done in one `ContextProxy` call:
-					// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
-					// We should probably switch to that and verify that it works.
-					// I left the original implementation in just to be safe.
-					await Promise.all([
-						this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
+					landed.profileList = true
+
+					if (mode !== undefined) {
+						// The durable writes are serialized instead of raced in one Promise.all so
+						// every step can record that it landed: a later rejection then puts back
+						// exactly the stores this call changed. Previously a rejected per-view write
+						// rolled back only the shared name inside setValue, while the profile record,
+						// the profile list, the mode mapping, and the shared provider settings stayed
+						// committed - leaving getState() reporting the previous profile's name next
+						// to the new profile's settings.
+						await this.providerSettingsManager.setModeConfig(mode, id)
+						landed.modeMapping = true
+
 						// Route through setValue so the in-memory viewLocalState buffer tracks the
 						// activated profile: a plain global write would leave a stale loaded
 						// currentApiConfigName shadowing the new value in getValues().
-						this.setValue("currentApiConfigName", name),
-						this.providerSettingsManager.setModeConfig(mode, id),
-						this.contextProxy.setProviderSettings(providerSettings),
+						await this.setValue("currentApiConfigName", name)
+						landed.selection = true
+
+						// Marked before the await: setProviderSettings fans out to several globalState
+						// keys, so a rejection partway through the fan-out still has to be rolled back.
+						landed.sharedProviderSettings = true
+						await this.contextProxy.setProviderSettings(providerSettings)
+
 						// setProviderSettings writes the shared store directly, bypassing the
 						// view-local mutation path: clear this view's buffered apiConfiguration
 						// overlay (if any) so a stale loaded profile cannot keep shadowing the
 						// new settings in getState().
-						this._saveViewLocalStateFromMutation({ apiConfiguration: undefined }),
-					])
+						await this._saveViewLocalStateFromMutation({ apiConfiguration: undefined })
+						landed.viewOverlay = true
 
-					// Other live views may have buffered this profile's settings earlier;
-					// refresh them so their getState() cannot report the updated profile's
-					// name with stale settings.
-					await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
+						// Other live views may have buffered this profile's settings earlier;
+						// refresh them so their getState() cannot report the updated profile's
+						// name with stale settings. Sibling buffers this call already rewrote are
+						// restored by the refresh itself before it rejects.
+						await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
 
-					// Change the provider for the current task.
-					// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
-					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+						// Change the provider for the current task.
+						// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
+						this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
 
-					// Keep the current task's sticky provider profile in sync with the newly-activated profile.
-					await this.persistStickyProviderProfileToCurrentTask(name)
-				} else {
-					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
+						// Keep the current task's sticky provider profile in sync with the newly-activated profile.
+						await this.persistStickyProviderProfileToCurrentTask(name)
+					}
+				} catch (error: unknown) {
+					await this.compensateProfileActivation(snapshot, landed, "upsertProviderProfile", error, false)
+					throw error
 				}
 
 				await this.postStateToWebview()
@@ -2520,6 +2730,14 @@ export class ClineProvider
 			)
 
 			vscode.window.showErrorMessage(t("common:errors.create_api_config"))
+
+			if (error instanceof ProfileActivationInconsistentError) {
+				// The rollback itself was incomplete. Returning `undefined` here would read as "the
+				// save failed and nothing changed" while the persisted profile stores disagree, so
+				// the caller gets the inconsistency instead.
+				throw error
+			}
+
 			return undefined
 		}
 	}
@@ -2858,32 +3076,63 @@ export class ClineProvider
 		const persistTaskHistory = options?.persistTaskHistory ?? true
 		const skipCurrentTaskRebuild = options?.skipCurrentTaskRebuild ?? false
 
-		if (!skipCurrentTaskRebuild) {
-			// See `upsertProviderProfile` for a description of what this is doing.
-			await Promise.all([
-				this.contextProxy.setValue("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+		// The mode is read before the first write because the per-mode mapping is one of the
+		// durable stores the snapshot below captures.
+		const { mode } = await this.getState()
+		const snapshot = await this.snapshotProfileActivationStores(name, mode)
+		const landed: ProfileActivationLanded = {
+			profileRecord: false,
+			profileList: false,
+			modeMapping: false,
+			selection: false,
+			sharedProviderSettings: false,
+			viewOverlay: false,
+		}
+
+		try {
+			if (!skipCurrentTaskRebuild) {
+				// See `upsertProviderProfile` for a description of what this is doing. The writes
+				// are serialized so each step can record that it landed: a rejection later in the
+				// activation then rolls back the profile list, the shared name, the shared settings,
+				// and this view's buffer instead of leaving them committed under the name the
+				// previous profile still carries.
+				await this.contextProxy.setValue("listApiConfigMeta", await this.providerSettingsManager.listConfig())
+				landed.profileList = true
+
 				// Route through setValue so the in-memory viewLocalState buffer tracks the
 				// activated profile: a plain ContextProxy write would leave a stale loaded
 				// currentApiConfigName shadowing the new value in getValues().
-				this.setValue("currentApiConfigName", name),
-				this.contextProxy.setProviderSettings(providerSettings),
+				await this.setValue("currentApiConfigName", name)
+				landed.selection = true
+
+				// Marked before the await: setProviderSettings fans out to several globalState keys,
+				// so a rejection partway through the fan-out still has to be rolled back.
+				landed.sharedProviderSettings = true
+				await this.contextProxy.setProviderSettings(providerSettings)
+
 				// setProviderSettings writes the shared store directly, bypassing the
 				// view-local mutation path: clear this view's buffered apiConfiguration
 				// overlay (if any) so a stale loaded profile cannot keep shadowing the
 				// new settings in getState().
-				this._saveViewLocalStateFromMutation({ apiConfiguration: undefined }),
-			])
+				await this._saveViewLocalStateFromMutation({ apiConfiguration: undefined })
+				landed.viewOverlay = true
 
-			// Other live views may have buffered this profile's settings earlier;
-			// refresh them so their getState() cannot report the activated profile's
-			// name with stale settings.
-			await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
-		}
+				// Other live views may have buffered this profile's settings earlier;
+				// refresh them so their getState() cannot report the activated profile's
+				// name with stale settings. Sibling buffers this call already rewrote are
+				// restored by the refresh itself before it rejects.
+				await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
+			}
 
-		const { mode } = await this.getState()
-
-		if (id && persistModeConfig) {
-			await this.providerSettingsManager.setModeConfig(mode, id)
+			if (id && persistModeConfig) {
+				await this.providerSettingsManager.setModeConfig(mode, id)
+				landed.modeMapping = true
+			}
+		} catch (error: unknown) {
+			// `activateProfile` above already rewrote the profile manager's own current-profile
+			// record, so the compensation has to put the previous name back there too.
+			await this.compensateProfileActivation(snapshot, landed, "activateProviderProfile", error, true)
+			throw error
 		}
 
 		// Change the provider for the current task.
@@ -2926,8 +3175,17 @@ export class ClineProvider
 			return
 		}
 
-		await Promise.all(
-			affected.map(async (instance) => {
+		// Snapshot every affected view BEFORE any write starts: a failure in one sibling has to
+		// roll back the siblings that already landed too. Without this, one sibling's rejected
+		// refresh leaves the other views holding the new profile's settings while the caller's
+		// compensation rolls the shared stores back - a split durable state across views.
+		const snapshots = affected.map((instance) => ({
+			instance,
+			previousOverlay: instance.viewLocalState.apiConfiguration,
+		}))
+
+		const results = await Promise.allSettled(
+			snapshots.map(async (snapshot) => {
 				// A provider that has begun disposal owns an orphaned viewStates key: viewId comes from
 				// the monotonic nextViewId counter, so no future view ever reads that entry again and
 				// prunePersistedViewStates() bounds it. Skipping work on such an instance is therefore
@@ -2935,17 +3193,52 @@ export class ClineProvider
 				// is already being torn down.
 				// Re-checked before every operation, not just at enumeration: this sibling can start
 				// disposing after the filter above ran.
-				if (instance._disposed) {
+				if (snapshot.instance._disposed) {
 					return
 				}
 				// Direct private access: compile-time safe across sibling instances.
-				await instance._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
-				if (instance._disposed) {
+				await snapshot.instance._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
+				if (snapshot.instance._disposed) {
 					return
 				}
-				await instance.postStateToWebview()
+				await snapshot.instance.postStateToWebview()
 			}),
 		)
+
+		const rejected = results.filter((result): result is PromiseRejectedResult => result.status === "rejected")
+		if (rejected.length > 0) {
+			const describeFailure = (e: unknown) => (e instanceof Error ? e.message : String(e))
+			const restoreFailures: string[] = []
+			// Undo every affected view, not just the failing one: the buffer is filled before the
+			// durable write settles, so even a rejected sibling keeps the new overlay. Each restore
+			// is awaited on its own so one failing restore cannot skip the next one.
+			for (const snapshot of snapshots) {
+				// Compensating through a provider that has begun disposal is the orphaned-key defect
+				// this guard exists to avoid; its entry is never read again, so leaving it is safe.
+				if (snapshot.instance._disposed) {
+					continue
+				}
+				try {
+					await snapshot.instance._saveViewLocalStateFromMutation({
+						apiConfiguration: snapshot.previousOverlay,
+					})
+				} catch (rollbackError: unknown) {
+					snapshot.instance.log(
+						`[refreshViewLocalStateForUpdatedProfile] Could not restore the buffer for view ${snapshot.instance.viewId} after a failed refresh: ${describeFailure(rollbackError)}`,
+					)
+					restoreFailures.push(`view ${snapshot.instance.viewId} buffer: ${describeFailure(rollbackError)}`)
+				}
+			}
+			if (restoreFailures.length > 0) {
+				// A sibling buffer that stayed on the new settings while the mutation is rolled back
+				// is a split durable state, not an ordinary failure: surface the distinct
+				// inconsistent-state error instead of the plain rejection.
+				throw new ProfileActivationInconsistentError(
+					`refreshViewLocalStateForUpdatedProfile: the profile change failed after sibling view buffers were rewritten and the rollback was incomplete (${restoreFailures.join("; ")}); the per-view buffers may now disagree with the shared stores. Original failure: ${describeFailure(rejected[0].reason)}`,
+				)
+			}
+			throw rejected[0].reason
+		}
 	}
 
 	/**
