@@ -30,6 +30,7 @@ import {
 	type ClineMessage,
 	type ClineSay,
 	type ClineAsk,
+	type ExtensionState,
 	type ToolProgressStatus,
 	type HistoryItem,
 	type PendingTaskAction,
@@ -67,14 +68,20 @@ import { maybeRemoveImageBlocks } from "../../api/transform/image-cleaning"
 import { OutputTokenLimitError } from "../../api/providers/utils/output-token-limit-error"
 
 // shared
-import { findLastIndex } from "../../shared/array"
+import { findLast, findLastIndex } from "../../shared/array"
 import { combineApiRequests } from "../../shared/combineApiRequests"
 import { combineCommandSequences } from "../../shared/combineCommandSequences"
 import { t } from "../../i18n"
 import { getApiMetrics, hasTokenUsageChanged, hasToolUsageChanged } from "../../shared/getApiMetrics"
 import { ClineAskResponse } from "../../shared/WebviewMessage"
 import { defaultModeSlug, getModeBySlug } from "../../shared/modes"
-import { DiffStrategy, type ToolUse, type ToolParamName, toolParamNames } from "../../shared/tools"
+import {
+	DiffStrategy,
+	type AutoApprovalContext,
+	type ToolUse,
+	type ToolParamName,
+	toolParamNames,
+} from "../../shared/tools"
 import { getModelMaxOutputTokens } from "../../shared/api"
 
 // services
@@ -133,13 +140,15 @@ import {
 import { processUserContentMentions } from "../mentions/processUserContentMentions"
 import { getMessagesSinceLastSummary, summarizeConversation, getEffectiveApiHistory } from "../condense"
 import { MessageQueueService } from "../message-queue/MessageQueueService"
-import { AutoApprovalHandler, checkAutoApproval } from "../auto-approval"
+import { type AutoDenyDetail, AutoApprovalHandler, checkAutoApproval } from "../auto-approval"
 import { MessageManager } from "../message-manager"
 import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
+import { initialRunState, type Ask, type RunEvent, type RunState } from "./run-state/runState"
+import { applyRunEvent, type RunRejection } from "./run-state/runStateShadow"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
@@ -157,6 +166,51 @@ export const MODEL_FETCH_TIMEOUT_MS = 5_000
 const QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const
 
 type QueuedAskResolution = { response: ClineAskResponse; requiresDurableAck: boolean }
+
+/**
+ * Denial kinds the command policy produces only while blanket auto-deny is on
+ * (`checkAutoApproval` returns `ask` for these when the setting is off — see
+ * the command branch of `src/core/auto-approval/index.ts`), so a denial of one
+ * of these kinds is blanket-caused. `denylist` and `guard_unavailable` are
+ * excluded: they deny independently of the blanket setting.
+ */
+export const BLANKET_DENY_AUTO_DENY_KINDS: ReadonlySet<AutoDenyDetail["kind"]> = new Set([
+	"dcg",
+	"not_allowlisted",
+	"dangerous_substitution",
+	"malformed_command",
+])
+
+/**
+ * What to do with a claimed queued message about to answer a command ask,
+ * decided against the auto-approval policy as it stands NOW.
+ */
+type QueuedCommandPolicyAction =
+	| { action: "consume" }
+	| { action: "approve" }
+	| { action: "deny"; detail?: AutoDenyDetail }
+	| { action: "release" }
+
+/**
+ * Whether blanket auto-deny currently engages. The three settings act as a
+ * conjunction: blanket deny only means anything while auto-approval is on and
+ * command auto-approval is on — without those two an unapproved command is
+ * prompted rather than auto-approved, so there is nothing to deny.
+ *
+ * Single source of truth for the derivation: the ask-time snapshot, the
+ * consume-site re-reads, and the tool-level execute-time re-check must not
+ * drift apart, or a flip landing between two of them decides execution or
+ * consumption on stale policy.
+ */
+export function isBlanketDenyEngaged(
+	state?: Pick<ExtensionState, "alwaysDenyUnapprovedCommands" | "autoApprovalEnabled" | "alwaysAllowExecute">,
+): boolean {
+	return (
+		state?.alwaysDenyUnapprovedCommands === true &&
+		state?.autoApprovalEnabled === true &&
+		state?.alwaysAllowExecute === true
+	)
+}
 
 function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolution | undefined {
 	if (type === "command_output") {
@@ -215,6 +269,13 @@ type AssistantMessagePersistenceCancellation = {
 	cancelled: boolean
 	promise: Promise<void>
 	resolve: () => void
+}
+
+export class PendingActionSettlementError extends Error {
+	constructor(message: string, options?: ErrorOptions) {
+		super(message, options)
+		this.name = "PendingActionSettlementError"
+	}
 }
 
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
@@ -343,7 +404,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	abandoned = false
 	abortReason?: ClineApiReqCancelReason
 	isInitialized = false
-	isPaused: boolean = false
+
+	runState: RunState = initialRunState
+	readonly runRejections: RunRejection[] = []
 
 	// API
 	apiConfiguration: ProviderSettings
@@ -370,6 +433,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private askResponse?: ClineAskResponse
 	private askResponseText?: string
 	private askResponseImages?: string[]
+	/**
+	 * Structured detail of the automatic denial that resolved the current ask,
+	 * set when `checkAutoApproval` denies via policy (denylist, blanket
+	 * auto-deny, or a DCG block in blanket mode) and consumed (cleared) by the
+	 * `ask()` result. System-generated, unlike `askResponseText` which carries
+	 * user feedback and triggers a `user_feedback` say row.
+	 */
+	private pendingAutoDenyDetail?: AutoDenyDetail
+	/**
+	 * Set while the current turn has blanket-denied a command ask. The queued
+	 * messages such a denial deliberately leaves in place were typed in response
+	 * to that denial, not as approval — so a later ask in the same turn must not
+	 * consume one as `yesButtonClicked` (which would silently approve it with the
+	 * interactive prompt suppressed). Read at the queued-message consume sites;
+	 * cleared by the per-turn reset beside `didToolFailInCurrentTurn`.
+	 */
+	private blanketDeniedCommandThisTurn = false
 	public lastMessageTs?: number
 	private autoApprovalTimeoutRef?: NodeJS.Timeout
 
@@ -489,6 +569,48 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 		this.userMessageContent.push(toolResult)
 		return true
+	}
+
+	/**
+	 * Derives terminal tool-turn readiness from the protocol state instead of
+	 * relying exclusively on the presenter's one-shot boolean latch.
+	 *
+	 * A re-entrant presenter can lose the latch update after every tool has
+	 * already completed. At that point the assistant turn is safe to continue
+	 * when the stream is closed, presentation is idle, every content block is
+	 * final, and every tool call has its matching result.
+	 */
+	private hasCompleteToolResultsForCurrentTurn(): boolean {
+		// Do not require currentStreamingContentIndex to reach the end here.
+		// A non-abort presenter rejection releases the lock and is logged, but
+		// nothing schedules another presentation pass. Gating on the index would
+		// strand this wait after exactly that failure.
+		if (!this.didCompleteReadingStream || this.presentAssistantMessageLocked) {
+			return false
+		}
+
+		const toolResultIds = new Set(
+			this.userMessageContent
+				.filter((block): block is Anthropic.ToolResultBlockParam => block.type === "tool_result")
+				.map((block) => block.tool_use_id),
+		)
+		let toolUseCount = 0
+
+		for (const block of this.assistantMessageContent) {
+			if (block.partial) {
+				return false
+			}
+			if (block.type !== "tool_use" && block.type !== "mcp_tool_use") {
+				continue
+			}
+
+			toolUseCount++
+			if (!block.id || !toolResultIds.has(sanitizeToolUseId(block.id))) {
+				return false
+			}
+		}
+
+		return toolUseCount > 0
 	}
 	didRejectTool = false
 	didAlreadyUseTool = false
@@ -613,7 +735,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		this.parentTask = parentTask
 		this.taskNumber = taskNumber
-		this.initialStatus = initialStatus
+		this.initialStatus = initialStatus ?? historyItem?.status
 		this.pendingAction = historyItem?.pendingAction
 
 		// Store the task's mode and API config name when it's created.
@@ -998,6 +1120,84 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
+	/**
+	 * An interrupted task cannot legally delegate, so a staged create-subtask
+	 * action is a durable rejection marker rather than replayable work. The
+	 * constructor-injected history item can be stale, so the persisted record
+	 * is refreshed first and the refreshed action is the one settled. A failed
+	 * refresh, lookup, or settlement stops replay instead of risking another
+	 * doomed child. A refreshed action kept for replay must also appear in the
+	 * loaded conversation, because a replayed acknowledgment without a matching
+	 * tool use could answer the wrong tool call.
+	 */
+	private async settleInterruptedCreateSubtaskBeforeReplay(): Promise<void> {
+		if (this.initialStatus !== "interrupted") {
+			return
+		}
+
+		const provider = this.providerRef.deref()
+		if (!provider) {
+			throw new PendingActionSettlementError(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Provider unavailable for task ${this.taskId}`,
+			)
+		}
+
+		try {
+			await provider.taskHistoryStore.reconcile({ forceRefresh: true })
+		} catch (error) {
+			throw new PendingActionSettlementError(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Failed to refresh task history for task ${this.taskId}`,
+				{ cause: error },
+			)
+		}
+
+		const refreshedItem = provider.taskHistoryStore.get(this.taskId)
+		if (!refreshedItem) {
+			throw new PendingActionSettlementError(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Task ${this.taskId} not found in refreshed task history`,
+			)
+		}
+		this.pendingAction = refreshedItem.pendingAction
+
+		const action = refreshedItem.pendingAction
+		if (action?.kind === "create_subtask") {
+			let authoritative: HistoryItem
+			try {
+				authoritative = await provider.taskHistoryStore.clearPendingActionIfMatching(
+					this.taskId,
+					action.actionId,
+				)
+			} catch (error) {
+				throw new PendingActionSettlementError(
+					`[Task#settleInterruptedCreateSubtaskBeforeReplay] Failed to settle rejected action for task ${this.taskId}`,
+					{ cause: error },
+				)
+			}
+			this.pendingAction = authoritative.pendingAction
+		}
+
+		const replayAction = this.pendingAction
+		if (replayAction && !this.loadedConversationContainsToolUse(replayAction.actionId)) {
+			throw new PendingActionSettlementError(
+				`[Task#settleInterruptedCreateSubtaskBeforeReplay] Refreshed action ${replayAction.actionId} for task ${this.taskId} is missing from the loaded conversation`,
+			)
+		}
+	}
+
+	/**
+	 * A replayed acknowledgment is safe only when its tool call is part of the
+	 * conversation the task just loaded. A tool result for an unmatched action
+	 * id could otherwise answer a tool call the model never made here.
+	 */
+	private loadedConversationContainsToolUse(actionId: string): boolean {
+		return this.apiConversationHistory.some(
+			(message) =>
+				message.role === "assistant" &&
+				Array.isArray(message.content) &&
+				message.content.some((block) => block.type === "tool_use" && block.id === actionId),
+		)
+	}
+
 	private handleQueuedAskResponse(message: QueuedMessage, resolution: QueuedAskResolution): string | undefined {
 		this.handleWebviewAskResponse(resolution.response, message.text, message.images)
 		if (resolution.requiresDurableAck) {
@@ -1005,6 +1205,146 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 		this.messageQueueService.removeMessage(message.id)
 		return undefined
+	}
+
+	/**
+	 * Re-read the auto-approval policy immediately before a queued message would
+	 * stand in for a command ask's approval, and consult the full command policy
+	 * under the fresh state if blanket deny now engages.
+	 *
+	 * The queued-answer shortcut skips `checkAutoApproval` and the ask's decision
+	 * otherwise rides on a single settings snapshot taken before the prompt was
+	 * shown. A blanket-deny flip landing between the snapshot and the consume is
+	 * invisible to that frozen gate, and the queued message would auto-approve an
+	 * unallowlisted command — fail-OPEN through a window as wide as the prompt
+	 * dwell. Re-reading here closes it: while blanket deny engages, the message
+	 * is never consumed as approval and the ask gets the structured denial policy
+	 * would have produced without a queued message.
+	 *
+	 * With `abortSignal`, the re-check settles on the abort itself instead of
+	 * merely losing a race against it: the fresh-state read ends in uncancellable
+	 * provider work, so a post-await check alone would leave this promise pending
+	 * whenever the read never lands, retaining the task and running policy work
+	 * after the abort. An aborted re-check resolves to the `release` no-op,
+	 * leaving the claim and the pending ask to the caller's release path.
+	 */
+	private async recheckQueuedCommandPolicy(
+		{
+			text,
+			isProtected,
+			dcgDecision,
+		}: {
+			text?: string
+			isProtected?: boolean
+			dcgDecision?: AutoApprovalContext["dcgDecision"]
+		},
+		abortSignal?: AbortSignal,
+	): Promise<QueuedCommandPolicyAction> {
+		// Resolving a sentinel rather than rejecting keeps a late rejection from
+		// the uncancellable read unhandled once the abort has won the race, and
+		// routes the abort through the same release early-return as the checks.
+		const signal = abortSignal
+		const abortPromise = signal
+			? new Promise<"aborted">((resolve) => {
+					if (signal.aborted) {
+						resolve("aborted")
+					} else {
+						signal.addEventListener("abort", () => resolve("aborted"), { once: true })
+					}
+				})
+			: undefined
+		const freshState = abortPromise
+			? await Promise.race([this.providerRef.deref()?.getState(), abortPromise])
+			: await this.providerRef.deref()?.getState()
+		// The abort either won the race (sentinel) or landed while the read was
+		// still resolving; both settle the re-check before any policy work.
+		if (freshState === "aborted" || signal?.aborted) {
+			return { action: "release" }
+		}
+		if (!isBlanketDenyEngaged(freshState)) {
+			// Disengaged: the queued answer is a legitimate approval, as before.
+			return { action: "consume" }
+		}
+		// Engaged: the full policy decides, with the fresh state. `cwd` and the
+		// forwarded DCG verdict match the ask-time `checkAutoApproval` call.
+		const approval = await checkAutoApproval({
+			state: freshState,
+			cwd: this.cwd,
+			ask: "command",
+			text,
+			isProtected,
+			dcgDecision,
+		})
+		if (signal?.aborted) {
+			return { action: "release" }
+		}
+		if (approval.decision === "deny") {
+			return { action: "deny", detail: approval.autoDeny }
+		}
+		if (approval.decision === "approve") {
+			return { action: "approve" }
+		}
+		return { action: "release" }
+	}
+
+	/**
+	 * Apply a queued-command policy re-check outcome to a claimed message: the
+	 * claim is released on every path except the legitimate consume, and an
+	 * engaged-policy outcome resolves the ask the same way the no-queued-message
+	 * path would (structured denial, approval, or — for a plain `ask` decision —
+	 * left pending for the user).
+	 */
+	private applyQueuedCommandPolicyAction(
+		action: QueuedCommandPolicyAction,
+		message: QueuedMessage,
+		resolution: QueuedAskResolution,
+	): string | undefined {
+		if (action.action !== "consume") {
+			this.messageQueueService.releaseMessage(message.id)
+		}
+		switch (action.action) {
+			case "consume":
+				return this.handleQueuedAskResponse(message, resolution)
+			case "deny":
+				if (action.detail && BLANKET_DENY_AUTO_DENY_KINDS.has(action.detail.kind)) {
+					this.blanketDeniedCommandThisTurn = true
+				}
+				this.pendingAutoDenyDetail = action.detail
+				this.denyAsk()
+				return undefined
+			case "approve":
+				this.approveAsk()
+				return undefined
+			case "release":
+				return undefined
+		}
+	}
+
+	/**
+	 * Shared claim-gate for the two queued-message consume sites.
+	 *
+	 * The latch blocks a message left in the queue by a command this turn already
+	 * blanket-denied (it answers that denial, not the current ask), and
+	 * `hasUnclaimed()` replaces the length-only `isEmpty()`, which reports a
+	 * queue containing nothing but claims as available for a new consumer.
+	 * `isMessageQueued`/`isStatusMutable` keep `isEmpty()` semantics on purpose:
+	 * flipping those would re-enable interactive prompt timers whenever a claim
+	 * is outstanding.
+	 */
+	private mayDrainQueuedMessageForAsk(): boolean {
+		return !this.blanketDeniedCommandThisTurn && this.messageQueueService.hasUnclaimed()
+	}
+
+	/**
+	 * Latch the turn after a blanket-caused command denial detected outside
+	 * the ask path (the tool's execute-time policy re-check). A message left
+	 * in the queue by that denial answers the denial, not the next ask, so
+	 * without the latch a later non-command ask would consume it as an
+	 * approval. Deliberately not cleared mid-turn: the per-turn reset owns
+	 * clearing.
+	 */
+	public recordBlanketCommandDenial(): void {
+		this.blanketDeniedCommandThisTurn = true
 	}
 
 	static create(options: TaskOptions): [Task, Promise<void>] {
@@ -1295,8 +1635,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.clineMessages.push(message)
 		const provider = this.providerRef.deref()
 		// Unanswered asks must reach the webview before Message listeners can respond against its state.
-		const requiresImmediateState =
-			message.partial === true || (message.type === "ask" && message.isAnswered !== true)
+		//
+		// Partial `say` messages deliberately do NOT flush. `flushPostStateToWebviewThrottled()`
+		// invoked right after a leading-edge debounce call has no pending trailing invocation to
+		// run, so it only cancels the trailing timer — which makes the *next* call hit the leading
+		// edge and post immediately. Flushing on every partial therefore defeated the debounce
+		// entirely (one full-state post per message, the very behaviour #1078 set out to remove).
+		// They are safe on the throttled path: the trailing/maxWait post carries the message's
+		// current text, so a `messageUpdated` dropped for a not-yet-known `ts` is superseded
+		// rather than lost.
+		//
+		// Partial *asks* still flush, via the clause below — `Task#ask` adds them without
+		// `isAnswered`, so they keep the ordering guarantee that unanswered asks depend on.
+		const requiresImmediateState = message.type === "ask" && message.isAnswered !== true
 		try {
 			await provider?.postStateToWebviewThrottled()
 		} catch (error) {
@@ -1376,7 +1727,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
-	/** Persists Cline messages and updates task metadata in the history store. Returns false on failure. */
+	/**
+	 * Persist the message array, then refresh the derived metadata / task-history entries.
+	 *
+	 * The returned boolean reflects the message write only: `saveTaskMessages` failure
+	 * leaves the on-disk record stale, so callers gating UI updates on durable state must
+	 * skip them. Metadata / task-history stage failures are logged and swallowed — the
+	 * message array is already persisted, and the next save recomputes and re-emits the
+	 * metadata.
+	 *
+	 * `merge` (default `true`) is passed through to `saveTaskMessages`: the in-memory
+	 * snapshot is merged with the on-disk record. `overwriteClineMessages` passes `false`
+	 * to replace the stored messages outright.
+	 */
 	private async saveClineMessages(merge = true): Promise<boolean> {
 		try {
 			await saveTaskMessages({
@@ -1385,7 +1748,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				globalStoragePath: this.globalStoragePath,
 				merge,
 			})
+		} catch (error) {
+			console.error("Failed to save Roo messages:", error)
+			return false
+		}
 
+		try {
 			if (this._taskApiConfigName === undefined) {
 				await this.taskApiConfigReady
 			}
@@ -1413,11 +1781,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const provider = this.providerRef.deref()
 			const existingStatus = provider?.taskHistoryStore.get(this.taskId)?.status
 			await provider?.updateTaskHistory(existingStatus ? { ...historyItem, status: existingStatus } : historyItem)
-			return true
 		} catch (error) {
-			console.error("Failed to save Roo messages:", error)
-			return false
+			// The message array was persisted above; a metadata or task-history failure must
+			// not mask that write (see the method docs). The next saveClineMessages() call
+			// recomputes and re-emits the metadata update.
+			console.error("Failed to save task metadata:", error)
 		}
+
+		return true
 	}
 
 	private findMessageByTimestamp(ts: number): ClineMessage | undefined {
@@ -1439,7 +1810,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		partial?: boolean,
 		progressStatus?: ToolProgressStatus,
 		isProtected?: boolean,
-	): Promise<{ response: ClineAskResponse; text?: string; images?: string[]; queuedMessageId?: string }> {
+		autoApprovalContext?: AutoApprovalContext,
+	): Promise<{
+		response: ClineAskResponse
+		text?: string
+		images?: string[]
+		queuedMessageId?: string
+		/**
+		 * Present when the ask was resolved by an automatic (policy) denial
+		 * rather than a user click. Consumers must not treat this as a user
+		 * rejection: the denial is scoped to its own tool call.
+		 */
+		autoDenyDetail?: AutoDenyDetail
+	}> {
 		// If this Cline instance was aborted by the provider, then the only
 		// thing keeping us alive is a promise still running in the background,
 		// in which case we don't want to send its result to the webview as it
@@ -1462,8 +1845,33 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// rendered, leaving them stuck on-screen).
 		const provider = this.providerRef.deref()
 		const state = provider ? await provider.getState() : undefined
+		// The blanket auto-deny setting only engages while command auto-approval
+		// is on; while it is disengaged, the queued-message shortcut below is
+		// unaffected.
+		const blanketDenyEngaged = isBlanketDenyEngaged(state)
+		// A queued message normally answers the pending ask, which for command asks
+		// means an unconditional auto-approve. That shortcut must never bypass
+		// blanket deny: while it is engaged, a command ask keeps its policy
+		// decision and the queued message is left in place for a later turn
+		// instead of being consumed as approval. The shared claim gate adds the
+		// per-turn latch: a message a blanket denial left behind answers that
+		// denial, not this ask, and a claim would force the `ask` decision below
+		// while the policy would have auto-answered it — holding a prompt no user
+		// has to see and stalling a hands-free session. Leaving the message
+		// unclaimed lets the policy decision stand and keeps the message queued.
+		const queueMayAnswerThisAsk = !(blanketDenyEngaged && type === "command")
+		// A queued message must not short-circuit protected asks (e.g.
+		// DCG-blocked commands): claiming one here skips checkAutoApproval, and
+		// the drain below would auto-approve what protection intentionally
+		// leaves pending for explicit user approval.
 		const queuedMessage =
-			partial === true || type === "command_output" ? undefined : this.messageQueueService.claimNextMessage()
+			partial === true ||
+			type === "command_output" ||
+			isProtected ||
+			!queueMayAnswerThisAsk ||
+			!this.mayDrainQueuedMessageForAsk()
+				? undefined
+				: this.messageQueueService.claimNextMessage()
 		const queuedAskResolution = queuedMessage ? queuedResponseForAsk(type, text) : undefined
 		// `this.cwd`, not `provider.cwd`:
 		// The path inside `text` was made relative to this task's workspace,
@@ -1471,9 +1879,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// currently reports.
 		const approval = queuedAskResolution
 			? ({ decision: "ask" } as const)
-			: await checkAutoApproval({ state, cwd: this.cwd, ask: type, text, isProtected })
+			: await checkAutoApproval({
+					state,
+					cwd: this.cwd,
+					ask: type,
+					text,
+					isProtected,
+					dcgDecision: autoApprovalContext?.dcgDecision,
+				})
 		const isAutoAnswered = approval.decision === "approve" || approval.decision === "deny"
 		const autoApprovalDecision = isAutoAnswered ? approval.decision : undefined
+
+		// Re-check: an abort during the getState/checkAutoApproval awaits must not post an ask row.
+		if (this.abort) {
+			if (queuedMessage) {
+				this.messageQueueService.releaseMessage(queuedMessage.id)
+			}
+			throw new Error(`[RooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
+		}
 
 		if (partial !== undefined) {
 			const lastMessage = this.clineMessages.at(-1)
@@ -1583,6 +2006,28 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		const timeouts: NodeJS.Timeout[] = []
 
+		// Record the structured detail of an automatic (policy) denial so the
+		// `ask()` result can hand it to the caller. Assigned unconditionally so
+		// a stale detail from a previous ask can never leak into this result.
+		// Deliberately not routed through `askResponseText`: that field means
+		// *user feedback* and triggers a `user_feedback` say row, while this
+		// reason is system-generated.
+		this.pendingAutoDenyDetail = approval.decision === "deny" ? approval.autoDeny : undefined
+		// A blanket-caused denial leaves the queued messages this turn for later
+		// turns; latch so no ask in this turn consumes one as approval. Set only on
+		// blanket-caused denials — here and at the consume-site re-check
+		// (`applyQueuedCommandPolicyAction`) — and never cleared mid-turn: the
+		// per-turn reset owns clearing, so a later non-denied ask cannot drop the
+		// latch prematurely.
+		if (
+			type === "command" &&
+			approval.decision === "deny" &&
+			approval.autoDeny &&
+			BLANKET_DENY_AUTO_DENY_KINDS.has(approval.autoDeny.kind)
+		) {
+			this.blanketDeniedCommandThisTurn = true
+		}
+
 		if (approval.decision === "approve") {
 			this.approveAsk()
 		} else if (approval.decision === "deny") {
@@ -1607,12 +2052,45 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const isStatusMutable = !partial && isBlocking && !isMessageQueued && approval.decision === "ask"
 
 		let queuedMessageId: string | undefined
-		if (isStatusMutable) {
+		// Arm the interactive/resumable/idle status timers for this ask: the
+		// single source of that arm, shared between the queue-free case and the
+		// claim-gated and queued-release paths below. A gated or released claim
+		// keeps the message in the queue, so `isMessageQueued` stays true and
+		// `isStatusMutable` — which requires an empty queue — stays false while
+		// the ask waits for the user; arming only from `isStatusMutable` would
+		// leave hands-free/API consumers seeing `Running` with no
+		// `TaskInteractive`/`interactionRequired` for a prompt that is in fact
+		// pending. Idempotent: several arm sites can fire for one ask (e.g. the
+		// queue-free arm, then a drain-site release), and a second arm would
+		// double-emit the event. The `timeouts` array is the arm ledger, and a
+		// `finally` around the wait owns the `clearTimeout` teardown on every
+		// settle path, including the abort and supersession throws. The
+		// callbacks still re-check liveness at fire time: an already-due timer
+		// can outrun that teardown, and a status transition published after
+		// abort would describe a task that no longer runs.
+		const armAskStatusTimers = (): void => {
+			const askStillPending = this.askResponse === undefined && this.lastMessageTs === askTs
+			if (!askStillPending || this.abort || partial || approval.decision !== "ask" || timeouts.length > 0) {
+				return
+			}
+
 			const statusMutationTimeout = 2_000
+
+			// Fire-time liveness check for the timers armed below. Clearing a due
+			// timer does not retract it: when abort lands between the wait's last
+			// poll tick and the timer's due time, the callback runs before
+			// `ask()`'s continuation reaches the teardown sweep, so liveness has
+			// to be re-checked here. Read-only: the `timeouts` ledger is never
+			// touched from the callbacks.
+			const statusTimerStillLive = (): boolean =>
+				!this.abort && this.askResponse === undefined && this.lastMessageTs === askTs
 
 			if (isInteractiveAsk(type)) {
 				timeouts.push(
 					setTimeout(() => {
+						if (!statusTimerStillLive()) {
+							return
+						}
 						const message = this.findMessageByTimestamp(askTs)
 
 						if (message) {
@@ -1628,6 +2106,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			} else if (isResumableAsk(type)) {
 				timeouts.push(
 					setTimeout(() => {
+						if (!statusTimerStillLive()) {
+							return
+						}
 						const message = this.findMessageByTimestamp(askTs)
 
 						if (message) {
@@ -1639,6 +2120,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			} else if (isIdleAsk(type)) {
 				timeouts.push(
 					setTimeout(() => {
+						if (!statusTimerStillLive()) {
+							return
+						}
 						const message = this.findMessageByTimestamp(askTs)
 
 						if (message) {
@@ -1648,74 +2132,239 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					}, statusMutationTimeout),
 				)
 			}
-		} else if (isMessageQueued && shouldDrainQueuedMessageForAsk && queuedMessage && queuedAskResolution) {
-			queuedMessageId = this.handleQueuedAskResponse(queuedMessage, queuedAskResolution)
+		}
+
+		if (isStatusMutable) {
+			armAskStatusTimers()
+		} else if (queuedMessage && queuedAskResolution) {
+			if (type === "command") {
+				// The snapshot gate is frozen; blanket deny may have engaged since the
+				// ask began. Re-read policy before the message stands in for approval.
+				// Drain-site parity for cancellation and cleanup: the fresh policy
+				// read ends in an uncancellable provider read, so an abort poller
+				// aborts a signal the re-check itself awaits — settling it on the
+				// abort instead of leaving a pending promise that retains this task
+				// and runs policy post-abort — and one `finally` releases the claim
+				// on the abort, throw, supersession, and "release" outcomes alike.
+				const recheckAbort = new AbortController()
+				const checkAbort = () => {
+					if (this.abort) {
+						recheckAbort.abort()
+					}
+				}
+				checkAbort()
+				const abortWatcher = setInterval(checkAbort, 100)
+				try {
+					const action = await this.recheckQueuedCommandPolicy(
+						{
+							text,
+							isProtected,
+							dcgDecision: autoApprovalContext?.dcgDecision,
+						},
+						recheckAbort.signal,
+					)
+					if (!this.abort && this.askResponse === undefined && this.lastMessageTs === askTs) {
+						// Any outcome on a still-live ask — the user answered or the
+						// ask was superseded — leaves the message for the next
+						// consumer; the `finally` below releases the claim and the ask
+						// resolves with the user's own response via the pWaitFor.
+						queuedMessageId = this.applyQueuedCommandPolicyAction(
+							action,
+							queuedMessage,
+							queuedAskResolution,
+						)
+						// A "release" outcome leaves the ask pending; consume/deny/approve
+						// resolved it, and the arm's pending check declines to arm then.
+						armAskStatusTimers()
+					}
+				} catch (error) {
+					// Drain-site parity: a failed re-check must not reject ask() nor
+					// strand the claim; the prompt stays pending for the user.
+					console.error("[Task#ask] queued command policy re-check failed:", error)
+					armAskStatusTimers()
+				} finally {
+					clearInterval(abortWatcher)
+					// One release path for abort, throw, supersession, and "release".
+					// `releaseMessage` is idempotent, so it stays safe beside the
+					// helper-internal release. The durable consume is the one outcome
+					// that must keep its claim until persistence removes the message —
+					// it is the only path that assigned `queuedMessageId` here.
+					if (queuedMessageId !== queuedMessage.id) {
+						this.messageQueueService.releaseMessage(queuedMessage.id)
+					}
+				}
+			} else {
+				queuedMessageId = this.handleQueuedAskResponse(queuedMessage, queuedAskResolution)
+			}
+		} else if (shouldDrainQueuedMessageForAsk && isMessageQueued) {
+			// The claim gate (per-turn latch, or blanket deny engaged for a command
+			// ask) left the queued message untouched. If the policy still leaves the
+			// prompt pending, the non-empty queue keeps `isStatusMutable` false, so
+			// the interactive arm must run from here — the same reason a release
+			// re-arms. For an auto-answered ask the arm's pending check declines.
+			armAskStatusTimers()
+		}
+
+		// At most one drain-site policy re-check is in flight per ask; the
+		// pWaitFor predicate is synchronous, so its await runs out here.
+		let queuedCommandPolicyCheck: Promise<void> | undefined
+		const verifyDrainedCommandMessage = async (
+			message: QueuedMessage,
+			resolution: QueuedAskResolution,
+		): Promise<void> => {
+			// The fresh policy read ends in `provider.getState()`, which awaits
+			// custom-mode file work that cannot be cancelled from here. An abort
+			// poller aborts a signal the re-check itself awaits, settling it within
+			// one poll of the abort instead of leaving `ask()` blocked on the pending
+			// read or a lost race retaining this task. The re-check's own race
+			// attaches handlers to the read, so it rejecting after the abort settles
+			// is already considered handled — no extra `.catch` needed.
+			const recheckAbort = new AbortController()
+			const checkAbort = () => {
+				if (this.abort) {
+					recheckAbort.abort()
+				}
+			}
+			checkAbort()
+			const abortWatcher = setInterval(checkAbort, 100)
+			try {
+				const action = await this.recheckQueuedCommandPolicy(
+					{
+						text,
+						isProtected,
+						dcgDecision: autoApprovalContext?.dcgDecision,
+					},
+					recheckAbort.signal,
+				)
+				if (!this.abort && this.askResponse === undefined && this.lastMessageTs === askTs) {
+					queuedMessageId = this.applyQueuedCommandPolicyAction(action, message, resolution)
+					// A "release" outcome leaves the ask pending while the queue stays
+					// non-empty, so the arm that `isStatusMutable` gates — computed
+					// once, before the claim — must run here.
+					armAskStatusTimers()
+				}
+			} finally {
+				clearInterval(abortWatcher)
+				// One release path for abort, throw, supersession, and "release".
+				// `releaseMessage` is idempotent, so it stays safe beside the
+				// branch-local releases. The durable consume is the one outcome
+				// that must keep its claim until persistence removes the message —
+				// it is the only path that assigned `queuedMessageId`.
+				if (queuedMessageId !== message.id) {
+					this.messageQueueService.releaseMessage(message.id)
+				}
+			}
 		}
 
 		// Wait for askResponse to be set
-		await pWaitFor(
-			() => {
-				if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
-					return true
-				}
-
-				// If a queued message arrives while we're blocked on an ask (e.g. a follow-up
-				// suggestion click that was incorrectly queued due to UI state), consume it
-				// immediately so the task doesn't hang.
-				if (shouldDrainQueuedMessageForAsk && !this.messageQueueService.isEmpty()) {
-					const message = this.messageQueueService.claimNextMessage()
-					const resolution = message ? queuedResponseForAsk(type, text) : undefined
-					if (message && resolution) {
-						queuedMessageId = this.handleQueuedAskResponse(message, resolution)
+		try {
+			await pWaitFor(
+				() => {
+					if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
+						return true
 					}
+
+					// If a queued message arrives while we're blocked on an ask (e.g. a follow-up
+					// suggestion click that was incorrectly queued due to UI state), consume it
+					// immediately so the task doesn't hang. Command asks under blanket deny are
+					// excluded (`queueMayAnswerThisAsk`): a queued message must never stand in
+					// for the explicit approval the policy withheld. Protected asks are exempt
+					// too: like the pre-block drain above, they must wait for explicit user
+					// approval.
+					if (
+						queueMayAnswerThisAsk &&
+						shouldDrainQueuedMessageForAsk &&
+						!isProtected &&
+						!queuedCommandPolicyCheck &&
+						this.mayDrainQueuedMessageForAsk()
+					) {
+						const message = this.messageQueueService.claimNextMessage()
+						const resolution = message ? queuedResponseForAsk(type, text) : undefined
+						if (message && resolution) {
+							if (type === "command") {
+								// Claim first, then verify the policy off-predicate: a
+								// blanket-deny flip landing during the prompt dwell is
+								// invisible to the frozen snapshot gate, so the claim is
+								// provisional until the fresh check clears it.
+								queuedCommandPolicyCheck = verifyDrainedCommandMessage(message, resolution).catch(
+									(error) => {
+										// The background check must never reject unhandled;
+										// on failure the claim is released so the message
+										// stays available to a later consumer.
+										console.error("[Task#ask] queued command policy re-check failed:", error)
+										this.messageQueueService.releaseMessage(message.id)
+										armAskStatusTimers()
+									},
+								)
+							} else {
+								queuedMessageId = this.handleQueuedAskResponse(message, resolution)
+							}
+						}
+					}
+
+					return false
+				},
+				{ interval: 100 },
+			)
+
+			// Let a policy re-check that was in flight when the wait resolved run to
+			// completion: its bail-out path releases the claim, and leaving it
+			// unresolved would let the consume race the result below. On abort, detach
+			// instead: the re-check settles on the abort and its `finally` releases the
+			// claim either way, while awaiting past the abort could stall on an
+			// uncancellable read instead of letting the throw below settle the ask.
+			if (queuedCommandPolicyCheck && !this.abort) {
+				await queuedCommandPolicyCheck
+			}
+
+			/* v8 ignore next 3 -- abort-while-waiting path; covered by e2e standalone-resume test */
+			if (this.abort) {
+				if (queuedMessageId) {
+					this.messageQueueService.releaseMessage(queuedMessageId)
 				}
-
-				return false
-			},
-			{ interval: 100 },
-		)
-
-		/* v8 ignore next 3 -- abort-while-waiting path; covered by e2e standalone-resume test */
-		if (this.abort) {
-			if (queuedMessageId) {
-				this.messageQueueService.releaseMessage(queuedMessageId)
+				throw new Error(`[ZooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
 			}
-			throw new Error(`[ZooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
-		}
 
-		if (this.lastMessageTs !== askTs) {
-			// Could happen if we send multiple asks in a row i.e. with
-			// command_output. It's important that when we know an ask could
-			// fail, it is handled gracefully.
-			if (queuedMessageId) {
-				this.messageQueueService.releaseMessage(queuedMessageId)
+			if (this.lastMessageTs !== askTs) {
+				// Could happen if we send multiple asks in a row i.e. with
+				// command_output. It's important that when we know an ask could
+				// fail, it is handled gracefully.
+				if (queuedMessageId) {
+					this.messageQueueService.releaseMessage(queuedMessageId)
+				}
+				throw new AskIgnoredError("superseded")
 			}
-			throw new AskIgnoredError("superseded")
+
+			const result = {
+				response: this.askResponse!,
+				text: this.askResponseText,
+				images: this.askResponseImages,
+				queuedMessageId,
+				autoDenyDetail: this.pendingAutoDenyDetail,
+			}
+			this.askResponse = undefined
+			this.askResponseText = undefined
+			this.askResponseImages = undefined
+			this.pendingAutoDenyDetail = undefined
+
+			// Switch back to an active state.
+			if (this.idleAsk || this.resumableAsk || this.interactiveAsk) {
+				this.idleAsk = undefined
+				this.resumableAsk = undefined
+				this.interactiveAsk = undefined
+				this.emit(RooCodeEventName.TaskActive, this.taskId)
+			}
+
+			this.emit(RooCodeEventName.TaskAskResponded)
+			return result
+		} finally {
+			// Teardown for every settle path: the normal resolve and the
+			// abort/supersession throws that never reach the result handling
+			// above. The fire-time guard in the armed callbacks covers the
+			// sub-tick window where an already-due timer fires before this
+			// sweep runs.
+			timeouts.forEach((timeout) => clearTimeout(timeout))
 		}
-
-		const result = {
-			response: this.askResponse!,
-			text: this.askResponseText,
-			images: this.askResponseImages,
-			queuedMessageId,
-		}
-		this.askResponse = undefined
-		this.askResponseText = undefined
-		this.askResponseImages = undefined
-
-		// Cancel the timeouts if they are still running.
-		timeouts.forEach((timeout) => clearTimeout(timeout))
-
-		// Switch back to an active state.
-		if (this.idleAsk || this.resumableAsk || this.interactiveAsk) {
-			this.idleAsk = undefined
-			this.resumableAsk = undefined
-			this.interactiveAsk = undefined
-			this.emit(RooCodeEventName.TaskActive, this.taskId)
-		}
-
-		this.emit(RooCodeEventName.TaskAskResponded)
-		return result
 	}
 
 	handleWebviewAskResponse(askResponse: ClineAskResponse, text?: string, images?: string[]) {
@@ -2148,6 +2797,56 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return formatResponse.toolError(formatResponse.missingToolParameterError(paramName))
 	}
 
+	/**
+	 * Finalize a partial "tool" ask message without blocking for user input.
+	 * Call this in error paths where a partial tool message was opened during streaming
+	 * but execution failed before the normal approval flow could close it, so the webview
+	 * spinner does not get stuck in a loading state.
+	 *
+	 * The matching partial message may no longer be the final entry if another asynchronous
+	 * message was inserted between the partial ask and the error handler, so search backward
+	 * instead of relying on clineMessages.at(-1).
+	 *
+	 * Any in-progress `progressStatus` on the message is cleared as well: the ask is being
+	 * finalized because it will NOT complete, so a stale "in progress" indicator would be
+	 * misleading (the normal completion path overwrites it with the final status instead).
+	 *
+	 * `isAnswered` is stamped true because the ask is resolved by the system rather than
+	 * by the user: ChatView only shows ask buttons for unanswered messages, so leaving it
+	 * unset would keep Save/Reject armed for a write that already failed.
+	 */
+	async finalizePartialToolAsk(text?: string): Promise<void> {
+		const partialToolAsk = findLast(
+			this.clineMessages,
+			(message) =>
+				message.partial === true &&
+				message.type === "ask" &&
+				message.ask === "tool" &&
+				(text === undefined || message.text === text),
+		)
+
+		if (!partialToolAsk) {
+			return
+		}
+
+		partialToolAsk.partial = false
+		partialToolAsk.progressStatus = undefined
+		partialToolAsk.isAnswered = true
+		const saved = await this.saveClineMessages()
+		if (!saved) {
+			// The persistence write failed: the on-disk record still carries `partial: true`
+			// while the in-memory message is finalized. Skip the webview-only update so the
+			// two views do not diverge (a later state resync or restart reload would flip the
+			// spinner back on from the stale disk record). The next saveClineMessages() call
+			// re-persists the full message array and repairs the disk record.
+			console.error("[Task#finalizePartialToolAsk] saveClineMessages failed; skipping webview update")
+			return
+		}
+		await this.updateClineMessage(partialToolAsk).catch((error) => {
+			console.error("[Task#finalizePartialToolAsk] updateClineMessage failed:", error)
+		})
+	}
+
 	// Lifecycle
 	// Start / Resume / Abort / Dispose
 
@@ -2376,6 +3075,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// This is important in case the user deletes messages without resuming
 			// the task first.
 			this.hydrateApiConversationHistory(savedApiConversationHistory)
+			await this.settleInterruptedCreateSubtaskBeforeReplay()
 			if (
 				this.pendingAction &&
 				this.apiConversationHistory.some(
@@ -2679,6 +3379,65 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const tokenUsage = this.getTokenUsage()
 		this.debouncedEmitTokenUsage(tokenUsage, this.toolUsage)
 		this.debouncedEmitTokenUsage.flush()
+	}
+
+	markInitialized(): void {
+		this.isInitialized = true
+		this.driveRunEvent({ tag: "initialized" })
+	}
+
+	markStreamStarted(): void {
+		this.isStreaming = true
+		this.driveRunEvent({ tag: "streamStarted" })
+	}
+
+	markStreamCleanupFinished(): void {
+		this.didFinishAbortingStream = true
+		this.driveRunEvent({ tag: "streamCleanupFinished" })
+	}
+
+	markStreamEnded(): void {
+		this.isStreaming = false
+		this.driveRunEvent({ tag: "streamEnded" })
+	}
+
+	markAskStarted(ask: Exclude<Ask, { tag: "none" }>): void {
+		this.driveRunEvent({ tag: "askStarted", ask })
+	}
+
+	markAskSettled(askTs: number): void {
+		this.driveRunEvent({ tag: "askSettled", askTs })
+	}
+
+	markCompletionAccepted(askTs: number): void {
+		this.driveRunEvent({ tag: "completionAccepted", askTs })
+	}
+
+	setAbortReason(reason: ClineApiReqCancelReason): void {
+		this.abortReason ??= reason
+		this.driveRunEvent({ tag: "reasonSet", reason })
+	}
+
+	requestAbort(isAbandoned: boolean): void {
+		if (isAbandoned) {
+			this.abandoned = true
+		}
+		this.abort = true
+		this.driveRunEvent({ tag: "abortRequested", abandoned: isAbandoned })
+	}
+
+	requestAbandon(): void {
+		this.abandoned = true
+		this.driveRunEvent({ tag: "abandonRequested" })
+	}
+
+	requestDispose(): void {
+		this.abort = true
+		this.driveRunEvent({ tag: "disposeRequested" })
+	}
+
+	private driveRunEvent(event: RunEvent): void {
+		this.runState = applyRunEvent(this.runState, event, this.runRejections)
 	}
 
 	public abortTask(isAbandoned = false): Promise<void> {
@@ -3256,6 +4015,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// only prevent attempt_completion within the same assistant message, not across turns
 				// (e.g., if a tool fails, then user sends a message saying "just complete anyway")
 				this.didToolFailInCurrentTurn = false
+				// A blanket command denial only suppresses queued-message approval
+				// for the turn that earned it: a message the user queues afterward
+				// (a new turn) is fair game for the next ask to answer.
+				this.blanketDeniedCommandThisTurn = false
 				this.presentAssistantMessageLocked = false
 				this.presentAssistantMessageHasPendingUpdates = false
 				// No legacy text-stream tool parser.
@@ -3375,9 +4138,33 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										// Without this check, duplicate tool_use blocks with the same ID would
 										// be added to assistantMessageContent, causing API 400 errors:
 										// "tool_use ids must be unique"
-										if (this.streamingToolCallIndices.has(event.id)) {
+										// Use compound key (id, name) to distinguish different tools with the same call ID.
+										const dedupKey = NativeToolCallParser.makeStreamingKey(event.id, event.name)
+										if (this.streamingToolCallIndices.has(dedupKey)) {
 											console.warn(
 												`[Task#${this.taskId}] Ignoring duplicate tool_call_start for ID: ${event.id} (tool: ${event.name})`,
+											)
+											continue
+										}
+
+										// A call ID that already appears in assistantMessageContent cannot be
+										// round-tripped: the API history builder dedupes tool_use blocks by ID and
+										// results are matched by tool_use_id, so a second entry with the same ID
+										// would be orphaned. The compound-key check above already rejects an
+										// identical (id, name) start in this stream, so reject any remaining start
+										// that reuses an ID, regardless of the entry's displayed name: alias
+										// resolution renames a streaming entry to its canonical tool (the streamed
+										// name is kept in originalName), which would otherwise let a same-ID start
+										// under the canonical name slip past a name comparison. The first call wins.
+										const idAlreadyUsed = this.assistantMessageContent.some(
+											(entry) =>
+												// Stryker disable next-line ConditionalExpression: only tool_use and mcp_tool_use entries ever carry an id — the text block pushed in the text case has no id field and the start events reaching this guard always carry the string id locked in by processRawChunk — so the type check cannot change the outcome of entry.id === event.id for any entry this pipeline produces; the false replacement is additionally killed by the rejection tests.
+												(entry.type === "tool_use" || entry.type === "mcp_tool_use") &&
+												(entry as { id?: string }).id === event.id,
+										)
+										if (idAlreadyUsed) {
+											console.warn(
+												`[Task#${this.taskId}] Ignoring tool_call_start reusing call ID ${event.id} (tool: ${event.name})`,
 											)
 											continue
 										}
@@ -3399,7 +4186,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 										// Track the index where this tool will be stored
 										const toolUseIndex = this.assistantMessageContent.length
-										this.streamingToolCallIndices.set(event.id, toolUseIndex)
+										this.streamingToolCallIndices.set(dedupKey, toolUseIndex)
 
 										// Create initial partial tool use
 										const partialToolUse: ToolUse = {
@@ -3418,16 +4205,43 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
 										this.presentAssistantMessageSafe()
 									} else if (event.type === "tool_call_delta") {
-										// Process chunk using streaming JSON parser
-										const partialToolUse = NativeToolCallParser.processStreamingChunk(
-											event.id,
-											event.delta,
-											nativeToolCallParserScope,
-										)
+										// Deltas from the raw-chunk path carry the tracked name: build the
+										// compound key directly so same-ID calls cannot share an
+										// accumulator. Deltas without a name (legacy provider streams)
+										// keep the deprecated single-entry-per-ID lookup.
+										let streamingKey: string | undefined
 
-										if (partialToolUse) {
-											// Get the index for this tool call
-											const toolUseIndex = this.streamingToolCallIndices.get(event.id)
+										// Stryker disable next-line ConditionalExpression: event.name is always a string on this path — the only delta events reaching this handler are emitted by processRawChunk with the tracked start name (never undefined), so the legacy nameless branch below is unreachable defensive code and the conditional always takes the named side.
+										if (event.name !== undefined) {
+											streamingKey = NativeToolCallParser.makeStreamingKey(event.id, event.name)
+										} else {
+											const legacyEntry = NativeToolCallParser.getStreamingToolCallById(
+												event.id,
+												nativeToolCallParserScope,
+											)
+											streamingKey = legacyEntry
+												? NativeToolCallParser.makeStreamingKey(
+														legacyEntry.id,
+														legacyEntry.name,
+													)
+												: undefined
+										}
+
+										const partialToolUse =
+											// Stryker disable next-line ConditionalExpression: streamingKey can never be undefined here — makeStreamingKey always returns a string and the legacy lookup branch above is unreachable (see the directive on the event.name check) — so the null side is unreachable defensive code.
+											streamingKey === undefined
+												? null
+												: NativeToolCallParser.processStreamingChunk(
+														streamingKey,
+														event.delta,
+														nativeToolCallParserScope,
+													)
+
+										// Stryker disable next-line ConditionalExpression, EqualityOperator: streamingKey is always a defined string on this path (makeStreamingKey never returns undefined; the legacy branch is unreachable per the directives above), and processStreamingChunk returns a partial ToolUse for a known key, so both defensive conditions reduce to the partialToolUse check and cannot change the observed behavior.
+										if (partialToolUse && streamingKey !== undefined) {
+											// Reuse the compound key built above: it is exactly the key the start event
+											// registered under, so the delta lookup needs no second encoding.
+											const toolUseIndex = this.streamingToolCallIndices.get(streamingKey)
 											if (toolUseIndex !== undefined) {
 												// Store the ID for native protocol
 												;(partialToolUse as any).id = event.id
@@ -3812,14 +4626,42 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				const finalizeEvents = NativeToolCallParser.finalizeRawChunks(nativeToolCallParserScope)
 				for (const event of finalizeEvents) {
 					if (event.type === "tool_call_end") {
+						// Create compound key for deduplication (same pattern as streaming handler).
+						// End events carry the tool name; fall back to the id for events that don't.
+						// Stryker disable next-line LogicalOperator: event.name is always a string on this path — finalizeRawChunks emits end events with the tracked start name (a string, set before the tracker can start), so the ?? event.id fallback guards a nameless end event this pipeline cannot produce.
+						let eventName = event.name ?? event.id
+						let dedupKey = NativeToolCallParser.makeStreamingKey(event.id, eventName)
+
 						// Finalize the streaming tool call
-						const finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
-							event.id,
+						let finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
+							dedupKey,
 							nativeToolCallParserScope,
 						)
 
-						// Get the index for this tool call
-						const toolUseIndex = this.streamingToolCallIndices.get(event.id)
+						// Get the index for this tool call using compound key
+						let toolUseIndex = this.streamingToolCallIndices.get(dedupKey)
+
+						// Defensive resolution: if the end event's name does not match the start
+						// name (provider quirk), the compound-key lookup above misses and both the
+						// parser entry and the dedup tracking would stay stale. Resolve the tracked
+						// entry by id and target the real compound key for finalization and cleanup.
+						// Stryker disable next-line ConditionalExpression, LogicalOperator, EqualityOperator: the both-miss case is unreachable via the raw-chunk pipeline — end events carry the locked start name so the compound key resolves the registered entry, and a same-ID rejected-start end is always processed after the accepted start's end has already removed that entry; this defensive path protects against a cross-name end event the pipeline cannot produce.
+						if (finalToolUse === null && toolUseIndex === undefined) {
+							const resolved = NativeToolCallParser.getStreamingToolCallById(
+								event.id,
+								nativeToolCallParserScope,
+							)
+							// Stryker disable next-line ConditionalExpression: unreachable defensive region — getStreamingToolCallById can only resolve when the both-miss case above is reachable, which the raw-chunk pipeline cannot produce (see the directive there).
+							if (resolved) {
+								eventName = resolved.name
+								dedupKey = NativeToolCallParser.makeStreamingKey(resolved.id, resolved.name)
+								finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
+									dedupKey,
+									nativeToolCallParserScope,
+								)
+								toolUseIndex = this.streamingToolCallIndices.get(dedupKey)
+							}
+						}
 
 						if (finalToolUse) {
 							// Store the tool call ID
@@ -3830,8 +4672,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								this.assistantMessageContent[toolUseIndex] = finalToolUse
 							}
 
-							// Clean up tracking
-							this.streamingToolCallIndices.delete(event.id)
+							// Clean up tracking using compound key
+							this.streamingToolCallIndices.delete(dedupKey)
 
 							// Mark that we have new content to process
 							this.userMessageContentReady = false
@@ -3860,8 +4702,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								;(existingToolUse as any).id = event.id
 							}
 
-							// Clean up tracking
-							this.streamingToolCallIndices.delete(event.id)
+							// Clean up tracking using compound key
+							this.streamingToolCallIndices.delete(dedupKey)
 
 							// Mark that we have new content to process
 							this.userMessageContentReady = false
@@ -4087,7 +4929,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// 	this.userMessageContentReady = true
 					// }
 
-					await pWaitFor(() => this.userMessageContentReady || this.abort || this.abandoned)
+					await pWaitFor(
+						() =>
+							this.userMessageContentReady ||
+							this.hasCompleteToolResultsForCurrentTurn() ||
+							this.abort ||
+							this.abandoned,
+					)
 
 					if (this.abort || this.abandoned) {
 						throw new Error(
@@ -4122,9 +4970,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						this.consecutiveNoToolUseCount = 0
 					}
 
-					// Push to stack if there's content OR if we're paused waiting for a subtask.
-					// When paused, we push an empty item so the loop continues to the pause check.
-					if (this.userMessageContent.length > 0 || this.isPaused) {
+					if (this.userMessageContent.length > 0) {
 						stack.push({
 							userContent: [...this.userMessageContent], // Create a copy to avoid mutation issues
 							includeFileDetails: false, // Subsequent iterations don't need file details

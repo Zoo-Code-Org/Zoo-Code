@@ -46,11 +46,11 @@ Zoo Code builds on the foundation created by Roo Code and continues to expand it
 - **More dependable terminal and editing workflows** — fixes for premature terminal completion, task-state races, context management, diff editing, and provider-specific tool use.
 - **More control over your workspace** — rules management, per-mode MCP restrictions, multi-root path controls, model reasoning options, and completion change review actions.
 
-## What's New in v3.84.0
+## What's New in v3.88.0
 
-- ✨ **New SOTA models added:** Use GPT-6 Sol, GPT-6 Luna, and Claude Opus 5.5 across supported providers.
-- 🧭 **More reliable tasks and subtasks:** Keep delegated modes isolated, preserve subtask links after repeated stops, and protect orchestrator settings when slash commands switch modes.
-- 🛠️ **More dependable terminal, provider, and code-search behavior:** Improve terminal behavior across Windows and non-English environments, strengthen provider responses and cancellation, and make code search use the correct workspace more consistently.
+- ✨ **Provider and model support:** Use Grok Build and improved custom-model support. This release also fixes Bedrock model limits and sends the Codex verbosity setting.
+- 🧭 **Task reliability:** This release fixes cancellation handling, tool-turn continuation, and task-message saving.
+- ⚡ **Faster editing and chat:** File writes no longer use artificial delays by default. Chat messages carry less file data, and code actions reach the last active chat.
 
 <details>
   <summary>🌐 Available languages</summary>

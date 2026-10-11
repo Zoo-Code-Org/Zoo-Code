@@ -79,6 +79,8 @@ describe("LmStudioHandler Native Tools", () => {
 						}),
 					]),
 				}),
+				// RequestOptions carries the forwarded task abortSignal (undefined when no metadata.signal).
+				{},
 			)
 			// parallel_tool_calls should be true by default when not explicitly set
 			const callArgs = mockCreate.mock.calls[0][0]
@@ -101,6 +103,8 @@ describe("LmStudioHandler Native Tools", () => {
 				expect.objectContaining({
 					tool_choice: "auto",
 				}),
+				// RequestOptions carries the forwarded task abortSignal (undefined when no metadata.signal).
+				{},
 			)
 		})
 
@@ -202,6 +206,8 @@ describe("LmStudioHandler Native Tools", () => {
 				expect.objectContaining({
 					parallel_tool_calls: true,
 				}),
+				// RequestOptions carries the forwarded task abortSignal (undefined when no metadata.signal).
+				{},
 			)
 		})
 
@@ -379,11 +385,11 @@ describe("LmStudioHandler Native Tools", () => {
 			])
 			expect(firstChunks.parserEvents).toEqual([
 				{ type: "tool_call_start", id: "call_lmstudio_a", name: "test_tool" },
-				{ type: "tool_call_delta", id: "call_lmstudio_a", delta: '{"arg1":"a' },
+				{ type: "tool_call_delta", id: "call_lmstudio_a", name: "test_tool", delta: '{"arg1":"a' },
 			])
 			expect(secondChunks.parserEvents).toEqual([
 				{ type: "tool_call_start", id: "call_lmstudio_b", name: "test_tool" },
-				{ type: "tool_call_delta", id: "call_lmstudio_b", delta: '{"arg1":"b' },
+				{ type: "tool_call_delta", id: "call_lmstudio_b", name: "test_tool", delta: '{"arg1":"b' },
 			])
 		})
 

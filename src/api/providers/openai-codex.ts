@@ -13,6 +13,7 @@ import {
 	SERVICE_TIER_KEY,
 	type ReasoningEffort,
 	type ReasoningEffortExtended,
+	type VerbosityLevel,
 	ApiProviderError,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -41,7 +42,7 @@ type OpenAiCodexRequestServiceTier = typeof OpenAiCodexServiceTier.Priority
 const CODEX_API_BASE_URL = "https://chatgpt.com/backend-api/codex"
 const LUNA_MODEL_ID = "gpt-5.6-luna"
 const LUNA_CODEX_VERSION = "0.144.0"
-const RESPONSES_LITE_MODEL_IDS = new Set<OpenAiCodexModelId>([LUNA_MODEL_ID, "gpt-6-astra"])
+const RESPONSES_LITE_MODEL_IDS = new Set<OpenAiCodexModelId>([LUNA_MODEL_ID, "gpt-6-astra", "gpt-6.1-sol"])
 
 /**
  * A refusal is streamed as text so the chat still shows why the model declined, but it is not part
@@ -406,6 +407,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 			}>
 			tool_choice?: any
 			parallel_tool_calls?: boolean
+			text?: { verbosity: VerbosityLevel }
 		}
 
 		// Per the implementation guide: Codex backend may reject max_output_tokens
@@ -444,6 +446,11 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				}),
 			tool_choice: metadata?.tool_choice,
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+		}
+
+		// Include text.verbosity only when the model explicitly supports it
+		if (model.info.supportsVerbosity === true) {
+			body.text = { verbosity: model.verbosity || "medium" }
 		}
 
 		return body
