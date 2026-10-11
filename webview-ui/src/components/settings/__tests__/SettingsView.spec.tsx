@@ -1088,7 +1088,7 @@ describe("SettingsView - Chat Appearance Save Payload", () => {
 		)
 	})
 
-	it("saves marquee and unstriped tables when the settings are unset", () => {
+	it("saves marquee and preserves unset table striping when the settings are unset", () => {
 		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="ui" />, {
 			state: makeExtensionState({ chatInputEffect: undefined, tableStriped: undefined }),
 		})
@@ -1098,12 +1098,13 @@ describe("SettingsView - Chat Appearance Save Payload", () => {
 		fireEvent.change(content.getByTestId("chat-font-size-slider"), { target: { value: "18" } })
 		fireEvent.click(screen.getByTestId("save-button"))
 
-		expect(vscode.postMessage).toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: "updateSettings",
-				updatedSettings: expect.objectContaining({ chatInputEffect: "marquee", tableStriped: false }),
-			}),
-		)
+		const update = vi
+			.mocked(vscode.postMessage)
+			.mock.calls.map(([message]) => message)
+			.find((message) => message.type === "updateSettings")
+		expect(update?.updatedSettings).toEqual(expect.objectContaining({ chatInputEffect: "marquee" }))
+		// `undefined` keeps the legacy striped default instead of persisting `false`.
+		expect(update?.updatedSettings?.tableStriped).toBeUndefined()
 	})
 })
 

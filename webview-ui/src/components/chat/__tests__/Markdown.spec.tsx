@@ -15,7 +15,8 @@ describe("Markdown table striping", () => {
 	it.each([
 		{ tableStriped: true, expectedStriped: true },
 		{ tableStriped: false, expectedStriped: false },
-		{ tableStriped: undefined, expectedStriped: false },
+		// Unset keeps the legacy striped appearance.
+		{ tableStriped: undefined, expectedStriped: undefined },
 	])(
 		"passes striped=$expectedStriped when extension state tableStriped=$tableStriped",
 		({ tableStriped, expectedStriped }) => {

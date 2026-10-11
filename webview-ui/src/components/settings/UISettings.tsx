@@ -275,7 +275,7 @@ export const UISettings = ({
 						label={t("settings:ui.tableStriped.label")}>
 						<div className="flex flex-col gap-1">
 							<VSCodeCheckbox
-								checked={tableStriped ?? false}
+								checked={tableStriped !== false}
 								onChange={(e: any) => handleTableStripedChange(e.target.checked)}
 								data-testid="table-striped-checkbox">
 								<span className="font-medium">{t("settings:ui.tableStriped.label")}</span>

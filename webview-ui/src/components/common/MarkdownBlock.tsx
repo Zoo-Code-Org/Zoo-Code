@@ -32,7 +32,10 @@ const ALERT_LABELS: Record<AlertType, string> = {
 
 interface MarkdownBlockProps {
 	markdown?: string
-	/** Opt-in zebra striping for markdown tables (Settings → UI → tableStriped). */
+	/**
+	 * Zebra striping for markdown tables (Settings → UI → tableStriped).
+	 * Defaults to enabled so an unset setting keeps the legacy striped appearance.
+	 */
 	striped?: boolean
 }
 
@@ -277,7 +280,7 @@ const StyledMarkdown = styled.div`
 	}
 `
 
-const MarkdownBlock = memo(({ markdown, striped = false }: MarkdownBlockProps) => {
+const MarkdownBlock = memo(({ markdown, striped = true }: MarkdownBlockProps) => {
 	const components = useMemo(
 		() => ({
 			table: ({ children, ...props }: any) => {

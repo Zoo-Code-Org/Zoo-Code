@@ -75,7 +75,7 @@ export const ReasoningBlock = ({ content, isStreaming, isLast }: ReasoningBlockP
 				<div
 					ref={contentRef}
 					className="border-l border-vscode-descriptionForeground/20 ml-2 pl-4 pb-1 text-vscode-descriptionForeground break-words">
-					<MarkdownBlock markdown={content} striped={tableStriped ?? false} />
+					<MarkdownBlock markdown={content} striped={tableStriped} />
 				</div>
 			)}
 		</div>

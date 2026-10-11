@@ -514,7 +514,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					chatFontSize: chatFontSize ?? null,
 					enterBehavior: enterBehavior ?? "send",
 					chatInputEffect: chatInputEffect ?? "marquee",
-					tableStriped: tableStriped ?? false,
+					tableStriped,
 					includeCurrentTime: includeCurrentTime ?? true,
 					includeCurrentCost: includeCurrentCost ?? true,
 					maxGitStatusFiles: maxGitStatusFiles ?? 0,
@@ -1025,7 +1025,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								enterBehavior={enterBehavior ?? "send"}
 								chatInputEffect={chatInputEffect ?? "marquee"}
 								chatFontSize={chatFontSize ?? undefined}
-								tableStriped={tableStriped ?? false}
+								tableStriped={tableStriped}
 								autoCloseZooOpenedFiles={autoCloseZooOpenedFiles}
 								autoCloseZooOpenedFilesAfterUserEdited={autoCloseZooOpenedFilesAfterUserEdited}
 								autoCloseZooOpenedNewFiles={autoCloseZooOpenedNewFiles}

@@ -216,16 +216,19 @@ describe("UISettings", () => {
 			expect(checkbox.checked).toBe(tableStriped)
 		})
 
-		it("renders the table striping checkbox unchecked by default", () => {
+		it("renders the table striping checkbox checked by default", () => {
+			// Unset keeps the legacy striped appearance, so the control reflects it as on.
 			const { getByTestId } = render(<UISettings {...defaultProps} />)
 			const checkbox = getByTestId("table-striped-checkbox") as HTMLInputElement
 			expect(checkbox).toBeTruthy()
-			expect(checkbox.checked).toBe(false)
+			expect(checkbox.checked).toBe(true)
 		})
 
 		it("calls setCachedStateField when the table striping checkbox is toggled", async () => {
 			const setCachedStateField = vi.fn()
-			const { getByTestId } = render(<UISettings {...defaultProps} setCachedStateField={setCachedStateField} />)
+			const { getByTestId } = render(
+				<UISettings {...defaultProps} tableStriped={false} setCachedStateField={setCachedStateField} />,
+			)
 
 			fireEvent.click(getByTestId("table-striped-checkbox"))
 

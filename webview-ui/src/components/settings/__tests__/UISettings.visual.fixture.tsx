@@ -10,6 +10,7 @@ interface UIState {
 	enterBehavior: "send" | "newline"
 	chatInputEffect: "marquee" | "breathing"
 	chatFontSize?: number
+	tableStriped?: boolean
 	autoCloseZooOpenedFiles?: boolean
 	autoCloseZooOpenedFilesAfterUserEdited?: boolean
 	autoCloseZooOpenedNewFiles?: boolean
@@ -21,6 +22,8 @@ export function UISettingsStory() {
 		enterBehavior: "send",
 		chatInputEffect: "marquee",
 		chatFontSize: 14,
+		// Pinned so the rendered control is deterministic regardless of the striped default.
+		tableStriped: false,
 		autoCloseZooOpenedFiles: true,
 		autoCloseZooOpenedFilesAfterUserEdited: true,
 		autoCloseZooOpenedNewFiles: false,

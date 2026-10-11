@@ -2614,10 +2614,13 @@ describe("ClineProvider", () => {
 			},
 		)
 
-		test("defaults unset chatInputEffect to marquee and tableStriped to false", async () => {
+		test("defaults unset chatInputEffect to marquee and leaves tableStriped unset", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 
-			expect(await provider[method]()).toMatchObject({ chatInputEffect: "marquee", tableStriped: false })
+			const state = await provider[method]()
+			expect(state).toMatchObject({ chatInputEffect: "marquee" })
+			// Unset tableStriped stays undefined so the legacy striped default flows to the webview.
+			expect(state.tableStriped).toBeUndefined()
 		})
 	})
 
