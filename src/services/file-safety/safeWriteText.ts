@@ -199,22 +199,12 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			} catch {
 				// target does not exist yet - keep the default
 			}
-			let fd: number
-			try {
-				fd = fsSync.openSync(tempPath, "w", targetMode)
-			} catch (error: unknown) {
-				// Every write to one directory shares the staging dir, and a write that finishes
-				// removes it when empty. A concurrent writer can therefore remove it between
-				// _stagingDir() and this open. Re-create it and try once; any other errno, or
-				// a second ENOENT, is a real failure.
-				const code =
-					typeof error === "object" && error !== null && "code" in error
-						? (error as { code?: string }).code
-						: undefined
-				if (code !== "ENOENT" || stagingDir === null) throw error
-				_stagingDir(dirPath)
-				fd = fsSync.openSync(tempPath, "w", targetMode)
-			}
+			// No retry on ENOENT here. The staging directory carries a name this call
+			// generated, so no other write shares it and none can remove it between the
+			// create and this open; whatever removed it is not something re-creating a
+			// directory under a fresh name would put back under tempPath. The retry this
+			// branch used to carry therefore could only fail a second time.
+			const fd = fsSync.openSync(tempPath, "w", targetMode)
 			try {
 				// Loop until every byte is written: writeSync can report a short
 				// (partial) write, and publishing a truncated staging file would
