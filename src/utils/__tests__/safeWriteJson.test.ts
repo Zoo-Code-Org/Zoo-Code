@@ -973,4 +973,97 @@ describe("safeWriteJson", () => {
 		expect(entries.filter((entry) => entry.endsWith(".lock") || entry.includes(".new_"))).toEqual([])
 		await expect(fs.readFile(path.join(other, "mcp.json"), "utf8")).rejects.toThrow()
 	})
+
+	// The confinement option is read once, from one decision, and every reader obeys
+	// it. The shape this replaces decided the link publication with
+	// `confineTo === undefined` while the two scope checks tested the same option for
+	// truthiness, so an empty string was a declared scope on one line and no scope at
+	// all on the next: the publish went through the symlink referent with no scope
+	// check behind it. Both directions are pinned, because either half can regress
+	// alone.
+	test("treats an absent confineTo as unconfined and an empty confineTo as confined", async () => {
+		const projectDir = path.join(tempDir, "declared-or-not")
+		await fs.mkdir(projectDir)
+		const inside = path.join(projectDir, "settings.json")
+
+		// Absent: no scope declared, unconfined, and the write lands.
+		await safeWriteJson(inside, { first: true })
+		expect(await readFileContent(inside)).toEqual({ first: true })
+
+		// Declared - even as an empty string: a scope exists, so it has to be checked.
+		const error = await safeWriteJson(inside, { second: true }, { confineTo: "" }).then(
+			() => undefined,
+			(reason: unknown) => reason,
+		)
+
+		expect(error).toBeInstanceOf(ConfinedPathEscapeError)
+		if (error instanceof ConfinedPathEscapeError) {
+			// The rejection names the root that was declared. Substituting
+			// path.resolve("") would confine the write to the process working directory
+			// - a scope nobody declared.
+			expect(error.confineTo).toBe("")
+		}
+		// The rejected write did not proceed.
+		expect(await readFileContent(inside)).toEqual({ first: true })
+	})
+
+	test("rejects a whitespace-only confineTo and names the declared root", async () => {
+		// path.resolve("   ") is a directory named "   " under the process cwd, so a
+		// whitespace-only root is no more a scope than an empty one: it fails closed
+		// with the declared root, the same decision as the empty string.
+		const error = await safeWriteJson(currentTestFilePath, { mcpServers: {} }, { confineTo: "   " }).then(
+			() => undefined,
+			(reason: unknown) => reason,
+		)
+
+		expect(error).toBeInstanceOf(ConfinedPathEscapeError)
+		if (error instanceof ConfinedPathEscapeError) {
+			expect(error.confineTo).toBe("   ")
+		}
+		expect(await readFileContent(currentTestFilePath)).toEqual({ initial: "content" })
+	})
+
+	test("rejects a declared-empty confineTo before the lock key, the lock, the parent directory or any staging", async () => {
+		vi.resetModules()
+		// The target's parent does not exist, so an mkdir would create it outside the
+		// declared scope, and proper-lockfile would create ${lockKey}.lock beside the
+		// lock key. The realpath spy is the lock-key seam: resolveLockKey canonicalizes
+		// through it, so a rejection that still names the declared root proves the
+		// decision ran before the key was computed rather than after it.
+		const projectDir = path.join(tempDir, "declared-empty-order")
+		await fs.mkdir(projectDir)
+		const outside = path.join(tempDir, "declared-empty-missing-parent", "nested.json")
+
+		const realLockfile = await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")
+		const lockMockFn = vi.fn(async () => {
+			throw new Error("lock taken for a declared-empty scope (test)")
+		})
+		vi.doMock("proper-lockfile", () => ({ ...realLockfile, lock: lockMockFn }))
+		const { safeWriteJson: lockedSafeWriteJson } = await import("../safeWriteJson")
+		const realpathSpy = vi.spyOn(fs, "realpath").mockImplementation(async (candidate) => {
+			throw Object.assign(new Error(`ENOTSUP: the lock key was resolved (test): ${candidate}`), {
+				code: "ENOTSUP",
+			})
+		})
+
+		try {
+			const reason = await lockedSafeWriteJson(outside, { mcpServers: {} }, { confineTo: "" }).then(
+				() => undefined,
+				(caught: unknown) => caught,
+			)
+			// The module was re-imported, so its error class is a different identity than
+			// the one this spec imported: recognised by name and payload instead.
+			const failure = reason as ConfinedPathEscapeError | undefined
+			expect(failure?.name).toBe("ConfinedPathEscapeError")
+			expect(failure?.confineTo).toBe("")
+			expect(lockMockFn).not.toHaveBeenCalled()
+			const entries = await fs.readdir(tempDir)
+			expect(entries).not.toContain("declared-empty-missing-parent")
+			expect(entries.filter((entry) => entry.endsWith(".lock") || entry.includes(".new_"))).toEqual([])
+		} finally {
+			realpathSpy.mockRestore()
+			vi.doUnmock("proper-lockfile")
+			vi.resetModules()
+		}
+	})
 })

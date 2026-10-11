@@ -40,6 +40,11 @@ export interface SafeWriteJsonOptions {
 	 * known scope (a workspace, a project settings directory) can refuse a write
 	 * that a planted symlink would land somewhere else. The check runs before the
 	 * advisory lock is taken and before anything is staged.
+	 *
+	 * Confinement is active whenever this option is DEFINED, not when it is truthy:
+	 * an empty or whitespace-only root is a declared scope that cannot contain any
+	 * canonicalized path, so it is rejected with a {@link ConfinedPathEscapeError}
+	 * naming the declared root rather than read as "no scope was declared".
 	 */
 	confineTo?: string
 }
@@ -121,6 +126,30 @@ function _scopeErrorCode(error: unknown): string | undefined {
 }
 
 /**
+ * The scope root a caller declared, or undefined when no scope was declared.
+ *
+ * This is the ONE place confinement presence is decided, and it decides it with an
+ * explicit undefined comparison rather than a truthiness test: an empty string is a
+ * declared scope, and a reader that tested truthiness would call the same write
+ * unconfined while another reader called it confined.
+ *
+ * A declared root that is empty or whitespace-only cannot contain any canonicalized
+ * path - path.resolve("") names the process working directory and path.resolve("  ")
+ * names a directory nobody named - so it fails closed here with the declared root on
+ * the error, instead of silently disabling the checks below or confining the write to
+ * a directory the caller never named.
+ */
+function _declaredScopeRoot(confineTo: string | undefined, requestedPath: string): string | undefined {
+	if (confineTo === undefined) {
+		return undefined
+	}
+	if (confineTo.trim() === "") {
+		throw new ConfinedPathEscapeError(requestedPath, requestedPath, confineTo)
+	}
+	return confineTo
+}
+
+/**
  * Safely writes JSON data to a file.
  * - Creates parent directories if they don't exist
  * - Uses 'proper-lockfile' for inter-process advisory locking to prevent concurrent writes to the same path.
@@ -194,7 +223,22 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// confinement scope publishes through the referent and therefore locks the referent. Locking
 	// the referent while replacing the link lets two writers hold two different locks for one
 	// publish target - the lost update the lock exists to prevent.
-	const publishOverLink = options?.confineTo === undefined
+	//
+	// Confinement presence is decided ONCE, here, with an explicit undefined comparison,
+	// and every reader below - the link decision, both scope checks, the publish target,
+	// the merge read and the publish options - obeys this one value. Deciding it twice,
+	// once as an undefined comparison and once as a truthiness test, let confineTo: ""
+	// skip both scope checks while the link decision still published through the
+	// referent: confined in shape, confining nothing in fact. A declared root that is
+	// empty or whitespace-only cannot contain any canonicalized path, so it fails closed
+	// here - before the lock key is resolved, before the lock is taken, before any
+	// directory is created and before anything is staged.
+	const confinementRoot = _declaredScopeRoot(options?.confineTo, absoluteFilePath)
+	const confinementDeclared = confinementRoot !== undefined
+	// A default (unconfined) write replaces the link itself, so the publish must not
+	// re-resolve the path it is handed; a confined write publishes through the referent
+	// the two scope checks below clear.
+	const publishOverLink = !confinementDeclared
 	const referentLockKey = await resolveLockKey(absoluteFilePath)
 	// A confined caller publishes through the referent, so the referent is the identity it replaces
 	// and the only lock it needs. A default write replaces the link itself, so the link path is the
@@ -229,8 +273,8 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// referent directory would surface a lock-acquisition error after retries
 	// instead of ConfinedPathEscapeError). Repeated on the resolved publish target
 	// inside the lock, since a peer writer may move the referent in between.
-	if (options?.confineTo) {
-		const scopeRoot = await _resolveScopeRoot(options.confineTo)
+	if (confinementRoot !== undefined) {
+		const scopeRoot = await _resolveScopeRoot(confinementRoot)
 		_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(referentLockKey), scopeRoot)
 	}
 
@@ -275,15 +319,16 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// redirect a default write (McpHub passes no scope) onto a file nobody authorized, which is
 		// the boundary the confined callers exist to protect. A default write therefore replaces the
 		// link itself, as this primitive did before it resolved links at all.
-		resolvedTargetPath = options?.confineTo ? await resolvePublishTarget(absoluteFilePath) : absoluteFilePath
+		// Same decision as publishOverLink, read from the same value.
+		resolvedTargetPath = publishOverLink ? absoluteFilePath : await resolvePublishTarget(absoluteFilePath)
 
 		// Confinement, if the caller declared a scope. Both sides are canonicalized the
 		// same way: the publish target is resolved through symlinks, and a target that
 		// does not exist yet still carries the alias components of the path it was
 		// given. This runs before the merge read and before anything is staged, so a
 		// rejected write leaves nothing behind.
-		if (options?.confineTo) {
-			const scopeRoot = await _resolveScopeRoot(options.confineTo)
+		if (confinementRoot !== undefined) {
+			const scopeRoot = await _resolveScopeRoot(confinementRoot)
 			_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(resolvedTargetPath), scopeRoot)
 		}
 
@@ -297,7 +342,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			// copy JSON from outside the requested path into a file the caller named. The merge sees
 			// no existing document, exactly as it would if the path did not exist.
 			let mergeTargetIsLink = false
-			if (!options?.confineTo) {
+			if (publishOverLink) {
 				try {
 					mergeTargetIsLink = (await fs.lstat(resolvedTargetPath)).isSymbolicLink()
 				} catch (linkError: unknown) {
