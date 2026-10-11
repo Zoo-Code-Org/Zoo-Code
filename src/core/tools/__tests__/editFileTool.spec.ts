@@ -913,6 +913,46 @@ describe("editFileTool", () => {
 			expect(mockTask.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
 			expect(mockHandleError).not.toHaveBeenCalled()
 		})
+
+		it("leaves the registry empty when old_string does not match", async () => {
+			// The read happened but the edit failed. The token must not stay in the
+			// task-wide registry, or a later write_to_file could spend this read's token
+			// on a full-file overwrite of content the model never received.
+			const result = await executeEditFileTool(
+				{ old_string: "NonExistent", new_string: "Whatever" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(result).toContain("No match found")
+			expect(mockTask.observationRegistry.get(absoluteFilePath)).toBeUndefined()
+		})
+
+		it("leaves the registry empty when an empty old_string hits an existing file", async () => {
+			// The reproduction from review: edit_file with an empty old_string records the
+			// read, then returns "use write_to_file instead". The registry must stay empty
+			// so the write_to_file that follows still needs a read of its own.
+			const result = await executeEditFileTool(
+				{ old_string: "", new_string: "New file content" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(result).toContain("File already exists")
+			expect(mockTask.observationRegistry.get(absoluteFilePath)).toBeUndefined()
+		})
+
+		it("leaves the registry empty when the user rejects the edit", async () => {
+			// A rejection publishes nothing, so the read's token must not authorize a
+			// later write either.
+			mockAskApproval.mockResolvedValueOnce(false)
+
+			const result = await executeEditFileTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(result).toContain("Changes were rejected by the user.")
+			expect(mockTask.observationRegistry.get(absoluteFilePath)).toBeUndefined()
+		})
 	})
 
 	describe("CRLF normalization", () => {

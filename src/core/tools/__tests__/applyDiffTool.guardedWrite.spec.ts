@@ -271,4 +271,37 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			expect(mockPushToolResult).not.toHaveBeenCalledWith("Saved file")
 		},
 	)
+
+	it("leaves the registry empty when the diff fails to apply", async () => {
+		// The read happened but no hunk landed. The token must not stay in the task-wide
+		// registry, or a later write_to_file could spend this read's token on a
+		// full-file overwrite of content the model never received.
+		mockTask.diffStrategy = {
+			applyDiff: vi.fn().mockResolvedValue({ success: false, error: "context mismatch" }),
+		} as unknown as Task["diffStrategy"]
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
+		expect(mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts"))).toBe(false)
+	})
+
+	it("leaves the registry empty when the user rejects the diff", async () => {
+		// A rejection publishes nothing, so the read's token must not authorize a later
+		// write either.
+		mockAskApproval.mockResolvedValueOnce(false)
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
+		expect(mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts"))).toBe(false)
+	})
 })

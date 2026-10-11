@@ -86,13 +86,19 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				return
 			}
 
-			// Process each hunk. The read doubles as the S2 observation for the
+			// Process each hunk. The read also captures the on-disk version for the
 			// guarded publish (ReadFileTool contract: stat before and after the
-			// read, observe only when the on-disk version is unchanged between the
-			// two stats). Without it, the in-place modify publish is an unobserved
+			// read, keep the token only when the on-disk version is unchanged between
+			// the two stats). Without it, the in-place modify publish is an unobserved
 			// write and the composed chat-diff default rejects it ("File already
 			// exists ... and was not read before this write") even though this tool
-			// just read the exact content the patch was applied to.
+			// just read the exact content the patch was applied to. Tokens are held in
+			// a local map keyed by absolute path and observed only at the guarded
+			// publish that consumes them: observing at read time would leave them in
+			// the task-wide registry through a failed patch, a rejection, and the
+			// diff-view branch, where a later write_to_file could spend one on an
+			// unrelated overwrite.
+			const readTokens = new Map<string, string>()
 			const readFile = async (filePath: string): Promise<string> => {
 				const absolutePath = path.resolve(task.cwd, filePath)
 				const preReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
@@ -101,7 +107,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				if (preReadStats && postReadStats) {
 					const preReadToken = versionTokenOfStat(preReadStats)
 					if (preReadToken === versionTokenOfStat(postReadStats)) {
-						task.observationRegistry.observe(absolutePath, preReadToken)
+						readTokens.set(absolutePath, preReadToken)
 					}
 				}
 				return content
@@ -142,7 +148,15 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					await this.handleDeleteFile(absolutePath, relPath, task, callbacks, isWriteProtected)
 				} else if (change.type === "update") {
 					// Update file
-					await this.handleUpdateFile(change, absolutePath, relPath, task, callbacks, isWriteProtected)
+					await this.handleUpdateFile(
+						change,
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+						readTokens,
+					)
 				}
 			}
 
@@ -318,6 +332,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
+		readTokens: Map<string, string>,
 	): Promise<void> {
 		const { askApproval, pushToolResult } = callbacks
 
@@ -461,7 +476,14 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// Save changes to the same file
 			if (isPreventFocusDisruptionEnabled) {
 				// Guarded publish: the patched file content is complete, so create-guard
-				// semantics apply (stale observed versions are rejected with a re-read hint).
+				// semantics apply (stale observed versions are rejected with a re-read
+				// hint). The hunk read's token is observed here, at the guarded publish
+				// that consumes it, so a failed patch, a rejection, and the diff-view
+				// branch leave no token in the task-wide registry.
+				const readToken = readTokens.get(absolutePath)
+				if (readToken !== undefined) {
+					task.observationRegistry.observe(absolutePath, readToken)
+				}
 				await task.diffViewProvider.saveDirectly(
 					relPath,
 					newContent,

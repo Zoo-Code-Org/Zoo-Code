@@ -600,5 +600,32 @@ describe("editTool", () => {
 			expect(mockTask.diffViewProvider.reset).toHaveBeenCalled()
 			expect(mockTask.didEditFile).toBe(false)
 		})
+
+		it("leaves the registry empty when old_string does not match", async () => {
+			// The read happened but the edit failed. The token must not stay in the
+			// task-wide registry, or a later write_to_file could spend this read's token
+			// on a full-file overwrite of content the model never received.
+			const result = await executeEditTool(
+				{ old_string: "NonExistent", new_string: "Modified Line 2" },
+				{ fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(result).toContain("No match found")
+			expect(mockTask.observationRegistry.get(absoluteFilePath)).toBeUndefined()
+		})
+
+		it("leaves the registry empty when the user rejects the edit", async () => {
+			// A rejection publishes nothing, so the read's token must not authorize a
+			// later write either.
+			mockAskApproval.mockResolvedValueOnce(false)
+
+			const result = await executeEditTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(result).toContain("Changes were rejected by the user.")
+			expect(mockTask.observationRegistry.get(absoluteFilePath)).toBeUndefined()
+		})
 	})
 })

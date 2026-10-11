@@ -321,6 +321,44 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		},
 	)
 
+	it("update: leaves the registry empty when the hunk fails to apply", async () => {
+		// The hunk read happened; the patch did not land. The token must not stay in the
+		// task-wide registry, or a later write_to_file could spend this read's token on a
+		// full-file overwrite of content the model never received.
+		const failingPatch = `*** Begin Patch
+*** Update File: src/thing.ts
+@@
+-absent context line
++modified file content
+*** End Patch`
+
+		await tool.execute({ patch: failingPatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("Failed to process patch"))
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
+		expect(mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts"))).toBe(false)
+	})
+
+	it("update: leaves the registry empty when the user rejects the change", async () => {
+		// A rejection publishes nothing, so the read's token must not authorize a later
+		// write either.
+		mockAskApproval.mockResolvedValueOnce(false)
+
+		await tool.execute({ patch: updatePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockPushToolResult).toHaveBeenCalledWith("Changes were rejected by the user.")
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
+		expect(mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts"))).toBe(false)
+	})
+
 	it("add: publishes the new file through the guarded saveDirectly with create kind", async () => {
 		mockedFileExistsAtPath.mockResolvedValueOnce(false)
 
