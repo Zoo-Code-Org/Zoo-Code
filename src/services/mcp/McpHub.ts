@@ -639,9 +639,22 @@ export class McpHub {
 	 * safeWriteJson resolves the publish target with realpath before staging beside it, so a
 	 * repository that ships .roo/mcp.json as a symlink to a file OUTSIDE the workspace would
 	 * have that outside file replaced as soon as the user edits a project MCP setting or
-	 * allowlist. Passing the canonical workspace root as confineTo makes the write fail closed
-	 * instead. Global writes are deliberately unconstrained: they target the user's own
-	 * settings directory, which is not under the workspace.
+	 * allowlist. Passing the workspace root as confineTo makes that write fail closed instead.
+	 * Global writes are deliberately unconstrained: they target the user's own settings
+	 * directory, which is not under the workspace.
+	 *
+	 * DECISION AND LIMIT - these three call sites carry credentials (MCP server env and
+	 * headers), so the limit of the control they pass is stated here rather than left to the
+	 * option doc: confineTo decides twice from the resolved publish target and stops at its
+	 * final component. If a workspace replaces an ANCESTOR directory - .roo, or the workspace
+	 * directory itself - with a link after the last check, the credential write follows that
+	 * link and can still land outside the workspace; see the confineTo doc in
+	 * src/utils/safeWriteJson.ts for the two outcomes of that window. The control is kept
+	 * anyway, not dropped, because the case a committed tree can actually plant is a link at
+	 * the settings file itself, and that is the case this option does refuse. Closing the
+	 * ancestor window needs a handle-relative no-follow publish, which this runtime does not
+	 * offer, and the alternative reading - removing the control from the credential path -
+	 * would give up the refusal that works today to close a window no unit can close here.
 	 */
 	private confineForMcpWrite(source: "global" | "project"): string | undefined {
 		if (source !== "project") {
