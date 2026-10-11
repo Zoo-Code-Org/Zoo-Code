@@ -2696,7 +2696,17 @@ export class ClineProvider
 					id = await this.providerSettingsManager.saveConfig(name, providerSettings)
 					landed.profileRecord = true
 
-					if (signal.aborted) return id
+					if (signal.aborted) {
+						// The mutation timeout already released the caller with a timeout rejection, and this
+						// write has landed since. Returning here would exit the try without an exception, so
+						// the compensation below would never run and the record would stay saved under a
+						// caller that was told the save failed. Throwing routes this checkpoint through the
+						// same store-by-store rollback a rejected write gets. The landed flags keep it to the
+						// stores this call actually wrote - the queue advances on the timeout-bounded result,
+						// so everything after this checkpoint belongs to the next mutation - and an
+						// incomplete rollback still surfaces as the inconsistent-state error.
+						throw new Error("Profile upsert was cancelled after the profile-record write")
+					}
 
 					// The durable writes are serialized instead of raced in one Promise.all so every
 					// step can record that it landed: a later rejection then puts back exactly the stores
