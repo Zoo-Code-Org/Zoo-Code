@@ -3370,6 +3370,14 @@ export class ClineProvider
 			)
 
 			vscode.window.showErrorMessage(t("common:errors.create_api_config"))
+
+			if (error instanceof ProfileActivationInconsistentError) {
+				// The rollback itself was incomplete. Returning `undefined` here would read as "the
+				// save failed and nothing changed" while the persisted profile stores disagree, so
+				// the caller gets the inconsistency instead.
+				throw error
+			}
+
 			return undefined
 		}
 	}
@@ -4350,8 +4358,17 @@ export class ClineProvider
 			return
 		}
 
-		await Promise.all(
-			affected.map(async (instance) => {
+		// Snapshot every affected view BEFORE any write starts: a failure in one sibling has to
+		// roll back the siblings that already landed too. Without this, one sibling's rejected
+		// refresh leaves the other views holding the new profile's settings while the caller's
+		// compensation rolls the shared stores back - a split durable state across views.
+		const snapshots = affected.map((instance) => ({
+			instance,
+			previousOverlay: instance.viewLocalState.apiConfiguration,
+		}))
+
+		const results = await Promise.allSettled(
+			snapshots.map(async (snapshot) => {
 				// A provider that has begun disposal owns an orphaned viewStates key: viewId comes from
 				// the monotonic nextViewId counter, so no future view ever reads that entry again and
 				// prunePersistedViewStates() bounds it. Skipping work on such an instance is therefore
@@ -4359,12 +4376,12 @@ export class ClineProvider
 				// is already being torn down.
 				// Re-checked before every operation, not just at enumeration: this sibling can start
 				// disposing after the filter above ran.
-				if (instance._disposed) {
+				if (snapshot.instance._disposed) {
 					return
 				}
 				// Direct private access: compile-time safe across sibling instances.
-				await instance._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
-				if (instance._disposed) {
+				await snapshot.instance._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
+				if (snapshot.instance._disposed) {
 					return
 				}
 
@@ -4381,6 +4398,41 @@ export class ClineProvider
 				await instance.postStateToWebview()
 			}),
 		)
+
+		const rejected = results.filter((result): result is PromiseRejectedResult => result.status === "rejected")
+		if (rejected.length > 0) {
+			const describeFailure = (e: unknown) => (e instanceof Error ? e.message : String(e))
+			const restoreFailures: string[] = []
+			// Undo every affected view, not just the failing one: the buffer is filled before the
+			// durable write settles, so even a rejected sibling keeps the new overlay. Each restore
+			// is awaited on its own so one failing restore cannot skip the next one.
+			for (const snapshot of snapshots) {
+				// Compensating through a provider that has begun disposal is the orphaned-key defect
+				// this guard exists to avoid; its entry is never read again, so leaving it is safe.
+				if (snapshot.instance._disposed) {
+					continue
+				}
+				try {
+					await snapshot.instance._saveViewLocalStateFromMutation({
+						apiConfiguration: snapshot.previousOverlay,
+					})
+				} catch (rollbackError: unknown) {
+					snapshot.instance.log(
+						`[refreshViewLocalStateForUpdatedProfile] Could not restore the buffer for view ${snapshot.instance.viewId} after a failed refresh: ${describeFailure(rollbackError)}`,
+					)
+					restoreFailures.push(`view ${snapshot.instance.viewId} buffer: ${describeFailure(rollbackError)}`)
+				}
+			}
+			if (restoreFailures.length > 0) {
+				// A sibling buffer that stayed on the new settings while the mutation is rolled back
+				// is a split durable state, not an ordinary failure: surface the distinct
+				// inconsistent-state error instead of the plain rejection.
+				throw new ProfileActivationInconsistentError(
+					`refreshViewLocalStateForUpdatedProfile: the profile change failed after sibling view buffers were rewritten and the rollback was incomplete (${restoreFailures.join("; ")}); the per-view buffers may now disagree with the shared stores. Original failure: ${describeFailure(rejected[0].reason)}`,
+				)
+			}
+			throw rejected[0].reason
+		}
 	}
 
 	/**
