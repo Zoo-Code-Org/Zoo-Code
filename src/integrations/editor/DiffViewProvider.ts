@@ -992,7 +992,9 @@ export class DiffViewProvider {
 	/**
 	 * Replace an open buffer's content with what it held before streaming started. Runs before
 	 * the rollback closes the tab, so an unapproved buffer is never handed to close() dirty and
-	 * never survives a close that the editor vetoes.
+	 * never survives a close that the editor vetoes. An edit the workspace did not apply is a
+	 * failed restore and throws, so the rollback cannot report success on a buffer that never
+	 * came back.
 	 */
 	private async restorePreStreamBuffer(absolutePath: string): Promise<void> {
 		const document = vscode.workspace.textDocuments.find(
@@ -1004,7 +1006,25 @@ export class DiffViewProvider {
 		const edit = new vscode.WorkspaceEdit()
 		const range = new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length))
 		edit.replace(document.uri, range, this.originalContent ?? "")
-		await vscode.workspace.applyEdit(edit)
+		// applyEdit() resolves false when the edit was not applied: the buffer would still hold the
+		// unapproved streamed content, and the save that follows would persist exactly what this
+		// rollback is undoing. Capture the result like the close below does, treat false as a
+		// failed restore, and throw before saveBufferClean runs so the caller keeps its failure.
+		// A rejection is kept as the cause.
+		let applied: boolean
+		let applyError: Error | undefined
+		try {
+			applied = await vscode.workspace.applyEdit(edit)
+		} catch (error) {
+			applied = false
+			applyError = error instanceof Error ? error : new Error(String(error))
+		}
+		if (!applied) {
+			throw new Error(
+				`Rollback could not restore the pre-stream buffer for ${absolutePath}; the workspace edit was not applied, so the buffer may still hold the unapproved content.`,
+				{ cause: applyError },
+			)
+		}
 	}
 
 	/**
