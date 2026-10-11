@@ -820,9 +820,16 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))
 			// And the backup survives the rejection: it is the only artifact that still carries
 			// the target's original security descriptor, so deleting it would destroy the
-			// recovery path.
+			// recovery path. The copy is asserted first: counting the absence of a .bak unlink
+			// also passes when no backup was ever created, which is not the same fact.
+			const copies = vi.mocked(fs.copyFile).mock.calls
+			expect(copies).toHaveLength(1)
+			const [copiedSource, copiedDestination] = copies[0] ?? []
+			expect(String(copiedSource)).toBe(targetPath)
+			const backupDestination = String(copiedDestination)
+			expect(backupDestination).toContain("safeWriteText.bak_")
 			const bakUnlinks = vi.mocked(fs.unlink).mock.calls.filter(function (call) {
-				return typeof call[0] === "string" && call[0].includes(".bak")
+				return String(call[0]) === backupDestination
 			})
 			expect(bakUnlinks).toHaveLength(0)
 		})

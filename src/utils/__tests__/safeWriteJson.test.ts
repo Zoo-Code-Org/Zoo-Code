@@ -151,19 +151,31 @@ describe("safeWriteJson", () => {
 		// must classify this as a landed commit - not a failed publish whose staged file
 		// is a leftover to remove - and it must still rethrow, so no caller observes
 		// success for a publish whose DACL was not restored.
-		vi.mocked(safeWriteText).mockImplementationOnce(async () => {
+		// The mock has to reproduce the state a real DaclRestoreError arrives with: the
+		// commit rename already landed, and only the DACL restore afterwards failed. Throwing
+		// without the rename would let the no-unlink assertion pass on a write that never
+		// committed, which is a different situation with a different correct answer.
+		vi.mocked(safeWriteText).mockImplementationOnce(async (_target, _content, textOptions) => {
+			// fs.rename is a pass-through spy over the real rename, so this is the real commit.
+			await fs.rename(String(textOptions?.tempPath), target)
 			throw new DaclRestoreError(target, null)
 		})
 
 		await expect(safeWriteJson(target, { committed: "value" })).rejects.toBeInstanceOf(DaclRestoreError)
 
-		// The staged path was consumed by the commit rename, so the catch path must not
-		// unlink it as a leftover temp file.
 		const streamCall = vi
 			.mocked(fsSyncActual.createWriteStream)
 			.mock.calls.find((call) => String(call[0]).includes(".new_"))
 		expect(streamCall).toBeDefined()
 		const stagedPath = String(streamCall![0])
+
+		// The commit really landed: the new bytes are at the target and the staged name is
+		// gone, so this is the post-commit state the catch path has to classify.
+		expect(await readFileContent(target)).toEqual({ committed: "value" })
+		expect(await fileExists(stagedPath)).toBe(false)
+
+		// The staged path was consumed by the commit rename, so the catch path must not
+		// unlink it as a leftover temp file.
 		const stagedUnlinks = vi.mocked(fs.unlink).mock.calls.filter((call) => String(call[0]) === stagedPath)
 		expect(stagedUnlinks).toHaveLength(0)
 	})
