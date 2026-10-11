@@ -16,10 +16,10 @@ for research, documentation lookup, and fact-checking.
 
 - **Marketplace entry:** `src/assets/marketplace/mcps.yml`, item id `anysearch`
   (kept first in the file — entries are alphabetical). It declares two install methods:
-  1. **Remote Server** — JSON config with `Authorization: Bearer {{ANYSEARCH_API_KEY}}`;
-     the installer prompts for the API key at install time (higher rate limits).
-  2. **Remote Server (Anonymous)** — same endpoint without the auth header;
-     uses AnySearch's anonymous tier (lower rate limits, no key needed).
+    1. **Remote Server** — JSON config with `Authorization: Bearer {{ANYSEARCH_API_KEY}}`;
+       the installer prompts for the API key at install time (higher rate limits).
+    2. **Remote Server (Anonymous)** — same endpoint without the auth header;
+       uses AnySearch's anonymous tier (lower rate limits, no key needed).
 - **Install flow:** `MarketplaceManager` (default `target="project"`) → `SimpleInstaller`
   substitutes the `{{ANYSEARCH_API_KEY}}` parameter (collected from the user at install
   time; method-level parameters only apply to the selected method) and writes the
@@ -34,12 +34,12 @@ for research, documentation lookup, and fact-checking.
 Per AnySearch docs as of 2026-10-08 (tools are discovered dynamically at connect time;
 this table documents the vendor's offering, not a contract):
 
-| Tool | Purpose | Key parameters |
-| ---- | ------- | -------------- |
-| `search` | Web search, general or vertical domain | `query` (required), `max_results` (1–10, default 10), `domain` / `sub_domain` / `sub_domain_params` (vertical routing; values must come from `get_sub_domains`) |
-| `batch_search` | Parallel batch search (1–5 independent queries; one failure doesn't block others) | `queries` (required, 1–5 query objects with the same fields as `search`) |
-| `extract` | Fetch a URL and return its content as markdown | `url` (required) |
-| `get_sub_domains` | Discover vertical (domain-specific) search scopes | — |
+| Tool              | Purpose                                                                           | Key parameters                                                                                                                                                  |
+| ----------------- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `search`          | Web search, general or vertical domain                                            | `query` (required), `max_results` (1–10, default 10), `domain` / `sub_domain` / `sub_domain_params` (vertical routing; values must come from `get_sub_domains`) |
+| `batch_search`    | Parallel batch search (1–5 independent queries; one failure doesn't block others) | `queries` (required, 1–5 query objects with the same fields as `search`)                                                                                        |
+| `extract`         | Fetch a URL and return its content as markdown                                    | `url` (required)                                                                                                                                                |
+| `get_sub_domains` | Discover vertical (domain-specific) search scopes                                 | —                                                                                                                                                               |
 
 Anonymous requests work with lower rate limits; an API key raises the limits.
 Get a key at https://anysearch.com.
