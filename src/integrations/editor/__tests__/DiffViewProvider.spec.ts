@@ -9,7 +9,7 @@ import * as fs from "fs/promises"
 
 import { computeVersionToken, versionTokenOfStat } from "../../../utils/versionToken"
 import type { BigIntStats } from "fs"
-import { safeWriteText } from "../../../services/file-safety/safeWriteText"
+import { PostCommitDurabilityError, safeWriteText } from "../../../services/file-safety/safeWriteText"
 import { withFileLock } from "../../../utils/fileLock"
 import { createDirectoriesForFile } from "../../../utils/fs"
 import { ObservationRegistry } from "../../../core/task/observationRegistry"
@@ -38,6 +38,18 @@ vi.mock("fs/promises", () => ({
 vi.mock("../../../services/file-safety/safeWriteText", () => ({
 	safeWriteText: vi.fn().mockResolvedValue(undefined),
 	resolveLockKey: vi.fn(async (p: string) => p),
+	// The guarded write recognises a landed-but-not-durable publish by this error's
+	// identity, and this spec replaces the whole module, so the class is restated
+	// here with the real constructor shape rather than imported.
+	PostCommitDurabilityError: class PostCommitDurabilityError extends Error {
+		readonly targetPath: string
+
+		constructor(targetPath: string, cause: unknown) {
+			super("the rename committed but the parent directory could not be fsynced", { cause })
+			this.name = "PostCommitDurabilityError"
+			this.targetPath = targetPath
+		}
+	},
 }))
 
 // Mock the S1 version token (used by the S4 guarded write); the real
@@ -1180,6 +1192,41 @@ describe("DiffViewProvider", () => {
 					"Cannot guard the write: the owning task is no longer available",
 				)
 				expect(safeWriteText).not.toHaveBeenCalled()
+			})
+
+			it("reconciles the observation when a direct save landed but was not durable", async () => {
+				// saveDirectly calls guardedWrite directly, so it has no catch of its own to
+				// reconcile with: the commit rename put the bytes at the target and only the
+				// parent-directory fsync after it failed. Left on "v1", the next save from
+				// this task would be rejected stale against the version this save published
+				// itself.
+				const landed = new PostCommitDurabilityError(`${mockCwd}/test.ts`, new Error("EIO"))
+				// v1 for the compare-and-swap, v2 for the post-publish read under the same
+				// lock, then v2 again for the follow-up save. The queue is handed back in a
+				// finally: this spec clears but does not reset mocks between tests, so a
+				// half-consumed once-queue would leak into the tests that follow.
+				vi.mocked(computeVersionToken)
+					.mockResolvedValueOnce("v1")
+					.mockResolvedValueOnce("v2")
+					.mockResolvedValueOnce("v2")
+					.mockResolvedValueOnce("v2")
+				vi.mocked(safeWriteText).mockRejectedValueOnce(landed)
+
+				try {
+					const save = diffViewProvider.saveDirectly("test.ts", "new content", false, false, 0)
+
+					await expect(save).rejects.toBe(landed)
+					expect(mockTask.observationRegistry.get(`${mockCwd}/test.ts`)?.version).toBe("v2")
+
+					// The follow-up save is accepted: the disk already carries the bytes
+					// this save published, so the guard must not call them a stale version.
+					const followUp = diffViewProvider.saveDirectly("test.ts", "later content", false, false, 0)
+
+					await expect(followUp).resolves.toMatchObject({ finalContent: "later content" })
+					expect(safeWriteText).toHaveBeenCalledTimes(2)
+				} finally {
+					vi.mocked(computeVersionToken).mockReset().mockResolvedValue("v1")
+				}
 			})
 		})
 	})

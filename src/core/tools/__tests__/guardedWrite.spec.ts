@@ -15,7 +15,7 @@ import * as path from "path"
 import { describe, expect, it, beforeEach, vi } from "vitest"
 
 import { createIfAbsent, guardedWrite, replaceIfVersion, resetChain, GuardRejectedError } from "../guardedWrite"
-import { safeWriteText } from "../../../services/file-safety/safeWriteText"
+import { PostCommitDurabilityError, safeWriteText } from "../../../services/file-safety/safeWriteText"
 import { computeVersionToken } from "../../../utils/versionToken"
 import { withFileLock } from "../../../utils/fileLock"
 import { resolveLockKey } from "../../../services/file-safety/safeWriteText"
@@ -36,6 +36,18 @@ vi.mock("../../../utils/versionToken", () => ({
 vi.mock("../../../services/file-safety/safeWriteText", () => ({
 	safeWriteText: vi.fn(),
 	resolveLockKey: vi.fn(async (p: string) => p),
+	// The guard only needs the error's identity to recognise a publish whose commit
+	// rename landed, and this spec replaces the whole module anyway, so the class is
+	// restated here with the real constructor shape rather than imported.
+	PostCommitDurabilityError: class PostCommitDurabilityError extends Error {
+		readonly targetPath: string
+
+		constructor(targetPath: string, cause: unknown) {
+			super("the rename committed but the parent directory could not be fsynced", { cause })
+			this.name = "PostCommitDurabilityError"
+			this.targetPath = targetPath
+		}
+	},
 }))
 
 vi.mock("../../../utils/fileLock", () => ({
@@ -444,6 +456,117 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		})
 	})
 
+	// The commit rename is the commit point: when it lands and only the
+	// parent-directory fsync after it fails, the bytes are already at the
+	// target. The observation has to follow the disk, or the next guarded write
+	// from this task is rejected stale against the version it published itself -
+	// and DiffViewProvider.saveDirectly() reaches guardedWrite with no
+	// reconciliation of its own to absorb that. The failure still has to reach
+	// the caller: a durability check that did not pass is not a successful save.
+	describe("post-commit durability failure", () => {
+		it("reconciles the observation to the landed token and still rejects with the durability error", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("a.txt"), "v1")
+			const task = createMockTask({ observationRegistry: reg })
+			const landed = new PostCommitDurabilityError(abs("a.txt"), new Error("EIO: i/o error"))
+			mockedComputeVersionToken
+				.mockResolvedValueOnce("v1") // the compare-and-swap read
+				.mockResolvedValueOnce("v2") // the post-publish read, under the same lock
+			mockedSafeWriteText.mockRejectedValueOnce(landed)
+
+			await expect(guardedWrite(task, "a.txt", "next", "update")).rejects.toBe(landed)
+
+			expect(reg.get(abs("a.txt"))?.version).toBe("v2")
+			// A full-file publish is complete: the model supplied the whole content.
+			expect(reg.get(abs("a.txt"))?.complete).toBe(true)
+		})
+
+		it("lets the next guarded write from the same task publish instead of failing stale", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("a.txt"), "v1")
+			const task = createMockTask({ observationRegistry: reg })
+			const landed = new PostCommitDurabilityError(abs("a.txt"), new Error("EIO: i/o error"))
+			mockedComputeVersionToken.mockResolvedValueOnce("v1").mockResolvedValueOnce("v2")
+			mockedSafeWriteText.mockRejectedValueOnce(landed)
+
+			await expect(guardedWrite(task, "a.txt", "next", "update")).rejects.toBe(landed)
+
+			// The disk now carries this write's bytes, so the follow-up write must be
+			// accepted against the landed token rather than rejected with the stale
+			// remediation it would otherwise get against "v1".
+			mockedComputeVersionToken.mockResolvedValue("v2")
+
+			await guardedWrite(task, "a.txt", "final", "update")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
+			expect(reg.get(abs("a.txt"))?.version).toBe("v2")
+		})
+
+		it("keeps a partial observation partial when an edit landed without durability", async () => {
+			// The reconciliation must not upgrade completeness: an edit is authorized
+			// by the view the model saw, and a later full-file replacement still has to
+			// be rejected until the whole file is read.
+			const reg = new ObservationRegistry()
+			reg.observe(abs("slice.txt"), "v1", false)
+			const task = createMockTask({ observationRegistry: reg })
+			const landed = new PostCommitDurabilityError(abs("slice.txt"), new Error("EIO: i/o error"))
+			mockedComputeVersionToken.mockResolvedValueOnce("v1").mockResolvedValueOnce("v2")
+			mockedSafeWriteText.mockRejectedValueOnce(landed)
+
+			await expect(guardedWrite(task, "slice.txt", "patched", "edit")).rejects.toBe(landed)
+
+			expect(reg.get(abs("slice.txt"))?.version).toBe("v2")
+			expect(reg.get(abs("slice.txt"))?.complete).toBe(false)
+		})
+
+		it("records an unobserved create that landed without durability as a complete observation", async () => {
+			const reg = new ObservationRegistry()
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			const task = createMockTask({ observationRegistry: reg })
+			const landed = new PostCommitDurabilityError(abs("new.txt"), new Error("EIO: i/o error"))
+			mockedComputeVersionToken.mockResolvedValueOnce("v9")
+			mockedSafeWriteText.mockRejectedValueOnce(landed)
+
+			await expect(guardedWrite(task, "new.txt", "hello", "create")).rejects.toBe(landed)
+
+			expect(reg.get(abs("new.txt"))?.version).toBe("v9")
+			expect(reg.get(abs("new.txt"))?.complete).toBe(true)
+		})
+
+		it("leaves the observation untouched when the publish failed before the commit point", async () => {
+			// Only a landed rename reconciles. Any other publish failure means the
+			// target still holds the pre-write content, so the observation must keep
+			// the token that describes it.
+			const reg = new ObservationRegistry()
+			reg.observe(abs("a.txt"), "v1")
+			const task = createMockTask({ observationRegistry: reg })
+			// The CAS read matches; any later token read would name a different version, so a
+			// reconciliation that fired here would be visible instead of coincidentally equal.
+			mockedComputeVersionToken.mockResolvedValueOnce("v1").mockResolvedValue("v2")
+			mockedSafeWriteText.mockRejectedValueOnce(new Error("EACCES: permission denied"))
+
+			await expect(guardedWrite(task, "a.txt", "next", "update")).rejects.toThrow("EACCES: permission denied")
+
+			expect(reg.get(abs("a.txt"))?.version).toBe("v1")
+		})
+
+		it("keeps the previous observation when the landed token cannot be read", async () => {
+			// Same rule as the success path: a failed stat skips the reconciliation,
+			// it does not change the error the caller receives.
+			const reg = new ObservationRegistry()
+			reg.observe(abs("a.txt"), "v1")
+			const task = createMockTask({ observationRegistry: reg })
+			const landed = new PostCommitDurabilityError(abs("a.txt"), new Error("EIO: i/o error"))
+			mockedComputeVersionToken
+				.mockResolvedValueOnce("v1")
+				.mockRejectedValueOnce(Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }))
+			mockedSafeWriteText.mockRejectedValueOnce(landed)
+
+			await expect(guardedWrite(task, "a.txt", "next", "update")).rejects.toBe(landed)
+
+			expect(reg.get(abs("a.txt"))?.version).toBe("v1")
+		})
+	})
 	describe("edit", () => {
 		it("fails read-first when the file was never observed - nothing published, no I/O", async () => {
 			const task = createMockTask()

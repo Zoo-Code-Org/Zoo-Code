@@ -24,7 +24,7 @@
 import * as fs from "fs/promises"
 import * as path from "path"
 
-import { safeWriteText } from "../../services/file-safety/safeWriteText"
+import { PostCommitDurabilityError, safeWriteText } from "../../services/file-safety/safeWriteText"
 import { computeVersionToken } from "../../utils/versionToken"
 import { withFileLock } from "../../utils/fileLock"
 import { resolveLockKey } from "../../services/file-safety/safeWriteText"
@@ -137,6 +137,36 @@ async function tokenAfterPublish(absolutePath: string): Promise<string | undefin
 }
 
 /**
+ * The token a publish landed with when its commit rename succeeded but the
+ * durability check after it failed. Keyed by the error the guard rethrows, so
+ * the reconciliation in guardedWrite can follow the disk without adopting a
+ * peer writer's token: the guard reads it under the same lock it published
+ * under, and an error that is not this write's simply has no entry.
+ */
+const landedPublishTokens = new WeakMap<Error, string>()
+
+/**
+ * Called by a guard when its publish rejects. A PostCommitDurabilityError means
+ * the rename already placed the bytes at the target, so record the token that
+ * landed publish wrote before the error leaves the lock. A failed stat only
+ * skips the recording: it does not change the error the caller receives, and it
+ * must not turn a landed publish into one that is forgotten.
+ */
+async function recordLandedPublish(absolutePath: string, error: unknown): Promise<void> {
+	if (error instanceof PostCommitDurabilityError) {
+		const token = await tokenAfterPublish(absolutePath)
+		if (token !== undefined) {
+			landedPublishTokens.set(error, token)
+		}
+	}
+}
+
+/** The token a landed-but-not-durable publish wrote, or undefined for any other failure. */
+function landedPublishToken(error: unknown): string | undefined {
+	return error instanceof PostCommitDurabilityError ? landedPublishTokens.get(error) : undefined
+}
+
+/**
  * Publish content only if the target file does not exist.
  *
  * Rejects with a loud remediation error when the file already exists: the
@@ -164,7 +194,14 @@ export async function createIfAbsent(
 			}
 			// Immediately before publication starts.
 			cancelledBeforePublish(absolutePath, displayPath, isCancelled)
-			await safeWriteText(absolutePath, content)
+			try {
+				await safeWriteText(absolutePath, content)
+			} catch (error: unknown) {
+				// A rename that landed before the durability check failed still placed the
+				// bytes at the target: hand the token up before the error leaves the lock.
+				await recordLandedPublish(absolutePath, error)
+				throw error
+			}
 			// Read the new token under the same lock, otherwise a peer lock-using
 			// writer can publish in the gap and the caller records that writer's
 			// token as its own observation.
@@ -240,7 +277,14 @@ export async function replaceIfVersion(
 		if (currentVersion === expectedVersion) {
 			// Immediately before publication starts.
 			cancelledBeforePublish(absolutePath, displayPath, isCancelled)
-			await safeWriteText(absolutePath, content)
+			try {
+				await safeWriteText(absolutePath, content)
+			} catch (error: unknown) {
+				// A rename that landed before the durability check failed still placed the
+				// bytes at the target: hand the token up before the error leaves the lock.
+				await recordLandedPublish(absolutePath, error)
+				throw error
+			}
 			// Read the new token under the same lock, otherwise a peer lock-using
 			// writer can publish in the gap and the caller records that writer's
 			// token as its own observation.
@@ -332,66 +376,85 @@ export async function guardedWrite(
 			)
 		}
 		const obs = task.observationRegistry.get(absolutePath)
-		// A targeted edit authorizes only the view the model saw, so a partial
-		// observation stays partial; a full-file publish is complete.
-		let staysPartial = false
+		// Completeness the observation is refreshed with. A targeted edit authorizes only
+		// the view the model saw, so a partial observation stays partial, while a full-file
+		// publish is complete unless the caller carried another view's completeness through
+		// in completeOverride. One rule, read by the success refresh and by the
+		// reconciliation below, so the two can never disagree about what one publish records.
+		const completeAfterPublish = (): boolean => completeOverride ?? !(obs?.complete === false)
 		// Token the guard read under the lock, so the refresh records the token
 		// this write published rather than a peer writer's.
 		let publishedToken: string | undefined
 
-		if (kind === "edit") {
-			// Edit-style writes require a prior read: no observation, no write.
-			// A targeted edit only authorizes the view the model saw, so a
-			// partial observation is valid for the edit itself; the version
-			// check still rejects a file that moved since the read.
-			if (obs === undefined) {
-				await unobservedEditGuard(absolutePath, displayPath)
+		try {
+			if (kind === "edit") {
+				// Edit-style writes require a prior read: no observation, no write.
+				// A targeted edit only authorizes the view the model saw, so a
+				// partial observation is valid for the edit itself; the version
+				// check still rejects a file that moved since the read.
+				if (obs === undefined) {
+					await unobservedEditGuard(absolutePath, displayPath)
+				} else {
+					publishedToken = await replaceIfVersion(
+						absolutePath,
+						obs.version,
+						content,
+						displayPath,
+						() => task.abort,
+					)
+				}
 			} else {
-				publishedToken = await replaceIfVersion(
-					absolutePath,
-					obs.version,
-					content,
-					displayPath,
-					() => task.abort,
-				)
-				staysPartial = obs.complete === false
-			}
-		} else {
-			// "create" or "update" publish a full file built on the model's
-			// content. A replacement of an existing target -- an "update", or a
-			// "create" whose target is still on disk -- therefore requires a
-			// complete observation: a slice, range, truncated, or
-			// indentation-block read only authorizes the view the model saw, and
-			// publishing over the existing file would silently drop everything
-			// the model never read, so the guard fails closed with a
-			// re-read-the-whole-file remediation. A fresh create (absent target)
-			// needs no prior read and stays allowed.
-			const absent = kind === "create" && (await fileIsAbsent(absolutePath))
-			if (!absent && obs !== undefined && obs.complete === false) {
-				throw new GuardRejectedError(
-					"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
-						"a full-file replacement needs the complete content; re-read the whole file, then retry.",
-					displayPath,
-				)
-			}
+				// "create" or "update" publish a full file built on the model's
+				// content. A replacement of an existing target -- an "update", or a
+				// "create" whose target is still on disk -- therefore requires a
+				// complete observation: a slice, range, truncated, or
+				// indentation-block read only authorizes the view the model saw, and
+				// publishing over the existing file would silently drop everything
+				// the model never read, so the guard fails closed with a
+				// re-read-the-whole-file remediation. A fresh create (absent target)
+				// needs no prior read and stays allowed.
+				const absent = kind === "create" && (await fileIsAbsent(absolutePath))
+				if (!absent && obs !== undefined && obs.complete === false) {
+					throw new GuardRejectedError(
+						"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
+							"a full-file replacement needs the complete content; re-read the whole file, then retry.",
+						displayPath,
+					)
+				}
 
-			if (obs === undefined) {
-				// Never read: only an absent target may be created.
-				publishedToken = await createIfAbsent(absolutePath, content, displayPath, () => task.abort)
-			} else if (absent) {
-				// A "create" on a file that vanished after the read recreates it.
-				publishedToken = await createIfAbsent(absolutePath, content, displayPath, () => task.abort)
-			} else {
-				// The version recorded at read time must still match the on-disk
-				// token.
-				publishedToken = await replaceIfVersion(
-					absolutePath,
-					obs.version,
-					content,
-					displayPath,
-					() => task.abort,
-				)
+				if (obs === undefined) {
+					// Never read: only an absent target may be created.
+					publishedToken = await createIfAbsent(absolutePath, content, displayPath, () => task.abort)
+				} else if (absent) {
+					// A "create" on a file that vanished after the read recreates it.
+					publishedToken = await createIfAbsent(absolutePath, content, displayPath, () => task.abort)
+				} else {
+					// The version recorded at read time must still match the on-disk
+					// token.
+					publishedToken = await replaceIfVersion(
+						absolutePath,
+						obs.version,
+						content,
+						displayPath,
+						() => task.abort,
+					)
+				}
 			}
+		} catch (error: unknown) {
+			// A commit rename that landed but failed the durability check after it has
+			// already put this write's bytes at the target, and the guard rethrows that
+			// failure with the token it read under the same lock as the publish. The
+			// observation has to follow the disk: left on the pre-write token, the next
+			// guarded write from this task is rejected stale against the version it just
+			// published itself, and the save path that calls guardedWrite directly
+			// (DiffViewProvider.saveDirectly) has no reconciliation of its own to absorb
+			// that. The error is rethrown untouched -- a durability failure is not a
+			// successful save, and nothing here reports one.
+			const landedToken = landedPublishToken(error)
+			if (landedToken !== undefined) {
+				task.observationRegistry.observe(absolutePath, landedToken, completeAfterPublish())
+			}
+			throw error
 		}
 
 		// A publish changes the on-disk token (the rename changes ino, size, and
@@ -405,7 +468,7 @@ export async function guardedWrite(
 			// established: a partial observation that authorized a targeted edit
 			// must stay partial, otherwise a later full-file replacement would
 			// publish content built from the slice alone.
-			task.observationRegistry.observe(absolutePath, publishedToken, completeOverride ?? !staysPartial)
+			task.observationRegistry.observe(absolutePath, publishedToken, completeAfterPublish())
 		}
 	})
 }
