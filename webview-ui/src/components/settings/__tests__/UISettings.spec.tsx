@@ -210,6 +210,12 @@ describe("UISettings", () => {
 	})
 
 	describe("table striping", () => {
+		it.each([true, false])("reflects the explicit tableStriped=%s prop", (tableStriped) => {
+			const { getByTestId } = render(<UISettings {...defaultProps} tableStriped={tableStriped} />)
+			const checkbox = getByTestId("table-striped-checkbox") as HTMLInputElement
+			expect(checkbox.checked).toBe(tableStriped)
+		})
+
 		it("renders the table striping checkbox unchecked by default", () => {
 			const { getByTestId } = render(<UISettings {...defaultProps} />)
 			const checkbox = getByTestId("table-striped-checkbox") as HTMLInputElement
