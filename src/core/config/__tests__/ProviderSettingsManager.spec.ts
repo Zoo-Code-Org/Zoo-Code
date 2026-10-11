@@ -769,6 +769,51 @@ describe("ProviderSettingsManager", () => {
 	})
 
 	describe("LoadConfig", () => {
+		it.each([
+			{
+				scenario: "updates only the requested mode for an identified profile",
+				id: "test-id",
+				mode: "code",
+				expectedMappings: { code: "test-id", ask: "other-id" },
+			},
+			{
+				scenario: "preserves mode mappings when no mode is supplied",
+				id: "test-id",
+				mode: undefined,
+				expectedMappings: { code: "previous-id", ask: "other-id" },
+			},
+			{
+				scenario: "activates a profile without an ID without creating a mode mapping",
+				id: undefined,
+				mode: "architect",
+				expectedMappings: { code: "previous-id", ask: "other-id" },
+			},
+		])("$scenario", async ({ id, mode, expectedMappings }) => {
+			// Finish constructor migrations before loading a valid profile without an ID.
+			await providerSettingsManager.initialize()
+			const profile = { apiProvider: providerIdentifiers.anthropic, apiKey: "test-key", id }
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "default",
+				apiConfigs: { test: profile },
+				modeApiConfigs: { code: "previous-id", ask: "other-id" },
+			}
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+			mockSecrets.store.mockClear()
+
+			await expect(providerSettingsManager.activateProfile({ name: "test" }, mode)).resolves.toEqual({
+				name: "test",
+				...profile,
+			})
+
+			expect(mockSecrets.store).toHaveBeenCalledOnce()
+			const storedConfig = JSON.parse(mockSecrets.store.mock.calls[0][1])
+			expect(storedConfig).toEqual({
+				...existingConfig,
+				currentApiConfigName: "test",
+				modeApiConfigs: expectedMappings,
+			})
+		})
+
 		it("should load config and update current config name", async () => {
 			const existingConfig: ProviderProfiles = {
 				currentApiConfigName: "default",

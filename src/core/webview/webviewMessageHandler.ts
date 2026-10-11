@@ -640,7 +640,7 @@ const handleWebviewMessage = async (
 			const launchSignal = provider.settingsSaveSignal
 			let refreshTimedOut = false
 			const refreshProfiles = enqueueSettingsSave(provider.contextProxy, launchSignal, async () => {
-				const metadata = await provider.providerSettingsManager.listConfig()
+				let metadata = await provider.providerSettingsManager.listConfig()
 				let repairedProfile = false
 				launchSignal.throwIfAborted()
 				if (metadata) {
@@ -655,7 +655,8 @@ const handleWebviewMessage = async (
 								apiConfiguration,
 							)
 							launchSignal.throwIfAborted()
-							metadata[0].apiProvider = apiConfiguration.apiProvider
+							metadata = await provider.providerSettingsManager.listConfig()
+							launchSignal.throwIfAborted()
 						}
 					}
 

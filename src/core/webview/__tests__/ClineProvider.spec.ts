@@ -2260,7 +2260,13 @@ describe("ClineProvider", () => {
 		await provider.contextProxy.setValue("currentApiConfigName", "missing-profile")
 		const configuration: ProviderSettings = { apiProvider: providerIdentifiers.fakeAi }
 		const metadata: ProviderSettingsEntry[] = [{ id: "default-id", name: "default" }]
-		const list = vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue(metadata)
+		const refreshedMetadata: ProviderSettingsEntry[] = [
+			{ ...metadata[0], apiProvider: providerIdentifiers.fakeAi, modelId: "saved-model" },
+		]
+		const list = vi
+			.spyOn(provider.providerSettingsManager, "listConfig")
+			.mockResolvedValueOnce(metadata)
+			.mockResolvedValue(refreshedMetadata)
 		const hasConfig = vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(false)
 		const state = vi.spyOn(provider, "getState").mockResolvedValue({
 			...(await provider.getState()),
@@ -2281,8 +2287,8 @@ describe("ClineProvider", () => {
 			await vi.waitFor(() => expect(save).toHaveBeenCalledWith("default", configuration))
 			const nextWrite = vi.fn(async () => {
 				expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("default")
-				expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual(metadata)
-				expect(message).toHaveBeenCalledWith({ type: "listApiConfig", listApiConfig: metadata })
+				expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual(refreshedMetadata)
+				expect(message).toHaveBeenCalledWith({ type: "listApiConfig", listApiConfig: refreshedMetadata })
 			})
 			const queued = enqueueSettingsSave(provider.contextProxy, provider.settingsSaveSignal, nextWrite)
 			expect(nextWrite).not.toHaveBeenCalled()
@@ -2290,9 +2296,9 @@ describe("ClineProvider", () => {
 			expect(message).not.toHaveBeenCalled()
 			release()
 			await Promise.all([launching, queued])
-			expect(list).toHaveBeenCalledOnce()
+			expect(list).toHaveBeenCalledTimes(2)
 			expect(hasConfig).toHaveBeenCalledWith("missing-profile")
-			expect(metadata[0].apiProvider).toBe(providerIdentifiers.fakeAi)
+			expect(metadata[0].apiProvider).toBeUndefined()
 			expect(nextWrite).toHaveBeenCalledOnce()
 			expect(activate).not.toHaveBeenCalled()
 		} finally {
@@ -2300,6 +2306,60 @@ describe("ClineProvider", () => {
 			for (const spy of [list, hasConfig, state, save, post, message, activate]) spy.mockRestore()
 		}
 	})
+
+	test.each(["missing-profile", "default"])(
+		"refreshes saved first-run model metadata with current profile %s and recovers from a failed refresh",
+		async (currentName) => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("currentApiConfigName", currentName)
+			const configuration: ProviderSettings = {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "synthetic-key",
+				apiModelId: "vendor/saved-model",
+			}
+			await provider.contextProxy.setProviderSettings(configuration)
+			const metadata = await provider.providerSettingsManager.listConfig()
+			await provider.contextProxy.setValue("listApiConfigMeta", metadata)
+			const list = vi
+				.spyOn(provider.providerSettingsManager, "listConfig")
+				.mockResolvedValueOnce(metadata)
+				.mockRejectedValueOnce(new Error("synthetic metadata refresh failure"))
+			const save = vi.spyOn(provider.providerSettingsManager, "saveConfig")
+			const repair = vi.spyOn(provider, "repairProviderProfile")
+			const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const message = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const log = vi.spyOn(provider, "log")
+			try {
+				await webviewMessageHandler(provider, { type: "webviewDidLaunch" })
+				expect(save).toHaveBeenCalledWith("default", expect.objectContaining(configuration))
+				expect(list).toHaveBeenCalledTimes(2)
+				expect(repair).not.toHaveBeenCalled()
+				expect(provider.contextProxy.getValue("currentApiConfigName")).toBe(currentName)
+				expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual(metadata)
+				expect(mockContext.globalState.get("listApiConfigMeta")).toEqual(metadata)
+				expect(message).not.toHaveBeenCalledWith(expect.objectContaining({ type: "listApiConfig" }))
+				expect(log).toHaveBeenCalledWith("Failed to refresh provider profile metadata on launch")
+				expect(post).toHaveBeenCalled()
+
+				// Retry against the saved profile using the real metadata reader.
+				await webviewMessageHandler(provider, { type: "webviewDidLaunch" })
+				const refreshedMetadata = [
+					{ ...metadata[0], apiProvider: configuration.apiProvider, modelId: "saved-model" },
+				]
+				expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual(refreshedMetadata)
+				expect(mockContext.globalState.get("listApiConfigMeta")).toEqual(refreshedMetadata)
+				expect(message).toHaveBeenCalledWith({ type: "listApiConfig", listApiConfig: refreshedMetadata })
+				expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("default")
+				if (currentName === "missing-profile") {
+					expect(repair).toHaveBeenCalledWith("default", refreshedMetadata, provider.settingsSaveSignal)
+				} else {
+					expect(repair).not.toHaveBeenCalled()
+				}
+			} finally {
+				for (const spy of [list, save, repair, post, message, log]) spy.mockRestore()
+			}
+		},
+	)
 
 	test("does not sync an unconfigured fallback into the first-run profile", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
