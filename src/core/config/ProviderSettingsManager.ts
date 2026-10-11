@@ -450,6 +450,7 @@ export class ProviderSettingsManager {
 	 */
 	public async activateProfile(
 		params: { name: string } | { id: string },
+		mode?: Mode,
 	): Promise<ProviderSettingsWithId & { name: string }> {
 		const { name, ...providerSettings } = await this.getProfile(params)
 
@@ -457,6 +458,12 @@ export class ProviderSettingsManager {
 			return await this.lock(async () => {
 				const providerProfiles = await this.load()
 				providerProfiles.currentApiConfigName = name
+				if (mode && providerSettings.id) {
+					providerProfiles.modeApiConfigs = {
+						...providerProfiles.modeApiConfigs,
+						[mode]: providerSettings.id,
+					}
+				}
 				await this.store(providerProfiles)
 				return { name, ...providerSettings }
 			})

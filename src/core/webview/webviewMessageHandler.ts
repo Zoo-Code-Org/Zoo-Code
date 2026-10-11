@@ -641,6 +641,7 @@ const handleWebviewMessage = async (
 			let refreshTimedOut = false
 			const refreshProfiles = enqueueSettingsSave(provider.contextProxy, launchSignal, async () => {
 				const metadata = await provider.providerSettingsManager.listConfig()
+				let repairedProfile = false
 				launchSignal.throwIfAborted()
 				if (metadata) {
 					if (metadata.length === 1 && !checkExistKey(metadata[0])) {
@@ -662,13 +663,14 @@ const handleWebviewMessage = async (
 					if (currentConfigName) {
 						const hasConfig = await provider.providerSettingsManager.hasConfig(currentConfigName)
 						launchSignal.throwIfAborted()
-						if (!hasConfig) {
-							await updateGlobalState("currentApiConfigName", metadata[0]?.name)
+						if (!hasConfig && metadata[0]?.name) {
+							await provider.repairProviderProfile(metadata[0].name, metadata, launchSignal)
+							repairedProfile = true
 						}
 					}
 				}
 				launchSignal.throwIfAborted()
-				await updateGlobalState("listApiConfigMeta", metadata)
+				if (!repairedProfile) await updateGlobalState("listApiConfigMeta", metadata)
 				launchSignal.throwIfAborted()
 				if (metadata) await provider.postMessageToWebview({ type: "listApiConfig", listApiConfig: metadata })
 				launchSignal.throwIfAborted()

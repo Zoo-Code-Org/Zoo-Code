@@ -18,6 +18,8 @@ import {
 	type ProviderName,
 	type ProviderSettings,
 	type RooCodeSettings,
+	PROVIDER_SETTINGS_KEYS,
+	isSecretStateKey,
 	type ProviderSettingsEntry,
 	type StaticAppProperties,
 	type DynamicAppProperties,
@@ -2025,6 +2027,58 @@ export class ClineProvider
 				}`,
 			)
 		}
+	}
+
+	/** Called inside the launch settings-save queue; finish or roll back once writes begin. */
+	async repairProviderProfile(name: string, metadata: ProviderSettingsEntry[], signal: AbortSignal): Promise<void> {
+		await this.enqueueProviderProfileMutation(
+			async () => {
+				const {
+					name: profileName,
+					id: _id,
+					...settings
+				} = await this.providerSettingsManager.getProfile({ name })
+				const { mode } = await this.getState()
+				signal.throwIfAborted()
+				const values: RooCodeSettings = {
+					...settings,
+					listApiConfigMeta: metadata,
+					currentApiConfigName: profileName,
+				}
+				const previous = this.contextProxy.getValues()
+				// Match setProviderSettings: clear absent global settings, retaining shared secrets.
+				const keys = new Set<keyof RooCodeSettings>([
+					...PROVIDER_SETTINGS_KEYS.filter((key) => !isSecretStateKey(key) && previous[key] !== undefined),
+					...(Object.keys(values) as (keyof RooCodeSettings)[]),
+				])
+				const attempted: (keyof RooCodeSettings)[] = []
+				try {
+					// Sequential writes let rollback wait for every attempted write to settle.
+					for (const key of keys) {
+						attempted.push(key)
+						await this.contextProxy.setValue(key, values[key])
+					}
+					// Commit the active name and mode mapping in one profile-store write, last.
+					await this.providerSettingsManager.activateProfile({ name: profileName }, mode)
+				} catch (error) {
+					const unsaved: (keyof RooCodeSettings)[] = []
+					for (const key of attempted.reverse()) {
+						try {
+							await this.contextProxy.setValue(key, previous[key])
+						} catch {
+							unsaved.push(key)
+						}
+					}
+					if (unsaved.length) {
+						this.log(
+							`Provider profile repair rollback failed; unsaved fields (retry required): ${unsaved.join(", ")}`,
+						)
+					}
+					throw error
+				}
+			},
+			{ allowTimeout: false },
+		)
 	}
 
 	async activateProviderProfile(

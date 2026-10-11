@@ -2054,6 +2054,131 @@ describe("ClineProvider", () => {
 		for (const spy of [list, post, log]) spy.mockRestore()
 	})
 
+	describe("launch profile repair", () => {
+		const replacement: ProviderSettings = {
+			apiProvider: providerIdentifiers.anthropic,
+			apiModelId: "replacement-model",
+			apiKey: "synthetic-replacement-key",
+		}
+		const stale: ProviderSettings = {
+			apiProvider: providerIdentifiers.anthropic,
+			apiModelId: "deleted-model",
+			apiKey: "synthetic-deleted-key",
+			openAiBaseUrl: "https://stale.invalid",
+		}
+		const profilesKey = "roo_cline_config_api_config"
+
+		beforeEach(async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.providerSettingsManager.saveConfig("default", replacement)
+			await provider.providerSettingsManager.saveConfig("second", { apiProvider: providerIdentifiers.fakeAi })
+			await provider.providerSettingsManager.saveConfig("deleted", stale)
+			await provider.providerSettingsManager.activateProfile({ name: "deleted" }, defaultModeSlug)
+			await provider.providerSettingsManager.deleteConfig("deleted")
+			await provider.contextProxy.setProviderSettings(stale)
+			await provider.contextProxy.setValue("currentApiConfigName", "deleted")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+		})
+
+		afterEach(() => vi.mocked(provider.postStateToWebview).mockRestore())
+
+		test("loads the replacement before the next settings save and persists both active names and the mode", async () => {
+			const launching = webviewMessageHandler(provider, { type: "webviewDidLaunch" })
+			const nextSave = enqueueSettingsSave(provider.contextProxy, provider.settingsSaveSignal, async () => {
+				const { currentApiConfigName, apiConfiguration } = await provider.getState()
+				expect(currentApiConfigName).toBe("default")
+				expect(apiConfiguration).toMatchObject(replacement)
+				expect(apiConfiguration.openAiBaseUrl).toBeUndefined()
+				await provider.upsertProviderProfile(currentApiConfigName!, apiConfiguration)
+			})
+			await Promise.all([launching, nextSave])
+			expect(await provider.providerSettingsManager.getProfile({ name: "default" })).toMatchObject(replacement)
+			const persisted = JSON.parse((await mockContext.secrets.get(profilesKey))!)
+			expect(persisted.currentApiConfigName).toBe("default")
+			expect(persisted.modeApiConfigs[defaultModeSlug]).toBe(persisted.apiConfigs.default.id)
+			expect(mockContext.globalState.get("currentApiConfigName")).toBe("default")
+			expect(mockContext.globalState.get("apiModelId")).toBe(replacement.apiModelId)
+			expect(await mockContext.secrets.get("apiKey")).toBe(replacement.apiKey)
+		})
+
+		test.each(["apiModelId", "apiKey", "listApiConfigMeta", "currentApiConfigName", profilesKey])(
+			"rolls back a failed %s write and repairs successfully on retry",
+			async (failedKey) => {
+				const previous = provider.contextProxy.getValues()
+				const profilesBefore = await mockContext.secrets.get(profilesKey)
+				const update = vi.mocked(mockContext.globalState.update).getMockImplementation()!
+				const store = vi.mocked(mockContext.secrets.store).getMockImplementation()!
+				let failed = false
+				const failOnce = (key: string) => {
+					if (key === failedKey && !failed) {
+						failed = true
+						throw new Error("synthetic persistence failure")
+					}
+				}
+				vi.mocked(mockContext.globalState.update).mockImplementation(async (key, value) => {
+					failOnce(key)
+					await update(key, value)
+				})
+				vi.mocked(mockContext.secrets.store).mockImplementation(async (key, value) => {
+					failOnce(key)
+					await store(key, value)
+				})
+				await webviewMessageHandler(provider, { type: "webviewDidLaunch" })
+				expect(failed).toBe(true)
+				for (const key of [
+					"apiModelId",
+					"apiKey",
+					"openAiBaseUrl",
+					"listApiConfigMeta",
+					"currentApiConfigName",
+				] as const) {
+					expect(provider.contextProxy.getValue(key)).toEqual(previous[key])
+				}
+				expect(mockContext.globalState.get("apiModelId")).toBe(stale.apiModelId)
+				expect(mockContext.globalState.get("currentApiConfigName")).toBe("deleted")
+				expect(await mockContext.secrets.get("apiKey")).toBe(stale.apiKey)
+				expect(await mockContext.secrets.get(profilesKey)).toBe(profilesBefore)
+				await webviewMessageHandler(provider, { type: "webviewDidLaunch" })
+				expect((await provider.getState()).apiConfiguration).toMatchObject(replacement)
+				expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("default")
+			},
+		)
+
+		test("finishes an in-flight repair after cancellation before releasing the settings queue", async () => {
+			const controller = new AbortController()
+			let release!: () => void
+			const blocked = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			const update = vi.mocked(mockContext.globalState.update).getMockImplementation()!
+			const writing = vi.fn()
+			vi.mocked(mockContext.globalState.update).mockImplementation(async (key, value) => {
+				if (key === "apiModelId") {
+					writing()
+					await blocked
+				}
+				await update(key, value)
+			})
+			const metadata = await provider.providerSettingsManager.listConfig()
+			const repairing = enqueueSettingsSave(provider.contextProxy, controller.signal, () =>
+				provider.repairProviderProfile("default", metadata, controller.signal),
+			)
+			await vi.waitFor(() => expect(writing).toHaveBeenCalled())
+			const cancelled = expect(repairing).rejects.toMatchObject({ name: "AbortError" })
+			controller.abort()
+			await cancelled
+			const next = vi.fn(async () => {
+				expect((await provider.getState()).apiConfiguration).toMatchObject(replacement)
+				expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("default")
+			})
+			const queued = enqueueSettingsSave(provider.contextProxy, provider.settingsSaveSignal, next)
+			expect(next).not.toHaveBeenCalled()
+			release()
+			await queued
+			expect(next).toHaveBeenCalledOnce()
+		})
+	})
+
 	test("serializes first-run profile sync, name repair, and list posting with settings saves", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		await provider.contextProxy.setValue("currentApiConfigName", "missing-profile")
