@@ -572,16 +572,33 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 					// must produce, so the tool's handleError folds the failure it reports into that
 					// one result instead of pushing a second one.
 					const abandonedStreamFailure: { report?: string } = {}
+					let reportedStreamFailure = false
 					if (block.name === "write_to_file") {
-						await writeToFileTool.releaseStreamStateOnParseFailure(cline, {
-							handleError: async (action, error) => {
-								await cline.say(
-									"error",
-									`Error ${action}:\n${error.message ?? JSON.stringify(serializeError(error), null, 2)}`,
-								)
-								abandonedStreamFailure.report = `Error ${action}: ${JSON.stringify(serializeError(error))}`
-							},
-						})
+						try {
+							reportedStreamFailure = await writeToFileTool.releaseStreamStateOnParseFailure(cline, {
+								handleError: async (action, error) => {
+									// Store the report before touching the UI: the failure text is the only
+									// copy of it, and a chat row that cannot be saved must not cost the model
+									// the tool_result this guard owes the provider.
+									abandonedStreamFailure.report = `Error ${action}: ${JSON.stringify(serializeError(error))}`
+									await cline.say("error", `Error ${action}:\n${error.message}`)
+								},
+							})
+						} catch (teardownError) {
+							// The teardown protects this call from a leak; it must never be the reason the
+							// mandatory tool_result and the block-completion bookkeeping below are skipped.
+							console.error("Error releasing abandoned write_to_file stream state:", teardownError)
+						}
+					}
+					// The hook returns true when the failure it reported replaces the parse error. When it
+					// reports anyway and still returns false - a refused rollback with no captured streaming
+					// error is a second, distinct failure - the model must also learn the call could not be
+					// finalized, so both facts go into the one tool_result.
+					let resultContent = errorMessage
+					if (abandonedStreamFailure.report) {
+						resultContent = reportedStreamFailure
+							? abandonedStreamFailure.report
+							: `${abandonedStreamFailure.report}\n${errorMessage}`
 					}
 
 					// Push tool_result directly without setting didAlreadyUseTool so streaming can
@@ -589,7 +606,7 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 					cline.pushToolResultToUserContent({
 						type: "tool_result",
 						tool_use_id: sanitizeToolUseId(toolCallId),
-						content: formatResponse.toolError(abandonedStreamFailure.report ?? errorMessage),
+						content: formatResponse.toolError(resultContent),
 						is_error: true,
 					})
 

@@ -70,6 +70,7 @@ interface PresenterTask {
 	assistantMessageContent: Array<Record<string, unknown>>
 	userMessageContent: PushedToolResult[]
 	didCompleteReadingStream: boolean
+	userMessageContentReady: boolean
 	didRejectTool: boolean
 	didAlreadyUseTool: boolean
 	consecutiveMistakeCount: number
@@ -132,6 +133,7 @@ function buildTask(): PresenterTask {
 		assistantMessageContent: [],
 		userMessageContent: [],
 		didCompleteReadingStream: false,
+		userMessageContentReady: false,
 		didRejectTool: false,
 		didAlreadyUseTool: false,
 		consecutiveMistakeCount: 0,
@@ -300,5 +302,42 @@ describe("presentAssistantMessage - abandoned write_to_file stream", () => {
 
 		expect(task.diffViewProvider.open.mock.calls.length).toBe(opensAfterFailure + 1)
 		expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+	})
+
+	it("still emits the required tool_result when the error row cannot be saved", async () => {
+		const task = buildTask()
+		await streamFailedDelta(task)
+		task.say.mockRejectedValue(new Error("chat row unavailable"))
+
+		await expect(present(task, malformedCompletion())).resolves.toBeUndefined()
+
+		// A rejected chat row must not strand the turn: the provider still needs exactly one
+		// tool_result for this tool_use_id, and the block still has to be marked complete.
+		const results = toolResultsFor(task)
+		expect(results).toHaveLength(1)
+		expect(results[0].content).toContain(STREAM_FAILURE)
+		expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		expect(task.userMessageContentReady).toBe(true)
+	})
+
+	it("keeps the malformed-call error when the rollback itself failed", async () => {
+		const task = buildTask()
+		writeToFileTool["getTaskPartialStreamState"](asTask(task))
+		task.diffViewProvider.isEditing = true
+		task.diffViewProvider.revertChanges.mockRejectedValue(new Error("restore refused"))
+
+		await present(task, malformedCompletion())
+
+		// A refused rollback is a second, distinct failure: the hook reports it and still returns
+		// false, so the one tool_result has to carry both it and the malformed-call error - the
+		// model otherwise never learns the call could not be finalized.
+		const results = toolResultsFor(task)
+		expect(results).toHaveLength(1)
+		expect(results[0].content).toContain("write_to_file rollback failed: restore refused")
+		expect(results[0].content).toContain("missing nativeArgs")
+		const says = errorSays(task)
+		expect(says).toHaveLength(1)
+		expect(says[0][1]).toContain("Error writing file:")
+		expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 	})
 })
