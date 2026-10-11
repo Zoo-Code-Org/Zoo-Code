@@ -579,6 +579,16 @@
 		"enablePromptCaching": "Aktifkan prompt caching",
 		"enablePromptCachingTitle": "Aktifkan prompt caching untuk meningkatkan performa dan mengurangi biaya untuk model yang didukung.",
 		"cacheUsageNote": "Catatan: Jika kamu tidak melihat penggunaan cache, coba pilih model yang berbeda lalu pilih model yang kamu inginkan lagi.",
+		"githubCopilot": {
+			"accountActions": "Tindakan akun GitHub Copilot",
+			"signIn": "Masuk ke GitHub",
+			"reconnect": "Hubungkan ulang GitHub",
+			"signedIn": "Masuk sebagai {{account}}",
+			"connecting": "Menghubungkan...",
+			"noModels": "Tidak ada model Copilot yang tersedia. Instal atau aktifkan GitHub Copilot Chat, masuk dengan akun GitHub yang memenuhi syarat, lalu segarkan. Masuk tidak mengonfirmasi langganan Copilot. Batas paket GitHub, permintaan premium, dan laju permintaan berlaku.",
+			"manageAccount": "Kelola akun GitHub",
+			"manageAccountDescription": "Membuka menu akun VS Code, tempat Anda dapat keluar dari GitHub. Keluar memengaruhi Copilot dan ekstensi lain yang menggunakan akun ini."
+		},
 		"vscodeLmModel": "Model Bahasa",
 		"vscodeLmWarning": "Catatan: Model yang diakses melalui VS Code Language Model API dapat dibungkus atau disetel‑halus oleh penyedia, sehingga perilakunya dapat berbeda dibandingkan menggunakan model yang sama secara langsung dari penyedia atau router tipikal. Untuk menggunakan model dari menu tarik‑turun «Language Model», pertama beralihlah ke model tersebut lalu klik «Terima» pada prompt Copilot Chat; jika tidak, Anda mungkin melihat kesalahan seperti 400 «The requested model is not supported».",
 		"googleCloudSetup": {
@@ -998,6 +1008,9 @@
 		"rangeDescription": "Nilai yang lebih tinggi membuat output lebih acak, nilai yang lebih rendah membuatnya lebih deterministik."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "Dukungan gambar tidak dilaporkan",
+		"promptCacheManagedByCopilot": "Prompt caching dikelola oleh GitHub Copilot",
+		"promptCacheCopilotDetails": "Caching bergantung pada model dan backend GitHub Copilot. Zoo Code tidak dapat mengonfigurasi retensi cache atau mengamati cache hit melalui API VS Code.",
 		"supportsImages": "Mendukung gambar",
 		"noImages": "Tidak mendukung gambar",
 		"supportsPromptCache": "Mendukung prompt caching",

@@ -579,6 +579,16 @@
 		"enablePromptCaching": "İstem önbelleğini etkinleştir",
 		"enablePromptCachingTitle": "Desteklenen modeller için performansı artırmak ve maliyetleri azaltmak için istem önbelleğini etkinleştir.",
 		"cacheUsageNote": "Not: Önbellek kullanımını görmüyorsanız, farklı bir model seçip ardından istediğiniz modeli tekrar seçmeyi deneyin.",
+		"githubCopilot": {
+			"accountActions": "GitHub Copilot hesap eylemleri",
+			"signIn": "GitHub'da oturum aç",
+			"reconnect": "GitHub'a yeniden bağlan",
+			"signedIn": "{{account}} olarak oturum açıldı",
+			"connecting": "Bağlanılıyor...",
+			"noModels": "Kullanılabilir Copilot modeli yok. GitHub Copilot Chat'i yükleyin veya etkinleştirin, uygun bir GitHub hesabıyla oturum açın ve ardından yenileyin. Oturum açmak bir Copilot aboneliğini doğrulamaz. GitHub planınızın, premium isteklerin ve istek hızının sınırları geçerlidir.",
+			"manageAccount": "GitHub hesabını yönet",
+			"manageAccountDescription": "VS Code'un hesap menüsünü açar; GitHub oturumunu buradan kapatabilirsiniz. Oturumu kapatmak Copilot'u ve bu hesabı kullanan diğer uzantıları etkiler."
+		},
 		"vscodeLmModel": "Dil Modeli",
 		"vscodeLmWarning": "Not: VS Code Language Model API üzerinden erişilen modeller sağlayıcı tarafından sarılmış veya ince ayarlanmış olabilir; bu nedenle davranış, aynı modelin tipik bir sağlayıcı ya da yönlendirici üzerinden doğrudan kullanılmasından farklı olabilir. «Language Model» açılır menüsünden bir model kullanmak için önce o modele geçin ve ardından Copilot Chat isteminde «Kabul Et»e tıklayın; aksi takdirde 400 «The requested model is not supported» gibi bir hata görebilirsiniz.",
 		"googleCloudSetup": {
@@ -998,6 +1008,9 @@
 		"rangeDescription": "Daha yüksek değerler çıktıyı daha rastgele yapar, daha düşük değerler daha deterministik hale getirir."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "Görsel desteği bildirilmedi",
+		"promptCacheManagedByCopilot": "İstem önbelleğini GitHub Copilot yönetir",
+		"promptCacheCopilotDetails": "Önbellekleme modele ve GitHub Copilot arka ucuna bağlıdır. Zoo Code, VS Code API'si üzerinden önbellek saklama süresini yapılandıramaz veya önbellek isabetlerini gözlemleyemez.",
 		"supportsImages": "Görüntüleri destekler",
 		"noImages": "Görüntüleri desteklemez",
 		"supportsPromptCache": "İstem önbelleğini destekler",

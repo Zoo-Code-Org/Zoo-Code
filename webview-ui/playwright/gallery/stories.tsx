@@ -249,6 +249,34 @@ export const stories: Record<string, Story> = {
 			</div>
 		)
 	},
+	"github-copilot-settings": async () => {
+		const [{ AppProviders }, { VSCodeLM }, { providerIdentifiers }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/providers/VSCodeLM"),
+			import("@roo-code/types"),
+		])
+		function CopilotSettings() {
+			const [config, setConfig] = useState<import("@roo-code/types").ProviderSettings>({
+				apiProvider: providerIdentifiers.githubCopilot,
+				vsCodeLmModelSelector: { vendor: "copilot", id: "gpt-5.5", family: "gpt-5.5", version: "1" },
+			})
+			return (
+				<div data-testid="github-copilot-settings" className="w-[420px] p-4 bg-vscode-editor-background">
+					<VSCodeLM
+						apiConfiguration={config}
+						setApiConfigurationField={(field, value) =>
+							setConfig((previous) => ({ ...previous, [field]: value }))
+						}
+					/>
+				</div>
+			)
+		}
+		return (
+			<AppProviders>
+				<CopilotSettings />
+			</AppProviders>
+		)
+	},
 	"ui-settings": async () => {
 		const { UISettingsStory } = await import("@/components/settings/__tests__/UISettings.visual.fixture")
 		return <UISettingsStory />

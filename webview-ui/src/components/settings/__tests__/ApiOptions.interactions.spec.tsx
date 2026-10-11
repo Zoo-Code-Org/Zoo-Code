@@ -231,6 +231,14 @@ describe("ApiOptions interactions", () => {
 				expectedMessage: { type: "requestVsCodeLmModels" },
 			},
 			{
+				provider: providerIdentifiers.githubCopilot,
+				configuration: {},
+				expectedMessage: {
+					type: "requestVsCodeLmModels",
+					apiConfiguration: { apiProvider: providerIdentifiers.githubCopilot },
+				},
+			},
+			{
 				provider: providerIdentifiers.litellm,
 				configuration: { litellmBaseUrl: "http://litellm:4000", litellmApiKey: "litellm-key" },
 				expectedMessage: {

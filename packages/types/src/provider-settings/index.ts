@@ -4,7 +4,7 @@ import { bedrockProviderDefinition } from "./bedrock.js"
 import { vertexProviderDefinition } from "./vertex.js"
 import { openAiProviderDefinition } from "./openai.js"
 import { ollamaProviderDefinition } from "./ollama.js"
-import { vsCodeLmProviderDefinition } from "./vscode-lm.js"
+import { githubCopilotProviderDefinition, vsCodeLmProviderDefinition } from "./vscode-lm.js"
 import { lmStudioProviderDefinition } from "./lm-studio.js"
 import { geminiProviderDefinition } from "./gemini.js"
 import { geminiCliProviderDefinition } from "./gemini-cli.js"
@@ -56,6 +56,7 @@ export const providerDefinitionList = [
 	openAiProviderDefinition,
 	ollamaProviderDefinition,
 	vsCodeLmProviderDefinition,
+	githubCopilotProviderDefinition,
 	lmStudioProviderDefinition,
 	geminiProviderDefinition,
 	geminiCliProviderDefinition,

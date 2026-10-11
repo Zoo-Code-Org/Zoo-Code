@@ -31,6 +31,7 @@ import {
 	deepSeekModels,
 	openRouterDefaultModelId,
 	vscodeLlmModels,
+	githubCopilotLanguageModel,
 	vscodeLlmDefaultModelId,
 	moonshotDefaultModelId,
 	moonshotModels,
@@ -48,16 +49,19 @@ import { useRouterModels } from "../useRouterModels"
 import { useOpenRouterModelProviders } from "../useOpenRouterModelProviders"
 import { useLmStudioModels } from "../useLmStudioModels"
 import { useOllamaModels } from "../useOllamaModels"
+import { useGitHubCopilotModels } from "../useGitHubCopilotModels"
 
 vi.mock("../useRouterModels")
 vi.mock("../useOpenRouterModelProviders")
 vi.mock("../useLmStudioModels")
 vi.mock("../useOllamaModels")
+vi.mock("../useGitHubCopilotModels")
 
 const mockUseRouterModels = useRouterModels as Mock<typeof useRouterModels>
 const mockUseOpenRouterModelProviders = useOpenRouterModelProviders as Mock<typeof useOpenRouterModelProviders>
 const mockUseLmStudioModels = useLmStudioModels as Mock<typeof useLmStudioModels>
 const mockUseOllamaModels = useOllamaModels as Mock<typeof useOllamaModels>
+const mockUseGitHubCopilotModels = useGitHubCopilotModels as Mock<typeof useGitHubCopilotModels>
 
 type TestRouterModels = Partial<Record<keyof RouterModels, ModelRecord | null>>
 type QueryResultOptions = { isLoading?: boolean; isError?: boolean }
@@ -103,6 +107,7 @@ describe("useSelectedModel", () => {
 		mockUseOllamaModels.mockClear()
 		mockUseLmStudioModels.mockReturnValue(createLocalModelsResult({}))
 		mockUseOllamaModels.mockReturnValue(createLocalModelsResult({}))
+		mockUseGitHubCopilotModels.mockReturnValue({ data: undefined } as ReturnType<typeof useGitHubCopilotModels>)
 	})
 
 	const dynamicProviderCases = [
@@ -1389,6 +1394,146 @@ describe("useSelectedModel", () => {
 	})
 
 	describe("vscode-lm provider", () => {
+		const reportedModels = (...models: Array<{ id: string; family: string; modelInfo?: ModelInfo }>) =>
+			mockUseGitHubCopilotModels.mockReturnValue({
+				data: models.map((model) => ({ vendor: githubCopilotLanguageModel.vendor, version: "1", ...model })),
+			} as unknown as ReturnType<typeof useGitHubCopilotModels>)
+
+		const selectCopilot = (selector: NonNullable<ProviderSettings["vsCodeLmModelSelector"]>) =>
+			renderHook(() =>
+				useSelectedModel({ apiProvider: providerIdentifiers.githubCopilot, vsCodeLmModelSelector: selector }),
+			).result.current
+
+		it("only subscribes to the Copilot list while Copilot is the active provider", () => {
+			renderHook(() => useSelectedModel({ apiProvider: providerIdentifiers.vscodeLm }))
+			expect(mockUseGitHubCopilotModels).toHaveBeenLastCalledWith(false)
+
+			selectCopilot({ vendor: githubCopilotLanguageModel.vendor, id: "any" })
+			expect(mockUseGitHubCopilotModels).toHaveBeenLastCalledWith(true)
+		})
+
+		it("keeps vision unknown until the host reports it, even for a model the catalog knows supports images", () => {
+			const [curatedFamily] = Object.entries(vscodeLlmModels).find(([, entry]) => entry.supportsImages) ?? []
+			expect(curatedFamily).toBeDefined()
+
+			expect(
+				selectCopilot({ vendor: githubCopilotLanguageModel.vendor, family: curatedFamily }).info
+					?.supportsImages,
+			).toBeUndefined()
+		})
+
+		it("keeps missing Copilot image capability unknown instead of setting it to false", () => {
+			expect(
+				selectCopilot({ vendor: "copilot", id: "unknown-model", family: "unknown-model" }).info?.supportsImages,
+			).toBeUndefined()
+		})
+
+		it("uses what the host reports for the selected model: context and vision", () => {
+			reportedModels({
+				id: "dynamic-vision",
+				family: "dynamic-vision",
+				modelInfo: { contextWindow: 260000, supportsImages: true, supportsPromptCache: false },
+			})
+
+			const selected = selectCopilot({ vendor: "copilot", id: "dynamic-vision", family: "dynamic-vision" })
+
+			expect(selected.id).toBe("dynamic-vision")
+			expect(selected.info).toMatchObject({
+				contextWindow: 260000,
+				supportsImages: true,
+				supportsPromptCache: false,
+			})
+		})
+
+		it("lets a host report of no vision override the curated catalog", () => {
+			const [curatedFamily] = Object.entries(vscodeLlmModels).find(([, entry]) => entry.supportsImages) ?? []
+			reportedModels({
+				id: "text-only",
+				family: curatedFamily!,
+				modelInfo: { contextWindow: 1000, supportsImages: false, supportsPromptCache: false },
+			})
+
+			expect(
+				selectCopilot({ vendor: "copilot", id: "text-only", family: curatedFamily }).info?.supportsImages,
+			).toBe(false)
+		})
+
+		it("finds the reported model by family when the saved selector has no id", () => {
+			reportedModels(
+				{ id: "other", family: "other", modelInfo: { contextWindow: 1, supportsPromptCache: false } },
+				{
+					id: "by-family",
+					family: "wanted-family",
+					modelInfo: { contextWindow: 555, supportsPromptCache: false },
+				},
+			)
+
+			const selected = selectCopilot({ vendor: "copilot", family: "wanted-family" })
+
+			expect(selected.info?.contextWindow).toBe(555)
+			expect(selected.id).toBe("copilot/wanted-family")
+		})
+
+		it("falls back to the default model id when nothing is selected yet", () => {
+			const { result } = renderHook(() => useSelectedModel({ apiProvider: providerIdentifiers.githubCopilot }))
+			expect(result.current.id).toBe(vscodeLlmDefaultModelId)
+		})
+
+		it("shows the window the extension enforces, not a larger curated one, before the host reports", () => {
+			const [family, entry] =
+				Object.entries(vscodeLlmModels).find(([, e]) => e.contextWindow !== e.maxInputTokens) ?? []
+			expect(family).toBeDefined()
+
+			const selected = selectCopilot({ vendor: githubCopilotLanguageModel.vendor, family })
+
+			expect(selected.info?.contextWindow).toBe(entry!.maxInputTokens)
+			expect(selected.info?.contextWindow).toBeLessThan(entry!.contextWindow)
+		})
+
+		it("does not let a reported model that says nothing about vision inherit the catalog's flag", () => {
+			const [family] = Object.entries(vscodeLlmModels).find(([, e]) => e.supportsImages) ?? []
+			// An unreported capability arrives with its key absent, as it does after crossing the message boundary.
+			reportedModels({
+				id: "silent",
+				family: family!,
+				modelInfo: { contextWindow: 1000, supportsPromptCache: false },
+			})
+
+			expect(selectCopilot({ vendor: "copilot", id: "silent", family }).info?.supportsImages).toBeUndefined()
+		})
+
+		it("keeps vision unknown for a saved model the host's list does not include", () => {
+			const [family] = Object.entries(vscodeLlmModels).find(([, e]) => e.supportsImages) ?? []
+			reportedModels({ id: "someone-else", family: "someone-else" })
+
+			expect(selectCopilot({ vendor: "copilot", id: "not-listed", family }).info?.supportsImages).toBeUndefined()
+		})
+
+		it("picks the reported model matching the saved id, not merely the first one", () => {
+			reportedModels(
+				{ id: "other", family: "other", modelInfo: { contextWindow: 1, supportsPromptCache: false } },
+				{ id: "wanted", family: "wanted", modelInfo: { contextWindow: 777, supportsPromptCache: false } },
+			)
+
+			expect(selectCopilot({ vendor: "copilot", id: "wanted" }).info?.contextWindow).toBe(777)
+		})
+
+		it("follows a refreshed report for the same selection", () => {
+			reportedModels({ id: "m", family: "m", modelInfo: { contextWindow: 100, supportsPromptCache: false } })
+			const { result, rerender } = renderHook(() =>
+				useSelectedModel({
+					apiProvider: providerIdentifiers.githubCopilot,
+					vsCodeLmModelSelector: { vendor: "copilot", id: "m" },
+				}),
+			)
+			expect(result.current.info?.contextWindow).toBe(100)
+
+			reportedModels({ id: "m", family: "m", modelInfo: { contextWindow: 200, supportsPromptCache: false } })
+			rerender()
+
+			expect(result.current.info?.contextWindow).toBe(200)
+		})
+
 		beforeEach(() => {
 			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
 

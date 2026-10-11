@@ -579,6 +579,16 @@
 		"enablePromptCaching": "Prompt caching inschakelen",
 		"enablePromptCachingTitle": "Schakel prompt caching in om de prestaties te verbeteren en de kosten te verlagen voor ondersteunde modellen.",
 		"cacheUsageNote": "Let op: als je geen cachegebruik ziet, probeer dan een ander model te selecteren en vervolgens weer je gewenste model.",
+		"githubCopilot": {
+			"accountActions": "Acties voor het GitHub Copilot-account",
+			"signIn": "Aanmelden bij GitHub",
+			"reconnect": "GitHub opnieuw verbinden",
+			"signedIn": "Aangemeld als {{account}}",
+			"connecting": "Verbinden...",
+			"noModels": "Geen Copilot-modellen beschikbaar. Installeer of activeer GitHub Copilot Chat, meld je aan met een geschikt GitHub-account en ververs daarna. Aanmelden bevestigt geen Copilot-abonnement. De limieten van je GitHub-abonnement, premiumverzoeken en aanvraagfrequentie zijn van toepassing.",
+			"manageAccount": "GitHub-account beheren",
+			"manageAccountDescription": "Opent het accountmenu van VS Code, waar je je kunt afmelden bij GitHub. Afmelden heeft gevolgen voor Copilot en andere extensies die dit account gebruiken."
+		},
 		"vscodeLmModel": "Taalmodel",
 		"vscodeLmWarning": "Let op: Modellen die via de VS Code Language Model API worden benaderd kunnen door de provider worden verpakt of fijn‑afgesteld, waardoor het gedrag kan afwijken van het rechtstreeks gebruiken van hetzelfde model bij een typische provider of router. Om een model uit de keuzelijst ‘Language Model’ te gebruiken, schakel eerst naar dat model en klik vervolgens op ‘Accepteren’ in de Copilot Chat‑prompt; anders kun je een fout zien zoals 400 ‘The requested model is not supported’.",
 		"googleCloudSetup": {
@@ -998,6 +1008,9 @@
 		"rangeDescription": "Hogere waarden maken de output willekeuriger, lagere waarden maken deze deterministischer."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "Ondersteuning voor afbeeldingen niet gemeld",
+		"promptCacheManagedByCopilot": "Prompt-caching wordt beheerd door GitHub Copilot",
+		"promptCacheCopilotDetails": "Caching hangt af van het model en de GitHub Copilot-backend. Zoo Code kan de cachebewaartermijn niet instellen en cachetreffers niet waarnemen via de VS Code API.",
 		"supportsImages": "Ondersteunt afbeeldingen",
 		"noImages": "Ondersteunt geen afbeeldingen",
 		"supportsPromptCache": "Ondersteunt prompt caching",

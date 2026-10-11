@@ -91,6 +91,7 @@ function getModelIdForProvider(config: ProviderSettings): string | undefined {
 		case retiredProviderIdentifiers.ioIntelligence:
 		case retiredProviderIdentifiers.roo:
 		case providerIdentifiers.vscodeLm:
+		case providerIdentifiers.githubCopilot:
 		case providerIdentifiers.fakeAi:
 		case undefined:
 			return config.apiModelId

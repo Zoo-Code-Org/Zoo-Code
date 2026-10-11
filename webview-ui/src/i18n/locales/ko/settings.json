@@ -579,6 +579,16 @@
 		"enablePromptCaching": "프롬프트 캐시 활성화",
 		"enablePromptCachingTitle": "지원되는 모델의 성능을 향상시키고 비용을 절감하기 위해 프롬프트 캐시를 활성화합니다.",
 		"cacheUsageNote": "참고: 캐시 사용이 표시되지 않는 경우, 다른 모델을 선택한 다음 원하는 모델을 다시 선택해 보세요.",
+		"githubCopilot": {
+			"accountActions": "GitHub Copilot 계정 작업",
+			"signIn": "GitHub에 로그인",
+			"reconnect": "GitHub 다시 연결",
+			"signedIn": "{{account}}(으)로 로그인됨",
+			"connecting": "연결 중...",
+			"noModels": "사용 가능한 Copilot 모델이 없습니다. GitHub Copilot Chat을 설치하거나 활성화하고, 자격이 있는 GitHub 계정으로 로그인한 후 새로고침하세요. 로그인만으로는 Copilot 구독이 확인되지 않습니다. GitHub 요금제, 프리미엄 요청 및 속도 제한이 적용됩니다.",
+			"manageAccount": "GitHub 계정 관리",
+			"manageAccountDescription": "VS Code의 계정 메뉴를 엽니다. 여기에서 GitHub에서 로그아웃할 수 있습니다. 로그아웃하면 Copilot과 이 계정을 사용하는 다른 확장 프로그램에 영향을 줍니다."
+		},
 		"vscodeLmModel": "언어 모델",
 		"vscodeLmWarning": "참고: VS Code Language Model API를 통해 액세스되는 모델은 공급자가 래핑하거나 미세 조정했을 수 있어, 일반적인 공급자나 라우터에서 동일한 모델을 직접 사용할 때와 동작이 다를 수 있습니다. ‘Language Model’ 드롭다운의 모델을 사용하려면 먼저 해당 모델로 전환한 다음 Copilot Chat 프롬프트에서 ‘허용(수락)’을 클릭하세요. 그렇지 않으면 400 ‘The requested model is not supported’와 같은 오류가 발생할 수 있습니다.",
 		"googleCloudSetup": {
@@ -998,6 +1008,9 @@
 		"rangeDescription": "높은 값은 출력을 더 무작위하게, 낮은 값은 더 결정적으로 만듭니다."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "이미지 지원 여부가 보고되지 않음",
+		"promptCacheManagedByCopilot": "프롬프트 캐싱은 GitHub Copilot이 관리합니다",
+		"promptCacheCopilotDetails": "캐싱은 모델과 GitHub Copilot 백엔드에 따라 달라집니다. Zoo Code는 VS Code API를 통해 캐시 보존 기간을 설정하거나 캐시 적중 여부를 확인할 수 없습니다.",
 		"supportsImages": "이미지 지원",
 		"noImages": "이미지 지원 안 함",
 		"supportsPromptCache": "프롬프트 캐시 지원",

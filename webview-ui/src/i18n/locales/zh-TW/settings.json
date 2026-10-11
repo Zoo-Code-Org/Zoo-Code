@@ -606,6 +606,16 @@
 		"enablePromptCaching": "啟用提示快取",
 		"enablePromptCachingTitle": "啟用提示快取以提升支援的模型效能並降低成本。",
 		"cacheUsageNote": "注意：如果您沒有看到快取使用情況，請嘗試選擇其他模型，然後重新選擇您想要的模型。",
+		"githubCopilot": {
+			"accountActions": "GitHub Copilot 帳戶動作",
+			"signIn": "登入 GitHub",
+			"reconnect": "重新連線 GitHub",
+			"signedIn": "已以 {{account}} 身分登入",
+			"connecting": "連線中...",
+			"noModels": "沒有可用的 Copilot 模型。請安裝或啟用 GitHub Copilot Chat，使用符合資格的 GitHub 帳戶登入，然後重新整理。登入並不能確認你擁有 Copilot 訂閱。GitHub 方案、進階要求與速率限制皆適用。",
+			"manageAccount": "管理 GitHub 帳戶",
+			"manageAccountDescription": "開啟 VS Code 的帳戶選單，你可以在其中登出 GitHub。登出會影響 Copilot 以及使用此帳戶的其他擴充功能。"
+		},
 		"vscodeLmModel": "語言模型",
 		"vscodeLmWarning": "注意：透過 VS Code Language Model API 存取的模型可能由供應商封裝或微調，因此其行為可能與直接從一般供應商或路由器使用相同模型時不同。要使用「Language Model」下拉式選單中的模型，請先切換到該模型，然後在 Copilot Chat 提示中點選「接受」；否則可能會出現 400「The requested model is not supported」等錯誤。",
 		"googleCloudSetup": {
@@ -1025,6 +1035,9 @@
 		"rangeDescription": "較高值使輸出更隨機，較低值更確定"
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "未回報圖片支援情況",
+		"promptCacheManagedByCopilot": "提示詞快取由 GitHub Copilot 管理",
+		"promptCacheCopilotDetails": "快取行為取決於模型與 GitHub Copilot 後端。Zoo Code 無法透過 VS Code API 設定快取保留時間，也無法觀察快取命中情況。",
 		"supportsImages": "支援影像",
 		"noImages": "不支援影像",
 		"supportsPromptCache": "支援提示快取",

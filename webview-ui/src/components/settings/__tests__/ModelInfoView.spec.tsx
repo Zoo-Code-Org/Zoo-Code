@@ -8,6 +8,11 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 	useAppTranslation: () => ({
 		t: (key: string) =>
 			({
+				"settings:modelInfo.imageSupportUnknown": "Image support not reported",
+				"settings:modelInfo.supportsImages": "Supports images",
+				"settings:modelInfo.noImages": "Does not support images",
+				"settings:modelInfo.noPromptCache": "Does not support prompt caching",
+				"settings:modelInfo.promptCacheManagedByCopilot": "Prompt caching managed by GitHub Copilot",
 				"settings:serviceTier.pricingTableTitle": "Service tier pricing",
 				"settings:serviceTier.columns.tier": "Tier",
 				"settings:serviceTier.columns.input": "Input",
@@ -43,6 +48,73 @@ const getPricingRowValues = (tier: string) => {
 }
 
 describe("ModelInfoView service tier pricing", () => {
+	it("reports prompt caching as unsupported for other providers when the model says nothing about it", () => {
+		render(
+			<ModelInfoView
+				{...defaultProps}
+				apiProvider={providerIdentifiers.openai}
+				modelInfo={{ contextWindow: 128000 } as ModelInfo}
+				hidePricing
+			/>,
+		)
+		expect(screen.getByText("Does not support prompt caching")).toBeInTheDocument()
+	})
+
+	it("shows unknown Copilot image capability without claiming the model is text-only", () => {
+		render(
+			<ModelInfoView
+				{...defaultProps}
+				apiProvider={providerIdentifiers.githubCopilot}
+				modelInfo={{ contextWindow: 128000, supportsPromptCache: false }}
+				hidePricing
+			/>,
+		)
+		expect(screen.getByText("Image support not reported")).toBeInTheDocument()
+		expect(screen.queryByText("Does not support images")).not.toBeInTheDocument()
+		expect(screen.queryByText("Supports images")).not.toBeInTheDocument()
+	})
+
+	it("continues to show explicit Copilot image restrictions as unsupported", () => {
+		render(
+			<ModelInfoView
+				{...defaultProps}
+				apiProvider={providerIdentifiers.githubCopilot}
+				modelInfo={{ contextWindow: 128000, supportsImages: false, supportsPromptCache: false }}
+				hidePricing
+			/>,
+		)
+		expect(screen.getByText("Does not support images")).toBeInTheDocument()
+		expect(screen.queryByText("Image support not reported")).not.toBeInTheDocument()
+	})
+
+	it("shows vision and provider-managed caching for Copilot without claiming caching is unsupported", () => {
+		render(
+			<ModelInfoView
+				{...defaultProps}
+				apiProvider={providerIdentifiers.githubCopilot}
+				selectedModelId="claude-opus-5.5"
+				modelInfo={{ contextWindow: 871793, supportsImages: true, supportsPromptCache: false }}
+				hidePricing
+			/>,
+		)
+		expect(screen.getByText("Supports images")).toBeInTheDocument()
+		expect(screen.getByText("Prompt caching managed by GitHub Copilot")).toBeInTheDocument()
+		expect(screen.getByText("Prompt caching managed by GitHub Copilot")).toHaveAttribute("tabindex", "0")
+		expect(screen.queryByText("Does not support prompt caching")).not.toBeInTheDocument()
+	})
+
+	it("keeps unsupported caching labels for providers whose models do not support caching", () => {
+		render(
+			<ModelInfoView
+				{...defaultProps}
+				apiProvider={providerIdentifiers.ollama}
+				modelInfo={{ contextWindow: 32000, supportsImages: false, supportsPromptCache: false }}
+				hidePricing
+			/>,
+		)
+		expect(screen.getByText("Does not support images")).toBeInTheDocument()
+		expect(screen.getByText("Does not support prompt caching")).toBeInTheDocument()
+	})
 	it("uses the canonical gemini provider identifier", () => {
 		expect(providerIdentifiers.gemini).toBe("gemini")
 	})

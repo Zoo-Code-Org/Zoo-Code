@@ -579,6 +579,16 @@
 		"enablePromptCaching": "प्रॉम्प्ट कैशिंग सक्षम करें",
 		"enablePromptCachingTitle": "समर्थित मॉडल के लिए प्रदर्शन में सुधार और लागत को कम करने के लिए प्रॉम्प्ट कैशिंग सक्षम करें।",
 		"cacheUsageNote": "नोट: यदि आप कैश उपयोग नहीं देखते हैं, तो एक अलग मॉडल चुनने का प्रयास करें और फिर अपने वांछित मॉडल को पुनः चुनें।",
+		"githubCopilot": {
+			"accountActions": "GitHub Copilot खाते की क्रियाएँ",
+			"signIn": "GitHub में साइन इन करें",
+			"reconnect": "GitHub फिर से कनेक्ट करें",
+			"signedIn": "{{account}} के रूप में साइन इन किया गया",
+			"connecting": "कनेक्ट हो रहा है...",
+			"noModels": "कोई Copilot मॉडल उपलब्ध नहीं है। GitHub Copilot Chat इंस्टॉल या सक्षम करें, किसी पात्र GitHub खाते से साइन इन करें, फिर रिफ्रेश करें। साइन इन करने से Copilot सदस्यता की पुष्टि नहीं होती। आपके GitHub प्लान, प्रीमियम-अनुरोध और दर सीमाएँ लागू होती हैं।",
+			"manageAccount": "GitHub खाता प्रबंधित करें",
+			"manageAccountDescription": "VS Code का खाता मेनू खोलता है, जहाँ आप GitHub से साइन आउट कर सकते हैं। साइन आउट करने से Copilot और इस खाते का उपयोग करने वाले अन्य एक्सटेंशन प्रभावित होते हैं।"
+		},
 		"vscodeLmModel": "भाषा मॉडल",
 		"vscodeLmWarning": "नोट: VS Code Language Model API के माध्यम से उपलब्ध मॉडल प्रदाता द्वारा रैप या फाइन‑ट्यून किए जा सकते हैं, इसलिए इनका व्यवहार किसी सामान्य प्रदाता या राउटर से सीधे उसी मॉडल का उपयोग करने की तुलना में अलग हो सकता है। «Language Model» ड्रॉपडाउन से मॉडल उपयोग करने के लिए पहले उसी मॉडल पर स्विच करें और फिर Copilot Chat प्रॉम्प्ट में «Accept» पर क्लिक करें; अन्यथा 400 \"The requested model is not supported\" जैसी त्रुटि दिखाई दे सकती है।",
 		"googleCloudSetup": {
@@ -998,6 +1008,9 @@
 		"rangeDescription": "उच्च मान आउटपुट को अधिक यादृच्छिक बनाते हैं, निम्न मान इसे अधिक निर्धारित बनाते हैं।"
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "छवि समर्थन की जानकारी नहीं दी गई",
+		"promptCacheManagedByCopilot": "प्रॉम्प्ट कैशिंग GitHub Copilot द्वारा प्रबंधित है",
+		"promptCacheCopilotDetails": "कैशिंग मॉडल और GitHub Copilot बैकएंड पर निर्भर करती है। Zoo Code VS Code API के माध्यम से कैश प्रतिधारण को कॉन्फ़िगर नहीं कर सकता और न ही कैश हिट देख सकता है।",
 		"supportsImages": "छवियों का समर्थन करता है",
 		"noImages": "छवियों का समर्थन नहीं करता है",
 		"supportsPromptCache": "प्रॉम्प्ट कैशिंग का समर्थन करता है",

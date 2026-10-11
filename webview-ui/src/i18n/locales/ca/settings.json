@@ -579,6 +579,16 @@
 		"enablePromptCaching": "Habilitar emmagatzematge en caché de prompts",
 		"enablePromptCachingTitle": "Habilitar l'emmagatzematge en caché de prompts per millorar el rendiment i reduir els costos per als models compatibles.",
 		"cacheUsageNote": "Nota: Si no veieu l'ús de la caché, proveu de seleccionar un model diferent i després tornar a seleccionar el model desitjat.",
+		"githubCopilot": {
+			"accountActions": "Accions del compte de GitHub Copilot",
+			"signIn": "Inicia la sessió a GitHub",
+			"reconnect": "Torna a connectar GitHub",
+			"signedIn": "Sessió iniciada com a {{account}}",
+			"connecting": "Connectant...",
+			"noModels": "No hi ha models de Copilot disponibles. Instal·la o activa GitHub Copilot Chat, inicia la sessió amb un compte de GitHub elegible i actualitza. Iniciar la sessió no confirma una subscripció a Copilot. S'apliquen els límits del teu pla de GitHub, de sol·licituds premium i de taxa.",
+			"manageAccount": "Gestiona el compte de GitHub",
+			"manageAccountDescription": "Obre el menú de comptes de VS Code, on pots tancar la sessió de GitHub. Tancar la sessió afecta Copilot i altres extensions que utilitzen aquest compte."
+		},
 		"vscodeLmModel": "Model de llenguatge",
 		"vscodeLmWarning": "Nota: Els models accessibles a través de l’API VS Code Language Model poden estar encapsulats o ajustats pel proveïdor; per tant, el comportament pot diferir de l’ús directe del mateix model des d’un proveïdor o enrutador típic. Per utilitzar un model del desplegable «Language Model», primer canvia a aquest model i després fes clic a «Acceptar» a l’avís de Copilot Chat; en cas contrari pots veure un error com 400 «The requested model is not supported».",
 		"googleCloudSetup": {
@@ -998,6 +1008,9 @@
 		"rangeDescription": "Valors més alts fan que la sortida sigui més aleatòria, valors més baixos la fan més determinista."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "Compatibilitat amb imatges no informada",
+		"promptCacheManagedByCopilot": "La memòria cau de prompts la gestiona GitHub Copilot",
+		"promptCacheCopilotDetails": "La memòria cau depèn del model i del backend de GitHub Copilot. Zoo Code no pot configurar la retenció de la memòria cau ni observar-ne els encerts a través de l'API de VS Code.",
 		"supportsImages": "Suporta imatges",
 		"noImages": "No suporta imatges",
 		"supportsPromptCache": "Suporta emmagatzematge en caché de prompts",

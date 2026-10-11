@@ -23,6 +23,7 @@ import {
 	checkoutRestorePayloadSchema,
 	getCompletionCheckpoint,
 	providerIdentifiers,
+	githubCopilotLanguageModel,
 	retiredProviderIdentifiers,
 	LmStudioModelsMessageType,
 	OllamaModelsMessageType,
@@ -80,6 +81,11 @@ import { searchCommits } from "../../utils/git"
 import { exportSettings, importSettingsWithFeedback } from "../config/importExport"
 import { getOpenAiModels } from "../../api/providers/openai"
 import { getVsCodeLmModels } from "../../api/providers/vscode-lm"
+import {
+	connectGitHubCopilot,
+	getGitHubCopilotAccount,
+	openGitHubAccountManagement,
+} from "../../api/providers/github-copilot"
 import { openMention } from "../mentions"
 import { resolveImageMentions } from "../mentions/resolveImageMentions"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
@@ -118,6 +124,24 @@ import {
 	handleCreateWorktreeInclude,
 	handleCheckoutBranch,
 } from "./worktree"
+
+type GitHubCopilotViewState = {
+	/** The newest sign-in request, so a slower, older one cannot overwrite its result. */
+	signInId: number
+	/** Moves whenever a sign-in starts or settles; a passive refresh that began earlier is out of date. */
+	changes: number
+}
+
+const githubCopilotViewStates = new WeakMap<ClineProvider, GitHubCopilotViewState>()
+
+const getGitHubCopilotViewState = (provider: ClineProvider) => {
+	let state = githubCopilotViewStates.get(provider)
+	if (!state) {
+		state = { signInId: 0, changes: 0 }
+		githubCopilotViewStates.set(provider, state)
+	}
+	return state
+}
 
 export const webviewMessageHandler = async (
 	provider: ClineProvider,
@@ -1480,11 +1504,74 @@ export const webviewMessageHandler = async (
 			}
 
 			break
-		case VsCodeLmModelsMessageType.requestVsCodeLmModels:
-			const vsCodeLmModels = await getVsCodeLmModels()
-			// TODO: Cache like we do for OpenRouter, etc?
-			await provider.postMessageToWebview({ type: VsCodeLmModelsMessageType.vsCodeLmModels, vsCodeLmModels })
+		case VsCodeLmModelsMessageType.githubCopilotSignIn:
+		case VsCodeLmModelsMessageType.githubCopilotReconnect: {
+			// Plain sign-in and Reconnect run as separate attempts, so an older one can finish after a newer one.
+			// Only the latest request may publish, or its account and model list would overwrite newer state.
+			const viewState = getGitHubCopilotViewState(provider)
+			const requestId = ++viewState.signInId
+			viewState.changes++
+			const isLatest = () => viewState.signInId === requestId
+			try {
+				const { models, account } = await connectGitHubCopilot(async (githubCopilotAccount: string) => {
+					if (!isLatest()) return
+					await provider.postMessageToWebview({
+						type: VsCodeLmModelsMessageType.githubCopilotModels,
+						githubCopilotAccount,
+					})
+				}, message.type === VsCodeLmModelsMessageType.githubCopilotReconnect)
+				if (!isLatest()) break
+				await provider.postMessageToWebview({
+					type: VsCodeLmModelsMessageType.githubCopilotSignInResult,
+					vsCodeLmModels: models,
+					githubCopilotAccount: account,
+				})
+			} catch (error) {
+				if (!isLatest()) break
+				await provider.postMessageToWebview({
+					type: VsCodeLmModelsMessageType.githubCopilotSignInResult,
+					error: error instanceof Error ? error.message : String(error),
+				})
+			} finally {
+				if (isLatest()) viewState.changes++
+			}
 			break
+		}
+		case VsCodeLmModelsMessageType.githubCopilotManageAccount:
+			try {
+				await openGitHubAccountManagement()
+			} catch (error) {
+				provider.log(
+					`Could not open VS Code account management: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+			break
+		case VsCodeLmModelsMessageType.requestVsCodeLmModels: {
+			const isCopilot = message.apiConfiguration?.apiProvider === providerIdentifiers.githubCopilot
+			const type = isCopilot
+				? VsCodeLmModelsMessageType.githubCopilotModels
+				: VsCodeLmModelsMessageType.vsCodeLmModels
+			const viewState = isCopilot ? getGitHubCopilotViewState(provider) : undefined
+			const changesAtStart = viewState?.changes
+			const isOutOfDate = () => viewState !== undefined && viewState.changes !== changesAtStart
+			try {
+				const githubCopilotAccount = isCopilot ? await getGitHubCopilotAccount() : undefined
+				const vsCodeLmModels = await getVsCodeLmModels(isCopilot ? githubCopilotLanguageModel.selector : {})
+				if (isOutOfDate()) break
+				await provider.postMessageToWebview({
+					type,
+					vsCodeLmModels,
+					...(isCopilot ? { githubCopilotAccount: githubCopilotAccount ?? null } : {}),
+				})
+			} catch (error) {
+				if (isOutOfDate()) break
+				await provider.postMessageToWebview({
+					type,
+					error: error instanceof Error ? error.message : String(error),
+				})
+			}
+			break
+		}
 		case "openImage":
 			await openImage(message.text!, { values: message.values })
 			break

@@ -226,6 +226,7 @@ export const PROVIDERS_WITH_CUSTOM_MODEL_UI: ProviderName[] = [
 	providerIdentifiers.ollama,
 	providerIdentifiers.lmstudio,
 	providerIdentifiers.vscodeLm,
+	providerIdentifiers.githubCopilot,
 	providerIdentifiers.moonshot, // Moonshot has custom ModelPicker inside Moonshot.tsx
 ]
 

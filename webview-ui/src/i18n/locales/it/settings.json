@@ -579,6 +579,16 @@
 		"enablePromptCaching": "Abilita cache dei prompt",
 		"enablePromptCachingTitle": "Abilita la cache dei prompt per migliorare le prestazioni e ridurre i costi per i modelli supportati.",
 		"cacheUsageNote": "Nota: Se non vedi l'utilizzo della cache, prova a selezionare un modello diverso e poi seleziona nuovamente il modello desiderato.",
+		"githubCopilot": {
+			"accountActions": "Azioni dell'account GitHub Copilot",
+			"signIn": "Accedi a GitHub",
+			"reconnect": "Riconnetti GitHub",
+			"signedIn": "Accesso eseguito come {{account}}",
+			"connecting": "Connessione in corso...",
+			"noModels": "Nessun modello Copilot disponibile. Installa o abilita GitHub Copilot Chat, accedi con un account GitHub idoneo e poi aggiorna. L'accesso non conferma un abbonamento a Copilot. Si applicano i limiti del tuo piano GitHub, delle richieste premium e della frequenza.",
+			"manageAccount": "Gestisci account GitHub",
+			"manageAccountDescription": "Apre il menu degli account di VS Code, dove puoi disconnetterti da GitHub. La disconnessione riguarda Copilot e le altre estensioni che usano questo account."
+		},
 		"vscodeLmModel": "Modello linguistico",
 		"vscodeLmWarning": "Nota: I modelli accessibili tramite la VS Code Language Model API possono essere incapsulati o perfezionati dal provider, quindi il comportamento può differire dall’uso diretto dello stesso modello presso un provider o router tipico. Per usare un modello dal menu a discesa «Language Model», passa prima a quel modello e poi fai clic su «Accetta» nell’avviso di Copilot Chat; in caso contrario potresti visualizzare un errore come 400 «The requested model is not supported».",
 		"googleCloudSetup": {
@@ -998,6 +1008,9 @@
 		"rangeDescription": "Valori più alti rendono l'output più casuale, valori più bassi lo rendono più deterministico."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "Supporto per le immagini non segnalato",
+		"promptCacheManagedByCopilot": "La cache dei prompt è gestita da GitHub Copilot",
+		"promptCacheCopilotDetails": "La memorizzazione nella cache dipende dal modello e dal backend di GitHub Copilot. Zoo Code non può configurare la conservazione della cache né osservarne gli hit tramite l'API di VS Code.",
 		"supportsImages": "Supporta immagini",
 		"noImages": "Non supporta immagini",
 		"supportsPromptCache": "Supporta cache dei prompt",

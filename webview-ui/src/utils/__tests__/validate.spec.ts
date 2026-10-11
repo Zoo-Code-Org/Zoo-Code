@@ -178,6 +178,26 @@ describe("Model Validation Functions", () => {
 		})
 	})
 
+	describe("validateApiConfiguration for GitHub Copilot", () => {
+		const validate = (vsCodeLmModelSelector: ProviderSettings["vsCodeLmModelSelector"]) =>
+			validateApiConfiguration({ apiProvider: providerIdentifiers.githubCopilot, vsCodeLmModelSelector })
+
+		it.each([
+			["a model id", { vendor: "copilot", id: "gpt-x" }],
+			["a model family", { vendor: "copilot", family: "gpt-x" }],
+		])("accepts a selection that names %s", (_label, selector) => {
+			expect(validate(selector)).toBeUndefined()
+		})
+
+		it.each([
+			["no selection", undefined],
+			["a selection from another vendor", { vendor: "other", id: "gpt-x" }],
+			["a Copilot selection naming neither id nor family", { vendor: "copilot" }],
+		])("requires a model for %s", (_label, selector) => {
+			expect(validate(selector)).toBe("settings:validation.modelSelector")
+		})
+	})
+
 	describe("validateApiConfigurationExcludingModelErrors", () => {
 		it("returns undefined when configuration is valid", () => {
 			const config: ProviderSettings = {

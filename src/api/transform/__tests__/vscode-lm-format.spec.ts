@@ -93,10 +93,106 @@ vitest.mock("vscode", () => {
 		LanguageModelTextPart: MockLanguageModelTextPart,
 		LanguageModelToolCallPart: MockLanguageModelToolCallPart,
 		LanguageModelToolResultPart: MockLanguageModelToolResultPart,
+		// In VS Code this is a class whose static `image` builds the part.
+		LanguageModelDataPart: class {
+			static image = vitest.fn((data: Uint8Array, mimeType: string) => ({ data, mimeType }))
+		},
 	}
 })
 
 describe("convertToVsCodeLmMessages", () => {
+	it("sends decoded image bytes when image input is enabled", () => {
+		const result = convertToVsCodeLmMessages(
+			[
+				{
+					role: "user",
+					content: [
+						{
+							type: "image",
+							source: { type: "base64", media_type: "image/png", data: "aW1hZ2U=" },
+						},
+					],
+				},
+			],
+			true,
+		)
+		expect(Reflect.get(Reflect.get(vscode, "LanguageModelDataPart"), "image")).toHaveBeenCalledWith(
+			Buffer.from("image"),
+			"image/png",
+		)
+		expect(result[0].content[0]).toEqual({ data: Buffer.from("image"), mimeType: "image/png" })
+	})
+
+	it("refuses an image on a host that cannot carry image data, instead of dropping it silently", () => {
+		const hostImagePart = Reflect.get(vscode, "LanguageModelDataPart")
+		const factory = hostImagePart.image
+		Object.assign(hostImagePart, { image: undefined })
+		try {
+			expect(() =>
+				convertToVsCodeLmMessages(
+					[
+						{
+							role: "user",
+							content: [
+								{
+									type: "image",
+									source: { type: "base64", media_type: "image/png", data: "aW1hZ2U=" },
+								},
+							],
+						},
+					],
+					true,
+				),
+			).toThrow("Image input requires a newer version of VS Code")
+		} finally {
+			Object.assign(hostImagePart, { image: factory })
+		}
+	})
+
+	it("preserves image bytes within tool results", () => {
+		const result = convertToVsCodeLmMessages(
+			[
+				{
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "image-tool",
+							content: [
+								{
+									type: "image",
+									source: { type: "base64", media_type: "image/jpeg", data: "aW1hZ2U=" },
+								},
+							],
+						},
+					],
+				},
+			],
+			true,
+		)
+		const part = result[0].content[0] as vscode.LanguageModelToolResultPart
+		expect(part.content[0]).toEqual({ data: Buffer.from("image"), mimeType: "image/jpeg" })
+	})
+
+	it("does not silently replace unsupported image URLs when image input is enabled", () => {
+		expect(() =>
+			convertToVsCodeLmMessages(
+				[
+					{
+						role: "user",
+						content: [
+							{
+								type: "image",
+								source: { type: "url", url: "https://example.com/image.png" },
+							},
+						],
+					},
+				],
+				true,
+			),
+		).toThrow("requires base64 image data")
+	})
+
 	it("should convert simple string messages", () => {
 		const messages: Anthropic.Messages.MessageParam[] = [
 			{ role: "user", content: "Hello" },

@@ -579,6 +579,16 @@
 		"enablePromptCaching": "Ativar cache de prompts",
 		"enablePromptCachingTitle": "Ativar cache de prompts para melhorar o desempenho e reduzir custos para modelos suportados.",
 		"cacheUsageNote": "Nota: Se você não vir o uso do cache, tente selecionar um modelo diferente e depois selecionar novamente o modelo desejado.",
+		"githubCopilot": {
+			"accountActions": "Ações da conta do GitHub Copilot",
+			"signIn": "Entrar no GitHub",
+			"reconnect": "Reconectar ao GitHub",
+			"signedIn": "Conectado como {{account}}",
+			"connecting": "Conectando...",
+			"noModels": "Nenhum modelo do Copilot disponível. Instale ou ative o GitHub Copilot Chat, entre com uma conta do GitHub elegível e atualize. Entrar não confirma uma assinatura do Copilot. Aplicam-se os limites do seu plano do GitHub, de solicitações premium e de taxa.",
+			"manageAccount": "Gerenciar conta do GitHub",
+			"manageAccountDescription": "Abre o menu de contas do VS Code, onde você pode sair do GitHub. Sair afeta o Copilot e outras extensões que usam esta conta."
+		},
 		"vscodeLmModel": "Modelo de Linguagem",
 		"vscodeLmWarning": "Observação: Modelos acessados pela VS Code Language Model API podem ser encapsulados ou ajustados pelo provedor, portanto o comportamento pode diferir do uso direto do mesmo modelo em um provedor ou roteador típico. Para usar um modelo no menu suspenso «Language Model», primeiro altere para esse modelo e depois clique em «Aceitar» no prompt do Copilot Chat; caso contrário, você pode ver um erro como 400 «The requested model is not supported».",
 		"googleCloudSetup": {
@@ -998,6 +1008,9 @@
 		"rangeDescription": "Valores mais altos tornam a saída mais aleatória, valores mais baixos a tornam mais determinística."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "Suporte a imagens não informado",
+		"promptCacheManagedByCopilot": "O cache de prompts é gerenciado pelo GitHub Copilot",
+		"promptCacheCopilotDetails": "O cache depende do modelo e do backend do GitHub Copilot. O Zoo Code não pode configurar a retenção do cache nem observar acertos de cache pela API do VS Code.",
 		"supportsImages": "Suporta imagens",
 		"noImages": "Não suporta imagens",
 		"supportsPromptCache": "Suporta cache de prompts",

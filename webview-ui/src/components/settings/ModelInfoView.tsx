@@ -6,6 +6,7 @@ import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import { formatPrice } from "@src/utils/formatPrice"
 import { cn } from "@src/lib/utils"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { StandardTooltip } from "@src/components/ui"
 
 import { ModelDescriptionMarkdown } from "./ModelDescriptionMarkdown"
 
@@ -69,16 +70,34 @@ export const ModelInfoView = ({
 				{modelInfo.maxTokens?.toLocaleString()} tokens
 			</>
 		),
-		<ModelInfoSupportsItem
-			isSupported={modelInfo?.supportsImages ?? false}
-			supportsLabel={t("settings:modelInfo.supportsImages")}
-			doesNotSupportLabel={t("settings:modelInfo.noImages")}
-		/>,
-		<ModelInfoSupportsItem
-			isSupported={modelInfo?.supportsPromptCache ?? false}
-			supportsLabel={t("settings:modelInfo.supportsPromptCache")}
-			doesNotSupportLabel={t("settings:modelInfo.noPromptCache")}
-		/>,
+		apiProvider === providerIdentifiers.githubCopilot && modelInfo?.supportsImages === undefined ? (
+			<div className="flex items-center gap-1 font-medium">
+				<span className="codicon codicon-info" aria-hidden="true" />
+				{t("settings:modelInfo.imageSupportUnknown")}
+			</div>
+		) : (
+			<ModelInfoSupportsItem
+				isSupported={modelInfo?.supportsImages ?? false}
+				supportsLabel={t("settings:modelInfo.supportsImages")}
+				doesNotSupportLabel={t("settings:modelInfo.noImages")}
+			/>
+		),
+		apiProvider === providerIdentifiers.githubCopilot ? (
+			<StandardTooltip content={t("settings:modelInfo.promptCacheCopilotDetails")}>
+				<div
+					tabIndex={0}
+					className="flex items-center gap-1 font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+					<span className="codicon codicon-info" aria-hidden="true" />
+					{t("settings:modelInfo.promptCacheManagedByCopilot")}
+				</div>
+			</StandardTooltip>
+		) : (
+			<ModelInfoSupportsItem
+				isSupported={modelInfo?.supportsPromptCache ?? false}
+				supportsLabel={t("settings:modelInfo.supportsPromptCache")}
+				doesNotSupportLabel={t("settings:modelInfo.noPromptCache")}
+			/>
+		),
 		apiProvider === providerIdentifiers.gemini && (
 			<span className="italic">
 				{selectedModelId.includes("pro-preview")

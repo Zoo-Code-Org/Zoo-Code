@@ -101,7 +101,7 @@ export const isLocalProvider = (key: string): key is LocalProvider => localProvi
  * model list.
  */
 
-export const internalProviders = [providerIdentifiers.vscodeLm] as const
+export const internalProviders = [providerIdentifiers.vscodeLm, providerIdentifiers.githubCopilot] as const
 
 export type InternalProvider = (typeof internalProviders)[number]
 
@@ -489,6 +489,11 @@ export const MODELS_BY_PROVIDER: Record<
 	[providerIdentifiers.vscodeLm]: {
 		id: providerIdentifiers.vscodeLm,
 		label: "VS Code LM API",
+		models: Object.keys(vscodeLlmModels),
+	},
+	[providerIdentifiers.githubCopilot]: {
+		id: providerIdentifiers.githubCopilot,
+		label: "GitHub Copilot",
 		models: Object.keys(vscodeLlmModels),
 	},
 	[providerIdentifiers.xai]: { id: providerIdentifiers.xai, label: "xAI (Grok)", models: Object.keys(xaiModels) },

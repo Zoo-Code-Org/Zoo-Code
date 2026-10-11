@@ -38,6 +38,7 @@ const expectedProviderIdentifiers = [
 	"ollama",
 	"lmstudio",
 	"vscode-lm",
+	"github-copilot",
 	"openai",
 	"fake-ai",
 	"anthropic",
@@ -114,7 +115,7 @@ describe("provider identifiers", () => {
 			providerIdentifiers.kimiCode,
 		])
 		expect(localProviders).toEqual([providerIdentifiers.ollama, providerIdentifiers.lmstudio])
-		expect(internalProviders).toEqual([providerIdentifiers.vscodeLm])
+		expect(internalProviders).toEqual([providerIdentifiers.vscodeLm, providerIdentifiers.githubCopilot])
 		expect(customProviders).toEqual([providerIdentifiers.openai])
 		expect(fauxProviders).toEqual([providerIdentifiers.fakeAi])
 	})

@@ -579,6 +579,16 @@
 		"enablePromptCaching": "Habilitar caché de prompts",
 		"enablePromptCachingTitle": "Habilitar el caché de prompts para mejorar el rendimiento y reducir costos para modelos compatibles.",
 		"cacheUsageNote": "Nota: Si no ve el uso del caché, intente seleccionar un modelo diferente y luego seleccionar nuevamente su modelo deseado.",
+		"githubCopilot": {
+			"accountActions": "Acciones de la cuenta de GitHub Copilot",
+			"signIn": "Iniciar sesión en GitHub",
+			"reconnect": "Volver a conectar GitHub",
+			"signedIn": "Sesión iniciada como {{account}}",
+			"connecting": "Conectando...",
+			"noModels": "No hay modelos de Copilot disponibles. Instala o activa GitHub Copilot Chat, inicia sesión con una cuenta de GitHub elegible y actualiza. Iniciar sesión no confirma una suscripción a Copilot. Se aplican los límites de tu plan de GitHub, de solicitudes premium y de frecuencia.",
+			"manageAccount": "Administrar cuenta de GitHub",
+			"manageAccountDescription": "Abre el menú de cuentas de VS Code, donde puedes cerrar la sesión de GitHub. Cerrar sesión afecta a Copilot y a otras extensiones que usan esta cuenta."
+		},
 		"vscodeLmModel": "Modelo de lenguaje",
 		"vscodeLmWarning": "Nota: Los modelos a los que se accede a través de la API de modelos de lenguaje de VS Code pueden estar envueltos o ajustados por el proveedor, por lo que su comportamiento puede diferir del uso directo del mismo modelo desde un proveedor o enrutador típico. Para usar un modelo del menú desplegable «Language Model», primero cambia a ese modelo y luego haz clic en «Aceptar» en el aviso de Copilot Chat; de lo contrario, puedes ver un error como 400 «The requested model is not supported».",
 		"googleCloudSetup": {
@@ -998,6 +1008,9 @@
 		"rangeDescription": "Valores más altos hacen que la salida sea más aleatoria, valores más bajos la hacen más determinista."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "Compatibilidad con imágenes no informada",
+		"promptCacheManagedByCopilot": "El almacenamiento en caché de prompts lo gestiona GitHub Copilot",
+		"promptCacheCopilotDetails": "El almacenamiento en caché depende del modelo y del backend de GitHub Copilot. Zoo Code no puede configurar la retención de la caché ni observar sus aciertos a través de la API de VS Code.",
 		"supportsImages": "Soporta imágenes",
 		"noImages": "No soporta imágenes",
 		"supportsPromptCache": "Soporta caché de prompts",

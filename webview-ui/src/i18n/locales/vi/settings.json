@@ -579,6 +579,16 @@
 		"enablePromptCaching": "Bật bộ nhớ đệm lời nhắc",
 		"enablePromptCachingTitle": "Bật bộ nhớ đệm lời nhắc để cải thiện hiệu suất và giảm chi phí cho các mô hình được hỗ trợ.",
 		"cacheUsageNote": "Lưu ý: Nếu bạn không thấy việc sử dụng bộ nhớ đệm, hãy thử chọn một mô hình khác và sau đó chọn lại mô hình mong muốn của bạn.",
+		"githubCopilot": {
+			"accountActions": "Thao tác tài khoản GitHub Copilot",
+			"signIn": "Đăng nhập GitHub",
+			"reconnect": "Kết nối lại GitHub",
+			"signedIn": "Đã đăng nhập với tên {{account}}",
+			"connecting": "Đang kết nối...",
+			"noModels": "Không có mô hình Copilot nào khả dụng. Hãy cài đặt hoặc bật GitHub Copilot Chat, đăng nhập bằng tài khoản GitHub đủ điều kiện, rồi làm mới. Đăng nhập không xác nhận bạn có gói đăng ký Copilot. Áp dụng giới hạn của gói GitHub, yêu cầu cao cấp và tần suất yêu cầu.",
+			"manageAccount": "Quản lý tài khoản GitHub",
+			"manageAccountDescription": "Mở menu tài khoản của VS Code, nơi bạn có thể đăng xuất khỏi GitHub. Đăng xuất ảnh hưởng đến Copilot và các tiện ích mở rộng khác dùng tài khoản này."
+		},
 		"vscodeLmModel": "Mô hình ngôn ngữ",
 		"vscodeLmWarning": "Lưu ý: Các mô hình truy cập qua VS Code Language Model API có thể được nhà cung cấp bao bọc hoặc tinh chỉnh, vì vậy hành vi có thể khác so với khi dùng trực tiếp cùng mô hình từ nhà cung cấp hoặc router thông thường. Để dùng một mô hình trong menu «Language Model», trước tiên hãy chuyển sang mô hình đó rồi nhấp «Chấp nhận» trong lời nhắc Copilot Chat; nếu không bạn có thể gặp lỗi như 400 «The requested model is not supported».",
 		"googleCloudSetup": {
@@ -998,6 +1008,9 @@
 		"rangeDescription": "Giá trị cao hơn làm cho đầu ra ngẫu nhiên hơn, giá trị thấp hơn làm cho nó xác định hơn."
 	},
 	"modelInfo": {
+		"imageSupportUnknown": "Chưa báo cáo khả năng hỗ trợ hình ảnh",
+		"promptCacheManagedByCopilot": "Bộ nhớ đệm prompt do GitHub Copilot quản lý",
+		"promptCacheCopilotDetails": "Bộ nhớ đệm phụ thuộc vào mô hình và backend của GitHub Copilot. Zoo Code không thể cấu hình thời gian lưu bộ nhớ đệm hay quan sát lượt trúng bộ nhớ đệm qua API của VS Code.",
 		"supportsImages": "Hỗ trợ hình ảnh",
 		"noImages": "Không hỗ trợ hình ảnh",
 		"supportsPromptCache": "Hỗ trợ bộ nhớ đệm lời nhắc",
