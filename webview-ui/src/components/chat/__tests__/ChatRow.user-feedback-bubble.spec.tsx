@@ -1,4 +1,5 @@
 import React from "react"
+import userEvent from "@testing-library/user-event"
 import { fireEvent, renderWithExtensionState, screen } from "@/utils/test-utils"
 import type { ClineMessage } from "@roo-code/types"
 import { ChatRowContent } from "../ChatRow"
@@ -112,6 +113,77 @@ describe("ChatRow - user feedback bubble layout & contrast", () => {
 		const editBubble = container.querySelector(".border.rounded-sm") as HTMLElement | null
 		expect(editBubble).toBeTruthy()
 		expect(editBubble!.className).toContain("bg-vscode-editor-background")
+	})
+
+	describe.each([
+		{ name: "Enter", key: "Enter", input: "{Enter}" },
+		{ name: "Space", key: " ", input: " " },
+	])("$name keyboard activation", ({ key, input }) => {
+		beforeEach(() => {
+			// vitest.setup.ts replaces focus with a no-op for FAST components. Borrow
+			// JSDOM's native focus from a fresh realm so keyboard navigation works here.
+			const frame = document.createElement("iframe")
+			document.body.appendChild(frame)
+			const nativeFocus = frame.contentDocument!.createElement("button").focus
+			frame.remove()
+			vi.spyOn(HTMLElement.prototype, "focus", "get").mockReturnValue(nativeFocus)
+		})
+
+		afterEach(() => {
+			vi.restoreAllMocks()
+		})
+
+		it("enters edit mode from the message text", async () => {
+			const user = userEvent.setup()
+			renderRow(makeUserFeedback())
+
+			await user.tab()
+			expect(screen.getByRole("button", { name: "chat:queuedMessages.clickToEdit" })).toHaveFocus()
+			await user.keyboard(input)
+
+			expect(screen.getByRole("textbox")).toHaveValue("hello bubble")
+			expect(screen.queryByRole("button", { name: "chat:queuedMessages.clickToEdit" })).not.toBeInTheDocument()
+		})
+
+		it("does not enter edit mode from the message text while streaming", () => {
+			renderRow(makeUserFeedback(), false, true)
+			const messageControl = screen.getByRole("button", { name: "chat:queuedMessages.clickToEdit" })
+			expect(messageControl).toHaveAttribute("aria-disabled", "true")
+			expect(messageControl).toHaveAttribute("tabindex", "-1")
+
+			// Dispatch directly to exercise the guard even though streaming removes the tab stop.
+			fireEvent.keyDown(messageControl, { key })
+
+			expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
+			expect(messageControl).toBeInTheDocument()
+			expect(messageControl).toHaveTextContent("hello bubble")
+		})
+
+		it("activates the edit action button", async () => {
+			const user = userEvent.setup()
+			renderRow(makeUserFeedback())
+
+			await user.tab()
+			await user.tab()
+			expect(screen.getByRole("button", { name: "common:confirmation.editMessage" })).toHaveFocus()
+			await user.keyboard(input)
+
+			expect(screen.getByRole("textbox")).toHaveValue("hello bubble")
+		})
+
+		it("activates the delete action button without entering edit mode", async () => {
+			const user = userEvent.setup()
+			renderRow(makeUserFeedback())
+
+			await user.tab()
+			await user.tab()
+			await user.tab()
+			expect(screen.getByRole("button", { name: "common:confirmation.deleteMessage" })).toHaveFocus()
+			await user.keyboard(input)
+
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "deleteMessage", value: 1 })
+			expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
+		})
 	})
 
 	it("stays out of edit mode and hides edit/delete actions while streaming", () => {
