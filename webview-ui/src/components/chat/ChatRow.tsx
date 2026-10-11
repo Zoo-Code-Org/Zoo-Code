@@ -1254,9 +1254,22 @@ export const ChatRowContent = ({
 								) : (
 									<div
 										className="px-2 py-1 wrap-anywhere rounded-lg transition-colors"
+										role="button"
+										tabIndex={isStreaming ? -1 : 0}
+										aria-disabled={isStreaming || undefined}
+										aria-label={t("chat:queuedMessages.clickToEdit")}
 										onClick={(e) => {
 											e.stopPropagation()
 											if (!isStreaming) {
+												handleEditClick()
+											}
+										}}
+										onKeyDown={(e) => {
+											if (isStreaming) {
+												return
+											}
+											if (e.key === "Enter" || e.key === " ") {
+												e.preventDefault()
 												handleEditClick()
 											}
 										}}
@@ -1270,24 +1283,28 @@ export const ChatRowContent = ({
 							</div>
 							{!isEditing && (
 								<div className="flex gap-2 pr-1">
-									<div
-										className="cursor-pointer shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+									<button
+										type="button"
+										className="cursor-pointer shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity rounded-sm focus-visible:outline focus-visible:outline-1 focus-visible:outline-vscode-focusBorder"
 										style={{ visibility: isStreaming ? "hidden" : "visible" }}
+										aria-label={t("common:confirmation.editMessage")}
 										onClick={(e) => {
 											e.stopPropagation()
 											handleEditClick()
 										}}>
-										<Edit className="w-4 shrink-0" aria-label="Edit message icon" />
-									</div>
-									<div
-										className="cursor-pointer shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+										<Edit className="w-4 shrink-0" aria-hidden="true" />
+									</button>
+									<button
+										type="button"
+										className="cursor-pointer shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity rounded-sm focus-visible:outline focus-visible:outline-1 focus-visible:outline-vscode-focusBorder"
 										style={{ visibility: isStreaming ? "hidden" : "visible" }}
+										aria-label={t("common:confirmation.deleteMessage")}
 										onClick={(e) => {
 											e.stopPropagation()
 											vscode.postMessage({ type: "deleteMessage", value: message.ts })
 										}}>
-										<Trash2 className="w-4 shrink-0" aria-label="Delete message icon" />
-									</div>
+										<Trash2 className="w-4 shrink-0" aria-hidden="true" />
+									</button>
 								</div>
 							)}
 						</div>

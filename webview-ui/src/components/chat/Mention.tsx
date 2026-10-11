@@ -22,7 +22,12 @@ export const Mention = ({ text, withShadow = false }: MentionProps) => {
 				<span
 					key={index}
 					className={`${withShadow ? "mention-context-highlight-with-shadow" : "mention-context-highlight"} text-[0.9em] cursor-pointer`}
-					onClick={() => vscode.postMessage({ type: "openMention", text: part })}>
+					onClick={(event) => {
+						// Keep a mention click from bubbling into the surrounding chat row, where it
+						// would otherwise also trigger the row's click-to-edit handler.
+						event.stopPropagation()
+						vscode.postMessage({ type: "openMention", text: part })
+					}}>
 					@{part}
 				</span>
 			)

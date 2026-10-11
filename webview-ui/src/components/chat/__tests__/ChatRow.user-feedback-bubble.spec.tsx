@@ -87,23 +87,31 @@ describe("ChatRow - user feedback bubble layout & contrast", () => {
 		expect(bubble!.textContent).toContain("hello bubble")
 	})
 
-	it("places edit/delete action buttons outside the bubble", () => {
+	it("places keyboard-operable edit/delete action buttons outside the bubble and wires them up", () => {
 		const { container } = renderRow(makeUserFeedback())
 
-		// The action buttons container is a sibling of the bubble, below it
-		const actionBar = Array.from(container.querySelectorAll("div")).find(
-			(el) => el.className.includes("flex") && el.className.includes("gap-2") && el.className.includes("pr-1"),
-		) as HTMLElement | undefined
+		// Both controls are real buttons with translated accessible names, so
+		// keyboard and screen-reader users can reach them.
+		const editButton = screen.getByRole("button", { name: "common:confirmation.editMessage" })
+		const deleteButton = screen.getByRole("button", { name: "common:confirmation.deleteMessage" })
+		expect(editButton.tagName).toBe("BUTTON")
+		expect(deleteButton.tagName).toBe("BUTTON")
 
-		expect(actionBar).toBeTruthy()
-		expect(actionBar!.querySelector('[aria-label="Edit message icon"]')).toBeTruthy()
-		expect(actionBar!.querySelector('[aria-label="Delete message icon"]')).toBeTruthy()
-
-		// The bubble must NOT contain the edit/delete icons
+		// The bubble must NOT contain the edit/delete controls.
 		const bubble = container.querySelector(".cursor-text") as HTMLElement | null
 		expect(bubble).toBeTruthy()
-		expect(bubble!.querySelector('[aria-label="Edit message icon"]')).toBeFalsy()
-		expect(bubble!.querySelector('[aria-label="Delete message icon"]')).toBeFalsy()
+		expect(bubble!).not.toContainElement(editButton)
+		expect(bubble!).not.toContainElement(deleteButton)
+
+		// Clicking delete forwards the message timestamp to the extension host.
+		fireEvent.click(deleteButton)
+		expect(mockPostMessage).toHaveBeenCalledWith({ type: "deleteMessage", value: 1 })
+
+		// Clicking edit enters edit mode: the bubble switches to the editor background.
+		fireEvent.click(editButton)
+		const editBubble = container.querySelector(".border.rounded-sm") as HTMLElement | null
+		expect(editBubble).toBeTruthy()
+		expect(editBubble!.className).toContain("bg-vscode-editor-background")
 	})
 
 	it("stays out of edit mode and hides edit/delete actions while streaming", () => {
@@ -122,20 +130,11 @@ describe("ChatRow - user feedback bubble layout & contrast", () => {
 		expect(bubbleWrapper!.className).toContain("bg-vscode-list-hoverBackground")
 		expect(bubbleWrapper!.className).not.toContain("bg-vscode-editor-background")
 
-		// The edit/delete action icons remain mounted but hidden via visibility: hidden.
-		const actionBar = Array.from(container.querySelectorAll("div")).find(
-			(el) => el.className.includes("flex") && el.className.includes("gap-2") && el.className.includes("pr-1"),
-		) as HTMLElement | undefined
-		expect(actionBar).toBeTruthy()
-
-		const editIconWrapper = actionBar!.querySelector('[aria-label="Edit message icon"]')
-			?.parentElement as HTMLElement | null
-		const deleteIconWrapper = actionBar!.querySelector('[aria-label="Delete message icon"]')
-			?.parentElement as HTMLElement | null
-		expect(editIconWrapper).toBeTruthy()
-		expect(deleteIconWrapper).toBeTruthy()
-		expect(editIconWrapper!.style.visibility).toBe("hidden")
-		expect(deleteIconWrapper!.style.visibility).toBe("hidden")
+		// The edit/delete controls remain mounted but hidden via visibility: hidden.
+		const editButton = screen.getByLabelText("common:confirmation.editMessage")
+		const deleteButton = screen.getByLabelText("common:confirmation.deleteMessage")
+		expect(editButton.style.visibility).toBe("hidden")
+		expect(deleteButton.style.visibility).toBe("hidden")
 	})
 
 	it("uses the editor background for the bubble while editing", () => {
@@ -154,8 +153,8 @@ describe("ChatRow - user feedback bubble layout & contrast", () => {
 		expect(editBubble!.className).toContain("text-vscode-editor-foreground")
 		expect(editBubble!.className).not.toContain("bg-vscode-list-hoverBackground")
 
-		expect(screen.queryByLabelText("Edit message icon")).not.toBeInTheDocument()
-		expect(screen.queryByLabelText("Delete message icon")).not.toBeInTheDocument()
+		expect(screen.queryByLabelText("common:confirmation.editMessage")).not.toBeInTheDocument()
+		expect(screen.queryByLabelText("common:confirmation.deleteMessage")).not.toBeInTheDocument()
 	})
 
 	it("renders the feedback bubble without a header label", () => {
@@ -163,6 +162,24 @@ describe("ChatRow - user feedback bubble layout & contrast", () => {
 		// The header label ("you said") must not be rendered for user feedback
 		expect(screen.queryByText("chat:feedback.youSaid")).not.toBeInTheDocument()
 		expect(screen.queryByLabelText("User icon")).not.toBeInTheDocument()
+	})
+
+	it("opens a mention without also entering edit mode", () => {
+		const { container } = renderRow({
+			ts: 1,
+			type: "say",
+			say: "user_feedback",
+			text: "please check @problems for details",
+		})
+
+		fireEvent.click(screen.getByText("@problems"))
+
+		// The mention click opens the mention...
+		expect(mockPostMessage).toHaveBeenCalledWith({ type: "openMention", text: "problems" })
+		// ...and must not bubble into the row's click-to-edit handler.
+		const bubbleWrapper = container.querySelector(".border.rounded-sm") as HTMLElement | null
+		expect(bubbleWrapper).toBeTruthy()
+		expect(bubbleWrapper!.className).not.toContain("bg-vscode-editor-background")
 	})
 })
 
