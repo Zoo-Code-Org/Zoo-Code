@@ -38,7 +38,25 @@ export interface SafeWriteJsonOptions {
 	 * symlinks before this check runs, so a caller that picked the path from a
 	 * known scope (a workspace, a project settings directory) can refuse a write
 	 * that a planted symlink would land somewhere else. The check runs before the
-	 * advisory lock is taken and before anything is staged.
+	 * advisory lock is taken and before anything is staged, and it is repeated on
+	 * the resolved publish target inside the lock so a peer writer that moved the
+	 * referent in between is caught too.
+	 *
+	 * What it does NOT cover: an ancestor DIRECTORY of the target that is replaced
+	 * by a link in the window between the last check and the commit rename. Both
+	 * checks decide from the final component as it resolves at their own instant,
+	 * and publication is path based - the parent-directory creation and the commit
+	 * rename both take a path - so an ancestor swapped after the check redirects the
+	 * publish. What happens then depends on what sits at the swapped-in path: if it
+	 * already has a file at the target name the publish fails in the staging
+	 * identity guard (StagingPathError) and nothing is written; if it does not, the
+	 * write follows the swapped ancestor and lands OUTSIDE the declared scope. This
+	 * option claims neither outcome: it confines the target it resolved, not the
+	 * directory tree above it. Making the claim cover that window needs a publish
+	 * that walks from an already-open directory handle with no-follow semantics
+	 * (openat/renameat over a directory fd); this runtime exposes neither, so the
+	 * claim is narrowed here instead of being made true. A caller that needs
+	 * containment across that window cannot get it from this option.
 	 */
 	confineTo?: string
 }
@@ -195,7 +213,12 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// given. Re-checked here after the lock because a peer writer may have moved
 		// the referent between the pre-lock check and this one. This runs before the
 		// merge read and before anything is staged, so a rejected write leaves nothing
-		// behind.
+		// behind. It is also the LAST confinement decision of this write: it decides
+		// the final component as it resolves here, and an ancestor directory replaced
+		// by a link between this point and the commit rename below is outside its
+		// reach, because the rename takes a path and re-resolves the tree at rename
+		// time. See the confineTo option doc for what the two outcomes of that window
+		// are and why neither is claimed by this option.
 		if (options?.confineTo) {
 			const scopeRoot = await _resolveScopeRoot(options.confineTo)
 			_assertWithinScope(absoluteFilePath, await _resolveScopeRoot(resolvedTargetPath), scopeRoot)
