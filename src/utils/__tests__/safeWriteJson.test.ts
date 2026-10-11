@@ -864,6 +864,91 @@ describe("safeWriteJson", () => {
 		expect(await readFileContent(target)).toEqual({ own: true })
 	})
 
+	// The initial walk and the commit rename are separated by the whole staging sequence, and
+	// Node exposes no handle-relative rename: an ancestor that passed the walk can be swapped
+	// while the payload is staged, and the path-based commit rename would follow it. The
+	// publication therefore re-derives the final entry and every recorded ancestor identity
+	// immediately before the commit rename. (Real symlinks are unavailable in this CI lane, so
+	// the swap is simulated by scripting fs.lstat per visit, the same way as the tests above.)
+	test("refuses the publish when an ancestor is swapped for a link after the initial walk", async () => {
+		const parent = path.join(tempDir, "swap-parent")
+		await fs.mkdir(parent, { recursive: true })
+		const target = path.join(parent, "swap-ancestor.json")
+		await fsPromisesActuals.writeFile!(target, JSON.stringify({ own: true }))
+		// The guard reads isSymbolicLink plus the bigint identity, and a real BigIntStats cannot
+		// be produced for a simulated directory in this CI lane, so the doubles are asserted
+		// through unknown rather than stubbing every Stats field.
+		const asDir = { isSymbolicLink: () => false, dev: 1n, ino: 1n } as unknown as fsSyncActual.BigIntStats
+		const asLink = { isSymbolicLink: () => true, dev: 2n, ino: 2n } as unknown as fsSyncActual.BigIntStats
+		// Path-aware scripting: the first look at the parent is the walk that authorizes it; the
+		// next look happens inside the publication, where the swap must be caught.
+		let parentLooks = 0
+		vi.spyOn(fs, "lstat").mockImplementation(((p: unknown) => {
+			if (String(p) === parent) {
+				parentLooks++
+				return Promise.resolve(parentLooks === 1 ? asDir : asLink)
+			}
+			return Promise.resolve(asDir)
+		}) as unknown as typeof fs.lstat)
+
+		await expect(safeWriteJson(target, { leaked: true }, { refuseSymlinkTarget: true })).rejects.toThrow(
+			/is now a symlink/,
+		)
+
+		vi.restoreAllMocks()
+		// The re-check ran (the walk saw the directory once, the publication once more), the
+		// commit rename never happened, and the payload did not escape: the target still holds
+		// its own content and the staged temp was discarded, not left beside it.
+		expect(parentLooks).toBe(2)
+		expect(await readFileContent(target)).toEqual({ own: true })
+		expect(fsSyncActual.readdirSync(parent)).toEqual(["swap-ancestor.json"])
+	})
+
+	test("refuses the publish when an ancestor is replaced by a different directory", async () => {
+		const parent = path.join(tempDir, "repl-parent")
+		await fs.mkdir(parent, { recursive: true })
+		const target = path.join(parent, "replaced-ancestor.json")
+		await fsPromisesActuals.writeFile!(target, JSON.stringify({ own: true }))
+		const asDir = { isSymbolicLink: () => false, dev: 1n, ino: 1n } as unknown as fsSyncActual.BigIntStats
+		// The rename-away-and-recreate shape: the name is unchanged and the entry is still a
+		// directory, so only the identity tells the two apart.
+		const asOtherDir = { isSymbolicLink: () => false, dev: 9n, ino: 9n } as unknown as fsSyncActual.BigIntStats
+		let parentLooks = 0
+		vi.spyOn(fs, "lstat").mockImplementation(((p: unknown) => {
+			if (String(p) === parent) {
+				parentLooks++
+				return Promise.resolve(parentLooks === 1 ? asDir : asOtherDir)
+			}
+			return Promise.resolve(asDir)
+		}) as unknown as typeof fs.lstat)
+
+		await expect(safeWriteJson(target, { leaked: true }, { refuseSymlinkTarget: true })).rejects.toThrow(
+			/is no longer the directory that was checked/,
+		)
+
+		vi.restoreAllMocks()
+		expect(parentLooks).toBe(2)
+		expect(await readFileContent(target)).toEqual({ own: true })
+		expect(fsSyncActual.readdirSync(parent)).toEqual(["replaced-ancestor.json"])
+	})
+
+	test("publishes when every recorded ancestor keeps its identity", async () => {
+		const parent = path.join(tempDir, "stable-parent")
+		await fs.mkdir(parent, { recursive: true })
+		const target = path.join(parent, "stable-ancestor.json")
+		await fsPromisesActuals.writeFile!(target, JSON.stringify({ own: true }))
+		// Pinning must not reject the ordinary case: every ancestor keeps the identity the walk
+		// recorded, so the publication proceeds.
+		vi.spyOn(fs, "lstat").mockResolvedValue(
+			{ isSymbolicLink: () => false, dev: 1n, ino: 1n } as unknown as fsSyncActual.BigIntStats,
+		)
+
+		await safeWriteJson(target, { written: true }, { refuseSymlinkTarget: true })
+
+		vi.restoreAllMocks()
+		expect(await readFileContent(target)).toEqual({ written: true })
+	})
+
 	test("does not apply the ancestor refusal when refuseSymlinkTarget is not set", async () => {
 		const target = path.join(tempDir, "default-ancestor.json")
 		await fsPromisesActuals.writeFile!(target, JSON.stringify({ own: true }))

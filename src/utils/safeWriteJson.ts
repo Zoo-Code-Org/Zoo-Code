@@ -41,8 +41,26 @@ export interface SafeWriteJsonOptions {
 	 * settings exports carry API credentials - where following a link they never
 	 * pointed at would write secrets into a file they did not pick. When this is
 	 * set, a symlink at the final path component is an error instead.
+	 *
+	 * The refusal is not a one-time inspection: the final entry and every ancestor
+	 * directory identity are re-derived inside the publication, immediately before
+	 * the commit rename, so a directory swapped for a link during the staging
+	 * sequence is caught before it can redirect the payload. Node exposes no
+	 * handle-relative rename, so the window that remains is the commit rename
+	 * itself, not the checks before it.
 	 */
 	refuseSymlinkTarget?: boolean
+}
+
+/**
+ * An ancestor directory that passed the symlink refusal, recorded with the
+ * bigint device and inode it had at that moment so the publication can tell
+ * whether it is still the same directory before committing.
+ */
+interface CheckedDirectory {
+	dir: string
+	dev: bigint
+	ino: bigint
 }
 
 /**
@@ -80,19 +98,23 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// itself (e.g. <workspace>/.roo -> a directory outside the workspace). Only ENOENT stops the
 	// walk - a missing ancestor means nothing deeper exists to be a link. Any other inspection
 	// error fails closed, because "could not inspect" is not evidence that the path is safe.
-	async function _refuseSymlinkedAncestors(absoluteFilePath: string): Promise<void> {
+	// Each directory that passes is recorded with its bigint device and inode: a walk the
+	// publication does not re-derive is a refusal an attacker retires by swapping the directory
+	// after the walk ran, so the identities feed the pre-commit re-check below.
+	async function _refuseSymlinkedAncestors(absoluteFilePath: string): Promise<CheckedDirectory[]> {
+		const checked: CheckedDirectory[] = []
 		let current = path.dirname(absoluteFilePath)
 		for (;;) {
-			let st: fsSync.Stats
+			let st: fsSync.BigIntStats
 			try {
-				st = await fs.lstat(current)
+				st = await fs.lstat(current, { bigint: true })
 			} catch (error: unknown) {
 				const code =
 					error && typeof error === "object" && "code" in error
 						? (error as { code?: string }).code
 						: undefined
 				if (code === "ENOENT") {
-					return
+					return checked
 				}
 				throw error
 			}
@@ -101,9 +123,10 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 					`safeWriteJson: refusing to write to ${absoluteFilePath}: ${current} is a symlink, and the payload would be written outside the directory the caller named.`,
 				)
 			}
+			checked.push({ dir: current, dev: st.dev, ino: st.ino })
 			const parent = path.dirname(current)
 			if (parent === current) {
-				return
+				return checked
 			}
 			current = parent
 		}
@@ -112,6 +135,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// A credential-bearing payload must not be redirected through a link the user
 	// never chose: check the final path component before anything is resolved,
 	// staged, or locked.
+	let checkedAncestors: CheckedDirectory[] = []
 	if (options?.refuseSymlinkTarget) {
 		let targetStat: fsSync.Stats | undefined
 		try {
@@ -134,8 +158,10 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		// The final component alone is not enough: a symlinked ancestor redirects the payload while
 		// leaving the target path looking ordinary. Checked before anything is resolved, staged or
-		// locked, and it fails closed on any inspection error that is not ENOENT.
-		await _refuseSymlinkedAncestors(absoluteFilePath)
+		// locked, and it fails closed on any inspection error that is not ENOENT. The identities it
+		// records are re-derived by the publication hook below - this walk alone leaves the whole
+		// staging window open to an ancestor swap.
+		checkedAncestors = await _refuseSymlinkedAncestors(absoluteFilePath)
 	}
 
 	// Two paths, for two different jobs: lock identity and publication destination.
@@ -188,6 +214,48 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		await assertFinalComponentNotReplaced("after resolution")
 	}
 
+	// The initial checks and the commit rename are separated by the whole staging sequence, and
+	// Node exposes no handle-relative rename (no renameat): a local writer that swaps an
+	// inspected ancestor for a link - or for a different directory - during that window would
+	// still redirect the path-based commit rename, and no recheck of the final component would
+	// notice, because the swap is one directory up. The publication therefore re-derives the
+	// complete ancestry itself - the final entry and every recorded ancestor identity -
+	// immediately before the commit rename, so the refusal is enforced at the action it guards.
+	// What cannot be closed without a native renameat is stated rather than claimed as
+	// protection: the window that remains is the commit rename itself.
+	const assertAncestryUnchangedBeforeCommit = async (): Promise<void> => {
+		await assertFinalComponentNotReplaced("before publication")
+		for (const expected of checkedAncestors) {
+			let nowStat: fsSync.BigIntStats
+			try {
+				nowStat = await fs.lstat(expected.dir, { bigint: true })
+			} catch (error: unknown) {
+				const code =
+					error && typeof error === "object" && "code" in error
+						? (error as { code?: string }).code
+						: undefined
+				// The directory the walk recorded is gone: the ancestry the refusal was based on
+				// no longer exists, and a path-based rename would resolve a chain nobody checked.
+				if (code === "ENOENT") {
+					throw new Error(
+						`safeWriteJson: refusing to publish to ${absoluteFilePath}: ${expected.dir} no longer exists; an ancestor of the destination was replaced after it was checked.`,
+					)
+				}
+				throw error
+			}
+			if (nowStat.isSymbolicLink()) {
+				throw new Error(
+					`safeWriteJson: refusing to publish to ${absoluteFilePath}: ${expected.dir} is now a symlink; the payload would be written outside the directory the caller named.`,
+				)
+			}
+			if (nowStat.dev !== expected.dev || nowStat.ino !== expected.ino) {
+				throw new Error(
+					`safeWriteJson: refusing to publish to ${absoluteFilePath}: ${expected.dir} is no longer the directory that was checked; an ancestor of the destination was replaced after it was checked.`,
+				)
+			}
+		}
+	}
+
 	// Acquire the lock before any file operations. `acquireFileLock` owns the
 	// shared advisory lock protocol, so callers that lock the same path with it
 	// (for example task-history deletion) serialize with this write. It locks the
@@ -237,17 +305,20 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		const textOptions: SafeWriteTextOptions = {
 			tempPath: actualTempNewFilePath,
 			backup: true,
-			// This call already resolved the target (and re-checked the final component
-			// under the lock). safeWriteText must not resolve it a second time: a link
-			// installed in that window would be followed there and the payload committed
-			// to the attacker's referent.
+			// This call already resolved the target (and re-checks the final component
+			// under the lock through the hook below). safeWriteText must not resolve it a
+			// second time: a link installed in that window would be followed there and the
+			// payload committed to the attacker's referent.
 			targetPathIsResolved: true,
 		}
 
 		if (options?.refuseSymlinkTarget) {
-			// Last chance to notice the destination was swapped for a link: everything the
-			// caller asked for is staged and the commit rename follows the resolved path.
-			await assertFinalComponentNotReplaced("before publication")
+			// Re-derive the refusal inside the publication, immediately before the backup
+			// rename and the commit rename: the initial walk and this call are separated by
+			// the whole staging sequence, and a path-based rename follows an ancestor that
+			// was swapped for a link in that window. A rejection runs before anything is
+			// moved, so the target keeps its content and the staged temp is discarded.
+			textOptions.verifyBeforeCommit = assertAncestryUnchangedBeforeCommit
 		}
 		await safeWriteText(publishTargetPath, "", textOptions)
 
