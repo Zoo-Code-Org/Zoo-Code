@@ -2144,6 +2144,82 @@ describe("ClineProvider", () => {
 			},
 		)
 
+		test("continues after a rollback write fails, logs the unsaved field, and lets a queued repair retry", async () => {
+			const previous = provider.contextProxy.getValues()
+			const profilesBefore = await mockContext.secrets.get(profilesKey)
+			const metadata = await provider.providerSettingsManager.listConfig()
+			const signal = provider.settingsSaveSignal
+			const forwardError = new Error("synthetic forward persistence failure")
+			const update = vi.mocked(mockContext.globalState.update).getMockImplementation()!
+			const store = vi.mocked(mockContext.secrets.store).getMockImplementation()!
+			const writes = vi.spyOn(provider.contextProxy, "setValue").mockClear()
+			const log = vi.spyOn(provider, "log")
+			let forwardFailed = false
+			let rollbackStarted = false
+			let releaseRollback!: () => void
+			const blockedRollback = new Promise<void>((resolve) => {
+				releaseRollback = resolve
+			})
+			vi.mocked(mockContext.globalState.update).mockImplementation(async (key, value) => {
+				if (key === "currentApiConfigName" && !forwardFailed) {
+					forwardFailed = true
+					throw forwardError
+				}
+				await update(key, value)
+			})
+			vi.mocked(mockContext.secrets.store).mockImplementation(async (key, value) => {
+				if (key === "apiKey" && value === stale.apiKey) {
+					rollbackStarted = true
+					await blockedRollback
+					throw new Error("synthetic rollback persistence failure")
+				}
+				await store(key, value)
+			})
+			const repairing = enqueueSettingsSave(provider.contextProxy, signal, () =>
+				provider.repairProviderProfile("default", metadata, signal),
+			)
+			const rejected = expect(repairing).rejects.toBe(forwardError)
+			await vi.waitFor(() => expect(rollbackStarted).toBe(true))
+			const retry = vi.fn(async () => {
+				// Every attempted write is rolled back in reverse order, even after apiKey fails.
+				const forwardEnd = writes.mock.calls.findIndex(([key]) => key === "currentApiConfigName") + 1
+				const forwardKeys = writes.mock.calls.slice(0, forwardEnd).map(([key]) => key)
+				expect(writes.mock.calls.slice(forwardEnd)).toEqual(
+					forwardKeys.reverse().map((key) => [key, previous[key]]),
+				)
+				expect(log).toHaveBeenCalledWith(
+					"Provider profile repair rollback failed; unsaved fields (retry required): apiKey",
+				)
+				expect(mockContext.globalState.get("apiModelId")).toBe(stale.apiModelId)
+				expect(mockContext.globalState.get("openAiBaseUrl")).toBe(stale.openAiBaseUrl)
+				expect(mockContext.globalState.get("currentApiConfigName")).toBe("deleted")
+				expect(await mockContext.secrets.get("apiKey")).toBe(replacement.apiKey)
+				expect(await mockContext.secrets.get(profilesKey)).toBe(profilesBefore)
+				vi.mocked(mockContext.globalState.update).mockImplementation(update)
+				vi.mocked(mockContext.secrets.store).mockImplementation(store)
+				await provider.repairProviderProfile("default", metadata, signal)
+			})
+			const queued = enqueueSettingsSave(provider.contextProxy, signal, retry)
+			try {
+				expect(retry).not.toHaveBeenCalled()
+			} finally {
+				releaseRollback()
+			}
+			await Promise.all([rejected, queued])
+			expect(retry).toHaveBeenCalledOnce()
+			expect((await provider.getState()).apiConfiguration).toMatchObject(replacement)
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("default")
+			expect(mockContext.globalState.get("currentApiConfigName")).toBe("default")
+			expect(mockContext.globalState.get("apiModelId")).toBe(replacement.apiModelId)
+			expect(mockContext.globalState.get("openAiBaseUrl")).toBeUndefined()
+			expect(await mockContext.secrets.get("apiKey")).toBe(replacement.apiKey)
+			const persisted = JSON.parse((await mockContext.secrets.get(profilesKey))!)
+			expect(persisted.currentApiConfigName).toBe("default")
+			expect(persisted.modeApiConfigs[defaultModeSlug]).toBe(persisted.apiConfigs.default.id)
+			writes.mockRestore()
+			log.mockRestore()
+		})
+
 		test("finishes an in-flight repair after cancellation before releasing the settings queue", async () => {
 			const controller = new AbortController()
 			let release!: () => void
