@@ -375,11 +375,12 @@ describe("AutoApproveSettings - follow-up timeout slider", () => {
 
 	it("describes a zero timeout as never auto-selecting", () => {
 		renderSettings({ alwaysAllowFollowupQuestions: true, followupAutoApproveTimeoutMs: 0 })
+		const description = screen.getByTestId("auto-approve-followup-timeout-description")
 
 		// The translation mock returns the key verbatim, so the zero branch is
 		// distinguishable from the positive branch by its key alone.
-		expect(screen.getByText("settings:autoApprove.followupQuestions.timeoutZeroDescription")).toBeInTheDocument()
-		expect(screen.queryByText("settings:autoApprove.followupQuestions.timeoutLabel")).not.toBeInTheDocument()
+		expect(description).toHaveTextContent("settings:autoApprove.followupQuestions.timeoutZeroDescription")
+		expect(description).not.toHaveTextContent("settings:autoApprove.followupQuestions.timeoutLabel")
 	})
 
 	it("describes a positive timeout with the wait-time label", () => {

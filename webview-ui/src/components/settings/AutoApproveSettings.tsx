@@ -317,7 +317,9 @@ export const AutoApproveSettings = ({
 								/>
 								<span className="w-20">{followupAutoApproveTimeoutMs / 1000}s</span>
 							</div>
-							<div className="text-vscode-descriptionForeground text-sm mt-1">
+							<div
+								className="text-vscode-descriptionForeground text-sm mt-1"
+								data-testid="auto-approve-followup-timeout-description">
 								{followupAutoApproveTimeoutMs === 0
 									? t("settings:autoApprove.followupQuestions.timeoutZeroDescription")
 									: t("settings:autoApprove.followupQuestions.timeoutLabel")}
