@@ -20,6 +20,7 @@ import {
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
 	DEFAULT_WRITE_DELAY_MS,
 	providerIdentifiers,
+	retiredProviderIdentifiers,
 	openAiModelInfoSaneDefaults,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -2081,6 +2082,29 @@ describe("ClineProvider", () => {
 		})
 
 		afterEach(() => vi.mocked(provider.postStateToWebview).mockRestore())
+
+		test("does not copy approval settings or unknown fields from a persisted retired profile", async () => {
+			const persisted = JSON.parse((await mockContext.secrets.get(profilesKey))!)
+			persisted.apiConfigs.default = {
+				...persisted.apiConfigs.default,
+				apiProvider: retiredProviderIdentifiers.groq,
+				groqApiKey: "synthetic-legacy-key",
+				alwaysAllowExecute: true,
+			}
+			await mockContext.secrets.store(profilesKey, JSON.stringify(persisted))
+			await provider.contextProxy.setValue("alwaysAllowExecute", false)
+			const writes = vi.spyOn(provider.contextProxy, "setValue").mockClear()
+
+			await webviewMessageHandler(provider, { type: "webviewDidLaunch" })
+
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("default")
+			expect(provider.contextProxy.getValue("apiProvider")).toBe(retiredProviderIdentifiers.groq)
+			expect(provider.contextProxy.getValue("alwaysAllowExecute")).toBe(false)
+			expect(mockContext.globalState.get("alwaysAllowExecute")).toBe(false)
+			expect(writes.mock.calls.map(([key]) => key)).not.toContain("alwaysAllowExecute")
+			expect(writes.mock.calls.map(([key]) => key)).not.toContain("groqApiKey")
+			writes.mockRestore()
+		})
 
 		test("loads the replacement before the next settings save and persists both active names and the mode", async () => {
 			const launching = webviewMessageHandler(provider, { type: "webviewDidLaunch" })
