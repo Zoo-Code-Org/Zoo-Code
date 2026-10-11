@@ -114,14 +114,21 @@ function _errorCode(error: unknown): string | undefined {
 		: undefined
 }
 
-/** Create a private staging sub-directory inside *dir* so that multiple
- * concurrent writes never collide on their temp names. */
+/** Create a private per-write staging sub-directory inside *dir*. The name is
+ * generated here, the way the temp file inside it is named, so concurrent writes
+ * never collide on their temp names and never release a directory another write
+ * is still using. */
 function _stagingDir(dir: string): string {
-	const sd = path.join(dir, ".file-safety-staging")
-	// mkdirSync(recursive) follows an existing path, so a .file-safety-staging
-	// symlink planted by another process would stage - and then publish - outside
-	// the target directory. Anything that is not a real directory owned by this
-	// process is rejected instead of used.
+	// A shared fixed name is a path the workspace controls: mkdirSync with
+	// recursive:true accepts an existing entry of that name without creating
+	// anything, so a committed .file-safety-staging symlink would have the chmod
+	// below repair the permissions of a directory outside the workspace and put
+	// the staged file in it. A name this call generated cannot be pre-planted.
+	const sd = path.join(dir, ".file-safety-staging_" + Date.now() + "_" + Math.random().toString(36).substring(2))
+	// The name is this call's, the entry at it still has to be checked: a colliding
+	// or swapped-in path would stage - and then publish - outside the target
+	// directory. Anything that is not a real directory owned by this process is
+	// rejected instead of used.
 	let preExisted = false
 	try {
 		const existing = fsSync.lstatSync(sd)

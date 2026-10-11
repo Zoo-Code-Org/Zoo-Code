@@ -82,8 +82,47 @@ function _resolvedTarget(filePath: string): string {
 function _dirPath(filePath: string): string {
 	return path.dirname(_resolvedTarget(filePath))
 }
-function _stagingDir(dir: string): string {
+/**
+ * The one shared fixed name this layer used to stage under. A workspace can still ship an entry
+ * with that name, and the per-write name this layer generates now STARTS with it, so a substring
+ * probe cannot tell the two apart - every comparison below is against the full name.
+ */
+function _sharedStagingDir(dir: string): string {
 	return path.join(dir, ".file-safety-staging")
+}
+
+/**
+ * Exact shape of a per-write staging name, anchored at both ends: the separator, the timestamp and
+ * the random suffix all have to be there. Matching the prefix alone would also accept the shared
+ * name a workspace shipped.
+ */
+function _isPerWriteStagingName(name: string): boolean {
+	return /^\.file-safety-staging_\d+_[a-z0-9]+$/.test(name)
+}
+
+/** ENOENT stand-in, as the fs mocks report it for a path that does not exist yet. */
+function _enoent(): Error {
+	return Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+}
+
+/**
+ * lstat stand-in that answers per path: the shared name reports whatever the workspace shipped at
+ * it, and every other path behaves like a fresh entry - absent until this call creates it, then
+ * a real directory owned by this process.
+ */
+function _lstatPerPath(shared: string, sharedStats: fsSync.Stats): (p: unknown) => fsSync.Stats {
+	const seen = new Set<string>()
+	return (p: unknown) => {
+		const name = String(p)
+		if (name === shared) {
+			return sharedStats
+		}
+		if (!seen.has(name)) {
+			seen.add(name)
+			throw _enoent()
+		}
+		return _dirStats()
+	}
 }
 
 // Stats stand-in for the staging directory: a real directory owned by this
@@ -174,6 +213,97 @@ describe("safeWriteText", () => {
 
 			// no unlink of temp (it's now the committed file; DACL skipped via platform:linux)
 			expect(fs.unlink).not.toHaveBeenCalled()
+		})
+
+		// ── the staging directory's NAME ──────────────────────────────────────────
+		// One shared fixed name made the staging directory a path the workspace controls:
+		// mkdirSync with recursive:true accepts an existing entry of the requested name
+		// without creating anything, and the chmod below follows a link. The chain's shape
+		// is a name generated per write, so the entry a write creates, chmods and writes
+		// into is one it made. Every assertion here compares FULL names: the generated name
+		// starts with the shared name, so a substring probe cannot tell them apart.
+
+		it("gives each self-staged write its own staging directory, of the generated shape", async () => {
+			const targetA = "/tmp/test-dir/target-a.txt"
+			const targetB = "/tmp/test-dir/target-b.txt"
+			vi.mocked(fs.realpath).mockImplementation(async (p) => String(p))
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(targetA, "a", { platform: "linux" })
+			await safeWriteText(targetB, "b", { platform: "linux" })
+
+			const created = vi.mocked(fsSync.mkdirSync).mock.calls.map((c) => String(c[0]))
+			expect(created).toHaveLength(2)
+			expect(created[0]).not.toBe(created[1])
+			// Uniqueness has to come from the name itself, so the shape is pinned end to end.
+			for (const staging of created) {
+				expect(_isPerWriteStagingName(path.basename(staging))).toBe(true)
+			}
+			// Each write's permission repair names the directory it created, ...
+			expect(vi.mocked(fsSync.chmodSync).mock.calls.map((c) => String(c[0]))).toEqual(created)
+			// ...each staged file is opened inside its own directory, ...
+			const staged = vi
+				.mocked(fsSync.openSync)
+				.mock.calls.filter((c) => c[1] === "w")
+				.map((c) => String(c[0]))
+			expect(staged).toHaveLength(2)
+			expect(staged.map((p) => path.dirname(p))).toEqual(created)
+			// ...and each write releases its own directory, never the other one's.
+			expect(vi.mocked(fs.rmdir).mock.calls.map((c) => String(c[0]))).toEqual(created)
+		})
+
+		it("a symlink at the shared staging name cannot redirect the permission repair or the staged file", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			const shared = _sharedStagingDir(path.dirname(targetPath))
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// The workspace ships .file-safety-staging as a symlink to a directory the user owns
+			// outside the target directory. Only that exact name answers as a link.
+			vi.mocked(fsSync.lstatSync).mockImplementation(_lstatPerPath(shared, _linkStats()))
+
+			// The link is not this write's directory, so the write does not stop at it.
+			await expect(safeWriteText(targetPath, "data", { platform: "linux" })).resolves.toBeUndefined()
+
+			// The permission repair never reaches the shared name: every chmod names a directory
+			// of the generated shape, which is one this call created.
+			const repaired = vi.mocked(fsSync.chmodSync).mock.calls.map((c) => String(c[0]))
+			expect(repaired.length).toBeGreaterThan(0)
+			for (const staging of repaired) {
+				expect(staging).not.toBe(shared)
+				expect(_isPerWriteStagingName(path.basename(staging))).toBe(true)
+			}
+			// The staged file is created inside that directory and committed from it, so nothing
+			// lands in the outside directory the link points at.
+			const staged = String(vi.mocked(fsSync.openSync).mock.calls[0]?.[0])
+			expect(path.dirname(staged)).toBe(repaired[0])
+			expect(fs.rename).toHaveBeenCalledWith(staged, targetPath)
+			// And the release removes this write's directory, never the planted link.
+			expect(vi.mocked(fs.rmdir).mock.calls.map((c) => String(c[0]))).toEqual([repaired[0]])
+			expect(fsSync.rmdirSync).not.toHaveBeenCalled()
+		})
+
+		it("a plain directory at the shared staging name is never chmod-ed or written into", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			const shared = _sharedStagingDir(path.dirname(targetPath))
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// A committed plain directory owned by this process: nothing here rejects it on
+			// inspection, so only the generated name keeps this write out of it.
+			vi.mocked(fsSync.lstatSync).mockImplementation(_lstatPerPath(shared, _dirStats()))
+
+			await expect(safeWriteText(targetPath, "data", { platform: "linux" })).resolves.toBeUndefined()
+
+			// The repair never touches a directory this write did not create ...
+			for (const call of vi.mocked(fsSync.chmodSync).mock.calls) {
+				expect(String(call[0])).not.toBe(shared)
+			}
+			// ...nothing is staged inside it ...
+			for (const call of vi.mocked(fsSync.openSync).mock.calls) {
+				expect(path.dirname(String(call[0]))).not.toBe(shared)
+			}
+			// ...and the release does not remove a directory the workspace shipped.
+			expect(fsSync.rmdirSync).not.toHaveBeenCalledWith(shared)
+			expect(vi.mocked(fs.rmdir).mock.calls.map((c) => String(c[0]))).not.toContain(shared)
 		})
 	})
 
@@ -1577,11 +1707,14 @@ describe("safeWriteText", () => {
 
 			await safeWriteText(targetPath, "data", { platform: "linux" })
 
-			// realpath is mocked to return the literal path, so the SUT never resolves it.
-			expect(fsSync.mkdirSync).toHaveBeenCalledWith(_stagingDir(path.dirname(targetPath)), {
-				recursive: true,
-				mode: 0o700,
-			})
+			// The name is generated per write, so it is read back from the create rather than
+			// restated here: what this test pins is that the guard's ENOENT path still creates
+			// exactly one private staging directory, and that this write stages inside it.
+			const creates = vi.mocked(fsSync.mkdirSync).mock.calls
+			expect(creates).toHaveLength(1)
+			expect(creates[0]?.[1]).toEqual({ recursive: true, mode: 0o700 })
+			const staged = String(vi.mocked(fsSync.openSync).mock.calls[0]?.[0])
+			expect(path.dirname(staged)).toBe(String(creates[0]?.[0]))
 			expect(fs.rename).toHaveBeenCalled()
 		})
 
@@ -1610,7 +1743,9 @@ describe("safeWriteText", () => {
 
 			const name = await _rejectionName(safeWriteText(targetPath, "data", { platform: "linux" }))
 			expect(name).toBe("UnsafeStagingDirectoryError")
-			expect(fsSync.rmdirSync).toHaveBeenCalledWith(_stagingDir(path.dirname(targetPath)))
+			// The directory removed is exactly the one this call created - read back rather than
+			// restated, since the name is generated per write.
+			expect(fsSync.rmdirSync).toHaveBeenCalledWith(String(vi.mocked(fsSync.mkdirSync).mock.calls[0]?.[0]))
 		})
 
 		it("leaves a pre-existing staging directory when the post-create re-check rejects it", async () => {
