@@ -581,7 +581,15 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 									// copy of it, and a chat row that cannot be saved must not cost the model
 									// the tool_result this guard owes the provider.
 									abandonedStreamFailure.report = `Error ${action}: ${JSON.stringify(serializeError(error))}`
-									await cline.say("error", `Error ${action}:\n${error.message}`)
+									try {
+										await cline.say("error", `Error ${action}:\n${error.message}`)
+									} catch (reportError) {
+										// A chat row that cannot be saved must not cost the model the tool_result
+										// this guard owes the provider, and it must not change which failure that
+										// result reports: letting it escape here would also lose the hook's answer
+										// on whether the parse error is still worth mentioning.
+										console.error("Error saving abandoned write_to_file error row:", reportError)
+									}
 								},
 							})
 						} catch (teardownError) {

@@ -316,6 +316,9 @@ describe("presentAssistantMessage - abandoned write_to_file stream", () => {
 		const results = toolResultsFor(task)
 		expect(results).toHaveLength(1)
 		expect(results[0].content).toContain(STREAM_FAILURE)
+		// The lost chat row must not change which failure is reported: the hook still answered
+		// that its failure replaces the parse error.
+		expect(results[0].content).not.toContain("missing nativeArgs")
 		expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 		expect(task.userMessageContentReady).toBe(true)
 	})
