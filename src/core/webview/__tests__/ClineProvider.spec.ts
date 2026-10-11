@@ -4827,6 +4827,251 @@ describe("ClineProvider", () => {
 			await actor.dispose()
 			await sibling.dispose()
 		})
+
+		it("deletes the created record when the mutation timeout aborts after the record write", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("tab-upsert-abort-create")
+			const logSpy = vi.spyOn(provider, "log").mockImplementation(() => {})
+			await provider.setValue("currentApiConfigName", "profile-a")
+			const previousEntries = [{ name: "profile-a", id: "id-a" }]
+			await provider.contextProxy.setValue("listApiConfigMeta", previousEntries)
+			const settingsBeforeAbort = provider.contextProxy.getProviderSettings()
+			const postState = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			const manager = provider.providerSettingsManager
+			// Creation case: the profile did not exist before the call, so the only way to undo the
+			// landed record write is to delete it again.
+			vi.spyOn(manager, "getProfile").mockRejectedValue(new ProviderSettingsNotFoundError("profile-new"))
+			vi.spyOn(manager, "getModeConfigId").mockResolvedValue(undefined)
+			const listConfig = vi.spyOn(manager, "listConfig").mockResolvedValue([
+				{ name: "profile-a", id: "id-a" },
+				{ name: "profile-new", id: "id-new" },
+			])
+			const setModeConfig = vi.spyOn(manager, "setModeConfig").mockResolvedValue(undefined)
+			const deleteConfig = vi.spyOn(manager, "deleteConfig").mockResolvedValue(undefined)
+			// The record write is parked so the mutation timeout fires while it is in flight; the
+			// write then lands AFTER the abort, which is the post-commit window this checkpoint
+			// covers. Later restores resolve immediately so the rollback can complete.
+			let recordWrites = 0
+			let parked = false
+			let releaseRecordWrite!: (id: string) => void
+			const saveConfig = vi.spyOn(manager, "saveConfig").mockImplementation(() => {
+				recordWrites += 1
+				if (recordWrites === 1) {
+					return new Promise<string>((resolve) => {
+						parked = true
+						releaseRecordWrite = () => resolve("id-new")
+					})
+				}
+				return Promise.resolve("id-new")
+			})
+
+			const originalTimeout = ClineProvider.PENDING_OPERATION_TIMEOUT_MS
+			;(ClineProvider as unknown as { PENDING_OPERATION_TIMEOUT_MS: number }).PENDING_OPERATION_TIMEOUT_MS = 20
+			try {
+				const upsert = provider.upsertProviderProfile(
+					"profile-new",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "new-b" },
+					true,
+				)
+				// The queue is chained to the run, so awaiting it also waits for the compensation.
+				const queued = provider["providerProfileMutationQueue"]
+				// The caller is released by the mutation timeout while the record write is still parked.
+				await expect(upsert).resolves.toBeUndefined()
+				for (let attempt = 0; attempt < 1000 && !parked; attempt++) {
+					await new Promise((resolve) => setImmediate(resolve))
+				}
+				expect(parked).toBe(true)
+				releaseRecordWrite("id-new")
+				await queued
+
+				// Count the restore by value: the created record is deleted exactly once, and the
+				// forward write is not replayed as a second save.
+				expect(deleteConfig.mock.calls.filter((args) => args[0] === "profile-new").length).toBe(1)
+				expect(saveConfig.mock.calls.filter((args) => args[0] === "profile-new").length).toBe(1)
+				// The stores after the checkpoint never landed, so the landed-write gate must keep the
+				// rollback from replaying them: the next queued mutation owns them now.
+				expect(listConfig).not.toHaveBeenCalled()
+				expect(setModeConfig).not.toHaveBeenCalled()
+				expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual(previousEntries)
+				expect(provider.getValue("currentApiConfigName")).toBe("profile-a")
+				expect(provider.contextProxy.getProviderSettings()).toEqual(settingsBeforeAbort)
+				// No state post for a caller that has already been released.
+				expect(postState).not.toHaveBeenCalled()
+				// The cancellation is reported as a rolled-back write rather than a silent success.
+				expect(
+					logSpy.mock.calls.filter(([message]) =>
+						/rolled back the profile writes that had landed[\s\S]*Profile upsert was cancelled after the profile-record write/.test(
+							message,
+						),
+					).length,
+				).toBe(1)
+			} finally {
+				;(ClineProvider as unknown as { PENDING_OPERATION_TIMEOUT_MS: number }).PENDING_OPERATION_TIMEOUT_MS =
+					originalTimeout
+			}
+			await provider.dispose()
+		})
+
+		it("restores the previous settings when the mutation timeout aborts after an updated record write", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("tab-upsert-abort-update")
+			vi.spyOn(provider, "log").mockImplementation(() => {})
+			await provider.setValue("currentApiConfigName", "profile-a")
+			const previousEntries = [{ name: "profile-a", id: "id-a" }]
+			await provider.contextProxy.setValue("listApiConfigMeta", previousEntries)
+			const settingsBeforeAbort = provider.contextProxy.getProviderSettings()
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			const manager = provider.providerSettingsManager
+			// Update case: a previous record exists, so the compensation must put its settings back
+			// instead of deleting the profile the user already had.
+			vi.spyOn(manager, "getProfile").mockResolvedValue({
+				name: "profile-a",
+				id: "id-a",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "old-a",
+			})
+			vi.spyOn(manager, "getModeConfigId").mockResolvedValue("mode-id-a")
+			const listConfig = vi.spyOn(manager, "listConfig").mockResolvedValue([{ name: "profile-a", id: "id-a" }])
+			const setModeConfig = vi.spyOn(manager, "setModeConfig").mockResolvedValue(undefined)
+			const deleteConfig = vi.spyOn(manager, "deleteConfig").mockResolvedValue(undefined)
+			let recordWrites = 0
+			let parked = false
+			let releaseRecordWrite!: (id: string) => void
+			const saveConfig = vi.spyOn(manager, "saveConfig").mockImplementation((_name, settings) => {
+				recordWrites += 1
+				if (recordWrites === 1) {
+					return new Promise<string>((resolve) => {
+						parked = true
+						releaseRecordWrite = () => resolve("id-a")
+					})
+				}
+				// The compensating write must carry the previous settings, not the aborted ones.
+				expect(settings?.apiKey).toBe("old-a")
+				return Promise.resolve("id-a")
+			})
+
+			const originalTimeout = ClineProvider.PENDING_OPERATION_TIMEOUT_MS
+			;(ClineProvider as unknown as { PENDING_OPERATION_TIMEOUT_MS: number }).PENDING_OPERATION_TIMEOUT_MS = 20
+			try {
+				const upsert = provider.upsertProviderProfile(
+					"profile-a",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "new-a" },
+					true,
+				)
+				const queued = provider["providerProfileMutationQueue"]
+				await expect(upsert).resolves.toBeUndefined()
+				for (let attempt = 0; attempt < 1000 && !parked; attempt++) {
+					await new Promise((resolve) => setImmediate(resolve))
+				}
+				expect(parked).toBe(true)
+				releaseRecordWrite("id-a")
+				await queued
+
+				// One forward write and exactly one restore of the previous settings.
+				expect(
+					saveConfig.mock.calls.filter((args) => args[0] === "profile-a" && args[1]?.apiKey === "new-a")
+						.length,
+				).toBe(1)
+				expect(
+					saveConfig.mock.calls.filter((args) => args[0] === "profile-a" && args[1]?.apiKey === "old-a")
+						.length,
+				).toBe(1)
+				// An existing profile is restored, never deleted.
+				expect(deleteConfig.mock.calls.filter((args) => args[0] === "profile-a").length).toBe(0)
+				expect(listConfig).not.toHaveBeenCalled()
+				expect(setModeConfig).not.toHaveBeenCalled()
+				expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual(previousEntries)
+				expect(provider.getValue("currentApiConfigName")).toBe("profile-a")
+				expect(provider.contextProxy.getProviderSettings()).toEqual(settingsBeforeAbort)
+			} finally {
+				;(ClineProvider as unknown as { PENDING_OPERATION_TIMEOUT_MS: number }).PENDING_OPERATION_TIMEOUT_MS =
+					originalTimeout
+			}
+			await provider.dispose()
+		})
+
+		it("surfaces the inconsistent-state error when a cancelled record write cannot be rolled back", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("tab-upsert-abort-inconsistent")
+			const logSpy = vi.spyOn(provider, "log").mockImplementation(() => {})
+			await provider.setValue("currentApiConfigName", "profile-a")
+			await provider.contextProxy.setValue("listApiConfigMeta", [{ name: "profile-a", id: "id-a" }])
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			const manager = provider.providerSettingsManager
+			vi.spyOn(manager, "getProfile").mockRejectedValue(new ProviderSettingsNotFoundError("profile-new"))
+			vi.spyOn(manager, "getModeConfigId").mockResolvedValue(undefined)
+			vi.spyOn(manager, "listConfig").mockResolvedValue([{ name: "profile-new", id: "id-new" }])
+			vi.spyOn(manager, "setModeConfig").mockResolvedValue(undefined)
+			// The compensating delete fails, so the persisted stores are left disagreeing.
+			const deleteConfig = vi.spyOn(manager, "deleteConfig").mockRejectedValue(new Error("record delete failed"))
+			let recordWrites = 0
+			let parked = false
+			let releaseRecordWrite!: (id: string) => void
+			const saveConfig = vi.spyOn(manager, "saveConfig").mockImplementation(() => {
+				recordWrites += 1
+				if (recordWrites === 1) {
+					return new Promise<string>((resolve) => {
+						parked = true
+						releaseRecordWrite = () => resolve("id-new")
+					})
+				}
+				return Promise.resolve("id-new")
+			})
+
+			const originalTimeout = ClineProvider.PENDING_OPERATION_TIMEOUT_MS
+			;(ClineProvider as unknown as { PENDING_OPERATION_TIMEOUT_MS: number }).PENDING_OPERATION_TIMEOUT_MS = 20
+			try {
+				const upsert = provider.upsertProviderProfile(
+					"profile-new",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "new-b" },
+					true,
+				)
+				const queued = provider["providerProfileMutationQueue"]
+				await expect(upsert).resolves.toBeUndefined()
+				for (let attempt = 0; attempt < 1000 && !parked; attempt++) {
+					await new Promise((resolve) => setImmediate(resolve))
+				}
+				expect(parked).toBe(true)
+				releaseRecordWrite("id-new")
+				await queued
+
+				expect(deleteConfig.mock.calls.filter((args) => args[0] === "profile-new").length).toBe(1)
+				// A half-repaired cancellation must not read as a clean rollback: the run rejects with
+				// the inconsistent-state error, which the queue reports as an errored cancellation.
+				expect(
+					logSpy.mock.calls.filter(([message]) =>
+						/errored after cancellation[\s\S]*rollback was incomplete[\s\S]*record delete failed[\s\S]*Original failure: Profile upsert was cancelled after the profile-record write/.test(
+							message,
+						),
+					).length,
+				).toBe(1)
+			} finally {
+				;(ClineProvider as unknown as { PENDING_OPERATION_TIMEOUT_MS: number }).PENDING_OPERATION_TIMEOUT_MS =
+					originalTimeout
+			}
+			await provider.dispose()
+		})
 	})
 
 	describe("local state isolation", () => {
