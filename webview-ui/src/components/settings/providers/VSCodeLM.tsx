@@ -62,7 +62,11 @@ export const VSCodeLM = ({ apiConfiguration, setApiConfigurationField }: VSCodeL
 			if (message.type === expectedType && (message.vsCodeLmModels !== undefined || message.error)) {
 				setIsRefreshing(false)
 			}
-			if (isSignInResult) setIsConnecting(false)
+			// A sign-in result supersedes any refresh still waiting, whose reply may have been discarded as stale.
+			if (isSignInResult) {
+				setIsConnecting(false)
+				setIsRefreshing(false)
+			}
 			if (message.githubCopilotAccount !== undefined) setAccount(message.githubCopilotAccount ?? undefined)
 			if (isSignInResult || message.error) setError(message.error)
 			if (!isCopilot && !message.error && message.vsCodeLmModels) setLegacyModels(message.vsCodeLmModels)

@@ -441,8 +441,8 @@ function getSelectedModel({
 					// The extension enforces the curated input limit, so the UI must not show the larger window.
 					...(knownModel && { contextWindow: knownModel.maxInputTokens }),
 					...reported?.modelInfo,
-					// A reported model's vision is the host's alone; an omitted key must not fall back to the catalog.
-					...(reported && { supportsImages: reported.modelInfo?.supportsImages }),
+					// Vision is the host's word alone, as the extension enforces; the catalog's flag is never shown.
+					supportsImages: reported?.modelInfo?.supportsImages,
 					supportsPromptCache: false,
 				},
 			}

@@ -333,6 +333,120 @@ describe("webviewMessageHandler - Copilot authentication", () => {
 		})
 	})
 
+	describe("passive refresh racing a sign-in", () => {
+		const passiveRequest = () =>
+			webviewMessageHandler(mockClineProvider, {
+				type: "requestVsCodeLmModels",
+				apiConfiguration: { apiProvider: providerIdentifiers.githubCopilot },
+			})
+		const signedInResult = {
+			type: "githubCopilotSignInResult",
+			githubCopilotAccount: "New User",
+			vsCodeLmModels: [],
+		}
+
+		it("discards a refresh that began before a sign-in which finished first", async () => {
+			let finishModels!: (models: []) => void
+			vi.spyOn(copilotProvider, "getGitHubCopilotAccount").mockResolvedValue(undefined)
+			vi.spyOn(vsCodeLmProvider, "getVsCodeLmModels").mockImplementation(
+				() => new Promise((resolve) => (finishModels = resolve)),
+			)
+			vi.spyOn(copilotProvider, "connectGitHubCopilot").mockResolvedValue({ account: "New User", models: [] })
+
+			const refresh = passiveRequest()
+			await webviewMessageHandler(mockClineProvider, { type: "githubCopilotSignIn" })
+			finishModels([])
+			await refresh
+
+			expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledTimes(1)
+			expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith(signedInResult)
+		})
+
+		it("discards a refresh whose model lookup fails after a newer sign-in", async () => {
+			let failModels!: (reason: Error) => void
+			vi.spyOn(copilotProvider, "getGitHubCopilotAccount").mockResolvedValue(undefined)
+			vi.spyOn(vsCodeLmProvider, "getVsCodeLmModels").mockImplementation(
+				() => new Promise((_resolve, reject) => (failModels = reject)),
+			)
+			vi.spyOn(copilotProvider, "connectGitHubCopilot").mockResolvedValue({ account: "New User", models: [] })
+
+			const refresh = passiveRequest()
+			await webviewMessageHandler(mockClineProvider, { type: "githubCopilotSignIn" })
+			failModels(new Error("host busy"))
+			await refresh
+
+			expect(mockClineProvider.postMessageToWebview).not.toHaveBeenCalledWith(
+				expect.objectContaining({ error: expect.anything() }),
+			)
+		})
+
+		it("discards a refresh that began during a sign-in and ended after it", async () => {
+			let finishSignIn!: (value: { account: string; models: [] }) => void
+			let finishModels!: (models: []) => void
+			vi.spyOn(copilotProvider, "getGitHubCopilotAccount").mockResolvedValue(undefined)
+			vi.spyOn(vsCodeLmProvider, "getVsCodeLmModels").mockImplementation(
+				() => new Promise((resolve) => (finishModels = resolve)),
+			)
+			vi.spyOn(copilotProvider, "connectGitHubCopilot").mockImplementation(
+				() => new Promise((resolve) => (finishSignIn = resolve)),
+			)
+
+			const signIn = webviewMessageHandler(mockClineProvider, { type: "githubCopilotSignIn" })
+			const refresh = passiveRequest()
+			finishSignIn({ account: "New User", models: [] })
+			await signIn
+			finishModels([])
+			await refresh
+
+			expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledTimes(1)
+			expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith(signedInResult)
+		})
+
+		it("does not make a pending sign-in stale by starting a refresh", async () => {
+			let finishSignIn!: (value: { account: string; models: [] }) => void
+			vi.spyOn(copilotProvider, "getGitHubCopilotAccount").mockResolvedValue(undefined)
+			vi.spyOn(vsCodeLmProvider, "getVsCodeLmModels").mockResolvedValue([])
+			vi.spyOn(copilotProvider, "connectGitHubCopilot").mockImplementation(
+				() => new Promise((resolve) => (finishSignIn = resolve)),
+			)
+
+			const signIn = webviewMessageHandler(mockClineProvider, { type: "githubCopilotSignIn" })
+			await passiveRequest()
+			finishSignIn({ account: "New User", models: [] })
+			await signIn
+
+			expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith(signedInResult)
+		})
+
+		it("still answers a refresh when no sign-in happened meanwhile", async () => {
+			vi.spyOn(copilotProvider, "getGitHubCopilotAccount").mockResolvedValue("Test User")
+			vi.spyOn(vsCodeLmProvider, "getVsCodeLmModels").mockResolvedValue([])
+
+			await passiveRequest()
+
+			expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "githubCopilotModels",
+				githubCopilotAccount: "Test User",
+				vsCodeLmModels: [],
+			})
+		})
+
+		it("keeps one view's sign-in from discarding another view's refresh", async () => {
+			const otherView = { ...mockClineProvider, postMessageToWebview: vi.fn() } as unknown as ClineProvider
+			vi.spyOn(copilotProvider, "getGitHubCopilotAccount").mockResolvedValue("Test User")
+			vi.spyOn(vsCodeLmProvider, "getVsCodeLmModels").mockResolvedValue([])
+			vi.spyOn(copilotProvider, "connectGitHubCopilot").mockResolvedValue({ account: "Other", models: [] })
+
+			const refresh = passiveRequest()
+			await webviewMessageHandler(otherView, { type: "githubCopilotSignIn" })
+			await refresh
+
+			expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "githubCopilotModels", githubCopilotAccount: "Test User" }),
+			)
+		})
+	})
+
 	it("shows model discovery errors instead of silently returning an empty list", async () => {
 		vi.spyOn(copilotProvider, "getGitHubCopilotAccount").mockResolvedValue("Test User")
 		vi.spyOn(vsCodeLmProvider, "getVsCodeLmModels").mockRejectedValue(new Error("Model access denied"))

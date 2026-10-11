@@ -1412,14 +1412,14 @@ describe("useSelectedModel", () => {
 			expect(mockUseGitHubCopilotModels).toHaveBeenLastCalledWith(true)
 		})
 
-		it("describes a model from the curated catalog until the host has reported it", () => {
+		it("keeps vision unknown until the host reports it, even for a model the catalog knows supports images", () => {
 			const [curatedFamily] = Object.entries(vscodeLlmModels).find(([, entry]) => entry.supportsImages) ?? []
 			expect(curatedFamily).toBeDefined()
 
 			expect(
 				selectCopilot({ vendor: githubCopilotLanguageModel.vendor, family: curatedFamily }).info
 					?.supportsImages,
-			).toBe(true)
+			).toBeUndefined()
 		})
 
 		it("keeps missing Copilot image capability unknown instead of setting it to false", () => {
@@ -1502,11 +1502,11 @@ describe("useSelectedModel", () => {
 			expect(selectCopilot({ vendor: "copilot", id: "silent", family }).info?.supportsImages).toBeUndefined()
 		})
 
-		it("keeps the catalog's vision flag only for a model the host has not reported", () => {
+		it("keeps vision unknown for a saved model the host's list does not include", () => {
 			const [family] = Object.entries(vscodeLlmModels).find(([, e]) => e.supportsImages) ?? []
 			reportedModels({ id: "someone-else", family: "someone-else" })
 
-			expect(selectCopilot({ vendor: "copilot", id: "not-listed", family }).info?.supportsImages).toBe(true)
+			expect(selectCopilot({ vendor: "copilot", id: "not-listed", family }).info?.supportsImages).toBeUndefined()
 		})
 
 		it("picks the reported model matching the saved id, not merely the first one", () => {

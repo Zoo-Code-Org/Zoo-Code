@@ -341,6 +341,46 @@ describe("provider model routing", () => {
 		expect(modelPickerMock.mock.lastCall![0].models).toHaveProperty("kept")
 	})
 
+	it("releases a refresh still waiting when a sign-in result arrives, since its own reply may have been discarded", () => {
+		renderWithQuery(
+			<VSCodeLM
+				apiConfiguration={{ apiProvider: providerIdentifiers.githubCopilot }}
+				setApiConfigurationField={vi.fn()}
+			/>,
+		)
+		vi.spyOn(vscode, "postMessage").mockImplementation(() => undefined)
+		act(() =>
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: VsCodeLmModelsMessageType.githubCopilotModels, githubCopilotAccount: "Test User" },
+				}),
+			),
+		)
+		fireEvent.click(screen.getByRole("button", { name: "settings:providers.refreshModels.label" }))
+		expect(screen.getByRole("button", { name: "settings:providers.refreshModels.label" })).toHaveAttribute(
+			"aria-busy",
+			"true",
+		)
+
+		act(() =>
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: VsCodeLmModelsMessageType.githubCopilotSignInResult,
+						githubCopilotAccount: "Test User",
+						vsCodeLmModels: [],
+					},
+				}),
+			),
+		)
+
+		expect(screen.getByRole("button", { name: "settings:providers.refreshModels.label" })).toHaveAttribute(
+			"aria-busy",
+			"false",
+		)
+		for (const button of screen.getAllByRole("button")) expect(button).toBeEnabled()
+	})
+
 	it("keeps sign-in pending during background discovery and displays cancellation", () => {
 		const postMessage = vi.spyOn(vscode, "postMessage").mockImplementation(() => undefined)
 		renderWithQuery(

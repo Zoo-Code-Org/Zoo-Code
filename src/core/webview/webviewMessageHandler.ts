@@ -125,8 +125,23 @@ import {
 	handleCheckoutBranch,
 } from "./worktree"
 
-/** The newest GitHub Copilot sign-in request per view, so a slower, older one cannot overwrite its result. */
-const githubCopilotSignInRequestIds = new WeakMap<ClineProvider, number>()
+type GitHubCopilotViewState = {
+	/** The newest sign-in request, so a slower, older one cannot overwrite its result. */
+	signInId: number
+	/** Moves whenever a sign-in starts or settles; a passive refresh that began earlier is out of date. */
+	changes: number
+}
+
+const githubCopilotViewStates = new WeakMap<ClineProvider, GitHubCopilotViewState>()
+
+const getGitHubCopilotViewState = (provider: ClineProvider) => {
+	let state = githubCopilotViewStates.get(provider)
+	if (!state) {
+		state = { signInId: 0, changes: 0 }
+		githubCopilotViewStates.set(provider, state)
+	}
+	return state
+}
 
 export const webviewMessageHandler = async (
 	provider: ClineProvider,
@@ -1493,9 +1508,10 @@ export const webviewMessageHandler = async (
 		case VsCodeLmModelsMessageType.githubCopilotReconnect: {
 			// Plain sign-in and Reconnect run as separate attempts, so an older one can finish after a newer one.
 			// Only the latest request may publish, or its account and model list would overwrite newer state.
-			const requestId = (githubCopilotSignInRequestIds.get(provider) ?? 0) + 1
-			githubCopilotSignInRequestIds.set(provider, requestId)
-			const isLatest = () => githubCopilotSignInRequestIds.get(provider) === requestId
+			const viewState = getGitHubCopilotViewState(provider)
+			const requestId = ++viewState.signInId
+			viewState.changes++
+			const isLatest = () => viewState.signInId === requestId
 			try {
 				const { models, account } = await connectGitHubCopilot(async (githubCopilotAccount: string) => {
 					if (!isLatest()) return
@@ -1516,6 +1532,8 @@ export const webviewMessageHandler = async (
 					type: VsCodeLmModelsMessageType.githubCopilotSignInResult,
 					error: error instanceof Error ? error.message : String(error),
 				})
+			} finally {
+				if (isLatest()) viewState.changes++
 			}
 			break
 		}
@@ -1533,15 +1551,20 @@ export const webviewMessageHandler = async (
 			const type = isCopilot
 				? VsCodeLmModelsMessageType.githubCopilotModels
 				: VsCodeLmModelsMessageType.vsCodeLmModels
+			const viewState = isCopilot ? getGitHubCopilotViewState(provider) : undefined
+			const changesAtStart = viewState?.changes
+			const isOutOfDate = () => viewState !== undefined && viewState.changes !== changesAtStart
 			try {
 				const githubCopilotAccount = isCopilot ? await getGitHubCopilotAccount() : undefined
 				const vsCodeLmModels = await getVsCodeLmModels(isCopilot ? githubCopilotLanguageModel.selector : {})
+				if (isOutOfDate()) break
 				await provider.postMessageToWebview({
 					type,
 					vsCodeLmModels,
 					...(isCopilot ? { githubCopilotAccount: githubCopilotAccount ?? null } : {}),
 				})
 			} catch (error) {
+				if (isOutOfDate()) break
 				await provider.postMessageToWebview({
 					type,
 					error: error instanceof Error ? error.message : String(error),
