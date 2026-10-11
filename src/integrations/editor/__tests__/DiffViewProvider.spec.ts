@@ -1599,6 +1599,76 @@ describe("DiffViewProvider", () => {
 				}
 			}
 		})
+		it("revertChanges() reports a close that rejected instead of deleting underneath it", async () => {
+			// tabGroups.close() can reject, not only resolve false (the editor throws on veto). The rejection
+			// used to be logged and swallowed, so the rollback continued, unlinked the placeholder, and
+			// removed the directories it had created underneath a tab that was still open. The rejection
+			// must surface as the rollback failure with the original error kept as its cause, and the
+			// filesystem cleanup must not run: after a refused discard the caller owns the next step
+			// (fail closed), so this rollback must not delete around it.
+			const editor = buildActiveDiffEditor()
+			editor.document.isDirty = true
+			const closeError = new Error("Tab close rejected by the editor")
+			const dirtyTab = {
+				input: Object.assign(new vscode.TabInputText(makeUri(mockTargetPath)), {
+					uri: makeUri(mockTargetPath),
+				}),
+				isDirty: true,
+				label: "mock-target-file.ts",
+			}
+			const originalTabs = Object.getOwnPropertyDescriptor(vscode.window.tabGroups, "all")
+			const originalDocs = Object.getOwnPropertyDescriptor(vscode.workspace, "textDocuments")
+			const originalClose = Object.getOwnPropertyDescriptor(vscode.window.tabGroups, "close")
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: () => [{ tabs: [dirtyTab] }],
+				configurable: true,
+			})
+			Object.defineProperty(vscode.workspace, "textDocuments", {
+				get: () => [editor.document],
+				configurable: true,
+			})
+			Object.defineProperty(vscode.window.tabGroups, "close", {
+				value: vi.fn().mockRejectedValue(closeError),
+				configurable: true,
+			})
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "create",
+				createdDirs: [`${mockCwd}/new-parent`],
+				originalContent: "",
+			})
+
+			try {
+				// The failure is reported, not swallowed: revertChanges() rejects with the rollback
+				// error, and the original rejection stays reachable as its cause.
+				const failure = await diffViewProvider.revertChanges().then(
+					() => undefined,
+					(error: unknown) => (error instanceof Error ? error : new Error(String(error))),
+				)
+				expect(failure).toBeInstanceOf(Error)
+				expect(failure?.message).toContain("could not close the restored buffer")
+				expect(failure?.cause).toBe(closeError)
+				// Cleanup ownership is retained: the close was attempted without a force flag, and
+				// neither the placeholder unlink nor the created-directory rmdir ran underneath the
+				// still-open tab.
+				expect(vscode.window.tabGroups.close).toHaveBeenCalledWith(dirtyTab)
+				expect(fs.unlink).not.toHaveBeenCalled()
+				expect(fs.rmdir).not.toHaveBeenCalled()
+			} finally {
+				if (originalTabs) {
+					Object.defineProperty(vscode.window.tabGroups, "all", originalTabs)
+				}
+				if (originalDocs) {
+					Object.defineProperty(vscode.workspace, "textDocuments", originalDocs)
+				}
+				if (originalClose) {
+					Object.defineProperty(vscode.window.tabGroups, "close", originalClose)
+				}
+			}
+		})
 		it("revertChanges() restores and saves the buffer through the real rollback path", async () => {
 			// The two tests above spy restorePreStreamBuffer() and saveBufferClean(), so the restoration
 			// itself never runs there and only proves ordering. This one leaves both real: the buffer must
