@@ -11,51 +11,72 @@
 </sub>
 </div>
 
-# Contributor Covenant Gedragscode
+<a id="contributor-covenant-code-of-conduct"></a>
 
-## Onze Belofte
+# Contributor Covenant-gedragscode
 
-In het belang van het bevorderen van een open en gastvrije omgeving, beloven wij als bijdragers en beheerders om deelname aan ons project en onze community een ervaring zonder intimidatie te maken voor iedereen, ongeacht leeftijd, lichaamsgrootte, handicap, etniciteit, geslachtskenmerken, genderidentiteit en -expressie, ervaringsniveau, opleiding, sociaal-economische status, nationaliteit, uiterlijk, ras, religie of seksuele identiteit en oriëntatie.
+<a id="our-pledge"></a>
 
-## Onze Standaarden
+## Onze belofte
 
-Voorbeelden van gedrag dat bijdraagt aan het creëren van een positieve omgeving zijn onder andere:
+We zijn bijdragers en beheerders. We willen een open en gastvrije omgeving. We beloven dat iedereen zonder intimidatie aan ons project en onze community kan deelnemen. Dit geldt ongeacht leeftijd, lichaamsomvang, beperking, etniciteit, geslachtskenmerken, genderidentiteit en -expressie, ervaringsniveau, opleiding, sociaaleconomische status, nationaliteit, uiterlijk, ras, religie of seksuele identiteit en oriëntatie.
 
-- Gebruik van gastvrije en inclusieve taal
-- Respect tonen voor verschillende standpunten en ervaringen
-- Constructieve kritiek gracieus accepteren
-- Focus op wat het beste is voor de community
-- Empathie tonen voor andere communityleden
+<a id="our-standards"></a>
 
-Voorbeelden van onacceptabel gedrag van deelnemers zijn onder andere:
+## Onze normen
 
-- Het gebruik van seksueel getinte taal of beelden en ongewenste seksuele aandacht of toenadering
-- Trollgedrag, beledigende/denigrerende opmerkingen en persoonlijke of politieke aanvallen
-- Openbare of privé-intimidatie
-- Het publiceren van andermans privé-informatie, zoals een fysiek of elektronisch adres, zonder uitdrukkelijke toestemming
-- Ander gedrag dat redelijkerwijs als ongepast kan worden beschouwd in een professionele omgeving
+Dit gedrag helpt om een positieve omgeving te creëren:
 
-## Onze Verantwoordelijkheden
+- Gebruik gastvrije en inclusieve taal.
+- Respecteer verschillende standpunten en ervaringen.
+- Sta open voor opbouwende kritiek.
+- Richt je op wat het beste is voor de community.
+- Toon begrip voor andere communityleden.
 
-Projectbeheerders zijn verantwoordelijk voor het verduidelijken van de normen voor acceptabel gedrag en worden geacht passende en eerlijke corrigerende maatregelen te nemen in reactie op gevallen van onacceptabel gedrag.
+Dit gedrag van deelnemers is niet aanvaardbaar:
 
-Projectbeheerders hebben het recht en de verantwoordelijkheid om opmerkingen, commits, code, wiki-bewerkingen, issues en andere bijdragen die niet in overeenstemming zijn met deze Gedragscode te verwijderen, te bewerken of te weigeren, of om elke bijdrager tijdelijk of permanent te verbannen voor ander gedrag dat zij ongepast, bedreigend, beledigend of schadelijk achten.
+- Seksueel getinte taal of beelden gebruiken.
+- Ongewenste seksuele aandacht of toenadering.
+- Trollen, beledigende of kleinerende reacties en persoonlijke of politieke aanvallen.
+- Openbare of privé-intimidatie.
+- Privégegevens van anderen publiceren zonder hun uitdrukkelijke toestemming. Voorbeelden zijn een fysiek of elektronisch adres.
+- Ander gedrag dat mensen redelijkerwijs ongepast kunnen vinden in een professionele omgeving.
+
+<a id="our-responsibilities"></a>
+
+## Onze verantwoordelijkheden
+
+Projectbeheerders moeten de normen voor aanvaardbaar gedrag verduidelijken. Ze moeten passende en eerlijke corrigerende maatregelen nemen als een deelnemer onaanvaardbaar gedrag vertoont.
+
+Projectbeheerders hebben het recht en de verantwoordelijkheid om op te treden tegen bijdragen die deze gedragscode niet volgen. Ze kunnen reacties, commits, code, wikiwijzigingen, issues en andere bijdragen verwijderen, aanpassen of weigeren. Ze kunnen een bijdrager ook tijdelijk of permanent uitsluiten wegens ander gedrag dat ze ongepast, bedreigend, beledigend of schadelijk vinden.
+
+<a id="scope"></a>
 
 ## Toepassingsgebied
 
-Deze Gedragscode is van toepassing binnen projectruimtes en in openbare ruimtes wanneer een individu het project of de community vertegenwoordigt. Voorbeelden van vertegenwoordiging van een project of community zijn het gebruik van een officieel project-e-mailadres, posten via een officieel socialmedia-account of optreden als een aangestelde vertegenwoordiger op een online of offline evenement. De definitie van vertegenwoordiging van een project kan verder worden gespecificeerd door projectbeheerders.
+Deze gedragscode geldt in de projectruimtes. Die geldt ook in openbare ruimtes als iemand het project of de community vertegenwoordigt. Voorbeelden van vertegenwoordiging zijn:
+
+- Een officieel e-mailadres van het project gebruiken.
+- Berichten plaatsen met een officieel socialmedia-account.
+- Optreden als aangewezen vertegenwoordiger bij een online of fysiek evenement.
+
+Projectbeheerders kunnen bepalen en verduidelijken wat het vertegenwoordigen van een project inhoudt.
+
+<a id="enforcement"></a>
 
 ## Handhaving
 
-Voorvallen van beledigend, intimiderend of anderszins onacceptabel gedrag kunnen worden gemeld door contact op te nemen met het projectteam via support@zoocode.dev. Alle klachten zullen worden beoordeeld en onderzocht en zullen resulteren in een reactie die passend wordt geacht voor de omstandigheden. Het projectteam is verplicht vertrouwelijkheid te bewaren met betrekking tot de melder van het incident. Verdere details over specifiek handhavingsbeleid kunnen afzonderlijk worden gepubliceerd.
+Meld misbruik, intimidatie of ander onaanvaardbaar gedrag bij het projectteam via support@zoocode.dev. Het projectteam beoordeelt en onderzoekt alle klachten. Het team reageert op de manier die het nodig en passend vindt voor de omstandigheden. Het team moet de identiteit van de melder van een incident vertrouwelijk houden. Het team kan meer details over specifieke handhavingsregels apart publiceren.
 
-Projectbeheerders die de Gedragscode niet te goeder trouw volgen of handhaven, kunnen tijdelijke of permanente gevolgen ondervinden zoals bepaald door andere leden van het leiderschap van het project.
+Projectbeheerders moeten de gedragscode te goeder trouw volgen en handhaven. Als ze dit niet doen, kunnen er tijdelijke of permanente gevolgen zijn. Andere leden van de projectleiding bepalen de gevolgen.
 
-## Toeschrijving
+<a id="attribution"></a>
 
-Deze Gedragscode is gebaseerd op [Cline's versie][cline_coc] van de [Contributor Covenant][homepage], versie 1.4, beschikbaar op https://www.contributor-covenant.org/version/1/4/code-of-conduct.html
+## Bronvermelding
+
+This Code of Conduct is adapted from [Cline's version][cline_coc] of the [Contributor Covenant][homepage], version 1.4. It is available at https://www.contributor-covenant.org/version/1/4/code-of-conduct.html
 
 [cline_coc]: https://github.com/cline/cline/blob/main/CODE_OF_CONDUCT.md
 [homepage]: https://www.contributor-covenant.org
 
-Voor antwoorden op veelgestelde vragen over deze gedragscode, zie https://www.contributor-covenant.org/faq
+For answers to common questions about this code of conduct, see https://www.contributor-covenant.org/faq
