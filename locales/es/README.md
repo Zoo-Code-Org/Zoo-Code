@@ -47,11 +47,11 @@ Zoo Code parte de los cimientos creados por Roo Code y continúa ampliándolos c
 - **Flujos de terminal y edición más fiables** — correcciones para la finalización prematura del terminal, las condiciones de carrera del estado de las tareas, la gestión del contexto, la edición de diff y el uso de herramientas específicas de cada proveedor.
 - **Más control sobre tu espacio de trabajo** — gestión de reglas, restricciones de MCP por modo, controles de rutas multirraíz, opciones de razonamiento de modelos y acciones para revisar los cambios al completar una tarea.
 
-## Novedades de la v3.86.0
+## Novedades de la v3.88.0
 
-- ✨ **Compatibilidad con nuevos modelos:** Usa GPT-6.1 Sol, aprovecha el límite de salida corregido de Claude Opus 5.5 y selecciona DeepSeek V4.1 Flash en OpenCode Go.
-- 🧭 **Cancelaciones e interrupciones de tareas fiables:** Conserva el primer motivo de cancelación, restablece el estado de cancelación del flujo en cada solicitud y evita que las tareas interrumpidas vuelvan a ejecutar subtareas rechazadas.
-- 🛠️ **Herramientas, prompts y transmisión de la interfaz fiables:** Conserva intactos los argumentos de las herramientas recibidos en streaming, aplica la política de herramientas MCP, evita números de línea inventados y haz más fluidas las actualizaciones del chat.
+- ✨ **Soporte de proveedores y modelos:** Usa Grok Build y una compatibilidad mejorada con modelos personalizados. Esta versión también corrige los límites de modelos de Bedrock y envía la configuración de verbosidad de Codex.
+- 🧭 **Confiabilidad de las tareas:** Esta versión corrige el manejo de cancelaciones, la continuación de turnos de herramientas y el guardado de mensajes de tarea.
+- ⚡ **Edición y chat más rápidos:** Las escrituras de archivos ya no usan retrasos artificiales por defecto. Los mensajes del chat llevan menos datos de archivos, y las acciones de código llegan al último chat activo.
 
 ## ¿Qué puede hacer Zoo Code por TI?
 

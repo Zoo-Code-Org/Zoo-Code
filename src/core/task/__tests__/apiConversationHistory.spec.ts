@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { prepareApiConversationMessage } from "../apiConversationHistory.js"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
+import type { ApiHandler } from "../../../api"
 
 describe("prepareApiConversationMessage", () => {
 	beforeEach(() => {
@@ -80,6 +81,40 @@ describe("prepareApiConversationMessage", () => {
 		expect(result.content).toEqual([
 			{ type: "reasoning", summary: [], encrypted_content: "encrypted", id: "reasoning-1" },
 			{ type: "text", text: "answer" },
+		])
+	})
+
+	it.each(["reasoning-1", undefined])("preserves encrypted reasoning alongside its visible text (id: %s)", (id) => {
+		const api = {
+			createMessage: vi.fn<ApiHandler["createMessage"]>(),
+			getModel: vi.fn<ApiHandler["getModel"]>(),
+			countTokens: vi.fn<ApiHandler["countTokens"]>(),
+			getEncryptedContent: () => ({ encrypted_content: "encrypted", ...(id ? { id } : {}) }),
+		}
+		const result = prepareApiConversationMessage({
+			message: {
+				role: "assistant",
+				content: [
+					{ type: "text", text: "Reading files" },
+					{ type: "tool_use", id: "call-1", name: "read_file", input: { path: "a.ts" } },
+				],
+			},
+			reasoning: "visible reasoning",
+			api,
+			apiConfiguration: { apiProvider: providerIdentifiers.openaiCodex },
+			apiConversationHistory: [],
+		})
+
+		expect(result.content).toEqual([
+			{
+				type: "reasoning",
+				text: "visible reasoning",
+				summary: [],
+				encrypted_content: "encrypted",
+				...(id ? { id } : {}),
+			},
+			{ type: "text", text: "Reading files" },
+			{ type: "tool_use", id: "call-1", name: "read_file", input: { path: "a.ts" } },
 		])
 	})
 
