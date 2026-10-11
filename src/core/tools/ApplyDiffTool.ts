@@ -8,6 +8,7 @@ import { getReadablePath } from "../../utils/path"
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
 import { fileExistsAtPath } from "../../utils/fs"
+import { versionTokenOfStat } from "../../utils/versionToken"
 import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { unescapeHtmlEntities } from "../../utils/text-normalization"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
@@ -68,7 +69,22 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				return
 			}
 
+			// The diff below is built from this exact read, so the save that follows must be
+			// authorized against the version captured here - not against whatever version the
+			// diff view happens to stat afterwards (there is no diff view on the
+			// focus-disruption path). Same contract as ApplyPatchTool's hunk read: stat
+			// around the read and observe only when the file did not change underneath it.
+			// Without it the saveDirectly("edit") below has no observation for the path and the
+			// guarded publish fails with "File not read yet -- read the file, then retry."
+			const preReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 			const originalContent: string = await fs.readFile(absolutePath, "utf-8")
+			const postReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+			if (preReadStats && postReadStats) {
+				const preReadToken = versionTokenOfStat(preReadStats)
+				if (preReadToken === versionTokenOfStat(postReadStats)) {
+					task.observationRegistry.observe(absolutePath, preReadToken)
+				}
+			}
 
 			// Apply the diff to the original content
 			const diffResult = (await task.diffStrategy?.applyDiff(
@@ -173,7 +189,8 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					return
 				}
 
-				// Save directly without showing diff view or opening the file
+				// Save directly without showing diff view or opening the file. The diff is
+				// applied to an existing file, so edit-guard semantics require a prior read.
 				task.diffViewProvider.editType = "modify"
 				task.diffViewProvider.originalContent = originalContent
 				await task.diffViewProvider.saveDirectly(
@@ -182,6 +199,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					false,
 					diagnosticsEnabled,
 					writeDelayMs,
+					"edit",
 				)
 			} else {
 				// Original behavior with diff view

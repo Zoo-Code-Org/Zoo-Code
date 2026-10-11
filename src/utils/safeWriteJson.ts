@@ -3,6 +3,8 @@ import * as fsSync from "fs"
 import * as path from "path"
 import { JsonStreamStringify } from "json-stream-stringify"
 
+import { resolvePublishTarget, safeWriteText, type SafeWriteTextOptions } from "../services/file-safety/safeWriteText"
+
 import { acquireFileLock } from "./fileLock"
 
 /**
@@ -32,7 +34,7 @@ export interface SafeWriteJsonOptions {
  * Safely writes JSON data to a file.
  * - Creates parent directories if they don't exist
  * - Uses 'proper-lockfile' for inter-process advisory locking to prevent concurrent writes to the same path.
- * - Writes to a temporary file first.
+ * - Writes to a temporary file first via JsonStreamStringify streaming.
  * - If the target file exists, it's backed up before being replaced.
  * - Attempts to roll back and clean up in case of errors.
  * - Supports pretty-printing with indentation while maintaining streaming efficiency.
@@ -42,7 +44,6 @@ export interface SafeWriteJsonOptions {
  * @param {SafeWriteJsonOptions} options - Optional configuration for JSON formatting.
  * @returns {Promise<void>}
  */
-
 async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJsonOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 	let releaseLock = async () => {} // Initialized to a no-op
@@ -52,28 +53,31 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 	// Ensure directory structure exists with improved reliability
 	try {
-		// Create directory with recursive option
 		await fs.mkdir(dirPath, { recursive: true })
-
-		// Verify directory exists after creation attempt
 		await fs.access(dirPath)
 	} catch (dirError: any) {
 		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
 		throw dirError
 	}
 
-	// Acquire the lock before any file operations. `acquireFileLock` owns the
-	// shared advisory lock protocol, so callers that lock the same path with
-	// it (for example task-history deletion) serialize with this write.
-	// If lock acquisition fails, it throws immediately. The releaseLock
-	// remains a no-op, so the finally block in the main file operations
-	// try-catch-finally won't try to release an unacquired lock if this
-	// path is taken.
-	releaseLock = await acquireFileLock(absoluteFilePath)
+	// Resolve the publish target BEFORE acquiring the lock: proper-lockfile keys
+	// the lock by the given path, so a symlink alias and its referent would
+	// otherwise take two distinct locks for one underlying file - a concurrent
+	// merge through both aliases could then read the same JSON and overwrite one
+	// update. Locking the resolved referent coordinates every alias through one
+	// lock. resolvePublishTarget tolerates a not-yet-existing file (it returns
+	// the given path on ENOENT), preserving the previous create-from-absent flow.
+	const resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
 
-	// Variables to hold the actual paths of temp files if they are created.
+	// Acquire the lock before any file operations. `acquireFileLock` owns the
+	// shared advisory lock protocol, so callers that lock the same path with it
+	// (for example task-history deletion) serialize with this write. It locks the
+	// resolved publish target, which is the key every other writer to this file
+	// uses. If acquisition fails it throws immediately, so the finally block never
+	// releases an unacquired lock.
+	releaseLock = await acquireFileLock(resolvedTargetPath)
+	// Variables to hold the actual path of the temp file if it is created.
 	let actualTempNewFilePath: string | null = null
-	let actualTempBackupFilePath: string | null = null
 
 	try {
 		// If a merge callback was provided, read the current file under the lock
@@ -82,7 +86,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		if (options?.merge) {
 			let existing: unknown = null
 			try {
-				existing = JSON.parse(await fs.readFile(absoluteFilePath, "utf8"))
+				existing = JSON.parse(await fs.readFile(resolvedTargetPath, "utf8"))
 			} catch (error: unknown) {
 				const code =
 					error && typeof error === "object" && "code" in error ? (error as { code: string }).code : undefined
@@ -93,79 +97,44 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			data = options.merge(existing, data)
 		}
 
-		// Step 1: Write data to a new temporary file.
+		// Step 1: Write data to a new temporary file via JSON streaming.
+		// Stage it beside the *resolved* target (the symlink referent when the path is
+		// a symlink; resolvedTargetPath above): safeWriteText commits by renaming
+		// onto that referent, and a rename across filesystems would fail with EXDEV.
 		actualTempNewFilePath = path.join(
-			path.dirname(absoluteFilePath),
-			`.${path.basename(absoluteFilePath)}.new_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
+			path.dirname(resolvedTargetPath),
+			".new_" + Date.now() + "_" + Math.random().toString(36).substring(2) + ".tmp",
 		)
 
 		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
 
-		// Step 2: Check if the target file exists. If so, rename it to a backup path.
-		try {
-			// Check for target file existence
-			await fs.access(absoluteFilePath)
-			// Target exists, create a backup path and rename.
-			actualTempBackupFilePath = path.join(
-				path.dirname(absoluteFilePath),
-				`.${path.basename(absoluteFilePath)}.bak_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
-			)
-			await fs.rename(absoluteFilePath, actualTempBackupFilePath)
-		} catch (accessError: any) {
-			// Explicitly type accessError
-			if (accessError.code !== "ENOENT") {
-				// An error other than "file not found" occurred during access check.
-				throw accessError
-			}
-			// Target file does not exist, so no backup is made. actualTempBackupFilePath remains null.
+		// Step 2: Delegate backup + commit + rollback to safeWriteText with the
+		// pre-written temp path. backup:true keeps the old safeWriteJson semantics (a
+		// copy of the target is taken before the commit, and a failure removes that
+		// copy - the target itself is never moved) and keeps the target in place until
+		// safeWriteText captures its Windows DACL (safeWriteText dumps the DACL before
+		// making the backup copy and restores it onto the directory after the commit
+		// rename).
+		const textOptions: SafeWriteTextOptions = {
+			tempPath: actualTempNewFilePath,
+			backup: true,
 		}
 
-		// Step 3: Rename the new temporary file to the target file path.
-		// This is the main "commit" step.
-		await fs.rename(actualTempNewFilePath, absoluteFilePath)
+		await safeWriteText(resolvedTargetPath, "", textOptions)
 
-		// If we reach here, the new file is successfully in place.
-		// The original actualTempNewFilePath is now the main file, so we shouldn't try to clean it up as "temp".
-		// Mark as "used" or "committed"
+		// If we reach here, the new file is successfully in place and any
+		// backup has already been handled by safeWriteText.
 		actualTempNewFilePath = null
-
-		// Step 4: If a backup was created, attempt to delete it.
-		if (actualTempBackupFilePath) {
-			try {
-				await fs.unlink(actualTempBackupFilePath)
-				// Mark backup as handled
-				actualTempBackupFilePath = null
-			} catch (unlinkBackupError) {
-				// Log this error, but do not re-throw. The main operation was successful.
-				// actualTempBackupFilePath remains set, indicating an orphaned backup.
-				console.error(
-					`Successfully wrote ${absoluteFilePath}, but failed to clean up backup ${actualTempBackupFilePath}:`,
-					unlinkBackupError,
-				)
-			}
-		}
 	} catch (originalError) {
-		console.error(`Operation failed for ${absoluteFilePath}: [Original Error Caught]`, originalError)
+		console.error(`Operation failed for ${resolvedTargetPath}: [Original Error Caught]`, originalError)
 
 		const newFileToCleanupWithinCatch = actualTempNewFilePath
-		const backupFileToRollbackOrCleanupWithinCatch = actualTempBackupFilePath
 
-		// Attempt rollback if a backup was made
-		if (backupFileToRollbackOrCleanupWithinCatch) {
-			try {
-				await fs.rename(backupFileToRollbackOrCleanupWithinCatch, absoluteFilePath)
-				// Mark as handled, prevent later unlink of this path
-				actualTempBackupFilePath = null
-			} catch (rollbackError) {
-				// actualTempBackupFilePath (outer scope) remains pointing to backupFileToRollbackOrCleanupWithinCatch
-				console.error(
-					`[Catch] Failed to restore backup ${backupFileToRollbackOrCleanupWithinCatch} to ${absoluteFilePath}:`,
-					rollbackError,
-				)
-			}
-		}
-
-		// Cleanup the .new file if it exists
+		// A failed safeWriteText leaves the target exactly where it was: its backup is a
+		// copy, so undoing a failure removes that copy rather than moving anything back
+		// over the target path. Clean up the .new file if it still exists (safeWriteText
+		// also removes its own tempPath on failure; this is a safety net in case its
+		// cleanup missed it).
 		if (newFileToCleanupWithinCatch) {
 			try {
 				await fs.unlink(newFileToCleanupWithinCatch)
@@ -177,27 +146,13 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			}
 		}
 
-		// Cleanup the .bak file if it still needs to be (i.e., wasn't successfully restored)
-		if (actualTempBackupFilePath) {
-			try {
-				await fs.unlink(actualTempBackupFilePath)
-			} catch (cleanupError) {
-				console.error(
-					`[Catch] Failed to clean up temporary backup file ${actualTempBackupFilePath}:`,
-					cleanupError,
-				)
-			}
-		}
 		throw originalError // This MUST be the error that rejects the promise.
 	} finally {
 		// Release the lock in the main finally block.
 		try {
-			// releaseLock will be the actual unlock function if lock was acquired,
-			// or the initial no-op if acquisition failed.
 			await releaseLock()
 		} catch (unlockError) {
-			// Do not re-throw here, as the originalError from the try/catch (if any) is more important.
-			console.error(`Failed to release lock for ${absoluteFilePath}:`, unlockError)
+			console.error(`Failed to release lock for ${resolvedTargetPath}:`, unlockError)
 		}
 	}
 }
