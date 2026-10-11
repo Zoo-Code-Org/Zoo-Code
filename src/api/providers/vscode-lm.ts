@@ -1134,12 +1134,31 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 
 		// Only offered tools may be recovered; their schemas keep recovered parameters typed
 		// rather than passing every value through as a string.
-		const providedToolSchemas: LeakedToolSchemas = new Map(
-			(metadata?.tools ?? [])
-				.filter((tool) => tool.type === "function")
-				.filter((tool) => tool.function.name.length > 0)
-				.map((tool) => [tool.function.name, tool.function.parameters as Record<string, unknown> | undefined]),
+		const providedTools = (metadata?.tools ?? [])
+			.filter((tool) => tool.type === "function")
+			.filter((tool) => tool.function.name.length > 0)
+		const providedToolSchemas = new Map(
+			providedTools.map((tool) => [
+				tool.function.name,
+				tool.function.parameters as Record<string, unknown> | undefined,
+			]),
 		)
+		const encodedToolAliases = new Map<string, string | undefined>()
+		for (const tool of providedTools) {
+			const encodedName = sanitizeToolNameSurrogates(tool.function.name)
+			// Raw names retain their schema and meaning even when another tool encodes to that name.
+			if (!providedToolSchemas.has(encodedName)) {
+				encodedToolAliases.set(
+					encodedName,
+					encodedToolAliases.has(encodedName) ? undefined : tool.function.name,
+				)
+			}
+		}
+		for (const [encodedName, originalName] of encodedToolAliases) {
+			if (originalName !== undefined) {
+				providedToolSchemas.set(encodedName, providedToolSchemas.get(originalName))
+			}
+		}
 		const salvageLeakedToolCalls = providedToolSchemas.size > 0
 		let salvageBuffer: string[] | undefined
 		let salvageCarry = ""
@@ -1155,14 +1174,15 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				drained.push({ type: "text", text: leftoverText })
 			}
 			for (const call of calls) {
+				const originalName = encodedToolAliases.get(call.name) ?? call.name
 				console.warn(
 					"Zoo Code <Language Model API>: Recovered a tool call the model emitted as text instead of a structured tool call:",
-					{ name: call.name, params: Object.keys(call.input) },
+					{ name: originalName, params: Object.keys(call.input) },
 				)
 				drained.push({
 					type: "tool_call",
 					id: `vscodelm-salvaged-${Date.now()}-${salvagedToolCallIndex++}`,
-					name: call.name,
+					name: originalName,
 					arguments: JSON.stringify(call.input),
 				})
 			}

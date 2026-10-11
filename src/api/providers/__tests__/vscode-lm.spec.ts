@@ -406,6 +406,152 @@ describe("VsCodeLmHandler", () => {
 				])
 			})
 
+			describe("offered tool name recovery", () => {
+				it.each([
+					{
+						label: "encoded surrogate",
+						rawName: "read\uD800file",
+						declaredName: "read_uD800file",
+						leakedName: "read_uD800file",
+						expectedName: "read\uD800file",
+					},
+					{
+						label: "encoded marker",
+						rawName: "get_uuid",
+						declaredName: "get_uuuid",
+						leakedName: "get_uuuid",
+						expectedName: "get_uuid",
+					},
+					{
+						label: "raw marker",
+						rawName: "get_uuid",
+						declaredName: "get_uuuid",
+						leakedName: "get_uuid",
+						expectedName: "get_uuid",
+					},
+				])("recovers $label with its original schema and split invariance", async (fixture) => {
+					const text =
+						`<function_calls><invoke name="${fixture.leakedName}">` +
+						'<parameter name="count">7</parameter></invoke></function_calls>'
+					const split = text.indexOf(fixture.leakedName) + 5
+					for (const parts of [[text], [text.slice(0, split), text.slice(split)]]) {
+						streamTextParts(parts)
+						const chunks = await collectStream(
+							handler.createMessage("system", [{ role: "user", content: "hi" }], {
+								taskId: "test-task",
+								tools: [
+									{
+										type: "function",
+										function: {
+											name: fixture.rawName,
+											parameters: { type: "object", properties: { count: { type: "number" } } },
+										},
+									},
+								],
+							}),
+						)
+						expect(mockLanguageModelChat.sendRequest).toHaveBeenLastCalledWith(
+							expect.any(Array),
+							expect.objectContaining({
+								tools: [expect.objectContaining({ name: fixture.declaredName })],
+							}),
+							expect.anything(),
+						)
+						expect(chunks.filter((chunk) => chunk.type !== "usage")).toEqual([
+							{
+								type: "tool_call",
+								id: expect.stringMatching(/^vscodelm-salvaged-\d+-0$/),
+								name: fixture.expectedName,
+								arguments: '{"count":7}',
+							},
+						])
+					}
+				})
+
+				it.each([false, true])(
+					"keeps raw priority on an encoded collision (reverse order: %s)",
+					async (reverse) => {
+						const tools = [
+							{
+								type: "function" as const,
+								function: {
+									name: "get_uuid",
+									parameters: { type: "object", properties: { count: { type: "string" } } },
+								},
+							},
+							{
+								type: "function" as const,
+								function: {
+									name: "get_uuuid",
+									parameters: { type: "object", properties: { count: { type: "number" } } },
+								},
+							},
+						]
+						streamTextParts([
+							'<function_calls><invoke name="get_uuuid"><parameter name="count">7</parameter></invoke></function_calls>',
+						])
+						const chunks = await collectStream(
+							handler.createMessage("system", [{ role: "user", content: "hi" }], {
+								taskId: "test-task",
+								tools: reverse ? tools.reverse() : tools,
+							}),
+						)
+						expect(chunks.filter((chunk) => chunk.type !== "usage")).toEqual([
+							{
+								type: "tool_call",
+								id: expect.stringMatching(/^vscodelm-salvaged-\d+-0$/),
+								name: "get_uuuid",
+								arguments: '{"count":7}',
+							},
+						])
+					},
+				)
+
+				it.each([
+					{
+						label: "undeclared encoding",
+						offeredNames: ["read\uD800file"],
+						leakedName: "read_ud800file",
+						expectedText:
+							'<function_calls><invoke name="read_ud800file"><parameter name="count">7</parameter></invoke></function_calls>',
+					},
+					{
+						label: "unoffered tool",
+						offeredNames: ["calculator"],
+						leakedName: "get_uuuid",
+						expectedText:
+							'<function_calls><invoke name="get_uuuid"><parameter name="count">7</parameter></invoke></function_calls>',
+					},
+					{
+						label: "ambiguous alias",
+						offeredNames: ["get_uuid", "get_uuid"],
+						leakedName: "get_uuuid",
+						expectedText:
+							'<function_calls><invoke name="get_uuuid"><parameter name="count">7</parameter></invoke></function_calls>',
+					},
+				])("keeps $label as exact text", async ({ offeredNames, leakedName, expectedText }) => {
+					const text =
+						`<function_calls><invoke name="${leakedName}">` +
+						'<parameter name="count">7</parameter></invoke></function_calls>'
+					streamTextParts([text])
+					const chunks = await collectStream(
+						handler.createMessage("system", [{ role: "user", content: "hi" }], {
+							taskId: "test-task",
+							tools: offeredNames.map((name) => ({
+								type: "function",
+								function: {
+									name,
+									parameters: { type: "object", properties: { count: { type: "number" } } },
+								},
+							})),
+						}),
+					)
+					expect(chunks.filter((chunk) => chunk.type !== "usage")).toEqual([
+						{ type: "text", text: expectedText },
+					])
+				})
+			})
+
 			it("detects a marker split across stream chunks", async () => {
 				const chunks = await collect([
 					"abc <function_calls><inv",
