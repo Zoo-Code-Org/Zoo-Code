@@ -248,6 +248,12 @@ describe("safeWriteText", () => {
 			).resolves.toBeUndefined()
 
 			expect(fs.rmdir).toHaveBeenCalledTimes(1)
+			// The removal that reported ENOENT has to be the one aimed at this write's own
+			// staging directory: a cleanup that removed some other directory and got
+			// ENOENT is not this contract, and it would leave this directory behind.
+			const stagingDirs = vi.mocked(fsSync.mkdirSync).mock.calls.map((call) => String(call[0]))
+			expect(stagingDirs.length).toBe(1)
+			expect(fs.rmdir).toHaveBeenCalledWith(stagingDirs[0])
 			expect(warnings).toEqual([])
 		})
 
