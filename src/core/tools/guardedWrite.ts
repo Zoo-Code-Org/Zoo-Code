@@ -240,8 +240,9 @@ export async function replaceIfVersion(
 			// honor the advisory lock can still rewrite the file while the staged copy is
 			// being written and fsynced, so the token is re-checked inside safeWriteText
 			// immediately before the commit rename: the window then covers only that
-			// syscall, and the race surfaces as a rejected stale write instead of a newer
-			// version being replaced by the older one.
+			// syscall. A change the verification detects rejects the write; a change that
+			// lands after verification returns and before the rename can still be
+			// overwritten, so this narrows the race rather than closing it.
 			await safeWriteText(absolutePath, content, {
 				preCommitVerify: async (targetPath) => {
 					let verifiedVersion: string

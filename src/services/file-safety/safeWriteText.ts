@@ -251,10 +251,19 @@ export async function safeWriteText(filePath: string, content: string, options?:
 		if (platform === "win32") {
 			try {
 				await fs.access(targetPath) // target exists?
-				daclDumpPath = targetPath + ".acl.tmp"
-				const saved = await _saveDaclWindows(targetPath, daclDumpPath, options?.execFileRunner)
-				if (!saved) {
-					daclDumpPath = null // skip DACL handling entirely
+				const dumpPath = targetPath + ".acl.tmp"
+				const saved = await _saveDaclWindows(targetPath, dumpPath, options?.execFileRunner)
+				if (saved) {
+					// Only a successfully saved dump may be restored onto the
+					// committed file (step 5).
+					daclDumpPath = dumpPath
+				} else {
+					// A failed icacls may have left a partial dump behind. Clearing the
+					// reference alone hands that file to nobody - the cleanup below only
+					// unlinks a tracked dump - so remove it here (best-effort). Nothing
+					// later may restore from a dump whose save failed.
+					await fs.unlink(dumpPath).catch(() => {})
+					daclDumpPath = null
 				}
 			} catch {
 				// target does not exist or access failed — no DACL handling
