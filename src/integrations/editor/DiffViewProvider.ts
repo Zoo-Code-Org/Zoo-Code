@@ -652,9 +652,42 @@ export class DiffViewProvider {
 
 			// Apply the edit and save, since contents shouldn't have changed
 			// this won't show in local history unless of course the user made
-			// changes and saved during the edit.
-			await vscode.workspace.applyEdit(edit)
-			await updatedDocument.save()
+			// changes and saved during the edit. applyEdit() resolves false when the workspace
+			// refused the edit and save() resolves false when the editor refused the save: both
+			// booleans were dropped, so a rollback whose restore never applied or whose save never
+			// landed was reported to the caller as a completed rollback. Capture each result the
+			// way the pre-stream restore and the refused close do, keep a rejection as the cause,
+			// and throw before any later bookkeeping so nothing proceeds on the assumption that
+			// the original content came back and reached disk.
+			let applied: boolean
+			let applyError: Error | undefined
+			try {
+				applied = await vscode.workspace.applyEdit(edit)
+			} catch (error) {
+				applied = false
+				applyError = error instanceof Error ? error : new Error(String(error))
+			}
+			if (!applied) {
+				throw new Error(
+					`Rollback could not restore the original content for ${absolutePath}; the workspace edit was not applied, so the document may still hold the unapproved content.`,
+					{ cause: applyError },
+				)
+			}
+
+			let saved: boolean
+			let saveError: Error | undefined
+			try {
+				saved = await updatedDocument.save()
+			} catch (error) {
+				saved = false
+				saveError = error instanceof Error ? error : new Error(String(error))
+			}
+			if (!saved) {
+				throw new Error(
+					`Rollback could not save the restored document for ${absolutePath}; the original content may not be on disk.`,
+					{ cause: saveError },
+				)
+			}
 
 			await this.closeAllDiffViews()
 

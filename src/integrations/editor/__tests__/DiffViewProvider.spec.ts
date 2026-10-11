@@ -1226,7 +1226,8 @@ describe("DiffViewProvider", () => {
 					uri: { fsPath: `${mockCwd}/test.txt` },
 					getText: vi.fn().mockReturnValue("modified"),
 					isDirty: false,
-					save: vi.fn().mockResolvedValue(undefined),
+					// The revert branch reads the save result; report a save that landed.
+					save: vi.fn().mockResolvedValue(true),
 					positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
 				},
 			}
@@ -1245,12 +1246,15 @@ describe("DiffViewProvider", () => {
 	describe("userTouchedDocument close/keep behavior", () => {
 		const mockTargetPath = `${mockCwd}/mock-target-file.ts`
 
+		// Both the approved save (saveChanges) and the existing-file rollback (revertChanges) read
+		// the save result, so the shared double reports a save that landed; an undefined-
+		// resolving double would read as a refused save.
 		const buildActiveDiffEditor = () => ({
 			document: {
 				uri: { fsPath: mockTargetPath, scheme: "file" },
 				getText: vi.fn().mockReturnValue("content"),
 				isDirty: false,
-				save: vi.fn().mockResolvedValue(undefined),
+				save: vi.fn().mockResolvedValue(true),
 				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
 			},
 		})
@@ -1790,6 +1794,183 @@ describe("DiffViewProvider", () => {
 			expect(vscode.window.showTextDocument).toHaveBeenCalled()
 		})
 
+		it("revertChanges() fails the existing-file rollback when the revert edit is not applied", async () => {
+			// applyEdit() resolves false when the workspace refuses the edit. Dropping that boolean let
+			// the rollback save anyway and report a completed rollback for a restore that never
+			// happened: the document could still hold the unapproved content, and the caller's
+			// failure reporting - the whole point of the revertDiffChangesBeforeReset return value -
+			// was skipped. The edit result is validated before the save runs.
+			const editor = buildActiveDiffEditor()
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(false)
+			const closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			const closeFileTab = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+			diffViewProvider["closeFileTab"] = closeFileTab
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				editType: "modify",
+				originalContent: "original",
+				documentWasOpen: false,
+				userTouchedDocument: false,
+				preEditScrollLine: undefined,
+				activeDiffEditor: editor,
+			})
+
+			await expect(diffViewProvider.revertChanges()).rejects.toThrow("could not restore the original content")
+
+			// Counts, not call shapes: the save and both close paths each have exactly one legitimate
+			// caller on this branch, and all of them sit behind the edit check.
+			expect(editor.document.save).toHaveBeenCalledTimes(0)
+			expect(closeAllDiffViews).toHaveBeenCalledTimes(0)
+			expect(closeFileTab).toHaveBeenCalledTimes(0)
+		})
+
+		it("revertChanges() keeps the workspace rejection as the cause of a failed existing-file revert", async () => {
+			// A revert that fails because the workspace rejected the edit keeps its reason: the
+			// rollback error carries the rejection as its cause, the shape the refused close and the
+			// pre-stream restore use.
+			const editor = buildActiveDiffEditor()
+			const rejection = new Error("edit rejected by the workspace")
+			vi.mocked(vscode.workspace.applyEdit).mockRejectedValue(rejection)
+			const closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			const closeFileTab = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+			diffViewProvider["closeFileTab"] = closeFileTab
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				editType: "modify",
+				originalContent: "original",
+				documentWasOpen: false,
+				userTouchedDocument: false,
+				preEditScrollLine: undefined,
+				activeDiffEditor: editor,
+			})
+
+			let revertFailure: unknown
+			try {
+				await diffViewProvider.revertChanges()
+			} catch (error) {
+				revertFailure = error
+			}
+
+			expect(revertFailure).toBeInstanceOf(Error)
+			if (revertFailure instanceof Error) {
+				expect(revertFailure.message).toContain("could not restore the original content")
+				expect(revertFailure.cause).toBe(rejection)
+			}
+			expect(editor.document.save).toHaveBeenCalledTimes(0)
+			expect(closeAllDiffViews).toHaveBeenCalledTimes(0)
+			expect(closeFileTab).toHaveBeenCalledTimes(0)
+		})
+
+		it("revertChanges() fails the existing-file rollback when the restored document save reports false", async () => {
+			// The double resolves an explicit false, not undefined: a bare await would let a double
+			// resolving undefined pass by accident, so the reported-failure contract is pinned with a
+			// real false. A refused save means the restored original content never reached disk; the
+			// rollback must fail before the close and tab bookkeeping assume it did.
+			const editor = buildActiveDiffEditor()
+			editor.document.save = vi.fn().mockResolvedValue(false)
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			const closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			const closeFileTab = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+			diffViewProvider["closeFileTab"] = closeFileTab
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				editType: "modify",
+				originalContent: "original",
+				documentWasOpen: false,
+				userTouchedDocument: false,
+				preEditScrollLine: undefined,
+				activeDiffEditor: editor,
+			})
+
+			await expect(diffViewProvider.revertChanges()).rejects.toThrow("could not save the restored document")
+
+			expect(editor.document.save).toHaveBeenCalledTimes(1)
+			// Throw before any later bookkeeping: the diff views stay open and the tab decision
+			// never runs on a document whose restored content may not be on disk.
+			expect(closeAllDiffViews).toHaveBeenCalledTimes(0)
+			expect(closeFileTab).toHaveBeenCalledTimes(0)
+		})
+
+		it("revertChanges() keeps the save rejection as the cause of a failed existing-file revert", async () => {
+			// Same shape as the edit rejection: a save that rejects is a failed rollback, and the
+			// rejection is kept as the cause rather than ending up as a reported success.
+			const editor = buildActiveDiffEditor()
+			const rejection = new Error("save refused by the editor host")
+			editor.document.save = vi.fn().mockRejectedValue(rejection)
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			const closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			const closeFileTab = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+			diffViewProvider["closeFileTab"] = closeFileTab
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				editType: "modify",
+				originalContent: "original",
+				documentWasOpen: false,
+				userTouchedDocument: false,
+				preEditScrollLine: undefined,
+				activeDiffEditor: editor,
+			})
+
+			let revertFailure: unknown
+			try {
+				await diffViewProvider.revertChanges()
+			} catch (error) {
+				revertFailure = error
+			}
+
+			expect(revertFailure).toBeInstanceOf(Error)
+			if (revertFailure instanceof Error) {
+				expect(revertFailure.message).toContain("could not save the restored document")
+				expect(revertFailure.cause).toBe(rejection)
+			}
+			expect(closeAllDiffViews).toHaveBeenCalledTimes(0)
+			expect(closeFileTab).toHaveBeenCalledTimes(0)
+		})
+
+		it("revertChanges() reverts, saves and closes when the edit is applied and the save reports true", async () => {
+			// Guard for the fix itself: an applied edit plus a save that reports true keeps the
+			// revert-save-close flow exactly as it was; only a refused edit or refused save changes
+			// behaviour.
+			const editor = buildActiveDiffEditor()
+			editor.document.save = vi.fn().mockResolvedValue(true)
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			const closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			const closeFileTab = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+			diffViewProvider["closeFileTab"] = closeFileTab
+			Object.assign(diffViewProvider, {
+				isEditing: true,
+				relPath: "mock-target-file.ts",
+				editType: "modify",
+				originalContent: "original",
+				documentWasOpen: false,
+				userTouchedDocument: false,
+				preEditScrollLine: undefined,
+				activeDiffEditor: editor,
+			})
+
+			await expect(diffViewProvider.revertChanges()).resolves.toBeUndefined()
+
+			// The revert edit carried the original content back, the save ran once, and the full
+			// close and tab flow proceeded exactly as before the fix. closeAllDiffViews also runs
+			// inside the trailing reset(), so the success evidence is "at least once, before the
+			// tab decision", not an exact count.
+			expect(mockWorkspaceEdit.replace).toHaveBeenCalledTimes(1)
+			expect(mockWorkspaceEdit.replace.mock.calls[0]?.[2]).toBe("original")
+			expect(editor.document.save).toHaveBeenCalledTimes(1)
+			expect(closeAllDiffViews.mock.calls.length).toBeGreaterThanOrEqual(1)
+			expect(closeAllDiffViews.mock.invocationCallOrder[0]).toBeLessThan(closeFileTab.mock.invocationCallOrder[0])
+			expect(closeFileTab).toHaveBeenCalledTimes(1)
+		})
+
 		it("marks userTouchedDocument when the file editor is activated during the diff", async () => {
 			let activeCallback: ((editor: any) => void) | undefined
 			vi.mocked(vscode.window.onDidChangeActiveTextEditor).mockImplementation((cb: any) => {
@@ -1832,12 +2013,15 @@ describe("DiffViewProvider", () => {
 	describe("userTouchedDiffEditor keep/close behavior", () => {
 		const mockTargetPath = `${mockCwd}/mock-target-file.ts`
 
+		// Both the approved save (saveChanges) and the existing-file rollback (revertChanges) read
+		// the save result, so the shared double reports a save that landed; an undefined-
+		// resolving double would read as a refused save.
 		const buildActiveDiffEditor = () => ({
 			document: {
 				uri: { fsPath: mockTargetPath, scheme: "file" },
 				getText: vi.fn().mockReturnValue("content"),
 				isDirty: false,
-				save: vi.fn().mockResolvedValue(undefined),
+				save: vi.fn().mockResolvedValue(true),
 				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
 			},
 		})
@@ -2240,12 +2424,15 @@ describe("DiffViewProvider", () => {
 	describe("auto-close settings decision table", () => {
 		const mockTargetPath = `${mockCwd}/auto-close-test.ts`
 
+		// Both the approved save (saveChanges) and the existing-file rollback (revertChanges) read
+		// the save result, so the shared double reports a save that landed; an undefined-
+		// resolving double would read as a refused save.
 		const buildActiveDiffEditor = () => ({
 			document: {
 				uri: { fsPath: mockTargetPath, scheme: "file" },
 				getText: vi.fn().mockReturnValue("content"),
 				isDirty: false,
-				save: vi.fn().mockResolvedValue(undefined),
+				save: vi.fn().mockResolvedValue(true),
 				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
 			},
 		})
