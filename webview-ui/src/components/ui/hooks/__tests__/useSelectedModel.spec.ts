@@ -1502,26 +1502,6 @@ describe("useSelectedModel", () => {
 			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
 		})
 
-		it("returns the default Fireworks model when no model is configured", () => {
-			const { result } = renderHook(() => useSelectedModel({ apiProvider: providerIdentifiers.fireworks }), {
-				wrapper: createWrapper(),
-			})
-
-			expect(result.current.id).toBe(fireworksDefaultModelId)
-			expect(result.current.info).toEqual(fireworksModels[fireworksDefaultModelId])
-		})
-
-		it("returns known Fireworks model metadata", () => {
-			const id = "accounts/fireworks/models/kimi-k2-instruct"
-			const { result } = renderHook(
-				() => useSelectedModel({ apiProvider: providerIdentifiers.fireworks, apiModelId: id }),
-				{ wrapper: createWrapper() },
-			)
-
-			expect(result.current.id).toBe(id)
-			expect(result.current.info).toEqual(fireworksModels[id])
-		})
-
 		const staticCatalogCases = [
 			{
 				apiProvider: providerIdentifiers.fireworks,
@@ -1595,6 +1575,24 @@ describe("useSelectedModel", () => {
 				expect(result.current.id).toBe("some/custom-model-not-in-list")
 				expect(result.current.info).toEqual(openAiModelInfoSaneDefaults)
 				expect(result.current.info?.contextWindow).toBeGreaterThan(1)
+			},
+		)
+
+		describe.each([providerIdentifiers.fireworks, providerIdentifiers.baseten, providerIdentifiers.sambanova])(
+			"%s inherited Object.prototype keys",
+			(apiProvider) => {
+				// An `in` check would match these keys on the prototype chain and return a function as `info`.
+				it.each(["constructor", "toString", "__proto__", "hasOwnProperty"])(
+					"treats %s as a custom model ID with sane default metadata",
+					(apiModelId) => {
+						const { result } = renderHook(() => useSelectedModel({ apiProvider, apiModelId }), {
+							wrapper: createWrapper(),
+						})
+
+						expect(result.current.id).toBe(apiModelId)
+						expect(result.current.info).toEqual(openAiModelInfoSaneDefaults)
+					},
+				)
 			},
 		)
 	})
