@@ -69,7 +69,13 @@ function _tempName(dir: string, prefix: string): string {
 /** Create a private staging sub-directory inside *dir* so that multiple
  * concurrent writes never collide on their temp names. */
 function _stagingDir(dir: string): string {
-	const sd = path.join(dir, ".file-safety-staging")
+	// One directory per write, named the way the temp inside it is named. A shared
+	// fixed name is a path the workspace controls: mkdirSync(recursive) accepts an
+	// existing entry of that name without creating anything, and a committed symlink
+	// at that name would make the chmod below rewrite the permissions of a directory
+	// outside the workspace and put the staged file in it. A name this call generated
+	// cannot be pre-planted by the content being written.
+	const sd = path.join(dir, ".file-safety-staging_" + Date.now() + "_" + Math.random().toString(36).substring(2))
 	// mode:0o700 protects a freshly created staging dir; the best-effort chmod
 	// repairs a pre-existing one (mkdirSync with recursive:true never chmods an
 	// existing directory), so staged temp files are never group/world readable.
@@ -251,7 +257,11 @@ export async function safeWriteText(filePath: string, content: string, options?:
 		if (platform === "win32") {
 			try {
 				await fs.access(targetPath) // target exists?
-				const dumpPath = targetPath + ".acl.tmp"
+				// A name this call generates, not a name derived from the target. A fixed
+				// "<target>.acl.tmp" can already exist beside the target and belong to
+				// something else; the cleanup below would then unlink a file this write
+				// never created. Same owned-unique shape as the staging temp.
+				const dumpPath = _tempName(dirPath, "safeWriteText.acl")
 				const saved = await _saveDaclWindows(targetPath, dumpPath, options?.execFileRunner)
 				if (saved) {
 					// Only a successfully saved dump may be restored onto the

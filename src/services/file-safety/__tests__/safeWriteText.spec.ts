@@ -118,6 +118,27 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).not.toHaveBeenCalled()
 		})
 
+		it("gives each self-staged write its own staging directory", async () => {
+			// A workspace can ship a directory entry named .file-safety-staging, and a
+			// shared fixed name is then a path the workspace controls rather than one this
+			// write created. Each self-staged write must get its own name.
+			const first = "/tmp/test-dir/a.txt"
+			const second = "/tmp/test-dir/b.txt"
+			vi.mocked(fs.realpath).mockImplementation(async (p) => String(p))
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(first, "one", { platform: "linux" })
+			await safeWriteText(second, "two", { platform: "linux" })
+
+			const staging = vi
+				.mocked(fsSync.mkdirSync)
+				.mock.calls.map((c) => String(c[0]))
+				.filter((p) => p.includes(".file-safety-staging_"))
+			expect(staging).toHaveLength(2)
+			expect(staging[0]).not.toBe(staging[1])
+			for (const sd of staging) expect(sd).toMatch(/\.file-safety-staging_\d+_[a-z0-9]+$/)
+		})
+
 		it("removes the staging directory after the commit lands", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
@@ -426,7 +447,34 @@ describe("safeWriteText", () => {
 			// write succeeded despite icacls failure (fallback to plain rename)
 			expect(fs.rename).toHaveBeenCalled()
 			// and the fallback leaves no dump file behind
-			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))
+		})
+
+		it("win32 DACL: a failed save never unlinks a dump this write did not create", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			// A file that already sits at the name an earlier fixed scheme would have used.
+			// It belongs to whatever put it there, not to this write.
+			const preExisting = targetPath + ".acl.tmp"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+				if (typeof cb === "function") cb(new Error("icacls save error"), "", "")
+				return fakeChild
+			})
+
+			await safeWriteText(targetPath, "data", { platform: "win32" })
+
+			// The dump icacls was told to write is a name this call generated...
+			const dumpArg = vi.mocked(execFile).mock.calls[0]?.[1]?.[2]
+			expect(typeof dumpArg).toBe("string")
+			expect(String(dumpArg)).toContain("safeWriteText.acl")
+			expect(String(dumpArg)).not.toBe(preExisting)
+			// ...and the cleanup only ever reaches that owned name. The pre-existing file
+			// survives a failed save instead of being deleted as if this write owned it.
+			for (const call of vi.mocked(fs.unlink).mock.calls) {
+				expect(String(call[0])).not.toBe(preExisting)
+			}
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))
 		})
 
 		it("win32 DACL: a partial dump left by a failed save is removed and never restored", async () => {
@@ -449,7 +497,7 @@ describe("safeWriteText", () => {
 			expect(execFile).toHaveBeenCalledTimes(1)
 			expect(vi.mocked(execFile).mock.calls[0]?.[1]?.[1]).toBe("/save")
 			// The possibly partial dump was unlinked, not merely forgotten.
-			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))
 		})
 
 		it("win32 DACL save args are [targetPath, /save, dumpPath, /T] before backup rename", async () => {
@@ -465,7 +513,7 @@ describe("safeWriteText", () => {
 			// First call: save DACL from target before backup rename
 			const firstCall = vi.mocked(execFile).mock.calls[0]
 			expect(firstCall[0]).toBe("icacls")
-			expect(firstCall[1]).toEqual([targetPath, "/save", expect.stringContaining(".acl.tmp"), "/T"])
+			expect(firstCall[1]).toEqual([targetPath, "/save", expect.stringContaining("safeWriteText.acl"), "/T"])
 
 			// Second call: restore DACL onto directory after commit rename
 			const secondCall = vi.mocked(execFile).mock.calls[1]
@@ -473,11 +521,11 @@ describe("safeWriteText", () => {
 			expect(secondCall[1]).toEqual([
 				expect.stringContaining("/tmp/test-dir"),
 				"/restore",
-				expect.stringContaining(".acl.tmp"),
+				expect.stringContaining("safeWriteText.acl"),
 			])
 
 			// dump file was unlinked after restore
-			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))
 		})
 
 		it("win32 DACL: dump is unlinked even when restore fails", async () => {
@@ -501,7 +549,7 @@ describe("safeWriteText", () => {
 			expect(fs.rename).toHaveBeenCalled()
 
 			// dump file was still unlinked in finally
-			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))
 		})
 
 		it("win32 DACL: when target does not exist, no save/restore/dump", async () => {
