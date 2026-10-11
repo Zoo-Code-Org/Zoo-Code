@@ -1205,25 +1205,30 @@ export const ChatRowContent = ({
 					return null // we should never see this message type
 				case "text":
 					return (
-						<div className="group">
+						<div className="group" role="group" aria-label={t("chat:text.rooSaid")}>
 							<div className="pl-6 relative">
 								<div className="absolute top-0 right-0 z-10">
 									<OpenMarkdownPreviewButton markdown={message.text} />
 								</div>
-								<Markdown markdown={message.text} partial={message.partial} />
-								{message.images && message.images.length > 0 && (
-									<div style={{ marginTop: "10px" }}>
-										{message.images.map((image, index) => (
-											<ImageBlock key={index} imageData={image} />
-										))}
-									</div>
-								)}
+								<div className="pr-10">
+									<Markdown markdown={message.text} partial={message.partial} />
+									{message.images && message.images.length > 0 && (
+										<div style={{ marginTop: "10px" }}>
+											{message.images.map((image, index) => (
+												<ImageBlock key={index} imageData={image} />
+											))}
+										</div>
+									)}
+								</div>
 							</div>
 						</div>
 					)
 				case "user_feedback":
 					return (
-						<div className="group w-fit max-w-[70%] ml-auto flex flex-col items-end gap-1">
+						<div
+							className="group w-fit max-w-[70%] ml-auto flex flex-col items-end gap-1"
+							role="group"
+							aria-label={t("chat:feedback.youSaid")}>
 							<div
 								className={cn(
 									"border rounded-sm overflow-hidden whitespace-pre-wrap",
@@ -1257,7 +1262,6 @@ export const ChatRowContent = ({
 										role="button"
 										tabIndex={isStreaming ? -1 : 0}
 										aria-disabled={isStreaming || undefined}
-										aria-label={t("chat:queuedMessages.clickToEdit")}
 										onClick={(e) => {
 											e.stopPropagation()
 											if (!isStreaming) {

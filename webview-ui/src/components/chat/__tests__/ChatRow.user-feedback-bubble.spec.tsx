@@ -144,16 +144,16 @@ describe("ChatRow - user feedback bubble layout & contrast", () => {
 			renderRow(makeUserFeedback())
 
 			await user.tab()
-			expect(screen.getByRole("button", { name: "chat:queuedMessages.clickToEdit" })).toHaveFocus()
+			expect(screen.getByRole("button", { name: "hello bubble" })).toHaveFocus()
 			await user.keyboard(input)
 
 			expect(screen.getByRole("textbox")).toHaveValue("hello bubble")
-			expect(screen.queryByRole("button", { name: "chat:queuedMessages.clickToEdit" })).not.toBeInTheDocument()
+			expect(screen.queryByRole("button", { name: "hello bubble" })).not.toBeInTheDocument()
 		})
 
 		it("does not enter edit mode from the message text while streaming", () => {
 			renderRow(makeUserFeedback(), false, true)
-			const messageControl = screen.getByRole("button", { name: "chat:queuedMessages.clickToEdit" })
+			const messageControl = screen.getByRole("button", { name: "hello bubble" })
 			expect(messageControl).toHaveAttribute("aria-disabled", "true")
 			expect(messageControl).toHaveAttribute("tabindex", "-1")
 
