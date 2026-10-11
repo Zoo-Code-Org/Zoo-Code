@@ -359,6 +359,41 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts"))).toBe(false)
 	})
 
+	it("leaves the registry empty after the diff-view save", async () => {
+		// The diff-view branch saves through saveChanges(), which never consults the
+		// registry, so the read must not leave a token behind for a later write_to_file
+		// to spend on an unrelated overwrite.
+		const diffViewStub = mockTask.diffViewProvider as unknown as Record<string, unknown>
+		diffViewStub.open = vi.fn().mockResolvedValue(undefined)
+		diffViewStub.update = vi.fn().mockResolvedValue(undefined)
+		diffViewStub.scrollToFirstDiff = vi.fn()
+		diffViewStub.saveChanges = vi.fn().mockResolvedValue({
+			newProblemsMessage: "",
+			userEdits: undefined,
+			finalContent: "new content",
+		})
+		mockTask.providerRef = {
+			deref: vi.fn().mockReturnValue({
+				getState: vi.fn().mockResolvedValue({
+					diagnosticsEnabled: true,
+					writeDelayMs: 1000,
+					// Diff-view save path: no focus-disruption experiment.
+					experiments: {},
+				}),
+			}),
+		} as unknown as Task["providerRef"]
+
+		await tool.execute({ patch: updatePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(diffViewStub.saveChanges).toHaveBeenCalled()
+		expect(mockSaveDirectly).not.toHaveBeenCalled()
+		expect(mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts"))).toBe(false)
+	})
+
 	it("add: publishes the new file through the guarded saveDirectly with create kind", async () => {
 		mockedFileExistsAtPath.mockResolvedValueOnce(false)
 

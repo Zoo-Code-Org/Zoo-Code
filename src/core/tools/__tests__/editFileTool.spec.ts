@@ -953,6 +953,20 @@ describe("editFileTool", () => {
 			expect(result).toContain("Changes were rejected by the user.")
 			expect(mockTask.observationRegistry.get(absoluteFilePath)).toBeUndefined()
 		})
+
+		it("leaves the registry empty after the diff-view save", async () => {
+			// The diff-view branch saves through saveChanges(), which never consults the
+			// registry, so this tool's read must not leave a token behind for a later
+			// write_to_file to spend on an unrelated overwrite.
+			const result = await executeEditFileTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3" },
+			)
+
+			expect(result).toContain("Tool result message")
+			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalled()
+			expect(mockTask.observationRegistry.get(absoluteFilePath)).toBeUndefined()
+		})
 	})
 
 	describe("CRLF normalization", () => {

@@ -642,5 +642,19 @@ describe("searchReplaceTool", () => {
 			expect(result).toContain("Changes were rejected by the user.")
 			expect(mockCline.observationRegistry.get(absoluteFilePath)).toBeUndefined()
 		})
+
+		it("leaves the registry empty after the diff-view save", async () => {
+			// The diff-view branch saves through saveChanges(), which never consults the
+			// registry, so this tool's read must not leave a token behind for a later
+			// write_to_file to spend on an unrelated overwrite.
+			const result = await executeSearchReplaceTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileContent: "Line 1\nLine 2\nLine 3" },
+			)
+
+			expect(result).toContain("Tool result message")
+			expect(mockCline.diffViewProvider.saveChanges).toHaveBeenCalled()
+			expect(mockCline.observationRegistry.get(absoluteFilePath)).toBeUndefined()
+		})
 	})
 })
