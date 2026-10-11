@@ -119,6 +119,8 @@ describe("ChatRow - user feedback bubble layout & contrast", () => {
 		{ name: "Enter", key: "Enter", input: "{Enter}" },
 		{ name: "Space", key: " ", input: " " },
 	])("$name keyboard activation", ({ key, input }) => {
+		const originalFocusDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "focus")!
+
 		beforeEach(() => {
 			// vitest.setup.ts replaces focus with a no-op for FAST components. Borrow
 			// JSDOM's native focus from a fresh realm so keyboard navigation works here.
@@ -126,11 +128,15 @@ describe("ChatRow - user feedback bubble layout & contrast", () => {
 			document.body.appendChild(frame)
 			const nativeFocus = frame.contentDocument!.createElement("button").focus
 			frame.remove()
-			vi.spyOn(HTMLElement.prototype, "focus", "get").mockReturnValue(nativeFocus)
+			Object.defineProperty(HTMLElement.prototype, "focus", {
+				configurable: true,
+				writable: true,
+				value: nativeFocus,
+			})
 		})
 
 		afterEach(() => {
-			vi.restoreAllMocks()
+			Object.defineProperty(HTMLElement.prototype, "focus", originalFocusDescriptor)
 		})
 
 		it("enters edit mode from the message text", async () => {
