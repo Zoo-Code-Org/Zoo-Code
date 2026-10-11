@@ -642,7 +642,36 @@ const handleWebviewMessage = async (
 			const refreshProfiles = enqueueSettingsSave(provider.contextProxy, launchSignal, async () => {
 				const metadata = await provider.providerSettingsManager.listConfig()
 				launchSignal.throwIfAborted()
+				if (metadata) {
+					if (metadata.length === 1 && !checkExistKey(metadata[0])) {
+						const { apiConfiguration } = await provider.getState()
+						launchSignal.throwIfAborted()
+
+						// Only sync a first-run profile when the current configuration has meaningful settings.
+						if (checkExistKey(apiConfiguration)) {
+							await provider.providerSettingsManager.saveConfig(
+								metadata[0].name ?? "default",
+								apiConfiguration,
+							)
+							launchSignal.throwIfAborted()
+							metadata[0].apiProvider = apiConfiguration.apiProvider
+						}
+					}
+
+					const currentConfigName = getGlobalState("currentApiConfigName")
+					if (currentConfigName) {
+						const hasConfig = await provider.providerSettingsManager.hasConfig(currentConfigName)
+						launchSignal.throwIfAborted()
+						if (!hasConfig) {
+							await updateGlobalState("currentApiConfigName", metadata[0]?.name)
+						}
+					}
+				}
+				launchSignal.throwIfAborted()
 				await updateGlobalState("listApiConfigMeta", metadata)
+				launchSignal.throwIfAborted()
+				if (metadata) await provider.postMessageToWebview({ type: "listApiConfig", listApiConfig: metadata })
+				launchSignal.throwIfAborted()
 				if (refreshTimedOut) await provider.postStateToWebview()
 			}).catch((error) => {
 				if (launchSignal.aborted && error === launchSignal.reason) throw error
@@ -684,59 +713,6 @@ const handleWebviewMessage = async (
 			if (mcpHub) {
 				await provider.postMessageToWebview({ type: "mcpServers", mcpServers: mcpHub.getAllServers() })
 			}
-
-			provider.providerSettingsManager
-				.listConfig()
-				.then(async (listApiConfig) => {
-					if (!listApiConfig) {
-						return
-					}
-
-					if (listApiConfig.length === 1) {
-						// Check if first time init then sync with exist config.
-						if (!checkExistKey(listApiConfig[0])) {
-							const { apiConfiguration } = await provider.getState()
-
-							// Only save if the current configuration has meaningful settings
-							// (e.g., API keys). This prevents saving a default "anthropic"
-							// fallback when no real config exists, which can happen during
-							// CLI initialization before provider settings are applied.
-							if (checkExistKey(apiConfiguration)) {
-								await provider.providerSettingsManager.saveConfig(
-									listApiConfig[0].name ?? "default",
-									apiConfiguration,
-								)
-
-								listApiConfig[0].apiProvider = apiConfiguration.apiProvider
-							}
-						}
-					}
-
-					const currentConfigName = getGlobalState("currentApiConfigName")
-
-					if (currentConfigName) {
-						if (!(await provider.providerSettingsManager.hasConfig(currentConfigName))) {
-							// Current config name not valid, get first config in list.
-							const name = listApiConfig[0]?.name
-							await updateGlobalState("currentApiConfigName", name)
-
-							if (name) {
-								await provider.activateProviderProfile({ name })
-								return
-							}
-						}
-					}
-
-					await Promise.all([
-						await updateGlobalState("listApiConfigMeta", listApiConfig),
-						await provider.postMessageToWebview({ type: "listApiConfig", listApiConfig }),
-					])
-				})
-				.catch((error) =>
-					provider.log(
-						`Error list api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
-					),
-				)
 
 			// Telemetry is on by disclosed default: "unset" (no choice made yet) leaves that
 			// default in effect, same as "enabled". Only an explicit "disabled" opts out.

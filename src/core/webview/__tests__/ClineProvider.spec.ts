@@ -2054,6 +2054,73 @@ describe("ClineProvider", () => {
 		for (const spy of [list, post, log]) spy.mockRestore()
 	})
 
+	test("serializes first-run profile sync, name repair, and list posting with settings saves", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("currentApiConfigName", "missing-profile")
+		const configuration: ProviderSettings = { apiProvider: providerIdentifiers.fakeAi }
+		const metadata: ProviderSettingsEntry[] = [{ id: "default-id", name: "default" }]
+		const list = vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue(metadata)
+		const hasConfig = vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(false)
+		const state = vi.spyOn(provider, "getState").mockResolvedValue({
+			...(await provider.getState()),
+			apiConfiguration: configuration,
+		})
+		let release!: () => void
+		const save = vi.spyOn(provider.providerSettingsManager, "saveConfig").mockImplementation(
+			() =>
+				new Promise<string>((resolve) => {
+					release = () => resolve("default-id")
+				}),
+		)
+		const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+		const message = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+		const activate = vi.spyOn(provider, "activateProviderProfile")
+		try {
+			const launching = webviewMessageHandler(provider, { type: "webviewDidLaunch" })
+			await vi.waitFor(() => expect(save).toHaveBeenCalledWith("default", configuration))
+			const nextWrite = vi.fn(async () => {
+				expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("default")
+				expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual(metadata)
+				expect(message).toHaveBeenCalledWith({ type: "listApiConfig", listApiConfig: metadata })
+			})
+			const queued = enqueueSettingsSave(provider.contextProxy, provider.settingsSaveSignal, nextWrite)
+			expect(nextWrite).not.toHaveBeenCalled()
+			expect(hasConfig).not.toHaveBeenCalled()
+			expect(message).not.toHaveBeenCalled()
+			release()
+			await Promise.all([launching, queued])
+			expect(list).toHaveBeenCalledOnce()
+			expect(hasConfig).toHaveBeenCalledWith("missing-profile")
+			expect(metadata[0].apiProvider).toBe(providerIdentifiers.fakeAi)
+			expect(nextWrite).toHaveBeenCalledOnce()
+			expect(activate).not.toHaveBeenCalled()
+		} finally {
+			release?.()
+			for (const spy of [list, hasConfig, state, save, post, message, activate]) spy.mockRestore()
+		}
+	})
+
+	test("does not sync an unconfigured fallback into the first-run profile", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		const metadata: ProviderSettingsEntry[] = [{ id: "default-id", name: "default" }]
+		const list = vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue(metadata)
+		const state = vi.spyOn(provider, "getState").mockResolvedValue({
+			...(await provider.getState()),
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+		const save = vi.spyOn(provider.providerSettingsManager, "saveConfig")
+		const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+		const message = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+		try {
+			await webviewMessageHandler(provider, { type: "webviewDidLaunch" })
+			expect(save).not.toHaveBeenCalled()
+			expect(list).toHaveBeenCalledOnce()
+			expect(message).toHaveBeenCalledWith({ type: "listApiConfig", listApiConfig: metadata })
+		} finally {
+			for (const spy of [list, state, save, post, message]) spy.mockRestore()
+		}
+	})
+
 	test("bounds the launch wait without releasing the save queue, then posts refreshed state", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const list = vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
@@ -2076,11 +2143,13 @@ describe("ClineProvider", () => {
 			await launching
 			expect(provider.isViewLaunched).toBe(true)
 			expect(post).toHaveBeenCalled()
+			expect(list).not.toHaveBeenCalled()
 			expect(nextWrite).not.toHaveBeenCalled()
 			post.mockClear()
 			release()
 			await saving
 			await queued
+			expect(list).toHaveBeenCalledOnce()
 			expect(nextWrite).toHaveBeenCalledOnce()
 			expect(post).toHaveBeenCalledOnce()
 		} finally {
