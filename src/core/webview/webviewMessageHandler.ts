@@ -39,7 +39,7 @@ import { type ApiMessage } from "../task-persistence/apiMessages"
 import { saveTaskMessages } from "../task-persistence"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
-import { ClineProvider } from "./ClineProvider"
+import type { ClineProvider } from "./ClineProvider"
 import { findOriginalContent } from "./stripOriginalContent"
 import { handleCheckpointRestoreOperation } from "./checkpointRestoreHandler"
 import { generateErrorDiagnostics } from "./diagnosticsHandler"
@@ -119,15 +119,69 @@ import {
 	handleCheckoutBranch,
 } from "./worktree"
 
+import { enqueueSettingsSave } from "./settingsSaveQueue"
+
+// A webview timeout does not cancel host writes. Keep every SettingsView save message
+// in arrival order, including retries and messages from views sharing the same context.
+const settingsSaveMessageTypes = new Set<WebviewMessage["type"]>([
+	"updateSettings",
+	"upsertApiConfiguration",
+	"telemetrySetting",
+	"debugSetting",
+])
+
 export const webviewMessageHandler = async (
 	provider: ClineProvider,
 	message: WebviewMessage,
 	marketplaceManager?: MarketplaceManager,
+): Promise<void> => {
+	if (!settingsSaveMessageTypes.has(message.type)) {
+		return handleWebviewMessage(provider, message, marketplaceManager)
+	}
+
+	const signal = provider.settingsSaveSignal
+	return enqueueSettingsSave(provider.contextProxy, signal, () =>
+		handleWebviewMessage(provider, message, marketplaceManager, signal),
+	)
+}
+
+const handleWebviewMessage = async (
+	provider: ClineProvider,
+	message: WebviewMessage,
+	marketplaceManager?: MarketplaceManager,
+	signal?: AbortSignal,
 ) => {
 	// Utility functions provided for concise get/update of global state via contextProxy API.
 	const getGlobalState = <K extends keyof GlobalState>(key: K) => provider.contextProxy.getValue(key)
-	const updateGlobalState = async <K extends keyof GlobalState>(key: K, value: GlobalState[K]) =>
+	const updateGlobalState = async <K extends keyof GlobalState>(key: K, value: GlobalState[K]) => {
+		signal?.throwIfAborted()
 		await provider.contextProxy.setValue(key, value)
+	}
+
+	// SettingsView correlates each write separately before marking the whole save complete.
+	const saveSetting = async (key: string, write: () => Promise<unknown>) => {
+		let success = false
+		try {
+			signal?.throwIfAborted()
+			await write()
+			signal?.throwIfAborted()
+			success = true
+		} catch (error) {
+			signal?.throwIfAborted()
+			if (!message.requestId) throw error
+			provider.log(
+				`Failed to save settings: ${JSON.stringify([key])}; error: ${JSON.stringify(error instanceof Error ? error.name : "Unknown")}`,
+			)
+		}
+		if (message.requestId) {
+			await provider.postMessageToWebview({
+				type: "settingsSaveResult",
+				requestId: message.requestId,
+				success,
+				unsavedSettings: success ? [] : [key],
+			})
+		}
+	}
 
 	const getCurrentCwd = () => {
 		return provider.getCurrentTask()?.cwd || provider.cwd
@@ -580,7 +634,36 @@ export const webviewMessageHandler = async (
 				provider.resolveWebviewThemeFixtureProbe(message.requestId, message.themeFixture)
 			}
 			break
-		case "webviewDidLaunch":
+		case "webviewDidLaunch": {
+			// A disposed view may still be completing an uncancellable profile write.
+			// Refresh metadata before publishing state, including after a failed save.
+			const launchSignal = provider.settingsSaveSignal
+			let refreshTimedOut = false
+			const refreshProfiles = enqueueSettingsSave(provider.contextProxy, launchSignal, async () => {
+				const metadata = await provider.providerSettingsManager.listConfig()
+				launchSignal.throwIfAborted()
+				await updateGlobalState("listApiConfigMeta", metadata)
+				if (refreshTimedOut) await provider.postStateToWebview()
+			}).catch((error) => {
+				if (launchSignal.aborted && error === launchSignal.reason) throw error
+				provider.log("Failed to refresh provider profile metadata on launch")
+			})
+			let refreshTimeout: ReturnType<typeof setTimeout> | undefined
+			try {
+				await Promise.race([
+					refreshProfiles,
+					new Promise<void>((resolve) => {
+						refreshTimeout = setTimeout(() => {
+							// Release only the launch wait; keep the write queue serialized.
+							refreshTimedOut = true
+							provider.log("Provider profile metadata refresh timed out on launch")
+							resolve()
+						}, 30_000)
+					}),
+				])
+			} finally {
+				clearTimeout(refreshTimeout)
+			}
 			// Load custom modes first
 			const customModes = await provider.customModesManager.getCustomModes()
 			await updateGlobalState("customModes", customModes)
@@ -689,6 +772,7 @@ export const webviewMessageHandler = async (
 
 			provider.isViewLaunched = true
 			break
+		}
 		case "newTask":
 			// Initializing new instance of Cline will make sure that any
 			// agentically running promises in old instance don't affect our new
@@ -731,12 +815,15 @@ export const webviewMessageHandler = async (
 				if (message.updatedSettings.destructiveCommandGuardEnabled === true) {
 					try {
 						const { ensureDcgInstalled } = await import("../../services/destructive-command-guard")
+						signal?.throwIfAborted()
 						const binaryPath = await ensureDcgInstalled(provider.context.globalStorageUri.fsPath)
+						signal?.throwIfAborted()
 						if (!binaryPath) {
 							message.updatedSettings.destructiveCommandGuardEnabled = false
 							vscode.window.showErrorMessage(t("common:errors.destructiveCommandGuard.unavailable"))
 						}
 					} catch (error) {
+						signal?.throwIfAborted()
 						message.updatedSettings.destructiveCommandGuardEnabled = false
 						vscode.window.showErrorMessage(
 							t("common:errors.destructiveCommandGuard.enableFailed", {
@@ -746,117 +833,146 @@ export const webviewMessageHandler = async (
 					}
 				}
 
-				for (const [key, value] of Object.entries(message.updatedSettings)) {
-					let newValue = value
+				const pendingSettings = new Set(Object.keys(message.updatedSettings))
+				try {
+					for (const [key, value] of Object.entries(message.updatedSettings)) {
+						signal?.throwIfAborted()
+						let newValue = value
 
-					if (key === "language") {
-						newValue = value ?? "en"
-						changeLanguage(newValue as Language)
-					} else if (key === "allowedCommands") {
-						const commands = value ?? []
+						if (key === "language") {
+							newValue = value ?? "en"
+							changeLanguage(newValue as Language)
+						} else if (key === "allowedCommands") {
+							const commands = value ?? []
 
-						newValue = Array.isArray(commands)
-							? commands.filter((cmd) => typeof cmd === "string" && cmd.trim().length > 0)
-							: []
+							newValue = Array.isArray(commands)
+								? commands.filter((cmd) => typeof cmd === "string" && cmd.trim().length > 0)
+								: []
 
-						await vscode.workspace
-							.getConfiguration(Package.name)
-							.update("allowedCommands", newValue, vscode.ConfigurationTarget.Global)
-					} else if (key === "deniedCommands") {
-						const commands = value ?? []
+							await vscode.workspace
+								.getConfiguration(Package.name)
+								.update("allowedCommands", newValue, vscode.ConfigurationTarget.Global)
+						} else if (key === "deniedCommands") {
+							const commands = value ?? []
 
-						newValue = Array.isArray(commands)
-							? commands.filter((cmd) => typeof cmd === "string" && cmd.trim().length > 0)
-							: []
+							newValue = Array.isArray(commands)
+								? commands.filter((cmd) => typeof cmd === "string" && cmd.trim().length > 0)
+								: []
 
-						await vscode.workspace
-							.getConfiguration(Package.name)
-							.update("deniedCommands", newValue, vscode.ConfigurationTarget.Global)
-					} else if (key === "allowedReadFiles" || key === "allowedWriteFiles") {
-						const patterns = value ?? []
+							await vscode.workspace
+								.getConfiguration(Package.name)
+								.update("deniedCommands", newValue, vscode.ConfigurationTarget.Global)
+						} else if (key === "allowedReadFiles" || key === "allowedWriteFiles") {
+							const patterns = value ?? []
 
-						// Blank lines, which the textarea editor produces freely,
-						// name no file and are dropped here. Patterns are
-						// otherwise not `.trim()`ed: leading whitespace is
-						// significant in gitignore syntax, and trailing
-						// whitespace has to be escaped by the user to be kept.
-						newValue = Array.isArray(patterns)
-							? patterns.filter((pattern) => typeof pattern === "string" && pattern.trim().length > 0)
-							: []
-					} else if (key === "ttsEnabled") {
-						newValue = value ?? true
-						setTtsEnabled(newValue as boolean)
-					} else if (key === "ttsSpeed") {
-						newValue = value ?? 1.0
-						setTtsSpeed(newValue as number)
-					} else if (key === "terminalShellIntegrationTimeout") {
-						if (value !== undefined) {
-							Terminal.setShellIntegrationTimeout(value as number)
-						}
-					} else if (key === "terminalShellIntegrationDisabled") {
-						if (value !== undefined) {
-							Terminal.setShellIntegrationDisabled(value as boolean)
-						}
-					} else if (key === "terminalCommandDelay") {
-						if (value !== undefined) {
-							Terminal.setCommandDelay(value as number)
-						}
-					} else if (key === "terminalPowershellCounter") {
-						if (value !== undefined) {
-							Terminal.setPowershellCounter(value as boolean)
-						}
-					} else if (key === "terminalZshClearEolMark") {
-						if (value !== undefined) {
-							Terminal.setTerminalZshClearEolMark(value as boolean)
-						}
-					} else if (key === "terminalZshOhMy") {
-						if (value !== undefined) {
-							Terminal.setTerminalZshOhMy(value as boolean)
-						}
-					} else if (key === "terminalZshP10k") {
-						if (value !== undefined) {
-							Terminal.setTerminalZshP10k(value as boolean)
-						}
-					} else if (key === "terminalZdotdir") {
-						if (value !== undefined) {
-							Terminal.setTerminalZdotdir(value as boolean)
-						}
-					} else if (key === "terminalProfile") {
-						const previousProfile = Terminal.getTerminalProfile()
-						Terminal.setTerminalProfile(typeof value === "string" ? value : undefined)
-						newValue = Terminal.getTerminalProfile()
+							// Blank lines, which the textarea editor produces freely,
+							// name no file and are dropped here. Patterns are
+							// otherwise not `.trim()`ed: leading whitespace is
+							// significant in gitignore syntax, and trailing
+							// whitespace has to be escaped by the user to be kept.
+							newValue = Array.isArray(patterns)
+								? patterns.filter((pattern) => typeof pattern === "string" && pattern.trim().length > 0)
+								: []
+						} else if (key === "ttsEnabled") {
+							newValue = value ?? true
+							setTtsEnabled(newValue as boolean)
+						} else if (key === "ttsSpeed") {
+							newValue = value ?? 1.0
+							setTtsSpeed(newValue as number)
+						} else if (key === "terminalShellIntegrationTimeout") {
+							if (value !== undefined) {
+								Terminal.setShellIntegrationTimeout(value as number)
+							}
+						} else if (key === "terminalShellIntegrationDisabled") {
+							if (value !== undefined) {
+								Terminal.setShellIntegrationDisabled(value as boolean)
+							}
+						} else if (key === "terminalCommandDelay") {
+							if (value !== undefined) {
+								Terminal.setCommandDelay(value as number)
+							}
+						} else if (key === "terminalPowershellCounter") {
+							if (value !== undefined) {
+								Terminal.setPowershellCounter(value as boolean)
+							}
+						} else if (key === "terminalZshClearEolMark") {
+							if (value !== undefined) {
+								Terminal.setTerminalZshClearEolMark(value as boolean)
+							}
+						} else if (key === "terminalZshOhMy") {
+							if (value !== undefined) {
+								Terminal.setTerminalZshOhMy(value as boolean)
+							}
+						} else if (key === "terminalZshP10k") {
+							if (value !== undefined) {
+								Terminal.setTerminalZshP10k(value as boolean)
+							}
+						} else if (key === "terminalZdotdir") {
+							if (value !== undefined) {
+								Terminal.setTerminalZdotdir(value as boolean)
+							}
+						} else if (key === "terminalProfile") {
+							const previousProfile = Terminal.getTerminalProfile()
+							Terminal.setTerminalProfile(typeof value === "string" ? value : undefined)
+							newValue = Terminal.getTerminalProfile()
 
-						if (newValue !== previousProfile) {
-							// Discard idle terminals so the next command gets a fresh
-							// terminal using the new profile's shell instead of reusing
-							// a stale one from the previous profile.
-							TerminalRegistry.closeIdleTerminals()
-						}
-					} else if (key === "execaShellPath") {
-						Terminal.setExecaShellPath(value as string | undefined)
-					} else if (key === "mcpEnabled") {
-						newValue = value ?? true
-						const mcpHub = provider.getMcpHub()
+							if (newValue !== previousProfile) {
+								// Discard idle terminals so the next command gets a fresh
+								// terminal using the new profile's shell instead of reusing
+								// a stale one from the previous profile.
+								TerminalRegistry.closeIdleTerminals()
+							}
+						} else if (key === "execaShellPath") {
+							Terminal.setExecaShellPath(value as string | undefined)
+						} else if (key === "mcpEnabled") {
+							newValue = value ?? true
+							const mcpHub = provider.getMcpHub()
 
-						if (mcpHub) {
-							await mcpHub.handleMcpEnabledChange(newValue as boolean)
-						}
-					} else if (key === "experiments") {
-						if (!value) {
-							continue
+							if (mcpHub) {
+								await mcpHub.handleMcpEnabledChange(newValue as boolean)
+							}
+						} else if (key === "experiments") {
+							if (!value) {
+								pendingSettings.delete(key)
+								continue
+							}
+
+							newValue = {
+								...(getGlobalState("experiments") ?? experimentDefault),
+								...(value as Record<ExperimentId, boolean>),
+							}
+						} else if (key === "customSupportPrompts") {
+							if (!value) {
+								pendingSettings.delete(key)
+								continue
+							}
 						}
 
-						newValue = {
-							...(getGlobalState("experiments") ?? experimentDefault),
-							...(value as Record<ExperimentId, boolean>),
-						}
-					} else if (key === "customSupportPrompts") {
-						if (!value) {
-							continue
-						}
+						signal?.throwIfAborted()
+						await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
+						signal?.throwIfAborted()
+						pendingSettings.delete(key)
 					}
-
-					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
+				} catch (error) {
+					signal?.throwIfAborted()
+					// Earlier entries may already be saved. Keep the remaining keys retryable.
+					// Escape untrusted keys and error names; values and error text may contain secrets.
+					provider.log(
+						`Failed to save settings: ${JSON.stringify([...pendingSettings])}; error: ${JSON.stringify(error instanceof Error ? error.name : "Unknown")}`,
+					)
+					if (!message.requestId) {
+						void vscode.window.showErrorMessage(
+							t("common:errors.settingsSaveFailed", { keys: [...pendingSettings].join(", ") }),
+						)
+					}
+				}
+				if (message.requestId) {
+					await provider.postMessageToWebview({
+						type: "settingsSaveResult",
+						requestId: message.requestId,
+						success: pendingSettings.size === 0,
+						unsavedSettings: [...pendingSettings],
+					})
 				}
 
 				await provider.postStateToWebview()
@@ -2303,9 +2419,20 @@ export const webviewMessageHandler = async (
 			}
 			break
 		case "upsertApiConfiguration":
-			if (message.text && message.apiConfiguration) {
-				await provider.upsertProviderProfile(message.text, message.apiConfiguration)
-			}
+			await saveSetting("apiConfiguration", async () => {
+				if (message.text && message.apiConfiguration) {
+					const id = await provider.upsertProviderProfile(
+						message.text,
+						message.apiConfiguration,
+						true,
+						signal,
+					)
+					// The provider returns undefined when persistence fails.
+					if (message.requestId && id === undefined) throw new Error()
+				} else if (message.requestId) {
+					throw new Error()
+				}
+			})
 			break
 		case "renameApiConfiguration":
 			if (message.values && message.apiConfiguration) {
@@ -2753,6 +2880,7 @@ export const webviewMessageHandler = async (
 			const thisUpdate = telemetrySettingQueue
 				.catch(() => undefined)
 				.then(async () => {
+					signal?.throwIfAborted()
 					const telemetrySetting = message.text as TelemetrySetting
 					const previousSetting = getGlobalState("telemetrySetting") || "unset"
 					const isOptedIn = isTelemetryOptedIn(telemetrySetting)
@@ -2769,6 +2897,7 @@ export const webviewMessageHandler = async (
 					// captureTelemetrySettingsChanged calls above/below still track the user's
 					// stored preference transition on its own, independent of that live toggle.
 					await updateGlobalState("telemetrySetting", telemetrySetting)
+					signal?.throwIfAborted()
 
 					if (TelemetryService.hasInstance()) {
 						TelemetryService.instance.updateTelemetryState(isOptedIn && vscode.env.isTelemetryEnabled)
@@ -2783,14 +2912,17 @@ export const webviewMessageHandler = async (
 				})
 			telemetrySettingQueue = thisUpdate
 
-			await thisUpdate
+			await saveSetting("telemetrySetting", () => thisUpdate)
 			break
 		}
 		case "debugSetting": {
-			await vscode.workspace
-				.getConfiguration(Package.name)
-				.update("debug", message.bool ?? false, vscode.ConfigurationTarget.Global)
-			await provider.postStateToWebview()
+			await saveSetting("debug", async () => {
+				await vscode.workspace
+					.getConfiguration(Package.name)
+					.update("debug", message.bool ?? false, vscode.ConfigurationTarget.Global)
+				signal?.throwIfAborted()
+				await provider.postStateToWebview()
+			})
 			break
 		}
 		case "rooCloudSignIn": {

@@ -12,6 +12,8 @@ for (const theme of visualThemes) {
 		const story = component.getByTestId("chat-text-area-story")
 		const editor = story.getByRole("textbox")
 		await expect(editor).toBeVisible()
+		await editor.blur()
+		await expect(editor).not.toBeFocused()
 		await expect(story).toHaveScreenshot(`chat-composer-resting-${theme.name}.png`)
 
 		await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
@@ -29,4 +31,34 @@ for (const theme of visualThemes) {
 			focusedControl: editor,
 		})
 	})
+}
+
+for (const theme of visualThemes) {
+	for (const chatInputEffect of ["marquee", "breathing"] as const) {
+		test(`streaming composer ${chatInputEffect} in ${theme.name}`, async ({ mount, page }) => {
+			const component = mountedStory(await mount("chat-text-area", { isStreaming: true, chatInputEffect }))
+			await applyVisualTheme(page, theme)
+			const story = component.getByTestId("chat-text-area-story")
+			await story.getByRole("textbox").blur()
+			const effects = story.getByTestId("streaming-border").locator(":scope > div")
+			await expect(effects.first()).toHaveCSS(
+				"animation-name",
+				chatInputEffect === "marquee" ? "border-spin" : "streaming-glow",
+			)
+			// Preserve a visible, deterministic point in each production animation.
+			await effects.evaluateAll((elements) => {
+				for (const element of elements) {
+					for (const animation of element.getAnimations()) {
+						animation.pause()
+						animation.currentTime = 1000
+					}
+				}
+			})
+			await expect(story).toHaveScreenshot(`chat-composer-${chatInputEffect}-${theme.name}.png`, {
+				animations: "allow",
+			})
+			await page.emulateMedia({ reducedMotion: "reduce" })
+			for (const effect of await effects.all()) await expect(effect).toHaveCSS("animation-name", "none")
+		})
+	}
 }

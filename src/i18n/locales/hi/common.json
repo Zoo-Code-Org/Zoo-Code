@@ -147,7 +147,8 @@
 			"unexpectedStreamError": "Unexpected error processing response stream",
 			"completionError": "OpenAI Codex completion error: {{message}}"
 		},
-		"rooHistoryImport": "Roo Code इतिहास आयात करने में विफल: {{error}}"
+		"rooHistoryImport": "Roo Code इतिहास आयात करने में विफल: {{error}}",
+		"settingsSaveFailed": "कुछ सेटिंग्स सहेजी नहीं जा सकीं। फिर से प्रयास करने के लिए सहेजें चुनें। {{keys}}"
 	},
 	"warnings": {
 		"no_terminal_content": "कोई टर्मिनल सामग्री चयनित नहीं",

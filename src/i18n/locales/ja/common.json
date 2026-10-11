@@ -147,7 +147,8 @@
 			"unexpectedStreamError": "Unexpected error processing response stream",
 			"completionError": "OpenAI Codex completion error: {{message}}"
 		},
-		"rooHistoryImport": "Roo Codeの履歴のインポートに失敗しました: {{error}}"
+		"rooHistoryImport": "Roo Codeの履歴のインポートに失敗しました: {{error}}",
+		"settingsSaveFailed": "一部の設定を保存できませんでした。「保存」を選択して再試行してください。 {{keys}}"
 	},
 	"warnings": {
 		"no_terminal_content": "選択されたターミナルコンテンツがありません",

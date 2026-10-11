@@ -4,17 +4,24 @@ import { defaultModeSlug, type Mode } from "@roo/modes"
 import { AppProviders } from "../../../../playwright/AppProviders"
 import { ChatTextArea } from "../ChatTextArea"
 
-export function ChatTextAreaStory() {
+export function ChatTextAreaStory({
+	isStreaming = false,
+	chatInputEffect = "marquee",
+}: {
+	isStreaming?: boolean
+	chatInputEffect?: "marquee" | "breathing"
+}) {
 	const [inputValue, setInputValue] = useState("Audit contrast across the Zoo Code webview")
 	const [selectedImages, setSelectedImages] = useState<string[]>([])
 	const [mode, setMode] = useState<Mode>(defaultModeSlug)
 
 	return (
-		<AppProviders>
+		<AppProviders initialState={{ chatInputEffect }}>
 			<div
 				data-testid="chat-text-area-story"
 				className="w-[488px] max-w-full rounded-lg border border-vscode-panel-border bg-vscode-editor-background p-3">
 				<ChatTextArea
+					isStreaming={isStreaming}
 					inputValue={inputValue}
 					setInputValue={setInputValue}
 					sendingDisabled={false}

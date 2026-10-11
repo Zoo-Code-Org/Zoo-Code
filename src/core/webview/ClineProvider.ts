@@ -230,6 +230,11 @@ export class ClineProvider
 	private taskEventListeners: WeakMap<Task, Array<() => void>> = new WeakMap()
 	private currentWorkspacePath: string | undefined
 	private _disposed = false
+	private settingsSaveController = new AbortController()
+
+	public get settingsSaveSignal(): AbortSignal {
+		return this.settingsSaveController.signal
+	}
 	private readonly _postStateToWebviewThrottled = debounce(
 		async () => {
 			try {
@@ -258,25 +263,40 @@ export class ClineProvider
 		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
 	}
 
-	private enqueueProviderProfileMutation<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+	private enqueueProviderProfileMutation<T>(
+		fn: (signal: AbortSignal) => Promise<T>,
+		{ allowTimeout = true }: { allowTimeout?: boolean } = {},
+	): Promise<T> {
 		const controller = new AbortController()
-		// Run fn after either outcome so a rejected mutation never poisons the queue.
-		const run = this.providerProfileMutationQueue.then(
-			() => fn(controller.signal),
-			() => fn(controller.signal),
-		)
-		const callerResult = this.withProviderProfileMutationTimeout(run, () => {
-			controller.abort()
-			this.log("Provider profile mutation timed out; aborting in-flight mutation")
-		})
+		// A caller can time out while still queued; never start its mutation afterwards.
+		const runMutation = () => {
+			controller.signal.throwIfAborted()
+			return fn(controller.signal)
+		}
+		const previous = this.providerProfileMutationQueue
+		const run = previous.then(runMutation, runMutation)
+		// A profile save that has started persisting must finish before another mutation runs.
+		const slowMutationTimer = allowTimeout
+			? undefined
+			: setTimeout(() => {
+					this.log("Provider profile save is still pending; waiting for persistence to finish")
+				}, ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+		const callerResult = allowTimeout
+			? this.withProviderProfileMutationTimeout(run, () => {
+					controller.abort()
+					this.log("Provider profile mutation timed out; aborting in-flight mutation")
+				})
+			: run
 
 		void run.then(
 			() => {
+				clearTimeout(slowMutationTimer)
 				if (controller.signal.aborted) {
 					this.log("Provider profile mutation completed after cancellation")
 				}
 			},
 			(error) => {
+				clearTimeout(slowMutationTimer)
 				if (controller.signal.aborted) {
 					this.log(
 						`Provider profile mutation errored after cancellation: ${
@@ -287,12 +307,9 @@ export class ClineProvider
 			},
 		)
 
-		// Advance from the timeout-bounded result. Each fn checks its AbortSignal before
-		// writing state, so advancing the queue on timeout cannot produce stale overwrites.
-		this.providerProfileMutationQueue = callerResult.then(
-			() => undefined,
-			() => undefined,
-		)
+		// A queued timeout cannot release an earlier uncancellable save's lock.
+		// Started cancellable mutations still check their signal before writing state.
+		this.providerProfileMutationQueue = Promise.allSettled([previous, callerResult]).then(() => undefined)
 		return callerResult
 	}
 
@@ -814,6 +831,7 @@ export class ClineProvider
 	- https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
 	*/
 	private clearWebviewResources() {
+		this.settingsSaveController.abort()
 		this.rejectPendingThemeFixtureProbes(new Error("Webview was disposed before the theme fixture probe completed"))
 		while (this.webviewDisposables.length) {
 			const x = this.webviewDisposables.pop()
@@ -840,6 +858,7 @@ export class ClineProvider
 		}
 
 		this._disposed = true
+		this.settingsSaveController.abort()
 		this._postStateToWebviewThrottled.cancel()
 		this.log("Disposing ClineProvider...")
 
@@ -1016,6 +1035,10 @@ export class ClineProvider
 	}
 
 	async resolveWebviewView(webviewView: vscode.WebviewView | vscode.WebviewPanel) {
+		if (this._disposed) return
+		if (this.settingsSaveController.signal.aborted) {
+			this.settingsSaveController = new AbortController()
+		}
 		this.view = webviewView
 		const inTabMode = "onDidChangeViewState" in webviewView
 
@@ -1699,8 +1722,14 @@ export class ClineProvider
 	 * @param webview A reference to the extension webview
 	 */
 	private setWebviewMessageListener(webview: vscode.Webview) {
-		const onReceiveMessage = async (message: WebviewMessage) =>
-			webviewMessageHandler(this, message, this.marketplaceManager)
+		const onReceiveMessage = async (message: WebviewMessage) => {
+			const signal = this.settingsSaveSignal
+			try {
+				await webviewMessageHandler(this, message, this.marketplaceManager)
+			} catch (error) {
+				if (!signal.aborted || error !== signal.reason) throw error
+			}
+		}
 
 		const messageDisposable = webview.onDidReceiveMessage(onReceiveMessage)
 		this.webviewDisposables.push(messageDisposable)
@@ -1876,52 +1905,66 @@ export class ClineProvider
 		name: string,
 		providerSettings: ProviderSettings,
 		activate: boolean = true,
+		saveSignal?: AbortSignal,
 	): Promise<string | undefined> {
 		try {
-			return await this.enqueueProviderProfileMutation(async (signal) => {
-				// TODO: Do we need to be calling `activateProfile`? It's not
-				// clear to me what the source of truth should be; in some cases
-				// we rely on the `ContextProxy`'s data store and in other cases
-				// we rely on the `ProviderSettingsManager`'s data store. It might
-				// be simpler to unify these two.
-				const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
+			return await this.enqueueProviderProfileMutation(
+				async (mutationSignal) => {
+					const signal = saveSignal ? AbortSignal.any([mutationSignal, saveSignal]) : mutationSignal
+					signal.throwIfAborted()
+					// TODO: Do we need to be calling `activateProfile`? It's not
+					// clear to me what the source of truth should be; in some cases
+					// we rely on the `ContextProxy`'s data store and in other cases
+					// we rely on the `ProviderSettingsManager`'s data store. It might
+					// be simpler to unify these two.
+					const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
 
-				if (signal.aborted) return id
+					// Once saveConfig starts, disposal cannot cancel the remaining persistence.
+					// Keep provider storage, cached metadata, and active settings synchronized;
+					// the settings queue retains the write lock even if its caller is cancelled.
 
-				if (activate) {
-					const { mode } = await this.getState()
+					if (activate) {
+						const { mode } = await this.getState()
+						const listApiConfigMeta = await this.providerSettingsManager.listConfig()
 
-					// These promises do the following:
-					// 1. Adds or updates the list of provider profiles.
-					// 2. Sets the current provider profile.
-					// 3. Sets the current mode's provider profile.
-					// 4. Copies the provider settings to the context.
-					//
-					// Note: 1, 2, and 4 can be done in one `ContextProxy` call:
-					// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
-					// We should probably switch to that and verify that it works.
-					// I left the original implementation in just to be safe.
-					await Promise.all([
-						this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
-						this.updateGlobalState("currentApiConfigName", name),
-						this.providerSettingsManager.setModeConfig(mode, id),
-						this.contextProxy.setProviderSettings(providerSettings),
-					])
+						// These promises do the following:
+						// 1. Adds or updates the list of provider profiles.
+						// 2. Sets the current provider profile.
+						// 3. Sets the current mode's provider profile.
+						// 4. Copies the provider settings to the context.
+						//
+						// Note: 1, 2, and 4 can be done in one `ContextProxy` call:
+						// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
+						// We should probably switch to that and verify that it works.
+						// I left the original implementation in just to be safe.
+						const results = await Promise.allSettled([
+							this.updateGlobalState("listApiConfigMeta", listApiConfigMeta),
+							this.updateGlobalState("currentApiConfigName", name),
+							this.providerSettingsManager.setModeConfig(mode, id),
+							this.contextProxy.setProviderSettings(providerSettings),
+						])
+						const failure = results.find((result) => result.status === "rejected")
+						if (failure?.status === "rejected") throw failure.reason
 
-					// Change the provider for the current task.
-					// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
-					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+						// Change the provider for the current task.
+						// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
+						this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
 
-					// Keep the current task's sticky provider profile in sync with the newly-activated profile.
-					await this.persistStickyProviderProfileToCurrentTask(name)
-				} else {
-					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
-				}
+						// Keep the current task's sticky provider profile in sync with the newly-activated profile.
+						await this.persistStickyProviderProfileToCurrentTask(name)
+					} else {
+						const listApiConfigMeta = await this.providerSettingsManager.listConfig()
+						await this.updateGlobalState("listApiConfigMeta", listApiConfigMeta)
+					}
 
-				await this.postStateToWebview()
-				return id
-			})
+					signal.throwIfAborted()
+					await this.postStateToWebview()
+					return id
+				},
+				{ allowTimeout: false },
+			)
 		} catch (error) {
+			saveSignal?.throwIfAborted()
 			this.log(
 				`Error create new api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 			)
@@ -2654,6 +2697,8 @@ export class ClineProvider
 			reasoningBlockCollapsed,
 			chatFontSize,
 			enterBehavior,
+			chatInputEffect,
+			tableStriped,
 			cloudUserInfo,
 			cloudIsAuthenticated,
 			sharingEnabled,
@@ -2833,6 +2878,8 @@ export class ClineProvider
 			reasoningBlockCollapsed: reasoningBlockCollapsed ?? true,
 			chatFontSize,
 			enterBehavior: enterBehavior ?? "send",
+			chatInputEffect: chatInputEffect ?? "marquee",
+			tableStriped: tableStriped ?? false,
 			cloudUserInfo,
 			cloudIsAuthenticated: cloudIsAuthenticated ?? false,
 			cloudAuthSkipModel: this.context.globalState.get<boolean>("roo-auth-skip-model") ?? false,
@@ -3064,6 +3111,8 @@ export class ClineProvider
 			reasoningBlockCollapsed: stateValues.reasoningBlockCollapsed ?? true,
 			chatFontSize: stateValues.chatFontSize,
 			enterBehavior: stateValues.enterBehavior ?? "send",
+			chatInputEffect: stateValues.chatInputEffect ?? "marquee",
+			tableStriped: stateValues.tableStriped ?? false,
 			cloudUserInfo,
 			cloudIsAuthenticated,
 			sharingEnabled,
