@@ -11,8 +11,9 @@ export interface SafeWriteTextOptions {
 	 * When true, copy the target to a backup file before the commit rename. The
 	 * commit is a single atomic rename, so the target is never removed first and
 	 * nothing restores from the copy: it is deleted after a confirmed commit, and
-	 * kept on disk when the commit could not be confirmed durable so the previous
-	 * content stays recoverable. Costs a full read+write of the old file, so
+	 * kept on disk when the commit could not be confirmed durable or the saved
+	 * DACL could not be restored, so the previous content and its security
+	 * descriptor stay recoverable. Costs a full read+write of the old file, so
 	 * callers that do not need that recovery copy should leave this off.
 	 */
 	backup?: boolean
@@ -87,6 +88,22 @@ export class PublishNotDurableError extends Error {
 	constructor(targetPath: string, reason: string) {
 		super(`Published ${targetPath} but could not confirm it is durable: ${reason}`)
 		this.name = "PublishNotDurableError"
+	}
+}
+
+/**
+ * The content is committed but the saved DACL could not be put back on it, so the file at the
+ * target answers to different access rights than the one it replaced. Reported as an error rather
+ * than a warning: the caller has to know that the publish changed who can read the file. Raised
+ * after the commit rename, so the content is at the target and the backup copy is retained.
+ */
+export class DaclRestoreError extends Error {
+	constructor(
+		public readonly targetPath: string,
+		public readonly causeError: unknown,
+	) {
+		super(`safeWriteText: content committed at ${targetPath}, but its saved access rights could not be restored`)
+		this.name = "DaclRestoreError"
 	}
 }
 
@@ -393,6 +410,11 @@ export async function safeWriteText(filePath: string, content: string, options?:
 	// content is in place, so there is nothing to roll back, but the caller must
 	// not be told the publish is durable.
 	let durabilityError: unknown = null
+	// Set when the commit landed but the saved DACL could not be put back on the published file.
+	// The content is in place, so there is nothing to roll back, but the caller must not observe a
+	// success whose access rights changed, and the backup is the only artifact still carrying the
+	// original security descriptor, so it has to survive for recovery.
+	let daclRestoreError: DaclRestoreError | null = null
 	let daclDumpPath: string | null = null // tracked for cleanup in finally
 	let daclSaved = false // restore step runs only when the save succeeded
 
@@ -607,11 +629,6 @@ export async function safeWriteText(filePath: string, content: string, options?:
 				}
 			}
 
-			// Tracked separately from durability: a committed file whose DACL could not be
-			// restored is only half-published, and the backup is the only copy that still carries
-			// the original security descriptor.
-			let daclRestoreFailed = false
-
 			// -- Step 5 (win32): restore DACL AFTER commit rename ---------
 			if (platform === "win32" && daclSaved && daclDumpPath !== null) {
 				const restoredDir = path.dirname(targetPath)
@@ -623,19 +640,20 @@ export async function safeWriteText(filePath: string, content: string, options?:
 					attempt = await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
 				}
 				if (!attempt.restored) {
-					daclRestoreFailed = true
 					if (attempt.privilegeUnavailable && !daclRestorePrivilegeUnavailable) {
 						daclRestorePrivilegeUnavailable = true
 						console.warn(
 							"safeWriteText: this host cannot restore DACLs (icacls /restore reports a missing privilege), so later writes in this process will skip saving and restoring them.",
 						)
 					}
-					// Not fatal for the content: on a non-elevated host /restore cannot succeed at
-					// all, and the new content is already committed. It is fatal for the recovery
-					// state, so the backup is kept below and the situation is surfaced here.
-					console.warn(
-						`safeWriteText: ${targetPath} was published but its original DACL could not be restored from ${daclDumpPath ?? "the saved dump"}; the previous content and its permissions are only recoverable from the backup copy.`,
-					)
+					// The content is committed, but the published file answers to a different DACL
+					// than the one that was saved, and nothing here verified an equivalent
+					// restrictive ACL on the replacement. Reported as an error rather than a
+					// warning: a publish that changed who can read the file must not look like an
+					// ordinary successful save. Thrown after the rollback handler below - the
+					// content is committed, so this is not a failure to roll back, and the backup
+					// has to survive for recovery.
+					daclRestoreError = new DaclRestoreError(targetPath, null)
 				}
 			}
 
@@ -646,7 +664,12 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			// A copy that failed part way leaves a partial file at backupPath with backupCreated
 			// never set, so the condition has to cover backupAttempted too: after a successful
 			// publish nothing else would ever remove that half-written backup.
-			if ((backupCreated || backupAttempted) && backupPath && durabilityError === null && !daclRestoreFailed) {
+			if (
+				(backupCreated || backupAttempted) &&
+				backupPath &&
+				durabilityError === null &&
+				daclRestoreError === null
+			) {
 				try {
 					await fs.unlink(backupPath)
 				} catch {
@@ -736,5 +759,14 @@ export async function safeWriteText(filePath: string, content: string, options?:
 	if (durabilityError !== null) {
 		const reason = durabilityError instanceof Error ? durabilityError.message : String(durabilityError)
 		throw new PublishNotDurableError(targetPath, reason)
+	}
+
+	// Raised outside the rollback handler for the same reason as PublishNotDurableError: the
+	// content is committed, so this is not a failure to roll back, and the backup retained above
+	// is the only artifact still carrying the target's original security descriptor. A restore
+	// failure therefore reaches the caller as its own error: no caller can observe success for a
+	// publish whose DACL was not restored.
+	if (daclRestoreError !== null) {
+		throw daclRestoreError
 	}
 }

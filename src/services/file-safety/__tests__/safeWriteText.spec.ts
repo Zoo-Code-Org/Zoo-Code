@@ -4,7 +4,7 @@ import { execFile } from "child_process"
 import type { ChildProcess } from "child_process"
 import * as path from "path"
 
-import { resolvePublishTarget, safeWriteText, type SafeWriteTextOptions } from "../safeWriteText"
+import { DaclRestoreError, resolvePublishTarget, safeWriteText, type SafeWriteTextOptions } from "../safeWriteText"
 
 // The two failure classes are module-private (knip ignores __tests__, so a
 // test-only export would be reported as unused), so tests match them by name.
@@ -522,6 +522,8 @@ describe("safeWriteText", () => {
 
 			// Fail closed: the target is never published, because publishing would replace its security
 			// descriptor with inherited permissions and nothing could put the original back.
+			// The refusal lands before the commit rename - the target keeps its content.
+			expect(fs.rename).not.toHaveBeenCalled()
 			// Only the save ran: a failed capture must not be followed by a restore attempt.
 			expect(execFile).toHaveBeenCalledTimes(1)
 			// The staging file and any partial dump are still cleaned up by the rollback.
@@ -540,9 +542,12 @@ describe("safeWriteText", () => {
 			})
 			vi.mocked(fsSync.statSync).mockReturnValue({ isFile: () => true, size: 256 } as never)
 
-			await safeWriteText(targetPath, "data", { platform: "win32" })
-
-			// The capture is judged by the artifact, so the publish proceeds and the restore is attempted.
+			// The capture is judged by the artifact, so the publish proceeds and the restore is
+			// attempted. This mocked icacls fails the restore too, and a failed restore reaches
+			// the caller as DaclRestoreError rather than a warning beside a resolved write.
+			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toBeInstanceOf(
+				DaclRestoreError,
+			)
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 			// Save, then the restore attempt (icacls is retried once if it fails, so >= 2).
 			const restoreCalls = vi.mocked(execFile).mock.calls.filter(function (call) {
@@ -556,7 +561,10 @@ describe("safeWriteText", () => {
 			// otherwise the write below would disable DACL handling for every later test in
 			// the file. vi.mock factories still apply to the re-imported module.
 			vi.resetModules()
-			const { safeWriteText: freshWriteText } = await import("../safeWriteText")
+			// The re-imported module has its own class identity, so the rejection is matched
+			// against the class this instance throws, not the one imported at the top.
+			const { safeWriteText: freshWriteText, DaclRestoreError: FreshDaclRestoreError } =
+				await import("../safeWriteText")
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
@@ -571,7 +579,9 @@ describe("safeWriteText", () => {
 			}) as unknown as typeof execFile
 			const options = { platform: "win32", execFileRunner: runner }
 
-			await freshWriteText(targetPath, "data", options)
+			// The first publish still loses its DACL, so it is reported as the typed error -
+			// the memo only changes what LATER writes in this process pay for.
+			await expect(freshWriteText(targetPath, "data", options)).rejects.toBeInstanceOf(FreshDaclRestoreError)
 			// Exactly one save and one restore: the 1300 exit tells the restore it is
 			// the missing privilege, so the transient retry must not run.
 			expect(calls).toBe(2)
@@ -635,12 +645,13 @@ describe("safeWriteText", () => {
 			expect(dumps[1]).toContain("safeWriteText.acl.tmp")
 		})
 
-		it("win32 DACL: dump is unlinked even when restore fails", async () => {
+		it("win32 DACL: a failed restore is a DaclRestoreError and the dump is still unlinked", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
-			// icacls save succeeds, restore fails
+			// icacls save succeeds, both restore attempts fail
 			let callCount = 0
 			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
 				callCount++
@@ -650,10 +661,20 @@ describe("safeWriteText", () => {
 				return fakeChild
 			})
 
-			await safeWriteText(targetPath, "data", { platform: "win32" })
+			// A publish whose DACL was not restored reaches the caller as its own error:
+			// no caller can observe success for it.
+			await expect(safeWriteText(targetPath, "data", { platform: "win32" })).rejects.toBeInstanceOf(
+				DaclRestoreError,
+			)
 
-			// write succeeded despite restore failure (best-effort)
-			expect(fs.rename).toHaveBeenCalled()
+			// The content did commit before the restore failed: the rename happened exactly
+			// once even though the publish reports an error.
+			expect(fs.rename).toHaveBeenCalledTimes(1)
+
+			// Contract change: the changed access rights are an error the caller receives,
+			// not a warning beside a write that resolved.
+			expect(warnSpy.mock.calls.flat().join(" ")).not.toContain("could not be restored")
+			warnSpy.mockRestore()
 
 			// dump file was still unlinked in finally
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))
@@ -788,15 +809,22 @@ describe("safeWriteText", () => {
 				return fakeChild
 			})
 
-			await safeWriteText(targetPath, "data", { platform: "win32", backup: true })
+			// The publish reports the lost DACL as the typed error...
+			await expect(safeWriteText(targetPath, "data", { platform: "win32", backup: true })).rejects.toBeInstanceOf(
+				DaclRestoreError,
+			)
 
-			// The content is still committed - a failed ACL restore is not a write failure.
+			// ...but the content is still committed - the restore failure lands after the rename.
 			expect(fs.rename).toHaveBeenCalled()
 			// The dump is still cleaned up in the finally block.
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining(".acl.tmp"))
-			// But the backup survives: it is the only artifact that still carries the target's
-			// original security descriptor, so deleting it would destroy the recovery path.
-			expect(fs.unlink).not.toHaveBeenCalledWith(expect.stringContaining(".bak"))
+			// And the backup survives the rejection: it is the only artifact that still carries
+			// the target's original security descriptor, so deleting it would destroy the
+			// recovery path.
+			const bakUnlinks = vi.mocked(fs.unlink).mock.calls.filter(function (call) {
+				return typeof call[0] === "string" && call[0].includes(".bak")
+			})
+			expect(bakUnlinks).toHaveLength(0)
 		})
 
 		it("staging temp release: a transient unlink failure on the rollback path is retried", async () => {

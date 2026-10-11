@@ -23,10 +23,16 @@ vi.mock("fs/promises", () => ({
 	unlink: vi.fn().mockResolvedValue(undefined),
 }))
 
-// Mock safeWriteText (used by saveDirectly)
-vi.mock("../../../services/file-safety/safeWriteText", () => ({
-	safeWriteText: vi.fn().mockResolvedValue(undefined),
-}))
+// Mock safeWriteText (used by saveDirectly). The real module's error classes stay
+// available through importOriginal, so a test can hand the caller an actual
+// DaclRestoreError instead of a look-alike.
+vi.mock("../../../services/file-safety/safeWriteText", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../../services/file-safety/safeWriteText")>()
+	return {
+		...actual,
+		safeWriteText: vi.fn().mockResolvedValue(undefined),
+	}
+})
 
 // Mock utils
 vi.mock("../../../utils/fs", () => ({
@@ -838,6 +844,26 @@ describe("DiffViewProvider", () => {
 			expect(vi.mocked(fs.access).mock.invocationCallOrder[accessIndex]).toBeLessThan(
 				vi.mocked(safeWriteText).mock.invocationCallOrder[0],
 			)
+		})
+
+		it("surfaces a failed DACL restore as a rejection instead of a completed save", async () => {
+			const { DaclRestoreError, safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			vi.mocked(safeWriteText).mockClear()
+			// The primitive reports a lost DACL after the commit rename as DaclRestoreError.
+			// The direct-save path must not swallow it: a caller that sees saveDirectly
+			// resolve would report a save whose access rights silently changed.
+			vi.mocked(safeWriteText).mockRejectedValueOnce(new DaclRestoreError(`${mockCwd}/test.ts`, null))
+
+			await expect(
+				diffViewProvider.saveDirectly("test.ts", "new content", true, true, 200),
+			).rejects.toBeInstanceOf(DaclRestoreError)
+
+			// The rejection is the primitive's own - the publish was attempted exactly once,
+			// not retried into a success the caller could observe.
+			const publishCalls = vi.mocked(safeWriteText).mock.calls.filter(function (call) {
+				return call[0] === `${mockCwd}/test.ts`
+			})
+			expect(publishCalls).toHaveLength(1)
 		})
 
 		beforeEach(() => {
