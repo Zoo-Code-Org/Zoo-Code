@@ -28,10 +28,12 @@ export interface SafeWriteTextOptions {
 	execFileRunner?: typeof execFile
 
 	/**
-	 * Sink for non-fatal safety notices. A Windows DACL that could not be captured means the
-	 * committed file may inherit different access rights: the write still proceeds (a missing or
-	 * failing icacls must not block saving), but the caller is told instead of the change being
-	 * silent. Defaults to console.warn.
+	 * Sink for non-fatal safety notices. The notice that still reaches it is a leftover: the backup
+	 * copy kept beside the target after a Windows DACL restore failed, named with its path. A DACL
+	 * that could not be captured is no longer a notice here - the publish is refused with
+	 * DaclInspectionError before anything is committed - and a saved DACL that could not be put back
+	 * after the commit arrives as DaclRestoreError rather than a warning, so neither reaches this
+	 * sink. Defaults to console.warn.
 	 */
 	onWarning?: (message: string) => void
 
@@ -76,6 +78,41 @@ export class PostCommitDurabilityError extends Error {
 		)
 		this.name = "PostCommitDurabilityError"
 		this.targetPath = targetPath
+	}
+}
+
+/**
+ * The target exists but its access rights could not be inspected or saved, so publishing would
+ * replace it with a file that inherits different rights. On Windows the publish is refused before
+ * anything is committed: a save that silently widened who can read the file is not a save the
+ * caller can trust, and nothing has been published yet, so the target still holds its content.
+ */
+export class DaclInspectionError extends Error {
+	constructor(
+		readonly targetPath: string,
+		readonly phase: "inspect" | "save",
+		readonly causeError: unknown,
+	) {
+		const detail = phase === "save" ? "its DACL could not be saved" : "its access rights could not be checked"
+		super(`safeWriteText: refusing to publish over ${targetPath} because ${detail}`)
+		this.name = "DaclInspectionError"
+	}
+}
+
+/**
+ * The content is committed but the saved DACL could not be put back on it, so the file at the
+ * target answers to different access rights than the one it replaced. Reported as an error rather
+ * than a warning: no caller can observe success for a publish whose DACL was not preserved. The
+ * failure handler keeps this write's backup copy for it - that copy is the only artifact still
+ * carrying the access rights of the file the publish replaced.
+ */
+export class DaclRestoreError extends Error {
+	constructor(
+		readonly targetPath: string,
+		readonly causeError: unknown,
+	) {
+		super(`safeWriteText: content committed at ${targetPath}, but its saved access rights could not be restored`)
+		this.name = "DaclRestoreError"
 	}
 }
 // -- helpers ---------------------------------------------------------------
@@ -337,6 +374,32 @@ export async function safeWriteText(
 	// Non-null only when the win32 step-2 block saved a successful DACL dump:
 	// it gates the step-5 restore and is tracked for the cleanup unlinks.
 	let daclDumpPath: string | null = null
+	// Warning delivery must never abort the write: the notice below describes a leftover
+	// beside a committed file, and a caller whose callback throws (a UI sink, a logger that is
+	// mid-restart) must not turn that into a different failure than the one the caller is told
+	// about. Declared above the try so the failure handler can report a retained backup through it.
+	const warn = (message: string) => {
+		const report = (label: string, error: unknown) => {
+			console.warn(
+				`safeWriteText: onWarning callback ${label}: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+		try {
+			const sink = options?.onWarning ?? ((m: string) => console.warn(m))
+			const result: unknown = sink(message)
+			// A sink may be async - TypeScript accepts a value-returning callback where
+			// a void one is expected. Awaiting it would let warning delivery delay a
+			// write that has already committed (and hang it if the sink never settles),
+			// while leaving the promise unhandled turns a rejection into an unhandled
+			// rejection, which under Node's default mode can end the process after a
+			// successful write. Attach a handler without awaiting.
+			if (result instanceof Promise) {
+				result.catch((error: unknown) => report("rejected", error))
+			}
+		} catch (error: unknown) {
+			report("failed", error)
+		}
+	}
 	try {
 		// -- Step 1: write content to staging temp file -------------------
 		if (!options?.tempPath) {
@@ -406,31 +469,6 @@ export async function safeWriteText(
 
 		// -- Step 2 (win32): save DACL BEFORE the backup copy -----------
 		const platform = options?.platform ?? process.platform
-		// Warning delivery must never abort the write: the notices below describe a
-		// committed-but-imperfect publish, and a caller whose callback throws (a UI sink,
-		// a logger that is mid-restart) must not turn that into a failed save.
-		const warn = (message: string) => {
-			const report = (label: string, error: unknown) => {
-				console.warn(
-					`safeWriteText: onWarning callback ${label}: ${error instanceof Error ? error.message : String(error)}`,
-				)
-			}
-			try {
-				const sink = options?.onWarning ?? ((m: string) => console.warn(m))
-				const result: unknown = sink(message)
-				// A sink may be async - TypeScript accepts a value-returning callback where
-				// a void one is expected. Awaiting it would let warning delivery delay a
-				// write that has already committed (and hang it if the sink never settles),
-				// while leaving the promise unhandled turns a rejection into an unhandled
-				// rejection, which under Node's default mode can end the process after a
-				// successful write. Attach a handler without awaiting.
-				if (result instanceof Promise) {
-					result.catch((error: unknown) => report("rejected", error))
-				}
-			} catch (error: unknown) {
-				report("failed", error)
-			}
-		}
 		if (platform === "win32") {
 			let accessError: unknown = null
 			try {
@@ -451,21 +489,20 @@ export async function safeWriteText(
 					// no later step can restore from it.
 					await fs.unlink(dumpPath).catch(() => {})
 					// The target exists and its DACL could not be captured, so the commit rename
-					// replaces it with a file that inherits different access rights. The write still
-					// proceeds - a missing or failing icacls must not leave the user unable to save -
-					// but the replacement is no longer ACL-identical and that has to be visible
-					// instead of silent.
-					warn(
-						`Could not save the DACL of ${targetPath}; the replacement may inherit different access rights.`,
-					)
+					// would replace it with a file that inherits different access rights, and nothing
+					// here can verify an equivalent restrictive ACL on that replacement. The publish is
+					// refused instead of warned about: a save that silently changed who can read the
+					// file is not a save the caller can trust. Nothing is committed yet, so the target
+					// still holds its content, and this throw lands in the handler at the bottom of
+					// this try - the one place that removes the staged file and this write's own
+					// staging directory - so a refused publish strands neither.
+					throw new DaclInspectionError(targetPath, "save", null)
 				}
 			} else if (errorCode(accessError) !== "ENOENT") {
-				// Not "absent": the target is there but could not be checked (EACCES, ...), so
-				// DACL preservation was skipped for a reason the caller cannot infer from the
-				// successful write alone.
-				warn(
-					`Could not check ${targetPath} for DACL preservation (${errorCode(accessError) ?? "unknown error"}); the replacement may inherit different access rights.`,
-				)
+				// Not "absent": the target is there but its access rights could not be read
+				// (EACCES, ...), so publishing would replace a file whose rights this call never
+				// learned. Same rule as the failed save above: refuse before anything is committed.
+				throw new DaclInspectionError(targetPath, "inspect", accessError)
 			}
 		}
 		try {
@@ -547,15 +584,14 @@ export async function safeWriteText(
 				const restoredDir = path.dirname(targetPath)
 				const restored = await _restoreDaclWindows(restoredDir, daclDumpPath, options?.execFileRunner)
 				if (!restored) {
-					// The content is committed, but the published file may carry a different DACL
-					// from the one that was saved. Failing the write here would break every
-					// publish on machines where icacls cannot reapply the saved ACEs (a plain
-					// temp directory restore fails with "Not all privileges or groups referenced
-					// are assigned to the caller"), so the change of access rights is reported
-					// rather than thrown.
-					warn(
-						`safeWriteText: content committed at ${targetPath}, but the saved DACL could not be restored from ${daclDumpPath}; the file may carry different access rights than the one it replaced.`,
-					)
+					// The content is committed, but the published file answers to a different DACL
+					// from the one that was saved, and nothing here verified an equivalent
+					// restrictive ACL on the replacement. This reaches the caller as an error rather
+					// than a warning: no caller can observe success for a publish whose DACL was not
+					// preserved. The handler at the bottom of this try keeps the backup copy for this
+					// error instead of rolling the published content back, so the throw reports the
+					// changed access rights without undoing a write the caller can already observe.
+					throw new DaclRestoreError(targetPath, null)
 				}
 			}
 
@@ -588,11 +624,25 @@ export async function safeWriteText(
 		// published, a later failure (for example the post-commit directory fsync)
 		// must not overwrite the published content with the old file.
 		if (backupPath && releaseBackupOnSuccess) {
-			// Nothing to restore: the backup is a copy, so the target still holds whatever
-			// the commit left there - before the commit that is the pre-write content, and
-			// after it the published content. Either way the copy has served its purpose
-			// and must not be left beside the target where no caller can find it.
-			await fs.unlink(backupPath).catch(() => {})
+			if (originalError instanceof DaclRestoreError) {
+				// The one post-commit failure that keeps its copy. The published file answers to
+				// the descriptor its staging file was created with, and this copy - made from the
+				// file the publish replaced, so on Windows it carries that file's security
+				// attributes - is the only artifact left holding the access rights that could not
+				// be restored. Deleting it would destroy the only recovery path for exactly the
+				// fact the error reports, so the copy stays and its path is named to the human:
+				// the caller already holds the error, and this primitive reports a leftover on
+				// the warning sink because it has no structured result to carry it on.
+				warn(
+					`${originalError.message}; its backup copy is kept at ${backupPath} and still carries the access rights of the file it replaced.`,
+				)
+			} else {
+				// Nothing to restore: the backup is a copy, so the target still holds whatever
+				// the commit left there - before the commit that is the pre-write content, and
+				// after it the published content. Either way the copy has served its purpose
+				// and must not be left beside the target where no caller can find it.
+				await fs.unlink(backupPath).catch(() => {})
+			}
 			backupPath = null
 		}
 		try {
