@@ -1,5 +1,10 @@
 import * as fs from "fs/promises"
-import { DiffViewProvider, DIFF_VIEW_URI_SCHEME, DIFF_VIEW_LABEL_CHANGES } from "../DiffViewProvider"
+import {
+	DocumentSaveFailedError,
+	DiffViewProvider,
+	DIFF_VIEW_URI_SCHEME,
+	DIFF_VIEW_LABEL_CHANGES,
+} from "../DiffViewProvider"
 import * as vscode from "vscode"
 import * as path from "path"
 import delay from "delay"
@@ -995,6 +1000,64 @@ describe("DiffViewProvider", () => {
 			// A rejected save leaves the file absent or holding the previous content: the caller has
 			// to keep the rollback available, so signalling here would lose the write's debris.
 			expect(onCommit).not.toHaveBeenCalled()
+		})
+
+		it("throws a typed write failure before any success bookkeeping when the save reports false", async () => {
+			// The double resolves an explicit false, not undefined: a bare await would let a
+			// double resolving undefined pass by accident, so the reported-failure contract is
+			// pinned with a real false.
+			const save = vi.fn().mockResolvedValue(false)
+			// Structural double carrying only the members saveChanges() reaches at the save; the
+			// full TextEditor shape needs a live editor host - hence the assertion.
+			diffViewProvider["activeDiffEditor"] = {
+				document: { getText: vi.fn().mockReturnValue("new content"), isDirty: true, save },
+			} as unknown as vscode.TextEditor
+			const closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+
+			await expect(diffViewProvider.saveChanges(false, 0)).rejects.toThrow(DocumentSaveFailedError)
+
+			expect(save).toHaveBeenCalledTimes(1)
+			// Success bookkeeping must not run: the caller is told the write failed, so the diff
+			// views stay open and no result is stored for formatFileWriteResponse().
+			expect(closeAllDiffViews).not.toHaveBeenCalled()
+			expect(diffViewProvider.newProblemsMessage).toBeUndefined()
+			expect(diffViewProvider.userEdits).toBeUndefined()
+		})
+
+		it("does not signal the commit point when the save reports false", async () => {
+			const save = vi.fn().mockResolvedValue(false)
+			// Structural double, as in the rejected-save test above.
+			diffViewProvider["activeDiffEditor"] = {
+				document: { getText: vi.fn().mockReturnValue("new content"), isDirty: true, save },
+			} as unknown as vscode.TextEditor
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			const onCommit = vi.fn()
+
+			await expect(diffViewProvider.saveChanges(false, 0, onCommit)).rejects.toThrow(DocumentSaveFailedError)
+
+			// Ordering for this branch: the commit point stands in for the placeholder release the
+			// sibling branches gate on. A callback that ran here would set the caller's
+			// writeCommitted flag and stand the rollback down on a write that never landed.
+			expect(onCommit).not.toHaveBeenCalled()
+		})
+
+		it("behaves exactly as before when the save reports true", async () => {
+			const save = vi.fn().mockResolvedValue(true)
+			// Structural double, as in the rejected-save test above.
+			diffViewProvider["activeDiffEditor"] = {
+				document: { getText: vi.fn().mockReturnValue("new content"), isDirty: true, save },
+			} as unknown as vscode.TextEditor
+			const closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+			const onCommit = vi.fn()
+
+			const result = await diffViewProvider.saveChanges(false, 0, onCommit)
+
+			expect(save).toHaveBeenCalledTimes(1)
+			expect(onCommit).toHaveBeenCalledTimes(1)
+			expect(closeAllDiffViews).toHaveBeenCalledTimes(1)
+			expect(result.finalContent).toBe("new content")
 		})
 	})
 
