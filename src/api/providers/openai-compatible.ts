@@ -16,6 +16,7 @@ import { convertToAiSdkMessages, convertToolsForAiSdk, processAiSdkStreamPart } 
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 
 import { DEFAULT_HEADERS } from "./constants"
+import { handleOpenAIError } from "./utils/error-handler"
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { RequestConfigBuilder } from "./config-builder/request-config-builder"
@@ -184,20 +185,38 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 		}
 
 		// Use streamText for streaming responses
-		const result = streamText(requestOptions)
+		try {
+			const result = streamText(requestOptions)
 
-		// Process the full stream to get all events
-		for await (const part of result.fullStream) {
-			// Use the processAiSdkStreamPart utility to convert stream parts
-			for (const chunk of processAiSdkStreamPart(part)) {
-				yield chunk
+			// Process the full stream to get all events
+			for await (const part of result.fullStream) {
+				// A streamed provider error arrives as an `error` part rather than a throw:
+				// re-throw the raw part error so the single catch below wraps it exactly once
+				// with status and provider name (an extra wrap here would duplicate the message
+				// prefix and log the error twice). Abort parts are a normal termination and fall
+				// through to processAiSdkStreamPart's ignore case.
+				if (part.type === "error") {
+					throw part.error
+				}
+
+				// Use the processAiSdkStreamPart utility to convert stream parts
+				for (const chunk of processAiSdkStreamPart(part)) {
+					yield chunk
+				}
 			}
-		}
 
-		// Yield usage metrics at the end
-		const usage = await result.usage
-		if (usage) {
-			yield this.processUsageMetrics(usage)
+			// Yield usage metrics at the end
+			const usage = await result.usage
+			if (usage) {
+				yield this.processUsageMetrics(usage)
+			}
+		} catch (error) {
+			// Cancellation is not an API failure: when the caller's bridged signal is
+			// what ended the stream, the abort contract surfaces unchanged.
+			if (metadata?.abortSignal?.aborted) {
+				throw error
+			}
+			throw handleOpenAIError(error, this.config.providerName)
 		}
 	}
 
@@ -205,25 +224,34 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 	 * Complete a prompt using the AI SDK generateText.
 	 */
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
-		const languageModel = this.getLanguageModel()
-
-		const generateOptions: Parameters<typeof generateText>[0] & { abortSignal?: AbortSignal } = {
-			model: languageModel,
-			prompt,
-			maxOutputTokens: this.getMaxOutputTokens(),
-			temperature: this.config.temperature ?? 0,
-		}
-
 		const mergedAbortSignal = RequestConfigBuilder.mergeAbortSignalAndTimeout(
 			options?.abortSignal,
 			options?.timeoutMs,
 		)
-		if (mergedAbortSignal) {
-			generateOptions.abortSignal = mergedAbortSignal
+		try {
+			const languageModel = this.getLanguageModel()
+
+			const generateOptions: Parameters<typeof generateText>[0] & { abortSignal?: AbortSignal } = {
+				model: languageModel,
+				prompt,
+				maxOutputTokens: this.getMaxOutputTokens(),
+				temperature: this.config.temperature ?? 0,
+			}
+			if (mergedAbortSignal) {
+				generateOptions.abortSignal = mergedAbortSignal
+			}
+
+			const { text } = await generateText(generateOptions)
+
+			return text
+		} catch (error) {
+			// A cancelled request is not an API failure: the abort contract (the raw
+			// AbortError / DOMException) must surface unchanged, so it is re-thrown
+			// before the provider error-wrap.
+			if (mergedAbortSignal?.aborted) {
+				throw error
+			}
+			throw handleOpenAIError(error, this.config.providerName)
 		}
-
-		const { text } = await generateText(generateOptions)
-
-		return text
 	}
 }

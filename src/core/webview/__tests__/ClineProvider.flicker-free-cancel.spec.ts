@@ -1,3 +1,4 @@
+import { WebviewFocusTracker } from "../WebviewFocusTracker"
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import * as vscode from "vscode"
 
@@ -350,6 +351,7 @@ describe("ClineProvider flicker-free cancel", () => {
 			mockOutputChannel,
 			"sidebar",
 			mockContextProxy as unknown as ContextProxy,
+			new WebviewFocusTracker(),
 		)
 
 		// Mock provider methods

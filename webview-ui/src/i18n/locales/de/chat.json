@@ -343,10 +343,10 @@
 		"title": "Zoo Code {{version}} veröffentlicht",
 		"support": "Bitte unterstütze Zoo Code, indem du uns auf <githubLink>GitHub</githubLink> einen Stern gibst.",
 		"release": {
-			"heading": "Was ist neu:",
-			"highlight1": "✨ Unterstützung für neue Modelle: Nutze GPT-6.1 Sol, profitiere vom korrigierten Ausgabelimit von Claude Opus 5.5 und wähle DeepSeek V4.1 Flash bei OpenCode Go.",
-			"highlight2": "🧭 Zuverlässige Aufgabenabbrüche und Unterbrechungen: Bewahre den ersten Abbruchgrund, setze den Stream-Abbruchstatus für jede Anfrage zurück und verhindere, dass unterbrochene Aufgaben abgelehnte Unteraufgaben erneut ausführen.",
-			"highlight3": "🛠️ Zuverlässige Tools, Prompts und UI-Streams: Erhalte gestreamte Tool-Argumente vollständig, setze die MCP-Tool-Richtlinien durch, verhindere erfundene Zeilennummern und sorge für flüssigere Chat-Updates."
+			"heading": "Was ist neu im Zoo Code v3.88.0",
+			"highlight1": "✨ Provider- und Modellunterstützung: Nutze Grok Build und eine verbesserte Unterstützung für eigene Modelle. Diese Version behebt außerdem Bedrock-Modellgrenzen und sendet die Codex-Verbosity-Einstellung.",
+			"highlight2": "🧭 Zuverlässigkeit von Aufgaben: Diese Version behebt die Behandlung von Abbrüchen, die Fortsetzung von Tool-Turns und das Speichern von Aufgabennachrichten.",
+			"highlight3": "⚡ Schnelleres Bearbeiten und Chatten: Datei-Schreibvorgänge verwenden standardmäßig keine künstlichen Verzögerungen mehr. Chat-Nachrichten enthalten weniger Dateidaten, und Code-Aktionen erreichen den zuletzt aktiven Chat."
 		},
 		"cloudAgents": {
 			"heading": "Neu in der Cloud:",
