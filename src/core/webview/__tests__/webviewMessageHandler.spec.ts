@@ -2004,6 +2004,35 @@ describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 	})
 })
 
+// The web fetch auto-approval toggle is a plain boolean with no normalization
+// branch, so it must round-trip through the generic updateSettings loop and be
+// returned by getStateToPostToWebview().
+describe("webviewMessageHandler - alwaysAllowWebFetch", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("persists an enabled web fetch auto-approval through updateSettings", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { alwaysAllowWebFetch: true },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysAllowWebFetch", true)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	it("persists a disabled web fetch auto-approval through updateSettings", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { alwaysAllowWebFetch: false },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysAllowWebFetch", false)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+})
+
 // A plain boolean needs no normalization branch in the updateSettings loop,
 // so this pins the generic persistence path: every polarity, including an
 // explicit unset (undefined), must reach ContextProxy verbatim rather than
@@ -3294,6 +3323,144 @@ describe("updateSettings with the display settings", () => {
 			expect(mockClineProvider.log).toHaveBeenCalledWith(
 				"[updateSettings] Could not refresh the webview state: webview gone",
 			)
+		})
+	})
+
+	describe("overlapping saves", () => {
+		const written = () =>
+			vi
+				.mocked(mockClineProvider.contextProxy.setValue)
+				.mock.calls.filter(([key]) => key === "alwaysAllowWebFetch")
+				.map(([, value]) => value)
+
+		it("applies a later save only after an earlier slow save finished, so the later value is stored last", async () => {
+			// The first save waits on the destructive command guard install before writing its settings.
+			let finishInstall!: (path: string) => void
+			vi.mocked(ensureDcgInstalled).mockImplementationOnce(
+				() => new Promise<string>((resolve) => (finishInstall = resolve)),
+			)
+
+			const first = webviewMessageHandler(mockClineProvider, {
+				type: "updateSettings",
+				requestId: "save-1",
+				updatedSettings: { destructiveCommandGuardEnabled: true, alwaysAllowWebFetch: true },
+			})
+			const second = webviewMessageHandler(mockClineProvider, {
+				type: "updateSettings",
+				requestId: "save-2",
+				updatedSettings: { alwaysAllowWebFetch: false },
+			})
+
+			// The second save's queued applySettings body must not run while the first is still waiting.
+			// However the fast-path revocation (Fix B) fires immediately for alwaysAllowWebFetch: false,
+			// so exactly one write — the fast-path false — is expected before the install finishes.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			try {
+				expect(written()).toEqual([false])
+			} finally {
+				// Always release finishInstall so the in-flight promises settle and
+				// do not keep later tests from running cleanly.
+				finishInstall("/dcg")
+				await Promise.all([first, second])
+			}
+
+			// After both saves complete: fast-path false, then first-save true, then second-save false.
+			expect(written()).toEqual([false, true, false])
+		})
+
+		it("runs a later save after an earlier one failed", async () => {
+			// Use soundEnabled (a key with no fast-path) so the rejection targets only the queued
+			// applySettings body for the first save.  The second save sets soundEnabled too so it
+			// can be checked.  alwaysAllowWebFetch is not involved here to avoid the fast-path.
+			vi.mocked(mockClineProvider.contextProxy.setValue).mockRejectedValueOnce(new Error("storage unavailable"))
+
+			const first = webviewMessageHandler(mockClineProvider, {
+				type: "updateSettings",
+				updatedSettings: { soundEnabled: true },
+			})
+			const second = webviewMessageHandler(mockClineProvider, {
+				type: "updateSettings",
+				updatedSettings: { soundEnabled: false },
+			})
+
+			await expect(first).rejects.toThrow("storage unavailable")
+			await expect(second).resolves.toBeUndefined()
+
+			const soundWrites = vi
+				.mocked(mockClineProvider.contextProxy.setValue)
+				.mock.calls.filter(([key]) => key === "soundEnabled")
+				.map(([, value]) => value)
+			expect(soundWrites).toEqual([true, false])
+		})
+
+		it("discards a queued save that set alwaysAllowWebFetch: true when resetState fires before the save runs", async () => {
+			// The save with alwaysAllowWebFetch: true arrives while a slow DCG install is in progress,
+			// so it waits in the queue.  resetState fires before the install finishes.  When the
+			// install finally finishes the queued save should be a no-op — the user just wiped state.
+			let finishInstall!: (path: string) => void
+			vi.mocked(ensureDcgInstalled).mockImplementationOnce(
+				() => new Promise<string>((resolve) => (finishInstall = resolve)),
+			)
+
+			const providerWithReset = {
+				...mockClineProvider,
+				resetState: vi.fn().mockResolvedValue(undefined),
+			} as unknown as typeof mockClineProvider
+
+			const save = webviewMessageHandler(providerWithReset, {
+				type: "updateSettings",
+				updatedSettings: { destructiveCommandGuardEnabled: true, alwaysAllowWebFetch: true },
+			})
+
+			// Let the event loop run so the save starts waiting on the install.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			// User triggers Reset State while the install is still pending.
+			await webviewMessageHandler(providerWithReset, { type: "resetState" })
+
+			// Now release the installer so the queued save body gets to run.
+			finishInstall("/dcg")
+			await save
+
+			// alwaysAllowWebFetch: true must NOT have been written after the reset.
+			const webFetchWrites = vi
+				.mocked(providerWithReset.contextProxy.setValue)
+				.mock.calls.filter(([key]) => key === "alwaysAllowWebFetch")
+				.map(([, value]) => value)
+			expect(webFetchWrites).not.toContain(true)
+		})
+
+		it("applies an alwaysAllowWebFetch: false revocation immediately without waiting for the queue", async () => {
+			// A slow DCG install holds up the queue.
+			let finishInstall!: (path: string) => void
+			vi.mocked(ensureDcgInstalled).mockImplementationOnce(
+				() => new Promise<string>((resolve) => (finishInstall = resolve)),
+			)
+
+			const slow = webviewMessageHandler(mockClineProvider, {
+				type: "updateSettings",
+				updatedSettings: { destructiveCommandGuardEnabled: true },
+			})
+
+			// Wait for the slow save to start (it is now blocking the queue).
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			// A revocation arrives while the queue is blocked.
+			const revoke = webviewMessageHandler(mockClineProvider, {
+				type: "updateSettings",
+				updatedSettings: { alwaysAllowWebFetch: false },
+			})
+
+			// The fast-path write must have happened already even though the queue is still blocked.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			const writtenNow = vi
+				.mocked(mockClineProvider.contextProxy.setValue)
+				.mock.calls.filter(([key]) => key === "alwaysAllowWebFetch")
+				.map(([, value]) => value)
+			expect(writtenNow).toContain(false)
+
+			finishInstall("/dcg")
+			await Promise.all([slow, revoke])
 		})
 	})
 
