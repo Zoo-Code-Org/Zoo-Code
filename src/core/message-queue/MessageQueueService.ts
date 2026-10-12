@@ -113,6 +113,19 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 		return this._messages.length === 0
 	}
 
+	/**
+	 * Whether at least one queued message is still available to be claimed.
+	 *
+	 * `isEmpty()` measures the queue's length and is blind to claims, so a
+	 * message some consumer is holding (claim is not a removal) still makes it
+	 * report a non-empty queue. Consumers that are about to take a message need
+	 * this instead: it answers "is there anything I may take", which is false
+	 * when every remaining message is already spoken for.
+	 */
+	public hasUnclaimed(): boolean {
+		return this._messages.some((message) => !this.claimedMessageIds.has(message.id))
+	}
+
 	public dispose(): void {
 		this._messages = []
 		this.claimedMessageIds.clear()

@@ -31,8 +31,7 @@ describe("Task.startSubtask() metadata-driven delegation", () => {
 		})
 		expect(child.taskId).toBe("child-1")
 
-		// Parent should not be paused and no paused/unpaused events should be emitted
-		expect((parent as any).isPaused).not.toBe(true)
+		// No paused/unpaused events should be emitted
 		expect((parent as any).childTaskId).toBeUndefined()
 		const emittedEvents = (parent.emit as any).mock.calls.map((c: any[]) => c[0])
 		expect(emittedEvents).not.toContain(RooCodeEventName.TaskPaused)

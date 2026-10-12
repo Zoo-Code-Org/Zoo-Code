@@ -12,9 +12,15 @@ import {
 	type RouterModels,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
+	DEFAULT_WRITE_DELAY_MS,
 } from "@roo-code/types"
 
-import { ExtensionStateContextProvider, useExtensionState, mergeExtensionState } from "../ExtensionStateContext"
+import {
+	ExtensionStateContextProvider,
+	useExtensionState,
+	mergeExtensionState,
+	createInitialExtensionState,
+} from "../ExtensionStateContext"
 
 const TestComponent = () => {
 	const { allowedCommands, setAllowedCommands, soundEnabled, showRooIgnoredFiles, setShowRooIgnoredFiles } =
@@ -215,6 +221,16 @@ describe("ExtensionStateContext", () => {
 		expect(JSON.parse(screen.getByTestId("show-rooignored-files").textContent!)).toBe(true)
 	})
 
+	it("initializes the write delay to the pre-hydration default", () => {
+		// The initializer itself (not a merge fixture) must carry the shared
+		// default: a regression that dropped it from createInitialExtensionState
+		// would otherwise stay hidden because the merge tests supply the key
+		// manually.
+		const state = createInitialExtensionState()
+
+		expect(state.writeDelayMs).toBe(DEFAULT_WRITE_DELAY_MS)
+	})
+
 	it("initializes shadowed context fields from initialState", () => {
 		const routerModels = {} as RouterModels
 		const marketplaceItems: MarketplaceItem[] = [
@@ -412,7 +428,9 @@ describe("mergeExtensionState", () => {
 			enableCheckpoints: true,
 			perWriteCheckpoints: true,
 			changeCardDetail: "summary",
-			writeDelayMs: 1000,
+			// Matches the shared DEFAULT_WRITE_DELAY_MS (pre-hydration placeholder
+			// must not disagree with the extension's own fallback).
+			writeDelayMs: 0,
 			mode: "default",
 			experiments: {} as Record<ExperimentId, boolean>,
 			customModes: [],
@@ -498,7 +516,9 @@ describe("mergeExtensionState", () => {
 			enableCheckpoints: true,
 			perWriteCheckpoints: true,
 			changeCardDetail: "summary",
-			writeDelayMs: 1000,
+			// Matches the shared DEFAULT_WRITE_DELAY_MS (pre-hydration placeholder
+			// must not disagree with the extension's own fallback).
+			writeDelayMs: 0,
 			mode: "default",
 			experiments: {} as Record<ExperimentId, boolean>,
 			customModes: [],

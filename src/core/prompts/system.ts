@@ -108,7 +108,7 @@ ${markdownFormattingSection()}
 
 ${getSharedToolUseSection()}${toolsCatalog}
 
-	${getToolUseGuidelinesSection(policy)}
+${getToolUseGuidelinesSection(policy)}
 
 ${getCapabilitiesSection(policy)}
 
