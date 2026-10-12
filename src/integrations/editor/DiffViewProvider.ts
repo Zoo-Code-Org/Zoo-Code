@@ -760,9 +760,15 @@ export class DiffViewProvider {
 			// The file was newly created for this edit; close its transiently
 			// opened tab before deleting it from disk.
 			await this.closeFileTab(absolutePath)
-			await fs.unlink(absolutePath)
-			// The placeholder this edit owned is gone; no later cleanup may unlink that path again.
+			// Ownership is terminal at the ATTEMPT, not at its success - the same semantics the
+			// discard uses when it clears the field before unlinking. If this unlink fails, a
+			// later cleanup that still claimed the path would retry the delete, and anything
+			// recreated at that path in the meantime - the user's new file, the next edit's
+			// placeholder - would be unlinked as if it were still this edit's artifact. A failed
+			// delete stays visible as this method's rejection (the artifact may remain on disk);
+			// what it must not stay is a claim.
 			this.placeholderPath = undefined
+			await fs.unlink(absolutePath)
 
 			// Remove only the directories we created, in reverse order.
 			for (let i = this.createdDirs.length - 1; i >= 0; i--) {

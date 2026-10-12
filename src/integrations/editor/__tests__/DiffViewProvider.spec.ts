@@ -2639,6 +2639,48 @@ describe("DiffViewProvider", () => {
 			expect(fs.unlink).toHaveBeenCalledTimes(1)
 		})
 
+		it("ends placeholder ownership when its delete attempt fails, so no retry can claim a replacement", async () => {
+			// A failed unlink leaves a file at the path, but anything may recreate that path
+			// before a later cleanup runs - the user's new file, the next edit's placeholder -
+			// and a retry would delete it as if it were still this edit's artifact. The delete
+			// ATTEMPT ends the claim; the failure surfaces as this rejection so the artifact is
+			// reported rather than silently retried against a stranger's file.
+			const relPath = "unlink-failed-placeholder.ts"
+			const fsPath = `${mockCwd}/${relPath}`
+			Object.assign(diffViewProvider, {
+				relPath,
+				editType: "create",
+				createdDirs: [],
+				placeholderPath: fsPath,
+				activeDiffEditor: {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue("partial content"),
+						isDirty: false,
+						save: vi.fn().mockResolvedValue(true),
+					},
+				},
+				closeAllDiffViews: vi.fn().mockResolvedValue(undefined),
+				closeFileTab: vi.fn().mockResolvedValue(undefined),
+			})
+			vi.mocked(fs.unlink).mockRejectedValueOnce(new Error("EBUSY: resource busy or locked"))
+
+			await expect(diffViewProvider.revertChanges()).rejects.toThrow("EBUSY")
+
+			expect(fs.unlink).toHaveBeenCalledWith(fsPath)
+			// The attempt ended the claim even though the delete failed.
+			expect(diffViewProvider["placeholderPath"]).toBeUndefined()
+
+			// A discard after the failed revert must not unlink the path a second time.
+			const callOrder: string[] = []
+			Object.assign(diffViewProvider, { activeDiffEditor: { document: makeAbandonedDocument(callOrder) } })
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+
+			await diffViewProvider.discardUnapprovedStream()
+
+			expect(fs.unlink).toHaveBeenCalledTimes(1)
+		})
+
 		it("does nothing when no abandoned view is open", async () => {
 			Object.assign(diffViewProvider, { relPath: undefined, activeDiffEditor: undefined })
 
