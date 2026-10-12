@@ -44,6 +44,37 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"bedrock-custom-arn": async ({ baseModelId = "" }) => {
+		const [{ AppProviders }, { BedrockCustomArn }, { providerIdentifiers }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/providers/BedrockCustomArn"),
+			import("@roo-code/types"),
+		])
+		function CustomArn() {
+			const [config, setConfig] = useState<import("@roo-code/types").ProviderSettings>({
+				apiProvider: providerIdentifiers.bedrock,
+				apiModelId: "custom-arn",
+				awsRegion: "us-west-2",
+				awsCustomArn: "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/abcd1234efgh",
+				awsCustomArnBaseModelId: String(baseModelId),
+			})
+			return (
+				<div className="w-[480px] p-4 flex flex-col gap-3 bg-vscode-editor-background text-vscode-foreground">
+					<BedrockCustomArn
+						apiConfiguration={config}
+						setApiConfigurationField={(field, value) =>
+							setConfig((previous) => ({ ...previous, [field]: value }))
+						}
+					/>
+				</div>
+			)
+		}
+		return (
+			<AppProviders>
+				<CustomArn />
+			</AppProviders>
+		)
+	},
 	"accessibility-contrast": async () => {
 		const { AccessibilityContrastGallery } =
 			await import("@/components/ui/__tests__/AccessibilityContrast.visual.fixture")
@@ -87,6 +118,11 @@ export const stories: Record<string, Story> = {
 				</div>
 			</AppProviders>
 		)
+	},
+	"auto-approve-settings": async () => {
+		const { AutoApproveSettingsStory } =
+			await import("@/components/settings/__tests__/AutoApproveSettings.visual.fixture")
+		return <AutoApproveSettingsStory />
 	},
 	"chat-text-area": async () => {
 		const { ChatTextAreaStory } = await import("@/components/chat/__tests__/ChatTextArea.visual.fixture")

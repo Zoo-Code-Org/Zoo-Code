@@ -28,6 +28,8 @@ import { Package } from "./shared/package"
 import { formatLanguage } from "./shared/language"
 import { ContextProxy } from "./core/config/ContextProxy"
 import { ClineProvider } from "./core/webview/ClineProvider"
+import { ClineProviderFactory } from "./core/webview/ClineProviderFactory"
+import { WebviewFocusTracker } from "./core/webview/WebviewFocusTracker"
 import { DIFF_VIEW_URI_SCHEME } from "./integrations/editor/DiffViewProvider"
 import { Terminal } from "./integrations/terminal/Terminal"
 import { TerminalRegistry } from "./integrations/terminal/TerminalRegistry"
@@ -35,6 +37,7 @@ import { openAiCodexOAuthManager } from "./integrations/openai-codex/oauth"
 import { kimiCodeOAuthManager } from "./integrations/kimi-code/oauth"
 import { McpServerManager } from "./services/mcp/McpServerManager"
 import { CodeIndexManagerRegistry } from "./services/code-index/code-index-manager-registry"
+import { CodeIndexScope } from "./services/code-index/code-index-scope"
 import { MdmService } from "./services/mdm/MdmService"
 import { migrateSettings } from "./utils/migrateSettings"
 import { autoImportSettings } from "./utils/autoImportSettings"
@@ -195,6 +198,15 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 	)
 
+	const codeIndexScope = new CodeIndexScope(context)
+	context.subscriptions.push(codeIndexScope)
+	try {
+		codeIndexScope.init()
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error)
+		outputChannel.appendLine(`[CodeIndexScope] Failed to initialize: ${message}`)
+	}
+
 	// Initialize code index managers for all workspace folders.
 	if (vscode.workspace.workspaceFolders) {
 		for (const folder of vscode.workspace.workspaceFolders) {
@@ -215,7 +227,9 @@ export async function activate(context: vscode.ExtensionContext) {
 	}
 
 	// Initialize the provider *before* the Roo Code Cloud service.
-	const provider = new ClineProvider(context, outputChannel, "sidebar", contextProxy, mdmService)
+	const webviewFocusTracker = new WebviewFocusTracker()
+	context.subscriptions.push(webviewFocusTracker)
+	const provider = new ClineProvider(context, outputChannel, "sidebar", contextProxy, webviewFocusTracker, mdmService)
 
 	// Initialize Roo Code Cloud service.
 	settingsUpdatedHandler = () => {
@@ -304,7 +318,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 	)
 
-	registerCodeActions(context)
+	registerCodeActions(context, webviewFocusTracker)
 	registerTerminalActions(context)
 
 	// Allows other extensions to activate once Roo is ready.
@@ -373,7 +387,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		)
 	})
 
-	return new API(outputChannel, provider, socketPath, enableLogging)
+	const providerFactory = new ClineProviderFactory(context, outputChannel, webviewFocusTracker)
+	return new API(outputChannel, provider, providerFactory, socketPath, enableLogging)
 }
 
 // This method is called when your extension is deactivated.
