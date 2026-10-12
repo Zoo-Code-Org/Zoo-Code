@@ -7,9 +7,11 @@ import delay from "delay"
 import { CommandExecutionStatus, DEFAULT_TERMINAL_OUTPUT_PREVIEW_SIZE, PersistedCommandOutput } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
-import { Task } from "../task/Task"
+import { buildAutoDenyReason, checkAutoApproval } from "../auto-approval"
+import { BLANKET_DENY_AUTO_DENY_KINDS, isBlanketDenyEngaged, Task } from "../task/Task"
 import type { ClineProvider } from "../webview/ClineProvider"
 
+import type { DcgDecision } from "../../services/destructive-command-guard"
 import { ToolUse, ToolResponse } from "../../shared/tools"
 import { formatResponse } from "../prompts/responses"
 import { unescapeHtmlEntities } from "../../utils/text-normalization"
@@ -129,7 +131,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 			}
 
 			const provider = await task.providerRef.deref()
-			let dcgBlocked = false
+			let dcgDecision: DcgDecision | undefined
 			if (provider?.contextProxy.getValue("destructiveCommandGuardEnabled") === true) {
 				const { ensureDcgInstalled, runDcg } = await import("../../services/destructive-command-guard")
 				// Resolve through the managed installer on use so an extension update
@@ -143,27 +145,132 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 						? customCwd
 						: path.resolve(task.cwd, customCwd)
 					: task.cwd
-				const dcgResult = await runDcg(binaryPath, canonicalCommand, workingDirectory)
-				dcgBlocked = dcgResult.decision === "deny"
-				if (dcgResult.decision === "deny") {
-					await task.say("error", formatDcgBlockedMessage(dcgResult.reason, dcgResult.ruleId))
+				// Infra failures (spawn/parse/timeout) reject here and surface as a
+				// retryable tool_error via the outer catch — never as a policy denial.
+				dcgDecision = await runDcg(binaryPath, canonicalCommand, workingDirectory)
+				if (dcgDecision.decision === "deny") {
+					await task.say("error", formatDcgBlockedMessage(dcgDecision.reason, dcgDecision.ruleId))
 				}
 			}
 
-			// DCG-approved commands are auto-approved by checkAutoApproval. A DCG
-			// block is presented as Zoo's normal command prompt, with isProtected
-			// forcing the user to explicitly choose whether to execute it.
-			const didApprove = dcgBlocked
-				? await askApproval("command", canonicalCommand, undefined, true)
-				: await askApproval("command", canonicalCommand)
+			// The blanket auto-deny setting only engages while command auto-approval
+			// is on. A DCG block keeps its protected user prompt unless the blanket
+			// setting is fully engaged, in which case it is auto-denied. This
+			// snapshot governs only how the ask is presented; after approval, the
+			// engagement, the command policy, and terminal behavior are re-derived
+			// from a fresh read (below), so a settings flip during a pending prompt
+			// takes effect — engaging blanket deny denies the command instead of
+			// executing it. A blanket off-flip landing between this snapshot and
+			// Task.ask's own re-read routes a DCG block to the normal prompt instead
+			// of the protected one; a user still decides either way, so the snapshot
+			// stays.
+			const providerState = await provider?.getState()
+			const blanketAutoDeny = isBlanketDenyEngaged(providerState)
+
+			// Outside blanket mode a DCG block is presented as the protected
+			// prompt. This flag governs prompt presentation only: protection is a
+			// property of the policy that produced the prompt, so the execute-time
+			// re-check re-derives it from the fresh state rather than reusing this
+			// value (below).
+			const isProtectedAsk = dcgDecision !== undefined && dcgDecision.decision === "deny" && !blanketAutoDeny
+
+			// DCG-approved commands are auto-approved by checkAutoApproval (from the
+			// passed verdict). A DCG block is either auto-denied with the guard's
+			// reason delivered to the model (blanket mode), or presented as Zoo's
+			// normal command prompt, with isProtected forcing the user to explicitly
+			// choose whether to execute it.
+			let didApprove: boolean
+			if (dcgDecision === undefined) {
+				didApprove = await askApproval("command", canonicalCommand)
+			} else if (dcgDecision.decision === "allow") {
+				didApprove = await askApproval("command", canonicalCommand, undefined, false, { dcgDecision })
+			} else if (blanketAutoDeny) {
+				didApprove = await askApproval("command", canonicalCommand, undefined, false, { dcgDecision })
+			} else {
+				didApprove = await askApproval("command", canonicalCommand, undefined, isProtectedAsk)
+			}
 
 			if (!didApprove) {
 				return
 			}
 
 			const executionId = task.lastMessageTs?.toString() ?? Date.now().toString()
-			const providerState = await provider?.getState()
-			const { terminalShellIntegrationDisabled = true } = providerState ?? {}
+			// Re-read after approval so a settings flip while the approval prompt
+			// was pending is honored for terminal behavior and policy.
+			const freshState = await provider?.getState()
+			const { terminalShellIntegrationDisabled = true } = freshState ?? {}
+
+			if (isBlanketDenyEngaged(freshState)) {
+				// Execute-time re-validate: the approval rode on the pre-ask
+				// snapshot, so a blanket-deny engagement that landed between the
+				// approval and this point would otherwise execute a command the
+				// fresh policy denies. Parity call with the drain-site re-check,
+				// forwarding the verdict already computed above — re-running the
+				// guard would respawn the process for no new information. A fresh
+				// policy that still approves executes normally. Protection is
+				// re-derived from the fresh state, not latched from the prompt:
+				// `isProtected` short-circuits the command policy to an ask before
+				// any denial is evaluated, so forwarding the ask-time flag would
+				// let a DCG block approved during the dwell execute even though
+				// the blanket setting is now on. Inside this branch blanket deny
+				// is engaged, so the protection rule (`DCG block && blanket off`)
+				// cannot hold under the current policy — the fresh derivation is
+				// `false`, and the blanket denial is evaluated. Routing keeps the
+				// ask-path distinction: `guard_unavailable` marks a guard-state
+				// inconsistency (retryable error, not a policy denial, and no
+				// latch); blanket kinds latch the turn so a queue message left by
+				// this denial cannot be consumed as approval by a later ask.
+				// Consulting the latch instead of the policy would deny commands
+				// whose own approval was legal, inverting approval semantics.
+				const recheck = await checkAutoApproval({
+					state: freshState,
+					cwd: task.cwd,
+					ask: "command",
+					text: canonicalCommand,
+					isProtected: false,
+					dcgDecision,
+				})
+				if (recheck.decision === "deny") {
+					const detail = recheck.autoDeny
+					// Fail closed: a deny without structured detail (permitted by the
+					// result type, produced by no command-policy branch today) must
+					// still block execution — it rides the retryable-error channel
+					// like `guard_unavailable` instead of falling through to the terminal.
+					if (!detail || detail.kind === "guard_unavailable") {
+						pushToolResult(
+							formatResponse.toolError(
+								detail
+									? buildAutoDenyReason(detail)
+									: `Command \`${canonicalCommand}\` was not executed: the command policy denied it without a reason. You may retry the same command.`,
+							),
+						)
+						return
+					}
+					if (BLANKET_DENY_AUTO_DENY_KINDS.has(detail.kind)) {
+						task.recordBlanketCommandDenial()
+					}
+					pushToolResult(
+						formatResponse.toolAutoDenied({
+							reason: buildAutoDenyReason(detail),
+							offendingCommand: detail.command,
+							ruleId: detail.dcgRuleId,
+						}),
+					)
+					return
+				} else if (recheck.decision !== "approve") {
+					// Fail closed on every non-approval, not just `deny`: with
+					// blanket engaged the command policy should never answer
+					// `ask`/`timeout` here, but the result union allows it, and an
+					// unexpected non-approval must not reach the terminal. Retry
+					// is safe — nothing ran and nothing latched.
+					pushToolResult(
+						formatResponse.toolError(
+							`Command \`${canonicalCommand}\` was not executed: the fresh command policy re-check returned "${recheck.decision}" instead of an approval. You may retry the same command.`,
+						),
+					)
+					return
+				}
+			}
 
 			// Get command execution timeout from VSCode configuration (in seconds)
 			const commandExecutionTimeoutSeconds = vscode.workspace

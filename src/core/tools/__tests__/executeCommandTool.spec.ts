@@ -4,6 +4,7 @@ import type { ToolUsage } from "@roo-code/types"
 import * as vscode from "vscode"
 
 import { Task } from "../../task/Task"
+import * as autoApprovalModule from "../../auto-approval"
 import { formatResponse } from "../../prompts/responses"
 import { ToolUse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
 import { unescapeHtmlEntities } from "../../../utils/text-normalization"
@@ -26,6 +27,11 @@ vitest.mock("vscode", () => ({
 	workspace: {
 		getConfiguration: vitest.fn(),
 	},
+	// The Task module's real blanket-policy helpers load the editor decoration
+	// controller, which builds a decoration type at import time.
+	window: {
+		createTextEditorDecorationType: vitest.fn().mockReturnValue({ dispose: vitest.fn() }),
+	},
 }))
 
 vitest.mock("../../../integrations/terminal/TerminalRegistry", () => ({
@@ -43,7 +49,13 @@ vitest.mock("../../../integrations/terminal/TerminalRegistry", () => ({
 	},
 }))
 
-vitest.mock("../../task/Task")
+// The handler calls `isBlanketDenyEngaged` and reads
+// `BLANKET_DENY_AUTO_DENY_KINDS` from the Task module, so the blanket-policy
+// helpers must stay real while the Task class itself stays a stub.
+vitest.mock("../../task/Task", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../task/Task")>()
+	return { ...actual, Task: vitest.fn() }
+})
 vitest.mock("../../prompts/responses")
 
 const mockRunDcg = vitest.fn()
@@ -57,6 +69,11 @@ vitest.mock("../../../services/destructive-command-guard", () => ({
 // Import the module
 import * as executeCommandModule from "../ExecuteCommandTool"
 const { executeCommandTool } = executeCommandModule
+
+// Spies installed on the auto-approval module are not restored between tests,
+// so a delegating spy must call the real policy captured at import time:
+// capturing inside a test can capture another test's leaked spy and recurse.
+const realCheckAutoApproval = autoApprovalModule.checkAutoApproval
 
 describe("executeCommandTool", () => {
 	// Setup common test variables
@@ -88,6 +105,7 @@ describe("executeCommandTool", () => {
 			recordToolUsage: vitest.fn().mockReturnValue({} as ToolUsage),
 			recordToolError: vitest.fn(),
 			supersedePendingAsk: vitest.fn(),
+			recordBlanketCommandDenial: vitest.fn(),
 			providerRef: {
 				deref: vitest.fn().mockResolvedValue({
 					contextProxy: {
@@ -334,8 +352,365 @@ describe("executeCommandTool", () => {
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
 			})
 
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test")
+			// The DCG verdict is forwarded so checkAutoApproval auto-approves from
+			// the verdict itself rather than inferring it from settings alone.
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, false, {
+				dcgDecision: { decision: "allow" },
+			})
 			expect(mockPushToolResult).toHaveBeenCalled()
+		})
+
+		it("passes the DCG deny verdict unprotected when blanket auto-deny is engaged", async () => {
+			const provider = await mockCline.providerRef.deref()
+			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
+			provider.getState.mockResolvedValue({
+				destructiveCommandGuardEnabled: true,
+				terminalShellIntegrationDisabled: true,
+				alwaysDenyUnapprovedCommands: true,
+				autoApprovalEnabled: true,
+				alwaysAllowExecute: true,
+			})
+			mockRunDcg.mockResolvedValue({ decision: "deny", reason: "matches a destructive pattern" })
+			mockAskApproval.mockResolvedValue(false)
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			// Blanket mode: not protected, so checkAutoApproval resolves the ask as
+			// an automatic denial carrying the DCG reason instead of prompting.
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, false, {
+				dcgDecision: { decision: "deny", reason: "matches a destructive pattern" },
+			})
+		})
+
+		it("keeps the protected prompt when DCG denies and blanket auto-deny is off", async () => {
+			const provider = await mockCline.providerRef.deref()
+			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
+			provider.getState.mockResolvedValue({
+				destructiveCommandGuardEnabled: true,
+				terminalShellIntegrationDisabled: true,
+				alwaysDenyUnapprovedCommands: false,
+				autoApprovalEnabled: true,
+				alwaysAllowExecute: true,
+			})
+			mockRunDcg.mockResolvedValue({ decision: "deny", reason: "matches a destructive pattern" })
+			mockAskApproval.mockResolvedValue(false)
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true)
+		})
+
+		it("keeps the protected prompt when blanket auto-deny is on but command auto-approval is off", async () => {
+			const provider = await mockCline.providerRef.deref()
+			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
+			provider.getState.mockResolvedValue({
+				destructiveCommandGuardEnabled: true,
+				terminalShellIntegrationDisabled: true,
+				alwaysDenyUnapprovedCommands: true,
+				autoApprovalEnabled: false,
+				alwaysAllowExecute: true,
+			})
+			mockRunDcg.mockResolvedValue({ decision: "deny", reason: "matches a destructive pattern" })
+			mockAskApproval.mockResolvedValue(false)
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true)
+		})
+
+		it("keeps the protected prompt when blanket auto-deny is on but execute auto-approval is off", async () => {
+			const provider = await mockCline.providerRef.deref()
+			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
+			provider.getState.mockResolvedValue({
+				destructiveCommandGuardEnabled: true,
+				terminalShellIntegrationDisabled: true,
+				alwaysDenyUnapprovedCommands: true,
+				autoApprovalEnabled: true,
+				alwaysAllowExecute: false,
+			})
+			mockRunDcg.mockResolvedValue({ decision: "deny", reason: "matches a destructive pattern" })
+			mockAskApproval.mockResolvedValue(false)
+
+			// Structural harness double — mockCline carries only the fields the handler reads; a typed Task is impractical.
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				// vi.fn stands in for the AskApproval signature; every test in this block uses this identical cast.
+				askApproval: mockAskApproval as unknown as AskApproval,
+				// vi.fn stands in for the HandleError signature; every test in this block uses this identical cast.
+				handleError: mockHandleError as unknown as HandleError,
+				// vi.fn stands in for the PushToolResult signature; every test in this block uses this identical cast.
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true)
+		})
+
+		it("denies an approved command at execute time when blanket deny engages during the approval dwell", async () => {
+			// The seconds-wide window: the approval rode on the pre-ask snapshot
+			// taken with blanket deny off, and the engagement save lands before
+			// the command reaches the terminal. The execute-time re-check must
+			// deny instead of executing, and the blanket-kind denial must latch
+			// the turn so the queue message this denial leaves cannot stand in
+			// as approval for a later ask.
+			const provider = await mockCline.providerRef.deref()
+			provider.getState
+				.mockResolvedValueOnce({
+					alwaysDenyUnapprovedCommands: false,
+					autoApprovalEnabled: true,
+					alwaysAllowExecute: true,
+					allowedCommands: [],
+					deniedCommands: [],
+					destructiveCommandGuardEnabled: false,
+					terminalShellIntegrationDisabled: true,
+				})
+				.mockResolvedValue({
+					alwaysDenyUnapprovedCommands: true,
+					autoApprovalEnabled: true,
+					alwaysAllowExecute: true,
+					allowedCommands: [],
+					deniedCommands: [],
+					destructiveCommandGuardEnabled: false,
+					terminalShellIntegrationDisabled: true,
+				})
+			mockAskApproval.mockResolvedValue(true)
+
+			// The `as Task` cast is documentary — the harness double is `any`-typed,
+			// so it and the `vi.fn` callbacks already satisfy the parameter types.
+			await executeCommandTool.handle(mockCline as Task, mockToolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			// Position pin: the denial must arrive after an ask actually happened —
+			// a pre-approval gate would deny without ever asking.
+			expect(mockAskApproval).toHaveBeenCalledTimes(1)
+
+			// Denied, not executed: the command never reaches the terminal.
+			expect(executeCommandModule.executeCommandInTerminal).not.toHaveBeenCalled()
+			expect(mockCline.recordBlanketCommandDenial).toHaveBeenCalledTimes(1)
+			expect(formatResponse.toolAutoDenied).toHaveBeenCalledWith({
+				reason: expect.stringContaining("not on the command allowlist"),
+				offendingCommand: "echo test",
+				ruleId: undefined,
+			})
+			expect(formatResponse.toolError).not.toHaveBeenCalled()
+			expect(mockPushToolResult).toHaveBeenCalledTimes(1)
+		})
+
+		it("routes a guard flip during the approval dwell to a retryable error without latching", async () => {
+			// The DCG setting flips on between approval and execution: the tool
+			// holds no verdict for this command, so the fresh read denies with the
+			// guard-state inconsistency. That is not a policy denial: the payload
+			// stays a retryable tool error, and nothing latches — a re-issue
+			// carrying a verdict may still execute.
+			const provider = await mockCline.providerRef.deref()
+			provider.getState
+				.mockResolvedValueOnce({
+					alwaysDenyUnapprovedCommands: true,
+					autoApprovalEnabled: true,
+					alwaysAllowExecute: true,
+					allowedCommands: [],
+					deniedCommands: [],
+					destructiveCommandGuardEnabled: false,
+					terminalShellIntegrationDisabled: true,
+				})
+				.mockResolvedValue({
+					alwaysDenyUnapprovedCommands: true,
+					autoApprovalEnabled: true,
+					alwaysAllowExecute: true,
+					allowedCommands: [],
+					deniedCommands: [],
+					destructiveCommandGuardEnabled: true,
+					terminalShellIntegrationDisabled: true,
+				})
+			mockAskApproval.mockResolvedValue(true)
+
+			await executeCommandTool.handle(mockCline as Task, mockToolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			// Same position pin as the sibling test: asked first, denied by the re-check.
+			expect(mockAskApproval).toHaveBeenCalledTimes(1)
+			expect(executeCommandModule.executeCommandInTerminal).not.toHaveBeenCalled()
+			expect(mockCline.recordBlanketCommandDenial).not.toHaveBeenCalled()
+			expect(formatResponse.toolAutoDenied).not.toHaveBeenCalled()
+			expect(formatResponse.toolError).toHaveBeenCalledWith(expect.stringContaining("not a policy denial"))
+			expect(mockPushToolResult).toHaveBeenCalledTimes(1)
+		})
+
+		// Shared scenario for the protected-prompt transition: the command is
+		// DCG-denied with blanket auto-deny OFF, so the user sees the protected
+		// prompt, explicitly approves it, and the blanket setting engages before
+		// the command reaches the terminal.
+		const setupProtectedDwellFlip = async () => {
+			const provider = await mockCline.providerRef.deref()
+			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
+			provider.getState
+				.mockResolvedValueOnce({
+					destructiveCommandGuardEnabled: true,
+					alwaysDenyUnapprovedCommands: false,
+					autoApprovalEnabled: true,
+					alwaysAllowExecute: true,
+					allowedCommands: [],
+					deniedCommands: [],
+					terminalShellIntegrationDisabled: true,
+				})
+				.mockResolvedValue({
+					destructiveCommandGuardEnabled: true,
+					alwaysDenyUnapprovedCommands: true,
+					autoApprovalEnabled: true,
+					alwaysAllowExecute: true,
+					allowedCommands: [],
+					deniedCommands: [],
+					terminalShellIntegrationDisabled: true,
+				})
+			mockRunDcg.mockResolvedValue({
+				decision: "deny",
+				reason: "matches a destructive pattern",
+				ruleId: "recursive-delete",
+			})
+			// The user affirmatively approves the protected prompt during the dwell.
+			mockAskApproval.mockResolvedValue(true)
+			return provider
+		}
+
+		it("auto-denies a DCG-denied protected command when blanket deny engages during the approval dwell", async () => {
+			await setupProtectedDwellFlip()
+
+			await executeCommandTool.handle(mockCline, mockToolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			// The prompt shown was the protected one — the blanket setting was off
+			// when the ask was built.
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true)
+
+			// The blanket denial wins over the affirmative approval: the command
+			// never reaches the terminal. The provider-level assertion is the
+			// load-bearing one — it is the real execution boundary.
+			expect(TerminalRegistry.getOrCreateTerminal).not.toHaveBeenCalled()
+			expect(executeCommandModule.executeCommandInTerminal).not.toHaveBeenCalled()
+			expect(mockCline.recordBlanketCommandDenial).toHaveBeenCalledTimes(1)
+			expect(formatResponse.toolAutoDenied).toHaveBeenCalledWith({
+				reason: expect.stringContaining("matches a destructive pattern"),
+				offendingCommand: "echo test",
+				ruleId: "recursive-delete",
+			})
+			expect(formatResponse.toolError).not.toHaveBeenCalled()
+			expect(mockPushToolResult).toHaveBeenCalledTimes(1)
+		})
+
+		it("re-derives the recheck's protected flag from the fresh state instead of forwarding the latched prompt flag", async () => {
+			await setupProtectedDwellFlip()
+			const originalCheckAutoApproval = autoApprovalModule.checkAutoApproval
+			const recheckSpy = vitest
+				.spyOn(autoApprovalModule, "checkAutoApproval")
+				.mockImplementation((args) => originalCheckAutoApproval(args))
+
+			await executeCommandTool.handle(mockCline, mockToolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(recheckSpy).toHaveBeenCalledTimes(1)
+			// The ask the user answered was protected, but protection is a property
+			// of the policy that produced the prompt. Forwarding the latched flag
+			// would make `checkAutoApproval` short-circuit to `ask` before ever
+			// evaluating the now-engaged blanket denial.
+			expect(recheckSpy).toHaveBeenCalledWith(expect.objectContaining({ ask: "command", isProtected: false }))
+			expect(TerminalRegistry.getOrCreateTerminal).not.toHaveBeenCalled()
+		})
+
+		it("fails closed when the execute-time recheck returns a non-approval other than deny", async () => {
+			await setupProtectedDwellFlip()
+			// The blanket-engaged command policy never answers `ask` today; force a
+			// result from the permitted-but-unexpected tail of the union to pin that
+			// any non-approval blocks execution instead of falling through.
+			vitest.spyOn(autoApprovalModule, "checkAutoApproval").mockResolvedValue({ decision: "ask" })
+
+			await executeCommandTool.handle(mockCline, mockToolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(TerminalRegistry.getOrCreateTerminal).not.toHaveBeenCalled()
+			expect(executeCommandModule.executeCommandInTerminal).not.toHaveBeenCalled()
+			// Not a policy denial: no latch, and the retryable-error channel instead.
+			expect(mockCline.recordBlanketCommandDenial).not.toHaveBeenCalled()
+			expect(formatResponse.toolAutoDenied).not.toHaveBeenCalled()
+			expect(formatResponse.toolError).toHaveBeenCalledWith(expect.stringContaining("instead of an approval"))
+			expect(mockPushToolResult).toHaveBeenCalledTimes(1)
+		})
+
+		it("executes an allowlisted command when blanket deny stays engaged and the recheck approves", async () => {
+			// The inverse of the dwell-flip denials: blanket deny is engaged on
+			// both the ask-time snapshot and the fresh read, but the command
+			// rides the allowlist, so the fresh policy still approves and the
+			// execute-time re-check must fall through to execution — blanket
+			// engagement alone is not a denial.
+			const provider = await mockCline.providerRef.deref()
+			provider.getState.mockResolvedValue({
+				alwaysDenyUnapprovedCommands: true,
+				autoApprovalEnabled: true,
+				alwaysAllowExecute: true,
+				allowedCommands: ["echo"],
+				deniedCommands: [],
+				destructiveCommandGuardEnabled: false,
+				terminalShellIntegrationDisabled: true,
+			})
+			// The command auto-approves against this snapshot, so the ask resolves true.
+			mockAskApproval.mockResolvedValue(true)
+			const recheckSpy = vitest
+				.spyOn(autoApprovalModule, "checkAutoApproval")
+				.mockImplementation((args) => realCheckAutoApproval(args))
+
+			await executeCommandTool.handle(mockCline as Task, mockToolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			// The re-check genuinely ran against the fresh state — without this
+			// pin the assertions below could pass with the re-check skipped.
+			expect(recheckSpy).toHaveBeenCalledTimes(1)
+			expect(recheckSpy).toHaveBeenCalledWith(expect.objectContaining({ ask: "command", isProtected: false }))
+
+			// Approved: the command reaches the terminal and the pushed result is
+			// the execution output, not a denial or a retryable error. The
+			// TerminalRegistry assertion is the load-bearing one — the handler's
+			// intra-module call to `executeCommandInTerminal` is not intercepted
+			// by the spy, so the registry call is the real execution boundary.
+			expect(TerminalRegistry.getOrCreateTerminal).toHaveBeenCalledTimes(1)
+			expect(mockPushToolResult).toHaveBeenCalledTimes(1)
+			expect(mockPushToolResult).toHaveBeenCalledWith(
+				expect.stringContaining("Command executed in terminal within working directory"),
+			)
+			expect(mockCline.recordBlanketCommandDenial).not.toHaveBeenCalled()
+			expect(formatResponse.toolAutoDenied).not.toHaveBeenCalled()
+			expect(formatResponse.toolError).not.toHaveBeenCalled()
 		})
 
 		it("installs or updates DCG before evaluating an enabled command", async () => {
@@ -671,6 +1046,38 @@ describe("executeCommandTool", () => {
 			await handlePromise
 
 			expect(mockPushToolResult.mock.calls[0][0]).toContain("Exit code: 0")
+		})
+
+		it("honors a terminal shell integration flip made during a pending approval", async () => {
+			vitest.useFakeTimers()
+			const provider = await mockCline.providerRef.deref()
+			// The pre-ask snapshot must not pin terminal behavior: execution
+			// reads provider state again after approval and must honor the
+			// fresher value.
+			provider.getState
+				.mockResolvedValueOnce({ terminalShellIntegrationDisabled: true })
+				.mockResolvedValueOnce({ terminalShellIntegrationDisabled: false })
+			vitest.spyOn(Terminal, "isActiveShellCmdExe").mockReturnValue(false)
+			const terminal = await setupControllableTerminal()
+
+			const handlePromise = handleCommand("Write-Output hello")
+
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			// A stale pre-ask snapshot would have selected "execa"; the post-approval
+			// re-read sees shell integration enabled again and selects "vscode".
+			expect(terminal.provider).toBe("vscode")
+
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
+			callbacks.onShellExecutionStarted!(1234, proc)
+			await callbacks.onLine("hello\n", proc)
+			await callbacks.onCompleted!("hello\n", proc)
+			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
+			terminal.resolveProcess()
+			await vitest.advanceTimersByTimeAsync(100)
+			await handlePromise
+
+			expect(mockPushToolResult).toHaveBeenCalled()
 		})
 
 		it("allows an explicit agent timeout to move a command to the background", async () => {

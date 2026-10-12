@@ -343,10 +343,10 @@
 		"title": "Zoo Code {{version}} रिलीज़ हो गया",
 		"support": "कृपया <githubLink>GitHub</githubLink> पर हमें स्टार देकर Zoo Code का समर्थन करें।",
 		"release": {
-			"heading": "नया क्या है:",
-			"highlight1": "🔑 अपनी Zoo Gateway API key कहीं भी इस्तेमाल करें—इसे किसी भी OpenAI-compatible client या workflow में जोड़ें: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "🎁 सीमित समय के लिए Zoo Gateway के ज़रिए MiniMax-M3 का FREE access पाएं।",
-			"highlight3": "✨ अब उपलब्ध: बिल्कुल नए GPT-6 Astra और Claude Fable 5.1 models।"
+			"heading": "Zoo Code v3.88.0 में नया क्या है",
+			"highlight1": "✨ Provider और model समर्थन: Grok Build और बेहतर custom-model समर्थन का उपयोग करें। यह release Bedrock model limits भी ठीक करती है और Codex verbosity setting भेजती है।",
+			"highlight2": "🧭 Task भरोसेमंदपन: यह release cancellation handling, tool-turn continuation और task-message saving को ठीक करती है।",
+			"highlight3": "⚡ तेज़ editing और chat: File writes अब डिफ़ॉल्ट रूप से कृत्रिम देरी का उपयोग नहीं करतीं। Chat messages कम file data रखते हैं, और code actions अंतिम सक्रिय chat तक पहुँचते हैं।"
 		},
 		"cloudAgents": {
 			"heading": "क्लाउड में नया:",

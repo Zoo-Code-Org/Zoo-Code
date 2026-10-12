@@ -1,6 +1,8 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
+import { sanitizeIdentifierSurrogates, sanitizeSurrogates, sanitizeSurrogatesDeep } from "./sanitize-surrogates"
+
 /**
  * Type for OpenRouter's reasoning detail elements.
  * @see https://openrouter.ai/docs/use-cases/reasoning-tokens#streaming-response
@@ -355,7 +357,9 @@ export function convertToOpenAiMessages(
 			const messageWithDetails = anthropicMessage as AssistantMessageWithReasoning
 			const baseMessage: OpenAI.Chat.ChatCompletionMessageParam & ReasoningPassthroughFields = {
 				role: anthropicMessage.role,
-				content: anthropicMessage.content,
+				// Sanitize lone UTF-16 surrogates: providers validating the JSON body
+				// (e.g. DeepSeek) reject the whole request otherwise. See #461.
+				content: sanitizeSurrogates(anthropicMessage.content),
 			}
 
 			if (anthropicMessage.role === "assistant") {
@@ -365,7 +369,7 @@ export function convertToOpenAiMessages(
 				}
 				// Pass through reasoning_content for DeepSeek / Z.ai thinking mode.
 				if (typeof messageWithDetails.reasoning_content === "string" && messageWithDetails.reasoning_content) {
-					baseMessage.reasoning_content = messageWithDetails.reasoning_content
+					baseMessage.reasoning_content = sanitizeSurrogates(messageWithDetails.reasoning_content)
 				}
 			}
 
@@ -402,7 +406,7 @@ export function convertToOpenAiMessages(
 					let content: string
 
 					if (typeof toolMessage.content === "string") {
-						content = toolMessage.content
+						content = sanitizeSurrogates(toolMessage.content)
 					} else {
 						content =
 							toolMessage.content
@@ -415,7 +419,7 @@ export function convertToOpenAiMessages(
 										return "[Image]"
 									}
 									if (part.type === "text") {
-										return part.text
+										return sanitizeSurrogates(part.text)
 									}
 									return ""
 								})
@@ -423,7 +427,9 @@ export function convertToOpenAiMessages(
 					}
 					openAiMessages.push({
 						role: "tool",
-						tool_call_id: normalizeId(toolMessage.tool_use_id),
+						// Injective sanitization keeps the id paired with its tool_use after
+						// lone surrogates are replaced. See #461.
+						tool_call_id: sanitizeIdentifierSurrogates(normalizeId(toolMessage.tool_use_id)),
 						// Use "(empty)" placeholder for empty content to satisfy providers like Gemini (via OpenRouter)
 						content: content || "(empty)",
 					})
@@ -468,7 +474,7 @@ export function convertToOpenAiMessages(
 						] as OpenAI.Chat.ChatCompletionToolMessageParam
 						if (lastToolMessage?.role === "tool") {
 							const additionalText = filteredNonToolMessages
-								.map((part) => (part as Anthropic.TextBlockParam).text)
+								.map((part) => sanitizeSurrogates((part as Anthropic.TextBlockParam).text))
 								.join("\n")
 							lastToolMessage.content = `${lastToolMessage.content}\n\n${additionalText}`
 						}
@@ -494,7 +500,7 @@ export function convertToOpenAiMessages(
 									}
 									return { type: "text", text: "[Image]" }
 								}
-								return { type: "text", text: part.text }
+								return { type: "text", text: sanitizeSurrogates(part.text) }
 							}),
 						})
 					}
@@ -537,19 +543,22 @@ export function convertToOpenAiMessages(
 							if (part.type === "image") {
 								return "" // impossible as the assistant cannot send images
 							}
-							return part.text
+							return sanitizeSurrogates(part.text)
 						})
 						.join("\n")
 				}
 
 				// Process tool use messages
 				const tool_calls: OpenAI.Chat.ChatCompletionMessageToolCall[] = toolMessages.map((toolMessage) => ({
-					id: normalizeId(toolMessage.id),
+					// Injective sanitization keeps the id paired with its tool_result after
+					// lone surrogates are replaced. See #461.
+					id: sanitizeIdentifierSurrogates(normalizeId(toolMessage.id)),
 					type: "function",
 					function: {
-						name: toolMessage.name,
-						// json string
-						arguments: JSON.stringify(toolMessage.input),
+						name: sanitizeSurrogates(toolMessage.name),
+						// json string (deep-sanitized: a lone surrogate anywhere in the payload
+						// makes providers like DeepSeek reject the whole request)
+						arguments: JSON.stringify(sanitizeSurrogatesDeep(toolMessage.input)),
 					},
 				}))
 
@@ -579,7 +588,7 @@ export function convertToOpenAiMessages(
 						? messageWithDetails.reasoning_content
 						: undefined) ?? extractedReasoning
 				if (outgoingReasoningContent) {
-					baseMessage.reasoning_content = outgoingReasoningContent
+					baseMessage.reasoning_content = sanitizeSurrogates(outgoingReasoningContent)
 				}
 
 				// Add tool_calls after reasoning_details

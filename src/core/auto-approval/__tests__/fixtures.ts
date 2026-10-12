@@ -45,6 +45,7 @@ export const baseState: State = {
 	alwaysAllowExecute: false,
 	alwaysAllowFollowupQuestions: false,
 	destructiveCommandGuardEnabled: false,
+	alwaysDenyUnapprovedCommands: false,
 	allowedCommands: [],
 	deniedCommands: [],
 }

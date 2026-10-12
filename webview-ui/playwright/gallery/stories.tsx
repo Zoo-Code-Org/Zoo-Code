@@ -12,6 +12,69 @@ const mermaidGantt = `gantt
     Ship release :active, release, after scope, 3d`
 
 export const stories: Record<string, Story> = {
+	"bedrock-output-budget": async ({ model = "anthropic.claude-opus-5" }) => {
+		const [{ AppProviders }, { ThinkingBudget }, { bedrockModels, providerIdentifiers }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/ThinkingBudget"),
+			import("@roo-code/types"),
+		])
+		const apiModelId = model === "anthropic.claude-opus-4-8" ? model : "anthropic.claude-opus-5"
+		function Budget() {
+			const [config, setConfig] = useState<import("@roo-code/types").ProviderSettings>({
+				apiProvider: providerIdentifiers.bedrock,
+				apiModelId,
+				enableReasoningEffort: true,
+			})
+			return (
+				<div className="w-[420px] p-4 flex flex-col gap-4 bg-vscode-editor-background">
+					<h2>{apiModelId}</h2>
+					<ThinkingBudget
+						apiConfiguration={config}
+						modelInfo={bedrockModels[apiModelId]}
+						setApiConfigurationField={(field, value) =>
+							setConfig((previous) => ({ ...previous, [field]: value }))
+						}
+					/>
+				</div>
+			)
+		}
+		return (
+			<AppProviders>
+				<Budget />
+			</AppProviders>
+		)
+	},
+	"bedrock-custom-arn": async ({ baseModelId = "" }) => {
+		const [{ AppProviders }, { BedrockCustomArn }, { providerIdentifiers }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/providers/BedrockCustomArn"),
+			import("@roo-code/types"),
+		])
+		function CustomArn() {
+			const [config, setConfig] = useState<import("@roo-code/types").ProviderSettings>({
+				apiProvider: providerIdentifiers.bedrock,
+				apiModelId: "custom-arn",
+				awsRegion: "us-west-2",
+				awsCustomArn: "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/abcd1234efgh",
+				awsCustomArnBaseModelId: String(baseModelId),
+			})
+			return (
+				<div className="w-[480px] p-4 flex flex-col gap-3 bg-vscode-editor-background text-vscode-foreground">
+					<BedrockCustomArn
+						apiConfiguration={config}
+						setApiConfigurationField={(field, value) =>
+							setConfig((previous) => ({ ...previous, [field]: value }))
+						}
+					/>
+				</div>
+			)
+		}
+		return (
+			<AppProviders>
+				<CustomArn />
+			</AppProviders>
+		)
+	},
 	"accessibility-contrast": async () => {
 		const { AccessibilityContrastGallery } =
 			await import("@/components/ui/__tests__/AccessibilityContrast.visual.fixture")
@@ -55,6 +118,11 @@ export const stories: Record<string, Story> = {
 				</div>
 			</AppProviders>
 		)
+	},
+	"auto-approve-settings": async () => {
+		const { AutoApproveSettingsStory } =
+			await import("@/components/settings/__tests__/AutoApproveSettings.visual.fixture")
+		return <AutoApproveSettingsStory />
 	},
 	"chat-text-area": async () => {
 		const { ChatTextAreaStory } = await import("@/components/chat/__tests__/ChatTextArea.visual.fixture")

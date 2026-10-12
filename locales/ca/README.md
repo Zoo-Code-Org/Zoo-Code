@@ -47,11 +47,11 @@ Zoo Code parteix de la base creada per Roo Code i continua ampliant-la amb:
 - **Fluxos de terminal i edició més fiables** — correccions per a la finalització prematura del terminal, les condicions de cursa en l'estat de les tasques, la gestió del context, l'edició de diff i l'ús d'eines específiques de cada proveïdor.
 - **Més control sobre el teu espai de treball** — gestió de regles, restriccions MCP per mode, controls de rutes multiarrel, opcions de raonament dels models i accions per revisar els canvis en completar una tasca.
 
-## Novetats a la v3.82.0
+## Novetats a la v3.88.0
 
-- 🔑 **Utilitza la teva clau API de Zoo Gateway a qualsevol lloc** — porta-la a qualsevol client o flux de treball compatible amb OpenAI: https://zoocode.dev/models
-- 🎁 **Accés gratuït al model durant un temps limitat** — obtén accés gratuït a MiniMax-M3 mitjançant Zoo Gateway.
-- ✨ **Models totalment nous** — GPT-6 Astra i Claude Fable 5.1 ja estan disponibles.
+- ✨ **Suport de proveïdors i models:** Fes servir Grok Build i un suport millorat de models personalitzats. Aquesta versió també corregeix els límits de models de Bedrock i envia la configuració de verbositat de Codex.
+- 🧭 **Fiabilitat de les tasques:** Aquesta versió corregeix la gestió de les cancel·lacions, la continuació dels torns d'eines i el desat dels missatges de tasca.
+- ⚡ **Edició i xat més ràpids:** Les escriptures de fitxers ja no utilitzen retards artificials per defecte. Els missatges del xat porten menys dades de fitxers, i les accions de codi arriben a l'últim xat actiu.
 
 ## Què pot fer Zoo Code per TU?
 

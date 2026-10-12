@@ -47,11 +47,11 @@ Zoo Code s'appuie sur les fondations créées par Roo Code et continue de les en
 - **Des workflows de terminal et d'édition plus fiables** — correctifs pour les fins prématurées de commandes dans le terminal, les conditions de concurrence liées à l'état des tâches, la gestion du contexte, l'édition de diff et l'utilisation d'outils propres aux providers.
 - **Davantage de contrôle sur ton espace de travail** — gestion des règles, restrictions MCP par mode, contrôle des chemins multi-root, options de raisonnement des modèles et actions de vérification des modifications à la fin d'une tâche.
 
-## Nouveautés de la v3.82.0
+## Nouveautés de la v3.88.0
 
-- 🔑 **Utilise ta clé API Zoo Gateway partout** — ajoute-la à n'importe quel client ou workflow compatible avec OpenAI : https://zoocode.dev/models
-- 🎁 **Accès gratuit au modèle pendant une durée limitée** — accède gratuitement à MiniMax-M3 via Zoo Gateway.
-- ✨ **Tout nouveaux modèles** — GPT-6 Astra et Claude Fable 5.1 sont désormais disponibles.
+- ✨ **Prise en charge des fournisseurs et des modèles :** Utilise Grok Build et une prise en charge améliorée des modèles personnalisés. Cette version corrige aussi les limites de modèles Bedrock et envoie le paramètre de verbosité de Codex.
+- 🧭 **Fiabilité des tâches :** Cette version corrige la gestion des annulations, la poursuite des tours d'outils et la sauvegarde des messages de tâche.
+- ⚡ **Édition et chat plus rapides :** Les écritures de fichiers n'utilisent plus de délais artificiels par défaut. Les messages du chat transportent moins de données de fichiers, et les actions de code atteignent le dernier chat actif.
 
 ## Que peut faire Zoo Code pour VOUS ?
 

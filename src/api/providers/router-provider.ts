@@ -108,8 +108,35 @@ export abstract class RouterProvider extends BaseProvider {
 		return this.modelFetchPromise
 	}
 
-	async ensureModelFetched(): Promise<void> {
-		await this.fetchModel()
+	async ensureModelFetched(signal?: AbortSignal): Promise<void> {
+		// A caller that already gave up must not start (or keep) a wait on the
+		// shared catalog fetch.
+		if (signal?.aborted) {
+			throw signal.reason
+		}
+
+		const fetch = this.fetchModel()
+		if (!signal) {
+			await fetch
+			return
+		}
+
+		// Detach this waiter as soon as the signal aborts; the shared in-flight
+		// fetch continues for any other waiter and still populates the cache.
+		await new Promise<void>((resolve, reject) => {
+			const onAbort = () => reject(signal.reason)
+			signal.addEventListener("abort", onAbort, { once: true })
+			fetch.then(
+				() => {
+					signal.removeEventListener("abort", onAbort)
+					resolve()
+				},
+				(error: unknown) => {
+					signal.removeEventListener("abort", onAbort)
+					reject(error)
+				},
+			)
+		})
 	}
 
 	override getModel(): { id: string; info: ModelInfo } {

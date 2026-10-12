@@ -46,11 +46,11 @@ Zoo Code, Roo Code की बनाई नींव पर आगे बढ़�
 - **ज़्यादा भरोसेमंद terminal और editing workflows** — terminal के समय से पहले पूरा होने, task-state race conditions, context management, diff editing और provider-specific tool use से जुड़ी समस्याओं के fixes।
 - **अपने workspace पर ज़्यादा control** — rules management, हर mode के लिए MCP restrictions, multi-root path controls, model reasoning options और completion changes की review actions।
 
-## v3.82.0 में नया क्या है
+## v3.88.0 में नया क्या है
 
-- 🔑 **अपनी Zoo Gateway API key कहीं भी इस्तेमाल करें** — इसे किसी भी OpenAI-compatible client या workflow में जोड़ें: https://zoocode.dev/models
-- 🎁 **सीमित समय के लिए FREE model access** — Zoo Gateway के ज़रिए MiniMax-M3 का FREE access पाएं।
-- ✨ **बिल्कुल नए models** — GPT-6 Astra और Claude Fable 5.1 अब उपलब्ध हैं।
+- ✨ **Provider और model समर्थन:** Grok Build और बेहतर custom-model समर्थन का उपयोग करें। यह release Bedrock model limits भी ठीक करती है और Codex verbosity setting भेजती है।
+- 🧭 **Task भरोसेमंदपन:** यह release cancellation handling, tool-turn continuation और task-message saving को ठीक करती है।
+- ⚡ **तेज़ editing और chat:** File writes अब डिफ़ॉल्ट रूप से कृत्रिम देरी का उपयोग नहीं करतीं। Chat messages कम file data रखते हैं, और code actions अंतिम सक्रिय chat तक पहुँचते हैं।
 
 ## Zoo Code आपके लिए क्या कर सकता है?
 

@@ -40,6 +40,7 @@ import { saveTaskMessages } from "../task-persistence"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
+import { findOriginalContent } from "./stripOriginalContent"
 import { handleCheckpointRestoreOperation } from "./checkpointRestoreHandler"
 import { generateErrorDiagnostics } from "./diagnosticsHandler"
 import {
@@ -83,7 +84,7 @@ import { openMention } from "../mentions"
 import { resolveImageMentions } from "../mentions/resolveImageMentions"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { getWorkspacePath } from "../../utils/path"
-import { isPathOutsideWorkspace } from "../../utils/pathUtils"
+import { isPathOutsideWorkspace, decodeUntrustedPathToStable, isRealPathOutsideWorkspace } from "../../utils/pathUtils"
 import { Mode, defaultModeSlug } from "../../shared/modes"
 import { getModels, flushModels } from "../../api/providers/fetchers/modelCache"
 import { GetModelsOptions } from "../../shared/api"
@@ -1528,13 +1529,70 @@ export const webviewMessageHandler = async (
 				}
 			}
 			break
-		case "openFile":
-			let filePath: string = message.text!
-			if (!path.isAbsolute(filePath)) {
-				filePath = path.join(getCurrentCwd(), filePath)
+		case "openFile": {
+			const rawPath = message.text || ""
+			if (!rawPath) {
+				break
 			}
-			await openFile(filePath, message.values as { create?: boolean; content?: string; line?: number })
+			// Task markdown links are untrusted, so markdown-sourced openFile
+			// requests (flagged by the webview with fromMarkdown) must resolve
+			// inside the current workspace. First-party callers (modes, MCP,
+			// slash-command settings) may legitimately open global config files
+			// outside the workspace, so they keep the previous behavior.
+			const fromMarkdown = message.values?.fromMarkdown === true
+			const rejectOutsideWorkspace = () => {
+				void vscode.window.showErrorMessage(
+					t("common:errors.cannot_access_path", {
+						path: rawPath,
+						error: t("common:errors.path_outside_workspace"),
+					}),
+				)
+			}
+			let filePath = rawPath
+			// Markdown link targets are URL syntax: percent-decode to a fixed point
+			// here, at the containment boundary. openFile decodes AFTER this check,
+			// so a request like `%2e%2e/%2e%2e/.env` would otherwise pass
+			// containment as a literal and escape only after that later decode.
+			if (fromMarkdown) {
+				const decoded = decodeUntrustedPathToStable(rawPath)
+				// Stryker disable next-line ConditionalExpression,BlockStatement: hostile non-stabilizing encodings are unreachable from the webview (its posts are plain link targets); the bound is defensive
+				if (decoded === null) {
+					// Stryker disable next-line CallExpression: hostile non-stabilizing encodings are pinned by the direct decodeUntrustedPathToStable bound test; the webview never posts such values
+					rejectOutsideWorkspace()
+					break
+				}
+				filePath = decoded
+			}
+			if (!path.isAbsolute(filePath)) {
+				const cwd = getCurrentCwd()
+				if (!cwd) {
+					void vscode.window.showErrorMessage(
+						t("common:errors.could_not_open_file", { errorMessage: t("common:errors.no_workspace") }),
+					)
+					break
+				}
+				filePath = path.resolve(cwd, filePath)
+			}
+			// Workspace-boundary validation (defense in depth): the webview already
+			// rejects traversal in markdown anchors, but refuse any markdown path
+			// that still resolves outside the workspace.
+			if (fromMarkdown && isPathOutsideWorkspace(filePath)) {
+				rejectOutsideWorkspace()
+				break
+			}
+			// Lexical containment cannot see symlinks: a link inside a workspace
+			// folder may resolve to a target outside the workspace. Re-check the
+			// real filesystem path (failing closed) before opening.
+			if (fromMarkdown && (await isRealPathOutsideWorkspace(filePath))) {
+				rejectOutsideWorkspace()
+				break
+			}
+			await openFile(
+				filePath,
+				message.values as { create?: boolean; content?: string; line?: number; fromMarkdown?: boolean },
+			)
 			break
+		}
 		case "readFileContent": {
 			const relPath = message.text || ""
 			if (!relPath) {
@@ -1571,6 +1629,29 @@ export const webviewMessageHandler = async (
 					fileContent: { path: relPath, content: null, error: errorMsg },
 				})
 			}
+			break
+		}
+		case "readOriginalContent": {
+			const ts = message.messageTs
+
+			if (typeof ts !== "number") {
+				break
+			}
+
+			const task = provider.getCurrentTask()
+			// A request made for another task must not be answered from the current one.
+			const isRequestedTask = message.taskId === undefined || message.taskId === task?.taskId
+			const id = { messageId: message.messageId, ts }
+
+			await provider.postMessageToWebview({
+				type: "originalContent",
+				originalContentInfo: {
+					ts,
+					messageId: message.messageId,
+					taskId: message.taskId,
+					content: isRequestedTask ? findOriginalContent(task?.clineMessages, id) : null,
+				},
+			})
 			break
 		}
 		case "openMention":
@@ -3091,7 +3172,8 @@ export const webviewMessageHandler = async (
 				await provider.postStateToWebview()
 
 				// Then handle validation and initialization for the current workspace
-				const currentCodeIndexManager = provider.getCurrentWorkspaceCodeIndexManager()
+				const scope = provider.getCurrentWorkspaceCodeIndexScope()
+				const currentCodeIndexManager = scope?.codeIndexManager
 				if (currentCodeIndexManager) {
 					// If embedder provider changed, perform proactive validation
 					if (embedderProviderChanged) {
@@ -3170,7 +3252,8 @@ export const webviewMessageHandler = async (
 		}
 
 		case "requestIndexingStatus": {
-			const manager = provider.getCurrentWorkspaceCodeIndexManager()
+			const scope = provider.getCurrentWorkspaceCodeIndexScope()
+			const manager = scope?.codeIndexManager
 			if (!manager) {
 				// No workspace open - send error status
 				await provider.postMessageToWebview({
@@ -3234,7 +3317,8 @@ export const webviewMessageHandler = async (
 		}
 		case "startIndexing": {
 			try {
-				const manager = provider.getCurrentWorkspaceCodeIndexManager()
+				const scope = provider.getCurrentWorkspaceCodeIndexScope()
+				const manager = scope?.codeIndexManager
 				if (!manager) {
 					await provider.postMessageToWebview({
 						type: "indexingStatusUpdate",
@@ -3275,15 +3359,15 @@ export const webviewMessageHandler = async (
 		}
 		case "stopIndexing": {
 			try {
-				const manager = provider.getCurrentWorkspaceCodeIndexManager()
-				if (!manager) {
+				const scope = provider.getCurrentWorkspaceCodeIndexScope()
+				if (!scope) {
 					provider.log("Cannot stop indexing: No workspace folder open")
 					return
 				}
-				manager.stopIndexing()
+				scope.codeIndexManager.stopIndexing()
 				await provider.postMessageToWebview({
 					type: "indexingStatusUpdate",
-					values: manager.getCurrentStatus(),
+					values: scope.codeIndexManager.getCurrentStatus(),
 				})
 			} catch (error) {
 				provider.log(`Error stopping indexing: ${error instanceof Error ? error.message : String(error)}`)
@@ -3292,23 +3376,12 @@ export const webviewMessageHandler = async (
 		}
 		case "toggleWorkspaceIndexing": {
 			try {
-				const manager = provider.getCurrentWorkspaceCodeIndexManager()
-				if (!manager) {
+				const scope = provider.getCurrentWorkspaceCodeIndexScope()
+				if (!scope) {
 					provider.log("Cannot toggle workspace indexing: No workspace folder open")
 					return
 				}
-				const enabled = message.bool ?? false
-				await manager.setWorkspaceEnabled(enabled)
-				if (enabled && manager.isFeatureEnabled && manager.isFeatureConfigured) {
-					await manager.initialize(provider.contextProxy)
-					void manager.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
-				} else if (!enabled) {
-					manager.stopIndexing()
-				}
-				await provider.postMessageToWebview({
-					type: "indexingStatusUpdate",
-					values: manager.getCurrentStatus(),
-				})
+				await scope.workspaceIndexingEnablementManager.setEnabled(message.bool ?? false, provider)
 			} catch (error) {
 				provider.log(
 					`Error toggling workspace indexing: ${error instanceof Error ? error.message : String(error)}`,
@@ -3318,7 +3391,8 @@ export const webviewMessageHandler = async (
 		}
 		case "setAutoEnableDefault": {
 			try {
-				const manager = provider.getCurrentWorkspaceCodeIndexManager()
+				const scope = provider.getCurrentWorkspaceCodeIndexScope()
+				const manager = scope?.codeIndexManager
 				if (!manager) {
 					provider.log("Cannot set auto-enable default: No workspace folder open")
 					return
@@ -3351,8 +3425,8 @@ export const webviewMessageHandler = async (
 		}
 		case "clearIndexData": {
 			try {
-				const manager = provider.getCurrentWorkspaceCodeIndexManager()
-				if (!manager) {
+				const scope = provider.getCurrentWorkspaceCodeIndexScope()
+				if (!scope) {
 					provider.log("Cannot clear index data: No workspace folder open")
 					await provider.postMessageToWebview({
 						type: "indexCleared",
@@ -3363,7 +3437,7 @@ export const webviewMessageHandler = async (
 					})
 					return
 				}
-				await manager.clearIndexData()
+				await scope.codeIndexManager.clearIndexData()
 				await provider.postMessageToWebview({ type: "indexCleared", values: { success: true } })
 			} catch (error) {
 				provider.log(`Error clearing index data: ${error instanceof Error ? error.message : String(error)}`)

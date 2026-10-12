@@ -270,6 +270,8 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		allowedMaxCost: undefined,
 		language: "en" as const,
 		alwaysAllowExecute: false,
+		alwaysDenyUnapprovedCommands: false,
+		destructiveCommandGuardEnabled: false,
 		alwaysAllowMcp: false,
 		alwaysAllowModeSwitch: false,
 		alwaysAllowSubtasks: false,

@@ -259,8 +259,46 @@ export function getCommandDecision(
 	allowedCommands: string[],
 	deniedCommands?: string[],
 ): CommandDecision {
+	return getCommandDecisionDetailed(command, allowedCommands, deniedCommands).decision
+}
+
+/**
+ * Result of {@link getCommandDecisionDetailed}: {@link getCommandDecision}'s
+ * plain decision plus the offending sub-command and the matched pattern that
+ * produced it, so automatic denials can tell the model exactly what went
+ * wrong.
+ */
+export interface CommandDecisionDetail {
+	decision: CommandDecision
+	/**
+	 * For `auto_deny`: the first sub-command matched by the denylist.
+	 * For `ask_user`: the first sub-command lacking an allowlist match.
+	 * For `malformed_command`: the raw (unsplit) command string.
+	 */
+	offendingCommand?: string
+	/** The matched denied prefix, for `auto_deny` decisions. */
+	matchedPattern?: string
+	/** Human-readable shell syntax error, for `malformed_command` decisions. */
+	parseError?: string
+}
+
+/**
+ * Same decision logic as {@link getCommandDecision}, additionally naming the
+ * offending sub-command (and matched denied prefix) that produced the
+ * decision, so the auto-deny feedback can point the model at the specific
+ * part of a chained command that caused the rejection.
+ *
+ * The chain-level aggregation mirrors `getCommandDecision` exactly:
+ * "any denial blocks all", dangerous substitutions force `ask_user`, and a
+ * parse error yields `malformed_command`.
+ */
+export function getCommandDecisionDetailed(
+	command: string,
+	allowedCommands: string[],
+	deniedCommands?: string[],
+): CommandDecisionDetail {
 	if (!command?.trim()) {
-		return "auto_approve"
+		return { decision: "auto_approve" }
 	}
 
 	// Parse into sub-commands (split by &&, ||, ;, |). parseCommand also
@@ -274,34 +312,44 @@ export function getCommandDecision(
 	// distinct decision lets callers surface a useful message to the agent
 	// rather than silently presenting the command for user approval.
 	if (parseError !== null) {
-		return "malformed_command"
+		return { decision: "malformed_command", offendingCommand: command, parseError: parseError.message }
 	}
 
-	// Check each sub-command and collect decisions
-	const decisions: CommandDecision[] = subCommands.map((cmd) => {
-		// Remove simple PowerShell-like redirections (e.g. 2>&1) before checking
-		const cmdWithoutRedirection = cmd.replace(/\d*>&\d*/, "").trim()
+	// Remove simple PowerShell-like redirections (e.g. 2>&1) before checking
+	const sanitizedCommands = subCommands.map((cmd) => cmd.replace(/\d*>&\d*/, "").trim())
 
-		return getSingleCommandDecision(cmdWithoutRedirection, allowedCommands, deniedCommands)
-	})
+	const decisions: CommandDecision[] = sanitizedCommands.map((cmd) =>
+		getSingleCommandDecision(cmd, allowedCommands, deniedCommands),
+	)
 
-	// If any sub-command is denied, deny the whole command
-	if (decisions.includes("auto_deny")) {
-		return "auto_deny"
+	// If any sub-command is denied, deny the whole command; name the first
+	// denied sub-command and the denied prefix it matched.
+	const denyIndex = decisions.indexOf("auto_deny")
+	if (denyIndex !== -1) {
+		const offendingCommand = sanitizedCommands[denyIndex]
+		const lowerMatch = findLongestPrefixMatch(offendingCommand, deniedCommands || [])
+		// Prefer the original-cased pattern the user typed, falling back to the
+		// case-insensitive match itself.
+		const matchedPattern =
+			(deniedCommands || []).find((pattern) => pattern.toLowerCase() === lowerMatch) ?? lowerMatch ?? undefined
+
+		return { decision: "auto_deny", offendingCommand, matchedPattern }
 	}
 
 	// Require explicit user approval for dangerous patterns
 	if (containsDangerousSubstitution(command)) {
-		return "ask_user"
+		return { decision: "ask_user" }
 	}
 
 	// If all sub-commands are approved, approve the whole command
 	if (decisions.every((decision) => decision === "auto_approve")) {
-		return "auto_approve"
+		return { decision: "auto_approve" }
 	}
 
-	// Otherwise, ask user
-	return "ask_user"
+	// Otherwise, ask user; name the first sub-command with no allowlist match.
+	const askIndex = decisions.indexOf("ask_user")
+
+	return { decision: "ask_user", offendingCommand: askIndex !== -1 ? sanitizedCommands[askIndex] : undefined }
 }
 
 /**

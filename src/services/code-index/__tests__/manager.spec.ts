@@ -1,6 +1,10 @@
+import { ContextProxy } from "../../../core/config/ContextProxy"
+import { makeExtensionContext } from "../../../test-utils/vscode"
 import { CodeIndexManager } from "../manager"
 import { CodeIndexManagerRegistry } from "../code-index-manager-registry"
 import { CodeIndexServiceFactory } from "../service-factory"
+import { CodeIndexOrchestrator } from "../orchestrator"
+import { CodeIndexSearchService } from "../search-service"
 import type { MockedClass } from "vitest"
 import * as path from "path"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
@@ -166,6 +170,66 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 
 	afterEach(() => {
 		CodeIndexManagerRegistry.disposeAll()
+	})
+
+	describe("configuration readiness", () => {
+		it("does not regain readiness when a detached configuration finishes loading", async () => {
+			let finishRefresh!: () => void
+			const contextProxy = new ContextProxy(makeExtensionContext())
+			vi.spyOn(contextProxy, "getGlobalState").mockReturnValue({ codebaseIndexEnabled: false })
+			vi.spyOn(contextProxy, "getSecret").mockReturnValue(undefined)
+			vi.spyOn(contextProxy, "refreshSecrets").mockReturnValue(
+				new Promise<void>((resolve) => {
+					finishRefresh = resolve
+				}),
+			)
+
+			const initialization = manager.initialize(contextProxy)
+			expect(manager.isConfigurationLoaded).toBe(false)
+			await manager.recoverFromError()
+			finishRefresh()
+			await initialization
+			expect(manager.isConfigurationLoaded).toBe(false)
+		})
+
+		it("keeps failed configuration unloaded until a settings refresh succeeds", async () => {
+			const error = new Error("secrets refresh failed")
+			const contextProxy = new ContextProxy(makeExtensionContext())
+			vi.spyOn(contextProxy, "getGlobalState").mockReturnValue({ codebaseIndexEnabled: false })
+			vi.spyOn(contextProxy, "getSecret").mockReturnValue(undefined)
+			vi.spyOn(contextProxy, "refreshSecrets").mockRejectedValueOnce(error).mockResolvedValue(undefined)
+
+			await expect(manager.initialize(contextProxy)).rejects.toThrow(error)
+			expect(manager.isConfigurationLoaded).toBe(false)
+			await manager.handleSettingsChange()
+			expect(manager.isConfigurationLoaded).toBe(true)
+			expect(manager.isInitialized).toBe(false)
+		})
+
+		it("marks disabled configuration loaded only after secrets refresh completes", async () => {
+			let finishRefresh!: () => void
+			const refresh = new Promise<void>((resolve) => {
+				finishRefresh = resolve
+			})
+			const contextProxy = new ContextProxy(makeExtensionContext())
+			vi.spyOn(contextProxy, "getGlobalState").mockReturnValue({ codebaseIndexEnabled: false })
+			vi.spyOn(contextProxy, "getSecret").mockReturnValue(undefined)
+			vi.spyOn(contextProxy, "refreshSecrets").mockReturnValue(refresh)
+
+			expect(manager.isConfigurationLoaded).toBe(false)
+			const initialization = manager.initialize(contextProxy)
+			expect(contextProxy.refreshSecrets).toHaveBeenCalledOnce()
+			expect(manager.isConfigurationLoaded).toBe(false)
+			finishRefresh()
+			await initialization
+
+			expect(manager.isConfigurationLoaded).toBe(true)
+			expect(manager.isFeatureEnabled).toBe(false)
+			expect(manager.isInitialized).toBe(false)
+
+			await manager.recoverFromError()
+			expect(manager.isConfigurationLoaded).toBe(false)
+		})
 	})
 
 	describe("handleSettingsChange", () => {
@@ -412,63 +476,19 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			;(manager as any)._configManager = mockConfigManager
 		})
 
-		it("should validate embedder during _recreateServices when validation succeeds", async () => {
-			// Arrange
-			mockServiceFactoryInstance.validateEmbedder.mockResolvedValue({ valid: true })
+		it("should create indexing services without a startup embedder validation request", async () => {
+			mockServiceFactoryInstance.validateEmbedder.mockResolvedValue({
+				valid: false,
+				error: "Embedder unavailable",
+			})
 
-			// Act - directly call the private method for testing
-			await (manager as any)._recreateServices()
+			await manager["_recreateServices"]()
 
-			// Assert
 			expect(mockServiceFactoryInstance.createServices).toHaveBeenCalled()
-			const createdEmbedder = mockServiceFactoryInstance.createServices.mock.results[0].value.embedder
-			expect(mockServiceFactoryInstance.validateEmbedder).toHaveBeenCalledWith(createdEmbedder)
+			expect(mockServiceFactoryInstance.validateEmbedder).not.toHaveBeenCalled()
 			expect(mockStateManager.setSystemState).not.toHaveBeenCalledWith("Error", expect.any(String))
-		})
-
-		it("should set error state when embedder validation fails", async () => {
-			// Arrange
-			mockServiceFactoryInstance.validateEmbedder.mockResolvedValue({
-				valid: false,
-				error: "embeddings:validation.authenticationFailed",
-			})
-
-			// Act & Assert
-			await expect((manager as any)._recreateServices()).rejects.toThrow(
-				"embeddings:validation.authenticationFailed",
-			)
-
-			// Assert other expectations
-			expect(mockServiceFactoryInstance.createServices).toHaveBeenCalled()
-			const createdEmbedder = mockServiceFactoryInstance.createServices.mock.results[0].value.embedder
-			expect(mockServiceFactoryInstance.validateEmbedder).toHaveBeenCalledWith(createdEmbedder)
-			expect(mockStateManager.setSystemState).toHaveBeenCalledWith(
-				"Error",
-				"embeddings:validation.authenticationFailed",
-			)
-		})
-
-		it("should set generic error state when embedder validation throws", async () => {
-			// Arrange
-			// Since the real service factory catches exceptions, we should mock it to resolve with an error
-			mockServiceFactoryInstance.validateEmbedder.mockResolvedValue({
-				valid: false,
-				error: "embeddings:validation.configurationError",
-			})
-
-			// Act & Assert
-			await expect((manager as any)._recreateServices()).rejects.toThrow(
-				"embeddings:validation.configurationError",
-			)
-
-			// Assert other expectations
-			expect(mockServiceFactoryInstance.createServices).toHaveBeenCalled()
-			const createdEmbedder = mockServiceFactoryInstance.createServices.mock.results[0].value.embedder
-			expect(mockServiceFactoryInstance.validateEmbedder).toHaveBeenCalledWith(createdEmbedder)
-			expect(mockStateManager.setSystemState).toHaveBeenCalledWith(
-				"Error",
-				"embeddings:validation.configurationError",
-			)
+			expect(manager["_orchestrator"]).toBeInstanceOf(CodeIndexOrchestrator)
+			expect(manager["_searchService"]).toBeInstanceOf(CodeIndexSearchService)
 		})
 
 		it("should handle embedder creation failure", async () => {
@@ -622,7 +642,7 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			// Assert - manager should be initialized again
 			expect(manager.isInitialized).toBe(true)
 			expect(mockServiceFactoryInstance.createServices).toHaveBeenCalled()
-			expect(mockServiceFactoryInstance.validateEmbedder).toHaveBeenCalled()
+			expect(mockServiceFactoryInstance.validateEmbedder).not.toHaveBeenCalled()
 		})
 
 		it("should be safe to call when not in error state (idempotent)", async () => {

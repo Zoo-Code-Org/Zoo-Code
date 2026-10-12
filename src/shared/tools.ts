@@ -2,13 +2,31 @@ import { Anthropic } from "@anthropic-ai/sdk"
 
 import type { ClineAsk, ToolProgressStatus, ToolGroup, ToolName, GenerateImageParams } from "@roo-code/types"
 
+import type { DcgDecision } from "../services/destructive-command-guard/runner"
+
 export type ToolResponse = string | Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam>
+
+/**
+ * Extra inputs that only some ask types consult when resolving auto-approval.
+ * Carried from the tool through `askApproval` into `Task.ask` and onward to
+ * `checkAutoApproval`. All fields are optional, so tools that pass nothing
+ * keep the existing behavior.
+ */
+export type AutoApprovalContext = {
+	/**
+	 * Verdict of a Destructive Command Guard run the tool already performed
+	 * for this exact command (`execute_command` only). Infra failures never
+	 * produce a verdict — they surface as a retryable tool error beforehand.
+	 */
+	dcgDecision?: DcgDecision
+}
 
 export type AskApproval = (
 	type: ClineAsk,
 	partialMessage?: string,
 	progressStatus?: ToolProgressStatus,
 	forceApproval?: boolean,
+	autoApprovalContext?: AutoApprovalContext,
 ) => Promise<boolean>
 
 export type HandleError = (action: string, error: Error) => Promise<void>

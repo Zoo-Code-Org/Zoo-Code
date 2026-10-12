@@ -346,6 +346,10 @@
 				"label": "Yıkıcı komut korumasını etkinleştir",
 				"description": "Bu platform için Destructive Command Guard'ı (DCG) indirir ve kullanır. DCG'nin izin verdiği komutlar otomatik olarak çalıştırılır. DCG tarafından engellenen komutlar onayını gerektirir. Bu seçenek etkinken Zoo'nun komut listeleri devre dışı bırakılır. Seçeneği kapatsan da indirilen çalıştırılabilir dosya korunur."
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "İzin Verilen Otomatik Yürütme Komutları",
 			"allowedCommandsDescription": "\"Yürütme işlemlerini her zaman onayla\" etkinleştirildiğinde otomatik olarak yürütülebilen komut önekleri. Tüm komutlara izin vermek için * ekleyin (dikkatli kullanın).",
 			"deniedCommands": "Reddedilen komutlar",
@@ -394,6 +398,11 @@
 		"vscodeLmDescription": "VS Code Dil Modeli API'si, diğer VS Code uzantıları tarafından sağlanan modelleri çalıştırmanıza olanak tanır (GitHub Copilot dahil ancak bunlarla sınırlı değildir). Başlamanın en kolay yolu, VS Code Marketplace'ten Copilot ve Copilot Chat uzantılarını yüklemektir.",
 		"awsCustomArnUse": "Kullanmak istediğiniz model için geçerli bir Amazon Bedrock ARN'si girin. Format örnekleri:",
 		"awsCustomArnDesc": "ARN içindeki bölgenin yukarıda seçilen AWS Bölgesiyle eşleştiğinden emin olun.",
+		"awsCustomArnBaseModel": "Temel model",
+		"awsCustomArnBaseModelOther": "Diğer (listede yok)",
+		"awsCustomArnBaseModelDesc": "Bu ARN'nin işaret ettiği model. Zoo Code bunu düşünme, sıcaklık, bağlam penceresi, maksimum çıktı ve fiyatlandırma için kullanır. ARN model adını içerdiğinde otomatik olarak algılanır.",
+		"awsCustomArnContextWindow": "Bağlam penceresi (token)",
+		"awsCustomArnMaxTokens": "Maksimum çıktı tokenı",
 		"openRouterApiKey": "OpenRouter API Anahtarı",
 		"getOpenRouterApiKey": "OpenRouter API Anahtarı Al",
 		"vercelAiGatewayApiKey": "Vercel AI Gateway API Anahtarı",
@@ -536,6 +545,8 @@
 		"openAiApiKey": "OpenAI API Anahtarı",
 		"apiKey": "API Anahtarı",
 		"openAiBaseUrl": "Temel URL",
+		"openAiStrictToolSchemas": "Katı araç şemaları (strict: true)",
+		"openAiStrictToolSchemasDescription": "Şema uyumunu etkinleştirmek için araç şemalarıyla strict: true gönderir. Katı olmayan araç çağırmak için devre dışı bırakın.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure dağıtım adı",
 		"azureOpenAiDeploymentNameDescription": "Temel model adı yerine Azure AI Studio'daki dağıtım adını girin.",
@@ -667,6 +678,10 @@
 			"description": "'Zoo sorun yaşıyor' iletişim kutusunu göstermeden önceki ardışık hata veya tekrarlanan eylem sayısı. Bu güvenlik mekanizmasını devre dışı bırakmak için 0 olarak ayarlayın (asla tetiklenmez).",
 			"unlimitedDescription": "Sınırsız yeniden deneme etkin (otomatik devam et). Diyalog asla görünmeyecek.",
 			"warning": "⚠️ 0'a ayarlamak, önemli API kullanımına neden olabilecek sınırsız yeniden denemeye izin verir"
+		},
+		"toolRepetitionSoftLimit": {
+			"label": "Tekrar Yumuşak Uyarı Eşiği",
+			"description": "Bu kadar aynı ardışık araç çağrısından sonra araç engellenir ve sizi dahil etmeden yapay zekadan yeniden denemeyi gerekçelendirmesi istenir. Yumuşak uyarıları devre dışı bırakmak için 0 olarak ayarlayın."
 		},
 		"reasoningEffort": {
 			"label": "Model Akıl Yürütme Çabası",

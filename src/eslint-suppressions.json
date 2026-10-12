@@ -46,7 +46,7 @@
 	},
 	"__tests__/new-task-delegation.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 9
+			"count": 8
 		}
 	},
 	"activate/CodeActionProvider.ts": {
@@ -136,7 +136,7 @@
 	},
 	"api/providers/__tests__/bedrock.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 38
+			"count": 37
 		}
 	},
 	"api/providers/__tests__/deepseek.spec.ts": {
@@ -654,11 +654,6 @@
 			"count": 1
 		}
 	},
-	"core/config/__tests__/ProviderSettingsManager.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
 	"core/context-management/__tests__/context-management.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
@@ -761,7 +756,7 @@
 	},
 	"core/prompts/tools/filter-tools-for-mode.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 3
+			"count": 1
 		}
 	},
 	"core/prompts/tools/native-tools/__tests__/converters.spec.ts": {
@@ -919,11 +914,6 @@
 			"count": 16
 		}
 	},
-	"core/tools/__tests__/ToolRepetitionDetector.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
 	"core/tools/__tests__/askFollowupQuestionTool.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 20
@@ -966,7 +956,7 @@
 	},
 	"core/tools/__tests__/mcpServerRestriction.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 7
+			"count": 6
 		}
 	},
 	"core/tools/__tests__/newTaskTool.spec.ts": {
@@ -976,7 +966,7 @@
 	},
 	"core/tools/__tests__/readFileTool.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 98
+			"count": 96
 		}
 	},
 	"core/tools/__tests__/runSlashCommandTool.spec.ts": {
@@ -1036,12 +1026,12 @@
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 198
+			"count": 196
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 37
+			"count": 27
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-profile.spec.ts": {
@@ -1301,12 +1291,12 @@
 	},
 	"services/code-index/__tests__/manager.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 87
+			"count": 84
 		}
 	},
 	"services/code-index/__tests__/orchestrator.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 25
+			"count": 23
 		}
 	},
 	"services/code-index/__tests__/service-factory.spec.ts": {

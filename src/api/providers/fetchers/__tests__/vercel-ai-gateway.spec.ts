@@ -77,7 +77,9 @@ describe("Vercel AI Gateway Fetchers", () => {
 
 			const models = await getVercelAiGatewayModels()
 
-			expect(mockedAxios.get).toHaveBeenCalledWith("https://ai-gateway.vercel.sh/v1/models")
+			expect(mockedAxios.get).toHaveBeenCalledWith("https://ai-gateway.vercel.sh/v1/models", {
+				signal: undefined,
+			})
 			expect(Object.keys(models)).toHaveLength(2) // Only language models
 			expect(models["anthropic/claude-sonnet-4"]).toBeDefined()
 			expect(models["anthropic/claude-3.5-haiku"]).toBeDefined()
@@ -110,6 +112,37 @@ describe("Vercel AI Gateway Fetchers", () => {
 			expect(models).toEqual({})
 			expect(consoleErrorSpy).toHaveBeenCalled()
 			consoleErrorSpy.mockRestore()
+		})
+
+		it("passes the caller's abort signal to the catalog request", async () => {
+			const controller = new AbortController()
+			mockedAxios.get.mockResolvedValueOnce({ data: { object: "list", data: [] } })
+
+			await getVercelAiGatewayModels(undefined, { signal: controller.signal })
+
+			expect(mockedAxios.get).toHaveBeenCalledWith("https://ai-gateway.vercel.sh/v1/models", {
+				signal: controller.signal,
+			})
+		})
+
+		it("rejects with an AbortError when the signal aborts the pending request", async () => {
+			const controller = new AbortController()
+			mockedAxios.get.mockImplementation((_url: string, config?: { signal?: AbortSignal }) => {
+				// Mirror the HTTP client: a request rejects when its signal fires,
+				// including when the signal was already aborted when the request started.
+				return new Promise<never>((_resolve, reject) => {
+					if (config?.signal?.aborted) {
+						reject(new Error("canceled"))
+						return
+					}
+					config?.signal?.addEventListener?.("abort", () => reject(new Error("canceled")), { once: true })
+				})
+			})
+
+			const fetchPromise = getVercelAiGatewayModels(undefined, { signal: controller.signal })
+			controller.abort()
+
+			await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
 		})
 
 		it("continues processing with partially valid schema", async () => {
@@ -291,6 +324,22 @@ describe("Vercel AI Gateway Fetchers", () => {
 				model: {
 					...baseModel,
 					id: "anthropic/claude-opus-5",
+					context_window: 1000000,
+					max_tokens: 128000,
+				},
+			})
+
+			expect(result.maxTokens).toBe(128000)
+			expect(result.contextWindow).toBe(1000000)
+			expect(result.supportsTemperature).toBe(false)
+		})
+
+		it("marks Claude Opus 5.5 as not supporting temperature", () => {
+			const result = parseVercelAiGatewayModel({
+				id: "anthropic/claude-opus-5-5",
+				model: {
+					...baseModel,
+					id: "anthropic/claude-opus-5-5",
 					context_window: 1000000,
 					max_tokens: 128000,
 				},

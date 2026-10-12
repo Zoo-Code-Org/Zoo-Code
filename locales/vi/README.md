@@ -46,11 +46,11 @@ Zoo Code phát triển trên nền tảng do Roo Code tạo ra và tiếp tục 
 - **Workflow terminal và chỉnh sửa đáng tin cậy hơn** — sửa lỗi terminal hoàn tất quá sớm, xung đột trạng thái tác vụ, quản lý ngữ cảnh, chỉnh sửa diff và sử dụng công cụ riêng của từng provider.
 - **Kiểm soát workspace tốt hơn** — quản lý quy tắc, giới hạn MCP theo từng chế độ, kiểm soát đường dẫn multi-root, tùy chọn reasoning của model và thao tác xem lại thay đổi khi hoàn tất.
 
-## Điểm mới trong v3.82.0
+## Điểm mới trong v3.88.0
 
-- 🔑 **Dùng khóa API Zoo Gateway ở bất cứ đâu** — thêm khóa vào bất kỳ client hoặc workflow nào tương thích với OpenAI: https://zoocode.dev/models
-- 🎁 **Quyền truy cập model miễn phí trong thời gian giới hạn** — truy cập MiniMax-M3 miễn phí qua Zoo Gateway.
-- ✨ **Các model hoàn toàn mới** — GPT-6 Astra và Claude Fable 5.1 hiện đã có sẵn.
+- ✨ **Hỗ trợ provider và model:** Dùng Grok Build và hỗ trợ model tùy chỉnh đã được cải thiện. Bản phát hành này cũng sửa các giới hạn model Bedrock và gửi cài đặt verbosity của Codex.
+- 🧭 **Độ tin cậy của task:** Bản phát hành này sửa cách xử lý hủy, việc tiếp tục lượt tool và việc lưu message task.
+- ⚡ **Chỉnh sửa và chat nhanh hơn:** Ghi file mặc định không còn dùng độ trễ nhân tạo. Message chat mang ít dữ liệu file hơn, và code action đến được chat hoạt động gần nhất.
 
 ## Zoo Code có thể làm gì cho BẠN?
 

@@ -344,10 +344,10 @@
 		"title": "Zoo Code {{version}} 已发布",
 		"support": "请在 <githubLink>GitHub</githubLink> 上为 Zoo Code 点星支持我们。",
 		"release": {
-			"heading": "新增功能：",
-			"highlight1": "🔑 随处使用你的 Zoo Gateway API 密钥——可将其用于任何兼容 OpenAI 的客户端或工作流：<modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "🎁 限时通过 Zoo Gateway 免费使用 MiniMax-M3。",
-			"highlight3": "✨ 全新上线：GPT-6 Astra 和 Claude Fable 5.1 模型。"
+			"heading": "Zoo Code v3.88.0 新增内容",
+			"highlight1": "✨ Provider 与模型支持：使用 Grok Build 和改进后的自定义模型支持。本版本还修复了 Bedrock 模型上限，并发送 Codex verbosity 设置。",
+			"highlight2": "🧭 任务可靠性：本版本修复了取消处理、tool turn 续行和任务消息保存。",
+			"highlight3": "⚡ 更快的编辑与聊天：文件写入默认不再使用人为延迟。聊天消息携带更少的文件数据，代码操作会到达最近活动的聊天。"
 		},
 		"cloudAgents": {
 			"heading": "云端新功能：",

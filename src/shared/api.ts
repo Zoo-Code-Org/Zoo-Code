@@ -125,6 +125,9 @@ export const getModelMaxOutputTokens = ({
 
 	// For "Hybrid" reasoning models, discard the model's actual maxTokens for Anthropic contexts
 	if (model.supportsReasoningBudget && isAnthropicContext) {
+		if (model.supportsMaxTokens && settings?.modelMaxTokens != null && settings.modelMaxTokens > 0) {
+			return model.maxTokens ? Math.min(settings.modelMaxTokens, model.maxTokens) : settings.modelMaxTokens
+		}
 		return ANTHROPIC_DEFAULT_MAX_TOKENS
 	}
 
@@ -166,11 +169,15 @@ export const getModelMaxOutputTokens = ({
 
 // GetModelsOptions
 
-// Allow callers to always pass apiKey/baseUrl without excess property errors,
+// Allow callers to always pass apiKey/baseUrl/signal without excess property errors,
 // while still enforcing required fields per provider where applicable.
 type CommonFetchParams = {
 	apiKey?: string
 	baseUrl?: string
+	// Optional cancellation for model-catalog fetches (getModels/refreshModels): the signal is
+	// threaded through the model-cache single-flight so an aborted caller stops waiting at the
+	// moment of abort. Every provider arm inherits it via the intersection below.
+	signal?: AbortSignal
 }
 
 // Exhaustive, value-level map for all dynamic providers.

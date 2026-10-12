@@ -346,6 +346,10 @@
 				"label": "Включить защиту от разрушительных команд",
 				"description": "Скачивает и использует Destructive Command Guard (DCG) для этой платформы. Разрешённые DCG команды выполняются автоматически. Команды, заблокированные DCG, требуют твоего подтверждения. Пока эта настройка включена, списки команд Zoo отключены. Скачанный исполняемый файл сохраняется после отключения настройки."
 			},
+			"autoDeny": {
+				"label": "Auto-deny unapproved commands (never ask)",
+				"description": "When auto-approval for command execution is on, no confirmation prompts appear for commands. DCG off: everything not on the allowlist is auto-denied. DCG on: everything DCG does not approve is auto-denied, with the DCG reason sent to the model. No confirmation prompts."
+			},
 			"allowedCommands": "Разрешённые авто-выполняемые команды",
 			"allowedCommandsDescription": "Префиксы команд, которые могут быть автоматически выполнены при включённом параметре \"Всегда одобрять выполнение операций\". Добавьте * для разрешения всех команд (используйте с осторожностью).",
 			"deniedCommands": "Запрещенные команды",
@@ -394,6 +398,11 @@
 		"vscodeLmDescription": "API языковой модели VS Code позволяет запускать модели, предоставляемые другими расширениями VS Code (включая, но не ограничиваясь GitHub Copilot). Для начала установите расширения Copilot и Copilot Chat из VS Code Marketplace.",
 		"awsCustomArnUse": "Введите действительный Amazon Bedrock ARN для используемой модели. Примеры формата:",
 		"awsCustomArnDesc": "Убедитесь, что регион в ARN совпадает с выбранным выше регионом AWS.",
+		"awsCustomArnBaseModel": "Базовая модель",
+		"awsCustomArnBaseModelOther": "Другая (нет в списке)",
+		"awsCustomArnBaseModelDesc": "Модель, на которую указывает этот ARN. Zoo Code использует её для мышления, температуры, контекстного окна, максимального вывода и цен. Определяется автоматически, если ARN содержит имя модели.",
+		"awsCustomArnContextWindow": "Контекстное окно (токены)",
+		"awsCustomArnMaxTokens": "Максимум выходных токенов",
 		"openRouterApiKey": "OpenRouter API-ключ",
 		"getOpenRouterApiKey": "Получить OpenRouter API-ключ",
 		"vercelAiGatewayApiKey": "Ключ API Vercel AI Gateway",
@@ -536,6 +545,8 @@
 		"apiKey": "API-ключ",
 		"openAiApiKey": "OpenAI API-ключ",
 		"openAiBaseUrl": "Базовый URL",
+		"openAiStrictToolSchemas": "Строгие схемы инструментов (strict: true)",
+		"openAiStrictToolSchemasDescription": "Отправляет strict: true вместе со схемами инструментов, чтобы включить строгое соблюдение схемы. Отключите, чтобы использовать нестрогий вызов инструментов.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Имя развёртывания Azure",
 		"azureOpenAiDeploymentNameDescription": "Введите имя развёртывания из Azure AI Studio, а не имя базовой модели.",
@@ -667,6 +678,10 @@
 			"description": "Количество последовательных ошибок или повторных действий перед показом диалогового окна 'У Zoo возникли проблемы'. Установите 0, чтобы отключить этот механизм безопасности (он никогда не сработает).",
 			"unlimitedDescription": "Включены неограниченные повторные попытки (автоматическое продолжение). Диалоговое окно никогда не появится.",
 			"warning": "⚠️ Установка значения 0 разрешает неограниченные повторные попытки, что может значительно увеличить использование API"
+		},
+		"toolRepetitionSoftLimit": {
+			"label": "Порог мягкого предупреждения о повторах",
+			"description": "После такого количества идентичных последовательных вызовов инструмента инструмент блокируется, и ИИ предлагается обосновать повторную попытку — без вашего участия. Установите 0, чтобы отключить мягкие предупреждения."
 		},
 		"reasoningEffort": {
 			"label": "Усилия по рассуждению модели",

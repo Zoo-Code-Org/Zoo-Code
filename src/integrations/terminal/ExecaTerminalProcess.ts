@@ -5,6 +5,8 @@ import process from "process"
 import type { RooTerminal } from "./types"
 import { BaseTerminal } from "./BaseTerminal"
 import { BaseTerminalProcess } from "./BaseTerminalProcess"
+import { getShell } from "../../utils/shell"
+import { getUtf8LocaleEnv } from "./localeEnv"
 
 export class ExecaTerminalProcess extends BaseTerminalProcess {
 	private terminalRef: WeakRef<RooTerminal>
@@ -40,16 +42,16 @@ export class ExecaTerminalProcess extends BaseTerminalProcess {
 			this.isHot = true
 
 			this.subprocess = execa({
-				shell: BaseTerminal.getExecaShellPath() || true,
+				shell: BaseTerminal.getExecaShellPath() || getShell(),
 				cwd: this.terminal.getCurrentWorkingDirectory(),
 				all: true,
 				// Ignore stdin to ensure non-interactive mode and prevent hanging
 				stdin: "ignore",
 				env: {
 					...process.env,
-					// Ensure UTF-8 encoding for Ruby, CocoaPods, etc.
-					LANG: "en_US.UTF-8",
-					LC_ALL: "en_US.UTF-8",
+					// Keep the host locale when it already is UTF-8 (e.g. en_AU.UTF-8), otherwise
+					// fall back to en_US.UTF-8 so tools such as Ruby and CocoaPods still emit UTF-8.
+					...getUtf8LocaleEnv(),
 				},
 			})`${command}`
 

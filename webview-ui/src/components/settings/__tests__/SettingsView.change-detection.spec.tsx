@@ -400,6 +400,8 @@ describe("SettingsView - Change Detection Fix", () => {
 		allowedMaxCost: undefined,
 		language: "en",
 		alwaysAllowExecute: false,
+		alwaysDenyUnapprovedCommands: false,
+		destructiveCommandGuardEnabled: false,
 		alwaysAllowMcp: false,
 		alwaysAllowModeSwitch: false,
 		alwaysAllowSubtasks: false,

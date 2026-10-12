@@ -343,10 +343,10 @@
 		"title": "Rilasciato Zoo Code {{version}}",
 		"support": "Sostieni Zoo Code lasciandoci una stella su <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Novità:",
-			"highlight1": "🔑 Usa la tua chiave API Zoo Gateway ovunque: portala in qualsiasi client o workflow compatibile con OpenAI: <modelsLink>https://zoocode.dev/models</modelsLink>",
-			"highlight2": "🎁 Per un periodo limitato, accedi gratuitamente a MiniMax-M3 tramite Zoo Gateway.",
-			"highlight3": "✨ Ora disponibili: i nuovissimi modelli GPT-6 Astra e Claude Fable 5.1."
+			"heading": "Novità di Zoo Code v3.88.0",
+			"highlight1": "✨ Supporto per provider e modelli: Usa Grok Build e un supporto migliorato per i modelli personalizzati. Questa versione corregge anche i limiti dei modelli Bedrock e invia l'impostazione di verbosità di Codex.",
+			"highlight2": "🧭 Affidabilità delle attività: Questa versione corregge la gestione degli annullamenti, la continuazione dei turni dei tool e il salvataggio dei messaggi delle attività.",
+			"highlight3": "⚡ Modifica e chat più veloci: Le scritture dei file non usano più ritardi artificiali per impostazione predefinita. I messaggi della chat trasportano meno dati dei file, e le azioni del codice raggiungono l'ultima chat attiva."
 		},
 		"cloudAgents": {
 			"heading": "Novità nel Cloud:",

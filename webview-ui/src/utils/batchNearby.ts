@@ -12,7 +12,7 @@ export interface BatchNearbyOptions<T> {
 	/** Returns true if this item is the target type to batch (e.g., readFile ask) */
 	isTarget: (item: T) => boolean
 	/** Returns true if this item can be skipped over when looking for more targets */
-	isIgnorableBetweenTargets: (item: T) => boolean
+	isIgnorableBetweenTargets: (item: T, batchContext?: T) => boolean
 	/** Returns true if this item is a semantic boundary that stops merging */
 	isBoundary: (item: T) => boolean
 	/** Synthesize a batch of items into a single item */
@@ -43,15 +43,22 @@ export function batchNearby<T>(items: T[], options: BatchNearbyOptions<T>): T[] 
 			const batch: T[] = [items[i]]
 			let j = i + 1
 			const pendingIgnorable: T[] = []
+			let batchContext: T | undefined
+
+			for (let contextIndex = i - 1; contextIndex >= 0; contextIndex--) {
+				if (!isIgnorableBetweenTargets(items[contextIndex])) {
+					batchContext = items[contextIndex]
+					break
+				}
+			}
 
 			while (j < items.length) {
-				if (isBoundary(items[j])) {
+				if (isBoundary(items[j]) && !isIgnorableBetweenTargets(items[j], batchContext)) {
 					break // boundary stops the batch
-				}
-				if (isTarget(items[j])) {
+				} else if (isTarget(items[j])) {
 					batch.push(items[j])
 					j++
-				} else if (isIgnorableBetweenTargets(items[j])) {
+				} else if (isIgnorableBetweenTargets(items[j], batchContext)) {
 					pendingIgnorable.push(items[j]) // track but don't commit yet
 					j++
 				} else {

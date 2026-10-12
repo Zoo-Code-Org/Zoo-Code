@@ -5,7 +5,13 @@ import type { ModelInfo } from "@roo-code/types"
 import { parseApiPrice } from "../../../shared/cost"
 import { toRequestyServiceUrl } from "../../../shared/utils/requesty"
 
-export async function getRequestyModels(baseUrl?: string, apiKey?: string): Promise<Record<string, ModelInfo>> {
+import { throwIfAborted } from "../utils/abort-signal"
+
+export async function getRequestyModels(
+	baseUrl?: string,
+	apiKey?: string,
+	opts?: { signal?: AbortSignal },
+): Promise<Record<string, ModelInfo>> {
 	const models: Record<string, ModelInfo> = {}
 
 	try {
@@ -18,7 +24,7 @@ export async function getRequestyModels(baseUrl?: string, apiKey?: string): Prom
 		const resolvedBaseUrl = toRequestyServiceUrl(baseUrl)
 		const modelsUrl = new URL("v1/models", resolvedBaseUrl)
 
-		const response = await axios.get(modelsUrl.toString(), { headers })
+		const response = await axios.get(modelsUrl.toString(), { headers, signal: opts?.signal })
 		const rawModels = response.data.data
 
 		for (const rawModel of rawModels) {
@@ -63,9 +69,19 @@ export async function getRequestyModels(baseUrl?: string, apiKey?: string): Prom
 				modelInfo.supportsTemperature = false
 			}
 
+			if (rawModel.id === "anthropic/claude-opus-5-5") {
+				modelInfo.supportsReasoningBudget = true
+				modelInfo.supportsReasoningBinary = true
+				modelInfo.supportsTemperature = false
+			}
+
 			models[rawModel.id] = modelInfo
 		}
 	} catch (error) {
+		// Surface cancellation as a rejection: logging and returning here would
+		// present an aborted fetch to callers as a successful (partial) catalog.
+		throwIfAborted(opts?.signal)
+
 		console.error(`Error fetching Requesty models: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`)
 	}
 
