@@ -81,7 +81,11 @@ describe("checkpointSave change-journal wiring (B2)", () => {
 	let saveCheckpointSpy: Mock
 	let mockProvider: ProviderLike
 	let mockTask: TaskLike
-	const write: CheckpointWriteInfo = { path: "src/foo.ts", operation: "create", diffStats: { additions: 3, deletions: 0 } }
+	const write: CheckpointWriteInfo = {
+		path: "src/foo.ts",
+		operation: "create",
+		diffStats: { additions: 3, deletions: 0 },
+	}
 
 	beforeEach(async () => {
 		tmpStorageDir = await fs.mkdtemp(path.join(os.tmpdir(), "b2-journal-wiring-"))

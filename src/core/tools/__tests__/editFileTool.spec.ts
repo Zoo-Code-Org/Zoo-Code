@@ -796,12 +796,11 @@ describe("editFileTool", () => {
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
 			// B2: the write info threads the path, operation, and the approval
 			// diff stats into the checkpoint hook.
-			expect(mockedCheckpointSave).toHaveBeenCalledWith(
-				mockTask,
-				false,
-				true,
-				{ path: testFilePath, operation: "update", diffStats: { additions: 1, deletions: 1 } },
-			)
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask, false, true, {
+				path: testFilePath,
+				operation: "update",
+				diffStats: { additions: 1, deletions: 1 },
+			})
 		})
 
 		it("does not record a checkpoint when perWriteCheckpoints is disabled", async () => {
@@ -834,12 +833,11 @@ describe("editFileTool", () => {
 
 			expect(mockTask.consecutiveMistakeCount).toBe(0)
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
-			expect(mockedCheckpointSave).toHaveBeenCalledWith(
-				mockTask,
-				false,
-				true,
-				{ path: testFilePath, operation: "create", diffStats: { additions: 1, deletions: 1 } },
-			)
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask, false, true, {
+				path: testFilePath,
+				operation: "create",
+				diffStats: { additions: 1, deletions: 1 },
+			})
 		})
 
 		it("omits diff stats from the checkpoint write when the diff has no stats", async () => {
@@ -850,12 +848,10 @@ describe("editFileTool", () => {
 
 			expect(mockTask.consecutiveMistakeCount).toBe(0)
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
-			expect(mockedCheckpointSave).toHaveBeenCalledWith(
-				mockTask,
-				false,
-				true,
-				{ path: testFilePath, operation: "update" },
-			)
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask, false, true, {
+				path: testFilePath,
+				operation: "update",
+			})
 		})
 	})
 })

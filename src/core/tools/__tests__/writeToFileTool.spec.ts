@@ -489,12 +489,11 @@ describe("writeToFileTool", () => {
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
 			// B2: the write info threads the path, operation, and the approval
 			// diff stats (3 added lines, 0 removed) into the checkpoint hook.
-			expect(mockedCheckpointSave).toHaveBeenCalledWith(
-				mockCline,
-				false,
-				true,
-				{ path: testFilePath, operation: "create", diffStats: { additions: 3, deletions: 0 } },
-			)
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockCline, false, true, {
+				path: testFilePath,
+				operation: "create",
+				diffStats: { additions: 3, deletions: 0 },
+			})
 		})
 
 		it("does not record a checkpoint when perWriteCheckpoints is disabled", async () => {
@@ -578,12 +577,11 @@ describe("writeToFileTool", () => {
 				true,
 				1000,
 			)
-			expect(mockedCheckpointSave).toHaveBeenCalledWith(
-				mockCline,
-				false,
-				true,
-				{ path: testFilePath, operation: "create", diffStats: { additions: 3, deletions: 0 } },
-			)
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockCline, false, true, {
+				path: testFilePath,
+				operation: "create",
+				diffStats: { additions: 3, deletions: 0 },
+			})
 		})
 
 		it("omits diff stats from the checkpoint write when the approval diff is empty", async () => {
@@ -594,12 +592,10 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({}, { fileExists: true })
 
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
-			expect(mockedCheckpointSave).toHaveBeenCalledWith(
-				mockCline,
-				false,
-				true,
-				{ path: testFilePath, operation: "update" },
-			)
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockCline, false, true, {
+				path: testFilePath,
+				operation: "update",
+			})
 		})
 	})
 })

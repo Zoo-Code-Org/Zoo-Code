@@ -40,11 +40,7 @@ export function journalPath(globalStorageDir: string, taskId: string): string {
  * Uses appendFile so each write is a single syscall — minimal torn-write risk.
  * Creates parent directories if they don't exist yet (e.g. first checkpoint).
  */
-export async function appendChange(
-	globalStorageDir: string,
-	taskId: string,
-	entry: ChangeJournalEntry,
-): Promise<void> {
+export async function appendChange(globalStorageDir: string, taskId: string, entry: ChangeJournalEntry): Promise<void> {
 	const filePath = journalPath(globalStorageDir, taskId)
 	await fs.mkdir(path.dirname(filePath), { recursive: true })
 	const line = JSON.stringify(entry) + "\n"
@@ -58,10 +54,7 @@ export async function appendChange(
  * silently discarded.  The rest of the file is returned in order.  An absent
  * or empty journal returns [].
  */
-export async function loadChanges(
-	globalStorageDir: string,
-	taskId: string,
-): Promise<ChangeJournalEntry[]> {
+export async function loadChanges(globalStorageDir: string, taskId: string): Promise<ChangeJournalEntry[]> {
 	const filePath = journalPath(globalStorageDir, taskId)
 
 	let content: string
