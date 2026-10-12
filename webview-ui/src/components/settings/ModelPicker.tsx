@@ -1,9 +1,10 @@
-import { useMemo, useState, useCallback, useEffect, useRef } from "react"
+import { useMemo, useState, useCallback, useEffect, useRef, type ReactNode } from "react"
 import { VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 import { Trans } from "react-i18next"
 import { ChevronsUpDown, Check, X, Info } from "lucide-react"
 
 import {
+	type ProviderName,
 	type ProviderSettings,
 	type ModelInfo,
 	type OrganizationAllowList,
@@ -25,6 +26,7 @@ import {
 	Popover,
 	PopoverContent,
 	PopoverTrigger,
+	StandardTooltip,
 	Button,
 } from "@src/components/ui"
 import { useEscapeKey } from "@src/hooks/useEscapeKey"
@@ -75,6 +77,37 @@ interface ModelPickerProps {
 	displayTransform?: (value: unknown) => string
 	/** Callback when model changes - useful for side effects like clearing related fields */
 	onModelChange?: (modelId: string) => void
+	/**
+	 * Compact mode for the chat input bar: renders `renderTrigger` instead of
+	 * the labelled combobox button, hides the model info/pricing block, and
+	 * never auto-initializes a default model (the chat selector only reflects
+	 * the active profile and persists explicit selections).
+	 */
+	compact?: boolean
+	/** Tooltip content shown above the trigger (compact mode). */
+	tooltip?: string
+	/** Disable the trigger (compact mode). */
+	disabled?: boolean
+	/** Whether the model list is still loading (compact mode). */
+	isLoading?: boolean
+	/** Hide the custom-model escape hatch even when free-form ids are allowed. */
+	hideCustomModel?: boolean
+	/** Custom trigger renderer (compact mode). */
+	renderTrigger?: (state: {
+		displayValue: string | undefined
+		placeholder: string
+		isLoading: boolean
+		disabled: boolean
+	}) => ReactNode
+	/** Extra classes for the popover content (compact mode). */
+	contentClassName?: string
+	/** Portal container for the popover content (compact mode). */
+	portalContainer?: HTMLElement
+	/**
+	 * Provider used to filter the model list. Defaults to the provider on
+	 * `apiConfiguration`; the chat selector overrides it for an unset provider.
+	 */
+	activeProviderOverride?: ProviderName
 }
 
 export const ModelPicker = ({
@@ -93,6 +126,15 @@ export const ModelPicker = ({
 	valueTransform,
 	displayTransform,
 	onModelChange,
+	compact = false,
+	tooltip,
+	disabled = false,
+	isLoading = false,
+	hideCustomModel = false,
+	renderTrigger,
+	contentClassName,
+	portalContainer,
+	activeProviderOverride,
 }: ModelPickerProps) => {
 	const { t } = useAppTranslation()
 
@@ -116,9 +158,10 @@ export const ModelPicker = ({
 	}, [displayTransform, apiConfiguration, modelIdKey, selectedModelId])
 
 	const activeProvider =
-		apiConfiguration.apiProvider && isRetiredProvider(apiConfiguration.apiProvider)
+		activeProviderOverride ??
+		(apiConfiguration.apiProvider && isRetiredProvider(apiConfiguration.apiProvider)
 			? undefined
-			: apiConfiguration.apiProvider
+			: apiConfiguration.apiProvider)
 
 	const modelIds = useMemo(() => {
 		const filteredModels = filterModels(models, activeProvider, organizationAllowList)
@@ -192,13 +235,19 @@ export const ModelPicker = ({
 	}, [])
 
 	useEffect(() => {
+		// The compact (chat) picker must never auto-write configuration on mount.
+		if (compact) {
+			isInitialized.current = true
+			return
+		}
+
 		if (!selectedModelId && !isInitialized.current) {
 			const initialValue = modelIds.includes(selectedModelId) ? selectedModelId : defaultModelId
 			setApiConfigurationField(modelIdKey, initialValue, false) // false = automatic initialization
 		}
 
 		isInitialized.current = true
-	}, [modelIds, setApiConfigurationField, modelIdKey, selectedModelId, defaultModelId])
+	}, [modelIds, setApiConfigurationField, modelIdKey, selectedModelId, defaultModelId, compact])
 
 	// Cleanup timeouts on unmount to prevent test flakiness
 	useEffect(() => {
@@ -214,6 +263,95 @@ export const ModelPicker = ({
 
 	// Use the shared ESC key handler hook
 	useEscapeKey(open, () => setOpen(false))
+
+	// Popover body shared by the settings picker and the compact chat picker.
+	const popoverContent = (
+		<PopoverContent
+			className={cn("p-0 w-[var(--radix-popover-trigger-width)]", compact && "w-[300px]", contentClassName)}
+			container={portalContainer}
+			align={compact ? "start" : undefined}
+			sideOffset={compact ? 4 : undefined}>
+			<Command>
+				<div className="relative">
+					<CommandInput
+						ref={searchInputRef}
+						value={searchValue}
+						onValueChange={setSearchValue}
+						placeholder={t("settings:modelPicker.searchPlaceholder")}
+						className="h-9 mr-4"
+						data-testid="model-input"
+					/>
+					{searchValue.length > 0 && (
+						<div className="absolute right-2 top-0 bottom-0 flex items-center justify-center">
+							<X
+								className="text-vscode-input-foreground opacity-50 hover:opacity-100 size-4 p-0.5 cursor-pointer"
+								onClick={onClearSearch}
+							/>
+						</div>
+					)}
+				</div>
+				<CommandList>
+					<CommandEmpty>
+						{searchValue && (
+							<div className="py-2 px-1 text-sm">{t("settings:modelPicker.noMatchFound")}</div>
+						)}
+					</CommandEmpty>
+					<CommandGroup>
+						{modelIds.map((model) => (
+							<CommandItem
+								key={model}
+								value={model}
+								onSelect={onSelect}
+								data-testid={`model-option-${model}`}>
+								<span className="truncate" title={model}>
+									{model}
+								</span>
+								<Check
+									className={cn(
+										"size-4 p-0.5 ml-auto",
+										model === displayValue ? "opacity-100" : "opacity-0",
+									)}
+								/>
+							</CommandItem>
+						))}
+					</CommandGroup>
+				</CommandList>
+				{!hideCustomModel && searchValue && !modelIds.includes(searchValue) && (
+					<div className="p-1 border-t border-vscode-input-border">
+						<CommandItem data-testid="use-custom-model" value={searchValue} onSelect={onSelect}>
+							{t("settings:modelPicker.useCustomModel", { modelId: searchValue })}
+						</CommandItem>
+					</div>
+				)}
+			</Command>
+		</PopoverContent>
+	)
+
+	if (compact) {
+		const trigger = renderTrigger?.({
+			displayValue,
+			placeholder: t("settings:common.select"),
+			isLoading,
+			disabled,
+		})
+
+		return (
+			<Popover open={open} onOpenChange={onOpenChange}>
+				{tooltip ? (
+					<StandardTooltip content={tooltip}>
+						<PopoverTrigger asChild disabled={disabled}>
+							{trigger}
+						</PopoverTrigger>
+					</StandardTooltip>
+				) : (
+					<PopoverTrigger asChild disabled={disabled}>
+						{trigger}
+					</PopoverTrigger>
+				)}
+				{popoverContent}
+			</Popover>
+		)
+	}
 
 	return (
 		<>
@@ -231,63 +369,7 @@ export const ModelPicker = ({
 							<ChevronsUpDown className="opacity-50" />
 						</Button>
 					</PopoverTrigger>
-					<PopoverContent className="p-0 w-[var(--radix-popover-trigger-width)]">
-						<Command>
-							<div className="relative">
-								<CommandInput
-									ref={searchInputRef}
-									value={searchValue}
-									onValueChange={setSearchValue}
-									placeholder={t("settings:modelPicker.searchPlaceholder")}
-									className="h-9 mr-4"
-									data-testid="model-input"
-								/>
-								{searchValue.length > 0 && (
-									<div className="absolute right-2 top-0 bottom-0 flex items-center justify-center">
-										<X
-											className="text-vscode-input-foreground opacity-50 hover:opacity-100 size-4 p-0.5 cursor-pointer"
-											onClick={onClearSearch}
-										/>
-									</div>
-								)}
-							</div>
-							<CommandList>
-								<CommandEmpty>
-									{searchValue && (
-										<div className="py-2 px-1 text-sm">
-											{t("settings:modelPicker.noMatchFound")}
-										</div>
-									)}
-								</CommandEmpty>
-								<CommandGroup>
-									{modelIds.map((model) => (
-										<CommandItem
-											key={model}
-											value={model}
-											onSelect={onSelect}
-											data-testid={`model-option-${model}`}>
-											<span className="truncate" title={model}>
-												{model}
-											</span>
-											<Check
-												className={cn(
-													"size-4 p-0.5 ml-auto",
-													model === displayValue ? "opacity-100" : "opacity-0",
-												)}
-											/>
-										</CommandItem>
-									))}
-								</CommandGroup>
-							</CommandList>
-							{searchValue && !modelIds.includes(searchValue) && (
-								<div className="p-1 border-t border-vscode-input-border">
-									<CommandItem data-testid="use-custom-model" value={searchValue} onSelect={onSelect}>
-										{t("settings:modelPicker.useCustomModel", { modelId: searchValue })}
-									</CommandItem>
-								</div>
-							)}
-						</Command>
-					</PopoverContent>
+					{popoverContent}
 				</Popover>
 			</div>
 			{errorMessage && <ApiErrorMessage errorMessage={errorMessage} />}
