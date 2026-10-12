@@ -510,7 +510,11 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 				if (mode !== "100644" && mode !== "100755") {
 					throw new Error(`restoreFile target is not a regular file in the checkpoint: ${filePath}`)
 				}
-				await this.git.checkout([commitHash, "--", gitPath])
+				// The checkout pathspec must be literal too: a filename containing
+				// glob characters ([a].ts, foo?bar.ts) would otherwise match - or
+				// miss - other files, restoring more (or the wrong file) than the
+				// single requested path.
+				await this.git.checkout([commitHash, "--", `:(literal)${gitPath}`])
 			} else {
 				await fs.rm(path.join(this.workspaceDir, filePath), { force: true })
 			}
