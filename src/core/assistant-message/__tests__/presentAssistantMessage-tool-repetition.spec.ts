@@ -370,6 +370,29 @@ describe("presentAssistantMessage - Tool Repetition Detection", () => {
 		expect(toolResult?.content).toContain("read_file")
 	})
 
+	it("should not run the tool when the user answers no to a hard block, and should reset the streak", async () => {
+		const toolCallId = "tool_call_hard_block_no"
+		const block = makeReadFileBlock(toolCallId)
+		primeDetector(detector, block, HARD_LIMIT)
+		mockTask.assistantMessageContent = [block]
+
+		mockTask.ask = vi.fn().mockResolvedValue({ response: "noButtonClicked" })
+
+		await present()
+
+		expect(mockTask.ask).toHaveBeenCalledTimes(1)
+		expect(readFileHandle).not.toHaveBeenCalled()
+		expect(findToolResult(toolCallId)?.content).toContain("read_file")
+
+		// The hard block resets the streak, so the same call runs on the next turn.
+		const nextBlock = makeReadFileBlock("tool_call_after_hard_block_no")
+		startNextTurn([nextBlock])
+
+		await present()
+
+		expect(readFileHandle).toHaveBeenCalledTimes(1)
+	})
+
 	it("should incorporate user feedback when the user responds to a hard block", async () => {
 		const toolCallId = "tool_call_hard_block_feedback"
 		const block = makeReadFileBlock(toolCallId)
