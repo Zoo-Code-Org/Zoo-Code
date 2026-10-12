@@ -3213,6 +3213,7 @@ export class ClineProvider
 			alwaysAllowMcp,
 			alwaysAllowModeSwitch,
 			alwaysAllowSubtasks,
+			alwaysAllowWebFetch,
 			allowedMaxRequests,
 			allowedMaxCost,
 			autoCondenseContext,
@@ -3378,6 +3379,7 @@ export class ClineProvider
 			alwaysAllowMcp: alwaysAllowMcp ?? false,
 			alwaysAllowModeSwitch: alwaysAllowModeSwitch ?? false,
 			alwaysAllowSubtasks: alwaysAllowSubtasks ?? false,
+			alwaysAllowWebFetch: alwaysAllowWebFetch ?? false,
 			allowedMaxRequests,
 			allowedMaxCost,
 			autoCondenseContext: autoCondenseContext ?? true,
@@ -3627,6 +3629,7 @@ export class ClineProvider
 			alwaysAllowMcp: stateValues.alwaysAllowMcp ?? false,
 			alwaysAllowModeSwitch: stateValues.alwaysAllowModeSwitch ?? false,
 			alwaysAllowSubtasks: stateValues.alwaysAllowSubtasks ?? false,
+			alwaysAllowWebFetch: stateValues.alwaysAllowWebFetch ?? false,
 			alwaysAllowFollowupQuestions: stateValues.alwaysAllowFollowupQuestions ?? false,
 			followupAutoApproveTimeoutMs: stateValues.followupAutoApproveTimeoutMs ?? 60000,
 			diagnosticsEnabled: stateValues.diagnosticsEnabled ?? true,
@@ -3821,7 +3824,7 @@ export class ClineProvider
 
 	// dev
 
-	async resetState() {
+	async resetState(onConfirm?: () => void): Promise<boolean> {
 		const answer = await vscode.window.showInformationMessage(
 			t("common:confirmation.reset_state"),
 			{ modal: true },
@@ -3829,8 +3832,13 @@ export class ClineProvider
 		)
 
 		if (answer !== t("common:answers.yes")) {
-			return
+			return false
 		}
+
+		// Invalidate pending saves BEFORE any destructive state clear so that
+		// saves awaiting a slow DCG install cannot slip through the generation
+		// check and re-write a permission that the reset is about to wipe.
+		onConfirm?.()
 
 		// Log out from cloud if authenticated
 		if (CloudService.hasInstance()) {
@@ -3853,6 +3861,7 @@ export class ClineProvider
 		await this.removeClineFromStack()
 		await this.postStateToWebview()
 		await this.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
+		return true
 	}
 
 	// logging
