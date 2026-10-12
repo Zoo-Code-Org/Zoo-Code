@@ -714,6 +714,67 @@ describe("writeToFileTool", () => {
 				writeToFileTool["taskPartialStreamState"].clear()
 			}
 		})
+
+		it("still releases the per-task state when the failure report itself rejects", async () => {
+			// The presenter's handleError awaits Task.say(), which rejects once the task is
+			// aborted. Awaiting the report unguarded let that rejection escape the catch before
+			// the discard, the reset, and the release - the abort that broke the report also
+			// leaked the entry and the TaskAborted listener the report described.
+			mockCline.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
+			mockCline.diffViewProvider.isEditing = true
+			mockHandleError.mockRejectedValue(new Error("task aborted"))
+			const state = writeToFileTool["getTaskPartialStreamState"](mockCline)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			try {
+				// The rejected report still propagates after the teardown: the failure surfaces
+				// exactly once and the caller still learns the call did not resolve.
+				await expect(executeWriteFileTool({})).rejects.toThrow("task aborted")
+
+				expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+				// The discard must still precede the reset: reset() clears the state it reads.
+				expect(mockCline.diffViewProvider.discardUnapprovedStream.mock.invocationCallOrder[0]).toBeLessThan(
+					mockCline.diffViewProvider.reset.mock.invocationCallOrder[0],
+				)
+				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, state.abortCleanup)
+				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			} finally {
+				mockHandleError.mockResolvedValue(undefined)
+				writeToFileTool["taskPartialStreamState"].clear()
+			}
+		})
+
+		it("releases the per-task state on the saveDirectly branch when the failure report rejects", async () => {
+			// The prevent-focus-disruption branch writes through saveDirectly and never opens a
+			// diff view, so the catch's discard block is skipped - the reset and the release
+			// must still run when the report itself rejects.
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockResolvedValue({
+					diagnosticsEnabled: true,
+					writeDelayMs: 1000,
+					experiments: { preventFocusDisruption: true },
+				}),
+			})
+			mockCline.diffViewProvider.saveDirectly = vi.fn().mockRejectedValue(new Error("direct save failed"))
+			mockHandleError.mockRejectedValue(new Error("task aborted"))
+			const state = writeToFileTool["getTaskPartialStreamState"](mockCline)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			try {
+				await expect(executeWriteFileTool({})).rejects.toThrow("task aborted")
+
+				// No preview existed on this branch: the discard block is skipped...
+				expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
+				// ...but the reset and the release are unconditional.
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, state.abortCleanup)
+				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			} finally {
+				mockHandleError.mockResolvedValue(undefined)
+				writeToFileTool["taskPartialStreamState"].clear()
+			}
+		})
 	})
 
 	describe("early-exit stream state cleanup", () => {

@@ -274,6 +274,103 @@ describe("ClineProvider failed history restoration cleanup", () => {
 		expect(taskEventListeners.has(task)).toBe(true)
 		expect(task.dispose).not.toHaveBeenCalled()
 	})
+
+	it("leaves a stale task's stream state, listeners, and disposal alone when the registry no longer holds it", async () => {
+		// cleanupFailedHistoryTask() releases the tool's per-task state only after the
+		// PendingActionSettlementError check and the registry identity check. A settlement
+		// failure for a task the registry has already dropped must not clear the stale task's
+		// state, run its listeners, or dispose it: a regression that cleared anyway would tear
+		// down state a later resume still owns.
+		const cleanupListener = vi.fn()
+		const stale = {
+			taskId: "stale-history-task",
+			instanceId: "inst-9",
+			emit: vi.fn(),
+			once: vi.fn(),
+			off: vi.fn(),
+			dispose: vi.fn().mockResolvedValue(undefined),
+		}
+		const key = "stale-history-task.inst-9"
+		writeToFileTool["taskPartialStreamState"].set(key, {
+			lastSeenPartialPath: undefined,
+			streamFailed: false,
+			streamError: undefined,
+			task: stale as unknown as Task,
+			abortCleanup: () => {},
+		})
+		const taskEventListeners = new Map([[stale, [cleanupListener]]])
+		const taskRegistry = new TaskRegistry()
+		const provider = { taskRegistry, taskEventListeners, log: vi.fn() } as unknown as ClineProvider
+
+		try {
+			await privateClineProvider.cleanupFailedHistoryTask.call(
+				provider,
+				stale as unknown as Task,
+				new PendingActionSettlementError("settlement failed"),
+			)
+
+			expect(writeToFileTool["taskPartialStreamState"].has(key)).toBe(true)
+			expect(stale.off).not.toHaveBeenCalled()
+			expect(cleanupListener).not.toHaveBeenCalled()
+			expect(taskEventListeners.has(stale)).toBe(true)
+			expect(stale.emit).not.toHaveBeenCalled()
+			expect(stale.dispose).not.toHaveBeenCalled()
+		} finally {
+			writeToFileTool["taskPartialStreamState"].clear()
+		}
+	})
+
+	it("leaves a stale task alone when the registry holds a replacement task under the same id", async () => {
+		// Identity, not presence: a re-created task owns the id now. Clearing the stale object
+		// would release a stream entry the failed resume no longer owns while leaving the
+		// replacement's own bookkeeping untouched.
+		const cleanupListener = vi.fn()
+		const stale = {
+			taskId: "replaced-history-task",
+			instanceId: "inst-9",
+			emit: vi.fn(),
+			once: vi.fn(),
+			off: vi.fn(),
+			dispose: vi.fn().mockResolvedValue(undefined),
+		}
+		const replacement = {
+			taskId: "replaced-history-task",
+			instanceId: "inst-10",
+			emit: vi.fn(),
+			dispose: vi.fn().mockResolvedValue(undefined),
+		}
+		const key = "replaced-history-task.inst-9"
+		writeToFileTool["taskPartialStreamState"].set(key, {
+			lastSeenPartialPath: undefined,
+			streamFailed: false,
+			streamError: undefined,
+			task: stale as unknown as Task,
+			abortCleanup: () => {},
+		})
+		const taskEventListeners = new Map([[stale, [cleanupListener]]])
+		const taskRegistry = new TaskRegistry()
+		taskRegistry.push(replacement as unknown as Task)
+		const provider = { taskRegistry, taskEventListeners, log: vi.fn() } as unknown as ClineProvider
+
+		try {
+			await privateClineProvider.cleanupFailedHistoryTask.call(
+				provider,
+				stale as unknown as Task,
+				new PendingActionSettlementError("settlement failed"),
+			)
+
+			expect(writeToFileTool["taskPartialStreamState"].has(key)).toBe(true)
+			expect(stale.off).not.toHaveBeenCalled()
+			expect(cleanupListener).not.toHaveBeenCalled()
+			expect(taskEventListeners.has(stale)).toBe(true)
+			expect(stale.emit).not.toHaveBeenCalled()
+			expect(stale.dispose).not.toHaveBeenCalled()
+			// The replacement keeps its registry slot: the stale cleanup stopped at the guard.
+			expect(taskRegistry.getById("replaced-history-task")).toBe(replacement)
+		} finally {
+			writeToFileTool["taskPartialStreamState"].clear()
+		}
+	})
 })
 
 describe("ClineProvider.markDelegatedChildInterrupted() — live eviction path", () => {

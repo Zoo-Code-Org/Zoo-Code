@@ -21,6 +21,20 @@ import { Task } from "../../core/task/Task"
 
 import { DecorationController } from "./DecorationController"
 
+/**
+ * The approved document save reported failure: the content the user accepted never reached disk.
+ * Typed so the caller's failure handling can tell a failed write from an unrelated teardown error,
+ * and so a discarded boolean can never let the success bookkeeping run on a write that did not land.
+ */
+export class DocumentSaveFailedError extends Error {
+	constructor(absolutePath: string) {
+		super(
+			`Failed to save ${absolutePath}: the document save reported failure; the approved content is not on disk.`,
+		)
+		this.name = "DocumentSaveFailedError"
+	}
+}
+
 export const DIFF_VIEW_URI_SCHEME = "cline-diff"
 export const DIFF_VIEW_LABEL_CHANGES = "Original ↔ Zoo's Changes"
 
@@ -354,7 +368,15 @@ export class DiffViewProvider {
 		const editedContent = updatedDocument.getText()
 
 		if (updatedDocument.isDirty) {
-			await updatedDocument.save()
+			const saved = await updatedDocument.save()
+			// A save that reports false never landed: the buffer is still dirty and the file holds
+			// the previous content (or nothing for a new file). Throw before the placeholder release
+			// below and before any success bookkeeping, so the caller keeps ownership of what this
+			// edit created and the existing failure handling runs. A save that rejects still
+			// propagates as before.
+			if (!saved) {
+				throw new DocumentSaveFailedError(absolutePath)
+			}
 		}
 
 		// Ownership is released only once the approved write has landed. A save that rejects leaves

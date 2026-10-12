@@ -527,33 +527,42 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			if (pendingPartialAsk !== undefined) {
 				await this.finalizePartialToolAskAfterFailure(task, pendingPartialAsk)
 			}
-			await handleError("writing file", error as Error)
-			// A preview that never got its approved write to disk holds unapproved content: discard
-			// it before reset() drops the state the discard depends on. This is also the teardown for
-			// a saveChanges() that rejected mid-write - the placeholder is still owned by this edit,
-			// because saveChanges() releases ownership only once the save lands - so the discard is
-			// what removes the empty or half-written new file.
-			if (task.diffViewProvider.isEditing) {
-				const discardError = await this.discardUnapprovedStreamBeforeReset(task)
-				if (discardError) {
-					// The report must not own the teardown: Task.say() throws once the task is
-					// aborted, and a rejection here would skip the reset() and the bookkeeping
-					// release below - leaking exactly what this block exists to clean up.
-					await task
-						.say(
-							"error",
-							`write_to_file could not discard the unapproved preview after the failed write: ${discardError.message}`,
-						)
-						.catch((sayError) => {
-							console.error("Error reporting write_to_file discard failure:", sayError)
-						})
+			// The teardown runs in a finally around the report: the presenter's handleError awaits
+			// Task.say(), which can reject (an aborted task, a throwing message listener), and a
+			// rejected report must not skip the discard, the reset, or the release - they are the
+			// only thing standing between this failure and a leaked entry, its TaskAborted
+			// listener, and an abandoned preview. The rejection still propagates after the
+			// teardown, so the failure surfaces exactly once and the caller still sees it.
+			try {
+				await handleError("writing file", error as Error)
+			} finally {
+				// A preview that never got its approved write to disk holds unapproved content: discard
+				// it before reset() drops the state the discard depends on. This is also the teardown for
+				// a saveChanges() that rejected mid-write - the placeholder is still owned by this edit,
+				// because saveChanges() releases ownership only once the save lands - so the discard is
+				// what removes the empty or half-written new file.
+				if (task.diffViewProvider.isEditing) {
+					const discardError = await this.discardUnapprovedStreamBeforeReset(task)
+					if (discardError) {
+						// The report must not own the teardown: Task.say() throws once the task is
+						// aborted, and a rejection here would skip the reset() and the bookkeeping
+						// release below - leaking exactly what this block exists to clean up.
+						await task
+							.say(
+								"error",
+								`write_to_file could not discard the unapproved preview after the failed write: ${discardError.message}`,
+							)
+							.catch((sayError) => {
+								console.error("Error reporting write_to_file discard failure:", sayError)
+							})
+					}
 				}
+				// Guarded: a reset() that rejects must not skip the release below, and it must
+				// not turn a reported write failure into a teardown failure the caller cannot act
+				// on - the per-task entry and its TaskAborted listener are still ours to drop.
+				await this.resetDiffViewAfterWrite(task)
+				this.releasePartialStreamBookkeeping(task)
 			}
-			// Guarded: a reset() that rejects must not skip the release below, and it must
-			// not turn a reported write failure into a teardown failure the caller cannot act
-			// on - the per-task entry and its TaskAborted listener are still ours to drop.
-			await this.resetDiffViewAfterWrite(task)
-			this.releasePartialStreamBookkeeping(task)
 			return
 		}
 	}

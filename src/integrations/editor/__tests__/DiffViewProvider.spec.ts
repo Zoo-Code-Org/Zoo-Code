@@ -1,5 +1,10 @@
 import * as fs from "fs/promises"
-import { DiffViewProvider, DIFF_VIEW_URI_SCHEME, DIFF_VIEW_LABEL_CHANGES } from "../DiffViewProvider"
+import {
+	DocumentSaveFailedError,
+	DiffViewProvider,
+	DIFF_VIEW_URI_SCHEME,
+	DIFF_VIEW_LABEL_CHANGES,
+} from "../DiffViewProvider"
 import * as vscode from "vscode"
 import * as path from "path"
 import delay from "delay"
@@ -2321,10 +2326,35 @@ describe("DiffViewProvider", () => {
 			expect(diffViewProvider["placeholderPath"]).toBe(mockTargetPath)
 		})
 
+		it("keeps placeholder ownership and fails typed when the approved save reports false", async () => {
+			// save() resolves false when the document save did not land. The old code awaited and
+			// dropped the boolean, so a reported failure still released the placeholder, ran the
+			// success bookkeeping, and the caller reported success over a file that never changed.
+			// The double resolves an explicit false, not undefined, to pin the reported-failure
+			// contract rather than an accidental falsy.
+			const save = vi.fn().mockResolvedValue(false)
+			ownedSaveSetup(save)
+			const closeAllDiffViews = diffViewProvider["closeAllDiffViews"]
+
+			await expect(diffViewProvider.saveChanges(false, 0)).rejects.toThrow(DocumentSaveFailedError)
+
+			expect(save).toHaveBeenCalledTimes(1)
+			// Ownership stays with this edit: the discard is what removes the placeholder a
+			// reported-failure save left behind.
+			expect(diffViewProvider["placeholderPath"]).toBe(mockTargetPath)
+			// Success bookkeeping must not run: the diff views stay open for the teardown, and no
+			// result is stored for formatFileWriteResponse().
+			expect(closeAllDiffViews).not.toHaveBeenCalled()
+			expect(diffViewProvider.newProblemsMessage).toBeUndefined()
+			expect(diffViewProvider.userEdits).toBeUndefined()
+		})
+
 		it("releases placeholder ownership once the approved save lands", async () => {
 			// The approved content replaced the placeholder, so the path is no longer this edit's
 			// to delete: a later rollback must not unlink content the user accepted.
-			const save = vi.fn().mockResolvedValue(undefined)
+			// The double resolves an explicit true: that is what a landed save reports, and the
+			// reported-failure check below must not be satisfied by an accidental undefined.
+			const save = vi.fn().mockResolvedValue(true)
 			ownedSaveSetup(save)
 
 			await expect(diffViewProvider.saveChanges(false, 0)).resolves.toBeDefined()
