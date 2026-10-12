@@ -3709,7 +3709,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		void getCheckpointService(this)
 
 		// B1 task-start baseline: a suppressed pre-task root commit (default-on).
-		if (!this.taskStartBaselineDone) {
+		// History resumes skip it: the baseline belongs to the original task start
+		// (exactly once per task), and the resumed task's shadow repo already carries
+		// a baseline for the first post-resume write checkpoint to diff against.
+		if (!this.taskStartBaselineDone && !this._isHistoryTask) {
 			this.taskStartBaselineDone = true
 			const baselineEnabled = (await this.providerRef.deref()?.getState())?.perWriteCheckpoints
 			if (baselineEnabled !== false) {
