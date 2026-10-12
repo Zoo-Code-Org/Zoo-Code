@@ -2,6 +2,7 @@
 
 import { renderWithExtensionState, screen, fireEvent, within, waitFor } from "@/utils/test-utils"
 import { act } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import { vscode } from "@/utils/vscode"
 import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, type ProviderSettings } from "@roo-code/types"
@@ -497,8 +498,9 @@ describe("SettingsView - Sound Settings", () => {
 		const checkbox = await within(content).findByTestId("change-card-detail-checkbox")
 		expect(checkbox).not.toBeChecked()
 
-		fireEvent.click(checkbox)
-		fireEvent.click(screen.getByTestId("save-button"))
+		const user = userEvent.setup()
+		await user.click(checkbox)
+		await user.click(screen.getByTestId("save-button"))
 
 		await waitFor(() =>
 			expect(vscode.postMessage).toHaveBeenCalledWith(
@@ -520,7 +522,8 @@ describe("SettingsView - Sound Settings", () => {
 		const checkbox = await within(content).findByTestId("change-card-detail-checkbox")
 		expect(checkbox).not.toBeChecked()
 
-		fireEvent.click(screen.getByTestId("save-button"))
+		const user = userEvent.setup()
+		await user.click(screen.getByTestId("save-button"))
 
 		await waitFor(() =>
 			expect(vscode.postMessage).toHaveBeenCalledWith(
@@ -543,8 +546,9 @@ describe("SettingsView - Sound Settings", () => {
 		const checkbox = await within(content).findByTestId("change-card-detail-checkbox")
 		await waitFor(() => expect(checkbox).toBeChecked())
 
-		fireEvent.click(checkbox)
-		fireEvent.click(screen.getByTestId("save-button"))
+		const user = userEvent.setup()
+		await user.click(checkbox)
+		await user.click(screen.getByTestId("save-button"))
 
 		await waitFor(() =>
 			expect(vscode.postMessage).toHaveBeenCalledWith(

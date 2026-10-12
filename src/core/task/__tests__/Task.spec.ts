@@ -6040,7 +6040,9 @@ describe("Cline", () => {
 			const state = await mockProvider.getState()
 			vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
 
-			task.abort = true
+			// End the loop after the first request; abort stays false so the
+			// baseline block (not the loop) is what the save spy observes.
+			vi.spyOn(task, "recursivelyMakeClineRequests").mockResolvedValue(true)
 
 			await taskAccess.initiateTaskLoop([])
 			await taskAccess.initiateTaskLoop([])
@@ -6069,7 +6071,7 @@ describe("Cline", () => {
 			const state = await mockProvider.getState()
 			vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
 
-			task.abort = true
+			vi.spyOn(task, "recursivelyMakeClineRequests").mockResolvedValue(true)
 
 			await taskAccess.initiateTaskLoop([])
 
@@ -6093,7 +6095,7 @@ describe("Cline", () => {
 			Reflect.deleteProperty(unsetState, "perWriteCheckpoints")
 			vi.spyOn(mockProvider, "getState").mockResolvedValue(unsetState as typeof state)
 
-			task.abort = true
+			vi.spyOn(task, "recursivelyMakeClineRequests").mockResolvedValue(true)
 
 			await taskAccess.initiateTaskLoop([])
 
@@ -6113,10 +6115,31 @@ describe("Cline", () => {
 			const state = await mockProvider.getState()
 			vi.spyOn(mockProvider, "getState").mockResolvedValue({ ...state, perWriteCheckpoints: false })
 
+			vi.spyOn(task, "recursivelyMakeClineRequests").mockResolvedValue(true)
+
+			await taskAccess.initiateTaskLoop([])
+
+			expect(saveSpy).not.toHaveBeenCalled()
+		})
+
+		it("does not record a baseline when the task is already aborted", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "aborted baseline task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const saveSpy = vi.spyOn(task, "checkpointSave").mockResolvedValue(undefined)
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
+
 			task.abort = true
 
 			await taskAccess.initiateTaskLoop([])
 
+			// A task cancelled before the loop starts must not pay for (or await)
+			// a baseline checkpoint it will never use.
 			expect(saveSpy).not.toHaveBeenCalled()
 		})
 
