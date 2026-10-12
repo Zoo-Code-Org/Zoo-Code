@@ -6,15 +6,16 @@ Zoo Code checks task lifecycle protocols through one umbrella command for indepe
 pnpm lifecycle:model-check
 ```
 
-The baseline command runs seven independent bounded checks in sequence:
+The baseline command runs eight independent bounded checks in sequence:
 
 1. the persisted task delegation lifecycle;
 2. shared-store concurrency across task-history hosts;
 3. production-backed handoff reducers with an abstract provider/scheduler protocol;
 4. the task cleanup protocol;
 5. request-stream parser scoping;
-6. completion persistence; and
-7. delegated-mode reader refinement.
+6. completion persistence;
+7. delegated-mode reader refinement; and
+8. tool-turn continuation.
 
 The planned two-sibling fan-out protocol is intentionally outside the baseline and CI umbrella. Run it explicitly with `pnpm fanout-protocol:model-check`; it describes optional future functionality, not current production coverage.
 
@@ -90,6 +91,40 @@ The known-unsafe witnesses currently compare exact shortest action sequences. Th
 ## Task cleanup protocol model
 
 The umbrella command also runs a separate bounded child model for in-memory abort, disposal, and provider-shutdown ordering. It models cleanup settlement and rejection as environment transitions and makes no filesystem, editor Promise, fairness, or timing-liveness claim. See [Task cleanup protocol model check](./task-cleanup-protocol-model.md).
+
+## Tool-turn continuation model
+
+`scripts/check-tool-turn-continuation.ts` is a separate bounded child model for the in-memory handoff between the presenter and the request loop. It also runs directly with `pnpm tool-turn:model-check`. It models one assistant turn with two tool blocks and one trailing text block. It makes no claim about tool handlers, approvals, or timing liveness.
+
+The model maps its state to production fields as follows:
+
+| Model state                | Production field                                                                                                                        |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `phase`, `index`           | `Task.assistantMessageContent` partial flags, matching `tool_result` blocks in `userMessageContent`, and `currentStreamingContentIndex` |
+| `stream`                   | `didCompleteReadingStream`                                                                                                              |
+| `lock`, `owner`, `pending` | `presentAssistantMessageLocked` and `presentAssistantMessageHasPendingUpdates`, owned by the `presentAssistantMessage` wrapper          |
+| `latch`                    | `userMessageContentReady`                                                                                                               |
+| `epoch`                    | the per-request reset in the request loop (`Task.ts`)                                                                                   |
+| `poll` and `post-wait`     | the `pWaitFor` condition and the abort check that follows it                                                                            |
+
+The checker enforces these invariants in every reachable state:
+
+1. The next request never starts while a tool block has no result.
+2. The next request never starts while a presenter pass is live.
+3. The presenter lock is never held without a live pass, including after a presenter failure.
+4. A released lock never hides a pending update, unless the task aborted or a pass failed.
+5. The next request never starts after abort.
+6. Every reachable state either can continue without abort or has started the request.
+7. A live pass always holds the lock.
+
+Five injected policies must each violate one named invariant: a latch-only wait (the #1883 hang), a readiness check with no lock gate, a check on the first tool result only, a presenter that keeps the lock after a failure, and a wait with no abort check. Six landmarks keep the intended paths reachable, including recovery from a lost latch, continuation after a presenter failure, a two-tool turn, abort on a ready turn, and a stale pass that unwinds after a retry.
+
+The model has two documented gaps. The checker asserts that both still reproduce, so a fix must update the model and this section:
+
+- A presenter failure on a tool block before it pushes a result releases the lock but leaves no result. The derived check stays false and the wait has no timeout. This hang existed before the derived check, when the lock stayed held. The change deliberately does not synthesize a tool result.
+- The wrapper `finally` clears the lock without an ownership check. After a mid-stream retry resets the turn, a stale pass that unwinds late can clear the lock of a newer pass and break invariant 7. A per-pass owner token removes this gap in the model. Invariants 1 to 7 hold for that policy.
+
+This model is not production-backed. The flags are fields on `Task`, not pure reducers. The real-presenter tests in `Task.spec.ts` and `presentAssistantMessage-custom-tool.spec.ts` tie it to production. A later change can extract the readiness check as a pure function so the checker and `Task` share it.
 
 ## Provider handoff and scheduler model
 

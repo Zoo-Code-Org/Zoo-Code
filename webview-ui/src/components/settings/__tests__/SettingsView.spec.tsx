@@ -4,12 +4,38 @@ import { renderWithExtensionState, screen, fireEvent, within, waitFor } from "@/
 import { act } from "@testing-library/react"
 
 import { vscode } from "@/utils/vscode"
-import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS } from "@roo-code/types"
+import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, type ProviderSettings } from "@roo-code/types"
+import type { ApiOptionsProps } from "../ApiOptions"
 
 import SettingsView from "../SettingsView"
 
 vi.mock("@src/utils/vscode", () => ({ vscode: { postMessage: vi.fn() } }))
 
+// SettingsView hands the buffered api configuration to the provider section, so the
+// save round trip can be observed without rendering the whole provider tree.
+vi.mock("../ApiOptions", () => ({
+	__esModule: true,
+	default: ({
+		apiConfiguration,
+		setApiConfigurationField,
+	}: Pick<ApiOptionsProps, "apiConfiguration" | "setApiConfigurationField">) => (
+		<div data-testid="api-options">
+			<span data-testid="received-strict">{String(apiConfiguration?.openAiStrictToolSchemas)}</span>
+			<button
+				data-testid="set-strict-true"
+				onClick={() => setApiConfigurationField("openAiStrictToolSchemas", true)}
+			/>
+			<button
+				data-testid="set-strict-false"
+				onClick={() => setApiConfigurationField("openAiStrictToolSchemas", false)}
+			/>
+			<button
+				data-testid="set-other-field"
+				onClick={() => setApiConfigurationField("openAiBaseUrl", "https://example.test")}
+			/>
+		</div>
+	),
+}))
 vi.mock("../ApiConfigManager", () => ({
 	__esModule: true,
 	default: ({ currentApiConfigName }: any) => (
@@ -910,5 +936,75 @@ describe("SettingsView - Blanket Auto-Deny", () => {
 				updatedSettings: expect.objectContaining({ alwaysDenyUnapprovedCommands: true }),
 			}),
 		)
+	})
+})
+
+describe("SettingsView - openAiStrictToolSchemas save round trip", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	const renderWithConfig = (apiConfiguration: ProviderSettings) => {
+		const onDone = vi.fn()
+		renderWithExtensionState(<SettingsView onDone={onDone} targetSection={"providers"} />, {
+			state: { currentApiConfigName: "test-config", apiConfiguration },
+		})
+	}
+
+	const posted = () =>
+		vi
+			.mocked(vscode.postMessage)
+			.mock.calls.map((call) => call[0])
+			.find((message) => message?.type === "upsertApiConfiguration")
+
+	it("restores the control from a loaded API configuration", () => {
+		// The control must show the stored value rather than the display default, so
+		// a saved false survives a reload.
+		renderWithConfig({ openAiStrictToolSchemas: false })
+		expect(screen.getByTestId("received-strict").textContent).toBe("false")
+	})
+
+	it("buffers the change and persists it only on Save", () => {
+		renderWithConfig({ openAiStrictToolSchemas: true })
+		fireEvent.click(screen.getByTestId("set-strict-false"))
+		// Toggling buffers in cachedState; nothing is persisted before Save.
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(posted()).toEqual(
+			expect.objectContaining({
+				type: "upsertApiConfiguration",
+				text: "test-config",
+				apiConfiguration: expect.objectContaining({ openAiStrictToolSchemas: false }),
+			}),
+		)
+	})
+
+	it("persists a toggled-on value as true in the upsert payload", () => {
+		// The save path must carry the value the user set, not only the loaded one:
+		// toggling on from a stored false and saving has to put true in the payload.
+		renderWithConfig({ openAiStrictToolSchemas: false })
+		fireEvent.click(screen.getByTestId("set-strict-true"))
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(posted()?.apiConfiguration?.openAiStrictToolSchemas).toBe(true)
+	})
+
+	it("saves a loaded false back as false when toggled on and off again", () => {
+		renderWithConfig({ openAiStrictToolSchemas: false })
+		fireEvent.click(screen.getByTestId("set-strict-true"))
+		fireEvent.click(screen.getByTestId("set-strict-false"))
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(posted()?.apiConfiguration?.openAiStrictToolSchemas).toBe(false)
+	})
+
+	it("leaves an unset value unset instead of writing the display default", () => {
+		// The control shows the display default, but saving must not materialise it:
+		// a config that never stored the setting stays unset.
+		renderWithConfig({})
+		expect(screen.getByTestId("received-strict").textContent).toBe("undefined")
+		// Make a change elsewhere so Save is enabled, then save.
+		fireEvent.click(screen.getByTestId("set-other-field"))
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(posted()?.apiConfiguration?.openAiBaseUrl).toBe("https://example.test")
+		expect(posted()?.apiConfiguration?.openAiStrictToolSchemas).toBeUndefined()
 	})
 })
