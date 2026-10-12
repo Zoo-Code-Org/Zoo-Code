@@ -939,9 +939,11 @@ describe("safeWriteJson", () => {
 		await fsPromisesActuals.writeFile!(target, JSON.stringify({ own: true }))
 		// Pinning must not reject the ordinary case: every ancestor keeps the identity the walk
 		// recorded, so the publication proceeds.
-		vi.spyOn(fs, "lstat").mockResolvedValue(
-			{ isSymbolicLink: () => false, dev: 1n, ino: 1n } as unknown as fsSyncActual.BigIntStats,
-		)
+		vi.spyOn(fs, "lstat").mockResolvedValue({
+			isSymbolicLink: () => false,
+			dev: 1n,
+			ino: 1n,
+		} as unknown as fsSyncActual.BigIntStats)
 
 		await safeWriteJson(target, { written: true }, { refuseSymlinkTarget: true })
 
