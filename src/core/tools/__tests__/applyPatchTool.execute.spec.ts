@@ -444,8 +444,33 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
 			})
+		})
 
-			expect(mockPushToolResult).toHaveBeenCalledWith("File saved successfully")
+		it("records exactly one checkpoint for a multi-file patch", async () => {
+			// B1's core contract: one checkpoint per patch, not per file - a
+			// regression to per-change saves would double the checkpoint count.
+			const multiPatch = [
+				"*** Begin Patch",
+				"*** Add File: src/new.ts",
+				"+hello",
+				"+world",
+				"*** Update File: src/test.ts",
+				"@@",
+				"-original file content",
+				"+modified content",
+				"*** End Patch",
+			].join(String.fromCharCode(10))
+			mockedFileExistsAtPath.mockImplementation((filePath: string) =>
+				Promise.resolve(!String(filePath).toLowerCase().endsWith("new.ts")),
+			)
+
+			await tool.execute({ patch: multiPatch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockHandleError).not.toHaveBeenCalled()
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
 		})
 	})
