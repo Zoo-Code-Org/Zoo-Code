@@ -1941,127 +1941,28 @@ export class ClineProvider
 		activate: boolean = true,
 	): Promise<string | undefined> {
 		try {
-			return await this.enqueueProviderProfileMutation(async (signal, epoch) => {
-				if (!this.isProfileMutationActive(epoch, signal)) {
-					return undefined
-				}
+			return await this.enqueueProviderProfileMutation(async (signal) => {
+				const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
 
-				const previousApiConfigName = this.contextProxy.getValues().currentApiConfigName
-				const previousProviderSettings = this.contextProxy.getProviderSettings()
-				let previousMode: Mode | undefined
-				let previousModeConfigId: string | undefined
-				let hadPreviousModeConfig = false
+				if (signal.aborted || this._disposed) return id
 
 				if (activate) {
-					try {
-						const state = await this.getState()
-						previousMode = state.mode
-						previousModeConfigId = await this.providerSettingsManager.getModeConfigId(state.mode)
-						hadPreviousModeConfig = previousModeConfigId !== undefined
-					} catch {
-						// Ignore lookup failures during pre-save capture
-					}
-				}
+					const { mode } = await this.getState()
 
-				if (!this.isProfileMutationActive(epoch, signal)) {
-					return undefined
-				}
+					await Promise.all([
+						this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+						this.updateGlobalState("currentApiConfigName", name),
+						this.providerSettingsManager.setModeConfig(mode, id),
+						this.contextProxy.setProviderSettings(providerSettings),
+					])
 
-				const { id, existed, previousProfile } = await this.providerSettingsManager.saveConfigWithPrevious(
-					name,
-					providerSettings,
-				)
-				const savedProfile: ProviderSettingsWithId = { ...providerSettings, id }
+					// Change the provider for the current task.
+					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
 
-				const rollback = async () => {
-					try {
-						const isStale = () => epoch !== undefined && epoch !== this.profileMutationEpoch
-						if (isStale() || (existed && !previousProfile)) return
-						const restored = await this.providerSettingsManager.restoreConfigIfMatches(
-							name,
-							savedProfile,
-							existed ? previousProfile : undefined,
-						)
-						if (isStale()) return
-						if (restored) {
-							await this.updateGlobalState(
-								"listApiConfigMeta",
-								await this.providerSettingsManager.listConfig(),
-							)
-							if (activate) {
-								if (isStale()) return
-								if (previousApiConfigName !== undefined)
-									await this.updateGlobalState("currentApiConfigName", previousApiConfigName)
-								if (isStale()) return
-								if (previousMode)
-									await this.providerSettingsManager.setModeConfig(
-										previousMode,
-										hadPreviousModeConfig ? previousModeConfigId : undefined,
-									)
-								if (isStale()) return
-								if (previousProviderSettings) {
-									const currentConfig = this.contextProxy.getValues().currentApiConfigName
-									if (currentConfig === name || currentConfig === previousApiConfigName) {
-										await this.contextProxy.setProviderSettings(previousProviderSettings)
-									}
-								}
-							}
-						}
-					} catch (rollbackError) {
-						this.log(
-							`Failed to rollback upsert for profile '${name}': ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
-						)
-					}
-				}
-
-				if (!this.isProfileMutationActive(epoch, signal)) {
-					await rollback()
-					return undefined
-				}
-
-				try {
-					if (activate) {
-						const mode = previousMode ?? (await this.getState()).mode
-
-						if (!this.isProfileMutationActive(epoch, signal)) {
-							await rollback()
-							return undefined
-						}
-
-						await Promise.all([
-							this.updateGlobalState(
-								"listApiConfigMeta",
-								await this.providerSettingsManager.listConfig(),
-							),
-							this.updateGlobalState("currentApiConfigName", name),
-							this.providerSettingsManager.setModeConfig(mode, id),
-							this.contextProxy.setProviderSettings(providerSettings),
-						])
-
-						if (!this.isProfileMutationActive(epoch, signal)) {
-							await rollback()
-							return undefined
-						}
-
-						// Change the provider for the current task.
-						this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
-
-						// Keep the current task's sticky provider profile in sync with the newly-activated profile.
-						await this.persistStickyProviderProfileToCurrentTask(name, { signal, epoch })
-					} else {
-						await this.updateGlobalState(
-							"listApiConfigMeta",
-							await this.providerSettingsManager.listConfig(),
-						)
-					}
-				} catch (updateError) {
-					await rollback()
-					throw updateError
-				}
-
-				if (!this.isProfileMutationActive(epoch, signal)) {
-					await rollback()
-					return undefined
+					// Keep the current task's sticky provider profile in sync with the newly-activated profile.
+					await this.persistStickyProviderProfileToCurrentTask(name)
+				} else {
+					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
 				}
 
 				await this.postStateToWebview()
