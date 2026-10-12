@@ -155,6 +155,31 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask as Task, false, true)
 		})
 
+		it("awaits the checkpoint before completing the patch", async () => {
+			// An unawaited save let the tool complete (and queued work start) while
+			// the checkpoint was still committing - a queued write could interleave
+			// its own checkpoint and shutdown could lose the commit.
+			let releaseCheckpoint: () => void = () => {}
+			mockedCheckpointSave.mockImplementationOnce(
+				() => new Promise<void>((resolve) => (releaseCheckpoint = resolve)),
+			)
+			let settled = false
+			const run = tool
+				.execute({ patch: deletePatch }, mockTask as Task, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+				})
+				.then(() => {
+					settled = true
+				})
+			await vi.waitFor(() => expect(mockedCheckpointSave).toHaveBeenCalledOnce())
+			expect(settled).toBe(false)
+			releaseCheckpoint()
+			await run
+			expect(settled).toBe(true)
+		})
+
 		it("does not record a checkpoint when perWriteCheckpoints is disabled", async () => {
 			// Structural cast for the test double (matches the mock style used for the controllers above).
 			const ref = (mockTask["providerRef"] as unknown as { deref: MockedFunction<() => unknown> }).deref
