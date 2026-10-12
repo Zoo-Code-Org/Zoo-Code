@@ -434,7 +434,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "oct-2026-v3.86.0-models-aborts-tool-streaming" // v3.86.0 models, aborts, and tool/UI streaming fixes
+	public readonly latestAnnouncementId = "oct-2026-v3.88.0-providers-tasks-speed" // v3.88.0 provider/model support, task reliability, faster editing and chat
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -1041,6 +1041,7 @@ export class ClineProvider
 					await forceFullModelDetailsLoad(
 						cline.apiConfiguration.lmStudioBaseUrl ?? "http://localhost:1234",
 						cline.apiConfiguration.lmStudioModelId!,
+						buildApiHandler({ ...cline.apiConfiguration, apiProvider: providerIdentifiers.lmstudio }),
 					)
 				}
 			} catch (error) {
@@ -1851,6 +1852,7 @@ export class ClineProvider
 			enableCheckpoints,
 			checkpointTimeout,
 			consecutiveMistakeLimit: apiConfiguration.consecutiveMistakeLimit,
+			toolRepetitionSoftLimit: apiConfiguration.toolRepetitionSoftLimit,
 			historyItem,
 			experiments,
 			rootTask: historyItem.rootTask,
@@ -2864,6 +2866,11 @@ export class ClineProvider
 		// settings commit can be rolled back store by store instead of only re-saving the
 		// settings: a later failed write would otherwise leave the persisted list, the shared
 		// selection, or this view's own pin pointing at a profile that no longer exists.
+		// Hoisted so the post-commit activation-side effects below can see whether this
+		// deletion displaced the profile this view or the shared selection was using.
+		let viewWasPinnedToDeleted = false
+		let deletedWasGlobal = false
+		let survivingSettings: ProviderSettings | undefined
 		const previousEntries = this.getProviderProfileEntries()
 		const previousGlobalSelection = globalSettings.currentApiConfigName
 		const previousViewPin = this.viewLocalState.currentApiConfigName
@@ -2898,7 +2905,6 @@ export class ClineProvider
 			// Resolve the surviving profile's settings so this view and any other
 			// live view still pinned to the deleted profile can be re-pinned with
 			// a matching configuration.
-			let survivingSettings: ProviderSettings | undefined
 			try {
 				const { name: _survivingName, ...settings } = await this.providerSettingsManager.getProfile({
 					name: profileToActivate,
@@ -2927,8 +2933,8 @@ export class ClineProvider
 			// deleted profile while the global selection points elsewhere must still be
 			// reconfigured, or getState() would keep the deleted profile's settings under
 			// the surviving profile's name.
-			const viewWasPinnedToDeleted = this.viewLocalState.currentApiConfigName === profileToDelete.name
-			const deletedWasGlobal = profileToDelete.name === globalSettings.currentApiConfigName
+			viewWasPinnedToDeleted = this.viewLocalState.currentApiConfigName === profileToDelete.name
+			deletedWasGlobal = profileToDelete.name === globalSettings.currentApiConfigName
 
 			if (viewWasPinnedToDeleted) {
 				// This view's pin now dangles: re-point it. setValue also persists the
@@ -3047,6 +3053,36 @@ export class ClineProvider
 			)
 			throw error
 		}
+
+		// The old deleteApiConfiguration path ended with activateProviderProfile, which
+		// updated the manager's own current-profile record and the current mode's profile
+		// mapping, rebuilt the current task's API handler, refreshed the current task's
+		// sticky profile, and emitted ProviderProfileChanged. The storage rewrites above
+		// cover the durable stores; when the deleted profile was the active one (globally
+		// or for this view), complete the activation-side effects here so the deletion
+		// leaves the same live state as activating the survivor. They run after the
+		// try/catch because the deletion has already landed: a failure here must not roll
+		// it back, the same placement activateProviderProfileUnlocked gives its rebuild.
+		if (deletedWasGlobal || viewWasPinnedToDeleted) {
+			const {
+				id: survivingId,
+				name: _activatedName,
+				...activatedSettings
+			} = await this.providerSettingsManager.activateProfile({ name: profileToActivate })
+			if (survivingId) {
+				const { mode } = await this.getState()
+				await this.providerSettingsManager.setModeConfig(mode, survivingId)
+			}
+			this.updateTaskApiHandlerIfNeeded(activatedSettings, { forceRebuild: true })
+			await this.persistStickyProviderProfileToCurrentTask(profileToActivate)
+			if (activatedSettings.apiProvider) {
+				this.emit(RooCodeEventName.ProviderProfileChanged, {
+					name: profileToActivate,
+					provider: activatedSettings.apiProvider,
+				})
+			}
+		}
+
 		await this.postStateToWebview()
 	}
 
@@ -4861,6 +4897,7 @@ export class ClineProvider
 			enableCheckpoints,
 			checkpointTimeout,
 			consecutiveMistakeLimit: effectiveApiConfiguration.consecutiveMistakeLimit,
+			toolRepetitionSoftLimit: effectiveApiConfiguration.toolRepetitionSoftLimit,
 			task: text,
 			images,
 			experiments,
