@@ -660,6 +660,55 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("listApiConfigMeta", expect.anything())
 		})
 
+		it("restores the shared mode and the acting view's pin separately when the switch is cancelled", async () => {
+			// The shared mode and this view's pin can start from different values: a sibling view
+			// may have moved the shared mode since this view pinned. The undo must put each
+			// store back on its own previous value, not write the shared one into the pin.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const updateMock = vi.mocked(mockContext.globalState.update)
+			// Shared mode "code" without touching the pin (a sibling view's last switch).
+			await provider["contextProxy"].setValue("mode", "code")
+			// This view is pinned to "architect", durably.
+			await provider["_saveViewLocalStateFromMutation"]({ mode: "architect" })
+			updateMock.mockClear()
+
+			const controller = new AbortController()
+			vi.mocked(mockContext.globalState.update).mockImplementation(async (key: string) => {
+				if (key === "mode") {
+					controller.abort()
+				}
+				return Promise.resolve()
+			})
+
+			await provider["handleModeSwitchUnlocked"]("debug", mockTask, controller.signal)
+
+			// The shared key moved to the new mode and back to the previous shared mode.
+			const modeWrites = updateMock.mock.calls.filter(([key]) => key === "mode").map(([, value]) => value)
+			expect(modeWrites).toEqual(["debug", "code"])
+			// The pin went debug -> architect: the view keeps its own previous mode, not the
+			// shared one, and the persisted entry agrees with the buffer.
+			const viewStatesWrites = updateMock.mock.calls
+				.filter(([key]) => key === "viewStates")
+				.map(([, value]) => {
+					const map = value as Record<string, { mode?: string }>
+					return map[Object.keys(map)[0]]?.mode
+				})
+			expect(viewStatesWrites).toEqual(["debug", "architect"])
+			expect(provider["viewLocalState"].mode).toBe("architect")
+		})
+
 		it("compensates the durable mode write when the abort lands while the profile lookups are in flight", async () => {
 			// The named gap: the mode and the acting view's pin are already durable when the timeout
 			// aborts during getModeConfigId. Returning bare from the post-lookup check left the

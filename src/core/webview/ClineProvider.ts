@@ -2319,6 +2319,10 @@ export class ClineProvider
 		// If the durable write fails, roll the shared write back so getValues()
 		// cannot mix a fresh shared mode with the stale pre-switch buffer.
 		const previousMode = this.getValue("mode")
+		// getValue reads the shared ContextProxy value only. The undo must also be able to put
+		// this view's own pin back: a sibling view may have moved the shared mode since this
+		// view last pinned, so the two stores can start from different values.
+		const previousViewMode = this.viewLocalState.mode
 		const generation = ++this.modeMutationGeneration
 		try {
 			// setValue writes the shared key and the acting view's pin, so once it resolves the switch
@@ -2345,7 +2349,7 @@ export class ClineProvider
 		// already advanced, so emitting or writing profile/list state now would land behind the next
 		// mutation. Compensate through the shared mode-switch rollback.
 		if (signal?.aborted) {
-			await this.compensateCancelledModeSwitch(newMode, previousMode, generation)
+			await this.compensateCancelledModeSwitch(newMode, previousMode, previousViewMode, generation)
 			return
 		}
 
@@ -2364,7 +2368,7 @@ export class ClineProvider
 		// mode and the acting view's pin too: the activation below is the only thing that completes
 		// the switch, and it never starts on a cancelled operation.
 		if (signal?.aborted) {
-			await this.compensateCancelledModeSwitch(newMode, previousMode, generation)
+			await this.compensateCancelledModeSwitch(newMode, previousMode, previousViewMode, generation)
 			return
 		}
 
@@ -2376,7 +2380,7 @@ export class ClineProvider
 		// per-view pin persisted with no mode-specific activation behind them, so a reload restored
 		// the incomplete new selection.
 		if (signal?.aborted) {
-			await this.compensateCancelledModeSwitch(newMode, previousMode, generation)
+			await this.compensateCancelledModeSwitch(newMode, previousMode, previousViewMode, generation)
 			return
 		}
 
@@ -2402,7 +2406,7 @@ export class ClineProvider
 					// while its profile was being read has to undo the durable mode write as well, or
 					// storage keeps the new mode with no activation behind it.
 					if (signal?.aborted) {
-						await this.compensateCancelledModeSwitch(newMode, previousMode, generation)
+						await this.compensateCancelledModeSwitch(newMode, previousMode, previousViewMode, generation)
 						return
 					}
 					await this.activateProviderProfileUnlocked(
@@ -2448,6 +2452,7 @@ export class ClineProvider
 	private async compensateCancelledModeSwitch(
 		newMode: Mode,
 		previousMode: Mode | undefined,
+		previousViewMode: Mode | undefined,
 		generation: number,
 	): Promise<void> {
 		if (generation !== this.modeMutationGeneration) {
@@ -2457,7 +2462,12 @@ export class ClineProvider
 			return
 		}
 		try {
-			await this.setValue("mode", previousMode)
+			// Restore the two stores separately, the way compensateProfileActivation restores the
+			// shared selection and the acting view's profile pin. Going through setValue would write
+			// the shared previous mode into this view's pin too, repinning a view that was pinned
+			// elsewhere (or pinning one that had no pin at all).
+			await this.contextProxy.setValue("mode", previousMode)
+			await this._saveViewLocalStateFromMutation({ mode: previousViewMode })
 		} catch (compensationError) {
 			throw new ModeSwitchInconsistentError(
 				`[ClineProvider] A cancelled switch to mode "${newMode}" could not restore the previous mode "${String(
