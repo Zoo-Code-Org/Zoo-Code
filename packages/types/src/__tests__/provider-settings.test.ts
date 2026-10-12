@@ -138,6 +138,26 @@ describe("OpenAI Codex provider settings", () => {
 	})
 })
 
+describe("OpenAI Codex WebSocket preference", () => {
+	it.each([true, false, undefined])("round-trips %s through both provider schemas", (enabled) => {
+		const settings = {
+			apiProvider: providerIdentifiers.openaiCodex,
+			...(enabled !== undefined ? { openAiCodexUseWebSocket: enabled } : {}),
+		}
+		expect(providerSettingsSchema.parse(settings)).toEqual(settings)
+		expect(providerSettingsSchemaDiscriminated.parse(JSON.parse(JSON.stringify(settings)))).toEqual(settings)
+		expect(PROVIDER_SETTINGS_KEYS).toContain("openAiCodexUseWebSocket")
+	})
+	it.each(["true", 1, null])("rejects non-boolean value %s", (enabled) => {
+		expect(
+			providerSettingsSchema.safeParse({
+				apiProvider: providerIdentifiers.openaiCodex,
+				openAiCodexUseWebSocket: enabled,
+			}).success,
+		).toBe(false)
+	})
+})
+
 describe("getApiProtocol", () => {
 	it("preserves API protocol wire values", () => {
 		expect(ANTHROPIC_API_PROTOCOL).toBe("anthropic")

@@ -2000,6 +2000,20 @@ describe("ClineProvider", () => {
 	})
 
 	test.each([true, false, undefined])(
+		"returns saved Codex WebSocket preference %s through the webview round trip",
+		async (enabled) => {
+			const configuration: ProviderSettings = {
+				apiProvider: providerIdentifiers.openaiCodex,
+				...(enabled !== undefined ? { openAiCodexUseWebSocket: enabled } : {}),
+			}
+			await provider.contextProxy.setProviderSettings(configuration)
+			expect(provider.contextProxy.getProviderSettings().openAiCodexUseWebSocket).toBe(enabled)
+			expect((await provider.getState()).apiConfiguration.openAiCodexUseWebSocket).toBe(enabled)
+			expect((await provider.getStateToPostToWebview()).apiConfiguration.openAiCodexUseWebSocket).toBe(enabled)
+		},
+	)
+
+	test.each([true, false, undefined])(
 		"returns saved OpenAI-compatible reasoning settings to the webview when enabled is %s",
 		async (enableReasoningEffort) => {
 			await provider.resolveWebviewView(mockWebviewView)
