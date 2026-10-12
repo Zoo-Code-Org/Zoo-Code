@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 import { presentAssistantMessage } from "../presentAssistantMessage"
+import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
 import type { Task } from "../../task/Task"
 
 const mockRelease = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
@@ -70,6 +71,14 @@ interface PresenterTask {
 	pushToolResultToUserContent: ReturnType<typeof vi.fn>
 }
 
+// The presenter validates against this frozen request snapshot; the mocked
+// validateToolUse never reads policy fields, and the provider-state double in
+// the task mock stays inert.
+const baseSnapshot: RequestPolicySnapshot = {
+	disabledTools: [],
+	customModes: [],
+	experiments: {},
+}
 describe("presentAssistantMessage - a rejected write_to_file releases its stream", () => {
 	let mockTask: PresenterTask
 
@@ -132,7 +141,7 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 		// releases them and the task carries a stale stream into its next write.
 		mockTask.assistantMessageContent = writeBlock()
 
-		await presentAssistantMessage(mockTask as unknown as Task)
+		await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
 
 		expect(mockRelease).toHaveBeenCalledTimes(1)
 		expect(mockRelease).toHaveBeenCalledWith(mockTask)
@@ -156,7 +165,7 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 		})
 		mockTask.assistantMessageContent = writeBlock()
 
-		await presentAssistantMessage(mockTask as unknown as Task)
+		await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
 
 		expect(mockRelease).toHaveBeenCalledTimes(1)
 		expect(mockHandle).not.toHaveBeenCalled()
@@ -181,7 +190,7 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 		})
 		mockTask.assistantMessageContent = writeBlock()
 
-		await presentAssistantMessage(mockTask as unknown as Task)
+		await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
 
 		expect(mockRelease).toHaveBeenCalledTimes(1)
 		expect(mockHandle).not.toHaveBeenCalled()
@@ -206,7 +215,7 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 			},
 		]
 
-		await presentAssistantMessage(mockTask as unknown as Task)
+		await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
 
 		expect(mockRelease).toHaveBeenCalledTimes(1)
 		expect(mockRelease).toHaveBeenCalledWith(mockTask)
@@ -240,7 +249,7 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 			},
 		]
 
-		await presentAssistantMessage(mockTask as unknown as Task)
+		await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
 
 		// The branch ran: the model received the hard-block refusal...
 		const toolResult = mockTask.userMessageContent.find((item) => item.type === "tool_result")
@@ -272,7 +281,7 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 			},
 		]
 
-		await presentAssistantMessage(mockTask as unknown as Task)
+		await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
 
 		const toolResult = mockTask.userMessageContent.find((item) => item.type === "tool_result")
 		if (!toolResult) {
@@ -297,7 +306,7 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 			},
 		]
 
-		await presentAssistantMessage(mockTask as unknown as Task)
+		await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
 
 		expect(mockRelease).not.toHaveBeenCalled()
 		expect(mockHandle).not.toHaveBeenCalled()
@@ -316,7 +325,7 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 			},
 		]
 
-		await presentAssistantMessage(mockTask as unknown as Task)
+		await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
 
 		expect(mockRelease).not.toHaveBeenCalled()
 	})
