@@ -8,7 +8,9 @@ import { AppProviders } from "../../../../playwright/AppProviders"
 interface UIState {
 	reasoningBlockCollapsed: boolean
 	enterBehavior: "send" | "newline"
+	chatInputEffect: "marquee" | "breathing"
 	chatFontSize?: number
+	tableStriped?: boolean
 	autoCloseZooOpenedFiles?: boolean
 	autoCloseZooOpenedFilesAfterUserEdited?: boolean
 	autoCloseZooOpenedNewFiles?: boolean
@@ -18,7 +20,10 @@ export function UISettingsStory() {
 	const [state, setState] = useState<UIState>({
 		reasoningBlockCollapsed: true,
 		enterBehavior: "send",
+		chatInputEffect: "marquee",
 		chatFontSize: 14,
+		// Pinned so the rendered control is deterministic regardless of the striped default.
+		tableStriped: false,
 		autoCloseZooOpenedFiles: true,
 		autoCloseZooOpenedFilesAfterUserEdited: true,
 		autoCloseZooOpenedNewFiles: false,
@@ -33,6 +38,8 @@ export function UISettingsStory() {
 					return { ...current, [field]: Boolean(value) }
 				case "enterBehavior":
 					return { ...current, enterBehavior: value === "newline" ? "newline" : "send" }
+				case "chatInputEffect":
+					return { ...current, chatInputEffect: value === "breathing" ? "breathing" : "marquee" }
 				case "chatFontSize":
 					return { ...current, chatFontSize: typeof value === "number" ? value : undefined }
 				default:

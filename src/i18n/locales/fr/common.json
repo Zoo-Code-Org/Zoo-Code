@@ -147,7 +147,8 @@
 			"unexpectedStreamError": "Unexpected error processing response stream",
 			"completionError": "OpenAI Codex completion error: {{message}}"
 		},
-		"rooHistoryImport": "Échec de l'importation de l'historique Roo Code : {{error}}"
+		"rooHistoryImport": "Échec de l'importation de l'historique Roo Code : {{error}}",
+		"settingsSaveFailed": "Certains paramètres n’ont pas pu être enregistrés. Sélectionnez Enregistrer pour réessayer. {{keys}}"
 	},
 	"warnings": {
 		"no_terminal_content": "Aucun contenu de terminal sélectionné",

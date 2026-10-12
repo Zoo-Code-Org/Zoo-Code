@@ -674,6 +674,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 
 		expect(postMessage).toHaveBeenCalledWith({
 			type: "upsertApiConfiguration",
+			requestId: expect.any(String),
 			text: "default",
 			apiConfiguration: {
 				apiProvider: providerIdentifiers.nanogpt,
@@ -726,6 +727,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		fireEvent.click(screen.getByTestId("save-button"))
 		expect(postMessage).toHaveBeenCalledWith({
 			type: "upsertApiConfiguration",
+			requestId: expect.any(String),
 			text: "default",
 			apiConfiguration: {
 				...configuration,

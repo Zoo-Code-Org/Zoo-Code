@@ -124,9 +124,18 @@ export const stories: Record<string, Story> = {
 			await import("@/components/settings/__tests__/AutoApproveSettings.visual.fixture")
 		return <AutoApproveSettingsStory />
 	},
-	"chat-text-area": async () => {
+	"chat-text-area": async ({ isStreaming, chatInputEffect }) => {
 		const { ChatTextAreaStory } = await import("@/components/chat/__tests__/ChatTextArea.visual.fixture")
-		return <ChatTextAreaStory />
+		return (
+			<ChatTextAreaStory
+				isStreaming={isStreaming === true}
+				chatInputEffect={chatInputEffect === "breathing" ? "breathing" : "marquee"}
+			/>
+		)
+	},
+	"chat-effects": async () => {
+		const { ChatEffectsStory } = await import("@/components/chat/__tests__/ChatEffects.visual.fixture")
+		return <ChatEffectsStory />
 	},
 	"history-empty": async () => {
 		const [{ AppProviders }, { default: HistoryView }] = await Promise.all([

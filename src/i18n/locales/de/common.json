@@ -147,7 +147,8 @@
 		"manual_url_missing_params": "Ungültige Callback-URL: erforderliche Parameter (code und state) fehlen",
 		"manual_url_auth_failed": "Manuelle URL-Authentifizierung fehlgeschlagen",
 		"manual_url_auth_error": "Authentifizierung fehlgeschlagen",
-		"rooHistoryImport": "Fehler beim Importieren des Roo Code-Verlaufs: {{error}}"
+		"rooHistoryImport": "Fehler beim Importieren des Roo Code-Verlaufs: {{error}}",
+		"settingsSaveFailed": "Einige Einstellungen konnten nicht gespeichert werden. Wählen Sie Speichern, um es erneut zu versuchen. {{keys}}"
 	},
 	"warnings": {
 		"no_terminal_content": "Kein Terminal-Inhalt ausgewählt",

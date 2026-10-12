@@ -147,7 +147,8 @@
 			"unexpectedStreamError": "Unexpected error processing response stream",
 			"completionError": "OpenAI Codex completion error: {{message}}"
 		},
-		"rooHistoryImport": "Gagal mengimpor riwayat Roo Code: {{error}}"
+		"rooHistoryImport": "Gagal mengimpor riwayat Roo Code: {{error}}",
+		"settingsSaveFailed": "Beberapa pengaturan tidak dapat disimpan. Pilih Simpan untuk mencoba lagi. {{keys}}"
 	},
 	"warnings": {
 		"no_terminal_content": "Tidak ada konten terminal yang dipilih",

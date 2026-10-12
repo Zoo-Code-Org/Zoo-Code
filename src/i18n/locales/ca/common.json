@@ -151,7 +151,8 @@
 		"manual_url_auth_failed": "Autenticació manual per URL ha fallat",
 		"manual_url_auth_error": "Autenticació fallida",
 		"mode_import_failed": "Ha fallat la importació del mode: {{error}}",
-		"rooHistoryImport": "No s'ha pogut importar l'historial de Roo Code: {{error}}"
+		"rooHistoryImport": "No s'ha pogut importar l'historial de Roo Code: {{error}}",
+		"settingsSaveFailed": "No s’han pogut desar alguns paràmetres. Seleccioneu Desa per tornar-ho a provar. {{keys}}"
 	},
 	"warnings": {
 		"no_terminal_content": "No s'ha seleccionat contingut de terminal",

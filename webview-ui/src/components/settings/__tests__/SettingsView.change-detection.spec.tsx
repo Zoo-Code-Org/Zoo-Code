@@ -454,6 +454,24 @@ describe("SettingsView - Change Detection Fix", () => {
 		...overrides,
 	})
 
+	// A save completes only after all four persistence requests are acknowledged.
+	const respondToSaveRequest = (success = true, unsavedSettings: string[] = []) => {
+		for (const [request] of mockPostMessage.mock.calls.slice(-4)) {
+			act(() =>
+				window.dispatchEvent(
+					new MessageEvent("message", {
+						data: {
+							type: "settingsSaveResult",
+							requestId: request.requestId,
+							success,
+							unsavedSettings,
+						},
+					}),
+				),
+			)
+		}
+	}
+
 	beforeAll(async () => {
 		// Import after mocks are registered so the isolated tests use the
 		// lightweight child component mocks above instead of the full settings UI.
@@ -508,6 +526,7 @@ describe("SettingsView - Change Detection Fix", () => {
 		fireEvent.click(screen.getByTestId("save-button"))
 		expect(mockPostMessage).toHaveBeenCalledWith({
 			type: "upsertApiConfiguration",
+			requestId: expect.any(String),
 			text: "default",
 			apiConfiguration: expect.objectContaining({ reasoningEffort: "high" }),
 		})
@@ -560,12 +579,17 @@ describe("SettingsView - Change Detection Fix", () => {
 		fireEvent.click(screen.getByTestId("save-button"))
 		expect(mockPostMessage).toHaveBeenCalledWith({
 			type: "upsertApiConfiguration",
+			requestId: expect.any(String),
 			text: "default",
 			apiConfiguration: expect.objectContaining({
 				apiProvider: providerIdentifiers.baseten,
 				basetenApiKey: "test-baseten-key",
 			}),
 		})
+
+		// Acknowledge the save so the button re-enables and the guard clears
+		// before the next edit and save are exercised in this same test.
+		respondToSaveRequest()
 
 		fireEvent.click(screen.getByTestId("set-provider-deepseek"))
 		expect(screen.getByTestId("provider-value")).toHaveTextContent("deepseek")
@@ -598,6 +622,7 @@ describe("SettingsView - Change Detection Fix", () => {
 
 		expect(mockPostMessage).toHaveBeenCalledWith({
 			type: "upsertApiConfiguration",
+			requestId: expect.any(String),
 			text: "default",
 			apiConfiguration: expect.objectContaining({
 				apiProvider: providerIdentifiers.deepseek,

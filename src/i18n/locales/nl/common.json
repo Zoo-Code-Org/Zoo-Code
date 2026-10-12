@@ -147,7 +147,8 @@
 			"unexpectedStreamError": "Unexpected error processing response stream",
 			"completionError": "OpenAI Codex completion error: {{message}}"
 		},
-		"rooHistoryImport": "Importeren van Roo Code-geschiedenis mislukt: {{error}}"
+		"rooHistoryImport": "Importeren van Roo Code-geschiedenis mislukt: {{error}}",
+		"settingsSaveFailed": "Sommige instellingen konden niet worden opgeslagen. Selecteer Opslaan om het opnieuw te proberen. {{keys}}"
 	},
 	"warnings": {
 		"no_terminal_content": "Geen terminalinhoud geselecteerd",

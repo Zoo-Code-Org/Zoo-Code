@@ -29,6 +29,7 @@ import type { WorktreeIncludeStatus } from "./worktree.js"
  */
 export interface ExtensionMessage {
 	type:
+		| "settingsSaveResult"
 		| "action"
 		| "state"
 		| "taskHistoryUpdated"
@@ -157,6 +158,7 @@ export interface ExtensionMessage {
 	/** Generic payload for extension messages that use `values` */
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	values?: Record<string, any>
+	unsavedSettings?: string[]
 	requestId?: string
 	themeFixture?: WebviewThemeFixture
 	promptText?: string
@@ -328,6 +330,8 @@ export type ExtensionState = Pick<
 	| "reasoningBlockCollapsed"
 	| "chatFontSize"
 	| "enterBehavior"
+	| "chatInputEffect"
+	| "tableStriped"
 	| "includeCurrentTime"
 	| "includeCurrentCost"
 	| "maxGitStatusFiles"

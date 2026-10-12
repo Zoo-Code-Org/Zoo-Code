@@ -157,6 +157,13 @@ describe("ContextProxy", () => {
 	})
 
 	describe("updateGlobalState", () => {
+		it("retains the saved cache value when persistence fails", async () => {
+			await proxy.updateGlobalState("chatInputEffect", "marquee")
+			mockGlobalState.update.mockRejectedValueOnce(new Error("disk full"))
+			await expect(proxy.updateGlobalState("chatInputEffect", "breathing")).rejects.toThrow("disk full")
+			expect(proxy.getGlobalState("chatInputEffect")).toBe("marquee")
+		})
+
 		it("should update state directly in original context", async () => {
 			await proxy.updateGlobalState("apiProvider", "deepseek")
 
@@ -208,6 +215,22 @@ describe("ContextProxy", () => {
 	})
 
 	describe("storeSecret", () => {
+		it("retains the saved secret when deletion fails", async () => {
+			await proxy.storeSecret("apiKey", "saved-secret")
+			mockSecrets.delete.mockRejectedValueOnce(new Error("storage unavailable"))
+
+			await expect(proxy.storeSecret("apiKey", undefined)).rejects.toThrow("storage unavailable")
+			expect(mockSecrets.delete).toHaveBeenCalledWith("apiKey")
+			expect(proxy.getSecret("apiKey")).toBe("saved-secret")
+		})
+
+		it("retains the saved secret when persistence fails", async () => {
+			await proxy.storeSecret("apiKey", "saved-secret")
+			mockSecrets.store.mockRejectedValueOnce(new Error("storage unavailable"))
+			await expect(proxy.storeSecret("apiKey", "unsaved-secret")).rejects.toThrow("storage unavailable")
+			expect(proxy.getSecret("apiKey")).toBe("saved-secret")
+		})
+
 		it("should store secret directly in original context", async () => {
 			await proxy.storeSecret("apiKey", "new-secret")
 

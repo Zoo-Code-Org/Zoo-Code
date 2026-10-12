@@ -152,7 +152,8 @@
 			"unexpectedStreamError": "Unexpected error processing response stream",
 			"completionError": "OpenAI Codex completion error: {{message}}"
 		},
-		"rooHistoryImport": "导入 Roo Code 历史记录失败：{{error}}"
+		"rooHistoryImport": "导入 Roo Code 历史记录失败：{{error}}",
+		"settingsSaveFailed": "部分设置未能保存。请选择“保存”重试。 {{keys}}"
 	},
 	"warnings": {
 		"no_terminal_content": "没有选择终端内容",

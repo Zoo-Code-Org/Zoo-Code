@@ -5,7 +5,7 @@ import * as vscode from "vscode"
 import { makeCompositeDisposable } from "../../../test-utils/vscode"
 
 import { TelemetryService } from "@roo-code/telemetry"
-import { getModelId, RooCodeEventName } from "@roo-code/types"
+import { getModelId, RooCodeEventName, type HistoryItem } from "@roo-code/types"
 
 import { ContextProxy } from "../../config/ContextProxy"
 import type { Mode } from "../../../shared/modes"
@@ -490,7 +490,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "second-profile")
 		})
 
-		test("timed-out mutations abort before writing state and advance the queue", async () => {
+		test("timed-out mutations retain the queue lock until their underlying work settles", async () => {
 			vi.useFakeTimers()
 			const logSpy = vi.spyOn(provider, "log")
 			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
@@ -522,9 +522,9 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
 				await firstResult
 
-				// Queue advanced immediately on timeout — second enqueues now.
+				// A later activation stays queued even after the first caller times out.
 				const second = provider.activateProviderProfile({ name: "second-profile" })
-				// activateProfile not yet called for second (it runs in the next microtask).
+				await vi.advanceTimersByTimeAsync(1)
 				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(1)
 
 				// Resolve the first activation's inner promise so its in-flight mock can return.
@@ -539,6 +539,136 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			} finally {
 				vi.useRealTimers()
 			}
+		})
+
+		test("stops activation after a metadata read finishes following timeout", async () => {
+			let release!: () => void
+			const blocked = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			const list = vi.spyOn(provider.providerSettingsManager, "listConfig").mockImplementationOnce(async () => {
+				await blocked
+				return []
+			})
+			const writes = vi.spyOn(provider.contextProxy, "setValue")
+			const settings = vi.spyOn(provider.contextProxy, "setProviderSettings")
+			const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			vi.useFakeTimers()
+			try {
+				const activation = provider.activateProviderProfile({ name: "test-config" })
+				const rejected = expect(activation).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				await rejected
+				expect(list).toHaveBeenCalledOnce()
+				release()
+				await provider["providerProfileMutationQueue"]
+				expect(writes).not.toHaveBeenCalled()
+				expect(settings).not.toHaveBeenCalled()
+				expect(provider.providerSettingsManager.setModeConfig).not.toHaveBeenCalled()
+				expect(post).not.toHaveBeenCalled()
+			} finally {
+				release()
+				vi.useRealTimers()
+			}
+		})
+
+		test("finishes a committed mode update after timeout before releasing the queue", async () => {
+			const task = new Task(defaultTaskOptions)
+			task["_taskMode"] = "code"
+			let persisted: HistoryItem = {
+				id: task.taskId,
+				ts: 1,
+				task: "Synthetic task",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				mode: "code",
+			}
+			provider["getTaskHistoryItem"] = vi.fn(() => persisted)
+			let release!: () => void
+			const blocked = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			const history = vi.spyOn(provider, "updateTaskHistory").mockImplementationOnce(async (item) => {
+				await blocked
+				persisted = item
+				return [item]
+			})
+			const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			vi.useFakeTimers()
+			try {
+				const switching = provider.handleModeSwitch("ask", task)
+				const rejected = expect(switching).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				await rejected
+				expect(history).toHaveBeenCalledOnce()
+				const next = vi.fn(async () => {
+					expect(persisted.mode).toBe("ask")
+					expect(task["_taskMode"]).toBe("ask")
+					expect(provider.contextProxy.getValue("mode")).toBe("ask")
+				})
+				const queued = provider["enqueueProviderProfileMutation"](next)
+				await vi.advanceTimersByTimeAsync(1)
+				expect(next).not.toHaveBeenCalled()
+				release()
+				await queued
+				expect(next).toHaveBeenCalledOnce()
+				expect(provider.providerSettingsManager.activateProfile).not.toHaveBeenCalled()
+				expect(post).not.toHaveBeenCalled()
+			} finally {
+				release()
+				vi.useRealTimers()
+			}
+		})
+
+		test("stops a mode switch before activation when its profile read outlives the timeout", async () => {
+			let release!: () => void
+			const blocked = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			vi.mocked(provider.providerSettingsManager.getModeConfigId).mockResolvedValue("test-id")
+			const profile = { name: "test-config", id: "test-id", apiProvider: providerIdentifiers.openrouter }
+			const read = vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementationOnce(async () => {
+				await blocked
+				return profile
+			})
+			const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			vi.useFakeTimers()
+			try {
+				const switching = provider.handleModeSwitch("ask")
+				const rejected = expect(switching).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				await rejected
+				expect(read).toHaveBeenCalledOnce()
+				release()
+				await provider["providerProfileMutationQueue"]
+				expect(provider.providerSettingsManager.activateProfile).not.toHaveBeenCalled()
+				expect(provider.providerSettingsManager.setModeConfig).not.toHaveBeenCalled()
+				expect(post).not.toHaveBeenCalled()
+			} finally {
+				release()
+				vi.useRealTimers()
+			}
+		})
+
+		test("drains outstanding activation writes before releasing the queue on failure", async () => {
+			let release!: () => void
+			const blocked = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			const failure = new Error("synthetic write failure")
+			vi.spyOn(provider.contextProxy, "setValue").mockRejectedValueOnce(failure)
+			const settings = vi.spyOn(provider.contextProxy, "setProviderSettings").mockReturnValueOnce(blocked)
+			const first = provider.activateProviderProfile({ name: "test-config" })
+			const rejected = expect(first).rejects.toThrow(failure)
+			const second = provider.activateProviderProfile({ name: "second-profile" })
+			await vi.waitFor(() => expect(settings).toHaveBeenCalledOnce())
+			expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledTimes(1)
+			release()
+			await rejected
+			await second
+			expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledTimes(2)
 		})
 
 		test("mode switch preserves its default task when queued behind a profile mutation", async () => {
