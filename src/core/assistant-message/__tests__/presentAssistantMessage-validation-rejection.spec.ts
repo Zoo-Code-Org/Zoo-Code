@@ -356,15 +356,20 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 			action: "hard_block",
 			askUser: { messageKey: "mistake_limit_reached", messageDetail: "repeated" },
 		})
+		// Keep the release pending: invocation order alone would still pass if the prompt
+		// opened while the cleanup was mid-flight. The prompt must not open until the
+		// release COMPLETES.
+		let resolveRelease!: () => void
+		mockRelease.mockImplementation(() => new Promise<void>((resolve) => (resolveRelease = resolve)))
 		mockTask.ask = vi.fn().mockRejectedValue(new Error("prompt failed"))
 		mockTask.assistantMessageContent = writeBlock()
 
-		await expect(presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)).rejects.toThrow(
-			"prompt failed",
-		)
-
-		expect(mockRelease).toHaveBeenCalledTimes(1)
-		// The release must precede the prompt, not follow it.
-		expect(mockRelease.mock.invocationCallOrder[0]).toBeLessThan(mockTask.ask.mock.invocationCallOrder[0])
+		const presentation = presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
+		await vi.waitFor(() => expect(mockRelease).toHaveBeenCalledTimes(1))
+		// The release is still pending: the prompt must not have opened.
+		expect(mockTask.ask).not.toHaveBeenCalled()
+		resolveRelease()
+		await expect(presentation).rejects.toThrow("prompt failed")
+		expect(mockTask.ask).toHaveBeenCalledTimes(1)
 	})
 })
