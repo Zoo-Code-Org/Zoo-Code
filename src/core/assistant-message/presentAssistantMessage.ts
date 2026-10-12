@@ -9,7 +9,9 @@ import { customToolRegistry } from "@roo-code/core"
 import { t } from "../../i18n"
 
 import { defaultModeSlug, getModeBySlug } from "../../shared/modes"
-import type { ToolParamName, ToolResponse, ToolUse, McpToolUse } from "../../shared/tools"
+import type { AutoApprovalContext, ToolParamName, ToolResponse, ToolUse, McpToolUse } from "../../shared/tools"
+
+import { buildAutoDenyReason } from "../auto-approval"
 
 import { AskIgnoredError } from "../task/AskIgnoredError"
 import { Task } from "../task/Task"
@@ -95,6 +97,28 @@ export async function presentAssistantMessage(cline: Task) {
 	}
 
 	cline.presentAssistantMessageLocked = true
+	try {
+		// Drain updates queued while the lock was held, including one that
+		// arrives after the helper's final check but before this continuation.
+		// The last pending check and the release below run in the same
+		// synchronous step, so no update can be stranded behind the lock.
+		do {
+			await presentAssistantMessageBlock(cline)
+		} while (!cline.abort && cline.presentAssistantMessageHasPendingUpdates)
+	} finally {
+		// Tool handlers and provider-state reads can reject. Never strand the
+		// task behind a dispatch lock after the presenter has unwound.
+		cline.presentAssistantMessageLocked = false
+	}
+}
+
+async function presentAssistantMessageBlock(cline: Task): Promise<void> {
+	if (cline.abort) {
+		return
+	}
+
+	// Each internal pass consumes the pending update. New updates arriving
+	// during an awaited operation can request another pass.
 	cline.presentAssistantMessageHasPendingUpdates = false
 
 	if (cline.currentStreamingContentIndex >= cline.assistantMessageContent.length) {
@@ -106,7 +130,6 @@ export async function presentAssistantMessage(cline: Task) {
 			cline.userMessageContentReady = true
 		}
 
-		cline.presentAssistantMessageLocked = false
 		return
 	}
 
@@ -123,7 +146,6 @@ export async function presentAssistantMessage(cline: Task) {
 			`Block content:`,
 			JSON.stringify(cline.assistantMessageContent[cline.currentStreamingContentIndex], null, 2),
 		)
-		cline.presentAssistantMessageLocked = false
 		return
 	}
 
@@ -214,16 +236,40 @@ export async function presentAssistantMessage(cline: Task) {
 				partialMessage?: string,
 				progressStatus?: ToolProgressStatus,
 				isProtected?: boolean,
+				autoApprovalContext?: AutoApprovalContext,
 			) => {
-				const { response, text, images } = await cline.ask(
+				const { response, text, images, autoDenyDetail } = await cline.ask(
 					type,
 					partialMessage,
 					false,
 					progressStatus,
 					isProtected || false,
+					autoApprovalContext,
 				)
 
 				if (response !== "yesButtonClicked") {
+					// Automatic (policy) denial: scoped to this tool call, so no
+					// `didRejectTool` (remaining tool calls in the turn proceed)
+					// and no `user_feedback` say (the reason is system-generated).
+					if (autoDenyDetail) {
+						// `guard_unavailable` marks a guard-state inconsistency, not a
+						// policy denial: the command never ran and a re-issue re-reads
+						// the guard setting, so the payload must stay a retryable error
+						// instead of carrying policy-denial advice.
+						if (autoDenyDetail.kind === "guard_unavailable") {
+							pushToolResult(formatResponse.toolError(buildAutoDenyReason(autoDenyDetail)))
+						} else {
+							pushToolResult(
+								formatResponse.toolAutoDenied({
+									reason: buildAutoDenyReason(autoDenyDetail),
+									offendingCommand: autoDenyDetail.command,
+									ruleId: autoDenyDetail.dcgRuleId,
+								}),
+							)
+						}
+						return false
+					}
+
 					if (text) {
 						await cline.say("user_feedback", text, images)
 						pushToolResult(formatResponse.toolResult(formatResponse.toolDeniedWithFeedback(text), images))
@@ -288,6 +334,67 @@ export async function presentAssistantMessage(cline: Task) {
 					tool_name: mcpBlock.toolName,
 					arguments: mcpBlock.arguments,
 				},
+			}
+
+			// Consult the shared policy layer before executing — ONLY for complete
+			// (non-partial) blocks. Validating partial blocks would surface validation
+			// errors repeatedly during streaming, pushing multiple tool_results for the
+			// same tool_use_id and making the stream appear frozen.
+			if (!mcpBlock.partial) {
+				const state = await cline.providerRef.deref()?.getState()
+				const { customModes, experiments: stateExperiments, disabledTools } = state ?? {}
+				// Read the task-local mode, not the shared provider mode.
+				// A delegated child task may run in a different mode than its parent.
+				const taskMode = await cline.getTaskMode()
+
+				const modelInfo = cline.api.getModel()
+				// Resolve aliases in includedTools before validation
+				// e.g., "write_file" should resolve to "write_to_file"
+				const rawIncludedTools = modelInfo.info.includedTools
+				const { resolveToolAlias } = await import("../prompts/tools/filter-tools-for-mode")
+				const includedTools = rawIncludedTools?.map((tool) => resolveToolAlias(tool))
+
+				try {
+					// Validate under the canonical "use_mcp_tool" name: the requirements map
+					// is keyed by canonical/alias names, so the dynamic mcp_* name would never
+					// key-match a disabledTools or excludedTools entry naming use_mcp_tool.
+					// Build requirements through the shared policy module so every suppressed
+					// entry reaches the validator, which checks them before the
+					// always-available class. See `buildToolRequirements` in
+					// effective-tool-policy.ts.
+					const toolRequirements = buildToolRequirements(disabledTools, modelInfo.info)
+
+					validateToolUse(
+						"use_mcp_tool",
+						taskMode,
+						customModes ?? [],
+						toolRequirements,
+						syntheticToolUse.params,
+						stateExperiments,
+						includedTools,
+					)
+				} catch (error) {
+					cline.consecutiveMistakeCount++
+					// For validation errors, send a tool_result with the error (required for
+					// native tool calling) but do NOT set didAlreadyUseTool = true — the tool
+					// was never executed, and interrupting the stream here would make the
+					// extension appear to hang.
+					const errorContent = formatResponse.toolError(error.message)
+					if (toolCallId) {
+						cline.pushToolResultToUserContent({
+							type: "tool_result",
+							tool_use_id: sanitizeToolUseId(toolCallId),
+							content: errorContent,
+							is_error: true,
+						})
+					}
+
+					// The validator's message names the canonical tool, never the
+					// model-controlled dynamic name, so this key is safe.
+					cline.recordToolError("use_mcp_tool", error.message)
+
+					break
+				}
 			}
 
 			await useMcpToolTool.handle(cline, syntheticToolUse, {
@@ -522,16 +629,42 @@ export async function presentAssistantMessage(cline: Task) {
 				partialMessage?: string,
 				progressStatus?: ToolProgressStatus,
 				isProtected?: boolean,
+				autoApprovalContext?: AutoApprovalContext,
 			) => {
-				const { response, text, images, queuedMessageId } = await cline.ask(
+				const { response, text, images, queuedMessageId, autoDenyDetail } = await cline.ask(
 					type,
 					partialMessage,
 					false,
 					progressStatus,
 					isProtected || false,
+					autoApprovalContext,
 				)
 
 				if (response !== "yesButtonClicked") {
+					// Automatic (policy) denial: scoped to this tool call, so no
+					// `didRejectTool` (remaining tool calls in the turn proceed)
+					// and no `user_feedback` say (the reason is system-generated).
+					// Automatic denials never carry queued feedback — a queued
+					// message forces a real ask.
+					if (autoDenyDetail) {
+						// `guard_unavailable` marks a guard-state inconsistency, not a
+						// policy denial: the command never ran and a re-issue re-reads
+						// the guard setting, so the payload must stay a retryable error
+						// instead of carrying policy-denial advice.
+						if (autoDenyDetail.kind === "guard_unavailable") {
+							pushToolResult(formatResponse.toolError(buildAutoDenyReason(autoDenyDetail)))
+						} else {
+							pushToolResult(
+								formatResponse.toolAutoDenied({
+									reason: buildAutoDenyReason(autoDenyDetail),
+									offendingCommand: autoDenyDetail.command,
+									ruleId: autoDenyDetail.dcgRuleId,
+								}),
+							)
+						}
+						return false
+					}
+
 					// Handle both messageResponse and noButtonClicked with text.
 					if (queuedMessageId) {
 						const persisted = await cline.persistQueuedFeedbackAndAcknowledge(queuedMessageId, text, images)
@@ -964,17 +1097,6 @@ export async function presentAssistantMessage(cline: Task) {
 		}
 	}
 
-	// Seeing out of bounds is fine, it means that the next too call is being
-	// built up and ready to add to assistantMessageContent to present.
-	// When you see the UI inactive during this, it means that a tool is
-	// breaking without presenting any UI. For example the write_to_file tool
-	// was breaking when relpath was undefined, and for invalid relpath it never
-	// presented UI.
-	// This needs to be placed here, if not then calling
-	// cline.presentAssistantMessage below would fail (sometimes) since it's
-	// locked.
-	cline.presentAssistantMessageLocked = false
-
 	// NOTE: When tool is rejected, iterator stream is interrupted and it waits
 	// for `userMessageContentReady` to be true. Future calls to present will
 	// skip execution since `didRejectTool` and iterate until `contentIndex` is
@@ -1002,7 +1124,7 @@ export async function presentAssistantMessage(cline: Task) {
 		if (cline.currentStreamingContentIndex < cline.assistantMessageContent.length) {
 			// There are already more content blocks to stream, so we'll call
 			// this function ourselves.
-			return presentAssistantMessage(cline)
+			return await presentAssistantMessageBlock(cline)
 		} else {
 			// CRITICAL FIX: If we're out of bounds and the stream is complete, set userMessageContentReady
 			// This handles the case where assistantMessageContent is empty or becomes empty after processing
@@ -1012,10 +1134,8 @@ export async function presentAssistantMessage(cline: Task) {
 		}
 	}
 
-	// Block is partial, but the read stream may have finished.
-	if (cline.presentAssistantMessageHasPendingUpdates) {
-		return presentAssistantMessage(cline)
-	}
+	// Pending updates are drained by presentAssistantMessage, which owns the
+	// lock and checks for them immediately before releasing it.
 }
 
 /**

@@ -46,11 +46,11 @@ Zoo Code, Roo Code की बनाई नींव पर आगे बढ़�
 - **ज़्यादा भरोसेमंद terminal और editing workflows** — terminal के समय से पहले पूरा होने, task-state race conditions, context management, diff editing और provider-specific tool use से जुड़ी समस्याओं के fixes।
 - **अपने workspace पर ज़्यादा control** — rules management, हर mode के लिए MCP restrictions, multi-root path controls, model reasoning options और completion changes की review actions।
 
-## v3.84.0 में नया क्या है
+## v3.88.0 में नया क्या है
 
-- ✨ **नए SOTA models जोड़े गए:** Supported providers पर GPT-6 Sol, GPT-6 Luna और Claude Opus 5.5 इस्तेमाल करें।
-- 🧭 **ज़्यादा भरोसेमंद tasks और subtasks:** Delegated modes को अलग रखें, बार-बार Stop करने के बाद भी subtask links बचाएं और slash commands से mode बदलते समय orchestrator settings को सुरक्षित रखें।
-- 🛠️ **ज़्यादा भरोसेमंद terminal, provider और code-search behavior:** Windows और non-English environments में terminal behavior बेहतर करें, provider responses और cancellation को मज़बूत बनाएं और code search में सही workspace का लगातार इस्तेमाल सुनिश्चित करें।
+- ✨ **Provider और model समर्थन:** Grok Build और बेहतर custom-model समर्थन का उपयोग करें। यह release Bedrock model limits भी ठीक करती है और Codex verbosity setting भेजती है।
+- 🧭 **Task भरोसेमंदपन:** यह release cancellation handling, tool-turn continuation और task-message saving को ठीक करती है।
+- ⚡ **तेज़ editing और chat:** File writes अब डिफ़ॉल्ट रूप से कृत्रिम देरी का उपयोग नहीं करतीं। Chat messages कम file data रखते हैं, और code actions अंतिम सक्रिय chat तक पहुँचते हैं।
 
 ## Zoo Code आपके लिए क्या कर सकता है?
 

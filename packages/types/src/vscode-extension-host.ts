@@ -106,12 +106,15 @@ export interface ExtensionMessage {
 		| "skills"
 		| "rules"
 		| "fileContent"
+		| "originalContent"
 		| "rooHistoryImportProgress"
 		| "themeFixtureProbeRequest"
 		| "checkpointRollbackResult"
 	text?: string
 	/** For fileContent: { path, content, error? } */
 	fileContent?: { path: string; content: string | null; error?: string }
+	/** For originalContent: the pre-edit file content of the requested tool message (null when unavailable) */
+	originalContentInfo?: { ts: number; messageId?: string; taskId?: string; content: string | null }
 	payload?: any // eslint-disable-line @typescript-eslint/no-explicit-any
 	checkpointWarning?: {
 		type: "WAIT_TIMEOUT" | "INIT_TIMEOUT"
@@ -312,6 +315,7 @@ export type ExtensionState = Pick<
 	| "alwaysAllowFollowupQuestions"
 	| "alwaysAllowExecute"
 	| "destructiveCommandGuardEnabled"
+	| "alwaysDenyUnapprovedCommands"
 	| "followupAutoApproveTimeoutMs"
 	| "allowedCommands"
 	| "deniedCommands"
@@ -503,6 +507,7 @@ export interface WebviewMessage {
 		| "getListApiConfiguration"
 		| "customInstructions"
 		| "webviewDidLaunch"
+		| "webviewDidFocus"
 		| "newTask"
 		| "askResponse"
 		| "terminalOperation"
@@ -529,6 +534,7 @@ export interface WebviewMessage {
 		| "saveImage"
 		| "openFile"
 		| "readFileContent"
+		| "readOriginalContent"
 		| "openMention"
 		| "cancelTask"
 		| "cancelAutoApproval"
@@ -730,6 +736,7 @@ export interface WebviewMessage {
 	ids?: string[]
 	terminalOperation?: "continue" | "abort"
 	messageTs?: number
+	messageId?: string
 	restoreCheckpoint?: boolean
 	historyPreviewCollapsed?: boolean
 	filters?: { type?: string; search?: string; tags?: string[] }
@@ -935,6 +942,8 @@ export interface ClineSayTool {
 	content?: string
 	// Original file content before first edit (for merged diff display in FileChangesPanel)
 	originalContent?: string
+	// Length of the originalContent the extension left out of the webview state (request it with readOriginalContent)
+	originalContentLength?: number
 	// Unified diff statistics computed by the extension
 	diffStats?: { added: number; removed: number }
 	regex?: string

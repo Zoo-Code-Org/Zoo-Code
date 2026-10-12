@@ -362,10 +362,10 @@
 		"title": "Zoo Code {{version}} yayınlandı",
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
-			"heading": "Yenilikler:",
-			"highlight1": "✨ Yeni SOTA modelleri eklendi: Desteklenen sağlayıcılarda GPT-6 Sol, GPT-6 Luna ve Claude Opus 5.5 kullan.",
-			"highlight2": "🧭 Daha güvenilir görevler ve alt görevler: Devredilen modları yalıtılmış tut, tekrarlanan Stop işlemlerinden sonra alt görev bağlantılarını koru ve slash komutları mod değiştirdiğinde orchestrator ayarlarını güvenceye al.",
-			"highlight3": "🛠️ Daha güvenilir terminal, sağlayıcı ve kod arama davranışı: Windows ve İngilizce olmayan ortamlarda terminal davranışını iyileştir, sağlayıcı yanıtlarını ve iptal işlemlerini güçlendir ve kod aramanın doğru workspace'i daha tutarlı kullanmasını sağla."
+			"heading": "Zoo Code v3.88.0'daki yenilikler",
+			"highlight1": "✨ Sağlayıcı ve model desteği: Grok Build'i kullan ve geliştirilmiş özel model desteğinden yararlan. Bu sürüm ayrıca Bedrock model sınırlarını düzeltir ve Codex verbosity ayarını gönderir.",
+			"highlight2": "🧭 Görev güvenilirliği: Bu sürüm iptal işlemeyi, araç turu devam ettirmeyi ve görev mesajı kaydetmeyi düzeltir.",
+			"highlight3": "⚡ Daha hızlı düzenleme ve sohbet: Dosya yazmaları varsayılan olarak yapay gecikmeler kullanmaz. Sohbet mesajları daha az dosya verisi taşır ve kod eylemleri en son etkin sohbete ulaşır."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",

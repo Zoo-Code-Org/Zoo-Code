@@ -361,10 +361,10 @@
 		"title": "S'ha publicat Zoo Code {{version}}",
 		"support": "Dona suport a Zoo Code fent-nos una estrella a <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Novetats:",
-			"highlight1": "✨ Nous models SOTA afegits: Utilitza GPT-6 Sol, GPT-6 Luna i Claude Opus 5.5 amb els proveïdors compatibles.",
-			"highlight2": "🧭 Tasques i subtasques més fiables: Mantén aïllats els modes delegats, conserva els enllaços de les subtasques després d'aturades repetides i protegeix la configuració de l'orquestrador quan les ordres amb barra canvien de mode.",
-			"highlight3": "🛠️ Comportament més fiable del terminal, els proveïdors i la cerca de codi: Millora el terminal a Windows i en entorns que no són en anglès, reforça les respostes i la cancel·lació dels proveïdors i fes que la cerca de codi utilitzi l'espai de treball correcte de manera més consistent."
+			"heading": "Què hi ha de nou al Zoo Code v3.88.0",
+			"highlight1": "✨ Suport de proveïdors i models: Fes servir Grok Build i un suport millorat de models personalitzats. Aquesta versió també corregeix els límits de models de Bedrock i envia la configuració de verbositat de Codex.",
+			"highlight2": "🧭 Fiabilitat de les tasques: Aquesta versió corregeix la gestió de les cancel·lacions, la continuació dels torns d'eines i el desat dels missatges de tasca.",
+			"highlight3": "⚡ Edició i xat més ràpids: Les escriptures de fitxers ja no utilitzen retards artificials per defecte. Els missatges del xat porten menys dades de fitxers, i les accions de codi arriben a l'últim xat actiu."
 		},
 		"cloudAgents": {
 			"heading": "Novetats al núvol:",

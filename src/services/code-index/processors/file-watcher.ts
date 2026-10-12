@@ -1,14 +1,6 @@
 import * as vscode from "vscode"
-import {
-	QDRANT_CODE_BLOCK_NAMESPACE,
-	MAX_FILE_SIZE_BYTES,
-	BATCH_SEGMENT_THRESHOLD,
-	MAX_BATCH_RETRIES,
-	INITIAL_RETRY_DELAY_MS,
-} from "../constants"
-import { createHash } from "crypto"
+import { BATCH_SEGMENT_THRESHOLD, MAX_BATCH_RETRIES, INITIAL_RETRY_DELAY_MS } from "../constants"
 import { RooIgnoreController } from "../../../core/ignore/RooIgnoreController"
-import { v5 as uuidv5 } from "uuid"
 import { Ignore } from "ignore"
 import { scannerExtensions } from "../shared/supported-extensions"
 import {
@@ -20,9 +12,8 @@ import {
 	BatchProcessingSummary,
 } from "../interfaces"
 import { codeParser } from "./parser"
+import { FilePreparation } from "./file-preparation"
 import { CacheManager } from "../cache-manager"
-import { generateNormalizedAbsolutePath, generateRelativeFilePath } from "../shared/get-relative-path"
-import { isPathInIgnoredDirectory } from "../../glob/ignore-utils"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { sanitizeErrorMessage } from "../shared/validation-helpers"
@@ -32,6 +23,7 @@ import { Package } from "../../../shared/package"
  * Implementation of the file watcher interface
  */
 export class FileWatcher implements IFileWatcher {
+	private readonly filePreparation: FilePreparation
 	private ignoreInstance?: Ignore
 	private fileWatcher?: vscode.FileSystemWatcher
 	private ignoreController: RooIgnoreController
@@ -86,6 +78,15 @@ export class FileWatcher implements IFileWatcher {
 		if (ignoreInstance) {
 			this.ignoreInstance = ignoreInstance
 		}
+		this.filePreparation = new FilePreparation({
+			workspacePath: this.workspacePath,
+			ignoreController: this.ignoreController,
+			ignoreInstance: this.ignoreInstance,
+			fileSystem: vscode.workspace.fs,
+			cacheManager: this.cacheManager,
+			parser: codeParser,
+			embedder: this.embedder,
+		})
 		// Get the configurable batch size from VSCode settings, fallback to default
 		// If not provided in constructor, try to get from VSCode settings
 		if (batchSegmentThreshold !== undefined) {
@@ -507,97 +508,6 @@ export class FileWatcher implements IFileWatcher {
 	 * @returns Promise resolving to processing result
 	 */
 	async processFile(filePath: string): Promise<FileProcessingResult> {
-		try {
-			// Get relative path for ignore checks
-			const relativeFilePath = generateRelativeFilePath(filePath, this.workspacePath)
-
-			// Check if file is in an ignored directory
-			// Use relative path to avoid matching parent directories outside the workspace
-			if (isPathInIgnoredDirectory(relativeFilePath)) {
-				return {
-					path: filePath,
-					status: "skipped" as const,
-					reason: "File is in an ignored directory",
-				}
-			}
-
-			// Check if file should be ignored
-			if (
-				!this.ignoreController.validateAccess(filePath) ||
-				(this.ignoreInstance && this.ignoreInstance.ignores(relativeFilePath))
-			) {
-				return {
-					path: filePath,
-					status: "skipped" as const,
-					reason: "File is ignored by .rooignore or .gitignore",
-				}
-			}
-
-			// Check file size
-			const fileStat = await vscode.workspace.fs.stat(vscode.Uri.file(filePath))
-			if (fileStat.size > MAX_FILE_SIZE_BYTES) {
-				return {
-					path: filePath,
-					status: "skipped" as const,
-					reason: "File is too large",
-				}
-			}
-
-			// Read file content
-			const fileContent = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath))
-			const content = fileContent.toString()
-
-			// Calculate hash
-			const newHash = createHash("sha256").update(content).digest("hex")
-
-			// Check if file has changed
-			if (this.cacheManager.getHash(filePath) === newHash) {
-				return {
-					path: filePath,
-					status: "skipped" as const,
-					reason: "File has not changed",
-				}
-			}
-
-			// Parse file
-			const blocks = await codeParser.parseFile(filePath, { content, fileHash: newHash })
-
-			// Prepare points for batch processing
-			let pointsToUpsert: PointStruct[] = []
-			if (this.embedder && blocks.length > 0) {
-				const texts = blocks.map((block) => block.content)
-				const { embeddings } = await this.embedder.createEmbeddings(texts)
-
-				pointsToUpsert = blocks.map((block, index) => {
-					const normalizedAbsolutePath = generateNormalizedAbsolutePath(block.file_path, this.workspacePath)
-					const stableName = `${normalizedAbsolutePath}:${block.start_line}`
-					const pointId = uuidv5(stableName, QDRANT_CODE_BLOCK_NAMESPACE)
-
-					return {
-						id: pointId,
-						vector: embeddings[index],
-						payload: {
-							filePath: generateRelativeFilePath(normalizedAbsolutePath, this.workspacePath),
-							codeChunk: block.content,
-							startLine: block.start_line,
-							endLine: block.end_line,
-						},
-					}
-				})
-			}
-
-			return {
-				path: filePath,
-				status: "processed_for_batching" as const,
-				newHash,
-				pointsToUpsert,
-			}
-		} catch (error) {
-			return {
-				path: filePath,
-				status: "local_error" as const,
-				error: error as Error,
-			}
-		}
+		return this.filePreparation.prepareFile(filePath)
 	}
 }

@@ -47,11 +47,11 @@ Zoo Code s'appuie sur les fondations créées par Roo Code et continue de les en
 - **Des workflows de terminal et d'édition plus fiables** — correctifs pour les fins prématurées de commandes dans le terminal, les conditions de concurrence liées à l'état des tâches, la gestion du contexte, l'édition de diff et l'utilisation d'outils propres aux providers.
 - **Davantage de contrôle sur ton espace de travail** — gestion des règles, restrictions MCP par mode, contrôle des chemins multi-root, options de raisonnement des modèles et actions de vérification des modifications à la fin d'une tâche.
 
-## Nouveautés de la v3.84.0
+## Nouveautés de la v3.88.0
 
-- ✨ **Nouveaux modèles SOTA ajoutés :** Utilise GPT-6 Sol, GPT-6 Luna et Claude Opus 5.5 avec les providers compatibles.
-- 🧭 **Tâches et sous-tâches plus fiables :** Garde les modes délégués isolés, préserve les liens des sous-tâches après des arrêts répétés et protège les réglages de l'orchestrateur quand les commandes slash changent de mode.
-- 🛠️ **Comportement plus fiable du terminal, des providers et de la recherche de code :** Améliore le terminal sous Windows et dans les environnements non anglophones, renforce les réponses et l'annulation des providers et assure-toi que la recherche de code utilise plus systématiquement le bon workspace.
+- ✨ **Prise en charge des fournisseurs et des modèles :** Utilise Grok Build et une prise en charge améliorée des modèles personnalisés. Cette version corrige aussi les limites de modèles Bedrock et envoie le paramètre de verbosité de Codex.
+- 🧭 **Fiabilité des tâches :** Cette version corrige la gestion des annulations, la poursuite des tours d'outils et la sauvegarde des messages de tâche.
+- ⚡ **Édition et chat plus rapides :** Les écritures de fichiers n'utilisent plus de délais artificiels par défaut. Les messages du chat transportent moins de données de fichiers, et les actions de code atteignent le dernier chat actif.
 
 ## Que peut faire Zoo Code pour VOUS ?
 

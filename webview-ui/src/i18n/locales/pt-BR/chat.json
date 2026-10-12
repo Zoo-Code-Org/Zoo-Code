@@ -361,10 +361,10 @@
 		"title": "Zoo Code {{version}} lançado",
 		"support": "Apoie o Zoo Code nos dando uma estrela no <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Novidades:",
-			"highlight1": "✨ Novos modelos SOTA adicionados: Use GPT-6 Sol, GPT-6 Luna e Claude Opus 5.5 nos providers compatíveis.",
-			"highlight2": "🧭 Tarefas e subtarefas mais confiáveis: Mantenha os modos delegados isolados, preserve os links das subtarefas após interrupções repetidas e proteja as configurações do orquestrador quando comandos com barra alternarem o modo.",
-			"highlight3": "🛠️ Comportamento mais confiável do terminal, dos providers e da busca de código: Melhore o terminal no Windows e em ambientes que não usam inglês, fortaleça as respostas e o cancelamento dos providers e faça a busca de código usar o workspace correto com mais consistência."
+			"heading": "Novidades do Zoo Code v3.88.0",
+			"highlight1": "✨ Suporte a provedores e modelos: Use o Grok Build e um suporte aprimorado a modelos personalizados. Esta versão também corrige os limites de modelos do Bedrock e envia a configuração de verbosidade do Codex.",
+			"highlight2": "🧭 Confiabilidade das tarefas: Esta versão corrige o tratamento de cancelamentos, a continuação de turnos de ferramentas e o salvamento de mensagens de tarefa.",
+			"highlight3": "⚡ Edição e chat mais rápidos: As gravações de arquivos não usam mais atrasos artificiais por padrão. As mensagens do chat carregam menos dados de arquivos, e as ações de código chegam ao último chat ativo."
 		},
 		"cloudAgents": {
 			"heading": "Novidades na Nuvem:",
