@@ -118,3 +118,110 @@ describe("SettingsView – saving the time and date settings", () => {
 		expect(screen.getByTestId("save-button")).toBeDisabled() // cleared without waiting for the host
 	})
 })
+
+describe("SettingsView – saving the web fetch auto-approval", () => {
+	beforeEach(() => postMessage.mockClear())
+	afterEach(() => vi.useRealTimers())
+
+	const editWebFetch = async () => {
+		fireEvent.click(await screen.findByTestId("always-allow-web-fetch-toggle"))
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+	}
+
+	it("waits for the host's answer and keeps Save disabled until then", async () => {
+		renderTab("autoApprove")
+		await editWebFetch()
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(posted("updateSettings")[0].requestId).toMatch(/^settings-save-/)
+		expect(screen.getByTestId("save-button")).toBeDisabled()
+	})
+
+	it("keeps the edit unsaved after a failed save so it can be retried", async () => {
+		renderTab("autoApprove")
+		await editWebFetch()
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		answerSave(lastSaveRequestId(postMessage), { success: false, error: "storage unavailable" })
+
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+	})
+
+	it("clears the unsaved flag once the host confirms, and leaves the form editable", async () => {
+		renderTab("autoApprove")
+		await editWebFetch()
+
+		saveAndConfirm(postMessage)
+
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+		// Save is also disabled while a save is pending: a further edit enabling it shows the save was settled,
+		// not merely still waiting for an answer.
+		fireEvent.click(screen.getByTestId("always-allow-write-toggle"))
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+	})
+
+	it("keeps Save available after a permission write fails following a mode refresh", async () => {
+		const pushHostState = (state: object) =>
+			act(() => {
+				window.dispatchEvent(new MessageEvent("message", { data: { type: "state", state } }))
+			})
+
+		renderTab("autoApprove")
+		await editWebFetch()
+		fireEvent.click(screen.getByTestId("save-button"))
+		const saveId = lastSaveRequestId(postMessage)
+
+		// A mode refresh taken before the write replaces the form with `false` and clears the unsaved flag.
+		pushHostState({ alwaysAllowWebFetch: false, mode: "ask" })
+		await waitFor(() =>
+			expect(screen.getByTestId("always-allow-web-fetch-toggle")).toHaveAttribute("aria-pressed", "false"),
+		)
+
+		// The host stores `true`, pushes its state (same mode: no form refresh), then fails on a later setting.
+		pushHostState({ alwaysAllowWebFetch: true, mode: "ask" })
+		answerSave(saveId, { success: false, error: "storage unavailable" })
+
+		// The permission may now be stored as `true` while the form shows `false`: Save must stay available, and
+		// it writes the form's value back.
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+		fireEvent.click(screen.getByTestId("save-button"))
+		const retry = postMessage.mock.calls
+			.map((call) => call[0] as { type: string; requestId?: string; updatedSettings?: object })
+			.filter((m) => m.type === "updateSettings")
+			.at(-1)
+		expect(retry?.updatedSettings).toEqual(expect.objectContaining({ alwaysAllowWebFetch: false }))
+		expect(retry?.requestId).not.toBe(saveId)
+	})
+
+	it("keeps Save available after a permission write times out followed by a mode refresh", async () => {
+		const pushHostState = (state: object) =>
+			act(() => {
+				window.dispatchEvent(new MessageEvent("message", { data: { type: "state", state } }))
+			})
+
+		renderTab("autoApprove")
+		await editWebFetch()
+		vi.useFakeTimers()
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		// The host never answers: the timeout fires and Save re-enables.
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(SAVE_ANSWER_TIMEOUT_MS)
+		})
+		vi.useRealTimers()
+
+		// A mode refresh after the timeout must NOT clear the unsaved-permission flag.
+		pushHostState({ alwaysAllowWebFetch: false, mode: "ask" })
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+
+		// A subsequent save must re-send the permission value from the form.
+		fireEvent.click(screen.getByTestId("save-button"))
+		const retry = postMessage.mock.calls
+			.map((call) => call[0] as { type: string; requestId?: string; updatedSettings?: object })
+			.filter((m) => m.type === "updateSettings")
+			.at(-1)
+		expect(retry?.updatedSettings).toEqual(expect.objectContaining({ alwaysAllowWebFetch: false }))
+		expect(retry?.requestId).toMatch(/^settings-save-/)
+	})
+})

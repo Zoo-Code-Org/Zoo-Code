@@ -11,6 +11,7 @@ type AutoApproveToggles = Pick<
 	| "alwaysAllowMcp"
 	| "alwaysAllowModeSwitch"
 	| "alwaysAllowSubtasks"
+	| "alwaysAllowWebFetch"
 	| "alwaysAllowExecute"
 	| "alwaysAllowFollowupQuestions"
 >
@@ -60,6 +61,13 @@ export const autoApproveSettingsConfig: Record<AutoApproveSetting, AutoApproveCo
 		descriptionKey: "settings:autoApprove.subtasks.description",
 		icon: "list-tree",
 		testId: "always-allow-subtasks-toggle",
+	},
+	alwaysAllowWebFetch: {
+		key: "alwaysAllowWebFetch",
+		labelKey: "settings:autoApprove.webFetch.label",
+		descriptionKey: "settings:autoApprove.webFetch.description",
+		icon: "globe",
+		testId: "always-allow-web-fetch-toggle",
 	},
 	alwaysAllowExecute: {
 		key: "alwaysAllowExecute",

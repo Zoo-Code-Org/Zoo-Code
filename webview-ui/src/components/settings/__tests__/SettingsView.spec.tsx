@@ -9,6 +9,7 @@ import { experimentDefault } from "@roo/experiments"
 import type { ApiOptionsProps } from "../ApiOptions"
 
 import SettingsView from "../SettingsView"
+import { answerSave } from "./saveAcknowledgement"
 
 vi.mock("@src/utils/vscode", () => ({ vscode: { postMessage: vi.fn() } }))
 
@@ -324,7 +325,7 @@ const mockPostMessage = (state: any) => {
 const renderSettingsView = (initialState: any = {}) => {
 	const onDone = vi.fn()
 
-	const result = renderWithExtensionState(<SettingsView onDone={onDone} />)
+	const result = renderWithExtensionState(<SettingsView onDone={onDone} />, { state: initialState })
 
 	// Hydrate initial state.
 	act(() => {
@@ -1141,6 +1142,305 @@ describe("SettingsView - Blanket Auto-Deny", () => {
 				updatedSettings: expect.objectContaining({ alwaysDenyUnapprovedCommands: true }),
 			}),
 		)
+	})
+
+	const lastUpdateSettings = () =>
+		vi
+			.mocked(vscode.postMessage)
+			.mock.calls.map((call) => call[0] as { type: string; requestId?: string; updatedSettings?: object })
+			.filter((message) => message.type === "updateSettings")
+			.at(-1)
+
+	it.each([
+		{ label: "never enabled", initialState: {} },
+		{
+			// `settingsImportedAt` busts the cached state so the saved `true`
+			// reaches `cachedState` before the user edits anything.
+			label: "saved as true",
+			initialState: { alwaysAllowWebFetch: true, settingsImportedAt: new Date().toISOString() },
+		},
+	])("does not send web fetch auto-approval on an unrelated save ($label)", ({ initialState }) => {
+		const { activateTab, getSettingsContent } = renderSettingsView(initialState)
+
+		activateTab("autoApprove")
+
+		// Make an unrelated change so Save is enabled.
+		fireEvent.click(within(getSettingsContent()).getByTestId("always-allow-write-toggle"))
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		const message = lastUpdateSettings()
+		expect(message?.updatedSettings).toBeDefined()
+		expect(message?.updatedSettings).not.toHaveProperty("alwaysAllowWebFetch")
+		// Unrelated saves keep their fire-and-forget behaviour.
+		expect(message?.requestId).toBeUndefined()
+	})
+
+	it("does not re-enable web fetch auto-approval that another view turned off", async () => {
+		// This view loaded `true`; another settings view then disabled it, so the
+		// host now pushes `false`, which this view's cache does not pick up.
+		const { activateTab, getSettingsContent } = renderSettingsView({
+			alwaysAllowWebFetch: true,
+			settingsImportedAt: new Date().toISOString(),
+		})
+		// `window.postMessage` dispatches asynchronously; wait for the message to land
+		// before interacting with the form so the host push is applied first.
+		await act(async () => {
+			mockPostMessage({ alwaysAllowWebFetch: false })
+			await new Promise((resolve) => setTimeout(resolve, 0))
+		})
+
+		activateTab("autoApprove")
+		fireEvent.click(within(getSettingsContent()).getByTestId("always-allow-write-toggle"))
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(lastUpdateSettings()?.updatedSettings).not.toHaveProperty("alwaysAllowWebFetch")
+	})
+
+	it.each([
+		{ label: "enabling", initialState: {}, expected: true },
+		{
+			label: "disabling",
+			initialState: { alwaysAllowWebFetch: true, settingsImportedAt: new Date().toISOString() },
+			expected: false,
+		},
+	])(
+		"buffers the web fetch toggle until Save, then sends it with a request id ($label)",
+		({ initialState, expected }) => {
+			const { activateTab, getSettingsContent } = renderSettingsView(initialState)
+
+			activateTab("autoApprove")
+
+			fireEvent.click(within(getSettingsContent()).getByTestId("always-allow-web-fetch-toggle"))
+
+			// Toggling must NOT persist before Save; it only buffers in cachedState.
+			expect(lastUpdateSettings()).toBeUndefined()
+
+			fireEvent.click(screen.getByTestId("save-button"))
+
+			const message = lastUpdateSettings()
+			expect(message?.updatedSettings).toEqual(expect.objectContaining({ alwaysAllowWebFetch: expected }))
+			// A request id makes the view wait for the host's answer (the disabled
+			// Save state is covered in SettingsView.displaySave.spec.tsx, which
+			// renders the real button).
+			expect(message?.requestId).toMatch(/^settings-save-/)
+		},
+	)
+
+	it("resends a web fetch edit after the host reports a failed save", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({
+			alwaysAllowWebFetch: true,
+			settingsImportedAt: new Date().toISOString(),
+		})
+
+		activateTab("autoApprove")
+		fireEvent.click(within(getSettingsContent()).getByTestId("always-allow-web-fetch-toggle"))
+		fireEvent.click(screen.getByTestId("save-button"))
+		const firstId = lastUpdateSettings()?.requestId
+
+		answerSave(firstId, { success: false, error: "storage unavailable" })
+
+		// A retry still carries the edit, under a new request id.
+		fireEvent.click(screen.getByTestId("save-button"))
+		const retry = lastUpdateSettings()
+		expect(retry?.updatedSettings).toEqual(expect.objectContaining({ alwaysAllowWebFetch: false }))
+		expect(retry?.requestId).toMatch(/^settings-save-/)
+		expect(retry?.requestId).not.toBe(firstId)
+	})
+
+	it("sends a reverted web fetch toggle after a failed save that may have stored it", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView()
+
+		activateTab("autoApprove")
+		const toggle = () => fireEvent.click(within(getSettingsContent()).getByTestId("always-allow-web-fetch-toggle"))
+
+		// Enable, save, and fail: the host may already have written `true`.
+		toggle()
+		fireEvent.click(screen.getByTestId("save-button"))
+		const firstId = lastUpdateSettings()?.requestId
+		expect(lastUpdateSettings()?.updatedSettings).toEqual(expect.objectContaining({ alwaysAllowWebFetch: true }))
+		answerSave(firstId, { success: false, error: "storage unavailable" })
+
+		// Disable again: the form now matches the loaded baseline, but the save must still send it.
+		toggle()
+		fireEvent.click(screen.getByTestId("save-button"))
+		const retry = lastUpdateSettings()
+		expect(retry?.updatedSettings).toEqual(expect.objectContaining({ alwaysAllowWebFetch: false }))
+		expect(retry?.requestId).toMatch(/^settings-save-/)
+		expect(retry?.requestId).not.toBe(firstId)
+
+		// Once the host confirms, unrelated saves stop sending it.
+		answerSave(retry?.requestId, { success: true })
+		fireEvent.click(within(getSettingsContent()).getByTestId("always-allow-write-toggle"))
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(lastUpdateSettings()?.updatedSettings).not.toHaveProperty("alwaysAllowWebFetch")
+	})
+
+	const webFetchToggle = () =>
+		within(screen.getByTestId("settings-content")).getByTestId("always-allow-web-fetch-toggle")
+
+	// `window.postMessage` dispatches asynchronously, so wait for the state push to land.
+	const pushHostState = (state: object) =>
+		act(async () => {
+			mockPostMessage(state)
+			await new Promise((resolve) => setTimeout(resolve, 0))
+		})
+
+	it("shows the stored permission when a save completes after a mode refresh replaced the form", async () => {
+		const { activateTab, getSettingsContent } = renderSettingsView()
+
+		// Enable web fetch and save; the host has not answered yet.
+		activateTab("autoApprove")
+		fireEvent.click(webFetchToggle())
+		fireEvent.click(screen.getByTestId("save-button"))
+		const saveId = lastUpdateSettings()?.requestId
+		expect(lastUpdateSettings()?.updatedSettings).toEqual(expect.objectContaining({ alwaysAllowWebFetch: true }))
+
+		// A mode refresh taken before the write replaces the form with the old `false`.
+		await pushHostState({ alwaysAllowWebFetch: false, mode: "ask" })
+		expect(webFetchToggle()).toHaveAttribute("data-variant", "secondary")
+
+		// The host stores `true`, pushes its state (same mode, so the form is not refreshed), then acknowledges.
+		await pushHostState({ alwaysAllowWebFetch: true, mode: "ask" })
+		answerSave(saveId, { success: true })
+
+		// The form shows the stored permission instead of a disabled one.
+		expect(webFetchToggle()).toHaveAttribute("data-variant", "primary")
+
+		// A later unrelated save neither resends nor reverts the stored permission.
+		fireEvent.click(within(getSettingsContent()).getByTestId("always-allow-write-toggle"))
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(lastUpdateSettings()?.updatedSettings).toEqual(expect.objectContaining({ alwaysAllowWrite: true }))
+		expect(lastUpdateSettings()?.updatedSettings).not.toHaveProperty("alwaysAllowWebFetch")
+		expect(webFetchToggle()).toHaveAttribute("data-variant", "primary")
+	})
+
+	it("keeps a permission edit made in the replacement form while an earlier save was in flight", async () => {
+		const { activateTab } = renderSettingsView()
+
+		// Enable web fetch and save; the host has not answered yet.
+		activateTab("autoApprove")
+		fireEvent.click(webFetchToggle())
+		fireEvent.click(screen.getByTestId("save-button"))
+		const saveId = lastUpdateSettings()?.requestId
+
+		// A mode refresh carrying `true` replaces the form, and the user disables the permission there.
+		await pushHostState({ alwaysAllowWebFetch: true, mode: "ask" })
+		fireEvent.click(webFetchToggle())
+		expect(webFetchToggle()).toHaveAttribute("data-variant", "secondary")
+
+		// The earlier save completes: the newer edit is not overwritten.
+		answerSave(saveId, { success: true })
+		expect(webFetchToggle()).toHaveAttribute("data-variant", "secondary")
+
+		// Saving sends the edit against the stored `true`.
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(lastUpdateSettings()?.updatedSettings).toEqual(expect.objectContaining({ alwaysAllowWebFetch: false }))
+		expect(lastUpdateSettings()?.requestId).toMatch(/^settings-save-/)
+	})
+
+	it("does not let a save answer that arrives after a mode refresh re-enable auto-approval", async () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({
+			alwaysAllowWebFetch: true,
+			settingsImportedAt: new Date().toISOString(),
+		})
+
+		// Disable web fetch and save; the host has not answered yet.
+		activateTab("autoApprove")
+		fireEvent.click(within(getSettingsContent()).getByTestId("always-allow-web-fetch-toggle"))
+		fireEvent.click(screen.getByTestId("save-button"))
+		const staleId = lastUpdateSettings()?.requestId
+		expect(lastUpdateSettings()?.updatedSettings).toEqual(expect.objectContaining({ alwaysAllowWebFetch: false }))
+
+		// A mode refresh still carrying `true` replaces the form before the write finishes.
+		await pushHostState({ alwaysAllowWebFetch: true, mode: "ask" })
+
+		// The host then stores the revocation and pushes `false` before answering.
+		// This push must NOT re-enable the permission when the stale save is answered.
+		await pushHostState({ alwaysAllowWebFetch: false, mode: "ask" })
+
+		// The late success acknowledges the stale save; the form must stay disabled.
+		answerSave(staleId, { success: true })
+		expect(webFetchToggle()).toHaveAttribute("data-variant", "secondary")
+
+		// An unrelated save must not resend the cached `true` and re-enable auto-approval.
+		fireEvent.click(within(getSettingsContent()).getByTestId("always-allow-write-toggle"))
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(lastUpdateSettings()?.updatedSettings).toEqual(expect.objectContaining({ alwaysAllowWrite: true }))
+		expect(lastUpdateSettings()?.updatedSettings).not.toHaveProperty("alwaysAllowWebFetch")
+	})
+
+	it("does not reconcile web fetch from a save that omitted it", async () => {
+		const { activateTab } = renderSettingsView()
+
+		// A display-only save waits for an answer but does not send the permission.
+		activateTab("language")
+		fireEvent.click(await screen.findByTestId("relative-times-checkbox"))
+		fireEvent.click(screen.getByTestId("save-button"))
+		const saveId = lastUpdateSettings()?.requestId
+		expect(saveId).toMatch(/^settings-save-/)
+		expect(lastUpdateSettings()?.updatedSettings).not.toHaveProperty("alwaysAllowWebFetch")
+
+		// Another view enabled the permission; a mode refresh loads the stored `true` before the answer.
+		await pushHostState({ alwaysAllowWebFetch: true, mode: "ask" })
+		answerSave(saveId, { success: true })
+
+		// The form keeps the stored `true` instead of the cached `false` from before the refresh.
+		activateTab("autoApprove")
+		expect(webFetchToggle()).toHaveAttribute("data-variant", "primary")
+		fireEvent.click(within(screen.getByTestId("settings-content")).getByTestId("always-allow-write-toggle"))
+		fireEvent.click(screen.getByTestId("save-button"))
+		// The second save must carry the unrelated alwaysAllowWrite edit it was triggered by.
+		expect(lastUpdateSettings()?.updatedSettings).toEqual(expect.objectContaining({ alwaysAllowWrite: true }))
+		expect(lastUpdateSettings()?.updatedSettings).not.toHaveProperty("alwaysAllowWebFetch")
+	})
+
+	it("omits web fetch from later unrelated saves once the host confirmed it", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView()
+
+		activateTab("autoApprove")
+		fireEvent.click(within(getSettingsContent()).getByTestId("always-allow-web-fetch-toggle"))
+		fireEvent.click(screen.getByTestId("save-button"))
+		answerSave(lastUpdateSettings()?.requestId, { success: true })
+
+		// `answerSave` runs inside `act`, so the baseline is updated before the next save.
+		fireEvent.click(within(getSettingsContent()).getByTestId("always-allow-write-toggle"))
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(lastUpdateSettings()?.updatedSettings).toEqual(expect.objectContaining({ alwaysAllowWrite: true }))
+		expect(lastUpdateSettings()?.updatedSettings).not.toHaveProperty("alwaysAllowWebFetch")
+		expect(lastUpdateSettings()?.requestId).toBeUndefined()
+	})
+
+	it("does not let an intermediate host push restore a permission revoked while a save is in flight", async () => {
+		// Scenario: user enables web fetch (form=true, baseline=false), saves.
+		// Before the host answers, user disables again (form=false, baseline still=false).
+		// Host pushes `true` (the stored value from the queued write).
+		// Without the fix, formValue(false) === baseline(false) triggers sync and restores true,
+		// overwriting the user's revocation.  With the fix, the sync is blocked while the
+		// web-fetch-inclusive save is still pending.
+		const { activateTab } = renderSettingsView()
+
+		activateTab("autoApprove")
+
+		// Enable web fetch and save; the host has not answered yet.
+		fireEvent.click(webFetchToggle())
+		fireEvent.click(screen.getByTestId("save-button"))
+		const saveId = lastUpdateSettings()?.requestId
+		expect(lastUpdateSettings()?.updatedSettings).toEqual(expect.objectContaining({ alwaysAllowWebFetch: true }))
+
+		// User immediately disables the permission again before the host responds.
+		fireEvent.click(webFetchToggle())
+		expect(webFetchToggle()).toHaveAttribute("data-variant", "secondary")
+
+		// Host pushes `true` (it stored the queued write) before answering the save.
+		// This must NOT restore `true` in the form because a web-fetch save is in flight.
+		await pushHostState({ alwaysAllowWebFetch: true, mode: "ask" })
+		expect(webFetchToggle()).toHaveAttribute("data-variant", "secondary")
+
+		// The host answers: the save completes successfully.
+		answerSave(saveId, { success: true })
+		// The form must still show `false` (the user's last intent).
+		expect(webFetchToggle()).toHaveAttribute("data-variant", "secondary")
 	})
 })
 
