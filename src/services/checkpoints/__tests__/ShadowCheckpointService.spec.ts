@@ -348,6 +348,36 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				expect(await fileExistsAtPath(path.join(innerDir, "newfile.txt"))).toBe(false)
 			})
 
+			it("rejects restoring the workspace root as a single file", async () => {
+				// "." passes the lexical and realpath guards (it IS the workspace)
+				// but as a pathspec it would recursively restore the entire tree
+				// from the checkpoint - a blast radius far beyond one file.
+				await fs.writeFile(testFile, "Ahoy, world!")
+				const commit1 = await service.saveCheckpoint("First checkpoint")
+				expect(commit1?.commit).toBeTruthy()
+
+				await expect(service.restoreFile(commit1!.commit, ".")).rejects.toThrow(
+					/restoreFile target is a directory/,
+				)
+			})
+
+			it("rejects a directory target that is a tree in the checkpoint", async () => {
+				// The on-disk directory check cannot catch a directory the task
+				// already deleted; only the checkpoint tree-entry mode check can
+				// stop git checkout from recursively restoring the subtree.
+				const innerDir = path.join(service.workspaceDir, "sub")
+				await fs.mkdir(innerDir)
+				await fs.writeFile(path.join(innerDir, "a.txt"), "a")
+				const commit1 = await service.saveCheckpoint("First checkpoint")
+				expect(commit1?.commit).toBeTruthy()
+
+				await fs.rm(innerDir, { recursive: true, force: true })
+				await expect(service.restoreFile(commit1!.commit, "sub")).rejects.toThrow(
+					/not a regular file in the checkpoint/,
+				)
+				expect(await fileExistsAtPath(path.join(innerDir, "a.txt"))).toBe(false)
+			})
+
 			it("emits a restore event when a file is restored", async () => {
 				const restoreListener = vi.fn()
 				service.on("restore", restoreListener)

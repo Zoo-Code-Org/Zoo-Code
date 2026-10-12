@@ -485,10 +485,31 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 				throw new Error(`restoreFile target resolves outside the workspace: ${filePath}`)
 			}
 
+			// restoreFile restores exactly one regular file: a directory pathspec
+			// would recursively check out the whole subtree from the checkpoint,
+			// so reject directory targets - including "." and "" resolving to the
+			// workspace root - before either branch runs.
+			try {
+				const targetStat = await fs.lstat(resolvedTarget)
+				if (targetStat.isDirectory()) {
+					throw new Error(`restoreFile target is a directory: ${filePath}`)
+				}
+			} catch (err) {
+				if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err
+			}
+
 			const start = Date.now()
 			const existed = await this.fileExistsInCommit(commitHash, gitPath)
 
 			if (existed) {
+				// The checkpoint entry can be a tree or a symlink (whose object
+				// is also a blob); only regular-file modes may be restored through
+				// this single-file path. ls-tree reports the mode, unlike cat-file.
+				const entry = await this.git!.raw(["ls-tree", commitHash, "--", gitPath])
+				const mode = entry.trim() ? entry.split("\t")[0].split(" ")[0] : ""
+				if (mode !== "100644" && mode !== "100755") {
+					throw new Error(`restoreFile target is not a regular file in the checkpoint: ${filePath}`)
+				}
 				await this.git.checkout([commitHash, "--", gitPath])
 			} else {
 				await fs.rm(path.join(this.workspaceDir, filePath), { force: true })
