@@ -154,7 +154,10 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			if (patchSucceeded) {
 				const perWriteCheckpoints = (await task.providerRef?.deref()?.getState())?.perWriteCheckpoints
 				if (perWriteCheckpoints !== false) {
-					void checkpointSave(task, false, true).catch(() => {})
+					// Await so the whole-patch checkpoint persists before the tool
+					// completes; an unawaited save lets queued work interleave its own
+					// checkpoint and lets shutdown lose the commit.
+					await checkpointSave(task, false, true).catch(() => {})
 				}
 			}
 		} catch (error) {
