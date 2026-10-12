@@ -188,6 +188,9 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 			// Track if we've already pushed a tool result
 			let hasToolResult = false
 			const toolCallId = mcpBlock.id
+			if (toolCallId && !cline.activeToolContexts.has(toolCallId)) {
+				cline.activeToolContexts.set(toolCallId, { toolCallId, didReject: false })
+			}
 
 			// Store approval feedback to merge into tool result (GitHub #10465)
 			let approvalFeedback: { text: string; images?: string[] } | undefined
@@ -287,7 +290,7 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 					} else {
 						pushToolResult(formatResponse.toolDenied())
 					}
-					cline.didRejectTool = true
+					markToolRejected(cline, toolCallId ?? "")
 					return false
 				}
 

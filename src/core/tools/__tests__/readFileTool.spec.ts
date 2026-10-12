@@ -828,6 +828,7 @@ describe("ReadFileTool", () => {
 				expect(mockTask.didRejectTool).toBe(true)
 				expect(context.didReject).toBe(true)
 				expect(updateFileResult).toHaveBeenCalledWith("file1.ts", expect.objectContaining({ status: "denied" }))
+				expect(updateFileResult).toHaveBeenCalledWith("file2.ts", expect.objectContaining({ status: "denied" }))
 			})
 		})
 

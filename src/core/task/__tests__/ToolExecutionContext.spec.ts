@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest"
 import { presentAssistantMessage } from "../../assistant-message/presentAssistantMessage"
 import { validateToolUse } from "../../tools/validateToolUse"
 import type { Task, ToolExecutionContext } from "../Task"
+import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
 
 vi.mock("../Task")
 vi.mock("../../tools/validateToolUse", async (importOriginal) => {
@@ -85,6 +86,11 @@ const listFilesBlock = (id: string) => ({
 	partial: false,
 })
 
+const baseSnapshot: RequestPolicySnapshot = {
+	disabledTools: [],
+	customModes: [],
+}
+
 const asTask = (task: ReturnType<typeof buildMockTask>): Task => task as unknown as Task
 
 describe("ToolExecutionContext", () => {
@@ -123,7 +129,7 @@ describe("ToolExecutionContext", () => {
 			},
 		)
 
-		await presentAssistantMessage(asTask(mockTask))
+		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 
 		expect(contextsSeenDuringExecution.get("call_a")).toBe(mockTask.activeToolContexts.get("call_a"))
 		expect(mockTask.activeToolContexts.get("call_a")).toEqual({
@@ -135,11 +141,11 @@ describe("ToolExecutionContext", () => {
 
 	it("reuses the context when a partial tool call is followed by its complete block", async () => {
 		mockTask.assistantMessageContent = [{ ...listFilesBlock("call_a"), partial: true }]
-		await presentAssistantMessage(asTask(mockTask))
+		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 		const first = mockTask.activeToolContexts.get("call_a")
 
 		mockTask.assistantMessageContent = [listFilesBlock("call_a")]
-		await presentAssistantMessage(asTask(mockTask))
+		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 
 		expect(first).toBeDefined()
 		expect(mockTask.activeToolContexts.get("call_a")).toBe(first)
@@ -149,11 +155,11 @@ describe("ToolExecutionContext", () => {
 		mockTask.assistantMessageContent = [listFilesBlock("call_a"), listFilesBlock("call_b")]
 		mockTask.ask.mockResolvedValueOnce({ response: "noButtonClicked" })
 
-		await presentAssistantMessage(asTask(mockTask))
+		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 		mockTask.didRejectTool = false
 		mockTask.presentAssistantMessageLocked = false
 		mockTask.currentStreamingContentIndex = 1
-		await presentAssistantMessage(asTask(mockTask))
+		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 
 		expect(mockTask.activeToolContexts.get("call_a")?.didReject).toBe(true)
 		expect(mockTask.activeToolContexts.get("call_b")?.didReject).toBe(false)
@@ -163,7 +169,7 @@ describe("ToolExecutionContext", () => {
 		mockTask.assistantMessageContent = [listFilesBlock("call_a")]
 		mockTask.ask.mockResolvedValue({ response: "noButtonClicked" })
 
-		await presentAssistantMessage(asTask(mockTask))
+		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 
 		expect(mockTask.didRejectTool).toBe(true)
 		expect(mockTask.activeToolContexts.get("call_a")?.didReject).toBe(true)
