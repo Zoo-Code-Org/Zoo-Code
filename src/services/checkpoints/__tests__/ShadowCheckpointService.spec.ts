@@ -260,6 +260,26 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				expect(await fs.readFile(testFile, "utf-8")).toBe("Ahoy, world!")
 			})
 
+			it("does not delete a live file when the checkpoint tree object is unreadable", async () => {
+				// The commit object can resolve while its tree is corrupt or missing
+				// (partial shadow-repo damage). An existence lookup that swallows the
+				// read failure would report "absent" and delete a live file the
+				// checkpoint does contain; the failure must propagate instead.
+				await fs.writeFile(testFile, "Ahoy, world!")
+				const commit1 = await service.saveCheckpoint("First checkpoint")
+				expect(commit1?.commit).toBeTruthy()
+
+				const git = service["git"]!
+				const gitDir = (await git.raw(["rev-parse", "--absolute-git-dir"])).trim()
+				const treeOid = (await git.raw(["show", "-s", "--format=%T", commit1!.commit])).trim()
+				await fs.rm(path.join(gitDir, "objects", treeOid.slice(0, 2), treeOid.slice(2)), { force: true })
+
+				await expect(service.restoreFile(commit1!.commit, "test.txt")).rejects.toThrow()
+
+				expect(await fileExistsAtPath(testFile)).toBe(true)
+				expect(await fs.readFile(testFile, "utf-8")).toBe("Ahoy, world!")
+			})
+
 			it("rejects a target that escapes the workspace through a symlinked ancestor", async () => {
 				// A lexical prefix check passes for a path that goes through a
 				// symlink inside the workspace pointing outside it; the resolved
