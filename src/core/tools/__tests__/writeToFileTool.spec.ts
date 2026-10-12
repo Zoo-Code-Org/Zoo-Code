@@ -903,6 +903,103 @@ describe("writeToFileTool", () => {
 				writeToFileTool["taskPartialStreamState"].clear()
 			}
 		})
+		it("discards a streamed preview when the completed call lacks a path", async () => {
+			// Streaming can open the diff view and fill it with unapproved content before the
+			// completed call reaches execute(). A malformed completed call must not just reset:
+			// reset() leaves the diff document dirty and closeAllDiffViews() skips dirty diff
+			// tabs, so the streamed content would survive in a live tab for a later user save
+			// to persist as an approved write. The discard must run first, and the
+			// missing-parameter result must still be what the model receives.
+			mockCline.diffViewProvider.isEditing = true
+			const block = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: { content: "content without a path" },
+				nativeArgs: { content: "content without a path" },
+				partial: false,
+			} as ToolUse<"write_to_file">
+			const state = writeToFileTool["getTaskPartialStreamState"](mockCline)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			try {
+				await writeToFileTool.handle(mockCline, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+				})
+
+				expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+				// The discard must precede the reset: reset() clears the state it reads.
+				expect(mockCline.diffViewProvider.discardUnapprovedStream.mock.invocationCallOrder[0]).toBeLessThan(
+					mockCline.diffViewProvider.reset.mock.invocationCallOrder[0],
+				)
+				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, state.abortCleanup)
+				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+				// The model still receives the missing-parameter result, not a discard report.
+				expect(mockPushToolResult).toHaveBeenCalledWith("Missing param error")
+			} finally {
+				writeToFileTool["taskPartialStreamState"].clear()
+			}
+		})
+
+		it("discards a streamed preview when the completed call lacks content", async () => {
+			// Same rule on the missing-content exit.
+			mockCline.diffViewProvider.isEditing = true
+			const block = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: { path: "a.ts" },
+				nativeArgs: { path: "a.ts" },
+				partial: false,
+			} as ToolUse<"write_to_file">
+			const state = writeToFileTool["getTaskPartialStreamState"](mockCline)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			try {
+				await writeToFileTool.handle(mockCline, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+				})
+
+				expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, state.abortCleanup)
+				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+				expect(mockPushToolResult).toHaveBeenCalledWith("Missing param error")
+			} finally {
+				writeToFileTool["taskPartialStreamState"].clear()
+			}
+		})
+
+		it("tears the preview down when cancellation lands while update() is in flight", async () => {
+			// The abort handler can release this task's state while VS Code's edit application
+			// is still awaiting, and its own teardown may have checked isEditing before this
+			// delta's streamed lines landed. No later delta runs for a released stream, so
+			// this delta must discard and reset what it streamed into - returning silently
+			// here left the preview active on the disposal path.
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.update = vi.fn().mockImplementation(async () => {
+				writeToFileTool["clearTaskState"](mockCline)
+			})
+			// The first delta only stabilizes the path; the second streams and is cancelled
+			// mid-update.
+			try {
+				await executeWriteFileTool({}, { isPartial: true })
+				expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+				expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+
+				await executeWriteFileTool({}, { isPartial: true })
+
+				expect(mockCline.diffViewProvider.update).toHaveBeenCalledTimes(1)
+				expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			} finally {
+				writeToFileTool["taskPartialStreamState"].clear()
+			}
+		})
 	})
 
 	describe("early-exit stream state cleanup", () => {

@@ -176,6 +176,47 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		await task.diffViewProvider.removeAdoptedDirectories()
 	}
 
+	/**
+	 * Teardown for a preview that a cancelled delta opened or streamed into: this delta owns
+	 * the cleanup when the abort handler's own teardown missed the session. No bookkeeping
+	 * release here - the cancellation already released the entry, and releasing again could
+	 * drop a newer registration.
+	 */
+	private async teardownCancelledPreview(task: Task): Promise<void> {
+		if (task.diffViewProvider.isEditing) {
+			await this.discardUnapprovedStreamBeforeReset(task)
+			await this.resetDiffViewAfterWrite(task)
+		}
+		await this.releaseEarlyDirectories(task)
+	}
+
+	/**
+	 * Shared cleanup for execute()'s early exits (missing parameters, rooignore denial):
+	 * release this task's stream state, discard a preview that streaming had already opened
+	 * (reset() alone leaves the diff document dirty, and closeAllDiffViews() skips dirty diff
+	 * tabs - the streamed content would survive for a later user save to persist), drop the
+	 * directories no editor took over, and reset. Each exit runs this in a finally around its
+	 * report, so a rejected report cannot strand any of it.
+	 */
+	private async releaseEarlyExitState(task: Task, failureDescription: string): Promise<void> {
+		this.releasePartialStreamBookkeeping(task)
+		if (task.diffViewProvider.isEditing) {
+			const discardError = await this.discardUnapprovedStreamBeforeReset(task)
+			if (discardError) {
+				await task
+					.say(
+						"error",
+						`write_to_file could not discard the preview for the ${failureDescription}: ${discardError.message}`,
+					)
+					.catch((sayError) => {
+						console.error("Error reporting write_to_file discard failure:", sayError)
+					})
+			}
+		}
+		await this.releaseEarlyDirectories(task)
+		await this.resetDiffViewAfterWrite(task)
+	}
+
 	private resetTaskPartialState(task: Task): void {
 		const key = this.getPartialStreamFailureKey(task)
 		const state = this.taskPartialStreamState.get(key)
@@ -314,14 +355,14 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			try {
 				pushToolResult(await task.sayAndCreateMissingParamError("write_to_file", "path"))
 			} finally {
-				// Returning here skips the try/catch teardown below: release THIS task's stream
-				// state (and only this task's) so the abort listener and any streamFailed guard do
-				// not outlive the call. The finally also covers a rejected report: Task.dispose()
-				// drops listeners but never the per-task map entry, so a report that cannot be
-				// delivered must not strand the entry - the rejection still propagates after the
-				// teardown. The guarded reset keeps a failing reset() from replacing that rejection.
-				this.releasePartialStreamBookkeeping(task)
-				await this.resetDiffViewAfterWrite(task)
+				// Returning here skips the try/catch teardown below. The shared early-exit cleanup
+				// releases THIS task's stream state, discards a preview that streaming had already
+				// opened (a malformed completed call must not leave unapproved content in a dirty
+				// diff tab for a later user save), drops orphaned directories, and resets. The
+				// finally also covers a rejected report: Task.dispose() drops listeners but never
+				// the per-task map entry, so a report that cannot be delivered must not strand any
+				// of it - the rejection still propagates after the teardown.
+				await this.releaseEarlyExitState(task, "malformed write")
 			}
 			return
 		}
@@ -332,10 +373,9 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			try {
 				pushToolResult(await task.sayAndCreateMissingParamError("write_to_file", "content"))
 			} finally {
-				// Same rule as the missing-path exit above: the release and the reset run even
-				// when the report itself rejects.
-				this.releasePartialStreamBookkeeping(task)
-				await this.resetDiffViewAfterWrite(task)
+				// Same rule as the missing-path exit above: the shared cleanup runs even when
+				// the report itself rejects.
+				await this.releaseEarlyExitState(task, "malformed write")
 			}
 			return
 		}
@@ -347,37 +387,15 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				await task.say("rooignore_error", relPath)
 				pushToolResult(formatResponse.rooIgnoreError(relPath))
 			} finally {
-				// Returning here skips the try/catch teardown below: release THIS task's stream
-				// state (and only this task's) so the abort listener and any streamFailed guard do
-				// not outlive the call. The finally earns its keep when the report itself rejects:
-				// Task.dispose() drops listeners but never the per-task map entry, so a rejected
-				// rooignore report must not strand the entry, the preview, or the adopted
-				// directories - the rejection still propagates after the teardown.
-				this.releasePartialStreamBookkeeping(task)
-				// Streaming is not gated by this check - open() never consults rooignore - so the
-				// denied call can still be holding a preview full of content that will never be
-				// approved. Leaving it open hands the next write a live editor containing someone
-				// else's unapproved content.
-				if (task.diffViewProvider.isEditing) {
-					const discardError = await this.discardUnapprovedStreamBeforeReset(task)
-					if (discardError) {
-						await task
-							.say(
-								"error",
-								`write_to_file could not discard the preview for the denied write: ${discardError.message}`,
-							)
-							.catch((sayError) => {
-								console.error("Error reporting write_to_file discard failure:", sayError)
-							})
-					}
-				}
-				// A delta that adopted parent directories before any diff view existed still owns
-				// them here: reset() drops the recorded list without touching disk, so on the no-editor
-				// path the directories of a denied write would stay on disk. When a session IS editing
-				// the provider owns them and the discard above has already removed them, which is why
-				// this runs after it and guards on isEditing itself.
-				await this.releaseEarlyDirectories(task)
-				await this.resetDiffViewAfterWrite(task)
+				// Returning here skips the try/catch teardown below. The shared early-exit cleanup
+				// releases THIS task's stream state, discards the preview of content that will
+				// never be approved (streaming is not gated by this check - open() never consults
+				// rooignore - so the denied call can still be holding a live editor full of someone
+				// else's unapproved content), drops the directories no editor took over, and
+				// resets. The finally earns its keep when the report itself rejects: Task.dispose()
+				// drops listeners but never the per-task map entry, so a rejected rooignore report
+				// must not strand any of it - the rejection still propagates after the teardown.
+				await this.releaseEarlyExitState(task, "denied write")
 			}
 			return
 		}
@@ -707,11 +725,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					// isEditing at a moment when there was no session yet. The view and the new-file
 					// placeholder open() wrote are then open with nobody left to close them, so this
 					// delta - the one that opened them - owns their teardown.
-					if (task.diffViewProvider.isEditing) {
-						await this.discardUnapprovedStreamBeforeReset(task)
-						await this.resetDiffViewAfterWrite(task)
-					}
-					await this.releaseEarlyDirectories(task)
+					await this.teardownCancelledPreview(task)
 					return
 				}
 
@@ -719,6 +733,17 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					everyLineHasLineNumbers(newContent) ? stripLineNumbers(newContent) : newContent,
 					false,
 				)
+
+				// Cancellation may land while update() is in flight: the abort handler releases
+				// this task's state while VS Code's edit application is still awaiting, and its
+				// own teardown may have checked isEditing before this delta's streamed lines
+				// landed. No later delta runs for a released stream, so this delta - the one
+				// that streamed into the view - owns its teardown; returning without it leaves
+				// the preview active on the disposal path.
+				if (!this.isPartialStreamStillLive(task, partialStreamState)) {
+					await this.teardownCancelledPreview(task)
+					return
+				}
 			}
 		} catch (error) {
 			// Two windows, two owners of the teardown.
