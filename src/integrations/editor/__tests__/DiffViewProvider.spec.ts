@@ -2388,7 +2388,9 @@ describe("DiffViewProvider", () => {
 			// so a post-save rejection still leaves the state set for the caller.
 			const save = vi.fn().mockResolvedValue(true)
 			ownedSaveSetup(save)
-			Object.assign(diffViewProvider, { keepOrCloseEditedFile: vi.fn().mockRejectedValue(new Error("tab handling failed")) })
+			Object.assign(diffViewProvider, {
+				keepOrCloseEditedFile: vi.fn().mockRejectedValue(new Error("tab handling failed")),
+			})
 
 			await expect(diffViewProvider.saveChanges(false, 0)).rejects.toThrow("tab handling failed")
 
