@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
+import { makeClineProviderFactory } from "../../test-utils/provider"
 
 import { providerIdentifiers } from "@roo-code/types"
 
@@ -37,7 +38,11 @@ describe("API.setConfiguration", () => {
 			},
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),
 		})
-		const api = new API(Object.assign({} as OutputChannel, { appendLine: vi.fn() }), provider)
+		const api = new API(
+			Object.assign({} as OutputChannel, { appendLine: vi.fn() }),
+			provider,
+			makeClineProviderFactory(),
+		)
 		const configuration = {
 			apiProvider: providerIdentifiers.bedrock,
 			currentApiConfigName: "default",

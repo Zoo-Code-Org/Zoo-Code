@@ -15,6 +15,7 @@ import {
 
 import { defaultModeSlug } from "../../../shared/modes"
 import { ContextProxy } from "../../config/ContextProxy"
+import { WebviewFocusTracker } from "../WebviewFocusTracker"
 import { ClineProvider } from "../ClineProvider"
 import { TelemetryService } from "@roo-code/telemetry"
 
@@ -688,7 +689,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 	describe("persisted view state pruning edge cases", () => {
 		it("should drop the entry without updatedAt first when the cap is exceeded", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			// An entry written before updatedAt existed ranks below every timestamped entry
 			// (updatedAt ?? 0) and is the first to fall off the cap.
 			const states = {
@@ -714,7 +721,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 
 		it("should keep the earliest inserted entries when updatedAt values tie", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			// Equal timestamps preserve insertion order (stable sort), so the first 50
 			// registered views survive and the last 5 fall off the cap.
 			const states = Object.fromEntries(
@@ -732,7 +745,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 
 		it("should drop malformed stored entries before pruning", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			// Storage can hold corrupted entries (undefined holes or non-object values) after
 			// partial writes: the guard keeps them out of the sorted map so the prune cannot
 			// read updatedAt off a missing entry.
@@ -753,7 +772,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 	describe("durable editor view state retention (#1065)", () => {
 		it("should preserve persisted viewStates entry when an editor provider is disposed during teardown", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 
 			await provider["setViewStateId"]("tab-to-preserve")
 			await provider.saveViewState("mode", "architect")
@@ -771,7 +796,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 	describe("profile mutations", () => {
 		it("should synchronize viewLocalState when activateProviderProfile mutates ContextProxy", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValueOnce({
 				name: "new-profile",
 				id: "new-profile-id",
@@ -805,7 +836,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 
 		it("should synchronize viewLocalState when upsertProviderProfile activates a saved profile", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "test-id", name: "saved-profile", apiProvider: providerIdentifiers.bedrock },
 			])
@@ -835,7 +872,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 
 		it("should synchronize viewLocalState when deleteProviderProfile selects a replacement profile", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			await provider.contextProxy.setValue("currentApiConfigName", "deleted-profile")
 			await provider.contextProxy.setValue("listApiConfigMeta", [
 				{ id: "deleted-id", name: "deleted-profile", apiProvider: providerIdentifiers.anthropic },
@@ -881,7 +924,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 
 		it("should re-point persisted view pins that referenced a deleted profile", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
 			await provider.contextProxy.setValue("listApiConfigMeta", [
 				{ id: "keeper-id", name: "keeper-profile", apiProvider: providerIdentifiers.anthropic },
@@ -909,7 +958,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 
 		it("should not write viewStates when re-pointing skips a corrupt stored entry", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
 			await provider.contextProxy.setValue("listApiConfigMeta", [
 				{ id: "keeper-id", name: "keeper-profile", apiProvider: providerIdentifiers.anthropic },
@@ -944,7 +999,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 
 		it("should re-point a mode-less legacy pin to a fresh two-field pin", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
 			await provider.contextProxy.setValue("listApiConfigMeta", [
 				{ id: "keeper-id", name: "keeper-profile", apiProvider: providerIdentifiers.anthropic },
@@ -977,7 +1038,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			vi.mocked(vscode.window.showInformationMessage).mockImplementationOnce(
 				async (_message: string, _options: unknown, ...items: vscode.MessageItem[]) => items[0],
 			)
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			provider["viewLocalState"] = {
 				mode: "architect",
 				currentApiConfigName: "stale-profile",
@@ -992,7 +1059,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 
 		it("should refresh the shared profile list when upsertProviderProfile saves without activating", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const quietEntry: ProviderSettingsEntry = {
 				id: "quiet-id",
 				name: "quiet-profile",
@@ -1018,7 +1091,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 
 		it("should activate the replacement profile when the deleting view has no profile pin", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
 			await provider.contextProxy.setValue("listApiConfigMeta", [
 				{ id: "keeper-id", name: "keeper-profile", apiProvider: providerIdentifiers.anthropic },
@@ -1041,7 +1120,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 
 		it("should refresh the pinned view through activation when it pinned the deleted profile", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			await provider.contextProxy.setValue("currentApiConfigName", "deleted-profile")
 			await provider.contextProxy.setValue("listApiConfigMeta", [
 				{ id: "deleted-id", name: "deleted-profile", apiProvider: providerIdentifiers.anthropic },
@@ -1100,8 +1185,15 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				mockOutputChannel,
 				"sidebar",
 				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
 			)
-			const providerB = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 
 			// B pins the doomed profile without an overlay (a fresh pin via setValue).
 			await providerB.setValue("currentApiConfigName", "doomed-profile")
@@ -1163,8 +1255,15 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				mockOutputChannel,
 				"sidebar",
 				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
 			)
-			const providerB = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const logSpy = vi.spyOn(providerA, "log")
 
 			// B pins the doomed profile without an overlay (a fresh pin via setValue).
@@ -1212,7 +1311,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 	describe("provider profile activation", () => {
 		it("should serve the activated profile settings through getState when activating an upserted profile", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			await provider.saveViewState("apiConfiguration", {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openai/gpt-4.1",
@@ -1250,8 +1355,15 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				mockOutputChannel,
 				"sidebar",
 				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
 			)
-			const providerB = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 
 			// B pins profile-y without an overlay (a fresh pin via setValue).
 			await providerB.setValue("currentApiConfigName", "profile-y")
@@ -1324,8 +1436,15 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				mockOutputChannel,
 				"sidebar",
 				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
 			)
-			const providerB = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 
 			// B pins profile-y and already carries a custom overlay on top of the pin:
 			// the overlay is newer than any shared write, so the snapshot must not
@@ -1386,6 +1505,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				mockOutputChannel,
 				"sidebar",
 				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
 			)
 
 			// A pins profile-y without an overlay and activates profile-x. A self
@@ -1439,8 +1559,15 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				mockOutputChannel,
 				"sidebar",
 				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
 			)
-			const providerB = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 
 			// B is pinned to the very profile A activates, with no overlay. The
 			// refresh path (after the shared write), not the pre-write snapshot,
@@ -1488,8 +1615,15 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				mockOutputChannel,
 				"sidebar",
 				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
 			)
-			const providerB = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const logSpy = vi.spyOn(providerA, "log")
 
 			// B pins profile-y without an overlay; the profile cannot be resolved
@@ -1521,7 +1655,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 
 		it("should drop the view-local overlay when flat provider settings are written through setValues", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			// Seed a pinned overlay (as loadViewState would after a reload).
 			await provider.saveViewState("apiConfiguration", {
 				apiProvider: providerIdentifiers.openrouter,
@@ -1545,7 +1685,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 	describe("handleModeSwitch integration", () => {
 		it("should update viewLocalState.mode when handleModeSwitch is called", async () => {
 			const postMessage = vi.fn()
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 
 			await provider.resolveWebviewView(createMockWebviewView(postMessage))
 
@@ -1565,7 +1711,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				return key === "lockApiConfigAcrossModes" ? true : fallback
 			})
 
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const getModeConfigIdSpy = vi.spyOn(provider.providerSettingsManager, "getModeConfigId")
 
 			await provider.resolveWebviewView(createMockWebviewView(postMessage))
@@ -1582,7 +1734,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 
 		it("should activate configured mode profile when switching modes", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValueOnce("profile-id")
 			const profileEntry: ProviderSettingsEntry = {
 				id: "profile-id",
@@ -1608,7 +1766,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 
 		it("should leave current configuration unchanged for empty mode profiles", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValueOnce("empty-profile-id")
 			const profileEntry: ProviderSettingsEntry = { id: "empty-profile-id", name: "empty-profile" }
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([profileEntry])
@@ -1626,7 +1790,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 
 		it("should emit ModeChanged event after handleModeSwitch", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const modeChangedSpy = vi.fn()
 
 			provider.on(RooCodeEventName.ModeChanged, modeChangedSpy)
@@ -1640,7 +1810,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 		// A4 regression: non-focused target task
 		it("should scope mode switches for non-focused tasks to the task only", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			await provider["resolveWebviewView"](createMockWebviewView())
 			const makeTask = (taskId: string) => ({
 				taskId,
@@ -1677,7 +1853,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 
 		it("should log and no-op when handleModeSwitch receives an unknown mode slug", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			await provider["resolveWebviewView"](createMockWebviewView())
 			const logSpy = vi.spyOn(provider, "log")
 
@@ -1695,7 +1877,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		// focus before the queued mutation runs. The view-level durable write and the
 		// ModeChanged broadcast belong to the view and must still happen.
 		it("should keep the view-level effects when a no-task switch is captured before a task gains focus", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			await provider["resolveWebviewView"](createMockWebviewView())
 			await provider["setViewStateId"]("k1-view")
 			const modeChangedSpy = vi.fn()
@@ -1733,7 +1921,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		// the task-scoped switch applies to the task only, and the view-level profile load
 		// stays behind the view-scoped guard.
 		it("should skip the mode profile load for a non-focused switch even when a saved config exists", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			await provider["resolveWebviewView"](createMockWebviewView())
 			const makeTask = (taskId: string) => ({
 				taskId,
@@ -1792,7 +1986,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 
 		it("should roll back the shared mode write when the durable write fails", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			// The shared store already carries a mode, so the rollback has a concrete value
 			// to restore.
 			await provider.contextProxy.setValue("mode", "code")
@@ -1818,7 +2018,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 
 		it("should log the rollback failure and rethrow the original error when the rollback also fails", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			await provider.contextProxy.setValue("mode", "code")
 			const appendLine = vi.spyOn(mockOutputChannel, "appendLine")
 			const durableError = new Error("durable write failed")
