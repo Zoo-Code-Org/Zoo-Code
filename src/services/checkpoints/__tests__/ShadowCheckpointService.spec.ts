@@ -280,6 +280,28 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				expect(await fs.readFile(testFile, "utf-8")).toBe("Ahoy, world!")
 			})
 
+			it("restores exactly the requested file when its name contains glob characters", async () => {
+				// A plain pathspec treats [a].ts as a character class matching
+				// a.ts, so checkout would restore the wrong file and leave the
+				// requested one modified. The restore contract is exactly one
+				// path: the checkout pathspec must be literal.
+				const workspaceDir = path.dirname(testFile)
+				const globFile = path.join(workspaceDir, "[a].ts")
+				const plainFile = path.join(workspaceDir, "a.ts")
+				await fs.writeFile(globFile, "glob content")
+				await fs.writeFile(plainFile, "plain content")
+				const commit = await service.saveCheckpoint("Glob-name checkpoint")
+				expect(commit?.commit).toBeTruthy()
+
+				await fs.writeFile(globFile, "glob modified")
+				await fs.writeFile(plainFile, "plain modified")
+
+				await service.restoreFile(commit!.commit, "[a].ts")
+
+				expect(await fs.readFile(globFile, "utf-8")).toBe("glob content")
+				expect(await fs.readFile(plainFile, "utf-8")).toBe("plain modified")
+			})
+
 			it("rejects a target that escapes the workspace through a symlinked ancestor", async () => {
 				// A lexical prefix check passes for a path that goes through a
 				// symlink inside the workspace pointing outside it; the resolved
