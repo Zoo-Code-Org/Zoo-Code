@@ -24,6 +24,25 @@ export const openAiCodexDefaultModelId: OpenAiCodexModelId = "gpt-5.6-sol"
  * Costs are 0 as they are covered by the subscription.
  */
 export const openAiCodexModels = {
+	// https://github.com/openai/codex/blob/main/codex-rs/models-manager/models.json
+	"gpt-6.1-sol": {
+		maxTokens: 128000,
+		// Use Codex's supported maximum rather than its 272K default compaction budget.
+		contextWindow: 872000,
+		includedTools: ["apply_patch"],
+		excludedTools: ["apply_diff", "write_to_file"],
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+		requiredReasoningEffort: true,
+		reasoningEffort: "low",
+		inputPrice: 0,
+		outputPrice: 0,
+		supportsVerbosity: true,
+		supportsTemperature: false,
+		description:
+			"GPT-6.1 Sol: Near-Astra performance for complex coding and professional work via ChatGPT subscription",
+	},
 	"gpt-6-astra": {
 		maxTokens: 128000,
 		contextWindow: 872000,

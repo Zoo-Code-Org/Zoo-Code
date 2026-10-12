@@ -348,6 +348,309 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 			expect(mockTask.recordToolUsage).not.toHaveBeenCalled()
 			expect(TelemetryService.instance.captureToolUsage).not.toHaveBeenCalled()
 		})
+
+		it("rejects at dispatch when use_mcp_tool is in disabledTools, without invoking the server method", async () => {
+			const mockHub = {
+				findServerNameBySanitizedName: () => "my_server",
+				getAllServers: () => [
+					{
+						name: "my_server",
+						tools: [{ name: "do_thing", enabledForPrompt: true }],
+					},
+				],
+				callTool: vi.fn(),
+			}
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({
+						mode: "code",
+						customModes: [],
+						disabledTools: ["use_mcp_tool"],
+					}),
+					getMcpHub: () => mockHub,
+				}),
+			}
+			vi.mocked(validateToolUse).mockImplementationOnce(() => {
+				throw new Error('Tool "use_mcp_tool" is not allowed in code mode.')
+			})
+
+			mockTask.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					id: "call_native_mcp_disabled",
+					name: "mcp_my_server_do_thing",
+					serverName: "my_server",
+					toolName: "do_thing",
+					arguments: {},
+					partial: false,
+				},
+			]
+
+			await presentAssistantMessage(mockTask as unknown as Task)
+
+			// The decision must come from the shared layer, under the canonical name,
+			// with the disabledTools entry folded into the requirements map.
+			const calls = vi.mocked(validateToolUse).mock.calls
+			expect(calls.length).toBeGreaterThan(0)
+			expect(calls[calls.length - 1][0]).toBe("use_mcp_tool")
+			expect(calls[calls.length - 1][3]).toMatchObject({ use_mcp_tool: false })
+
+			// Exactly one error tool_result for the block's id; the handler is never
+			// reached, so the server method is never invoked.
+			expect(mockTask.userMessageContent).toHaveLength(1)
+			expect(mockTask.userMessageContent).toContainEqual(
+				expect.objectContaining({
+					type: "tool_result",
+					tool_use_id: "call_native_mcp_disabled",
+					is_error: true,
+					content: expect.stringContaining("not allowed in code mode"),
+				}),
+			)
+			expect(mockHub.callTool).not.toHaveBeenCalled()
+
+			// No success attribution on rejection; a safe static failure key instead.
+			expect(mockTask.recordToolUsage).not.toHaveBeenCalled()
+			expect(TelemetryService.instance.captureToolUsage).not.toHaveBeenCalled()
+			expect(mockTask.recordToolError).toHaveBeenCalledWith("use_mcp_tool", expect.any(String))
+			expect(mockTask.consecutiveMistakeCount).toBe(1)
+			// The stream must not be interrupted by a validation rejection.
+			expect(mockTask.didAlreadyUseTool).toBe(false)
+		})
+
+		it("rejects at dispatch when use_mcp_tool is in the model's excludedTools", async () => {
+			const mockHub = {
+				findServerNameBySanitizedName: () => "my_server",
+				getAllServers: () => [
+					{
+						name: "my_server",
+						tools: [{ name: "do_thing", enabledForPrompt: true }],
+					},
+				],
+				callTool: vi.fn(),
+			}
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({
+						mode: "code",
+						customModes: [],
+					}),
+					getMcpHub: () => mockHub,
+				}),
+			}
+			// excludedTools reaches the requirements map only through
+			// buildToolRequirements' modelInfo fold, so this pins that input on the
+			// native path.
+			mockTask.api = {
+				getModel: () => ({ id: "test-model", info: { excludedTools: ["use_mcp_tool"] } }),
+			}
+			vi.mocked(validateToolUse).mockImplementationOnce(() => {
+				throw new Error('Tool "use_mcp_tool" is not allowed in code mode.')
+			})
+
+			mockTask.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					id: "call_native_mcp_excluded",
+					name: "mcp_my_server_do_thing",
+					serverName: "my_server",
+					toolName: "do_thing",
+					arguments: {},
+					partial: false,
+				},
+			]
+
+			await presentAssistantMessage(mockTask as unknown as Task)
+
+			const calls = vi.mocked(validateToolUse).mock.calls
+			expect(calls.length).toBeGreaterThan(0)
+			expect(calls[calls.length - 1][0]).toBe("use_mcp_tool")
+			expect(calls[calls.length - 1][3]).toMatchObject({ use_mcp_tool: false })
+
+			expect(mockTask.userMessageContent).toHaveLength(1)
+			expect(mockTask.userMessageContent).toContainEqual(
+				expect.objectContaining({
+					type: "tool_result",
+					tool_use_id: "call_native_mcp_excluded",
+					is_error: true,
+					content: expect.stringContaining("not allowed in code mode"),
+				}),
+			)
+			expect(mockHub.callTool).not.toHaveBeenCalled()
+
+			expect(mockTask.recordToolUsage).not.toHaveBeenCalled()
+			expect(TelemetryService.instance.captureToolUsage).not.toHaveBeenCalled()
+			expect(mockTask.recordToolError).toHaveBeenCalledWith("use_mcp_tool", expect.any(String))
+			expect(mockTask.consecutiveMistakeCount).toBe(1)
+			expect(mockTask.didAlreadyUseTool).toBe(false)
+		})
+
+		it("skips shared-layer validation for partial blocks so streaming never pushes error results", async () => {
+			// Validating partial blocks would surface one validation error tool_result
+			// per streamed chunk for the same tool_use_id.
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({
+						mode: "code",
+						customModes: [],
+					}),
+					getMcpHub: () => ({
+						findServerNameBySanitizedName: () => "my_server",
+					}),
+				}),
+			}
+			vi.mocked(validateToolUse).mockImplementationOnce(() => {
+				throw new Error('Tool "use_mcp_tool" is not allowed in code mode.')
+			})
+
+			mockTask.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					id: "call_native_mcp_partial",
+					name: "mcp_my_server_do_thing",
+					serverName: "my_server",
+					toolName: "do_thing",
+					arguments: {},
+					partial: true,
+				},
+			]
+
+			await presentAssistantMessage(mockTask as unknown as Task)
+
+			expect(validateToolUse).not.toHaveBeenCalled()
+			expect(mockTask.userMessageContent).toHaveLength(0)
+			expect(mockTask.consecutiveMistakeCount).toBe(0)
+		})
+
+		it("rejects through the state ?? {} fallback when the provider is unavailable", async () => {
+			// With no provider state the validator must still receive the task-local
+			// mode plus empty policy inputs: customModes [] and an empty requirements
+			// map, rather than the dispatch crashing.
+			mockTask.providerRef = { deref: () => undefined }
+			vi.mocked(validateToolUse).mockImplementationOnce(() => {
+				throw new Error('Tool "use_mcp_tool" is not allowed in code mode.')
+			})
+
+			mockTask.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					id: "call_native_mcp_no_provider",
+					name: "mcp_my_server_do_thing",
+					serverName: "my_server",
+					toolName: "do_thing",
+					arguments: {},
+					partial: false,
+				},
+			]
+
+			await presentAssistantMessage(mockTask as unknown as Task)
+
+			// The validator throws so the handler is never reached — the assertions
+			// pin the arguments the call site passed under the empty-state fallback.
+			const calls = vi.mocked(validateToolUse).mock.calls
+			expect(calls.length).toBeGreaterThan(0)
+			expect(calls[calls.length - 1][0]).toBe("use_mcp_tool")
+			expect(calls[calls.length - 1][1]).toBe("code")
+			expect(calls[calls.length - 1][2]).toEqual([])
+			expect(calls[calls.length - 1][3]).toEqual({})
+			// The default model info carries no includedTools.
+			expect(calls[calls.length - 1][6]).toBeUndefined()
+
+			expect(mockTask.userMessageContent).toHaveLength(1)
+			expect(mockTask.userMessageContent).toContainEqual(
+				expect.objectContaining({
+					type: "tool_result",
+					tool_use_id: "call_native_mcp_no_provider",
+					is_error: true,
+					content: expect.stringContaining("not allowed in code mode"),
+				}),
+			)
+
+			expect(mockTask.recordToolUsage).not.toHaveBeenCalled()
+			expect(TelemetryService.instance.captureToolUsage).not.toHaveBeenCalled()
+			expect(mockTask.recordToolError).toHaveBeenCalledWith("use_mcp_tool", expect.any(String))
+			expect(mockTask.consecutiveMistakeCount).toBe(1)
+			expect(mockTask.didAlreadyUseTool).toBe(false)
+		})
+
+		it("resolves aliases in the model's includedTools before passing them to the shared layer", async () => {
+			// A model may advertise tools under alias names; the shared layer compares
+			// canonical names, so "write_file" must arrive as "write_to_file".
+			mockTask.api = {
+				getModel: () => ({ id: "test-model", info: { includedTools: ["write_file"] } }),
+			}
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({
+						mode: "code",
+						customModes: [],
+					}),
+					getMcpHub: () => ({
+						findServerNameBySanitizedName: () => "my_server",
+					}),
+				}),
+			}
+			vi.mocked(validateToolUse).mockImplementationOnce(() => {
+				throw new Error('Tool "use_mcp_tool" is not allowed in code mode.')
+			})
+
+			mockTask.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					id: "call_native_mcp_alias",
+					name: "mcp_my_server_do_thing",
+					serverName: "my_server",
+					toolName: "do_thing",
+					arguments: {},
+					partial: false,
+				},
+			]
+
+			await presentAssistantMessage(mockTask as unknown as Task)
+
+			const calls = vi.mocked(validateToolUse).mock.calls
+			expect(calls.length).toBeGreaterThan(0)
+			expect(calls[calls.length - 1][0]).toBe("use_mcp_tool")
+			expect(calls[calls.length - 1][6]).toEqual(["write_to_file"])
+		})
+
+		it("pushes no tool_result when the native block omits its id, but still records the rejection", async () => {
+			// McpToolUse.id is optional; with no tool_use_id there is nothing to
+			// answer, so the error tool_result is skipped while the rejection is
+			// still recorded.
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({
+						mode: "code",
+						customModes: [],
+					}),
+					getMcpHub: () => ({
+						findServerNameBySanitizedName: () => "my_server",
+					}),
+				}),
+			}
+			vi.mocked(validateToolUse).mockImplementationOnce(() => {
+				throw new Error('Tool "use_mcp_tool" is not allowed in code mode.')
+			})
+
+			mockTask.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					name: "mcp_my_server_do_thing",
+					serverName: "my_server",
+					toolName: "do_thing",
+					arguments: {},
+					partial: false,
+				},
+			]
+
+			await presentAssistantMessage(mockTask as unknown as Task)
+
+			expect(mockTask.pushToolResultToUserContent).not.toHaveBeenCalled()
+			expect(mockTask.userMessageContent).toHaveLength(0)
+			expect(mockTask.recordToolError).toHaveBeenCalledWith("use_mcp_tool", expect.any(String))
+			expect(mockTask.consecutiveMistakeCount).toBe(1)
+			expect(mockTask.didAlreadyUseTool).toBe(false)
+		})
 	})
 
 	describe("undefined provider state", () => {
@@ -414,6 +717,50 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 			expect(calls.length).toBeGreaterThan(0)
 			expect(calls[0][0]).toBe("read_file")
 			expect(calls[0][1]).toBe("architect")
+		})
+
+		it("passes the task-local mode to validateToolUse for a native mcp_tool_use block", async () => {
+			// The native mcp arm has its own validateToolUse call site and must honor
+			// the same task-local mode contract as the tool_use arm: provider state
+			// deliberately reports a different mode than the task's.
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({
+						mode: "orchestrator",
+						customModes: [],
+					}),
+					getMcpHub: () => ({
+						findServerNameBySanitizedName: () => "my_server",
+					}),
+				}),
+			}
+			mockTask.getTaskMode = vi.fn().mockResolvedValue("architect")
+			// Throw so the handler is never reached — the assertion is on the
+			// arguments the call site passed to the shared layer.
+			vi.mocked(validateToolUse).mockImplementationOnce(() => {
+				throw new Error("Task-local mode check.")
+			})
+
+			mockTask.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					id: "call_delegation_mcp",
+					name: "mcp_my_server_do_thing",
+					serverName: "my_server",
+					toolName: "do_thing",
+					arguments: {},
+					partial: false,
+				},
+			]
+
+			await presentAssistantMessage(mockTask as unknown as Task)
+
+			const calls = vi.mocked(validateToolUse).mock.calls
+			expect(calls.length).toBeGreaterThan(0)
+			expect(calls[calls.length - 1][0]).toBe("use_mcp_tool")
+			// The discriminating assertion: task-local "architect", not provider
+			// "orchestrator" — the exact pre-delegation bug shape.
+			expect(calls[calls.length - 1][1]).toBe("architect")
 		})
 	})
 })

@@ -4,6 +4,7 @@ import React from "react"
 import { render, screen, act, cleanup } from "@/utils/test-utils"
 
 import AppWithProviders from "../App"
+import { vscode } from "../utils/vscode"
 
 vi.mock("@src/utils/vscode", () => ({
 	vscode: {
@@ -204,6 +205,65 @@ describe("App", () => {
 		expect(chatView).toBeInTheDocument()
 		expect(chatView.getAttribute("data-hidden")).toBe("false")
 	}, 10000)
+
+	it.each(["sidebar", "editor"])(
+		"reports direct pointer and keyboard interaction in the %s webview",
+		(renderContext) => {
+			mockUseExtensionState.mockReturnValue({
+				didHydrateState: true,
+				showWelcome: false,
+				renderContext,
+			})
+			const { unmount } = render(<AppWithProviders />)
+			vi.mocked(vscode.postMessage).mockClear()
+
+			document.dispatchEvent(new Event("pointerdown"))
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "a" }))
+			expect(vscode.postMessage).toHaveBeenCalledTimes(2)
+			expect(vscode.postMessage).toHaveBeenNthCalledWith(1, { type: "webviewDidFocus" })
+			expect(vscode.postMessage).toHaveBeenNthCalledWith(2, { type: "webviewDidFocus" })
+
+			window.dispatchEvent(new Event("blur"))
+			expect(vscode.postMessage).toHaveBeenCalledTimes(2)
+
+			unmount()
+			document.dispatchEvent(new Event("pointerdown"))
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "a" }))
+			expect(vscode.postMessage).toHaveBeenCalledTimes(2)
+		},
+	)
+
+	it("does not report chat interaction on initial focus, window activation, or programmatic focus", () => {
+		const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true)
+		try {
+			render(<AppWithProviders />)
+			expect(vscode.postMessage).not.toHaveBeenCalledWith({ type: "webviewDidFocus" })
+			window.dispatchEvent(new Event("focus"))
+			window.dispatchEvent(new Event("blur"))
+			window.dispatchEvent(new Event("focus"))
+			document.dispatchEvent(new Event("visibilitychange"))
+			document.dispatchEvent(new FocusEvent("focusin"))
+			const chat = screen.getByTestId("chat-view")
+			chat.tabIndex = 0
+			chat.focus()
+			expect(vscode.postMessage).not.toHaveBeenCalledWith({ type: "webviewDidFocus" })
+		} finally {
+			hasFocus.mockRestore()
+		}
+	})
+
+	it("reports direct interaction even when a child stops event propagation", () => {
+		render(<AppWithProviders />)
+		vi.mocked(vscode.postMessage).mockClear()
+		const chat = screen.getByTestId("chat-view")
+		const stopPropagation = (event: Event) => event.stopPropagation()
+		chat.addEventListener("pointerdown", stopPropagation)
+		chat.addEventListener("keydown", stopPropagation)
+		chat.dispatchEvent(new Event("pointerdown", { bubbles: true }))
+		chat.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }))
+		expect(vscode.postMessage).toHaveBeenCalledTimes(2)
+		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "webviewDidFocus" })
+	})
 
 	it("shows welcome view when setup is incomplete", () => {
 		mockUseExtensionState.mockReturnValue({

@@ -136,14 +136,23 @@ describe("CodeIndexScanExecutor", () => {
 		},
 	)
 
-	it.each([0, 2])("preserves incremental batch-error tolerance with %s indexed blocks", async (indexed) => {
+	it.each([0, 2])("rejects incremental batch errors with %s indexed blocks", async (indexed) => {
 		const { executor, scanner } = setup()
+		const failures = [new Error("embedding failure"), new Error("upsert failure"), new Error("embedding failure")]
 		scanner.scanDirectory.mockImplementation(async (_path, onError, onIndexed, onParsed) => {
 			onParsed?.(3)
 			onIndexed?.(indexed)
-			onError?.(new Error("batch failure"))
+			for (const failure of failures) onError?.(failure)
 			return { stats: { processed: 1, skipped: 0 }, totalBlockCount: 3 }
 		})
-		await expect(executor.runIncrementalScan(new AbortController().signal)).resolves.toBe(true)
+		const result = executor.runIncrementalScan(new AbortController().signal)
+		await expect(result).rejects.toBeInstanceOf(AggregateError)
+		await expect(result).rejects.toMatchObject({
+			errors: failures,
+			message: "Incremental scan failed with 3 errors:\nembedding failure\nupsert failure",
+		})
+		await result.catch((error: AggregateError) => {
+			for (const [index, failure] of failures.entries()) expect(error.errors[index]).toBe(failure)
+		})
 	})
 })
