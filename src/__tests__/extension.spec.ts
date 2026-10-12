@@ -3,6 +3,8 @@
 import type * as vscode from "vscode"
 import type { WebviewMessage } from "@roo-code/types"
 
+import { EMBEDDING_MODEL_PROFILES } from "../shared/embeddingModels"
+
 import { makeCompositeDisposable, makeEventEmitter, makeExtensionContext } from "../test-utils/vscode"
 
 vi.mock("vscode", () => ({
@@ -243,6 +245,32 @@ describe("extension.ts", () => {
 		} as unknown as vscode.ExtensionContext
 
 		settingsUpdatedHandler = undefined
+	})
+
+	test("persists codebase index models before constructing and registering the webview provider", async () => {
+		vi.resetModules()
+		const { ContextProxy } = await import("../core/config/ContextProxy")
+		const { ClineProvider } = await import("../core/webview/ClineProvider")
+		const vscode = await import("vscode")
+		const { activate } = await import("../extension")
+		const contextProxy = await ContextProxy.getInstance(mockContext)
+		let release!: () => void
+		const pendingWrite = new Promise<void>((resolve) => {
+			release = resolve
+		})
+		vi.mocked(contextProxy.setValue).mockReturnValueOnce(pendingWrite)
+
+		const activation = activate(mockContext)
+		await vi.waitFor(() =>
+			expect(contextProxy.setValue).toHaveBeenCalledWith("codebaseIndexModels", EMBEDDING_MODEL_PROFILES),
+		)
+		expect(ClineProvider).not.toHaveBeenCalled()
+		expect(vscode.window.registerWebviewViewProvider).not.toHaveBeenCalled()
+
+		release()
+		await activation
+		expect(ClineProvider).toHaveBeenCalledTimes(1)
+		expect(vscode.window.registerWebviewViewProvider).toHaveBeenCalledTimes(1)
 	})
 
 	test("shares the extension-owned focus tracker with the sidebar and code actions and disposes its listeners", async () => {

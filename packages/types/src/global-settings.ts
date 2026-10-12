@@ -291,9 +291,9 @@ export const globalSettingsSchema = z.object({
 	 */
 	chatInputEffect: z.enum(["marquee", "breathing"]).optional(),
 	/**
-	 * Opt-in zebra striping (alternating background colors) for rows in
-	 * markdown tables rendered in the chat.
-	 * @default false
+	 * Zebra striping (alternating background colors) for rows in markdown
+	 * tables rendered in the chat. Enabled by default when unset.
+	 * @default true
 	 */
 	tableStriped: z.boolean().optional(),
 	profileThresholds: z.record(z.string(), z.number()).optional(),

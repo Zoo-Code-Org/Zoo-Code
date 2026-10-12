@@ -26,6 +26,7 @@ import { initializeNetworkProxy } from "./utils/networkProxy"
 
 import { Package } from "./shared/package"
 import { formatLanguage } from "./shared/language"
+import { EMBEDDING_MODEL_PROFILES } from "./shared/embeddingModels"
 import { ContextProxy } from "./core/config/ContextProxy"
 import { ClineProvider } from "./core/webview/ClineProvider"
 import { ClineProviderFactory } from "./core/webview/ClineProviderFactory"
@@ -174,6 +175,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	}
 
 	const contextProxy = await ContextProxy.getInstance(context)
+	await contextProxy.setValue("codebaseIndexModels", EMBEDDING_MODEL_PROFILES)
+
 	const updateTelemetryState = () => {
 		const telemetrySetting = contextProxy.getGlobalState("telemetrySetting") ?? "unset"
 		TelemetryService.instance.updateTelemetryState(
