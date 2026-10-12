@@ -82,6 +82,7 @@ interface HarnessOptions {
 	openPrHeads?: Array<{ number: number; sha: string }>
 	openPrHeadsError?: boolean
 	openPrHeadsEnv?: string
+	emptyOpenList?: boolean
 	permissionErrorStatus?: number
 	requiredContexts?: string[]
 	requiredIntegrationId?: number | null
@@ -144,6 +145,7 @@ function createListPullRequests(options: HarnessOptions, eventName: string, pr: 
 	return vi.fn(async ({ state }: { state?: string }) => {
 		if (state === "open" && options.openPrHeadsError)
 			throw Object.assign(new Error("Bad credentials"), { status: 401 })
+		if (state === "open" && options.emptyOpenList) return []
 		if (state === "open" && options.prState === "closed") return []
 		if (eventName === "workflow_run" && options.workflowRunAssociated === false) {
 			if (options.workflowRunFallback === "none" || options.workflowRunFallback === undefined) return []
@@ -2168,13 +2170,36 @@ describe("PR review-state workflow", () => {
 		const resolution = await runResolve({
 			eventName: "workflow_dispatch",
 			workflowDispatchPrNumber: 1437,
-			prState: "closed",
+			emptyOpenList: true,
 		})
 
-		// The reconciliation target itself is open, so a zero-entry list is anomalous;
-		// emitting it as an empty map would let shards remove valid stacked labels.
+		// The target itself is open, so a zero-entry open list is anomalous; emitting it
+		// as an empty map would let shards remove valid stacked labels.
 		expect(resolution.openPrHeads()).toBeNull()
 		expect(resolution.prNumbers()).toEqual([1437])
+
+		// The shard consumes the emitted (empty) output: the stacked label stays as it
+		// is while review-state reconciliation still runs.
+		const emitted = resolution.setOutput.mock.calls.find(([name]) => name === "open_pr_heads")?.[1] as string
+		const result = await runWorkflow({
+			eventName: "workflow_dispatch",
+			workflowDispatchPrNumber: 1437,
+			openPrHeadsEnv: emitted,
+			labels: ["stacked", "awaiting-maintainer"],
+			permissions: { maintainer: "write" },
+			reviews: [
+				{
+					login: "maintainer",
+					type: "User",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.setFailed).not.toHaveBeenCalled()
 	})
 
 	it("hands the resolver's head map to shards through the declared env wiring", async () => {
