@@ -21,6 +21,7 @@ import {
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
 	DEFAULT_WRITE_DELAY_MS,
 	providerIdentifiers,
+	RooCodeEventName,
 	openAiModelInfoSaneDefaults,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -2981,6 +2982,22 @@ describe("ClineProvider", () => {
 				id: "keeper-id",
 				apiProvider: providerIdentifiers.anthropic,
 			}
+			// @ts-ignore - Replace providerSettingsManager with a test double: the deletion now
+			// also updates the manager's own current-profile record and the mode mapping.
+			provider.providerSettingsManager = {
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				getProfile: vi.fn().mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+				activateProfile: vi.fn().mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+			}
 			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
 			await provider.setValue("currentApiConfigName", "old-profile")
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
@@ -3016,6 +3033,10 @@ describe("ClineProvider", () => {
 			provider.providerSettingsManager = {
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
 				getProfile: vi.fn().mockResolvedValue({ name: "keeper-profile", ...keeperSettings }),
+				activateProfile: vi
+					.fn()
+					.mockResolvedValue({ name: "keeper-profile", id: "keeper-id", ...keeperSettings }),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
 			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
@@ -3036,6 +3057,147 @@ describe("ClineProvider", () => {
 
 			// The surviving profile's settings must replace the deleted profile's stale buffer.
 			expect(provider.getValues().apiConfiguration).toEqual(keeperSettings)
+			await provider.dispose()
+		})
+
+		it("rebuilds the live task state and manager selection when the active profile is deleted", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const keeperSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "keeper-key" }
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				getProfile: vi.fn().mockImplementation(({ name }: { name: string }) =>
+					Promise.resolve(
+						name === "doomed-profile"
+							? {
+									name: "doomed-profile",
+									id: "doomed-id",
+									apiProvider: providerIdentifiers.openrouter,
+								}
+							: { name: "keeper-profile", id: "keeper-id", ...keeperSettings },
+					),
+				),
+				activateProfile: vi
+					.fn()
+					.mockResolvedValue({ name: "keeper-profile", id: "keeper-id", ...keeperSettings }),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const rebuildSpy = vi
+				.spyOn(
+					provider as unknown as {
+						updateTaskApiHandlerIfNeeded: (
+							settings: ProviderSettings,
+							options: { forceRebuild?: boolean; skipCurrentTaskRebuild?: boolean },
+						) => void
+					},
+					"updateTaskApiHandlerIfNeeded",
+				)
+				.mockImplementation(() => {})
+			const events: Array<{ name: string; provider?: string }> = []
+			const listener = (config: { name: string; provider?: string }) => {
+				events.push(config)
+			}
+			provider.on(RooCodeEventName.ProviderProfileChanged, listener)
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+			await provider.setValue("currentApiConfigName", "doomed-profile")
+
+			await provider.deleteProviderProfile(doomedProfile)
+
+			// The manager's own current-profile record and the current mode's profile
+			// mapping must follow the survivor, as they did when the old path activated it.
+			expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith({ name: "keeper-profile" })
+			expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith(
+				(await provider.getState()).mode,
+				"keeper-id",
+			)
+			// The live task's API handler must be rebuilt from the survivor's settings.
+			expect(rebuildSpy).toHaveBeenCalledWith(expect.objectContaining({ apiKey: "keeper-key" }), {
+				forceRebuild: true,
+			})
+			// Watchers must learn that the active profile was replaced.
+			expect(events).toEqual([{ name: "keeper-profile", provider: providerIdentifiers.anthropic }])
+			provider.off(RooCodeEventName.ProviderProfileChanged, listener)
+			await provider.dispose()
+		})
+
+		it("does not rebuild the live task state when the deleted profile was not active", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const otherProfile: ProviderSettingsEntry = {
+				name: "other-profile",
+				id: "other-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				getProfile: vi.fn().mockResolvedValue({
+					name: "other-profile",
+					id: "other-id",
+					apiProvider: providerIdentifiers.openrouter,
+				}),
+				activateProfile: vi.fn().mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const rebuildSpy = vi
+				.spyOn(
+					provider as unknown as {
+						updateTaskApiHandlerIfNeeded: (
+							settings: ProviderSettings,
+							options: { forceRebuild?: boolean; skipCurrentTaskRebuild?: boolean },
+						) => void
+					},
+					"updateTaskApiHandlerIfNeeded",
+				)
+				.mockImplementation(() => {})
+			const events: Array<{ name: string; provider?: string }> = []
+			const listener = (config: { name: string; provider?: string }) => {
+				events.push(config)
+			}
+			provider.on(RooCodeEventName.ProviderProfileChanged, listener)
+			await provider.contextProxy.setValue("listApiConfigMeta", [keeperProfile, otherProfile])
+			await provider.setValue("currentApiConfigName", "keeper-profile")
+
+			await provider.deleteProviderProfile(otherProfile)
+
+			// The active profile was untouched: no manager re-activation, no task rebuild,
+			// no replacement event.
+			expect(provider.providerSettingsManager.activateProfile).not.toHaveBeenCalled()
+			expect(rebuildSpy).not.toHaveBeenCalled()
+			expect(events).toHaveLength(0)
+			provider.off(RooCodeEventName.ProviderProfileChanged, listener)
 			await provider.dispose()
 		})
 
@@ -3147,6 +3309,12 @@ describe("ClineProvider", () => {
 					apiProvider: providerIdentifiers.anthropic,
 				}),
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				activateProfile: vi.fn().mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
 			}
 			const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
 
@@ -3270,6 +3438,13 @@ describe("ClineProvider", () => {
 					apiProvider: providerIdentifiers.anthropic,
 					apiKey: "keeper-key",
 				}),
+				activateProfile: vi.fn().mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "keeper-key",
+				}),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
 			}
 
 			await writer.deleteProviderProfile(oldProfile)
