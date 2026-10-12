@@ -252,7 +252,11 @@ async function runWorkflow(options: HarnessOptions = {}) {
 	)
 	let createdOnce = false
 	const createLabel = vi.fn(async (args: unknown) => {
-		if (options.createLabelFailOnceName && (args as { name: string }).name === options.createLabelFailOnceName && !createdOnce) {
+		if (
+			options.createLabelFailOnceName &&
+			(args as { name: string }).name === options.createLabelFailOnceName &&
+			!createdOnce
+		) {
 			createdOnce = true
 			throw Object.assign(new Error("Create label failed once"), { status: 500 })
 		}
@@ -274,7 +278,8 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		return { data: { permission } }
 	})
 	const listPullRequests = vi.fn(async ({ state }: { state?: string }) => {
-		if (state === "open" && options.openPrHeadsError) throw Object.assign(new Error("Bad credentials"), { status: 401 })
+		if (state === "open" && options.openPrHeadsError)
+			throw Object.assign(new Error("Bad credentials"), { status: 401 })
 		if (state === "open" && options.prState === "closed") return []
 		if (eventName === "workflow_run" && options.workflowRunAssociated === false) {
 			if (options.workflowRunFallback === "none" || options.workflowRunFallback === undefined) return []
@@ -528,11 +533,11 @@ describe("PR review-state workflow", () => {
 			commitParents: [OLD_SHA],
 			openPrHeads: [{ number: 1436, sha: OLD_SHA }],
 		})
-		
+
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["stacked"] }))
 		// The relationship is read from the PR head commit, so the lookup must target it.
 		expect(result.getCommit).toHaveBeenCalledWith(expect.objectContaining({ commit_sha: SHA }))
-				expect(result.warning).not.toHaveBeenCalled()
+		expect(result.warning).not.toHaveBeenCalled()
 	})
 
 	it("removes a stale stacked label when the parent is not another open PR head", async () => {
@@ -560,9 +565,10 @@ describe("PR review-state workflow", () => {
 		// A lookup failure is advisory: the label already on the PR must not be decided from
 		// an unreadable parent, so it stays as it is.
 		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
-		expect(((await result.getPullRequest()).data.labels || []).map((label: { name: string }) => label.name)).toContain("stacked")
+		expect(
+			((await result.getPullRequest()).data.labels || []).map((label: { name: string }) => label.name),
+		).toContain("stacked")
 	})
-
 
 	it("keeps reconciling review state when the open-PR map lookup fails", async () => {
 		const result = await runWorkflow({
@@ -599,7 +605,9 @@ describe("PR review-state workflow", () => {
 
 		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("could not reconcile the stacked label"))
 		// The failed add must not be recorded as a label the PR actually has.
-		expect(((await result.getPullRequest()).data.labels || []).map((label: { name: string }) => label.name)).not.toContain("stacked")
+		expect(
+			((await result.getPullRequest()).data.labels || []).map((label: { name: string }) => label.name),
+		).not.toContain("stacked")
 		expect(result.setFailed).not.toHaveBeenCalled()
 	})
 
@@ -612,7 +620,9 @@ describe("PR review-state workflow", () => {
 
 		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("could not reconcile the stacked label"))
 		// A failed removal leaves the label on the PR; the next run retries it.
-		expect(((await result.getPullRequest()).data.labels || []).map((label: { name: string }) => label.name)).toContain("stacked")
+		expect(
+			((await result.getPullRequest()).data.labels || []).map((label: { name: string }) => label.name),
+		).toContain("stacked")
 		expect(result.setFailed).not.toHaveBeenCalled()
 	})
 	it("does not label a merge commit stacked when only one of its parents is an open PR head", async () => {
@@ -638,7 +648,9 @@ describe("PR review-state workflow", () => {
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
 		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["stacked"] }))
 		// The removal must also clear the label recorded for this PR, not just the remote state.
-		expect(((await result.getPullRequest()).data.labels || []).map((label: { name: string }) => label.name)).not.toContain("stacked")
+		expect(
+			((await result.getPullRequest()).data.labels || []).map((label: { name: string }) => label.name),
+		).not.toContain("stacked")
 	})
 
 	it("reconciles CodeRabbit status comments with the canonical bot identity", async () => {
@@ -658,7 +670,6 @@ describe("PR review-state workflow", () => {
 				},
 			],
 		})
-
 
 		expect(result.getPullRequest).toHaveBeenCalledTimes(1)
 		// The open-PR map is read once to identify a stacked parent; reconciliation still targets only the comment's PR.
