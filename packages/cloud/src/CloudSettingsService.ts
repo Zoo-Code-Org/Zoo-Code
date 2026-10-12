@@ -132,6 +132,11 @@ export class CloudSettingsService extends EventEmitter<SettingsServiceEvents> im
 			return false
 		}
 
+		const requestOrganizationId = this.currentOrganizationId
+		const requestToken = token
+		const isStale = () =>
+			requestOrganizationId !== this.currentOrganizationId || requestToken !== this.authService.getSessionToken()
+
 		try {
 			const response = await fetch(`${getRooCodeApiUrl()}/api/extension-settings`, {
 				headers: {
@@ -145,6 +150,12 @@ export class CloudSettingsService extends EventEmitter<SettingsServiceEvents> im
 			}
 
 			const data = await response.json()
+
+			if (isStale()) {
+				this.log("[cloud-settings] Discarding stale extension settings response")
+				return false
+			}
+
 			const result = parseExtensionSettingsResponse(data)
 
 			if (!result.success) {

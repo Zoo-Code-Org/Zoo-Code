@@ -588,6 +588,52 @@ describe("CloudSettingsService", () => {
 			})
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("organization-settings", undefined)
 		})
+
+		it("should discard a stale successful response from the previous organization after an organization switch", async () => {
+			mockAuthService.getStoredOrganizationId = vi.fn().mockReturnValue("org-allow-all")
+			mockAuthService.hasActiveSession = vi.fn().mockReturnValue(true)
+			mockAuthService.getSessionToken = vi.fn().mockReturnValue("token")
+			await cloudSettingsService.initialize()
+
+			let resolveStale!: (response: Response) => void
+			vi.mocked(fetch).mockReturnValueOnce(
+				new Promise<Response>((resolve) => {
+					resolveStale = resolve
+				}),
+			)
+			const timerCallback = vi.mocked(RefreshTimer).mock.calls[0]?.[0]?.callback
+			const pending = timerCallback?.()
+
+			const userInfoHandler = mockAuthService.on.mock.calls.find((call: string[]) => call[0] === "user-info")?.[1]
+			vi.mocked(fetch).mockResolvedValueOnce({
+				ok: false,
+				status: 500,
+				statusText: "Internal Server Error",
+			} as unknown as Response)
+			mockAuthService.getStoredOrganizationId = vi.fn().mockReturnValue("org-restricted")
+			mockAuthService.getUserInfo = vi.fn().mockReturnValue({ organizationId: "org-restricted" })
+			await userInfoHandler({ userInfo: { organizationId: "org-restricted" } })
+
+			resolveStale({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					organization: {
+						version: 1,
+						defaultSettings: {},
+						allowList: { allowAll: true, providers: {} },
+					},
+					user: mockUserSettings,
+				}),
+			} as unknown as Response)
+			await pending
+
+			expect(cloudSettingsService.getSettings()).toBeUndefined()
+			expect(cloudSettingsService.getAllowList()).toEqual({ allowAll: false, providers: {} })
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith(
+				"organization-settings",
+				expect.objectContaining({ allowList: { allowAll: true, providers: {} } }),
+			)
+		})
 	})
 
 	describe("isTaskSyncEnabled", () => {
