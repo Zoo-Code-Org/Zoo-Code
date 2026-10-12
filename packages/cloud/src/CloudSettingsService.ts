@@ -12,6 +12,7 @@ import {
 	type UserFeatures,
 	type UserSettingsConfig,
 	type UserSettingsData,
+	type CloudUserInfo,
 	OrganizationAllowList,
 	OrganizationSettings,
 	organizationSettingsSchema,
@@ -23,6 +24,7 @@ import { getRooCodeApiUrl } from "./config.js"
 import { RefreshTimer } from "./RefreshTimer.js"
 
 const ORGANIZATION_SETTINGS_CACHE_KEY = "organization-settings"
+const ORGANIZATION_ID_CACHE_KEY = "organization-settings-org-id"
 const USER_SETTINGS_CACHE_KEY = "user-settings"
 
 const parseExtensionSettingsResponse = (data: unknown) => {
@@ -55,6 +57,7 @@ export class CloudSettingsService extends EventEmitter<SettingsServiceEvents> im
 	private authService: AuthService
 	private settings: OrganizationSettings | undefined = undefined
 	private userSettings: UserSettingsData | undefined = undefined
+	private currentOrganizationId: string | null = null
 	private timer: RefreshTimer
 	private log: (...args: unknown[]) => void
 
@@ -96,6 +99,24 @@ export class CloudSettingsService extends EventEmitter<SettingsServiceEvents> im
 				}
 			} catch (error) {
 				this.log(`[cloud-settings] error processing auth-state-changed: ${error}`, error)
+			}
+		})
+
+		this.authService.on("user-info", async (data: { userInfo: CloudUserInfo }) => {
+			try {
+				const newOrgId = data.userInfo?.organizationId || null
+				if (newOrgId !== this.currentOrganizationId) {
+					this.currentOrganizationId = newOrgId
+					this.settings = undefined
+					await this.context.globalState.update(ORGANIZATION_SETTINGS_CACHE_KEY, undefined)
+					await this.context.globalState.update(ORGANIZATION_ID_CACHE_KEY, newOrgId)
+					this.emit("settings-updated", {} as Record<string, never>)
+					if (this.authService.hasActiveSession()) {
+						await this.fetchSettings()
+					}
+				}
+			} catch (error) {
+				this.log(`[cloud-settings] error processing user-info: ${error}`, error)
 			}
 		})
 
@@ -170,6 +191,7 @@ export class CloudSettingsService extends EventEmitter<SettingsServiceEvents> im
 		// Store settings in separate globalState values
 		if (this.settings) {
 			await this.context.globalState.update(ORGANIZATION_SETTINGS_CACHE_KEY, this.settings)
+			await this.context.globalState.update(ORGANIZATION_ID_CACHE_KEY, this.currentOrganizationId)
 		}
 
 		if (this.userSettings) {
@@ -177,17 +199,36 @@ export class CloudSettingsService extends EventEmitter<SettingsServiceEvents> im
 		}
 	}
 
+	private getCurrentOrganizationId(): string | null {
+		return this.authService.getUserInfo?.()?.organizationId || this.authService.getStoredOrganizationId?.() || null
+	}
+
 	private loadCachedSettings(): void {
-		// Load settings from separate globalState values
 		this.settings = this.context.globalState.get<OrganizationSettings>(ORGANIZATION_SETTINGS_CACHE_KEY)
 		this.userSettings = this.context.globalState.get<UserSettingsData>(USER_SETTINGS_CACHE_KEY)
+
+		const cachedOrgId = this.context.globalState.get<string | null>(ORGANIZATION_ID_CACHE_KEY) ?? null
+		const currentOrgId = this.getCurrentOrganizationId()
+		this.currentOrganizationId = currentOrgId
+
+		if (currentOrgId && cachedOrgId !== currentOrgId) {
+			this.settings = undefined
+		}
 	}
 
 	public getAllowList(): OrganizationAllowList {
+		const currentOrgId = this.getCurrentOrganizationId()
+		if (currentOrgId && (!this.settings || this.currentOrganizationId !== currentOrgId)) {
+			return { allowAll: false, providers: {} }
+		}
 		return this.settings?.allowList || ORGANIZATION_ALLOW_ALL
 	}
 
 	public getSettings(): OrganizationSettings | undefined {
+		const currentOrgId = this.getCurrentOrganizationId()
+		if (currentOrgId && this.currentOrganizationId !== currentOrgId) {
+			return undefined
+		}
 		return this.settings
 	}
 
@@ -287,6 +328,7 @@ export class CloudSettingsService extends EventEmitter<SettingsServiceEvents> im
 
 		// Clear both cache keys
 		await this.context.globalState.update(ORGANIZATION_SETTINGS_CACHE_KEY, undefined)
+		await this.context.globalState.update(ORGANIZATION_ID_CACHE_KEY, undefined)
 		await this.context.globalState.update(USER_SETTINGS_CACHE_KEY, undefined)
 	}
 

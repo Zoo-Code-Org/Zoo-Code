@@ -347,7 +347,8 @@ describe("useRouterModels", () => {
 		expect(vscode.postMessage).not.toHaveBeenCalled()
 	})
 
-	it("aborts pending router model fetch and cleans up listener when query is cancelled or unmounted", async () => {
+	it("cleans up listener when hook is unmounted", async () => {
+		const addListenerSpy = vi.spyOn(window, "addEventListener")
 		const removeListenerSpy = vi.spyOn(window, "removeEventListener")
 		const queryClient = makeQueryClient()
 		const wrapper = ({ children }: { children: React.ReactNode }) =>
@@ -362,11 +363,39 @@ describe("useRouterModels", () => {
 			}),
 		)
 
+		const addedHandler = addListenerSpy.mock.calls.find(([type]) => type === "message")?.[1]
+		expect(typeof addedHandler).toBe("function")
+
 		unmount()
+
+		await waitFor(() => {
+			expect(removeListenerSpy).toHaveBeenCalledWith("message", addedHandler)
+		})
+	})
+
+	it("cleans up listener when query is cancelled", async () => {
+		const addListenerSpy = vi.spyOn(window, "addEventListener")
+		const removeListenerSpy = vi.spyOn(window, "removeEventListener")
+		const queryClient = makeQueryClient()
+		const wrapper = ({ children }: { children: React.ReactNode }) =>
+			React.createElement(QueryClientProvider, { client: queryClient }, children)
+
+		renderHook(() => useRouterModels({ provider: providerIdentifiers.openrouter }), { wrapper })
+
+		await waitFor(() =>
+			expect(vscode.postMessage).toHaveBeenCalledWith({
+				type: RouterModelsMessageType.requestRouterModels,
+				values: { provider: providerIdentifiers.openrouter },
+			}),
+		)
+
+		const addedHandler = addListenerSpy.mock.calls.find(([type]) => type === "message")?.[1]
+		expect(typeof addedHandler).toBe("function")
+
 		queryClient.cancelQueries()
 
 		await waitFor(() => {
-			expect(removeListenerSpy).toHaveBeenCalledWith("message", expect.any(Function))
+			expect(removeListenerSpy).toHaveBeenCalledWith("message", addedHandler)
 		})
 	})
 })

@@ -287,6 +287,56 @@ describe("ContextProxy", () => {
 			expect(proxy.getGlobalState("mode")).toBe("test-mode")
 		})
 
+		it("waits for delayed operations to settle before rejecting when an operation fails", async () => {
+			let delayedOperationSettled = false
+			const delayedPromise = new Promise<void>((resolve) => {
+				setTimeout(() => {
+					delayedOperationSettled = true
+					resolve()
+				}, 50)
+			})
+
+			vi.spyOn(proxy, "setValue").mockImplementation((key) => {
+				if (key === "apiModelId") {
+					return Promise.reject(new Error("Failed to write apiModelId"))
+				}
+				if (key === "mode") {
+					return delayedPromise
+				}
+				return Promise.resolve()
+			})
+
+			await expect(
+				proxy.setValues({
+					apiModelId: "gpt-4",
+					mode: "test-mode",
+				}),
+			).rejects.toThrow("Failed to write apiModelId")
+
+			expect(delayedOperationSettled).toBe(true)
+		})
+
+		it("throws the first rejection in input order when multiple operations fail", async () => {
+			vi.spyOn(proxy, "setValue").mockImplementation((key) => {
+				if (key === "apiModelId") {
+					return new Promise((_, reject) =>
+						setTimeout(() => reject(new Error("First error: apiModelId")), 30),
+					)
+				}
+				if (key === "mode") {
+					return new Promise((_, reject) => setTimeout(() => reject(new Error("Second error: mode")), 10))
+				}
+				return Promise.resolve()
+			})
+
+			await expect(
+				proxy.setValues({
+					apiModelId: "gpt-4",
+					mode: "test-mode",
+				}),
+			).rejects.toThrow("First error: apiModelId")
+		})
+
 		it("should handle both secret and global state keys", async () => {
 			// Spy on storeSecret and updateGlobalState
 			const storeSecretSpy = vi.spyOn(proxy, "storeSecret")

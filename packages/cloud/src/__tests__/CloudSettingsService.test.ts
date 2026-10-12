@@ -21,6 +21,7 @@ describe("CloudSettingsService", () => {
 		hasActiveSession: ReturnType<typeof vi.fn>
 		on: ReturnType<typeof vi.fn>
 		getStoredOrganizationId: ReturnType<typeof vi.fn>
+		getUserInfo?: ReturnType<typeof vi.fn>
 	}
 	let mockRefreshTimer: {
 		start: ReturnType<typeof vi.fn>
@@ -534,6 +535,58 @@ describe("CloudSettingsService", () => {
 			expect(mockRefreshTimer.stop).toHaveBeenCalled()
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("organization-settings", undefined)
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("user-settings", undefined)
+		})
+
+		it("should invalidate settings and return fail-closed allow list when user switches to another organization while refresh is pending", async () => {
+			mockAuthService.getStoredOrganizationId = vi.fn().mockReturnValue("org-allow-all")
+			mockAuthService.hasActiveSession = vi.fn().mockReturnValue(true)
+			await cloudSettingsService.initialize()
+
+			// Cache initial settings for org-allow-all
+			vi.mocked(fetch).mockResolvedValueOnce({
+				ok: true,
+				json: vi.fn().mockResolvedValue({
+					organization: {
+						version: 1,
+						defaultSettings: {},
+						allowList: { allowAll: true, providers: {} },
+					},
+					user: mockUserSettings,
+				}),
+			} as unknown as Response)
+
+			mockAuthService.getSessionToken = vi.fn().mockReturnValue("token")
+			const timerCallback = vi.mocked(RefreshTimer).mock.calls[0]?.[0]?.callback
+			await timerCallback?.()
+
+			expect(cloudSettingsService.getAllowList().allowAll).toBe(true)
+
+			// Get the user-info handler
+			const userInfoHandler = mockAuthService.on.mock.calls.find((call: string[]) => call[0] === "user-info")?.[1]
+			expect(userInfoHandler).toBeDefined()
+
+			// Mock fetch to simulate delayed/failed refresh for new organization
+			vi.mocked(fetch).mockResolvedValueOnce({
+				ok: false,
+				status: 500,
+				statusText: "Internal Server Error",
+			} as unknown as Response)
+
+			// Switch to org-restricted
+			mockAuthService.getStoredOrganizationId = vi.fn().mockReturnValue("org-restricted")
+			mockAuthService.getUserInfo = vi.fn().mockReturnValue({ organizationId: "org-restricted" })
+
+			await userInfoHandler({
+				userInfo: { organizationId: "org-restricted" },
+			})
+
+			// Cached settings must be invalidated, getSettings returns undefined, and allowList fails closed
+			expect(cloudSettingsService.getSettings()).toBeUndefined()
+			expect(cloudSettingsService.getAllowList()).toEqual({
+				allowAll: false,
+				providers: {},
+			})
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("organization-settings", undefined)
 		})
 	})
 

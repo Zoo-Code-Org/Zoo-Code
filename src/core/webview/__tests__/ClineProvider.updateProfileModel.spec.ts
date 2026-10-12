@@ -790,6 +790,21 @@ describe("ClineProvider - updateProfileModel", () => {
 
 		expect(manager().updateProfileModel).not.toHaveBeenCalled()
 		expect(manager().saveConfig).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.cloud_service_unavailable")
+	})
+
+	it("rejects model update during organization switch when new organization settings are pending", async () => {
+		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
+		mockCloudInstance.isAuthenticated.mockReturnValue(true)
+		mockCloudInstance.getOrganizationId.mockReturnValue("org-restricted")
+		mockCloudInstance.getOrganizationSettings.mockReturnValue(undefined)
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-4.5",
+		})
+
+		expect(manager().updateProfileModel).not.toHaveBeenCalled()
+		expect(manager().saveConfig).not.toHaveBeenCalled()
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.violated_organization_allowlist")
 	})
 
@@ -1164,56 +1179,71 @@ describe("ClineProvider - updateProfileModel", () => {
 		)
 	})
 
-	it("advances the mutation queue when an in-flight mutation never settles and reaches the queue deadline", async () => {
-		vi.useFakeTimers()
-		try {
-			mockStoredProfile({
+	it("keeps the mutation queue blocked until an in-flight mutation settles before starting next mutation", async () => {
+		mockStoredProfile({
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4",
+		})
+
+		let resolveFirstMutation!: (
+			value: Awaited<ReturnType<ReturnType<typeof manager>["updateProfileModel"]>>,
+		) => void
+		const inFlightPromise = new Promise<Awaited<ReturnType<ReturnType<typeof manager>["updateProfileModel"]>>>(
+			(resolve) => {
+				resolveFirstMutation = resolve
+			},
+		)
+		manager().updateProfileModel.mockImplementationOnce(async () => inFlightPromise)
+
+		const mutation1 = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-4.5",
+		})
+
+		let mutation2Started = false
+		manager().updateProfileModel.mockImplementationOnce(async () => {
+			mutation2Started = true
+			return {
+				success: true,
+				updatedProfile: {
+					id: "test-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-5",
+				},
+				previousProfile: {
+					id: "test-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4",
+				},
+			}
+		})
+
+		const mutation2 = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-5",
+		})
+
+		// Mutation 2 must not start while mutation 1 is still in-flight
+		await Promise.resolve()
+		expect(mutation2Started).toBe(false)
+
+		// Once mutation 1 settles, mutation 2 advances
+		resolveFirstMutation({
+			success: true,
+			updatedProfile: {
+				id: "test-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4.5",
+			},
+			previousProfile: {
+				id: "test-id",
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openai/gpt-4",
-			})
+			},
+		})
 
-			const neverEndingPromise = new Promise<never>(() => {})
-			manager().updateProfileModel.mockImplementationOnce(async () => neverEndingPromise)
+		await mutation1
+		await mutation2
 
-			const mutation1 = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
-				openRouterModelId: "openai/gpt-4.5",
-			})
-
-			await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 100)
-			await mutation1
-
-			let mutation2Started = false
-			manager().updateProfileModel.mockImplementationOnce(async () => {
-				mutation2Started = true
-				return {
-					success: true,
-					updatedProfile: {
-						id: "test-id",
-						apiProvider: providerIdentifiers.openrouter,
-						openRouterModelId: "openai/gpt-5",
-					},
-					previousProfile: {
-						id: "test-id",
-						apiProvider: providerIdentifiers.openrouter,
-						openRouterModelId: "openai/gpt-4",
-					},
-				}
-			})
-
-			const mutation2 = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
-				openRouterModelId: "openai/gpt-5",
-			})
-
-			await vi.advanceTimersByTimeAsync(10)
-			expect(mutation2Started).toBe(false)
-
-			await vi.advanceTimersByTimeAsync(10000)
-			await mutation2
-
-			expect(mutation2Started).toBe(true)
-		} finally {
-			vi.useRealTimers()
-		}
+		expect(mutation2Started).toBe(true)
 	})
 
 	it("rolls back stored profile to previous state when context update fails", async () => {

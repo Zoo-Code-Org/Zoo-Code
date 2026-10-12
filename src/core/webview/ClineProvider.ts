@@ -53,6 +53,7 @@ import {
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
 	ORGANIZATION_ALLOW_ALL,
+	type OrganizationAllowList,
 	DEFAULT_MODES,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	getModelId,
@@ -330,29 +331,11 @@ export class ClineProvider
 			},
 		)
 
-		// Keep serialization in place until the mutation and any rollback settle before starting next mutation,
-		// but enforce a secondary deadline so a mutation that never settles cannot block later mutations indefinitely.
-		let queueTimeoutId: ReturnType<typeof setTimeout> | undefined
-		const queueDeadline = new Promise<void>((resolve) => {
-			queueTimeoutId = setTimeout(() => {
-				this.log("Provider profile mutation queue deadline reached before operation settled; advancing queue")
-				resolve()
-			}, ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 10000)
-		})
-
-		const queueSettled = Promise.race([
-			run.then(
-				() => undefined,
-				() => undefined,
-			),
-			queueDeadline,
-		]).finally(() => {
-			if (queueTimeoutId) {
-				clearTimeout(queueTimeoutId)
-			}
-		})
-
-		this.providerProfileMutationQueue = queueSettled
+		// Keep serialization in place until the mutation and any rollback settle before starting next mutation.
+		this.providerProfileMutationQueue = run.then(
+			() => undefined,
+			() => undefined,
+		)
 		return callerResult
 	}
 
@@ -1941,30 +1924,41 @@ export class ClineProvider
 		activate: boolean = true,
 	): Promise<string | undefined> {
 		try {
-			return await this.enqueueProviderProfileMutation(async (signal) => {
+			return await this.enqueueProviderProfileMutation(async (signal, epoch) => {
+				if (!this.isProfileMutationActive(epoch, signal)) return undefined
+
 				const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
 
-				if (signal.aborted || this._disposed) return id
+				if (!this.isProfileMutationActive(epoch, signal)) return id
 
 				if (activate) {
 					const { mode } = await this.getState()
+					if (!this.isProfileMutationActive(epoch, signal)) return id
+
+					const listConfigMeta = await this.providerSettingsManager.listConfig()
+					if (!this.isProfileMutationActive(epoch, signal)) return id
 
 					await Promise.all([
-						this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+						this.updateGlobalState("listApiConfigMeta", listConfigMeta),
 						this.updateGlobalState("currentApiConfigName", name),
 						this.providerSettingsManager.setModeConfig(mode, id),
 						this.contextProxy.setProviderSettings(providerSettings),
 					])
 
+					if (!this.isProfileMutationActive(epoch, signal)) return id
+
 					// Change the provider for the current task.
 					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
 
 					// Keep the current task's sticky provider profile in sync with the newly-activated profile.
-					await this.persistStickyProviderProfileToCurrentTask(name)
+					await this.persistStickyProviderProfileToCurrentTask(name, { signal, epoch })
 				} else {
-					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
+					const listConfigMeta = await this.providerSettingsManager.listConfig()
+					if (!this.isProfileMutationActive(epoch, signal)) return id
+					await this.updateGlobalState("listApiConfigMeta", listConfigMeta)
 				}
 
+				if (!this.isProfileMutationActive(epoch, signal)) return id
 				await this.postStateToWebview()
 				return id
 			})
@@ -1978,25 +1972,29 @@ export class ClineProvider
 		}
 	}
 
-	private getOrganizationAllowListForProfileMutation() {
+	private getOrganizationAllowListForProfileMutation():
+		| { success: true; allowList: OrganizationAllowList }
+		| { success: false; reason: "cloud_service_unavailable" | "organization_policy_unavailable" } {
 		if (!CloudService.hasInstance()) {
 			this.log("CloudService unavailable; rejecting model update")
-			return undefined
+			return { success: false, reason: "cloud_service_unavailable" }
 		}
 		try {
 			const cloudService = CloudService.instance
-			if (!cloudService.isAuthenticated()) return ORGANIZATION_ALLOW_ALL
+			if (!cloudService.isAuthenticated()) return { success: true, allowList: ORGANIZATION_ALLOW_ALL }
 			const settings = cloudService.getOrganizationSettings()
-			if (settings) return settings.allowList ?? ORGANIZATION_ALLOW_ALL
+			if (settings) {
+				return { success: true, allowList: settings.allowList ?? ORGANIZATION_ALLOW_ALL }
+			}
 			const orgId = cloudService.getOrganizationId?.() ?? cloudService.getUserInfo?.()?.organizationId
-			if (!orgId) return ORGANIZATION_ALLOW_ALL
+			if (!orgId) return { success: true, allowList: ORGANIZATION_ALLOW_ALL }
 			this.log("Organization policy unavailable for authenticated organization user; rejecting model update")
-			return undefined
+			return { success: false, reason: "organization_policy_unavailable" }
 		} catch (error) {
 			this.log(
 				`Unable to read organization allow-list for model update: ${error instanceof Error ? error.message : String(error)}`,
 			)
-			return undefined
+			return { success: false, reason: "organization_policy_unavailable" }
 		}
 	}
 
@@ -2028,12 +2026,17 @@ export class ClineProvider
 					return
 				}
 
-				const authoritativeOrganizationAllowList = this.getOrganizationAllowListForProfileMutation()
-				if (!authoritativeOrganizationAllowList) {
-					this.log(`Ignoring model update for profile '${name}': organization allow-list is unavailable`)
-					vscode.window.showErrorMessage(t("common:errors.violated_organization_allowlist"))
+				const allowListResult = this.getOrganizationAllowListForProfileMutation()
+				if (!allowListResult.success) {
+					this.log(`Ignoring model update for profile '${name}': ${allowListResult.reason}`)
+					if (allowListResult.reason === "cloud_service_unavailable") {
+						vscode.window.showErrorMessage(t("common:errors.cloud_service_unavailable"))
+					} else {
+						vscode.window.showErrorMessage(t("common:errors.violated_organization_allowlist"))
+					}
 					return
 				}
+				const authoritativeOrganizationAllowList = allowListResult.allowList
 
 				const validateProfileAllowed = (candidate: ProviderSettingsWithId) =>
 					ProfileValidator.isProfileAllowed(
@@ -2077,7 +2080,8 @@ export class ClineProvider
 					const isMatchingStored = !currentStored || deepEqual(storedWithoutName, updatedProfile)
 
 					if (isMatchingStored) {
-						appliedProfile = updatedProfile as ProviderSettings
+						const { id: _uid, ...updatedSettings } = updatedProfile
+						appliedProfile = updatedSettings as ProviderSettings
 					} else {
 						if (currentStored && !validateProfileAllowed(currentStored)) {
 							this.log(
@@ -2085,7 +2089,8 @@ export class ClineProvider
 							)
 							return
 						}
-						appliedProfile = currentStored as ProviderSettings
+						const { id: _cid, ...storedSettings } = (storedWithoutName ?? {}) as ProviderSettingsWithId
+						appliedProfile = storedSettings as ProviderSettings
 					}
 
 					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
@@ -2190,10 +2195,7 @@ export class ClineProvider
 	): Promise<void> {
 		if (options.skipCurrentTaskRebuild) return
 		const checkActive = () =>
-			!this._disposed &&
-			(!options.signal ||
-				options.epoch === undefined ||
-				this.isProfileMutationActive(options.epoch, options.signal))
+			!this._disposed && (!options.signal || this.isProfileMutationActive(options.epoch, options.signal))
 		if (!checkActive()) return
 		const task = this.getCurrentTask()
 		if (!task) return
