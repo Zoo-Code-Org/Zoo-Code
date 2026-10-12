@@ -334,6 +334,10 @@
 			"label": "Subtaken",
 			"description": "Subtaken aanmaken en afronden zonder goedkeuring"
 		},
+		"webFetch": {
+			"label": "Web",
+			"description": "Webinhoud ophalen zonder goedkeuring toestaan"
+		},
 		"followupQuestions": {
 			"label": "Vraag",
 			"description": "Selecteer automatisch het eerste voorgestelde antwoord voor vervolgvragen na de geconfigureerde time-out",

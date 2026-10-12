@@ -412,6 +412,10 @@
 			"label": "Subtasks",
 			"description": "Allow creation and completion of subtasks without requiring approval"
 		},
+		"webFetch": {
+			"label": "Web",
+			"description": "Allow fetching web content without requiring approval"
+		},
 		"followupQuestions": {
 			"label": "Question",
 			"description": "Automatically select the first suggested answer for follow-up questions after the configured timeout",

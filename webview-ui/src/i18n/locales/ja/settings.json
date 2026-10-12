@@ -334,6 +334,10 @@
 			"label": "サブタスク",
 			"description": "承認なしでサブタスクの作成と完了を許可"
 		},
+		"webFetch": {
+			"label": "Web",
+			"description": "承認なしでWebコンテンツの取得を許可"
+		},
 		"followupQuestions": {
 			"label": "質問",
 			"description": "設定された時間が経過すると、フォローアップ質問の最初の提案回答を自動的に選択します",

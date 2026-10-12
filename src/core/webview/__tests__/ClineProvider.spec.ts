@@ -2143,6 +2143,31 @@ describe("ClineProvider", () => {
 		expect(state.alwaysDenyUnapprovedCommands).toBe(false)
 	})
 
+	test("getStateToPostToWebview returns the saved web fetch auto-approval setting", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("alwaysAllowWebFetch", true)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.alwaysAllowWebFetch).toBe(true)
+	})
+
+	test("getStateToPostToWebview requires approval for web fetch by default", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.alwaysAllowWebFetch).toBe(false)
+	})
+
+	test("getState returns the saved web fetch auto-approval setting and defaults it to false", async () => {
+		expect((await provider.getState()).alwaysAllowWebFetch).toBe(false)
+
+		await provider.contextProxy.setValue("alwaysAllowWebFetch", true)
+
+		expect((await provider.getState()).alwaysAllowWebFetch).toBe(true)
+	})
+
 	test("language is set to VSCode language", async () => {
 		// Mock VSCode language as Spanish
 		;(vscode.env as any).language = "pt-BR"
