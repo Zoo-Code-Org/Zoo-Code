@@ -113,6 +113,8 @@
 	},
 	"selectMode": "상호작용 모드 선택",
 	"selectApiConfig": "API 구성 선택",
+	"selectModel": "모델 선택",
+	"selectModelUnsupported": "이 공급자는 여기서 모델을 선택할 수 없습니다. 클릭하면 설정으로 이동합니다.",
 	"lockApiConfigAcrossModes": "이 워크스페이스의 모든 모드에서 API 구성 잠금",
 	"unlockApiConfigAcrossModes": "이 워크스페이스의 모든 모드에서 API 구성이 잠겨 있습니다 (클릭하여 해제)",
 	"enhancePrompt": "추가 컨텍스트로 프롬프트 향상",

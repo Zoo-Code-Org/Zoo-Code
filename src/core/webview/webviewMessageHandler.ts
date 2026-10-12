@@ -2307,6 +2307,16 @@ export const webviewMessageHandler = async (
 				await provider.upsertProviderProfile(message.text, message.apiConfiguration)
 			}
 			break
+		case "updateProfileModel": {
+			const expectedProvider: unknown = message.values?.expectedProvider
+			const patch: unknown = message.values?.patch
+			if (!message.text || typeof expectedProvider !== "string" || typeof patch !== "object" || patch === null) {
+				break
+			}
+
+			await provider.updateProfileModel(message.text, expectedProvider, patch as Record<string, unknown>)
+			break
+		}
 		case "renameApiConfiguration":
 			if (message.values && message.apiConfiguration) {
 				try {

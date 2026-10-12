@@ -557,7 +557,11 @@ export class ContextProxy {
 
 	public async setValues(values: RooCodeSettings) {
 		const entries = Object.entries(values) as [RooCodeSettingsKey, unknown][]
-		await Promise.all(entries.map(([key, value]) => this.setValue(key, value)))
+		const results = await Promise.allSettled(entries.map(([key, value]) => this.setValue(key, value)))
+		const firstRejection = results.find((r): r is PromiseRejectedResult => r.status === "rejected")
+		if (firstRejection) {
+			throw firstRejection.reason
+		}
 	}
 
 	/**

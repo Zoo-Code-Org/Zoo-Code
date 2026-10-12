@@ -113,6 +113,8 @@
 	},
 	"selectMode": "対話モードを選択",
 	"selectApiConfig": "API構成を選択",
+	"selectModel": "モデルを選択",
+	"selectModelUnsupported": "このプロバイダーではここでモデルを選択できません。クリックして設定を開きます。",
 	"lockApiConfigAcrossModes": "このワークスペースのすべてのモードでAPI構成をロック",
 	"unlockApiConfigAcrossModes": "このワークスペースのすべてのモードでAPI構成がロックされています（クリックで解除）",
 	"enhancePrompt": "追加コンテキストでプロンプトを強化",

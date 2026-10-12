@@ -20,6 +20,8 @@
 		"billion_suffix": "b"
 	},
 	"ui": {
+		"loading": "Cargando...",
+		"clear_search": "Borrar búsqueda",
 		"search_placeholder": "Buscar...",
 		"no_results": "No se encontraron resultados"
 	},

@@ -20,6 +20,8 @@
 		"billion_suffix": "m"
 	},
 	"ui": {
+		"loading": "Memuat...",
+		"clear_search": "Hapus pencarian",
 		"search_placeholder": "Cari...",
 		"no_results": "Tidak ada hasil yang ditemukan"
 	},
