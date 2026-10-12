@@ -466,7 +466,11 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 			pushToolResult(message + replacementInfo)
 
 			if (perWriteCheckpoints) {
-				void checkpointSave(task, false, true).catch(() => {})
+				// Await so the checkpoint (staging + commit) completes before the
+				// diff state resets and queued work proceeds; fire-and-forget lets a
+				// queued write's own checkpoint interleave and lets shutdown lose the
+				// commit entirely.
+				await checkpointSave(task, false, true).catch(() => {})
 			}
 
 			await task.diffViewProvider.reset()
