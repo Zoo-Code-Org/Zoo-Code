@@ -30,6 +30,7 @@ type AutoApproveSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	alwaysAllowMcp?: boolean
 	alwaysAllowModeSwitch?: boolean
 	alwaysAllowSubtasks?: boolean
+	alwaysAllowWebFetch?: boolean
 	alwaysAllowExecute?: boolean
 	destructiveCommandGuardEnabled?: boolean
 	alwaysDenyUnapprovedCommands?: boolean
@@ -50,6 +51,7 @@ type AutoApproveSettingsProps = HTMLAttributes<HTMLDivElement> & {
 		| "alwaysAllowMcp"
 		| "alwaysAllowModeSwitch"
 		| "alwaysAllowSubtasks"
+		| "alwaysAllowWebFetch"
 		| "alwaysAllowExecute"
 		| "destructiveCommandGuardEnabled"
 		| "alwaysDenyUnapprovedCommands"
@@ -80,6 +82,7 @@ export const AutoApproveSettings = ({
 	alwaysAllowMcp,
 	alwaysAllowModeSwitch,
 	alwaysAllowSubtasks,
+	alwaysAllowWebFetch,
 	alwaysAllowExecute,
 	destructiveCommandGuardEnabled,
 	alwaysDenyUnapprovedCommands,
@@ -173,6 +176,7 @@ export const AutoApproveSettings = ({
 						alwaysAllowMcp={alwaysAllowMcp}
 						alwaysAllowModeSwitch={alwaysAllowModeSwitch}
 						alwaysAllowSubtasks={alwaysAllowSubtasks}
+						alwaysAllowWebFetch={alwaysAllowWebFetch}
 						alwaysAllowExecute={alwaysAllowExecute}
 						alwaysAllowFollowupQuestions={alwaysAllowFollowupQuestions}
 						onToggle={(key, value) => setCachedStateField(key, value)}
