@@ -10,7 +10,7 @@ overrides:
   esbuild: 0.28.1
   rollup: 4.60.4
   vite: 8.1.0
-  undici: 6.28.0
+  undici: 6.28.1
   form-data: '>=4.0.4'
   bluebird: '>=3.7.2'
   glob: 11.1.0
@@ -606,8 +606,8 @@ importers:
         specifier: ^0.1.13
         version: 0.1.13
       undici:
-        specifier: 6.28.0
-        version: 6.28.0
+        specifier: 6.28.1
+        version: 6.28.1
       uuid:
         specifier: ^11.1.0
         version: 11.1.1
@@ -8435,8 +8435,8 @@ packages:
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
-  undici@6.28.0:
-    resolution: {integrity: sha512-LIY910g9TI13YS95lrMFrs8Rm/u/irgHeTWoKCoteeJ04CUJ92eEfj0rVn+7VKMPBpUPiUoBKfhNyLI23EE/KA==}
+  undici@6.28.1:
+    resolution: {integrity: sha512-zWpdTVD54H48CIybL0rWQ3ukpb9d23wM7eH5RtfdmeP70cWHNjtfo7P4vZX+5CoDcO53J4Pu5uXp7lNfjc6DRA==}
     engines: {node: '>=18.17'}
 
   unicorn-magic@0.1.0:
@@ -10603,7 +10603,7 @@ snapshots:
     dependencies:
       '@qdrant/openapi-typescript-fetch': 1.2.6
       typescript: 5.9.3
-      undici: 6.28.0
+      undici: 6.28.1
 
   '@qdrant/openapi-typescript-fetch@1.2.6': {}
 
@@ -12655,7 +12655,7 @@ snapshots:
       parse5: 7.3.0
       parse5-htmlparser2-tree-adapter: 7.1.0
       parse5-parser-stream: 7.1.2
-      undici: 6.28.0
+      undici: 6.28.1
       whatwg-mimetype: 4.0.0
 
   chokidar@4.0.3:
@@ -17567,7 +17567,7 @@ snapshots:
 
   undici-types@6.21.0: {}
 
-  undici@6.28.0: {}
+  undici@6.28.1: {}
 
   unicorn-magic@0.1.0: {}
 

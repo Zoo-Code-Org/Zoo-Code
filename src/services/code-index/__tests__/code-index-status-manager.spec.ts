@@ -20,7 +20,12 @@ vi.mock("../state-manager")
 
 vi.mock("vscode", () => ({
 	window: { onDidChangeActiveTextEditor: vi.fn(), activeTextEditor: undefined },
-	workspace: { workspaceFolders: undefined, getWorkspaceFolder: vi.fn(), getConfiguration: vi.fn() },
+	workspace: {
+		workspaceFolders: undefined,
+		getWorkspaceFolder: vi.fn(),
+		getConfiguration: vi.fn(),
+		onDidChangeWorkspaceFolders: vi.fn(),
+	},
 }))
 
 function makeSource(workspacePath: string) {
@@ -59,6 +64,8 @@ function makeSource(workspacePath: string) {
 describe("CodeIndexStatusManager", () => {
 	let editorChanged: () => void
 	let disposeEditor: ReturnType<typeof vi.fn<() => void>>
+	let workspaceFoldersChanged: () => void
+	let disposeWorkspaceFolders: ReturnType<typeof vi.fn<() => void>>
 
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -73,6 +80,11 @@ describe("CodeIndexStatusManager", () => {
 		vi.mocked(vscode.window.onDidChangeActiveTextEditor).mockImplementation((listener) => {
 			editorChanged = () => listener(undefined)
 			return { dispose: disposeEditor }
+		})
+		disposeWorkspaceFolders = vi.fn()
+		vi.mocked(vscode.workspace.onDidChangeWorkspaceFolders).mockImplementation((listener) => {
+			workspaceFoldersChanged = () => listener({ added: [], removed: [] })
+			return { dispose: disposeWorkspaceFolders }
 		})
 	})
 
@@ -307,5 +319,88 @@ describe("CodeIndexStatusManager", () => {
 		expect(disposeEditor).not.toHaveBeenCalled()
 		expect(source.subscription.dispose).not.toHaveBeenCalled()
 		manager.dispose()
+	})
+
+	it("switches to the newly selected workspace on a workspace-folder change alone", () => {
+		const first = makeSource("/first")
+		const second = makeSource("/second")
+		const resolve = vi.fn((path: string) => (path === "/first" ? first : second))
+		const publish = vi.fn()
+		const manager = new CodeIndexStatusManager(resolve)
+		manager["publishStatus"] = publish
+		try {
+			manager.init()
+			expect(publish).toHaveBeenCalledExactlyOnceWith(first.status)
+			Object.defineProperty(vscode.workspace, "workspaceFolders", {
+				configurable: true,
+				value: [{ uri: makeUri("/second"), name: "second", index: 0 }],
+			})
+			workspaceFoldersChanged()
+			expect(resolve).toHaveBeenLastCalledWith("/second")
+			expect(first.subscription.dispose).toHaveBeenCalledTimes(1)
+			expect(second.onProgressUpdate).toHaveBeenCalledTimes(1)
+			expect(publish).toHaveBeenCalledTimes(2)
+			expect(publish).toHaveBeenLastCalledWith(second.status)
+			first.emit()
+			expect(publish).toHaveBeenCalledTimes(2)
+			second.status.message = "Updated"
+			second.emit()
+			expect(publish).toHaveBeenCalledTimes(3)
+			expect(publish).toHaveBeenLastCalledWith(second.status)
+		} finally {
+			manager.dispose()
+		}
+	})
+
+	it("keeps the subscription when a workspace-folder change leaves the selection unchanged", () => {
+		const source = makeSource("/first")
+		const publish = vi.fn()
+		const manager = new CodeIndexStatusManager(() => source)
+		manager["publishStatus"] = publish
+		manager.init()
+		workspaceFoldersChanged()
+		expect(source.onProgressUpdate).toHaveBeenCalledTimes(1)
+		expect(source.subscription.dispose).not.toHaveBeenCalled()
+		expect(publish).toHaveBeenCalledExactlyOnceWith(source.status)
+		manager.dispose()
+	})
+
+	it("releases the subscription when a workspace-folder change leaves no workspace", () => {
+		const source = makeSource("/first")
+		const publish = vi.fn()
+		const manager = new CodeIndexStatusManager(() => source)
+		manager["publishStatus"] = publish
+		manager.init()
+		Object.defineProperty(vscode.workspace, "workspaceFolders", { configurable: true, value: [] })
+		workspaceFoldersChanged()
+		expect(source.subscription.dispose).toHaveBeenCalledTimes(1)
+		source.emit()
+		expect(publish).toHaveBeenCalledExactlyOnceWith(source.status)
+		manager.dispose()
+	})
+
+	it("releases the workspace-folder listener on disposal even when its cleanup fails", () => {
+		const source = makeSource("/first")
+		const manager = new CodeIndexStatusManager(() => source)
+		const folderError = new Error("workspace folders cleanup failed")
+		const log = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			manager.init()
+			disposeWorkspaceFolders.mockImplementationOnce(() => {
+				throw folderError
+			})
+			expect(() => manager.dispose()).not.toThrow()
+			expect(log).toHaveBeenCalledExactlyOnceWith(
+				"[CodeIndexStatusManager] Failed to dispose workspace folders subscription:",
+				folderError,
+			)
+			expect(disposeEditor).toHaveBeenCalledTimes(1)
+			expect(source.subscription.dispose).toHaveBeenCalledTimes(1)
+			manager.dispose()
+			expect(disposeWorkspaceFolders).toHaveBeenCalledTimes(1)
+			expect(log).toHaveBeenCalledTimes(1)
+		} finally {
+			log.mockRestore()
+		}
 	})
 })

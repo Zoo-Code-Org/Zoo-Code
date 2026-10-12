@@ -46,11 +46,11 @@ Zoo Code phát triển trên nền tảng do Roo Code tạo ra và tiếp tục 
 - **Workflow terminal và chỉnh sửa đáng tin cậy hơn** — sửa lỗi terminal hoàn tất quá sớm, xung đột trạng thái tác vụ, quản lý ngữ cảnh, chỉnh sửa diff và sử dụng công cụ riêng của từng provider.
 - **Kiểm soát workspace tốt hơn** — quản lý quy tắc, giới hạn MCP theo từng chế độ, kiểm soát đường dẫn multi-root, tùy chọn reasoning của model và thao tác xem lại thay đổi khi hoàn tất.
 
-## Điểm mới trong v3.86.0
+## Điểm mới trong v3.88.0
 
-- ✨ **Hỗ trợ model mới:** Dùng GPT-6.1 Sol, tận dụng giới hạn đầu ra đã sửa của Claude Opus 5.5 và chọn DeepSeek V4.1 Flash trên OpenCode Go.
-- 🧭 **Hủy và gián đoạn task đáng tin cậy:** Giữ nguyên lý do hủy đầu tiên, đặt lại trạng thái hủy stream cho từng request và ngăn task bị gián đoạn chạy lại các subtask đã bị từ chối.
-- 🛠️ **Tool, Prompt và truyền luồng UI đáng tin cậy:** Giữ nguyên vẹn tham số tool được truyền theo luồng, thực thi chính sách tool MCP, ngăn số dòng bịa đặt và giúp cập nhật chat mượt mà hơn.
+- ✨ **Hỗ trợ provider và model:** Dùng Grok Build và hỗ trợ model tùy chỉnh đã được cải thiện. Bản phát hành này cũng sửa các giới hạn model Bedrock và gửi cài đặt verbosity của Codex.
+- 🧭 **Độ tin cậy của task:** Bản phát hành này sửa cách xử lý hủy, việc tiếp tục lượt tool và việc lưu message task.
+- ⚡ **Chỉnh sửa và chat nhanh hơn:** Ghi file mặc định không còn dùng độ trễ nhân tạo. Message chat mang ít dữ liệu file hơn, và code action đến được chat hoạt động gần nhất.
 
 ## Zoo Code có thể làm gì cho BẠN?
 

@@ -115,6 +115,7 @@ import { CustomModesManager } from "../config/CustomModesManager"
 import { PendingActionSettlementError, Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
+import type { WebviewFocusTracker } from "./WebviewFocusTracker"
 import type { ClineMessage, TodoItem } from "@roo-code/types"
 import {
 	type ApiMessage,
@@ -131,6 +132,7 @@ import {
 import { readTaskMessages } from "../task-persistence/taskMessages"
 import { getNonce } from "./getNonce"
 import { getUri } from "./getUri"
+import { omitOriginalContentFromExtensionMessage } from "./stripOriginalContent"
 import { REQUESTY_BASE_URL } from "../../shared/utils/requesty"
 import { validateAndFixToolResultIds } from "../task/validateToolResultIds"
 import { PendingEditOperationStore, type PendingEditOperationInput } from "./PendingEditOperationStore"
@@ -346,6 +348,13 @@ export class ClineProvider
 	private viewStateId: string
 
 	/**
+	 * Whether this instance wrote an entry under its own session-local temporary id.
+	 * Temporary ids restart from 0 on every extension host start, so an entry under the
+	 * same name can belong to a different session. Only re-key entries this instance wrote.
+	 */
+	private wroteUnderTemporaryViewStateId = false
+
+	/**
 	 * Local state buffer for this specific view instance.
 	 * Used to isolate mode, apiConfiguration, and other fields from the shared ContextProxy singleton
 	 * when running in parallel (multi-tab) mode.
@@ -363,7 +372,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "oct-2026-v3.86.0-models-aborts-tool-streaming" // v3.86.0 models, aborts, and tool/UI streaming fixes
+	public readonly latestAnnouncementId = "oct-2026-v3.88.0-providers-tasks-speed" // v3.88.0 provider/model support, task reliability, faster editing and chat
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -372,6 +381,7 @@ export class ClineProvider
 		private readonly outputChannel: vscode.OutputChannel,
 		private readonly renderContext: "sidebar" | "editor" = "sidebar",
 		public readonly contextProxy: ContextProxy,
+		public readonly webviewFocusTracker: WebviewFocusTracker,
 		mdmService?: MdmService,
 	) {
 		super()
@@ -546,10 +556,13 @@ export class ClineProvider
 			: this.contextProxy.getValue("viewStates")
 
 		if (!viewStates || typeof viewStates !== "object" || Array.isArray(viewStates)) {
-			return {}
+			return Object.create(null)
 		}
 
-		return { ...viewStates }
+		// Copy onto a null prototype. A view id that names an Object.prototype key
+		// ("constructor", "toString", "valueOf", ...) must not resolve through the
+		// prototype chain and be mistaken for a persisted entry.
+		return Object.assign(Object.create(null), viewStates)
 	}
 
 	/**
@@ -567,7 +580,13 @@ export class ClineProvider
 		const viewStateId = this.viewStateId
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
 			const states = this.getPersistedViewStates({ fresh: true })
-			const current = states[viewStateId] ?? {}
+			// The first write to an unowned temporary id claims the slot instead of merging
+			// into it: temporary names restart from 0 on every host start, so an entry under
+			// this name can be a leftover from an earlier session, and merging would adopt its
+			// fields and later re-key them under the stable id. Entries under a stable id, or
+			// under the temporary id this instance already authored, keep the merge semantics.
+			const ownsTargetEntry = viewStateId !== this.viewId || this.wroteUnderTemporaryViewStateId
+			const current = ownsTargetEntry ? (states[viewStateId] ?? {}) : {}
 			const next: PersistedViewState = { ...current }
 
 			if ("mode" in values) {
@@ -586,14 +605,22 @@ export class ClineProvider
 				}
 			}
 
+			let wroteEntry = false
 			if (!next.mode && !next.currentApiConfigName) {
 				delete states[viewStateId]
 			} else {
 				next.updatedAt = values.updatedAt ?? Date.now()
 				states[viewStateId] = next
+				wroteEntry = true
 			}
 
 			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+			// Authorship is recorded only after the durable write lands: a failed persistence
+			// must not mark the temporary id as owned, or a later load would adopt an entry
+			// that was never actually stored.
+			if (wroteEntry && viewStateId === this.viewId) {
+				this.wroteUnderTemporaryViewStateId = true
+			}
 		})
 
 		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
@@ -641,6 +668,13 @@ export class ClineProvider
 		const previousViewStateId = this.viewId
 
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			// An entry under this name can belong to a different session, because temporary
+			// ids restart from 0 on every extension host start. Only re-key entries this
+			// instance wrote, otherwise a stale entry from another session is adopted.
+			if (!this.wroteUnderTemporaryViewStateId) {
+				return
+			}
+
 			const states = this.getPersistedViewStates({ fresh: true })
 			const previous = states[previousViewStateId]
 
@@ -655,6 +689,10 @@ export class ClineProvider
 			}
 
 			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+
+			// Only a successful write clears authorship: a failed attempt leaves the entry
+			// under the temporary name, and a retry must still be able to re-key it.
+			this.wroteUnderTemporaryViewStateId = false
 		})
 
 		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
@@ -708,6 +746,14 @@ export class ClineProvider
 		// Capture the id this load is for: a newer id registered while an async
 		// profile lookup is in flight must not be overwritten by this stale load.
 		const loadedForViewId = this.viewStateId
+
+		// While the stable id has not been registered yet, the key is this instance's
+		// session-local name. Temporary names restart from 0 on every host start, so an
+		// entry under the same name can belong to a different session. Load only entries
+		// this instance authored.
+		if (loadedForViewId === this.viewId && !this.wroteUnderTemporaryViewStateId) {
+			return
+		}
 		try {
 			const persisted = this.getPersistedViewStates()[loadedForViewId]
 			const loadedState: Partial<ExtensionState> = {}
@@ -1218,8 +1264,12 @@ export class ClineProvider
 		McpServerManager.unregisterProvider(this)
 	}
 
+	public get isViewVisible(): boolean {
+		return this.view?.visible === true
+	}
+
 	public static getVisibleInstance(): ClineProvider | undefined {
-		return findLast(Array.from(this.activeInstances), (instance) => instance.view?.visible === true)
+		return findLast(Array.from(this.activeInstances), (instance) => instance.isViewVisible)
 	}
 
 	public static getAllInstances(): ClineProvider[] {
@@ -1270,7 +1320,7 @@ export class ClineProvider
 		return false
 	}
 
-	public static async handleCodeAction(
+	public async handleCodeAction(
 		command: CodeActionId,
 		promptType: CodeActionName,
 		params: Record<string, string | any[]>,
@@ -1278,28 +1328,22 @@ export class ClineProvider
 		// Capture telemetry for code action usage
 		TelemetryService.instance.captureCodeActionUsed(promptType)
 
-		const visibleProvider = await ClineProvider.getInstance()
-
-		if (!visibleProvider) {
-			return
-		}
-
-		const { customSupportPrompts } = await visibleProvider.getState()
+		const { customSupportPrompts } = await this.getState()
 
 		// TODO: Improve type safety for promptType.
 		const prompt = supportPrompt.create(promptType, params, customSupportPrompts)
 
 		if (command === "addToContext") {
-			await visibleProvider.postMessageToWebview({
+			await this.postMessageToWebview({
 				type: "invoke",
 				invoke: "setChatBoxMessage",
 				text: `${prompt}\n\n`,
 			})
-			await visibleProvider.postMessageToWebview({ type: "action", action: "focusInput" })
+			await this.postMessageToWebview({ type: "action", action: "focusInput" })
 			return
 		}
 
-		await visibleProvider.createTask(prompt)
+		await this.createTask(prompt)
 	}
 
 	public static async handleTerminalAction(
@@ -1402,6 +1446,7 @@ export class ClineProvider
 		// Sets up an event listener to listen for messages passed from the webview view context
 		// and executes code based on the message that is received.
 		this.setWebviewMessageListener(webviewView.webview)
+		this.webviewDisposables.push(this.webviewFocusTracker.init(this, webviewView))
 
 		// Listen for when the panel becomes visible.
 		// https://github.com/microsoft/vscode-discussions/discussions/840
@@ -1676,6 +1721,7 @@ export class ClineProvider
 			enableCheckpoints,
 			checkpointTimeout,
 			consecutiveMistakeLimit: apiConfiguration.consecutiveMistakeLimit,
+			toolRepetitionSoftLimit: apiConfiguration.toolRepetitionSoftLimit,
 			historyItem,
 			experiments,
 			rootTask: historyItem.rootTask,
@@ -1805,7 +1851,7 @@ export class ClineProvider
 		// path (e.g. the trailing postStateToWebview in handleModeSwitchUnlocked gates the next
 		// turn after a mode switch). Message ordering is enforced by the message seq, not the ack.
 		// Promise.resolve() normalizes non-promise returns (e.g. test doubles) before the catch.
-		void Promise.resolve(webview.postMessage(message)).catch((error) => {
+		void Promise.resolve(webview.postMessage(omitOriginalContentFromExtensionMessage(message))).catch((error) => {
 			// Swallow: postMessage rejects when the webview is disposed in flight.
 			// Log the dropped message type so a wedged webview channel is diagnosable
 			// instead of silently losing state updates.
@@ -2429,19 +2475,18 @@ export class ClineProvider
 					await this._saveViewLocalStateFromMutation({ apiConfiguration: undefined })
 				}
 			} else {
+				// The deleted profile was the active one (globally, or for this view), so
+				// the shared provider keys still carry its settings; replace them so
+				// getState() reports the surviving profile's configuration.
+				await this.contextProxy.setProviderSettings(survivingSettings)
 
-			// The deleted profile was the active one (globally, or for this view), so
-			// the shared provider keys still carry its settings; replace them so
-			// getState() reports the surviving profile's configuration.
-			await this.contextProxy.setProviderSettings(survivingSettings)
-
-			if (viewWasPinnedToDeleted) {
-				// This view's nested overlay (viewLocalState.apiConfiguration, seeded
-				// by loadViewState) still serves the deleted profile's configuration:
-				// replace it with the survivor's so the re-pointed pin serves matching
-				// settings. A view pinned to another profile keeps its own overlay.
-				await this._saveViewLocalStateFromMutation({ apiConfiguration: survivingSettings })
-			}
+				if (viewWasPinnedToDeleted) {
+					// This view's nested overlay (viewLocalState.apiConfiguration, seeded
+					// by loadViewState) still serves the deleted profile's configuration:
+					// replace it with the survivor's so the re-pointed pin serves matching
+					// settings. A view pinned to another profile keeps its own overlay.
+					await this._saveViewLocalStateFromMutation({ apiConfiguration: survivingSettings })
+				}
 			}
 		}
 
@@ -3758,8 +3803,31 @@ export class ClineProvider
 	}
 
 	public async setValue<K extends keyof RooCodeSettings>(key: K, value: RooCodeSettings[K]) {
+		const previousSharedValues = { [key]: this.contextProxy.getValue(key) } as RooCodeSettings
 		await this.contextProxy.setValue(key, value)
-		await this._saveViewLocalStateFromMutation({ [key]: value })
+		try {
+			await this._saveViewLocalStateFromMutation({ [key]: value })
+		} catch (error) {
+			// The per-view record did not land: restore the prior shared value so the two
+			// persistence layers cannot diverge, then surface the original failure.
+			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues)
+			throw error
+		}
+	}
+
+	/**
+	 * Restore shared values captured before a setter wrote them, used when the paired
+	 * per-view persistence failed so the shared store cannot move ahead of the per-view
+	 * record. A failed rollback is logged; the original failure is what callers see.
+	 */
+	private async _restoreSharedValuesAfterFailedViewWrite(previous: RooCodeSettings): Promise<void> {
+		try {
+			await this.contextProxy.setValues(previous)
+		} catch (rollbackError) {
+			this.log(
+				`[ClineProvider] Shared-state rollback after failed per-view write failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+			)
+		}
 	}
 
 	public getValue<K extends keyof RooCodeSettings>(key: K) {
@@ -3785,8 +3853,18 @@ export class ClineProvider
 			}
 		}
 
+		const previousSharedValues = Object.fromEntries(
+			Object.keys(sanitizedValues).map((key) => [key, this.contextProxy.getValue(key as keyof RooCodeSettings)]),
+		) as RooCodeSettings
 		await this.contextProxy.setValues(sanitizedValues)
-		await this._saveViewLocalStateFromMutation(sanitizedValues)
+		try {
+			await this._saveViewLocalStateFromMutation(sanitizedValues)
+		} catch (error) {
+			// The per-view record did not land: restore the prior shared values so the two
+			// persistence layers cannot diverge, then surface the original failure.
+			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues)
+			throw error
+		}
 	}
 
 	/**
@@ -4112,6 +4190,7 @@ export class ClineProvider
 			enableCheckpoints,
 			checkpointTimeout,
 			consecutiveMistakeLimit: effectiveApiConfiguration.consecutiveMistakeLimit,
+			toolRepetitionSoftLimit: effectiveApiConfiguration.toolRepetitionSoftLimit,
 			task: text,
 			images,
 			experiments,

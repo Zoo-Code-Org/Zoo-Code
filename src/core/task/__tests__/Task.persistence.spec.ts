@@ -1,3 +1,4 @@
+import { WebviewFocusTracker } from "../../webview/WebviewFocusTracker"
 // cd src && npx vitest run core/task/__tests__/Task.persistence.spec.ts
 
 import * as os from "os"
@@ -285,6 +286,7 @@ describe("Task persistence", () => {
 			mockOutputChannel,
 			"sidebar",
 			new ContextProxy(mockExtensionContext),
+			new WebviewFocusTracker(),
 		) as ClineProvider & Record<string, any>
 
 		mockApiConfig = {
