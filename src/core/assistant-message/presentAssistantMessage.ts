@@ -836,7 +836,12 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 					}
 
 					// Track tool repetition in telemetry via a named event.
-					TelemetryService.instance.captureConsecutiveMistakeError(cline.taskId)
+					TelemetryService.instance.captureConsecutiveMistakeError(
+						cline.taskId,
+						"tool_repetition",
+						cline.consecutiveMistakeCount,
+						cline.consecutiveMistakeLimit,
+					)
 
 					// Return tool result message about the repetition
 					pushToolResult(

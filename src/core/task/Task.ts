@@ -3784,7 +3784,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// Track consecutive mistake errors in telemetry via a named event.
 				// The reason is "no_tools_used" because this limit is reached via initiateTaskLoop
 				// which increments consecutiveMistakeCount when the model doesn't use any tools.
-				TelemetryService.instance.captureConsecutiveMistakeError(this.taskId)
+				TelemetryService.instance.captureConsecutiveMistakeError(
+					this.taskId,
+					"no_tools_used",
+					this.consecutiveMistakeCount,
+					this.consecutiveMistakeLimit,
+				)
 
 				const { response, text, images } = await this.ask(
 					"mistake_limit_reached",

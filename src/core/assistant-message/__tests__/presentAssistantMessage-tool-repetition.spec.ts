@@ -297,7 +297,12 @@ describe("presentAssistantMessage - Tool Repetition Detection", () => {
 			expect.stringContaining("tools:toolRepetitionLimitReached"),
 		)
 		expect(readFileHandle).not.toHaveBeenCalled()
-		expect(captureConsecutiveMistakeError).toHaveBeenCalledWith("test-task-id")
+		expect(captureConsecutiveMistakeError).toHaveBeenCalledWith(
+			"test-task-id",
+			"tool_repetition",
+			mockTask.consecutiveMistakeCount,
+			HARD_LIMIT,
+		)
 		expect(findToolResult(nextToolCallId)).toBeDefined()
 	})
 
@@ -361,8 +366,14 @@ describe("presentAssistantMessage - Tool Repetition Detection", () => {
 		expect(readFileHandle).not.toHaveBeenCalled()
 
 		// Telemetry escalation should have fired for a hard block.
-		expect(captureConsecutiveMistakeError).toHaveBeenCalledWith("test-task-id")
-		expect(captureException).toHaveBeenCalled()
+		expect(captureConsecutiveMistakeError).toHaveBeenCalledWith(
+			"test-task-id",
+			"tool_repetition",
+			mockTask.consecutiveMistakeCount,
+			HARD_LIMIT,
+		)
+		// The named event is the single capture: no duplicate exception.
+		expect(captureException).not.toHaveBeenCalled()
 
 		// A tool_result describing the repetition limit should have been pushed.
 		const toolResult = findToolResult(toolCallId)
