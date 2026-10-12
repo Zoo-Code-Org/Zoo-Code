@@ -1,6 +1,8 @@
+import { WebviewFocusTracker } from "../WebviewFocusTracker"
 // npx vitest core/webview/__tests__/ClineProvider.sticky-mode.spec.ts
 
 import * as vscode from "vscode"
+import { makeCompositeDisposable } from "../../../test-utils/vscode"
 import { TelemetryService } from "@roo-code/telemetry"
 import { ClineProvider } from "../ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
@@ -12,6 +14,7 @@ vi.mock("vscode", () => ({
 	ExtensionContext: vi.fn(),
 	OutputChannel: vi.fn(),
 	WebviewView: vi.fn(),
+	Disposable: { from: (...subscriptions: vscode.Disposable[]) => makeCompositeDisposable(...subscriptions) },
 	Uri: {
 		joinPath: vi.fn(),
 		file: vi.fn(),
@@ -301,7 +304,13 @@ describe("ClineProvider - Sticky Mode", () => {
 			}),
 		} as unknown as vscode.WebviewView
 
-		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+		provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
 
 		// Wait for the async TaskHistoryStore initialization to complete
 		await new Promise((resolve) => setTimeout(resolve, 10))
@@ -769,14 +778,21 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 
 		it("does not load a temporary-id entry that an earlier session wrote", async () => {
-			const fresh = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const fresh = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 
 			// Temporary names restart from 0 on every host start, so storage can still hold
 			// an entry under this instance's name from a previous session. The constructor
 			// load must not adopt it.
 			const sharedGet = mockContext.globalState.get
 			mockContext.globalState.get = vi.fn().mockImplementation((key: string) => {
-				if (key === "viewStates") return { [fresh.viewId]: { mode: "architect", currentApiConfigName: "stale-profile" } }
+				if (key === "viewStates")
+					return { [fresh.viewId]: { mode: "architect", currentApiConfigName: "stale-profile" } }
 				return sharedGet(key)
 			})
 
@@ -787,7 +803,6 @@ describe("ClineProvider - Sticky Mode", () => {
 			const state = await fresh.getState()
 			expect(state.mode).toBe("code")
 			expect(state.currentApiConfigName).not.toBe("stale-profile")
-
 		})
 
 		it("does not adopt an entry under the temporary name that this instance never wrote", async () => {

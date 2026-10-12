@@ -343,10 +343,10 @@
 		"title": "Zoo Code {{version}} 출시",
 		"support": "<githubLink>GitHub</githubLink>에서 별표를 눌러 Zoo Code를 응원해 주세요.",
 		"release": {
-			"heading": "새로운 기능:",
-			"highlight1": "✨ 새로운 모델 지원: GPT-6.1 Sol을 사용하고, 수정된 Claude Opus 5.5 출력 한도를 적용받으며, OpenCode Go에서 DeepSeek V4.1 Flash를 선택하세요.",
-			"highlight2": "🧭 안정적인 작업 중단과 인터럽트: 첫 번째 중단 사유를 보존하고, 요청마다 스트림 중단 상태를 초기화하며, 중단된 작업이 거부된 하위 작업을 다시 실행하지 않도록 합니다.",
-			"highlight3": "🛠️ 안정적인 도구, Prompt 및 UI 스트리밍: 스트리밍된 도구 인수를 온전히 보존하고, MCP 도구 정책을 적용하며, 존재하지 않는 줄 번호 생성을 막고, 채팅 업데이트를 더 매끄럽게 합니다."
+			"heading": "Zoo Code v3.88.0의 새로운 기능",
+			"highlight1": "✨ Provider 및 모델 지원: Grok Build을 사용하고 개선된 사용자 지정 모델 지원을 활용하세요. 이번 릴리스는 Bedrock 모델 제한도 수정하고 Codex verbosity 설정을 전송합니다.",
+			"highlight2": "🧭 작업 안정성: 이번 릴리스는 취소 처리, 도구 턴 재개, 작업 메시지 저장을 수정합니다.",
+			"highlight3": "⚡ 더 빠른 편집과 채팅: 파일 쓰기는 기본적으로 인위적인 지연을 더 이상 사용하지 않습니다. 채팅 메시지는 더 적은 파일 데이터를 전달하고, 코드 액션은 마지막으로 활성화된 채팅으로 전달됩니다."
 		},
 		"cloudAgents": {
 			"heading": "클라우드의 새로운 기능:",

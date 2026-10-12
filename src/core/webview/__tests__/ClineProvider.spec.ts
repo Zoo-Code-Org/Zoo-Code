@@ -41,6 +41,9 @@ import type { MdmService } from "../../../services/mdm/MdmService"
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { MessageManager } from "../../message-manager"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../../api/providers/fetchers/lmstudio"
+import { makeCompositeDisposable, makeEventEmitter } from "../../../test-utils/vscode"
+import { WebviewFocusTracker } from "../WebviewFocusTracker"
+import { resolveChatProvider } from "../../../activate/resolveChatProvider"
 
 // Mock setup must come before imports.
 vi.mock("../../prompts/sections/custom-instructions")
@@ -160,6 +163,7 @@ vi.mock("vscode", () => ({
 	ExtensionContext: vi.fn(),
 	OutputChannel: vi.fn(),
 	WebviewView: vi.fn(),
+	Disposable: { from: (...subscriptions: vscode.Disposable[]) => makeCompositeDisposable(...subscriptions) },
 	EventEmitter: vi.fn().mockImplementation(function () {
 		return {
 			event: vi.fn(),
@@ -584,7 +588,13 @@ describe("ClineProvider", () => {
 			}),
 		}
 
-		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+		provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
 
 		defaultTaskOptions = {
 			provider,
@@ -635,6 +645,364 @@ describe("ClineProvider", () => {
 
 		it("returns undefined when no live instance owns the view", () => {
 			expect(ClineProvider.getInstanceForView({} as vscode.WebviewView)).toBeUndefined()
+		})
+	})
+
+	test("reports an unresolved webview as not visible", () => {
+		expect(provider.isViewVisible).toBe(false)
+	})
+
+	describe("Add to Context destination", () => {
+		let originalInstances: Set<ClineProvider>
+		let tabProvider: ClineProvider
+		let sidebar: ReturnType<typeof createView>
+		let tab: ReturnType<typeof createView>
+		let panel: vscode.WebviewPanel
+		let panelState: vscode.EventEmitter<vscode.WebviewPanelOnDidChangeViewStateEvent>
+
+		function createView() {
+			const messages = makeEventEmitter<WebviewMessage>()
+			const visibility = makeEventEmitter<void>()
+			const disposed = makeEventEmitter<void>()
+			const postMessage = vi.fn<(message: ExtensionMessage) => Promise<boolean>>().mockResolvedValue(true)
+			const view: vscode.WebviewView = {
+				viewType: ClineProvider.sideBarId,
+				visible: true,
+				webview: {
+					html: "",
+					options: {},
+					cspSource: "vscode-webview://test-csp-source",
+					asWebviewUri: (uri) => uri,
+					postMessage,
+					onDidReceiveMessage: messages.event,
+				},
+				onDidChangeVisibility: visibility.event,
+				onDidDispose: disposed.event,
+				show: vi.fn(),
+			}
+			return { view, messages, visibility, disposed, postMessage }
+		}
+
+		beforeEach(async () => {
+			originalInstances = ClineProvider["activeInstances"]
+			ClineProvider["activeInstances"] = new Set([provider])
+			tabProvider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				provider.webviewFocusTracker,
+			)
+			sidebar = createView()
+			tab = createView()
+			panelState = makeEventEmitter<vscode.WebviewPanelOnDidChangeViewStateEvent>()
+			panel = {
+				viewType: ClineProvider.tabPanelId,
+				title: "Zoo Code",
+				viewColumn: undefined,
+				webview: tab.view.webview,
+				options: {},
+				active: false,
+				visible: true,
+				onDidChangeViewState: panelState.event,
+				onDidDispose: tab.disposed.event,
+				reveal: vi.fn(),
+				dispose: vi.fn(),
+			}
+			await provider.resolveWebviewView(sidebar.view)
+			await tabProvider.resolveWebviewView(panel)
+			sidebar.postMessage.mockClear()
+			tab.postMessage.mockClear()
+		})
+
+		afterEach(async () => {
+			await provider.dispose()
+			await tabProvider.dispose()
+			ClineProvider["activeInstances"] = originalInstances
+		})
+
+		const addSelection = async () => {
+			const target = await resolveChatProvider(provider.webviewFocusTracker)
+			await target?.handleCodeAction("addToContext", "ADD_TO_CONTEXT", { selectedText: "selected code" })
+		}
+
+		test("reports current visibility independently of panel activation", () => {
+			expect(provider.isViewVisible).toBe(true)
+			expect(tabProvider.isViewVisible).toBe(true)
+			expect(panel.active).toBe(false)
+			Object.defineProperty(sidebar.view, "visible", { value: false, configurable: true })
+			Object.defineProperty(panel, "visible", { value: false, configurable: true })
+			expect(provider.isViewVisible).toBe(false)
+			expect(tabProvider.isViewVisible).toBe(false)
+			Object.defineProperty(sidebar.view, "visible", { value: true, configurable: true })
+			Object.defineProperty(panel, "visible", { value: true, configurable: true })
+			expect(provider.isViewVisible).toBe(true)
+			expect(tabProvider.isViewVisible).toBe(true)
+		})
+
+		test("follows chat focus rather than registration order after returning to the source editor", async () => {
+			sidebar.messages.fire({ type: "webviewDidFocus" })
+			// Both views stay visible while the source editor has focus.
+			expect(ClineProvider.getVisibleInstance()).toBe(tabProvider)
+			await addSelection()
+			expect(sidebar.postMessage).toHaveBeenCalledWith({
+				type: "invoke",
+				invoke: "setChatBoxMessage",
+				text: expect.stringContaining("selected code"),
+			})
+			expect(sidebar.postMessage).toHaveBeenCalledWith({ type: "action", action: "focusInput" })
+			expect(tab.postMessage).not.toHaveBeenCalled()
+
+			sidebar.postMessage.mockClear()
+			tab.messages.fire({ type: "webviewDidFocus" })
+			await addSelection()
+			expect(tab.postMessage).toHaveBeenCalledTimes(2)
+			expect(sidebar.postMessage).not.toHaveBeenCalled()
+		})
+
+		test("remembers explicit chat focus after panel deactivation and background visibility events", async () => {
+			tab.messages.fire({ type: "webviewDidFocus" })
+			Object.defineProperty(panel, "active", { value: false, configurable: true })
+			panelState.fire({ webviewPanel: panel })
+			sidebar.visibility.fire()
+			sidebar.postMessage.mockClear()
+			tab.postMessage.mockClear()
+			await addSelection()
+			expect(tab.postMessage).toHaveBeenCalledTimes(2)
+			expect(sidebar.postMessage).not.toHaveBeenCalled()
+		})
+
+		test.each([
+			{ change: "activation", property: "active", value: true },
+			{ change: "visibility", property: "visible", value: false },
+			{ change: "position", property: "viewColumn", value: 2 },
+		])("panel $change does not overwrite a more recent sidebar interaction", async ({ property, value }) => {
+			Object.defineProperty(panel, "active", { value: property !== "active", configurable: true })
+			tab.messages.fire({ type: "webviewDidFocus" })
+			sidebar.messages.fire({ type: "webviewDidFocus" })
+			Object.defineProperty(panel, property, { value, configurable: true })
+			panelState.fire({ webviewPanel: panel })
+			expect(provider.webviewFocusTracker.getLastActiveProvider()).toBe(provider)
+
+			sidebar.postMessage.mockClear()
+			tab.postMessage.mockClear()
+			await addSelection()
+			expect(sidebar.postMessage).toHaveBeenCalledTimes(2)
+			expect(tab.postMessage).not.toHaveBeenCalled()
+		})
+
+		test("background messages reach the provider handler without changing the last focused chat", async () => {
+			sidebar.messages.fire({ type: "webviewDidFocus" })
+			const handler = vi
+				.spyOn(await import("../webviewMessageHandler"), "webviewMessageHandler")
+				.mockResolvedValue(undefined)
+			try {
+				const message: WebviewMessage = { type: "themeFixtureProbeResponse" }
+				tab.messages.fire(message)
+				expect(handler).toHaveBeenCalledOnce()
+				expect(handler.mock.calls[0].slice(0, 2)).toEqual([tabProvider, message])
+				expect(provider.webviewFocusTracker.getLastActiveProvider()).toBe(provider)
+			} finally {
+				handler.mockRestore()
+			}
+			await addSelection()
+			expect(sidebar.postMessage).toHaveBeenCalledTimes(2)
+			expect(tab.postMessage).not.toHaveBeenCalled()
+		})
+
+		test("waits for explicit focus even when a panel is already active during registration", () => {
+			const state = makeEventEmitter<vscode.WebviewPanelOnDidChangeViewStateEvent>()
+			const activePanel = { ...panel, active: true, onDidChangeViewState: state.event }
+			const tracker = new WebviewFocusTracker()
+			tracker.init(tabProvider, activePanel)
+			expect(tracker.getLastActiveProvider()).toBeUndefined()
+			state.fire({ webviewPanel: activePanel })
+			expect(tracker.getLastActiveProvider()).toBeUndefined()
+			tab.messages.fire({ type: "webviewDidFocus" })
+			expect(tracker.getLastActiveProvider()).toBe(tabProvider)
+			tracker.dispose()
+			expect(tracker.getLastActiveProvider()).toBeUndefined()
+			tab.messages.fire({ type: "webviewDidFocus" })
+			expect(tracker.getLastActiveProvider()).toBeUndefined()
+		})
+
+		test("closing a different chat does not clear the last focused chat", async () => {
+			tab.messages.fire({ type: "webviewDidFocus" })
+			sidebar.disposed.fire()
+			await addSelection()
+			expect(tab.postMessage).toHaveBeenCalledTimes(2)
+			expect(sidebar.postMessage).not.toHaveBeenCalled()
+		})
+
+		test("tracks focus using only message and disposal events", () => {
+			const tracker = new WebviewFocusTracker()
+			const messages = makeEventEmitter<WebviewMessage>()
+			const disposed = makeEventEmitter<void>()
+			tracker.init(provider, {
+				webview: { onDidReceiveMessage: messages.event },
+				onDidDispose: disposed.event,
+			})
+			messages.fire({ type: "webviewDidFocus" })
+			expect(tracker.getLastActiveProvider()).toBe(provider)
+			disposed.fire()
+			expect(tracker.getLastActiveProvider()).toBeUndefined()
+			messages.fire({ type: "webviewDidFocus" })
+			expect(tracker.getLastActiveProvider()).toBeUndefined()
+			tracker.dispose()
+		})
+
+		test("tracker instances keep focus state and disposal independent", () => {
+			const first = new WebviewFocusTracker()
+			const second = new WebviewFocusTracker()
+			const firstView = createView()
+			const secondView = createView()
+			const firstRegistration = first.init(provider, firstView.view)
+			second.init(tabProvider, secondView.view)
+			firstView.messages.fire({ type: "webviewDidFocus" })
+			secondView.messages.fire({ type: "webviewDidFocus" })
+
+			expect(first.getLastActiveProvider()).toBe(provider)
+			expect(second.getLastActiveProvider()).toBe(tabProvider)
+			firstRegistration.dispose()
+			firstRegistration.dispose()
+			firstView.messages.fire({ type: "webviewDidFocus" })
+			expect(first.getLastActiveProvider()).toBeUndefined()
+			expect(second.getLastActiveProvider()).toBe(tabProvider)
+			first.dispose()
+			second.dispose()
+			second.dispose()
+			secondView.messages.fire({ type: "webviewDidFocus" })
+			expect(second.getLastActiveProvider()).toBeUndefined()
+		})
+
+		test("preserves the visible-provider fallback when no chat has been focused", async () => {
+			await addSelection()
+			expect(tab.postMessage).toHaveBeenCalledTimes(2)
+			expect(sidebar.postMessage).not.toHaveBeenCalled()
+		})
+
+		test.each(["sidebar", "tab"])(
+			"falls back to the visible chat when the last focused %s is hidden",
+			async (source) => {
+				const hidden = source === "sidebar" ? sidebar : tab
+				const visible = source === "sidebar" ? tab : sidebar
+				hidden.messages.fire({ type: "webviewDidFocus" })
+				Object.defineProperty(source === "sidebar" ? sidebar.view : panel, "visible", {
+					value: false,
+					configurable: true,
+				})
+
+				const target = await resolveChatProvider(provider.webviewFocusTracker)
+				expect(target).toBe(source === "sidebar" ? tabProvider : provider)
+				await target?.handleCodeAction("addToContext", "ADD_TO_CONTEXT", { selectedText: "selected code" })
+
+				expect(hidden.postMessage).not.toHaveBeenCalled()
+				expect(visible.postMessage).toHaveBeenCalledWith({
+					type: "invoke",
+					invoke: "setChatBoxMessage",
+					text: expect.stringContaining("selected code"),
+				})
+				expect(visible.postMessage).toHaveBeenCalledWith({ type: "action", action: "focusInput" })
+				expect(vscode.commands.executeCommand).not.toHaveBeenCalled()
+			},
+		)
+
+		test.each(["sidebar", "tab"])(
+			"opens the sidebar when the last focused %s and all other chats are hidden",
+			async (source) => {
+				const focused = source === "sidebar" ? sidebar : tab
+				focused.messages.fire({ type: "webviewDidFocus" })
+				Object.defineProperty(sidebar.view, "visible", { value: false, configurable: true })
+				Object.defineProperty(panel, "visible", { value: false, configurable: true })
+				vi.mocked(vscode.commands.executeCommand).mockImplementationOnce(async () => {
+					Object.defineProperty(sidebar.view, "visible", { value: true, configurable: true })
+				})
+
+				const target = await resolveChatProvider(provider.webviewFocusTracker)
+				expect(target).toBe(provider)
+				await target?.handleCodeAction("addToContext", "ADD_TO_CONTEXT", { selectedText: "selected code" })
+
+				expect(vscode.commands.executeCommand).toHaveBeenCalledExactlyOnceWith(
+					`${ClineProvider.sideBarId}.focus`,
+				)
+				expect(sidebar.postMessage).toHaveBeenCalledWith({
+					type: "invoke",
+					invoke: "setChatBoxMessage",
+					text: expect.stringContaining("selected code"),
+				})
+				expect(tab.postMessage).not.toHaveBeenCalled()
+				expect(panel.reveal).not.toHaveBeenCalled()
+			},
+		)
+
+		test("remembers the last focused chat across hiding and showing it without another interaction", async () => {
+			sidebar.messages.fire({ type: "webviewDidFocus" })
+			Object.defineProperty(sidebar.view, "visible", { value: false, configurable: true })
+			expect(await resolveChatProvider(provider.webviewFocusTracker)).toBe(tabProvider)
+			expect(provider.webviewFocusTracker.getLastActiveProvider()).toBe(provider)
+			Object.defineProperty(sidebar.view, "visible", { value: true, configurable: true })
+			expect(await resolveChatProvider(provider.webviewFocusTracker)).toBe(provider)
+		})
+
+		test("preserves single-view behavior", async () => {
+			await tabProvider.dispose()
+			await addSelection()
+			expect(sidebar.postMessage).toHaveBeenCalledTimes(2)
+		})
+
+		test("preserves the sidebar fallback when the last focused tab is disposed", async () => {
+			tab.messages.fire({ type: "webviewDidFocus" })
+			await tabProvider.dispose()
+			Object.defineProperty(sidebar.view, "visible", { value: false, configurable: true })
+			vi.mocked(vscode.commands.executeCommand).mockImplementationOnce(async () => {
+				Object.defineProperty(sidebar.view, "visible", { value: true, configurable: true })
+			})
+			await addSelection()
+			expect(vscode.commands.executeCommand).toHaveBeenCalledWith(`${ClineProvider.sideBarId}.focus`)
+			expect(sidebar.postMessage).toHaveBeenCalledTimes(2)
+			expect(tab.postMessage).not.toHaveBeenCalled()
+		})
+
+		test("forgets a disposed sidebar webview even while its provider remains registered", async () => {
+			sidebar.messages.fire({ type: "webviewDidFocus" })
+			sidebar.disposed.fire()
+			expect(provider.webviewFocusTracker.getLastActiveProvider()).toBeUndefined()
+			await addSelection()
+			expect(tab.postMessage).toHaveBeenCalledTimes(2)
+			expect(sidebar.postMessage).not.toHaveBeenCalled()
+		})
+
+		test.each([
+			["explainCode", "EXPLAIN"],
+			["fixCode", "FIX"],
+			["improveCode", "IMPROVE"],
+		] as const)("creates a task only in the last focused chat for %s", async (command, promptType) => {
+			sidebar.messages.fire({ type: "webviewDidFocus" })
+			const task = new Task(defaultTaskOptions)
+			const sidebarTask = vi.spyOn(provider, "createTask").mockResolvedValue(task)
+			const tabTask = vi.spyOn(tabProvider, "createTask").mockResolvedValue(task)
+			try {
+				const target = provider.webviewFocusTracker.getLastActiveProvider()!
+				await target.handleCodeAction(command, promptType, { selectedText: "selected code" })
+				expect(sidebarTask).toHaveBeenCalledOnce()
+				expect(sidebarTask).toHaveBeenCalledWith(expect.stringContaining("selected code"))
+				expect(tabTask).not.toHaveBeenCalled()
+			} finally {
+				sidebarTask.mockRestore()
+				tabTask.mockRestore()
+			}
+		})
+
+		test("preserves visible-provider fallback for task creation when no chat has been focused", async () => {
+			const task = new Task(defaultTaskOptions)
+			const sidebarTask = vi.spyOn(provider, "createTask").mockResolvedValue(task)
+			const tabTask = vi.spyOn(tabProvider, "createTask").mockResolvedValue(task)
+			const target = await ClineProvider.getInstance()
+			await target?.handleCodeAction("explainCode", "EXPLAIN", { selectedText: "selected code" })
+			expect(tabTask).toHaveBeenCalledOnce()
+			expect(sidebarTask).not.toHaveBeenCalled()
+			sidebarTask.mockRestore()
+			tabTask.mockRestore()
 		})
 	})
 
@@ -739,6 +1107,7 @@ describe("ClineProvider", () => {
 			mockOutputChannel,
 			"sidebar",
 			new ContextProxy(developmentContext),
+			new WebviewFocusTracker(),
 		)
 		// The dev-server probe fails, so the HMR path falls back to the production HTML.
 		;(axios.get as any).mockRejectedValueOnce(new Error("Network error"))
@@ -787,6 +1156,7 @@ describe("ClineProvider", () => {
 				mockOutputChannel,
 				"sidebar",
 				new ContextProxy({ ...mockContext, extensionMode: vscode.ExtensionMode.Development }),
+				new WebviewFocusTracker(),
 			)
 			// The default axios mock resolves, so the dev-server probe succeeds and the
 			// HMR HTML branch (instead of the production fallback) is taken.
@@ -916,6 +1286,60 @@ describe("ClineProvider", () => {
 		releaseAck()
 	})
 
+	test("postMessageToWebview leaves originalContent of file-edit tool messages out of the state it posts", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const originalFile = "line of the original file\n".repeat(500)
+		const toolText = JSON.stringify({
+			tool: "appliedDiff",
+			path: "a.ts",
+			diff: "@@ d",
+			originalContent: originalFile,
+		})
+		// Only the field under test is populated; the rest of ExtensionState is irrelevant here.
+		const message = {
+			type: "state",
+			state: { clineMessages: [{ ts: 1, type: "ask", ask: "tool", text: toolText }] },
+		} as unknown as ExtensionMessage
+
+		await provider.postMessageToWebview(message)
+
+		const posted = mockPostMessage.mock.calls.at(-1)![0] as ExtensionMessage
+		const postedText = posted.state!.clineMessages![0]!.text!
+
+		expect(JSON.parse(postedText)).toEqual({
+			tool: "appliedDiff",
+			path: "a.ts",
+			diff: "@@ d",
+			originalContentLength: originalFile.length,
+		})
+		// the extension's own message (and so the persisted task) keeps the full content
+		expect(message.state!.clineMessages![0]!.text).toBe(toolText)
+	})
+
+	test("postMessageToWebview leaves originalContent out of messageUpdated", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const toolText = JSON.stringify({
+			tool: "appliedDiff",
+			path: "a.ts",
+			originalContent: "original file\n".repeat(100),
+		})
+
+		await provider.postMessageToWebview({
+			type: "messageUpdated",
+			clineMessage: { ts: 2, type: "ask", ask: "tool", text: toolText },
+		})
+
+		const posted = mockPostMessage.mock.calls.at(-1)![0] as ExtensionMessage
+
+		expect(JSON.parse(posted.clineMessage!.text!)).toEqual({
+			tool: "appliedDiff",
+			path: "a.ts",
+			originalContentLength: "original file\n".length * 100,
+		})
+	})
+
 	describe("theme fixture probes", () => {
 		const fixture = {
 			themeId: "Default Dark Modern",
@@ -994,6 +1418,7 @@ describe("ClineProvider", () => {
 			mockOutputChannel,
 			"sidebar",
 			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
 			mdmService,
 		)
 
@@ -1135,8 +1560,16 @@ describe("ClineProvider", () => {
 				mockOutputChannel,
 				"sidebar",
 				new ContextProxy(mockContext),
+
+				new WebviewFocusTracker(),
 			)
-			const provider2 = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const provider2 = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 
 			// Each instance should have a unique viewId
 			expect(provider1.viewId).toBeDefined()
@@ -1148,7 +1581,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should have viewId in correct format: {renderContext}-{instanceCount}", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 
 			expect(provider.viewId).toMatch(/^sidebar-\d+$/)
 
@@ -1156,8 +1595,20 @@ describe("ClineProvider", () => {
 		})
 
 		it("should increment instance count for each new instance", async () => {
-			const provider1 = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
-			const provider2 = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const provider1 = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const provider2 = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 
 			// First editor instance should be "editor-0" (or next available)
 			// Second editor instance should have a different number
@@ -1173,7 +1624,13 @@ describe("ClineProvider", () => {
 
 	describe("saveViewState", () => {
 		it("should update viewLocalState and persist mode through registered viewStates", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 
 			const contextProxySpy = vi.spyOn(provider.contextProxy, "setValue")
 			await provider["setViewStateId"]("stable-sidebar-view")
@@ -1199,7 +1656,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should update viewLocalState and persist currentApiConfigName through registered viewStates", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 
 			await provider["setViewStateId"]("stable-sidebar-view")
 			await provider.saveViewState("currentApiConfigName", "my-profile")
@@ -1213,7 +1676,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should update viewLocalState for apiConfiguration without persisting provider settings or secrets", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 
 			const testApiConfig = {
 				apiProvider: providerIdentifiers.openrouter,
@@ -1231,7 +1700,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should clear local override when saveViewState receives undefined", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 
 			await provider.saveViewState("mode", "architect")
 			expect(provider["viewLocalState"].mode).toBe("architect")
@@ -1244,7 +1719,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should clear the currentApiConfigName override when saveViewState receives undefined", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 
 			await provider.saveViewState("currentApiConfigName", "my-profile")
 			expect(provider["viewLocalState"].currentApiConfigName).toBe("my-profile")
@@ -1257,7 +1738,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should not update viewLocalState when durable view-state persistence fails", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			vi.spyOn(provider.contextProxy, "setValue").mockRejectedValueOnce(new Error("persist failed"))
 
 			await provider["setViewStateId"]("stable-sidebar-view")
@@ -1275,8 +1762,16 @@ describe("ClineProvider", () => {
 				mockOutputChannel,
 				"sidebar",
 				new ContextProxy(mockContext),
+
+				new WebviewFocusTracker(),
 			)
-			const provider2 = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const provider2 = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 
 			await provider1["setViewStateId"]("stable-sidebar-view")
 			await provider2["setViewStateId"]("stable-editor-view")
@@ -1298,7 +1793,13 @@ describe("ClineProvider", () => {
 
 	describe("loadViewState", () => {
 		it("should keep viewLocalState empty when no stable per-view values exist", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 
 			await vi.waitFor(() => {
 				expect(provider["viewLocalState"]).toEqual({})
@@ -1316,7 +1817,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should log and keep existing viewLocalState when loadViewState fails", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const logSpy = vi.spyOn(provider, "log")
 
 			// Register a stable id so the load is not skipped by the ownership guard:
@@ -1339,7 +1846,13 @@ describe("ClineProvider", () => {
 
 	describe("persisted view state pruning", () => {
 		it("should keep the newest 50 persisted view states", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const states = Object.fromEntries(
 				Array.from({ length: 55 }, (_, index) => [
 					`view-${index}`,
@@ -1360,7 +1873,13 @@ describe("ClineProvider", () => {
 
 	describe("setViewStateId", () => {
 		it('should ignore "__proto__" and keep the temporary viewId', async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 
 			await provider["setViewStateId"]("__proto__")
 
@@ -1376,7 +1895,13 @@ describe("ClineProvider", () => {
 
 		it("restores the previous view id when the registration write fails so a later launch retries", async () => {
 			const contextProxy = new ContextProxy(mockContext)
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", contextProxy)
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				contextProxy,
+				new WebviewFocusTracker(),
+			)
 			// Seed a pre-launch entry under the temporary id through the real write path,
 			// so the re-key has real work to do and records this instance as its author.
 			await provider["savePersistedViewState"]({ mode: "architect", updatedAt: 1 })
@@ -1405,14 +1930,26 @@ describe("ClineProvider", () => {
 
 	describe("view state persistence edge cases", () => {
 		it("should read viewStates from the ContextProxy cache when not fresh", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			await provider.contextProxy.setValue("viewStates", { "stable-sidebar-view": { mode: "architect" } })
 			expect(provider["getPersistedViewStates"]()).toEqual({ "stable-sidebar-view": { mode: "architect" } })
 			await provider.dispose()
 		})
 
 		it("should treat a corrupted non-object viewStates value as an empty map", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			// A string in storage is corrupt: the fresh-read guard must not spread it.
 			mockContext.globalState.update("viewStates", "corrupted-storage-value")
 			expect(provider["getPersistedViewStates"]({ fresh: true })).toEqual({})
@@ -1420,7 +1957,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should merge saved fields, drop cleared fields and delete emptied entries", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const logSpy = vi.spyOn(provider, "log")
 			const save = provider.saveViewState.bind(provider) as (key: string, value: unknown) => Promise<void>
 			const states = () => mockContext.globalState.get<Record<string, unknown>>("viewStates") ?? {}
@@ -1458,7 +2001,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should rekey a pre-launch entry under the temporary id to the registered stable id", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			// Seed through the write path so this instance is the author of the entry under
 			// its temporary id; an entry authored by another session must not be adopted.
 			await provider["savePersistedViewState"]({ mode: "architect", updatedAt: 1 })
@@ -1470,7 +2019,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should keep the stable entry and drop the temporary entry when both exist", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			// Author the temporary entry through the write path so this instance owns it,
 			// then add a stable entry that already exists in storage.
 			await provider["savePersistedViewState"]({ mode: "temp-mode", updatedAt: 1 })
@@ -1486,7 +2041,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should clear only this view's entry without clobbering an entry only storage knows about", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			await provider["setViewStateId"]("stable-sidebar-view")
 			// The cache only knows this view's entry; storage gains an extra view directly.
 			await provider.contextProxy.setValue("viewStates", { "stable-sidebar-view": { mode: "architect" } })
@@ -1500,7 +2061,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should prune by updatedAt regardless of insertion order", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const states = Object.fromEntries(
 				Array.from({ length: 55 }, (_, index) => [
 					`view-${index}`,
@@ -1517,7 +2084,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should sanitize, reject blank and undefined ids, and no-op on the active id", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const logSpy = vi.spyOn(provider, "log")
 			await provider["setViewStateId"]("a b/c")
 			expect(provider["viewStateId"]).toBe("a_b_c")
@@ -1531,12 +2104,24 @@ describe("ClineProvider", () => {
 		})
 
 		it("should load persisted mode, profile name and resolved profile into viewLocalState", async () => {
-			const writer = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const writer = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			await writer["setViewStateId"]("shared-view")
 			await writer.saveViewState("mode", "architect")
 			await writer.saveViewState("currentApiConfigName", "my-profile")
 
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const logSpy = vi.spyOn(provider, "log")
 			const getProfileSpy = vi.fn().mockResolvedValue({
 				name: "my-profile",
@@ -1562,7 +2147,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should log a successful empty load when no persisted entry exists", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const logSpy = vi.spyOn(provider, "log")
 			await provider["setViewStateId"]("stable-sidebar-view")
 			expect(provider["viewLocalState"]).toEqual({})
@@ -1571,7 +2162,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should keep the persisted profile name and log when the profile lookup fails", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const logSpy = vi.spyOn(provider, "log")
 			// @ts-ignore - Replace providerSettingsManager with a failing test double.
 			provider.providerSettingsManager = { getProfile: vi.fn().mockRejectedValue(new Error("profile missing")) }
@@ -1584,7 +2181,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should discard a stale load when the viewStateId changes during the profile lookup", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const logSpy = vi.spyOn(provider, "log")
 			// @ts-ignore - Replace providerSettingsManager with a test double that registers a newer id.
 			provider.providerSettingsManager = {
@@ -1602,7 +2205,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should reapply fields mutated while the load is in flight and keep persisted values for untouched fields", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const logSpy = vi.spyOn(provider, "log")
 			const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
 			await provider.saveViewState("currentApiConfigName", "cfg-a")
@@ -1633,12 +2242,24 @@ describe("ClineProvider", () => {
 		})
 
 		it("should keep the persisted mode authoritative when the pre-load buffer is untouched", async () => {
-			const writer = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const writer = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			await writer["setViewStateId"]("shared-view")
 			await writer.saveViewState("mode", "code")
 			await writer.saveViewState("currentApiConfigName", "my-profile")
 
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			// @ts-ignore - Replace providerSettingsManager with a test double for the profile lookup.
 			provider.providerSettingsManager = {
 				getProfile: vi.fn().mockResolvedValue({
@@ -1665,7 +2286,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should not restore a persisted mode whose custom mode no longer exists", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const logSpy = vi.spyOn(provider, "log")
 			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
 			provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
@@ -1691,7 +2318,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should not resurrect a field cleared mid-load from the pre-load buffer", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
 			// Persist a mode too: without it the load has no mode to resurrect, so the
 			// cleared-field assertion below would pass even if the loaded value clobbered
@@ -1718,7 +2351,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should reapply an independently mutated mode when the load settles", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
 			await provider.saveViewState("currentApiConfigName", "cfg-a")
 			const load = provider["setViewStateId"]("stable-sidebar-view")
@@ -1741,7 +2380,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should reapply an independently mutated profile name when the load settles", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
 			await provider.saveViewState("currentApiConfigName", "cfg-a")
 			const load = provider["setViewStateId"]("stable-sidebar-view")
@@ -1767,7 +2412,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should reapply an independently mutated apiConfiguration when the load settles", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
 			await provider.saveViewState("currentApiConfigName", "cfg-a")
 			const load = provider["setViewStateId"]("stable-sidebar-view")
@@ -1793,7 +2444,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should keep every persisted field authoritative when the load is untouched", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
 			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
 			provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
@@ -1817,7 +2474,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should persist known modes and reject unknown or non-string modes", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const logSpy = vi.spyOn(provider, "log")
 			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
 			provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
@@ -1848,7 +2511,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should apply setValue mutations to global state and keep or clear the right buffer fields", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const apiConfiguration = { apiProvider: providerIdentifiers.openrouter }
 			await provider.saveViewState("mode", "architect")
 			await provider.saveViewState("currentApiConfigName", "my-profile")
@@ -1868,7 +2537,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should build the buffered apiConfiguration from provider settings keys", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			provider["viewLocalState"] = { apiConfiguration: { openRouterApiKey: "key-1" } }
 			await provider.setValues({ apiProvider: providerIdentifiers.openrouter })
 			expect(provider["viewLocalState"].apiConfiguration).toStrictEqual({
@@ -1883,7 +2558,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should remove the buffered apiConfiguration when it is cleared", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const save = provider.saveViewState.bind(provider) as (key: string, value: unknown) => Promise<void>
 			await provider.saveViewState("apiConfiguration", { apiProvider: providerIdentifiers.openrouter })
 			await provider.saveViewState("apiConfiguration", undefined)
@@ -1895,7 +2576,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should clear viewLocalState and the persisted entry when resetting state", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			// @ts-ignore - Replace customModesManager with a test double (the real reset writes to disk).
 			provider.customModesManager = { resetCustomModes: vi.fn().mockResolvedValue(undefined), dispose: vi.fn() }
@@ -1917,7 +2604,13 @@ describe("ClineProvider", () => {
 
 	describe("provider profile mutations", () => {
 		it("should sync the view-local buffer when activating a profile over a loaded view state", async () => {
-			const writer = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const writer = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			await writer["setViewStateId"]("shared-view")
 			await writer.saveViewState("currentApiConfigName", "old-profile")
 
@@ -1927,7 +2620,13 @@ describe("ClineProvider", () => {
 				apiProvider: providerIdentifiers.openrouter,
 			}
 
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
 				activateProfile: vi.fn().mockResolvedValue(profile),
@@ -1957,7 +2656,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should sync the view-local buffer when creating and activating a profile", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const profile: ProviderSettingsEntry = {
 				name: "fresh-profile",
 				id: "fresh-id",
@@ -1979,7 +2684,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should sync the view-local buffer when deleting the current profile", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const oldProfile: ProviderSettingsEntry = {
 				name: "old-profile",
 				id: "old-id",
@@ -2003,7 +2714,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should swallow only the typed not-found signal when pruning a stale profile entry", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const staleProfile: ProviderSettingsEntry = {
 				name: "stale-profile",
 				id: "stale-id",
@@ -2030,7 +2747,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("should propagate a non-not-found deletion failure for a profile named like the not-found message", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const profile: ProviderSettingsEntry = {
 				name: "not found config",
 				id: "nf-id",
@@ -2062,7 +2785,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("reconfigures a view pinned to the deleted profile even when the global selection points elsewhere", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const oldProfile: ProviderSettingsEntry = {
 				name: "old-profile",
 				id: "old-id",
@@ -2113,7 +2842,13 @@ describe("ClineProvider", () => {
 		})
 
 		it("leaves the view buffer untouched when the deleted profile is neither globally active nor view-pinned", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
 			const oldProfile: ProviderSettingsEntry = {
 				name: "old-profile",
 				id: "old-id",
@@ -2845,18 +3580,44 @@ describe("ClineProvider", () => {
 		expect(state.language).toBe("pt-BR")
 	})
 
-	test("writeDelayMs defaults to 1000ms", async () => {
-		// Mock globalState.get to return undefined for writeDelayMs
-		;(mockContext.globalState.get as any).mockImplementation((key: string) => {
+	test("writeDelayMs defaults to DEFAULT_WRITE_DELAY_MS", async () => {
+		// Mock globalState.get to return undefined for writeDelayMs (typed reassignment,
+		// same pattern as the customModePrompts test below — Memento.get has no mock type)
+		mockContext.globalState.get = vi.fn((key: string) => {
 			return key === "writeDelayMs" ? undefined : null
 		})
 
 		const state = await provider.getState()
-		expect(state.writeDelayMs).toBe(1000)
+		expect(state.writeDelayMs).toBe(DEFAULT_WRITE_DELAY_MS)
+	})
+
+	test("getStateToPostToWebview returns the persisted writeDelayMs value", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		// Simulate the updateSettings handler storing the value.
+		await provider.contextProxy.setValue("writeDelayMs", 500)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.writeDelayMs).toBe(500)
+	})
+
+	test("getStateToPostToWebview defaults writeDelayMs to DEFAULT_WRITE_DELAY_MS when unset", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		// Ensure the setting is not persisted.
+		await provider.contextProxy.setValue("writeDelayMs", undefined)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.writeDelayMs).toBe(DEFAULT_WRITE_DELAY_MS)
 	})
 
 	test("getState applies fallback defaults for write, diff, and terminal settings", async () => {
-		;(mockContext.globalState.get as any).mockImplementation((key: string) => {
+		// Mock globalState.get to return undefined for the fallback settings
+		// (typed reassignment — Memento.get has no mock type, same pattern as the
+		// writeDelayMs default test above)
+		mockContext.globalState.get = vi.fn((key: string) => {
 			if (
 				[
 					"writeDelayMs",
@@ -3289,7 +4050,13 @@ describe("ClineProvider", () => {
 		} as unknown as vscode.ExtensionContext
 
 		// Create new provider with updated mock context
-		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+		provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
@@ -4759,7 +5526,13 @@ describe("Project MCP Settings", () => {
 		}
 		;(vscode.window as any).activeTextEditor = undefined
 		;(vscode.workspace.getWorkspaceFolder as any).mockReset()
-		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+		provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
 	})
 
 	test("handles openProjectMcpSettings message", async () => {
@@ -4888,7 +5661,13 @@ describe("getTelemetryProperties", () => {
 		} as unknown as vscode.ExtensionContext
 
 		mockOutputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
-		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+		provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
 
 		defaultTaskOptions = {
 			provider,
@@ -5096,7 +5875,13 @@ describe("ClineProvider - Router Models", () => {
 			TelemetryService.createInstance([])
 		}
 
-		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+		provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
 	})
 
 	test("handles requestRouterModels with successful responses", async () => {
@@ -5446,7 +6231,13 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			}),
 		}
 
-		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+		provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
 
 		defaultTaskOptions = {
 			provider,

@@ -1,3 +1,4 @@
+import { WebviewFocusTracker } from "../../webview/WebviewFocusTracker"
 // npx vitest core/task/__tests__/grace-retry-errors.spec.ts
 
 import * as os from "os"
@@ -199,6 +200,7 @@ describe("Grace Retry Error Handling", () => {
 			mockOutputChannel,
 			"sidebar",
 			new ContextProxy(mockExtensionContext),
+			new WebviewFocusTracker(),
 		) as any
 
 		mockApiConfig = {
