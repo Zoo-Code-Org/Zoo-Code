@@ -308,6 +308,14 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 
 		await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
 
+		// The branch ran: the model received the parse refusal for the read_file call...
+		const toolResult = mockTask.userMessageContent.find((item) => item.type === "tool_result")
+		if (!toolResult) {
+			throw new Error("expected a tool_result for the un-parsable call")
+		}
+		expect(toolResult.tool_use_id).toBe("call-read-3")
+		expect(toolResult.content).toContain("missing nativeArgs")
+		// ...and the name guard kept write_to_file's release out of it.
 		expect(mockRelease).not.toHaveBeenCalled()
 		expect(mockHandle).not.toHaveBeenCalled()
 	})
@@ -327,6 +335,36 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 
 		await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
 
+		// The validation refusal is what the model received...
+		const toolResult = mockTask.userMessageContent.find((item) => item.type === "tool_result")
+		if (!toolResult) {
+			throw new Error("expected a tool_result for the rejected call")
+		}
+		expect(toolResult.tool_use_id).toBe("call-read-1")
+		expect(toolResult.content).toContain("not allowed in this mode")
+		// ...and write_to_file's release stayed out of it.
 		expect(mockRelease).not.toHaveBeenCalled()
+	})
+
+	it("releases the streamed state before awaiting the hard-block guidance prompt", async () => {
+		// The prompt can stay open indefinitely, and an ask() that rejects (the abort lands
+		// while it is open) skips any release placed after it. The refused write's stream
+		// state, abort listener, and unapproved preview must not be held hostage to an
+		// answer that may never come: the release runs before the prompt opens.
+		mockValidate.mockReturnValue(undefined)
+		mockTask.toolRepetitionDetector.check = vi.fn().mockReturnValue({
+			action: "hard_block",
+			askUser: { messageKey: "mistake_limit_reached", messageDetail: "repeated" },
+		})
+		mockTask.ask = vi.fn().mockRejectedValue(new Error("prompt failed"))
+		mockTask.assistantMessageContent = writeBlock()
+
+		await expect(presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)).rejects.toThrow(
+			"prompt failed",
+		)
+
+		expect(mockRelease).toHaveBeenCalledTimes(1)
+		// The release must precede the prompt, not follow it.
+		expect(mockRelease.mock.invocationCallOrder[0]).toBeLessThan(mockTask.ask.mock.invocationCallOrder[0])
 	})
 })

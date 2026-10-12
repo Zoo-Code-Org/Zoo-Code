@@ -184,7 +184,19 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 */
 	private async teardownCancelledPreview(task: Task): Promise<void> {
 		if (task.diffViewProvider.isEditing) {
-			await this.discardUnapprovedStreamBeforeReset(task)
+			const discardError = await this.discardUnapprovedStreamBeforeReset(task)
+			if (discardError) {
+				// Task.abortTask() sets abort before it emits TaskAborted, and Task.say()
+				// rejects once abort is set, so the chat cannot receive this report on the
+				// cancellation path. The provider's output channel is the user-visible
+				// boundary that survives the abort: a failed discard can leave unapproved
+				// content or a placeholder artifact that only a human can clear now.
+				task.providerRef
+					.deref()
+					?.log(
+						`write_to_file could not discard the cancelled stream preview; unapproved content or placeholder artifacts may remain: ${discardError.message}`,
+					)
+			}
 			await this.resetDiffViewAfterWrite(task)
 		}
 		await this.releaseEarlyDirectories(task)

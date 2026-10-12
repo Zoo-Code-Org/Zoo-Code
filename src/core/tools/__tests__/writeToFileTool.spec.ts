@@ -150,6 +150,9 @@ describe("writeToFileTool", () => {
 					diagnosticsEnabled: true,
 					writeDelayMs: 1000,
 				}),
+				// The cancellation teardown reports discard failures through the provider's
+				// output channel: Task.say() rejects once abort is set.
+				log: vi.fn(),
 			}),
 		}
 		mockCline.rooIgnoreController = {
@@ -994,6 +997,35 @@ describe("writeToFileTool", () => {
 
 				expect(mockCline.diffViewProvider.update).toHaveBeenCalledTimes(1)
 				expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			} finally {
+				writeToFileTool["taskPartialStreamState"].clear()
+			}
+		})
+		it("reports a discard failure on the cancellation teardown through the provider log", async () => {
+			// Task.abortTask() sets abort before it emits TaskAborted, and Task.say() rejects
+			// once abort is set, so the chat cannot receive a discard failure from this path.
+			// The provider's output channel is the user-visible boundary that survives the
+			// abort: a failed discard can leave unapproved content or a placeholder artifact
+			// that only a human can clear now, and dropping the error hid that.
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.update = vi.fn().mockImplementation(async () => {
+				writeToFileTool["clearTaskState"](mockCline)
+			})
+			mockCline.diffViewProvider.discardUnapprovedStream.mockRejectedValue(new Error("restore failed"))
+
+			try {
+				await executeWriteFileTool({}, { isPartial: true })
+				await executeWriteFileTool({}, { isPartial: true })
+
+				expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+				const log = mockCline.providerRef.deref().log
+				expect(log).toHaveBeenCalledTimes(1)
+				expect(log.mock.calls[0][0]).toContain("could not discard the cancelled stream preview")
+				expect(log.mock.calls[0][0]).toContain("restore failed")
+				// Teardown completes despite the failed discard: reset still runs and the
+				// state stays released.
 				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
 				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
 			} finally {

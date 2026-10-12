@@ -850,6 +850,15 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 
 				// Hard block: stop and ask the user for guidance.
 				if (repetitionCheck.action === "hard_block") {
+					// Same family as the validation branch above: the completed block is refused
+					// before handle() runs, so a stream that had already started owns nobody but
+					// here. Release BEFORE the prompt: the prompt can stay open indefinitely, and
+					// an ask() that rejects would skip a release placed after it - the refused
+					// write's state, abort listener, and unapproved preview must not be held
+					// hostage to an answer that may never come.
+					if (block.name === "write_to_file") {
+						await writeToFileTool.releaseStreamAfterValidationRejection(cline)
+					}
 					// Handle repetition similar to mistake_limit_reached pattern.
 					const { response, text, images } = await cline.ask(
 						repetitionCheck.askUser.messageKey as ClineAsk,
@@ -887,11 +896,6 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 							`Tool call repetition limit reached for ${block.name}. Please try a different approach.`,
 						),
 					)
-					// Same family as the validation branch above: the completed block is refused
-					// before handle() runs, so a stream that had already started owns nobody but here.
-					if (block.name === "write_to_file") {
-						await writeToFileTool.releaseStreamAfterValidationRejection(cline)
-					}
 					break
 				}
 			}
