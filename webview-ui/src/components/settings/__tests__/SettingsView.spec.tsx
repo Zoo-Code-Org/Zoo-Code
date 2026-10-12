@@ -323,7 +323,7 @@ const mockPostMessage = (state: any) => {
 const renderSettingsView = (initialState: any = {}) => {
 	const onDone = vi.fn()
 
-	const result = renderWithExtensionState(<SettingsView onDone={onDone} />)
+	const result = renderWithExtensionState(<SettingsView onDone={onDone} />, { state: initialState })
 
 	// Hydrate initial state.
 	act(() => {
@@ -981,6 +981,70 @@ describe("SettingsView - Blanket Auto-Deny", () => {
 			expect.objectContaining({
 				type: "updateSettings",
 				updatedSettings: expect.objectContaining({ alwaysDenyUnapprovedCommands: true }),
+			}),
+		)
+	})
+
+	it("saves web fetch auto-approval as false when it was never enabled", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView()
+
+		activateTab("autoApprove")
+
+		// Make an unrelated change so Save is enabled.
+		fireEvent.click(within(getSettingsContent()).getByTestId("always-allow-write-toggle"))
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ alwaysAllowWebFetch: false }),
+			}),
+		)
+	})
+
+	it("keeps saved web fetch auto-approval as true on an unrelated save", () => {
+		// `settingsImportedAt` busts the cached state so the saved `true`
+		// reaches `cachedState` before the user edits anything.
+		const { activateTab, getSettingsContent } = renderSettingsView({
+			alwaysAllowWebFetch: true,
+			settingsImportedAt: new Date().toISOString(),
+		})
+
+		activateTab("autoApprove")
+
+		// Make an unrelated change so Save is enabled.
+		fireEvent.click(within(getSettingsContent()).getByTestId("always-allow-write-toggle"))
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ alwaysAllowWebFetch: true }),
+			}),
+		)
+	})
+
+	it("buffers the web fetch auto-approval toggle until Save", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView()
+
+		activateTab("autoApprove")
+
+		fireEvent.click(within(getSettingsContent()).getByTestId("always-allow-web-fetch-toggle"))
+
+		// Toggling must NOT persist before Save; it only buffers in cachedState.
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ alwaysAllowWebFetch: true }),
+			}),
+		)
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ alwaysAllowWebFetch: true }),
 			}),
 		)
 	})

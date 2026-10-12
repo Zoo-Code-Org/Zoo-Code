@@ -296,6 +296,7 @@ export type ExtensionState = Pick<
 	| "alwaysAllowMcp"
 	| "alwaysAllowModeSwitch"
 	| "alwaysAllowSubtasks"
+	| "alwaysAllowWebFetch"
 	| "alwaysAllowFollowupQuestions"
 	| "alwaysAllowExecute"
 	| "destructiveCommandGuardEnabled"

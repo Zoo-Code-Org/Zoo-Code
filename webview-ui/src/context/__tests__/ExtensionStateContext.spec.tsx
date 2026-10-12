@@ -76,6 +76,19 @@ const RulesTestComponent = () => {
 	return <div data-testid="rules">{JSON.stringify(rules)}</div>
 }
 
+const WebFetchAutoApproveTestComponent = () => {
+	const { alwaysAllowWebFetch, setAlwaysAllowWebFetch } = useExtensionState()
+
+	return (
+		<div>
+			<div data-testid="always-allow-web-fetch">{JSON.stringify(alwaysAllowWebFetch ?? null)}</div>
+			<button data-testid="enable-web-fetch-button" onClick={() => setAlwaysAllowWebFetch(true)}>
+				Enable Web Fetch
+			</button>
+		</div>
+	)
+}
+
 const ChatFontSizeTestComponent = () => {
 	const { chatFontSize, setChatFontSize } = useExtensionState()
 
@@ -755,6 +768,22 @@ describe("ExtensionStateContext", () => {
 		})
 
 		expect(JSON.parse(screen.getByTestId("show-rooignored-files").textContent!)).toBe(false)
+	})
+
+	it("updates alwaysAllowWebFetch through setAlwaysAllowWebFetch", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<WebFetchAutoApproveTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		expect(JSON.parse(screen.getByTestId("always-allow-web-fetch").textContent!)).toBe(null)
+
+		act(() => {
+			screen.getByTestId("enable-web-fetch-button").click()
+		})
+
+		expect(JSON.parse(screen.getByTestId("always-allow-web-fetch").textContent!)).toBe(true)
 	})
 
 	it("does not set the chat font-size CSS variable when unset (init)", () => {
