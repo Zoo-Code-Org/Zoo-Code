@@ -848,11 +848,26 @@ jobs:
 
                           // While CI is running or has failed, remove state labels and move on.
                           // CI failure is its own signal; the label would add noise, not clarity.
+                          // Exception (issue #2025): while GitHub is still computing
+                          // mergeability, a missing required check can simply mean a
+                          // conflicting PR got no merge-ref CI run — not that its
+                          // conflicts went away. Keep an existing has-conflicts label
+                          // through this branch instead of stripping it with the other
+                          // state labels. Known-clean mergeability keeps the strip, and
+                          // known-dirty never reaches here (the conflict check above
+                          // handles it first).
                           if (ciPending || ciFailed) {
-                            core.info(`PR #${pr.number}: CI ${ciPending ? 'pending' : 'failed'} — stripping state labels`);
+                            const mergeabilityUnknown =
+                              prDetail.mergeable === null || prDetail.mergeable_state === 'unknown';
+                            const keepHasConflicts = mergeabilityUnknown &&
+                              pr.labels.some(label => label.name === 'has-conflicts');
+                            core.info(
+                              `PR #${pr.number}: CI ${ciPending ? 'pending' : 'failed'} — stripping state labels` +
+                              (keepHasConflicts ? ' (keeping has-conflicts while mergeability is unknown)' : '')
+                            );
                             await updateReviewGate(pr, ciPending ? 'ci-pending' : 'ci-failed', false);
                             await setCodeRabbitReviewActive(pr, false);
-                            await reconcileLabels(pr, null);
+                            await reconcileLabels(pr, keepHasConflicts ? 'has-conflicts' : null);
                             await reconcileCommunityApproval(pr, 'remove');
                             await updateReviewGuide(
                               pr,
