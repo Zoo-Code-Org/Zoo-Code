@@ -3290,8 +3290,8 @@ describe("DiffViewProvider", () => {
 				await gate
 			})
 			diffViewProvider["closeOwnDiffView"] = closeOwnDiffView
-			;(diffViewProvider as any).relPath = "old.ts"
-			;(diffViewProvider as any).isEditing = true
+			diffViewProvider["relPath"] = "old.ts"
+			diffViewProvider.isEditing = true
 
 			const reset = diffViewProvider.reset()
 			while (closeOwnDiffView.mock.calls.length === 0) {
@@ -3308,14 +3308,21 @@ describe("DiffViewProvider", () => {
 				edit: vi.fn().mockResolvedValue(true),
 				revealRange: vi.fn(),
 			}
-			vi.mocked(vscode.window).visibleTextEditors = [mockEditor as any]
-			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor as any)
+			// Structural doubles: documented double casts instead of any (AGENTS.md).
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor as unknown as vscode.TextEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor as unknown as vscode.TextEditor)
 			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
-				setTimeout(() => callback({ uri: { fsPath: `${mockCwd}/new.ts`, scheme: "file" } } as any), 0)
+				setTimeout(
+					() =>
+						callback({
+							uri: { fsPath: `${mockCwd}/new.ts`, scheme: "file" },
+						} as unknown as vscode.TextDocument),
+					0,
+				)
 				return { dispose: vi.fn() }
 			})
 			vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
-			;(diffViewProvider as any).editType = "modify"
+			diffViewProvider.editType = "modify"
 
 			let openDone = false
 			const open = diffViewProvider.open("new.ts").then(() => {
@@ -3332,13 +3339,13 @@ describe("DiffViewProvider", () => {
 			// The old finalization completed before the new session claimed the provider, so
 			// it could neither clear the new session's flags nor claim its finalization.
 			expect(openDone).toBe(true)
-			expect((diffViewProvider as any).isEditing).toBe(true)
-			expect((diffViewProvider as any).relPath).toBe("new.ts")
+			expect(diffViewProvider.isEditing).toBe(true)
+			expect(diffViewProvider["relPath"]).toBe("new.ts")
 
 			// The new session is finalizable: its own reset closes it and closes its own
 			// diff view - the old finalization's single close did not consume it.
 			await diffViewProvider.reset()
-			expect((diffViewProvider as any).isEditing).toBe(false)
+			expect(diffViewProvider.isEditing).toBe(false)
 			expect(closeOwnDiffView).toHaveBeenCalledTimes(2)
 		})
 
