@@ -176,7 +176,7 @@
 		"cancel": "Отмена",
 		"rollingBack": "Выполняется откат...",
 		"rolledBack": "Откат выполнен",
-		"stepRolledBack": "Шаг откатен",
+		"stepRolledBack": "Шаг откачен",
 		"rollbackFailed": "Ошибка отката",
 		"openFile": "Открыть файл: {{path}}"
 	},

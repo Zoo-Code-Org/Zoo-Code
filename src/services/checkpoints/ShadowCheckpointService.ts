@@ -505,7 +505,7 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 				// The checkpoint entry can be a tree or a symlink (whose object
 				// is also a blob); only regular-file modes may be restored through
 				// this single-file path. ls-tree reports the mode, unlike cat-file.
-				const entry = await this.git!.raw(["ls-tree", commitHash, "--", gitPath])
+				const entry = await this.git!.raw(["ls-tree", commitHash, "--", `:(literal)${gitPath}`])
 				const mode = entry.trim() ? entry.split("\t")[0].split(" ")[0] : ""
 				if (mode !== "100644" && mode !== "100755") {
 					throw new Error(`restoreFile target is not a regular file in the checkpoint: ${filePath}`)
@@ -544,12 +544,15 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 		} catch {
 			throw new Error(`Checkpoint unavailable: ${commitHash}`)
 		}
-		try {
-			await this.git!.raw(["cat-file", "-e", `${commitHash}:${filePath}`])
-			return true
-		} catch {
-			return false
-		}
+		// Existence must distinguish "absent" from "unreadable": ls-tree exits 0
+		// with empty output only when the path is genuinely absent from the
+		// tree, while a corrupt or missing tree object makes it fail - and that
+		// failure must propagate rather than be misread as absence, which would
+		// route restoreFile into the delete branch and rm a live file the
+		// checkpoint does contain. The :(literal) magic keeps paths containing
+		// glob characters exact.
+		const entry = await this.git!.raw(["ls-tree", commitHash, "--", `:(literal)${filePath}`])
+		return entry.trim().length > 0
 	}
 
 	public async getDiff({ from, to }: { from?: string; to?: string }): Promise<CheckpointDiff[]> {
