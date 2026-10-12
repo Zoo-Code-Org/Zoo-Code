@@ -600,6 +600,40 @@ describe("writeToFileTool", () => {
 			expect(other.off).not.toHaveBeenCalled()
 		})
 
+		it("keys the per-task state by taskId and instanceId together", async () => {
+			// The map key is the composite taskId.instanceId: a replaced task keeps its taskId
+			// and gets a new instanceId, so the two instances must never share an entry or an
+			// abort listener, and releasing the old instance must leave the new one's state and
+			// listener intact. A taskId-only key passes every different-taskId test above.
+			const oldInstance = buildStreamingTask("same-task", "inst-old")
+			const newInstance = buildStreamingTask("same-task", "inst-new")
+			const oldState = writeToFileTool["getTaskPartialStreamState"](oldInstance as never)
+			const newState = writeToFileTool["getTaskPartialStreamState"](newInstance as never)
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(2)
+			expect(oldState).not.toBe(newState)
+			const oldListener = oldInstance.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			const newListener = newInstance.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(oldListener).toBeInstanceOf(Function)
+			expect(newListener).toBeInstanceOf(Function)
+			expect(oldListener).not.toBe(newListener)
+
+			// Releasing the replaced instance - the path clearTaskState takes - must not touch
+			// the live instance's entry or listener.
+			writeToFileTool.clearTaskState(oldInstance as never)
+
+			expect(writeToFileTool["taskPartialStreamState"].has("same-task.inst-old")).toBe(false)
+			expect(writeToFileTool["taskPartialStreamState"].has("same-task.inst-new")).toBe(true)
+			expect(oldInstance.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, oldListener)
+			expect(newInstance.off).not.toHaveBeenCalled()
+
+			writeToFileTool.clearTaskState(newInstance as never)
+		})
+
 		it("finalizes the partial ask when the write itself fails", async () => {
 			// Exact payload streamed as the partial tool ask for this scenario; a weaker
 			// matcher would pass a mutant that finalizes with the wrong text and still
