@@ -654,11 +654,6 @@
 			"count": 1
 		}
 	},
-	"core/config/__tests__/ProviderSettingsManager.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
 	"core/context-management/__tests__/context-management.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
@@ -917,11 +912,6 @@
 	"core/tools/__tests__/ReadCommandOutputTool.test.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 16
-		}
-	},
-	"core/tools/__tests__/ToolRepetitionDetector.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
 		}
 	},
 	"core/tools/__tests__/askFollowupQuestionTool.spec.ts": {
