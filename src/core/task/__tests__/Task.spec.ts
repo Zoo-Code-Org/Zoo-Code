@@ -6049,6 +6049,35 @@ describe("Cline", () => {
 			expect(saveSpy).toHaveBeenCalledWith(true, true)
 		})
 
+		it("does not record a baseline when the task resumes from history", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "resumed-baseline-task",
+					number: 1,
+					ts: Date.now(),
+					task: "resumed baseline task",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const saveSpy = vi.spyOn(task, "checkpointSave").mockResolvedValue(undefined)
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
+
+			task.abort = true
+
+			await taskAccess.initiateTaskLoop([])
+
+			// A history resume must not re-record the baseline: it belongs to the
+			// original task start (exactly once per task).
+			expect(saveSpy).not.toHaveBeenCalled()
+		})
+
 		it("records the baseline checkpoint when the setting is unset (default-on)", async () => {
 			const task = new Task({
 				provider: mockProvider,
