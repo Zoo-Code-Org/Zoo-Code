@@ -218,12 +218,15 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 		expect(toolResult.content).toContain("missing nativeArgs")
 	})
 
-	it("does not release the write_to_file stream for a different tool refused by the repetition guard", async () => {
+	it("does not release the write_to_file stream for a different tool hard-blocked by the repetition guard", async () => {
 		// The release is scoped by tool name in every branch. A repeated read_file must not
-		// reach through to write_to_file's state.
+		// reach through to write_to_file's state. The check result must carry the detector's
+		// real action field: with a shape the guard does not read, the block would fall
+		// through to the tool switch and the assertion would pass without ever entering the
+		// branch whose name guard it claims to control.
 		mockValidate.mockReturnValue(undefined)
 		mockTask.toolRepetitionDetector.check = vi.fn().mockReturnValue({
-			allowExecution: false,
+			action: "hard_block",
 			askUser: { messageKey: "mistake_limit_reached", messageDetail: "repeated" },
 		})
 		mockTask.assistantMessageContent = [
@@ -239,6 +242,43 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 
 		await presentAssistantMessage(mockTask as unknown as Task)
 
+		// The branch ran: the model received the hard-block refusal...
+		const toolResult = mockTask.userMessageContent.find((item) => item.type === "tool_result")
+		if (!toolResult) {
+			throw new Error("expected a tool_result for the hard-blocked call")
+		}
+		expect(toolResult.content).toContain("repetition limit reached")
+		// ...and the name guard kept write_to_file's release out of it.
+		expect(mockRelease).not.toHaveBeenCalled()
+		expect(mockHandle).not.toHaveBeenCalled()
+	})
+
+	it("does not release the write_to_file stream for a different tool soft-blocked by the repetition guard", async () => {
+		// Same name guard, the other refusal tier: the soft block also breaks before handle()
+		// and also releases only for write_to_file.
+		mockValidate.mockReturnValue(undefined)
+		mockTask.toolRepetitionDetector.check = vi.fn().mockReturnValue({
+			action: "soft_block",
+			message: "You are repeating the same tool call. Explain why you are repeating it.",
+		})
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call-read-4",
+				name: "read_file",
+				params: { path: "a.ts" },
+				nativeArgs: { path: "a.ts" },
+				partial: false,
+			},
+		]
+
+		await presentAssistantMessage(mockTask as unknown as Task)
+
+		const toolResult = mockTask.userMessageContent.find((item) => item.type === "tool_result")
+		if (!toolResult) {
+			throw new Error("expected a tool_result for the soft-blocked call")
+		}
+		expect(toolResult.content).toContain("repeating the same tool call")
 		expect(mockRelease).not.toHaveBeenCalled()
 		expect(mockHandle).not.toHaveBeenCalled()
 	})

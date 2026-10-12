@@ -775,6 +775,37 @@ describe("writeToFileTool", () => {
 				writeToFileTool["taskPartialStreamState"].clear()
 			}
 		})
+		it("skips the unapproved-preview discard once the approved write has reached disk", async () => {
+			// saveChanges() resolving means the approved content is on disk and the placeholder is
+			// released, but isEditing stays true until the success path's reset() runs. A post-save
+			// step that rejects after that point - pushToolWriteResult() calls Task.say(), which
+			// throws once the task is aborted - must report the failed step without touching the
+			// landed write: discarding it would rmdir() the directory that now holds the approved
+			// file (ENOTEMPTY), close its tab, and can overwrite the approved content with a
+			// blanked or reverted buffer.
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.pushToolWriteResult.mockRejectedValue(new Error("task aborted"))
+			const state = writeToFileTool["getTaskPartialStreamState"](mockCline)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			try {
+				await executeWriteFileTool({})
+
+				// The landed write is left alone...
+				expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
+				// ...while the teardown still owed runs: the reset, the per-task release, and the
+				// report of the step that actually failed.
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, state.abortCleanup)
+				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+				expect(mockHandleError).toHaveBeenCalledWith(
+					"writing file",
+					expect.objectContaining({ message: "task aborted" }),
+				)
+			} finally {
+				writeToFileTool["taskPartialStreamState"].clear()
+			}
+		})
 	})
 
 	describe("early-exit stream state cleanup", () => {

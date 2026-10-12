@@ -307,6 +307,10 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		// Set when this execute() opens its own partial tool ask (diff-view branch), so
 		// the catch below can finalize it. Undefined on the saveDirectly branch.
 		let pendingPartialAsk: string | undefined
+		// Set once the approved write has reached disk (saveDirectly or saveChanges resolved).
+		// After that point the preview holds the user-approved content, not an unapproved
+		// draft: the catch teardown must stop touching it (see the finally below).
+		let approvedWriteLanded = false
 
 		if (!relPath) {
 			task.consecutiveMistakeCount++
@@ -466,6 +470,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				}
 
 				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
+				approvedWriteLanded = true
 			} else {
 				if (!task.diffViewProvider.isEditing) {
 					const partialMessage = JSON.stringify(sharedMessageProps)
@@ -500,6 +505,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				}
 
 				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+				approvedWriteLanded = true
 			}
 
 			if (relPath) {
@@ -541,7 +547,15 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				// a saveChanges() that rejected mid-write - the placeholder is still owned by this edit,
 				// because saveChanges() releases ownership only once the save lands - so the discard is
 				// what removes the empty or half-written new file.
-				if (task.diffViewProvider.isEditing) {
+				//
+				// Once the approved write has landed, the preview is no longer unapproved content even
+				// though isEditing is still true (reset() runs later on the success path). Discarding a
+				// landed write would rmdir() the directory that now holds the approved file (ENOTEMPTY),
+				// close its tab, and - if the user typed into the buffer meanwhile - overwrite the
+				// approved content with a blank or reverted buffer. The failure to report is the
+				// post-save step that rejected, not the write; the reset() and the release below still
+				// run, so nothing leaks.
+				if (task.diffViewProvider.isEditing && !approvedWriteLanded) {
 					const discardError = await this.discardUnapprovedStreamBeforeReset(task)
 					if (discardError) {
 						// The report must not own the teardown: Task.say() throws once the task is
