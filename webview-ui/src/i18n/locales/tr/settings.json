@@ -721,7 +721,7 @@
 		},
 		"changeCardDetail": {
 			"label": "Değişiklik kartlarında tam diff'i göster",
-			"description": "Adım başına değişiklik kartlarında her dosya için tam birleşik diff'i satır içi olarak içerir. Kapalıyken kartlar yalnızca eklenen/çıkarılan satır sayıları dosya listesini gösterir."
+			"description": "Adım başına değişiklik kartlarında her dosya için tam birleşik diff'i satır içi olarak içerir. Kapalıyken kartlar yalnızca eklenen/çıkarılan satır sayılarıyla birlikte dosya listesini gösterir."
 		}
 	},
 	"notifications": {
