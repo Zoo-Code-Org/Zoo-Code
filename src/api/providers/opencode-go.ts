@@ -4,6 +4,7 @@ import OpenAI from "openai"
 
 import {
 	type ModelInfo,
+	type ModelRecord,
 	type ReasoningEffortExtended,
 	opencodeGoDefaultModelId,
 	opencodeGoDefaultModelInfo,
@@ -13,7 +14,7 @@ import {
 	providerIdentifiers,
 } from "@roo-code/types"
 
-import { ApiHandlerOptions } from "../../shared/api"
+import { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import { ApiStream, type ApiStreamUsageChunk } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
@@ -23,8 +24,14 @@ import { getModelParams } from "../transform/model-params"
 import { convertToResponsesApiInput } from "../transform/responses-api-input"
 import { processResponsesApiStream } from "../transform/responses-api-stream"
 
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import type {
+	SingleCompletionHandler,
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+} from "../index"
 import { RouterProvider } from "./router-provider"
+import { getOpencodeGoModels } from "./fetchers/opencode-go"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 import { DEFAULT_HEADERS } from "./constants"
 import { calculateApiCostAnthropic, calculateApiCostOpenAI } from "../../shared/cost"
@@ -118,6 +125,15 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 				...(options.openAiHeaders || {}),
 			},
 		})
+	}
+
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: false, keyScoped: false, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getOpencodeGoModels(options.apiKey, ...fetchOpts)
 	}
 
 	/**

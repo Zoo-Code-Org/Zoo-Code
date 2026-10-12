@@ -9,24 +9,41 @@ vitest.mock("vscode", () => ({
 	},
 }))
 
-// Handler constructors can require credentials or initialize SDK clients. Replace them
-// with inert classes so these tests exercise only the factory's routing behavior.
+// Replace handlers with inert classes (no-op constructors) that keep the real prototype
+// chain, so tests exercise routing and can still inspect methods such as fetchModels.
+const { inertClass } = vitest.hoisted(() => ({
+	inertClass: (actual: unknown): unknown => {
+		if (typeof actual !== "function" || !actual.prototype) {
+			return actual
+		}
+		const Inert = class {}
+		Object.setPrototypeOf(Inert.prototype, actual.prototype)
+		return Inert
+	},
+}))
+
 vitest.mock("../providers", async () => {
 	const providers = await vitest.importActual<Record<string, unknown>>("../providers")
 
-	return Object.fromEntries(Object.keys(providers).map((name) => [name, class {}]))
+	return Object.fromEntries(Object.entries(providers).map(([name, actual]) => [name, inertClass(actual)]))
 })
 
-vitest.mock("../providers/native-ollama", () => ({
-	NativeOllamaHandler: class {},
-}))
+vitest.mock("../providers/native-ollama", async () => {
+	const actual = await vitest.importActual<typeof import("../providers/native-ollama")>("../providers/native-ollama")
+
+	return { NativeOllamaHandler: inertClass(actual.NativeOllamaHandler) }
+})
 
 import {
+	dynamicProviders,
+	localProviders,
 	providerIdentifiers,
 	retiredProviderIdentifiers,
 	type ProviderName,
 	type ProviderNameWithRetired,
 } from "@roo-code/types"
+
+import type { RouterName } from "../../shared/api"
 
 import { buildApiHandler } from "../index"
 import {
@@ -153,5 +170,31 @@ describe("buildApiHandler", () => {
 		})
 
 		expect(handler).toBeInstanceOf(AnthropicHandler)
+	})
+})
+
+// fetchModels is optional on ApiHandler, so this replaces the old fetcher switch's
+// exhaustiveness check: every RouterName must build a handler that implements it.
+describe("buildApiHandler model catalog coverage", () => {
+	const routerNames: RouterName[] = [...dynamicProviders, ...localProviders]
+
+	it("covers at least one router", () => {
+		expect(routerNames.length).toBeGreaterThan(0)
+	})
+
+	it.each(routerNames)("returns a handler implementing fetchModels for %s", (apiProvider) => {
+		const handler = buildApiHandler({ apiProvider })
+
+		expect(handler).not.toBeInstanceOf(AnthropicHandler)
+		expect(typeof handler.fetchModels).toBe("function")
+		expect(typeof handler.getModelCacheScope).toBe("function")
+	})
+
+	it("does not expose fetchModels on the default fallback handler", () => {
+		const handler = buildApiHandler({
+			apiProvider: "unsupported-provider" as ProviderNameWithRetired,
+		})
+
+		expect(handler.fetchModels).toBeUndefined()
 	})
 })
