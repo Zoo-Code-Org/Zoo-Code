@@ -655,6 +655,83 @@ describe("ThinkingBudget", () => {
 			expect(setApiConfigurationField).toHaveBeenCalledWith("enableReasoningEffort", true)
 			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "xhigh")
 		})
+
+		// The arrays below mirror the supportsReasoningEffort surface emitted by
+		// parseOpenRouterModel for models advertising the "reasoning" parameter
+		// (src/api/providers/fetchers/openrouter.ts). The webview cannot import the
+		// fetcher, so the contract value is mirrored here and pinned at the source
+		// layer by the fetcher spec.
+		describe("OpenRouter fetcher contract (reasoning-advertising models)", () => {
+			const openRouterReasoningEffort: Exclude<ModelInfo["supportsReasoningEffort"], boolean | undefined> = [
+				"disable",
+				"low",
+				"medium",
+				"high",
+				"xhigh",
+				"max",
+			]
+
+			it("keeps a default user's reasoning disabled without persisting any effort", () => {
+				const setApiConfigurationField = vi.fn()
+
+				render(
+					<ThinkingBudget
+						{...defaultProps}
+						apiConfiguration={{}}
+						setApiConfigurationField={setApiConfigurationField}
+						modelInfo={{
+							...reasoningEffortModelInfo,
+							supportsReasoningEffort: openRouterReasoningEffort,
+						}}
+					/>,
+				)
+
+				expect(screen.getByTestId("select")).toHaveAttribute("data-value", "disable")
+				expect(setApiConfigurationField).not.toHaveBeenCalled()
+				expect(screen.getByTestId("select-item-disable")).toBeInTheDocument()
+				expect(screen.getByTestId("select-item-xhigh")).toBeInTheDocument()
+				expect(screen.getByTestId("select-item-max")).toBeInTheDocument()
+			})
+
+			it("round-trips a stored 'disable' selection without clobbering it to an effort", () => {
+				const setApiConfigurationField = vi.fn()
+
+				render(
+					<ThinkingBudget
+						{...defaultProps}
+						apiConfiguration={{ reasoningEffort: "disable", enableReasoningEffort: false }}
+						setApiConfigurationField={setApiConfigurationField}
+						modelInfo={{
+							...reasoningEffortModelInfo,
+							supportsReasoningEffort: openRouterReasoningEffort,
+						}}
+					/>,
+				)
+
+				expect(screen.getByTestId("select")).toHaveAttribute("data-value", "disable")
+				expect(setApiConfigurationField).not.toHaveBeenCalled()
+			})
+
+			it("enables reasoning and persists 'max' when max is selected", () => {
+				const setApiConfigurationField = vi.fn()
+
+				render(
+					<ThinkingBudget
+						{...defaultProps}
+						setApiConfigurationField={setApiConfigurationField}
+						modelInfo={{
+							...reasoningEffortModelInfo,
+							supportsReasoningEffort: openRouterReasoningEffort,
+						}}
+					/>,
+				)
+
+				fireEvent.click(screen.getByTestId("select-item-max"))
+
+				expect(setApiConfigurationField).toHaveBeenCalledWith("enableReasoningEffort", true)
+				expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "max")
+			})
+		})
 	})
 
 	describe("configurable max output tokens (supportsMaxTokens)", () => {

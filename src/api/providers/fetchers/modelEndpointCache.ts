@@ -68,7 +68,9 @@ export const getModelEndpoints = async ({
 			// Copy model-level capabilities to all endpoints
 			// Clone arrays to avoid shared mutable references
 			for (const endpointKey of Object.keys(modelProviders)) {
-				modelProviders[endpointKey].supportsReasoningEffort = parentModel.supportsReasoningEffort
+				modelProviders[endpointKey].supportsReasoningEffort = Array.isArray(parentModel.supportsReasoningEffort)
+					? [...parentModel.supportsReasoningEffort]
+					: parentModel.supportsReasoningEffort
 				modelProviders[endpointKey].supportedParameters = parentModel.supportedParameters
 					? [...parentModel.supportedParameters]
 					: undefined
@@ -91,7 +93,7 @@ export const getModelEndpoints = async ({
 	}
 
 	try {
-		modelProviders = await readModelEndpoints(router)
+		modelProviders = await readModelEndpoints(key)
 		// console.log(`[getModelProviders] read ${key} endpoints from file cache`)
 	} catch (error) {
 		console.error(`[getModelProviders] error reading ${key} endpoints from file cache`, error)
