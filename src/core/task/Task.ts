@@ -241,6 +241,11 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
 
+export interface ToolExecutionContext {
+	toolCallId: string
+	didReject: boolean
+}
+
 export interface TaskOptions extends CreateTaskOptions {
 	provider: ClineProvider
 	apiConfiguration: ProviderSettings
@@ -420,7 +425,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	rooIgnoreController?: RooIgnoreController
 	rooProtectedController?: RooProtectedController
 	fileContextTracker: FileContextTracker
-	terminalProcess?: RooTerminalProcess
+	terminalProcesses = new Map<string, RooTerminalProcess>()
+	activeToolContexts = new Map<string, ToolExecutionContext>()
 
 	// Editing
 	diffViewProvider: DiffViewProvider
@@ -2535,9 +2541,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	async handleTerminalOperation(terminalOperation: "continue" | "abort") {
 		if (terminalOperation === "continue") {
-			this.terminalProcess?.continue()
+			for (const process of this.terminalProcesses.values()) process.continue()
 		} else if (terminalOperation === "abort") {
-			this.terminalProcess?.abort()
+			for (const process of this.terminalProcesses.values()) process.abort()
 		}
 	}
 
@@ -4021,6 +4027,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.didCompleteReadingStream = false
 				this.userMessageContent = []
 				this.userMessageContentReady = false
+				this.activeToolContexts.clear()
 				this.didRejectTool = false
 				this.didAlreadyUseTool = false
 				this.assistantMessageSavedToHistory = false

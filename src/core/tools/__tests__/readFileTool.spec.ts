@@ -154,6 +154,7 @@ function createMockTask(options: MockTaskOptions = {}) {
 		consecutiveMistakeCount: 0,
 		didToolFailInCurrentTurn: false,
 		didRejectTool: false,
+		activeToolContexts: new Map(),
 		ask: vi.fn().mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined }),
 		say: vi.fn().mockResolvedValue(undefined),
 		sayAndCreateMissingParamError: vi.fn().mockResolvedValue("Missing required parameter: path"),
@@ -178,6 +179,7 @@ function createMockTask(options: MockTaskOptions = {}) {
 function createMockCallbacks() {
 	return {
 		pushToolResult: vi.fn(),
+		toolCallId: "test-tool-call-id",
 		askApproval: vi.fn(),
 		handleError: vi.fn(),
 	}
@@ -605,11 +607,14 @@ describe("ReadFileTool", () => {
 			const mockTask = createMockTask()
 			const callbacks = createMockCallbacks()
 
+			const context = { toolCallId: callbacks.toolCallId, didReject: false }
+			mockTask.activeToolContexts.set(callbacks.toolCallId, context)
 			mockTask.ask.mockResolvedValue({ response: "noButtonClicked", text: undefined, images: undefined })
 
 			await readFileTool.execute({ path: "test.ts" }, mockTask as any, callbacks)
 
 			expect(mockTask.didRejectTool).toBe(true)
+			expect(context.didReject).toBe(true)
 			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("Denied by user"))
 		})
 
@@ -796,6 +801,34 @@ describe("ReadFileTool", () => {
 
 			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("file1 content"))
 			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("file2 content"))
+		})
+
+		describe("batch approval denial", () => {
+			it.each([
+				["the user clicks no", { response: "noButtonClicked", text: undefined, images: undefined }],
+				["individual permissions deny a file", { response: "messageResponse", text: "{}", images: undefined }],
+				[
+					"individual permissions are not valid JSON",
+					{ response: "messageResponse", text: "not json", images: undefined },
+				],
+			])("marks the tool call rejected when %s", async (_name, askResult) => {
+				const mockTask = createMockTask()
+				const context = { toolCallId: "batch-call", didReject: false }
+				mockTask.activeToolContexts.set("batch-call", context)
+				mockTask.ask.mockResolvedValue(askResult)
+				const updateFileResult = vi.fn()
+				const filesToApprove = ["file1.ts", "file2.ts"].map((path) => ({
+					path,
+					status: "pending" as const,
+					entry: { path },
+				}))
+
+				await readFileTool["requestApproval"](mockTask as never, "batch-call", filesToApprove, updateFileResult)
+
+				expect(mockTask.didRejectTool).toBe(true)
+				expect(context.didReject).toBe(true)
+				expect(updateFileResult).toHaveBeenCalledWith("file1.ts", expect.objectContaining({ status: "denied" }))
+			})
 		})
 
 		it("should block rooignore-protected files in legacy format", async () => {

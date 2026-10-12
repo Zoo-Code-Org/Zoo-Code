@@ -77,6 +77,7 @@ interface MockTask {
 	didCompleteReadingStream: boolean
 	didRejectTool: boolean
 	didAlreadyUseTool: boolean
+	activeToolContexts: Map<string, unknown>
 	consecutiveMistakeCount: number
 	clineMessages: unknown[]
 	api: { getModel: () => { id: string; info: Record<string, unknown> } }
@@ -109,6 +110,7 @@ function buildMockTask(): MockTask {
 		didCompleteReadingStream: true,
 		didRejectTool: false,
 		didAlreadyUseTool: false,
+		activeToolContexts: new Map(),
 		consecutiveMistakeCount: 0,
 		clineMessages: [],
 		api: {
