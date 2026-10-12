@@ -209,7 +209,10 @@ jobs:
                           for (const candidate of openPrsForMap) {
                             if (candidate.head?.sha) heads[candidate.head.sha.toLowerCase()] = candidate.number;
                           }
-                          openPrHeadsOutput = JSON.stringify(heads);
+                          // An open-PR list with no entries is anomalous (the reconciliation
+                          // target itself is open), so treat it like an unavailable map:
+                          // shards must not decide from a map that looks empty.
+                          if (Object.keys(heads).length > 0) openPrHeadsOutput = JSON.stringify(heads);
                         } catch (error) {
                           core.warning(`Could not read the open pull request map: ${error.message}; shards will skip the stacked label this run`);
                         }

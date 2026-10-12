@@ -81,6 +81,7 @@ interface HarnessOptions {
 	getCommitErrorStatus?: number
 	openPrHeads?: Array<{ number: number; sha: string }>
 	openPrHeadsError?: boolean
+	openPrHeadsEnv?: string
 	permissionErrorStatus?: number
 	requiredContexts?: string[]
 	requiredIntegrationId?: number | null
@@ -525,7 +526,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 	// resolve-side lookup failure, which reaches shards as an empty value.
 	const headMap: Record<string, number> = { [SHA.toLowerCase()]: pr.number }
 	for (const entry of options.openPrHeads ?? []) headMap[entry.sha.toLowerCase()] = entry.number
-	process.env.OPEN_PR_HEADS = options.openPrHeadsError ? "" : JSON.stringify(headMap)
+	process.env.OPEN_PR_HEADS = options.openPrHeadsError ? "" : (options.openPrHeadsEnv ?? JSON.stringify(headMap))
 	try {
 		await new AsyncFunction("github", "context", "core", workflowScript)(github, context, core)
 	} finally {
@@ -2161,6 +2162,42 @@ describe("PR review-state workflow", () => {
 		)
 		expect(resolution.openPrHeads()).toBeNull()
 		expect(resolution.prNumbers()).toEqual([1437])
+	})
+
+	it("treats an empty open-PR list as an unavailable head map", async () => {
+		const resolution = await runResolve({
+			eventName: "workflow_dispatch",
+			workflowDispatchPrNumber: 1437,
+			prState: "closed",
+		})
+
+		// The reconciliation target itself is open, so a zero-entry list is anomalous;
+		// emitting it as an empty map would let shards remove valid stacked labels.
+		expect(resolution.openPrHeads()).toBeNull()
+		expect(resolution.prNumbers()).toEqual([1437])
+	})
+
+	it("hands the resolver's head map to shards through the declared env wiring", async () => {
+		// Contract: the shard consumes exactly what resolve emits, through the job env
+		// expression under test - not a map the harness rebuilt independently.
+		expect(String(workflow.jobs.reconcile.env.OPEN_PR_HEADS)).toContain("needs.resolve.outputs.open_pr_heads")
+
+		const resolution = await runResolve({
+			eventName: "workflow_dispatch",
+			workflowDispatchPrNumber: 1437,
+			openPrHeads: [{ number: 1436, sha: OLD_SHA }],
+		})
+		const emitted = resolution.setOutput.mock.calls.find(([name]) => name === "open_pr_heads")?.[1] as string
+
+		const result = await runWorkflow({
+			eventName: "workflow_dispatch",
+			workflowDispatchPrNumber: 1437,
+			openPrHeadsEnv: emitted,
+			commitParents: [OLD_SHA],
+		})
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["stacked"] }))
+		expect(result.warning).not.toHaveBeenCalled()
 	})
 
 	it("chains the resolve output through the matrix wiring into shard runs", async () => {
