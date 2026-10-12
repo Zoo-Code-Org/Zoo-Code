@@ -105,6 +105,8 @@ describe("fileChangesFromMessages", () => {
 			path: "src/foo.ts",
 			diff: "@@ -1 +1 @@\n+line",
 			diffStats: { added: 1, removed: 0 },
+			ts: messages[0].ts,
+			hasOriginalContent: false,
 		})
 	})
 
@@ -190,7 +192,7 @@ describe("fileChangesFromMessages", () => {
 		]
 		const result = fileChangesFromMessages(messages)
 		expect(result).toHaveLength(2)
-		expect(result[0]).toEqual({ path: "a.ts", diff: "content a" })
+		expect(result[0]).toEqual({ path: "a.ts", diff: "content a", ts: messages[0].ts, hasOriginalContent: false })
 		expect(result[1].path).toBe("b.ts")
 		expect(result[1].diff).toBe("content b")
 	})
@@ -276,5 +278,45 @@ describe("fileChangesFromMessages", () => {
 			}),
 		]
 		expect(fileChangesFromMessages(messages)).toEqual([])
+	})
+	describe("original content (omitted by the extension to keep the webview small)", () => {
+		const editMessage = (payload: Record<string, unknown>) =>
+			msg({
+				type: "ask",
+				ask: "tool",
+				isAnswered: true,
+				text: JSON.stringify({ tool: "appliedDiff", path: "src/foo.ts", diff: "d", ...payload }),
+			})
+
+		it("keeps an inline originalContent and marks the entry as having one", () => {
+			const message = editMessage({ originalContent: "old file" })
+			const [entry] = fileChangesFromMessages([message])
+
+			expect(entry.originalContent).toBe("old file")
+			expect(entry.hasOriginalContent).toBe(true)
+			expect(entry.ts).toBe(message.ts)
+		})
+
+		it("marks an entry whose originalContent was omitted (originalContentLength) as requestable", () => {
+			const message = editMessage({ originalContentLength: 4096 })
+			const [entry] = fileChangesFromMessages([message])
+
+			expect(entry.originalContent).toBeUndefined()
+			expect(entry.hasOriginalContent).toBe(true)
+			expect(entry.ts).toBe(message.ts)
+		})
+
+		it("treats an empty inline originalContent (a new file) as an original", () => {
+			const [entry] = fileChangesFromMessages([editMessage({ originalContent: "" })])
+
+			expect(entry.originalContent).toBe("")
+			expect(entry.hasOriginalContent).toBe(true)
+		})
+
+		it("marks an entry without any original as not having one", () => {
+			const [entry] = fileChangesFromMessages([editMessage({})])
+
+			expect(entry.hasOriginalContent).toBe(false)
+		})
 	})
 })

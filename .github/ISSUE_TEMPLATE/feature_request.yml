@@ -1,91 +1,93 @@
 name: Enhancement Request
-description: Propose an improvement in plain language focused on user benefit
+description: Propose an improvement in plain language that helps users
 labels: ["enhancement"]
 title: "[ENHANCEMENT] "
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Thank you for helping improve Zoo Code!
-        Please focus on the problem and the desired behavior in plain language.
+    - type: markdown
+      attributes:
+          value: |
+              Thank you for helping improve Zoo Code.
+              Describe the problem and the behavior you want.
 
-  - type: textarea
-    id: problem
-    attributes:
-      label: Problem (one or two sentences)
-      description: What problem are users facing?
-      placeholder: e.g., "Users often click Copy Run by mistake and duplicate runs unintentionally."
-    validations:
-      required: true
+              Write in Simplified Technical English (ASD-STE100): short sentences, plain words, active voice, one idea per sentence, no contractions. Keep the title short and specific.
 
-  - type: textarea
-    id: context
-    attributes:
-      label: Context (who is affected and when)
-      description: Who encounters this and in what situation?
-      placeholder: e.g., "Happens when browsing the Runs list; most visible for new users."
-    validations:
-      required: true
-
-  - type: textarea
-    id: desired
-    attributes:
-      label: Desired behavior (conceptual, not technical)
-      description: Describe what should happen in simple terms.
-      placeholder: e.g., "Ask for confirmation before copying a run."
-    validations:
-      required: true
-
-  - type: textarea
-    id: constraints
-    attributes:
-      label: Constraints / preferences (optional)
-      description: Any considerations like performance, accessibility, or UX expectations.
-      placeholder: e.g., "Keep it quick and unobtrusive; keyboard accessible."
-
-  - type: checkboxes
-    id: checklist
-    attributes:
-      label: Request checklist
-      options:
-        - label: I've searched existing Issues and Discussions for duplicates
-          required: true
-        - label: This describes a specific problem with clear context and impact
+    - type: textarea
+      id: problem
+      attributes:
+          label: Problem (one or two sentences)
+          description: What problem are users facing?
+          placeholder: For example, "Users often click Copy Run by mistake and duplicate runs unintentionally."
+      validations:
           required: true
 
-  - type: textarea
-    id: roo-code-tasks
-    attributes:
-      label: Zoo Code Task Links (optional)
-      description: If you explored this with Zoo Code, share public task links for context.
-      placeholder: Paste your Zoo Code share links here, one per line
+    - type: textarea
+      id: context
+      attributes:
+          label: Context (who is affected and when)
+          description: Who has this problem, and when?
+          placeholder: For example, "Happens when browsing the Runs list. New users see it most."
+      validations:
+          required: true
 
-  - type: markdown
-    attributes:
-      value: |
-        ---
-        Optional: You can stop here if you're just proposing the improvement.
+    - type: textarea
+      id: desired
+      attributes:
+          label: Desired behavior (conceptual, not technical)
+          description: Describe what should happen in simple words.
+          placeholder: For example, "Ask for confirmation before copying a run."
+      validations:
+          required: true
 
-  - type: textarea
-    id: acceptance-criteria
-    attributes:
-      label: Acceptance criteria (optional)
-      description: Define what “working” looks like with specific, testable outcomes.
-      placeholder: |
-        Given [context]
-        When [user action]
-        Then [expected result]
-        And [additional expectations]
-        But [what should NOT happen]
+    - type: textarea
+      id: constraints
+      attributes:
+          label: Constraints / preferences (optional)
+          description: Write any limits, such as performance, accessibility, or UX needs.
+          placeholder: For example, "Keep it quick and unobtrusive. Make it keyboard accessible."
 
-  - type: textarea
-    id: proposed-solution
-    attributes:
-      label: Proposed approach (optional)
-      description: If you have an idea, describe it briefly in plain language.
+    - type: checkboxes
+      id: checklist
+      attributes:
+          label: Request checklist
+          options:
+              - label: I searched the existing Issues and Discussions for duplicates
+                required: true
+              - label: This describes a specific problem with clear context and impact
+                required: true
 
-  - type: textarea
-    id: risks
-    attributes:
-      label: Trade-offs / risks (optional)
-      description: Potential downsides or alternatives considered.
+    - type: textarea
+      id: roo-code-tasks
+      attributes:
+          label: Zoo Code Task Links (optional)
+          description: If you tried this with Zoo Code, paste public task links.
+          placeholder: Paste your Zoo Code share links here, one per line
+
+    - type: markdown
+      attributes:
+          value: |
+              ---
+              Optional: You can stop here if you only propose the improvement.
+
+    - type: textarea
+      id: acceptance-criteria
+      attributes:
+          label: Acceptance criteria (optional)
+          description: Describe what “working” means. Use specific outcomes that you can test.
+          placeholder: |
+              Given [context]
+              When [user action]
+              Then [expected result]
+              And [additional expectations]
+              But [what should NOT happen]
+
+    - type: textarea
+      id: proposed-solution
+      attributes:
+          label: Proposed approach (optional)
+          description: If you have an idea, describe it in a few plain sentences.
+
+    - type: textarea
+      id: risks
+      attributes:
+          label: Trade-offs / risks (optional)
+          description: Write the possible downsides and the other options you considered.

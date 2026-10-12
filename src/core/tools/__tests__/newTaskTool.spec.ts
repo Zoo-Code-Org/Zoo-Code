@@ -91,7 +91,6 @@ const mockCline = {
 	emit: mockEmit,
 	recordToolError: mockRecordToolError,
 	consecutiveMistakeCount: 0,
-	isPaused: false,
 	pausedModeSlug: "ask",
 	taskId: "mock-parent-task-id",
 	enableCheckpoints: false,
@@ -135,7 +134,6 @@ describe("newTaskTool", () => {
 			groups: ["command", "read", "edit"],
 		}) // Default valid mode
 		mockCline.consecutiveMistakeCount = 0
-		mockCline.isPaused = false
 		// Default: VSCode setting is disabled
 		const mockGet = vi.fn().mockReturnValue(false)
 		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
@@ -593,7 +591,6 @@ describe("newTaskTool delegation flow", () => {
 			emit: localEmit,
 			recordToolError: mockRecordToolError,
 			consecutiveMistakeCount: 0,
-			isPaused: false,
 			pausedModeSlug: "ask",
 			taskId: "mock-parent-task-id",
 			setPendingTaskAction: vi.fn(),
