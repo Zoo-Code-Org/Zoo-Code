@@ -449,20 +449,38 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 			// while the real target resolves elsewhere. Validate containment on
 			// real paths for every target, not only existing ones: the checkout
 			// branch writes through a symlinked ancestor even when the target
-			// itself does not exist. Walk up to the deepest existing ancestor
-			// (the target itself when it exists) and resolve it. Resolving both
-			// sides keeps a legitimate symlinked workspace root working.
+			// itself does not exist. Walk up to the deepest ancestor that has a
+			// directory entry (lstat, so a dangling symlink counts as present and
+			// is then rejected by realpath instead of being skipped by an
+			// exists()-style check, which would validate the root and let the
+			// checkout report a false success). Resolving both sides keeps a
+			// legitimate symlinked workspace root working.
 			const realWorkspaceRoot = await fs.realpath(this.workspaceDir)
 			const realRoot = realWorkspaceRoot.endsWith(path.sep) ? realWorkspaceRoot : realWorkspaceRoot + path.sep
 			let realCandidate = resolvedTarget
-			while (!(await fileExistsAtPath(realCandidate))) {
+			while (true) {
+				try {
+					await fs.lstat(realCandidate)
+					break
+				} catch (err) {
+					const code = (err as NodeJS.ErrnoException).code
+					if (code !== "ENOENT" && code !== "ENOTDIR") throw err
+				}
 				const parent = path.dirname(realCandidate)
 				if (parent === realCandidate) {
 					throw new Error(`restoreFile target resolves outside the workspace: ${filePath}`)
 				}
 				realCandidate = parent
 			}
-			const realChecked = await fs.realpath(realCandidate)
+			let realChecked: string
+			try {
+				realChecked = await fs.realpath(realCandidate)
+			} catch (err) {
+				if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+					throw new Error(`restoreFile target resolves through a dangling link: ${filePath}`)
+				}
+				throw err
+			}
 			if (realChecked !== realWorkspaceRoot && !realChecked.startsWith(realRoot)) {
 				throw new Error(`restoreFile target resolves outside the workspace: ${filePath}`)
 			}
