@@ -1154,6 +1154,28 @@ describe("DiffViewProvider", () => {
 				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
 			})
 
+			it("forwards a caller-supplied completeness through the direct publish", async () => {
+				// The move path: the destination's registry entry must carry the completeness
+				// the caller earned from the source's view, not the fresh-create default. A
+				// fresh create records complete by default, so the discriminating spelling is
+				// the explicit false; the explicit true on a second fresh target shows the
+				// parameter reaches the refresh in both directions.
+				mockTask.observationRegistry.clear()
+				vi.mocked(fs.access).mockRejectedValue(enoent())
+
+				await diffViewProvider.saveDirectly("moved-out.ts", "content", false, false, 0, "create", false)
+				expect(mockTask.observationRegistry.get(`${mockCwd}/moved-out.ts`)).toMatchObject({
+					version: "v1",
+					complete: false,
+				})
+
+				await diffViewProvider.saveDirectly("moved-in.ts", "content", false, false, 0, "create", true)
+				expect(mockTask.observationRegistry.get(`${mockCwd}/moved-in.ts`)).toMatchObject({
+					version: "v1",
+					complete: true,
+				})
+			})
+
 			it("rejects an observed write whose version token is stale", async () => {
 				// The file changed on disk after the read that recorded "v1".
 				vi.mocked(computeVersionToken).mockResolvedValue("v2")
@@ -3255,6 +3277,71 @@ describe("DiffViewProvider", () => {
 			expect((diffViewProvider as any).preEditScrollLine).toBeUndefined()
 		})
 
+		it("open() waits for a finalization still in flight before starting the new session", async () => {
+			// performFinalReset() clears the session fields when it resumes from its awaits.
+			// A session started underneath it would have its flags, listeners and deferred
+			// scroll timer wiped by the old cleanup, and the old finalization would leave the
+			// new session already claimed. open() has to serialize with the prior finalization.
+			let release: () => void = () => {}
+			const gate = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			const closeOwnDiffView = vi.fn().mockImplementation(async () => {
+				await gate
+			})
+			diffViewProvider["closeOwnDiffView"] = closeOwnDiffView
+			;(diffViewProvider as any).relPath = "old.ts"
+			;(diffViewProvider as any).isEditing = true
+
+			const reset = diffViewProvider.reset()
+			while (closeOwnDiffView.mock.calls.length === 0) {
+				await new Promise((resolve) => setImmediate(resolve))
+			}
+
+			const mockEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/new.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue(""),
+					lineCount: 0,
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			}
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor as any]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor as any)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => callback({ uri: { fsPath: `${mockCwd}/new.ts`, scheme: "file" } } as any), 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+			;(diffViewProvider as any).editType = "modify"
+
+			let openDone = false
+			const open = diffViewProvider.open("new.ts").then(() => {
+				openDone = true
+			})
+			await new Promise((resolve) => setImmediate(resolve))
+			// The new session has not started: the old finalization still owns the provider.
+			expect(openDone).toBe(false)
+			expect(closeOwnDiffView).toHaveBeenCalledTimes(1)
+
+			release()
+			await Promise.all([reset, open])
+
+			// The old finalization completed before the new session claimed the provider, so
+			// it could neither clear the new session's flags nor claim its finalization.
+			expect(openDone).toBe(true)
+			expect((diffViewProvider as any).isEditing).toBe(true)
+			expect((diffViewProvider as any).relPath).toBe("new.ts")
+
+			// The new session is finalizable: its own reset closes it and closes its own
+			// diff view - the old finalization's single close did not consume it.
+			await diffViewProvider.reset()
+			expect((diffViewProvider as any).isEditing).toBe(false)
+			expect(closeOwnDiffView).toHaveBeenCalledTimes(2)
+		})
+
 		it("saveChanges() calls revealRange(AtTop) when documentWasOpen and preEditScrollLine is set", async () => {
 			const mockRevealRange = vi.fn()
 			const mockSavedEditor = { revealRange: mockRevealRange }
@@ -3463,16 +3550,21 @@ describe("DiffViewProvider", () => {
 				}),
 			})
 
-			// The cancellation lands inside the guarded publish. The implementation has to be
-			// restored afterwards: clearAllMocks() drops call records but keeps queued
+			// The cancellation lands while the guarded publish is in flight. It is started
+			// without being awaited inside the publish: the rollback waits for the publish to
+			// settle before touching the document, so a rollback awaited inside the publish
+			// would deadlock against that wait. The implementation has to be restored
+			// afterwards: clearAllMocks() drops call records but keeps queued
 			// implementations, and a leaked publish would cancel every later save in this file.
+			let cancellation: Promise<void> | undefined
 			vi.mocked(safeWriteText).mockImplementation(async () => {
-				await diffViewProvider.revertChanges()
+				cancellation = diffViewProvider.revertChanges()
 			})
 
 			let result: Awaited<ReturnType<DiffViewProvider["saveChanges"]>> | undefined
 			try {
 				result = await diffViewProvider.saveChanges(false)
+				await cancellation
 			} finally {
 				vi.mocked(safeWriteText).mockReset()
 				vi.mocked(safeWriteText).mockResolvedValue(undefined)
@@ -3488,6 +3580,79 @@ describe("DiffViewProvider", () => {
 			expect(applyEdit).toHaveBeenCalledTimes(1)
 			expect(closeAllDiffViews).toHaveBeenCalledTimes(1)
 			expect(restorePreviewTabs).toHaveBeenCalledTimes(1)
+		})
+
+		it("a cancellation that lands during the guarded publish waits for it and keeps the rollback last", async () => {
+			// The commit rename is the commit point: a rollback that wrote originalContent
+			// while the rename was still pending would be overwritten by the cancelled edit.
+			// The rollback has to wait for the publish to settle, the save has to report no
+			// completion of its own, and the rollback's write must be the last one.
+			let release: () => void = () => {}
+			const gate = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			let publishEntered = false
+			let publishSettled = false
+			vi.mocked(safeWriteText).mockImplementation(async () => {
+				publishEntered = true
+				await gate
+				publishSettled = true
+			})
+			// Records whether the publish had already settled at each rollback write, so
+			// the ordering assertion is about the writes themselves, not call counts.
+			const rollbackWritesAfterPublishSettled: boolean[] = []
+			const closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["restorePreviewTabs"] = vi.fn().mockResolvedValue(undefined)
+			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
+			applyEdit.mockImplementation(() => {
+				rollbackWritesAfterPublishSettled.push(publishSettled)
+				return Promise.resolve(true)
+			})
+			const documentSave = vi.fn().mockImplementation(() => {
+				rollbackWritesAfterPublishSettled.push(publishSettled)
+				return Promise.resolve(undefined)
+			})
+			diffViewProvider["relPath"] = "mock-target-file.ts"
+			diffViewProvider["editType"] = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({
+				document: makeTextDocument({
+					uri: makeUri(mockTargetPath),
+					getText: vi.fn().mockReturnValue("content"),
+					isDirty: false,
+					save: documentSave,
+				}),
+			})
+
+			const save = diffViewProvider.saveChanges(false)
+			while (!publishEntered) {
+				await new Promise((resolve) => setImmediate(resolve))
+			}
+
+			const revert = diffViewProvider.revertChanges()
+			await new Promise((resolve) => setImmediate(resolve))
+
+			// The rollback has not touched the document: the publish still owns the bytes.
+			expect(applyEdit).not.toHaveBeenCalled()
+
+			release()
+			const [result] = await Promise.all([save, revert])
+
+			// Both rollback writes happened after the publish settled, so the final bytes
+			// on disk are the rollback's originalContent, not the cancelled edit.
+			expect(rollbackWritesAfterPublishSettled).toEqual([true, true])
+			expect(result).toEqual({
+				newProblemsMessage: undefined,
+				userEdits: undefined,
+				finalContent: undefined,
+			})
+			// One pass over the tabs: the save added no cleanup of its own.
+			expect(closeAllDiffViews).toHaveBeenCalledTimes(1)
+			vi.mocked(safeWriteText).mockReset()
+			vi.mocked(safeWriteText).mockResolvedValue(undefined)
 		})
 
 		it("saveChanges() serializes its post-publish cleanup with a revertChanges() that lands during it", async () => {

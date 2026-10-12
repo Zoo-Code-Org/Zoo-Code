@@ -51,6 +51,14 @@ export class DiffViewProvider {
 	 */
 	private teardownCancellationRequested = false
 	/**
+	 * The guarded publish saveChanges() currently has in flight, if any. A cancellation that
+	 * lands while the publish is awaiting cannot be allowed to write its rollback underneath
+	 * the pending commit rename: the rename would land the cancelled edit on top of the
+	 * rollback. revertChanges() waits for this promise before touching the document, so the
+	 * rollback is the last writer and a cancelled save never leaves its edit published.
+	 */
+	private guardedSaveInFlight: Promise<unknown> | undefined
+	/**
 	 * Whether this edit session has been closed (its reset has been claimed). A caller that
 	 * waited for someone else's teardown cannot decide this by reading provider state: isEditing
 	 * and activeDiffEditor are exactly what the finalization changes, so two callers that both
@@ -146,6 +154,15 @@ export class DiffViewProvider {
 	}
 
 	async open(relPath: string): Promise<void> {
+		// A new session may not start while the previous one is still finalizing or tearing
+		// down. performFinalReset() clears the session fields wholesale when it resumes from
+		// its awaits, so a session started underneath it would lose its flags, listeners and
+		// deferred scroll timer to the old cleanup - and a runTeardown() still in flight would
+		// be joined by the new session's first save, skipping that save's own cleanup.
+		// Serialize: the prior finalization and teardown settle before this session claims
+		// the provider.
+		await this.finalizationInFlight?.catch(() => {})
+		await this.teardownInFlight?.catch(() => {})
 		this.relPath = relPath
 		const fileExists = this.editType === "modify"
 		const absolutePath = path.resolve(this.cwd, relPath)
@@ -153,6 +170,10 @@ export class DiffViewProvider {
 		// A new diff session may reuse this provider after a cancelled one, so the teardown marker
 		// starts clean: otherwise every later save would report itself cancelled without publishing.
 		this.teardownPasses = 0
+		// The cancellation claim belongs to the same marker: a cancellation that joined a pass
+		// of the previous session and was never read back must not make this session's first
+		// save report itself cancelled without publishing.
+		this.teardownCancellationRequested = false
 		// A new session has to be finalizable: a provider that was reset once would otherwise
 		// report its finalization as already claimed.
 		this.sessionFinalizationClaimed = false
@@ -712,7 +733,20 @@ export class DiffViewProvider {
 					saveTask.observationRegistry.forget(absolutePath)
 				}
 			}
-			await guardedWrite(saveTask, this.relPath, encodedContent, writeKind)
+			const guardedSave = guardedWrite(saveTask, this.relPath, encodedContent, writeKind)
+			// Register the publish before awaiting it: a cancellation that lands
+			// mid-publish waits on this promise (revertChanges) instead of racing its
+			// rollback against the commit rename. Cleared only while the entry is still
+			// this save's link, so a retried save's promise is never dropped by an
+			// earlier save finishing late.
+			this.guardedSaveInFlight = guardedSave
+			try {
+				await guardedSave
+			} finally {
+				if (this.guardedSaveInFlight === guardedSave) {
+					this.guardedSaveInFlight = undefined
+				}
+			}
 		} catch (error) {
 			// Autosave can publish the modified side of the diff before the user
 			// accepts, so the bytes on disk may already be exactly what this save
@@ -837,7 +871,11 @@ export class DiffViewProvider {
 		// already owns this session: that teardown closed the diff views and applied the auto-close
 		// preferences. Running this save's own post-publish cleanup on top of it would tear the same
 		// session down twice, so the save reports that it did not complete a save flow of its own.
-		if (this.teardownPasses > 0) {
+		// A cancellation that landed during the publish but has not started its pass yet claims
+		// the session through teardownCancellationRequested before it waits for the publish to
+		// settle; the claim is the same report, because that rollback - not this save's cleanup -
+		// will be the last writer to the target.
+		if (this.teardownPasses > 0 || this.teardownCancellationRequested) {
 			return { newProblemsMessage: undefined, userEdits: undefined, finalContent: undefined }
 		}
 
@@ -1042,6 +1080,19 @@ export class DiffViewProvider {
 	async revertChanges(): Promise<void> {
 		if (!this.relPath || !this.activeDiffEditor) {
 			return
+		}
+
+		// A guarded publish still in flight owns the target's bytes until it settles: its
+		// commit rename can land after a rollback save that started during the publish,
+		// leaving the cancelled edit as the final content. Claim the cancellation first - a
+		// save that settles underneath this wait sees the claim and reports no completed
+		// save instead of running its own post-publish cleanup - then wait for the publish
+		// to settle so this rollback is the last writer. A rejected publish wrote nothing,
+		// so waiting on a rejection is correct for the same reason.
+		this.teardownCancellationRequested = true
+		const pendingGuardedSave = this.guardedSaveInFlight
+		if (pendingGuardedSave) {
+			await pendingGuardedSave.catch(() => {})
 		}
 
 		const fileExists = this.editType === "modify"

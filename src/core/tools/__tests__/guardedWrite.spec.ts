@@ -433,6 +433,26 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
 			expect(reg.get(abs("doc.txt"))?.complete).toBe(true)
 		})
+		it("upgrades a partial observation to complete when the caller carries an explicit completeness", async () => {
+			// The move onto an existing target: the content was rebuilt from a complete view
+			// of the file taken outside the read path, so the publish must record completeness
+			// even though the registry entry came from a partial read. The default refresh
+			// keeps a partial observation partial (covered above); the explicit true is the
+			// only spelling that upgrades it, and it must survive the same refresh the
+			// default and the explicit false use.
+			const reg = new ObservationRegistry()
+			reg.observe(abs("moved-onto.txt"), "v1", false)
+			const task = createMockTask({ observationRegistry: reg })
+			mockedComputeVersionToken
+				.mockResolvedValueOnce("v1") // edit pre-write CAS
+				.mockResolvedValueOnce("v2") // post-publish refresh
+
+			await guardedWrite(task, "moved-onto.txt", "full content", "edit", true)
+
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
+			expect(reg.get(abs("moved-onto.txt"))?.version).toBe("v2")
+			expect(reg.get(abs("moved-onto.txt"))?.complete).toBe(true)
+		})
 
 		it("keeps the previous observation when the post-publish token cannot be computed (deletion race after publish)", async () => {
 			const reg = new ObservationRegistry()
