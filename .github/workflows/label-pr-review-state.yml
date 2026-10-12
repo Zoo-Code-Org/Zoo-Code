@@ -93,6 +93,7 @@ jobs:
         runs-on: ubuntu-latest
         outputs:
             pr_numbers: ${{ steps.resolve.outputs.pr_numbers }}
+            open_pr_heads: ${{ steps.resolve.outputs.open_pr_heads }}
         env:
             # Mirrors the workflow-level concurrency group so the run's queueing
             # identity is visible in the logs (kept in sync by the workflow tests).
@@ -133,6 +134,7 @@ jobs:
                       // associated PRs, with a fork-safe backfill by exact head owner,
                       // branch, and SHA when GitHub left pull_requests empty.
                       let prNumbers = [];
+                      let openPrsCache = null;
                       if (context.payload.pull_request?.number) {
                         prNumbers = [context.payload.pull_request.number];
                       } else if (context.eventName === 'issue_comment') {
@@ -165,14 +167,14 @@ jobs:
                           );
                         }
                       } else {
-                        const openPrs = await github.paginate(github.rest.pulls.list, {
+                        openPrsCache = await github.paginate(github.rest.pulls.list, {
                           owner, repo, state: 'open', per_page: 100,
                         });
                         // GitHub rejects matrices over 256 jobs, so the sweep pages the
                         // sorted open-PR list: consecutive runs rotate through
                         // fixed-size windows by run number, covering every open PR on a
                         // bounded cadence without ever exceeding the limit.
-                        const allNumbers = openPrs.map(pr => pr.number).sort((a, b) => a - b);
+                        const allNumbers = openPrsCache.map(pr => pr.number).sort((a, b) => a - b);
                         const sweepPageSize = 200;
                         const pageCount = Math.max(1, Math.ceil(allNumbers.length / sweepPageSize));
                         const page = context.runNumber % pageCount;
@@ -190,6 +192,29 @@ jobs:
                         `${prNumbers.length > 0 ? prNumbers.join(', ') : '(none)'}`
                       );
                       core.setOutput('pr_numbers', JSON.stringify(prNumbers));
+
+                      // Build the open-PR head map once here for every shard: a sweep would otherwise
+                      // multiply the paginated open-PR read by every shard against the Actions token
+                      // budget. Sweep triggers already hold the full open list, so the map costs them
+                      // no extra read. An empty output means the map was unavailable (or nothing was
+                      // resolved); shards then skip the stacked label rather than deciding from an
+                      // empty map.
+                      let openPrHeadsOutput = '';
+                      if (prNumbers.length > 0) {
+                        try {
+                          const openPrsForMap = openPrsCache ?? (await github.paginate(github.rest.pulls.list, {
+                            owner, repo, state: 'open', per_page: 100,
+                          }));
+                          const heads = {};
+                          for (const candidate of openPrsForMap) {
+                            if (candidate.head?.sha) heads[candidate.head.sha.toLowerCase()] = candidate.number;
+                          }
+                          openPrHeadsOutput = JSON.stringify(heads);
+                        } catch (error) {
+                          core.warning(`Could not read the open pull request map: ${error.message}; shards will skip the stacked label this run`);
+                        }
+                      }
+                      core.setOutput('open_pr_heads', openPrHeadsOutput);
 
     reconcile:
         name: Zoo Code / reconcile PR review state
@@ -232,6 +257,7 @@ jobs:
         runs-on: ubuntu-latest
         env:
             PR_NUMBER: ${{ matrix.pr_number }}
+            OPEN_PR_HEADS: ${{ needs.resolve.outputs.open_pr_heads }}
             # Mirrors this job's concurrency group so a superseded shard's queueing
             # identity is visible in the logs (kept in sync by the workflow tests).
             CONCURRENCY_GROUP: >-
@@ -439,17 +465,6 @@ jobs:
                       // how GitHub describes a focused stacked diff. Reviewers filter on this label to tell a
                       // unit apart from a standalone PR. It is orthogonal to the review-state labels, so it is
                       // reconciled separately and never removed by reconcileLabels.
-
-                      async function buildOpenPrHeads() {
-                        const candidates = await github.paginate(github.rest.pulls.list, {
-                          owner, repo, state: 'open', per_page: 100,
-                        });
-                        const heads = new Map();
-                        for (const candidate of candidates) {
-                          if (candidate.head?.sha) heads.set(candidate.head.sha.toLowerCase(), candidate.number);
-                        }
-                        return heads;
-                      }
 
                       async function reconcileStackedLabel(pr, openPrHeads) {
                         if (openPrHeads === null) {
@@ -771,17 +786,21 @@ jobs:
 
                       const failures = [];
 
-                      // Only read the open-PR map when there is a PR to reconcile, so an
-                      // unassociated workflow run still resolves to zero API reads.
-                      // A failed open-PR list call must not stop review-state reconciliation. The map is left
-                      // unset so reconcileStackedLabel skips label mutation for this run: an empty map would
-                      // look like "no open parents" and remove valid stacked labels.
+                      // The open-PR head map is built once in the resolve job and passed through the
+                      // job env, so a sweep pays one paginated read instead of one per shard. An empty
+                      // value means the map was unavailable this run: leave existing stacked labels as
+                      // they are rather than deciding from an empty map, which would look like
+                      // "no open parents" and remove valid labels.
                       let openPrHeads = null;
                       if (prs.length > 0) {
-                        try {
-                          openPrHeads = await buildOpenPrHeads();
-                        } catch (error) {
-                          core.warning(`Could not read the open pull request map: ${error.message}; skipping the stacked label for this run`);
+                        if (process.env.OPEN_PR_HEADS) {
+                          try {
+                            openPrHeads = new Map(Object.entries(JSON.parse(process.env.OPEN_PR_HEADS)));
+                          } catch (error) {
+                            core.warning(`Could not read the open pull request map: ${error.message}; skipping the stacked label for this run`);
+                          }
+                        } else {
+                          core.warning('Could not read the open pull request map: the resolve job provided none; skipping the stacked label for this run');
                         }
                       }
 

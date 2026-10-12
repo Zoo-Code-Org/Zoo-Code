@@ -513,15 +513,26 @@ async function runWorkflow(options: HarnessOptions = {}) {
 	// The reconcile job runs one matrix shard per PR and receives the target
 	// through the job's PR_NUMBER env mapping, plus the job's concurrency group
 	// through CONCURRENCY_GROUP.
-	const previousEnv = { prNumber: process.env.PR_NUMBER, group: process.env.CONCURRENCY_GROUP }
+	const previousEnv = {
+		prNumber: process.env.PR_NUMBER,
+		group: process.env.CONCURRENCY_GROUP,
+		openPrHeads: process.env.OPEN_PR_HEADS,
+	}
 	process.env.PR_NUMBER = String(pr.number)
 	process.env.CONCURRENCY_GROUP = `label-pr-review-state-reconcile-${pr.number}`
+	// The resolve job builds the open-PR head map once and passes it to shards through
+	// the job env; the harness mirrors that contract. openPrHeadsError simulates a
+	// resolve-side lookup failure, which reaches shards as an empty value.
+	const headMap: Record<string, number> = { [SHA.toLowerCase()]: pr.number }
+	for (const entry of options.openPrHeads ?? []) headMap[entry.sha.toLowerCase()] = entry.number
+	process.env.OPEN_PR_HEADS = options.openPrHeadsError ? "" : JSON.stringify(headMap)
 	try {
 		await new AsyncFunction("github", "context", "core", workflowScript)(github, context, core)
 	} finally {
 		for (const [key, value] of [
 			["PR_NUMBER", previousEnv.prNumber],
 			["CONCURRENCY_GROUP", previousEnv.group],
+			["OPEN_PR_HEADS", previousEnv.openPrHeads],
 		] as const) {
 			if (value === undefined) {
 				delete process.env[key]
@@ -600,12 +611,15 @@ async function runResolve(options: HarnessOptions = {}) {
 	}
 
 	const prNumbersOutput = setOutput.mock.calls.find(([name]) => name === "pr_numbers")?.[1] as string | undefined
+	const openPrHeadsOutput = setOutput.mock.calls.find(([name]) => name === "open_pr_heads")?.[1] as string | undefined
 	return {
 		setOutput,
 		listPullRequests,
 		getPullRequest,
 		info: core.info,
+		warning: core.warning,
 		prNumbers: () => (prNumbersOutput !== undefined ? (JSON.parse(prNumbersOutput) as number[]) : undefined),
+		openPrHeads: () => (openPrHeadsOutput ? (JSON.parse(openPrHeadsOutput) as Record<string, number>) : null),
 	}
 }
 
@@ -727,15 +741,16 @@ describe("PR review-state workflow", () => {
 			],
 		})
 
-		// The map is unavailable, so the stacked label is left untouched instead of being decided from
-		// an empty map; the rest of the run still reconciles.
+		// The map is unavailable (resolve failed to read it), so the stacked label is left
+		// untouched instead of being decided from an empty map; the rest still reconciles.
 		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("Could not read the open pull request map"))
 		// Review-state reconciliation still ran for this PR despite the failed lookup.
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
 		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stacked" }))
 		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["stacked"] }))
 		expect(result.setFailed).not.toHaveBeenCalled()
-		expect(result.listPullRequests).toHaveBeenCalled()
+		// The map arrives through the env, so the shard itself never lists pull requests.
+		expect(result.listPullRequests).not.toHaveBeenCalled()
 	})
 
 	it("warns and leaves the label state unchanged when a stacked add fails", async () => {
@@ -814,8 +829,9 @@ describe("PR review-state workflow", () => {
 		})
 
 		expect(result.getPullRequest).toHaveBeenCalledTimes(1)
-		// The open-PR map is read once to identify a stacked parent; reconciliation still targets only the comment's PR.
-		expect(result.listPullRequests).toHaveBeenCalledTimes(1)
+		// The open-PR head map arrives from the resolve job's env, so the shard reads no
+		// pull-request list; reconciliation still targets only the comment's PR.
+		expect(result.listPullRequests).not.toHaveBeenCalled()
 		expect(result.getCommit).toHaveBeenCalledTimes(1)
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
@@ -2112,14 +2128,39 @@ describe("PR review-state workflow", () => {
 	it("reconciles only the requested PR during manual dispatch", async () => {
 		const resolution = await runResolve({ eventName: "workflow_dispatch", workflowDispatchPrNumber: 1437 })
 
-		expect(resolution.listPullRequests).not.toHaveBeenCalled()
+		// One paginated read builds the open-PR head map once for the whole fan-out.
+		expect(resolution.listPullRequests).toHaveBeenCalledTimes(1)
 		expect(resolution.prNumbers()).toEqual([1437])
 
 		const result = await runWorkflow({ eventName: "workflow_dispatch", workflowDispatchPrNumber: 1437 })
 
-		// One read for the open-PR map; only the requested PR is reconciled.
-		expect(result.listPullRequests).toHaveBeenCalledTimes(1)
+		// The shard receives the map through the env; only the requested PR is reconciled.
+		expect(result.listPullRequests).not.toHaveBeenCalled()
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+	})
+
+	it("reuses the sweep's open list for the head map without an extra read", async () => {
+		const resolution = await runResolve({ eventName: "schedule" })
+
+		// The sweep already paged the open list to pick its window, so the map is free.
+		expect(resolution.listPullRequests).toHaveBeenCalledTimes(1)
+		expect(resolution.openPrHeads()).toEqual({ [SHA.toLowerCase()]: 1437 })
+	})
+
+	it("passes an empty head map to shards when the open list cannot be read", async () => {
+		const resolution = await runResolve({
+			eventName: "workflow_dispatch",
+			workflowDispatchPrNumber: 1437,
+			openPrHeadsError: true,
+		})
+
+		// Fail-soft: review-state resolution survives, and shards skip the stacked label
+		// rather than deciding from an empty map.
+		expect(resolution.warning).toHaveBeenCalledWith(
+			expect.stringContaining("Could not read the open pull request map"),
+		)
+		expect(resolution.openPrHeads()).toBeNull()
+		expect(resolution.prNumbers()).toEqual([1437])
 	})
 
 	it("chains the resolve output through the matrix wiring into shard runs", async () => {
@@ -2149,13 +2190,14 @@ describe("PR review-state workflow", () => {
 	it("reconciles the PR associated with a workflow run", async () => {
 		const resolution = await runResolve({ eventName: "workflow_run" })
 
-		expect(resolution.listPullRequests).not.toHaveBeenCalled()
+		// Associated runs need no lookup, but the head map is still built once here.
+		expect(resolution.listPullRequests).toHaveBeenCalledTimes(1)
 		expect(resolution.prNumbers()).toEqual([1437])
 
 		const result = await runWorkflow({ eventName: "workflow_run" })
 
-		// One read for the open-PR map; only the requested PR is reconciled.
-		expect(result.listPullRequests).toHaveBeenCalledTimes(1)
+		// The shard receives the map through the env; only the requested PR is reconciled.
+		expect(result.listPullRequests).not.toHaveBeenCalled()
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
 
