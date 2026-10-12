@@ -13,6 +13,7 @@ import {
 import { useRouterModels } from "@/components/ui/hooks/useRouterModels"
 import { useOllamaModels } from "@/components/ui/hooks/useOllamaModels"
 import { useLmStudioModels } from "@/components/ui/hooks/useLmStudioModels"
+import { useVsCodeLmModels } from "@/components/ui/hooks/useVsCodeLmModels"
 import { getStaticModelsForProvider } from "@/components/settings/utils/providerModelConfig"
 import { MODELS_BY_PROVIDER } from "@/components/settings/constants"
 import { useExtensionState } from "@/context/ExtensionStateContext"
@@ -91,6 +92,7 @@ export const useChatModelSelector = (): ChatModelSelectorData => {
 	const lmStudioModels = useLmStudioModels(
 		activeProvider === providerIdentifiers.lmstudio ? apiConfiguration?.lmStudioModelId || "lmstudio" : undefined,
 	)
+	const vsCodeLmModels = useVsCodeLmModels(activeProvider === providerIdentifiers.vscodeLm)
 
 	return useMemo<ChatModelSelectorData>(() => {
 		let models: Record<string, ModelInfo> | null = null
@@ -123,8 +125,24 @@ export const useChatModelSelector = (): ChatModelSelectorData => {
 				modelIdKey = "lmStudioModelId"
 				isLoading = lmStudioModels.isLoading
 			} else if (activeProvider === providerIdentifiers.vscodeLm) {
-				// VSCode LM exposes compound `{ vendor, family }` selections.
+				// VSCode LM exposes compound `{ vendor, family }` selections. Key the
+				// options as `vendor/family` (mirrors the settings provider) so they
+				// stay selectable even when free-form model ids are restricted.
 				modelIdKey = "vsCodeLmModelSelector"
+				models = (vsCodeLmModels.data ?? []).reduce(
+					(acc, model) => {
+						const modelId = `${model.vendor}/${model.family}`
+						acc[modelId] = {
+							maxTokens: 0,
+							contextWindow: 0,
+							supportsPromptCache: false,
+							description: `${model.vendor} - ${model.family}`,
+						}
+						return acc
+					},
+					{} as Record<string, ModelInfo>,
+				)
+				isLoading = vsCodeLmModels.isLoading
 				valueTransform = (modelId) => {
 					const [vendor, family] = modelId.split("/")
 					return { vendor, family }
@@ -151,5 +169,14 @@ export const useChatModelSelector = (): ChatModelSelectorData => {
 			valueTransform,
 			displayTransform,
 		}
-	}, [activeProvider, routerConfig, apiConfiguration, routerModels, stateRouterModels, ollamaModels, lmStudioModels])
+	}, [
+		activeProvider,
+		routerConfig,
+		apiConfiguration,
+		routerModels,
+		stateRouterModels,
+		ollamaModels,
+		lmStudioModels,
+		vsCodeLmModels,
+	])
 }

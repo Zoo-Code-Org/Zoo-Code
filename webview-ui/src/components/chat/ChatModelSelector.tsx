@@ -45,10 +45,10 @@ export const ChatModelSelector = ({ disabled = false, title, triggerClassName = 
 			vscode.postMessage({
 				type: "upsertApiConfiguration",
 				text: currentApiConfigName,
-				apiConfiguration: { ...apiConfiguration, apiProvider: provider, [modelIdKey]: value },
+				apiConfiguration: { ...apiConfiguration, [modelIdKey]: value },
 			})
 		},
-		[provider, modelIdKey, apiConfiguration, currentApiConfigName],
+		[modelIdKey, apiConfiguration, currentApiConfigName],
 	)
 
 	const setApiConfigurationField = useCallback(

@@ -1,0 +1,37 @@
+import { useQuery } from "@tanstack/react-query"
+import { type LanguageModelChatSelector } from "vscode"
+
+import { type ExtensionMessage, VsCodeLmModelsMessageType } from "@roo-code/types"
+
+import { vscode } from "@src/utils/vscode"
+
+const getVsCodeLmModels = async () =>
+	new Promise<LanguageModelChatSelector[]>((resolve, reject) => {
+		const cleanup = () => {
+			window.removeEventListener("message", handler)
+		}
+
+		const timeout = setTimeout(() => {
+			cleanup()
+			reject(new Error("VS Code LM models request timed out"))
+		}, 10000)
+
+		const handler = (event: MessageEvent) => {
+			const message: ExtensionMessage = event.data
+
+			if (message.type === VsCodeLmModelsMessageType.vsCodeLmModels) {
+				clearTimeout(timeout)
+				cleanup()
+				resolve(message.vsCodeLmModels ?? [])
+			}
+		}
+
+		window.addEventListener("message", handler)
+		vscode.postMessage({ type: VsCodeLmModelsMessageType.requestVsCodeLmModels })
+	})
+
+export const useVsCodeLmModels = (enabled: boolean) =>
+	useQuery({
+		queryKey: ["vsCodeLmModels"],
+		queryFn: () => (enabled ? getVsCodeLmModels() : []),
+	})

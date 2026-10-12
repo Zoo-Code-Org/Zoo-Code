@@ -10,6 +10,7 @@ import { type ModelInfo, type ProviderSettings, getProviderDefaultModelId, provi
 import { useRouterModels } from "@/components/ui/hooks/useRouterModels"
 import { useOllamaModels } from "@/components/ui/hooks/useOllamaModels"
 import { useLmStudioModels } from "@/components/ui/hooks/useLmStudioModels"
+import { useVsCodeLmModels } from "@/components/ui/hooks/useVsCodeLmModels"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { vscode } from "@/utils/vscode"
 
@@ -29,11 +30,13 @@ vi.mock("@src/context/ExtensionStateContext", () => ({
 vi.mock("@/components/ui/hooks/useRouterModels")
 vi.mock("@/components/ui/hooks/useOllamaModels")
 vi.mock("@/components/ui/hooks/useLmStudioModels")
+vi.mock("@/components/ui/hooks/useVsCodeLmModels")
 vi.mock("@/components/ui/hooks/useRooPortal", () => ({ useRooPortal: () => document.body }))
 
 const mockUseRouterModels = useRouterModels as Mock<typeof useRouterModels>
 const mockUseOllamaModels = useOllamaModels as Mock<typeof useOllamaModels>
 const mockUseLmStudioModels = useLmStudioModels as Mock<typeof useLmStudioModels>
+const mockUseVsCodeLmModels = useVsCodeLmModels as Mock<typeof useVsCodeLmModels>
 const mockUseExtensionState = useExtensionState as Mock<typeof useExtensionState>
 const mockPostMessage = vscode.postMessage as Mock
 
@@ -87,6 +90,10 @@ describe("ChatModelSelector", () => {
 			data: undefined,
 			isLoading: false,
 		} as unknown as ReturnType<typeof useLmStudioModels>)
+		mockUseVsCodeLmModels.mockReturnValue({
+			data: [],
+			isLoading: false,
+		} as unknown as ReturnType<typeof useVsCodeLmModels>)
 		setState({})
 	})
 
@@ -127,6 +134,46 @@ describe("ChatModelSelector", () => {
 				openRouterModelId: "model-a",
 			}),
 		})
+	})
+
+	it("preserves the stored provider without injecting a provider override", async () => {
+		// No apiProvider is stored; the adapter must not write one back.
+		setState({ apiConfiguration: {} })
+
+		renderSelector()
+
+		await act(async () => {
+			fireEvent.click(screen.getByTestId("chat-model-selector-trigger"))
+		})
+
+		await act(async () => {
+			fireEvent.click(screen.getByTestId("model-option-model-a"))
+		})
+
+		const payload = mockPostMessage.mock.calls.find(([msg]) => msg.type === "upsertApiConfiguration")?.[0]
+		expect(payload?.apiConfiguration).not.toHaveProperty("apiProvider")
+	})
+
+	it("lists VS Code LM models keyed as vendor/family even when custom models are restricted", async () => {
+		setState({
+			apiConfiguration: { apiProvider: providerIdentifiers.vscodeLm },
+			organizationAllowList: {
+				allowAll: false,
+				providers: { [providerIdentifiers.vscodeLm]: { allowAll: false, models: ["copilot/gpt-4o"] } },
+			},
+		})
+		mockUseVsCodeLmModels.mockReturnValue({
+			data: [{ vendor: "copilot", family: "gpt-4o" }],
+			isLoading: false,
+		} as unknown as ReturnType<typeof useVsCodeLmModels>)
+
+		renderSelector()
+
+		await act(async () => {
+			fireEvent.click(screen.getByTestId("chat-model-selector-trigger"))
+		})
+
+		expect(screen.getByTestId("model-option-copilot/gpt-4o")).toBeInTheDocument()
 	})
 
 	it("is disabled and does not persist when there is no active profile", async () => {
