@@ -446,19 +446,25 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 
 			// The lexical check cannot see through a symlinked ancestor: a link
 			// inside the workspace pointing outside it passes the prefix check
-			// while the real target resolves elsewhere. Re-check containment on
-			// the resolved (real) paths whenever the target file currently
-			// exists — that is the destructive case. A target that does not exist
-			// cannot be deleted, and the checkout branch only writes files the
-			// task-owned shadow repo recorded. Resolving both sides keeps a
-			// legitimate symlinked workspace root working.
-			if (await fileExistsAtPath(resolvedTarget)) {
-				const realWorkspaceRoot = await fs.realpath(this.workspaceDir)
-				const realRoot = realWorkspaceRoot.endsWith(path.sep) ? realWorkspaceRoot : realWorkspaceRoot + path.sep
-				const realTarget = await fs.realpath(resolvedTarget)
-				if (realTarget !== realWorkspaceRoot && !realTarget.startsWith(realRoot)) {
+			// while the real target resolves elsewhere. Validate containment on
+			// real paths for every target, not only existing ones: the checkout
+			// branch writes through a symlinked ancestor even when the target
+			// itself does not exist. Walk up to the deepest existing ancestor
+			// (the target itself when it exists) and resolve it. Resolving both
+			// sides keeps a legitimate symlinked workspace root working.
+			const realWorkspaceRoot = await fs.realpath(this.workspaceDir)
+			const realRoot = realWorkspaceRoot.endsWith(path.sep) ? realWorkspaceRoot : realWorkspaceRoot + path.sep
+			let realCandidate = resolvedTarget
+			while (!(await fileExistsAtPath(realCandidate))) {
+				const parent = path.dirname(realCandidate)
+				if (parent === realCandidate) {
 					throw new Error(`restoreFile target resolves outside the workspace: ${filePath}`)
 				}
+				realCandidate = parent
+			}
+			const realChecked = await fs.realpath(realCandidate)
+			if (realChecked !== realWorkspaceRoot && !realChecked.startsWith(realRoot)) {
+				throw new Error(`restoreFile target resolves outside the workspace: ${filePath}`)
 			}
 
 			const start = Date.now()
