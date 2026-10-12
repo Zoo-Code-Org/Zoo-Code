@@ -324,6 +324,30 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				expect(await fileExistsAtPath(path.join(outsideDir, "newfile.txt"))).toBe(false)
 			})
 
+			it("rejects a target under a dangling symlink ancestor instead of a false success", async () => {
+				// A dangling link is invisible to exists()-style checks (they follow
+				// the link), so an exists()-based containment walk would validate the
+				// workspace root and let the checkout branch report success without
+				// ever creating the file. The lstat walk must see the link entry and
+				// reject through realpath. "junction" needs no elevation on Windows
+				// and behaves as a directory symlink on POSIX.
+				const innerDir = path.join(service.workspaceDir, "sub")
+				await fs.mkdir(innerDir)
+				await fs.writeFile(path.join(innerDir, "newfile.txt"), "v1")
+				const commit1 = await service.saveCheckpoint("First checkpoint")
+				expect(commit1?.commit).toBeTruthy()
+
+				await fs.rm(innerDir, { recursive: true, force: true })
+				await fs.symlink(path.join(tmpDir, `gone-${Date.now()}`), innerDir, "junction")
+
+				await expect(service.restoreFile(commit1!.commit, path.join("sub", "newfile.txt"))).rejects.toThrow(
+					/dangling link/,
+				)
+
+				// Nothing was created through the dangling link.
+				expect(await fileExistsAtPath(path.join(innerDir, "newfile.txt"))).toBe(false)
+			})
+
 			it("emits a restore event when a file is restored", async () => {
 				const restoreListener = vi.fn()
 				service.on("restore", restoreListener)
