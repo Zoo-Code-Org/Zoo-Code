@@ -11,76 +11,72 @@
 </sub>
 </div>
 
-# Katkıda Bulunan Sözleşmesi Davranış Kuralları
+<a id="contributor-covenant-code-of-conduct"></a>
+
+# Contributor Covenant davranış kuralları
+
+<a id="our-pledge"></a>
 
 ## Taahhüdümüz
 
-Açık ve misafirperver bir ortam geliştirmek adına biz
-katkıda bulunanlar ve sürdürücüler olarak, projemize katılımın ve
-topluluğumuza katılımın; yaş, vücut
-ölçüsü, engellilik, etnik köken, cinsiyet özellikleri, cinsiyet kimliği ve ifadesi,
-deneyim seviyesi, eğitim, sosyo-ekonomik durum, milliyet, kişisel
-görünüm, ırk, din veya cinsel kimlik ve yönelime bakılmaksızın herkes için tacizden arınmış bir deneyim olmasını taahhüt ederiz.
+Biz katkıda bulunanlar ve bakım sorumlularıyız. Açık ve sıcak bir ortam istiyoruz. Projemize ve topluluğumuza katılımın herkes için tacizden uzak olmasını taahhüt ediyoruz. Bu taahhüt yaş, beden ölçüsü, engellilik, etnik köken, cinsiyet özellikleri, cinsiyet kimliği ve ifadesi, deneyim düzeyi, eğitim, sosyoekonomik durum, milliyet, dış görünüş, ırk, din veya cinsel kimlik ve yönelimden bağımsızdır.
+
+<a id="our-standards"></a>
 
 ## Standartlarımız
 
-Olumlu bir ortam yaratmaya katkıda bulunan davranış örnekleri
-şunları içerir:
+Şu davranışlar olumlu bir ortam oluşturmaya yardım eder:
 
-- Karşılayıcı ve kapsayıcı dil kullanmak
-- Farklı bakış açılarına ve deneyimlere saygılı olmak
-- Yapıcı eleştiriyi nazikçe kabul etmek
-- Topluluk için en iyisine odaklanmak
-- Diğer topluluk üyelerine empati göstermek
+- Sıcak ve kapsayıcı bir dil kullan.
+- Farklı görüşlere ve deneyimlere saygı göster.
+- Yapıcı eleştiriyi anlayışla kabul et.
+- Topluluk için en iyi olana odaklan.
+- Diğer topluluk üyelerine empati göster.
 
-Katılımcılar tarafından kabul edilemez davranış örnekleri şunları içerir:
+Katılımcıların şu davranışları kabul edilemez:
 
-- Cinselleştirilmiş dil veya görsellerin kullanımı ve istenmeyen cinsel ilgi veya
-  yaklaşımlar
-- Trolleme, hakaret/aşağılayıcı yorumlar ve kişisel veya politik saldırılar
-- Kamusal veya özel taciz
-- Açık izin olmadan başkalarının özel bilgilerini, örneğin fiziksel veya elektronik
-  adreslerini yayınlamak
-- Profesyonel bir ortamda makul olarak uygunsuz kabul edilebilecek diğer
-  davranışlar
+- Cinsellik içeren dil veya görseller kullanmak.
+- İstenmeyen cinsel ilgi veya yaklaşımlar.
+- Trolleme, hakaret veya aşağılama içeren yorumlar ve kişisel veya siyasi saldırılar.
+- Açık veya özel ortamda taciz.
+- Başkalarının özel bilgilerini açık izinleri olmadan yayınlamak. Fiziksel adres veya elektronik adres buna örnektir.
+- Profesyonel bir ortamda makul olarak uygunsuz sayılabilecek diğer davranışlar.
+
+<a id="our-responsibilities"></a>
 
 ## Sorumluluklarımız
 
-Proje sürdürücüleri, kabul edilebilir davranış standartlarını açıklığa kavuşturmaktan
-sorumludur ve kabul edilemez davranış örneklerine
-karşılık olarak uygun ve adil düzeltici önlemler almaları beklenir.
+Projenin bakım sorumluları kabul edilebilir davranış standartlarını açıklamalıdır. Bir katılımcı kabul edilemez davranış gösterdiğinde uygun ve adil düzeltici önlemler almalıdırlar.
 
-Proje sürdürücüleri, bu Davranış Kurallarına uygun olmayan yorumları, taahhütleri, kodları, wiki düzenlemelerini, sorunları ve diğer katkıları kaldırma, düzenleme veya
-reddetme hakkına ve sorumluluğuna sahiptir veya uygunsuz,
-tehditkar, saldırgan veya zararlı olduğunu düşündükleri diğer davranışlar için herhangi bir katkıda bulunanı geçici olarak veya kalıcı olarak yasaklayabilir.
+Projenin bakım sorumluları bu davranış kurallarına uymayan katkılara müdahale etme hakkına ve sorumluluğuna sahiptir. Yorumları, commit'leri, kodu, wiki düzenlemelerini, Issue'ları ve diğer katkıları kaldırabilir, düzenleyebilir veya reddedebilirler. Uygunsuz, tehdit edici, saldırgan veya zararlı gördükleri diğer davranışlar için katkıcıyı geçici veya kalıcı olarak engelleyebilirler.
+
+<a id="scope"></a>
 
 ## Kapsam
 
-Bu Davranış Kuralları, bir kişi projeyi veya topluluğunu temsil ederken hem proje alanlarında hem de kamusal alanlarda geçerlidir. Bir projeyi veya
-topluluğu temsil etme örnekleri arasında resmi bir proje e-posta adresi kullanmak,
-resmi bir sosyal medya hesabı aracılığıyla paylaşım yapmak veya çevrimiçi veya çevrimdışı bir etkinlikte atanmış temsilci olarak hareket etmek bulunur. Bir projeyi temsil etmek, proje sürdürücüleri tarafından daha fazla
-tanımlanabilir ve netleştirilebilir.
+Bu davranış kuralları proje alanlarında geçerlidir. Bir kişi projeyi veya topluluğunu temsil ettiğinde kamusal alanlarda da geçerlidir. Projeyi veya topluluğu temsil etme örnekleri şunlardır:
+
+- Resmî proje e-posta adresini kullanmak.
+- Resmî sosyal medya hesabıyla paylaşım yapmak.
+- Çevrimiçi veya fiziksel bir etkinlikte atanmış temsilci olarak görev almak.
+
+Projenin bakım sorumluları proje temsilini tanımlayabilir ve açıklayabilir.
+
+<a id="enforcement"></a>
 
 ## Uygulama
 
-Taciz edici veya başka türlü kabul edilemez davranış örnekleri,
-support@zoocode.dev adresinden proje ekibiyle iletişime geçilerek bildirilebilir. Tüm şikayetler
-incelenecek ve araştırılacak ve koşullara
-göre gerekli ve uygun görülen bir yanıtla sonuçlanacaktır. Proje ekibi,
-bir olayı bildiren kişiye ilişkin gizliliği korumakla yükümlüdür.
-Belirli uygulama politikalarının daha fazla ayrıntısı ayrıca yayınlanabilir.
+Kötüye kullanım, taciz veya başka bir kabul edilemez davranışı bildirmek için support@zoocode.dev adresinden proje ekibiyle iletişime geç. Proje ekibi tüm şikâyetleri inceler ve araştırır. Koşullara göre gerekli ve uygun gördüğü biçimde yanıt verir. Proje ekibi olayı bildiren kişinin kimliğini gizli tutmalıdır. Belirli uygulama politikalarının ayrıntılarını ayrıca yayınlayabilir.
 
-Davranış Kurallarını iyi
-niyetle takip etmeyen veya uygulamayan proje sürdürücüleri, projenin
-liderliğinin diğer üyeleri tarafından belirlenen geçici veya kalıcı yaptırımlarla karşılaşabilir.
+Projenin bakım sorumluları davranış kurallarına iyi niyetle uymalı ve kuralları uygulamalıdır. Aksi hâlde geçici veya kalıcı sonuçlarla karşılaşabilirler. Sonuçlara proje yönetiminin diğer üyeleri karar verir.
 
-## Atıf
+<a id="attribution"></a>
 
-Bu Davranış Kuralları, [Cline'ın versiyonundan][cline_coc] [Katkıda Bulunan Sözleşmesi][homepage], versiyon 1.4'ten uyarlanmıştır,
-https://www.contributor-covenant.org/version/1/4/code-of-conduct.html adresinde mevcuttur
+## Kaynak
+
+This Code of Conduct is adapted from [Cline's version][cline_coc] of the [Contributor Covenant][homepage], version 1.4. It is available at https://www.contributor-covenant.org/version/1/4/code-of-conduct.html
 
 [cline_coc]: https://github.com/cline/cline/blob/main/CODE_OF_CONDUCT.md
 [homepage]: https://www.contributor-covenant.org
 
-Bu davranış kuralları hakkında sık sorulan sorulara yanıtlar için
-https://www.contributor-covenant.org/faq adresini ziyaret edin
+For answers to common questions about this code of conduct, see https://www.contributor-covenant.org/faq
