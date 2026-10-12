@@ -295,6 +295,35 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				expect(await fs.readFile(outsideFile, "utf-8")).toBe("outside")
 			})
 
+			it("rejects a nonexistent target under a symlinked ancestor before checkout", async () => {
+				// The checkout branch writes through symlinked ancestors even when
+				// the target file itself does not exist yet, so containment must be
+				// validated on the deepest existing ancestor for every target
+				// (CWE-22 defense-in-depth). "junction" resolves without elevation
+				// on Windows and behaves as a directory symlink on POSIX.
+				const innerDir = path.join(service.workspaceDir, "sub")
+				await fs.mkdir(innerDir)
+				await fs.writeFile(path.join(innerDir, "newfile.txt"), "v1")
+				const commit1 = await service.saveCheckpoint("First checkpoint")
+				expect(commit1?.commit).toBeTruthy()
+
+				const outsideDir = path.join(tmpDir, `outside-${Date.now()}`)
+				await fs.mkdir(outsideDir, { recursive: true })
+
+				// Replace the real dir with a link to the outside dir: the commit
+				// still carries sub/newfile.txt, but the working-tree location now
+				// escapes through the link, and the target does not exist.
+				await fs.rm(innerDir, { recursive: true, force: true })
+				await fs.symlink(outsideDir, innerDir, "junction")
+
+				await expect(service.restoreFile(commit1!.commit, path.join("sub", "newfile.txt"))).rejects.toThrow(
+					/resolves outside the workspace/,
+				)
+
+				// The checkout never wrote through the link.
+				expect(await fileExistsAtPath(path.join(outsideDir, "newfile.txt"))).toBe(false)
+			})
+
 			it("emits a restore event when a file is restored", async () => {
 				const restoreListener = vi.fn()
 				service.on("restore", restoreListener)
