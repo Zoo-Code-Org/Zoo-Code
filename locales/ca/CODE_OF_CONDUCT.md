@@ -11,80 +11,72 @@
 </sub>
 </div>
 
-# Codi de Conducta del Pacte de Col·laboradors
+<a id="contributor-covenant-code-of-conduct"></a>
 
-## El nostre Compromís
+# Codi de conducta de Contributor Covenant
 
-En interès de fomentar un entorn obert i acollidor, nosaltres, com a
-col·laboradors i mantenidors, ens comprometem a fer de la participació en el nostre projecte i
-la nostra comunitat una experiència lliure d'assetjament per a tothom, independentment de l'edat, mida
-corporal, discapacitat, ètnia, característiques sexuals, identitat i expressió de gènere,
-nivell d'experiència, educació, estatus socioeconòmic, nacionalitat, aparença
-personal, raça, religió, o identitat i orientació sexual.
+<a id="our-pledge"></a>
 
-## Els nostres Estàndards
+## El nostre compromís
 
-Exemples de comportament que contribueix a crear un entorn positiu
-inclouen:
+Som col·laboradors i mantenidors. Volem un entorn obert i acollidor. Ens comprometem a fer que participar en el projecte i la comunitat sigui lliure d'assetjament per a tothom. Això s'aplica independentment de l'edat, la mida corporal, la discapacitat, l'ètnia, les característiques sexuals, la identitat i expressió de gènere, el nivell d'experiència, l'educació, la situació socioeconòmica, la nacionalitat, l'aparença personal, la raça, la religió o la identitat i orientació sexual.
 
-- Utilitzar llenguatge acollidor i inclusiu
-- Respectar els diferents punts de vista i experiències
-- Acceptar amb gràcia les crítiques constructives
-- Centrar-se en el que és millor per a la comunitat
-- Mostrar empatia envers altres membres de la comunitat
+<a id="our-standards"></a>
 
-Exemples de comportament inacceptable per part dels participants inclouen:
+## Les nostres normes
 
-- L'ús de llenguatge o imatges sexualitzades i atencions o
-  avenços sexuals no desitjats
-- Trolling, comentaris insultants/despectius, i atacs personals o polítics
-- Assetjament públic o privat
-- Publicar informació privada d'altres persones, com ara informació física o electrònica
-  adreça, sense permís explícit
-- Altres conductes que raonablement podrien considerar-se inadequades en un
-  entorn professional
+Aquests comportaments ajuden a crear un entorn positiu:
 
-## Les nostres Responsabilitats
+- Fes servir un llenguatge acollidor i inclusiu.
+- Respecta els diferents punts de vista i experiències.
+- Accepta les crítiques constructives amb bona actitud.
+- Centra't en el que és millor per a la comunitat.
+- Mostra empatia envers els altres membres de la comunitat.
 
-Els mantenidors del projecte són responsables de clarificar els estàndards de comportament
-acceptable i s'espera que prenguin mesures correctives apropiades i justes en
-resposta a qualsevol cas de comportament inacceptable.
+Aquests comportaments dels participants no són acceptables:
 
-Els mantenidors del projecte tenen el dret i la responsabilitat d'eliminar, editar o
-rebutjar comentaris, commits, codi, edicions wiki, incidències i altres contribucions
-que no estiguin alineades amb aquest Codi de Conducta, o de prohibir temporalment o
-permanentment qualsevol col·laborador per altres comportaments que considerin inapropiats,
-amenaçadors, ofensius o perjudicials.
+- Fer servir llenguatge o imatges sexualitzades.
+- Donar atenció sexual o fer insinuacions sexuals no desitjades.
+- Fer trolling, comentaris insultants o despectius i atacs personals o polítics.
+- Assetjar en públic o en privat.
+- Publicar informació privada d'altres persones sense el seu permís explícit. Per exemple, una adreça física o electrònica.
+- Altres conductes que es puguin considerar raonablement inadequades en un entorn professional.
+
+<a id="our-responsibilities"></a>
+
+## Les nostres responsabilitats
+
+Els mantenidors del projecte han d'aclarir les normes de comportament acceptable. Han de prendre mesures correctives adequades i justes quan un participant mostri un comportament inacceptable.
+
+Els mantenidors del projecte tenen el dret i la responsabilitat d'actuar sobre les contribucions que no segueixin aquest codi de conducta. Poden eliminar, editar o rebutjar comentaris, commits, codi, edicions del wiki, incidències i altres contribucions. També poden excloure un col·laborador temporalment o permanentment per altres comportaments que considerin inadequats, amenaçadors, ofensius o perjudicials.
+
+<a id="scope"></a>
 
 ## Àmbit
 
-Aquest Codi de Conducta s'aplica tant als espais del projecte com als espais públics
-quan un individu representa el projecte o la seva comunitat. Exemples de
-representació d'un projecte o comunitat inclouen l'ús d'un correu electrònic oficial del projecte,
-publicar mitjançant un compte oficial de xarxes socials, o actuar com a representant designat
-en un esdeveniment en línia o fora de línia. La representació d'un projecte pot ser
-definida i clarificada addicionalment pels mantenidors del projecte.
+Aquest codi de conducta s'aplica als espais del projecte. També s'aplica als espais públics quan una persona representa el projecte o la comunitat. Aquests són exemples de representació del projecte o la comunitat:
+
+- Fer servir una adreça de correu electrònic oficial del projecte.
+- Publicar amb un compte oficial de xarxes socials.
+- Actuar com a representant designat en un esdeveniment en línia o presencial.
+
+Els mantenidors del projecte poden definir i aclarir què vol dir representar el projecte.
+
+<a id="enforcement"></a>
 
 ## Aplicació
 
-Els casos de comportament abusiu, assetjador o altrament inacceptable poden ser
-reportats contactant amb l'equip del projecte a support@zoocode.dev. Totes les queixes
-seran revisades i investigades i resultaran en una resposta que
-es consideri necessària i adequada a les circumstàncies. L'equip del projecte està
-obligat a mantenir la confidencialitat respecte al reportador d'un incident.
-Es poden publicar separadament més detalls de polítiques d'aplicació específiques.
+Per informar d'un comportament abusiu, d'assetjament o d'altres comportaments inacceptables, contacta amb l'equip del projecte a support@zoocode.dev. L'equip revisa i investiga totes les queixes. Respon de la manera que considera necessària i adequada a les circumstàncies. L'equip ha de mantenir en secret la identitat de qui informa d'un incident. Pot publicar per separat més detalls sobre les polítiques d'aplicació concretes.
 
-Els mantenidors del projecte que no segueixin o apliquin el Codi de Conducta de bona
-fe poden enfrontar-se a repercussions temporals o permanents determinades per altres
-membres del lideratge del projecte.
+Els mantenidors del projecte han de seguir i fer complir el codi de conducta de bona fe. Si no ho fan, poden afrontar conseqüències temporals o permanents. Altres membres de la direcció del projecte decideixen aquestes conseqüències.
+
+<a id="attribution"></a>
 
 ## Atribució
 
-Aquest Codi de Conducta està adaptat de la [versió de Cline][cline_coc] del [Pacte de Col·laboradors][homepage], versió 1.4,
-disponible a https://www.contributor-covenant.org/version/1/4/code-of-conduct.html
+This Code of Conduct is adapted from [Cline's version][cline_coc] of the [Contributor Covenant][homepage], version 1.4. It is available at https://www.contributor-covenant.org/version/1/4/code-of-conduct.html
 
 [cline_coc]: https://github.com/cline/cline/blob/main/CODE_OF_CONDUCT.md
 [homepage]: https://www.contributor-covenant.org
 
-Per a respostes a preguntes freqüents sobre aquest codi de conducta, vegeu
-https://www.contributor-covenant.org/faq
+Per trobar respostes a preguntes habituals sobre aquest codi de conducta, consulta https://www.contributor-covenant.org/faq

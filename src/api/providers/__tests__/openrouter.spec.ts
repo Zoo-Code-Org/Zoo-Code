@@ -673,11 +673,11 @@ describe("OpenRouterHandler", () => {
 			])
 			expect(firstChunks.parserEvents).toEqual([
 				{ type: "tool_call_start", id: "call_openrouter_a", name: "read_file" },
-				{ type: "tool_call_delta", id: "call_openrouter_a", delta: '{"path":"a' },
+				{ type: "tool_call_delta", id: "call_openrouter_a", name: "read_file", delta: '{"path":"a' },
 			])
 			expect(secondChunks.parserEvents).toEqual([
 				{ type: "tool_call_start", id: "call_openrouter_b", name: "read_file" },
-				{ type: "tool_call_delta", id: "call_openrouter_b", delta: '{"path":"b' },
+				{ type: "tool_call_delta", id: "call_openrouter_b", name: "read_file", delta: '{"path":"b' },
 			])
 		})
 	})

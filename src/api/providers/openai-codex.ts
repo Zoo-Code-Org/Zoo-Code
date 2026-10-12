@@ -13,6 +13,7 @@ import {
 	SERVICE_TIER_KEY,
 	type ReasoningEffort,
 	type ReasoningEffortExtended,
+	type VerbosityLevel,
 	ApiProviderError,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -447,6 +448,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 			}>
 			tool_choice?: any
 			parallel_tool_calls?: boolean
+			text?: { verbosity: VerbosityLevel }
 		}
 
 		// Per the implementation guide: Codex backend may reject max_output_tokens
@@ -485,6 +487,11 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				}),
 			tool_choice: metadata?.tool_choice,
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+		}
+
+		// Include text.verbosity only when the model explicitly supports it
+		if (model.info.supportsVerbosity === true) {
+			body.text = { verbosity: model.verbosity || "medium" }
 		}
 
 		return body

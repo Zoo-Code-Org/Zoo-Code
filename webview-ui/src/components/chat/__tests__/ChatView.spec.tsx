@@ -755,7 +755,83 @@ describe("ChatView - Virtualization Configuration", () => {
 })
 
 describe("ChatView - Focus Grabbing Tests", () => {
-	beforeEach(() => vi.clearAllMocks())
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vi.spyOn(document, "hasFocus").mockReturnValue(false)
+	})
+
+	afterEach(() => vi.mocked(document.hasFocus).mockRestore())
+
+	it("does not focus input when mounted or shown while this document is unfocused", async () => {
+		vi.useFakeTimers()
+		try {
+			const { rerender } = renderChatView()
+			await act(async () => vi.advanceTimersByTime(100))
+			expect(mockFocus).not.toHaveBeenCalled()
+			rerender(<ChatView {...defaultProps} isHidden={true} />)
+			rerender(<ChatView {...defaultProps} isHidden={false} />)
+			await act(async () => vi.advanceTimersByTime(100))
+			expect(mockFocus).not.toHaveBeenCalled()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("does not focus input on passive visibility notifications but preserves explicit focus requests", async () => {
+		renderChatView()
+		mockFocus.mockClear()
+		await dispatchExtensionMessage({ type: "action", action: "didBecomeVisible" })
+		expect(mockFocus).not.toHaveBeenCalled()
+		await dispatchExtensionMessage({ type: "action", action: "focusInput" })
+		expect(mockFocus).toHaveBeenCalledTimes(1)
+	})
+
+	it("autofocuses input when the user opens a focused chat", async () => {
+		vi.mocked(document.hasFocus).mockReturnValue(true)
+		vi.useFakeTimers()
+		try {
+			renderChatView()
+			await act(async () => vi.advanceTimersByTime(100))
+			expect(mockFocus).toHaveBeenCalledTimes(1)
+			mockFocus.mockClear()
+			await dispatchExtensionMessage({ type: "action", action: "didBecomeVisible" })
+			expect(mockFocus).toHaveBeenCalledTimes(1)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("does not run delayed autofocus after focus moves back to the editor", async () => {
+		vi.mocked(document.hasFocus).mockReturnValue(true)
+		vi.useFakeTimers()
+		try {
+			renderChatView()
+			vi.mocked(document.hasFocus).mockReturnValue(false)
+			await act(async () => vi.advanceTimersByTime(100))
+			expect(mockFocus).not.toHaveBeenCalled()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it.each([false, true])("only refocuses re-enabled input when this document has focus=%s", async (hasFocus) => {
+		vi.mocked(document.hasFocus).mockReturnValue(hasFocus)
+		vi.useFakeTimers()
+		try {
+			const { getByRole } = renderChatView()
+			await dispatchTaskState("background task", 1)
+			await dispatchExtensionMessage({ type: "invoke", invoke: "newChat" })
+			expect(getByRole("textbox")).toHaveAttribute("data-sending-disabled", "true")
+			await act(async () => vi.advanceTimersByTime(100))
+			mockFocus.mockClear()
+			await dispatchExtensionMessage({ type: "state", state: makeExtensionState({ clineMessages: [] }) })
+			expect(getByRole("textbox")).toHaveAttribute("data-sending-disabled", "false")
+			await act(async () => vi.advanceTimersByTime(100))
+			expect(mockFocus).toHaveBeenCalledTimes(hasFocus ? 1 : 0)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
 
 	it("does not grab focus when follow-up question presented", async () => {
 		const { getByTestId } = renderChatView()
@@ -775,11 +851,6 @@ describe("ChatView - Focus Grabbing Tests", () => {
 		// Wait for the component to fully render and settle before clearing mocks
 		await waitFor(() => {
 			expect(getByTestId("chat-textarea")).toBeInTheDocument()
-		})
-
-		// Wait for the debounced focus effect to fire (50ms debounce + buffer for CI variability)
-		await act(async () => {
-			await new Promise((resolve) => setTimeout(resolve, 100))
 		})
 
 		// Clear any initial calls after state has settled
