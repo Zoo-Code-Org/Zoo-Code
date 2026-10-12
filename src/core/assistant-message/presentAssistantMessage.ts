@@ -836,10 +836,13 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 					}
 
 					// Track tool repetition in telemetry via a named event.
+					// The detector's hard limit is consecutiveMistakeLimit and it blocks when the
+					// identical-call count reaches it, so that count equals the limit here.
+					// consecutiveMistakeCount is unrelated and can be zero.
 					TelemetryService.instance.captureConsecutiveMistakeError(
 						cline.taskId,
 						"tool_repetition",
-						cline.consecutiveMistakeCount,
+						cline.consecutiveMistakeLimit,
 						cline.consecutiveMistakeLimit,
 					)
 

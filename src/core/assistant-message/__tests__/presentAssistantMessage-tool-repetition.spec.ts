@@ -300,7 +300,7 @@ describe("presentAssistantMessage - Tool Repetition Detection", () => {
 		expect(captureConsecutiveMistakeError).toHaveBeenCalledWith(
 			"test-task-id",
 			"tool_repetition",
-			mockTask.consecutiveMistakeCount,
+			HARD_LIMIT,
 			HARD_LIMIT,
 		)
 		expect(findToolResult(nextToolCallId)).toBeDefined()
@@ -369,7 +369,7 @@ describe("presentAssistantMessage - Tool Repetition Detection", () => {
 		expect(captureConsecutiveMistakeError).toHaveBeenCalledWith(
 			"test-task-id",
 			"tool_repetition",
-			mockTask.consecutiveMistakeCount,
+			HARD_LIMIT,
 			HARD_LIMIT,
 		)
 		// The named event is the single capture: no duplicate exception.
