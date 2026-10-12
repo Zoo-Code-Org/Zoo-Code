@@ -599,6 +599,33 @@ describe("OpenAICompatibleHandler abort wiring", () => {
 			expect(mergedSignal.aborted).toBe(true)
 		})
 
+		it("should reject with AbortError when the caller aborts while the request is pending", async () => {
+			// Keep generateText pending and reject only when the signal aborts, so the
+			// assertion covers the provider's in-flight cancellation path: a mock that
+			// resolves immediately would settle completePrompt before any cancellation
+			// is observable. This also pins the merged catch's abort guard - the raw
+			// DOMException must survive without the provider error-wrap.
+			mockGenerateText.mockImplementation((options: { abortSignal?: AbortSignal }) => {
+				return new Promise<{ text: string }>((resolve, reject) => {
+					const onAbort = () => reject(new DOMException("The operation was aborted.", "AbortError"))
+					if (options.abortSignal?.aborted) {
+						onAbort()
+						return
+					}
+					options.abortSignal?.addEventListener("abort", onAbort, { once: true })
+				})
+			})
+
+			const controller = new AbortController()
+			const pending = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			controller.abort()
+
+			await expect(pending).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The operation was aborted.",
+			})
+		})
+
 		it("should let the timeout component of a merged signal fire without the caller signal", async () => {
 			mockGenerateText.mockResolvedValue({ text: "response" })
 
