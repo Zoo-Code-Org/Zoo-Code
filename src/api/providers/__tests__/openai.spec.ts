@@ -1126,7 +1126,6 @@ describe("OpenAiHandler", () => {
 			})
 		})
 
-
 		// The Azure path test above covers createMessage and the completePrompt signal test
 		// uses a non-Azure handler; neither pins both options in one request config, which is
 		// what the Azure completePrompt branch composes (path + merged signal).

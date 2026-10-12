@@ -407,7 +407,6 @@ describe("empty cache protection", () => {
 	})
 
 	describe("getModels", () => {
-
 		it("forwards the caller abort signal to the kimi-code fetcher on the auth-scoped cache miss", async () => {
 			const controller = new AbortController()
 			vi.mocked(getKimiCodeModels).mockResolvedValue({})

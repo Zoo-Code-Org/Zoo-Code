@@ -39,10 +39,7 @@ export function mapKimiCodeModel(model: z.infer<typeof kimiCodeModelSchema>): Mo
 	}
 }
 
-export async function getKimiCodeModels(
-	apiKey?: string,
-	opts?: { signal?: AbortSignal },
-): Promise<ModelRecord> {
+export async function getKimiCodeModels(apiKey?: string, opts?: { signal?: AbortSignal }): Promise<ModelRecord> {
 	if (!apiKey) throw new Error("Kimi Code authentication is required to fetch models")
 	// A caller that already cancelled must not start a discovery request at all.
 	throwIfAborted(opts?.signal)

@@ -395,7 +395,12 @@ describe("handleOpenAIRequestError (abort awareness)", () => {
 		// The guard must not assume a reason exists: an SDK abort can arrive while the
 		// merged request signal is still live, and reading .name on an undefined reason
 		// would turn a cancellation into a TypeError.
-		const result = handleOpenAIRequestError(new APIUserAbortError(), "OpenAI", undefined, new AbortController().signal)
+		const result = handleOpenAIRequestError(
+			new APIUserAbortError(),
+			"OpenAI",
+			undefined,
+			new AbortController().signal,
+		)
 
 		expect(result.name).toBe("AbortError")
 		expect(result.message).toBe("OpenAI request aborted")
