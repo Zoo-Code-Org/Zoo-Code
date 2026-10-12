@@ -2,6 +2,7 @@
 
 import { renderWithExtensionState, screen, fireEvent, within, waitFor } from "@/utils/test-utils"
 import { act } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import { vscode } from "@/utils/vscode"
 import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, type ProviderSettings } from "@roo-code/types"
@@ -500,8 +501,9 @@ describe("SettingsView - Sound Settings", () => {
 		activateTab("checkpoints")
 		// The webview test env resolves i18n keys, so query the control by its
 		// test id rather than the translated label.
-		fireEvent.click(screen.getByTestId("change-card-detail-checkbox"))
-		fireEvent.click(screen.getByTestId("save-button"))
+		const user = userEvent.setup()
+		await user.click(screen.getByTestId("change-card-detail-checkbox"))
+		await user.click(screen.getByTestId("save-button"))
 
 		await waitFor(() =>
 			expect(vscode.postMessage).toHaveBeenCalledWith(
@@ -521,8 +523,9 @@ describe("SettingsView - Sound Settings", () => {
 		const { activateTab } = renderSettingsView({})
 
 		activateTab("checkpoints")
-		fireEvent.click(screen.getByTestId("per-write-checkbox"))
-		fireEvent.click(screen.getByTestId("save-button"))
+		const user = userEvent.setup()
+		await user.click(screen.getByTestId("per-write-checkbox"))
+		await user.click(screen.getByTestId("save-button"))
 
 		await waitFor(() =>
 			expect(vscode.postMessage).toHaveBeenCalledWith(
