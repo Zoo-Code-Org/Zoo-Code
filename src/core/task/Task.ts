@@ -3712,7 +3712,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// History resumes skip it: the baseline belongs to the original task start
 		// (exactly once per task), and the resumed task's shadow repo already carries
 		// a baseline for the first post-resume write checkpoint to diff against.
-		if (!this.taskStartBaselineDone && !this._isHistoryTask) {
+		// An already-aborted task skips it too: the loop will never run, so the
+		// save would only add latency to a task that is being disposed.
+		if (!this.taskStartBaselineDone && !this._isHistoryTask && !this.abort) {
 			this.taskStartBaselineDone = true
 			const baselineEnabled = (await this.providerRef.deref()?.getState())?.perWriteCheckpoints
 			if (baselineEnabled !== false) {
