@@ -1,4 +1,5 @@
 import { EventEmitter } from "events"
+import { makeClineProviderFactory } from "../../test-utils/provider"
 
 import { describe, expect, it, vi, beforeEach, type Mock } from "vitest"
 import * as vscode from "vscode"
@@ -117,6 +118,16 @@ function createTask(taskId: string): TaskDouble {
 	return task
 }
 
+// The merged API creates editor tabs through ClineProviderFactory; route the factory's
+// createInNewTab through the registerCommands mock so the tab-creation assertions keep
+// exercising the same seam (payload and resolved provider).
+const makeTabCreatingFactory = (provider: { context: unknown }, channel: unknown) => {
+	const factory = makeClineProviderFactory()
+	factory.createInNewTab = vi
+		.fn()
+		.mockImplementation(async () => openClineInNewTabMock({ context: provider.context, outputChannel: channel }))
+	return factory
+}
 describe("API task controls", () => {
 	let outputChannel: vscode.OutputChannel
 	let sidebarProvider: ProviderDouble
@@ -126,7 +137,11 @@ describe("API task controls", () => {
 		vi.clearAllMocks()
 		outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
 		sidebarProvider = createProvider("sidebar-task")
-		api = new API(outputChannel, asClineProvider(sidebarProvider))
+		api = new API(
+			outputChannel,
+			asClineProvider(sidebarProvider),
+			makeTabCreatingFactory(sidebarProvider, outputChannel),
+		)
 	})
 
 	describe("startNewTask", () => {
@@ -148,7 +163,7 @@ describe("API task controls", () => {
 				"new task",
 				undefined,
 				undefined,
-				{ consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER },
+				{ consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER, toolRepetitionSoftLimit: 0 },
 				configuration,
 			)
 		})
@@ -174,7 +189,7 @@ describe("API task controls", () => {
 				"keep editors",
 				undefined,
 				undefined,
-				{ consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER },
+				{ consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER, toolRepetitionSoftLimit: 0 },
 				configuration,
 			)
 		})
@@ -369,7 +384,13 @@ describe("API task controls", () => {
 
 		it("responds without switching modes and logs when the requested mode is invalid", async () => {
 			const task = createTask("task-invalid-mode")
-			api = new API(outputChannel, asClineProvider(sidebarProvider), undefined, true)
+			api = new API(
+				outputChannel,
+				asClineProvider(sidebarProvider),
+				makeTabCreatingFactory(sidebarProvider, outputChannel),
+				undefined,
+				true,
+			)
 			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
 
 			await expect(
@@ -414,7 +435,11 @@ describe("API task controls - per-view review fixes", () => {
 		vi.clearAllMocks()
 		outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
 		sidebarProvider = createProvider("sidebar-task")
-		api = new API(outputChannel, asClineProvider(sidebarProvider))
+		api = new API(
+			outputChannel,
+			asClineProvider(sidebarProvider),
+			makeTabCreatingFactory(sidebarProvider, outputChannel),
+		)
 	})
 
 	it("keeps the new registration when a replaced task instance tears down", async () => {
@@ -435,7 +460,13 @@ describe("API task controls - per-view review fixes", () => {
 
 	it("still delivers the follow-up answer when the mode switch fails", async () => {
 		const task = createTask("task-failing-switch")
-		api = new API(outputChannel, asClineProvider(sidebarProvider), undefined, true)
+		api = new API(
+			outputChannel,
+			asClineProvider(sidebarProvider),
+			makeTabCreatingFactory(sidebarProvider, outputChannel),
+			undefined,
+			true,
+		)
 		sidebarProvider.handleModeSwitch.mockRejectedValueOnce(new Error("persist failed"))
 		sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
 
@@ -460,7 +491,11 @@ describe("API task controls - per-view review fixes", () => {
 
 		it("rejects the task ask and global-state surface in production mode", async () => {
 			sidebarProvider.context = withProductionContext()
-			api = new API(outputChannel, asClineProvider(sidebarProvider))
+			api = new API(
+				outputChannel,
+				asClineProvider(sidebarProvider),
+				makeTabCreatingFactory(sidebarProvider, outputChannel),
+			)
 
 			// Pin the method name in each message: the guard builds the error from the
 			// method argument, and a partial match would leave the argument untested.
@@ -481,7 +516,11 @@ describe("API task controls - per-view review fixes", () => {
 				extensionMode: vscode.ExtensionMode.Test,
 				globalState: { get, update },
 			}
-			api = new API(outputChannel, asClineProvider(sidebarProvider))
+			api = new API(
+				outputChannel,
+				asClineProvider(sidebarProvider),
+				makeTabCreatingFactory(sidebarProvider, outputChannel),
+			)
 
 			expect(api.getGlobalState("mode")).toBe("code")
 			expect(get).toHaveBeenCalledWith("mode")

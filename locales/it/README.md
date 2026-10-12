@@ -47,11 +47,11 @@ Zoo Code parte dalle fondamenta create da Roo Code e continua ad ampliarle con:
 - **Workflow di terminale e modifica più affidabili** — correzioni per il completamento prematuro del terminale, le race condition dello stato delle attività, la gestione del contesto, la modifica dei diff e l'uso di strumenti specifici dei provider.
 - **Più controllo sul tuo workspace** — gestione delle regole, restrizioni MCP per modalità, controlli dei percorsi multi-root, opzioni di reasoning dei modelli e azioni per esaminare le modifiche al completamento.
 
-## Novità in v3.84.0
+## Novità in v3.88.0
 
-- ✨ **Aggiunti nuovi modelli SOTA:** Usa GPT-6 Sol, GPT-6 Luna e Claude Opus 5.5 con i provider supportati.
-- 🧭 **Attività e sottoattività più affidabili:** Mantieni isolati i mode delegati, conserva i collegamenti alle sottoattività dopo Stop ripetuti e proteggi le impostazioni dell'orchestrator quando i comandi slash cambiano mode.
-- 🛠️ **Comportamento più affidabile di terminale, provider e ricerca del codice:** Migliora il terminale su Windows e negli ambienti non in inglese, rafforza le risposte e l'annullamento dei provider e fai in modo che la ricerca del codice utilizzi più coerentemente il workspace corretto.
+- ✨ **Supporto per provider e modelli:** Usa Grok Build e un supporto migliorato per i modelli personalizzati. Questa versione corregge anche i limiti dei modelli Bedrock e invia l'impostazione di verbosità di Codex.
+- 🧭 **Affidabilità delle attività:** Questa versione corregge la gestione degli annullamenti, la continuazione dei turni dei tool e il salvataggio dei messaggi delle attività.
+- ⚡ **Modifica e chat più veloci:** Le scritture dei file non usano più ritardi artificiali per impostazione predefinita. I messaggi della chat trasportano meno dati dei file, e le azioni del codice raggiungono l'ultima chat attiva.
 
 ## Cosa può fare Zoo Code per TE?
 

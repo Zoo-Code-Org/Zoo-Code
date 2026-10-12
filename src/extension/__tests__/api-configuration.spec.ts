@@ -5,6 +5,7 @@ import { providerIdentifiers } from "@roo-code/types"
 
 import { API } from "../api"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
+import { makeClineProviderFactory } from "../../test-utils/provider"
 
 vi.mock("@roo-code/ipc", () => ({
 	IpcServer: class {},
@@ -25,7 +26,7 @@ describe("API - configuration", () => {
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
-		const api = new API(outputChannel, provider)
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
 
 		await api.setConfiguration({
 			currentApiConfigName: "default",
@@ -59,7 +60,7 @@ describe("API - configuration", () => {
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
-		const api = new API(outputChannel, provider)
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
 
 		await api.setConfiguration({ currentApiConfigName: "default" })
 
@@ -87,7 +88,7 @@ describe("API - configuration", () => {
 			getValues,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
-		const api = new API(outputChannel, provider)
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
 
 		const configuration = api.getConfiguration()
 

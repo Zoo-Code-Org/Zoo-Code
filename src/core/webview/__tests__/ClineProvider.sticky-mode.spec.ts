@@ -1,6 +1,8 @@
+import { WebviewFocusTracker } from "../WebviewFocusTracker"
 // npx vitest core/webview/__tests__/ClineProvider.sticky-mode.spec.ts
 
 import * as vscode from "vscode"
+import { makeCompositeDisposable } from "../../../test-utils/vscode"
 import { TelemetryService } from "@roo-code/telemetry"
 import { ClineProvider } from "../ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
@@ -12,6 +14,7 @@ vi.mock("vscode", () => ({
 	ExtensionContext: vi.fn(),
 	OutputChannel: vi.fn(),
 	WebviewView: vi.fn(),
+	Disposable: { from: (...subscriptions: vscode.Disposable[]) => makeCompositeDisposable(...subscriptions) },
 	Uri: {
 		joinPath: vi.fn(),
 		file: vi.fn(),
@@ -313,7 +316,13 @@ describe("ClineProvider - Sticky Mode", () => {
 			}),
 		} as unknown as vscode.WebviewView
 
-		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+		provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
 
 		// Wait for the async TaskHistoryStore initialization to complete
 		await new Promise((resolve) => setTimeout(resolve, 10))
@@ -1615,6 +1624,116 @@ describe("ClineProvider - Sticky Mode", () => {
 			tasks.forEach((task) => {
 				expect(task.emit).toHaveBeenCalled()
 			})
+		})
+	})
+
+	describe("persisted view state keys", () => {
+		it("does not resolve a view id that names an Object.prototype key through the chain", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			mockContext.globalState.get = vi.fn().mockImplementation((key: string) => {
+				if (key === "viewStates") return { "stable-test-view": { mode: "architect" } }
+				return undefined
+			})
+
+			const states = provider["getPersistedViewStates"]({ fresh: true })
+			expect(Object.getPrototypeOf(states)).toBeNull()
+			// A view id such as "constructor" must read as an absent entry, not as the
+			// inherited Object function, otherwise the rekey deletes the temporary entry
+			// and never writes it under the stable key.
+			expect(states["constructor"]).toBeUndefined()
+			expect(states["stable-test-view"]).toEqual({ mode: "architect" })
+
+			// Registering such an id must not make an inherited member look like a
+			// persisted entry: the lookup still reports an absent entry, so the rekey keeps the
+			// temporary entry instead of deleting it.
+			await provider["setViewStateId"]("constructor")
+			expect(provider["getPersistedViewStates"]({ fresh: true })["constructor"]).toBeUndefined()
+		})
+
+		it("does not load a temporary-id entry that an earlier session wrote", async () => {
+			// Temporary names restart from 0 on every host start, so storage can still hold
+			// an entry under this instance's name from a previous session. Seed the entry
+			// through the ContextProxy before the provider is constructed so the ordinary
+			// loadViewState read (which goes through the proxy cache) actually sees it.
+			const tempId = `sidebar-${ClineProvider["nextViewId"]}`
+			const proxy = new ContextProxy(mockContext)
+			await proxy.setValue("viewStates", {
+				[tempId]: { mode: "architect", currentApiConfigName: "stale-profile" },
+			})
+
+			const fresh = new ClineProvider(mockContext, mockOutputChannel, "sidebar", proxy, new WebviewFocusTracker())
+			expect(fresh.viewId).toBe(tempId)
+
+			// Let the constructor's fire-and-forget loadViewState settle.
+			await new Promise((resolve) => setTimeout(resolve, 10))
+
+			// The unowned temporary-id entry must not be adopted...
+			expect(fresh["viewLocalState"]).toStrictEqual({})
+
+			// ...and the shared values still win, so the stale entry cannot reach getState().
+			const state = await fresh.getState()
+			expect(state.mode).toBe("code")
+			expect(state.currentApiConfigName).not.toBe("stale-profile")
+		})
+
+		it("does not merge a stale temporary-id entry into this instance's first durable write", async () => {
+			// A first write under an unowned temporary id claims the slot: fields left by an
+			// earlier session under the same name must not be adopted (and later re-keyed to
+			// the stable id) by merging into the colliding entry.
+			const tempId = `sidebar-${ClineProvider["nextViewId"]}`
+			const proxy = new ContextProxy(mockContext)
+			await proxy.setValue("viewStates", { [tempId]: { currentApiConfigName: "old-profile", updatedAt: 1 } })
+
+			const fresh = new ClineProvider(mockContext, mockOutputChannel, "sidebar", proxy, new WebviewFocusTracker())
+			expect(fresh.viewId).toBe(tempId)
+
+			await fresh.saveViewState("mode", "code")
+
+			const states = fresh["getPersistedViewStates"]({ fresh: true })
+			expect(states[tempId]).toEqual({ mode: "code", updatedAt: expect.any(Number) })
+			expect(fresh["viewLocalState"].currentApiConfigName).toBeUndefined()
+		})
+
+		it("does not mark the temporary id as authored when the durable write fails", async () => {
+			// Authorship must be recorded only after the write lands: a failed persistence
+			// that still marked the id owned would let a later load adopt an entry that was
+			// never actually stored.
+			const tempId = `sidebar-${ClineProvider["nextViewId"]}`
+			const proxy = new ContextProxy(mockContext)
+			const fresh = new ClineProvider(mockContext, mockOutputChannel, "sidebar", proxy, new WebviewFocusTracker())
+			expect(fresh.viewId).toBe(tempId)
+
+			const originalUpdate = mockContext.globalState.update
+			mockContext.globalState.update = vi.fn().mockImplementation((key: string, value: unknown) => {
+				if (key === "viewStates") {
+					return Promise.reject(new Error("storage unavailable"))
+				}
+				return Promise.resolve()
+			})
+
+			await expect(fresh.saveViewState("mode", "code")).rejects.toThrow("storage unavailable")
+			expect(fresh["wroteUnderTemporaryViewStateId"]).toBe(false)
+
+			mockContext.globalState.update = originalUpdate
+		})
+
+		it("does not adopt an entry under the temporary name that this instance never wrote", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Temporary ids restart from 0 on every host start, so the same name can
+			// belong to a different session. An entry this instance never wrote must not
+			// be adopted as this view's state.
+			mockContext.globalState.get = vi.fn().mockImplementation((key: string) => {
+				if (key === "viewStates") return { [provider.viewId]: { mode: "architect" } }
+				return undefined
+			})
+
+			await provider["setViewStateId"]("stable-test-view")
+
+			const states = provider["getPersistedViewStates"]({ fresh: true })
+			expect(states[provider.viewId]).toEqual({ mode: "architect" })
+			expect(states["stable-test-view"]).toBeUndefined()
 		})
 	})
 })

@@ -165,7 +165,7 @@ export const anthropicModels = {
 		description: "Claude Opus 5 is Anthropic's most capable model for complex agentic coding and enterprise work.",
 	},
 	"claude-opus-5-5": {
-		maxTokens: 128_000, // Overridden to 8k if `enableReasoningEffort` is false.
+		maxTokens: 128_000,
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
@@ -173,10 +173,7 @@ export const anthropicModels = {
 		outputPrice: 20.0, // $20 per million output tokens
 		cacheWritesPrice: 5.0, // $5 per million tokens
 		cacheReadsPrice: 0.2, // $0.20 per million tokens
-		// Opus 5.5 keeps the Opus 5 adaptive-thinking / binary-toggle convention on
-		// the direct Anthropic provider path: manual budget_tokens and non-default
-		// sampling parameters return a 400.
-		supportsReasoningBudget: true,
+		// Opus 5.5 always uses adaptive thinking and rejects manual budget_tokens.
 		supportsReasoningBinary: true,
 		supportsTemperature: false,
 		description:
