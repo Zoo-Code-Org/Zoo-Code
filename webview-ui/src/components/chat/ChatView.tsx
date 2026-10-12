@@ -913,7 +913,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				case "action":
 					switch (message.action!) {
 						case "didBecomeVisible":
-							if (!isHidden && !sendingDisabled && !enableButtons) {
+							if (document.hasFocus() && !isHidden && !sendingDisabled && !enableButtons) {
 								textAreaRef.current?.focus()
 							}
 							break
@@ -1118,7 +1118,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 	useDebounceEffect(
 		() => {
-			if (!isHidden && !sendingDisabled && !enableButtons) {
+			if (document.hasFocus() && !isHidden && !sendingDisabled && !enableButtons) {
 				textAreaRef.current?.focus()
 			}
 		},
@@ -1738,7 +1738,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							atBottomThreshold={10}
 						/>
 					</div>
-					<FileChangesPanel clineMessages={messages} />
+					<FileChangesPanel clineMessages={messages} taskId={currentTaskId} />
 					{areButtonsVisible && (
 						<div
 							className={`flex h-9 items-center mb-1 px-[15px] ${

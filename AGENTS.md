@@ -49,6 +49,7 @@ Prefer the narrowest test layer that proves the behavior. This follows standard 
 
 - Read `docs/architecture/task-lifecycle-model.md` before changing task status, delegation, interruption, completion, abandonment, persistence ownership, or scheduler fan-out behavior.
 - Keep lifecycle mutations in the shared reducers under `src/core/task-persistence/taskLifecycle.ts`. Update model actions, invariants, or named semantic landmarks for every new transition or concurrency bug class representable in the lifecycle model, then run `pnpm lifecycle:model-check`.
+- The in-memory run-state submodel lives in `src/core/task/run-state/runState.ts`. It is a pure `nextRunState(state, event)` kernel, separate from the persisted reducers. Read `docs/architecture/task-lifecycle-target-architecture.md` before changing it.
 - Add extension-host E2E coverage only for a boundary the reducer model cannot prove, such as restart visibility, real persistence/rehydration, delayed provider streams, scheduler permits, or webview task scoping. Do not duplicate reducer interleavings in E2E.
 - Run the focused lifecycle tests and `pnpm test` before completing a Zoo Code lifecycle change.
 
