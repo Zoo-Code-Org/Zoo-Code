@@ -15,6 +15,7 @@ describe("IO Intelligence model fetcher", () => {
 		expect(axios.get).toHaveBeenCalledWith(`${IO_INTELLIGENCE_BASE_URL}/models`, {
 			headers: { Authorization: "Bearer key-a" },
 			timeout: 10_000,
+			signal: undefined,
 		})
 	})
 
@@ -24,7 +25,36 @@ describe("IO Intelligence model fetcher", () => {
 		expect(axios.get).toHaveBeenCalledWith(`${IO_INTELLIGENCE_BASE_URL}/models`, {
 			headers: undefined,
 			timeout: 10_000,
+			signal: undefined,
 		})
+	})
+
+	it("forwards the caller's abort signal to the request", async () => {
+		vi.mocked(axios.get).mockResolvedValue({ data: { data: [] } })
+		const controller = new AbortController()
+
+		await getIOIntelligenceModels("test-key", { signal: controller.signal })
+
+		expect(axios.get).toHaveBeenCalledWith(`${IO_INTELLIGENCE_BASE_URL}/models`, {
+			headers: { Authorization: "Bearer test-key" },
+			timeout: 10_000,
+			signal: controller.signal,
+		})
+	})
+
+	it("rejects with an AbortError when the signal aborts the pending request", async () => {
+		const controller = new AbortController()
+		vi.mocked(axios.get).mockImplementation((_url, config) => {
+			// Mirror the HTTP client: a pending request rejects when its signal fires.
+			return new Promise<never>((_resolve, reject) => {
+				config?.signal?.addEventListener?.("abort", () => reject(new Error("canceled")), { once: true })
+			})
+		})
+
+		const fetchPromise = getIOIntelligenceModels("k", { signal: controller.signal })
+		controller.abort()
+
+		await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
 	})
 
 	it("maps detailed metadata and exact per-million pricing for multiple models", async () => {

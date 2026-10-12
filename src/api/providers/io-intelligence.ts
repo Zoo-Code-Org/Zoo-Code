@@ -6,14 +6,21 @@ import {
 	ioIntelligenceDefaultModelId,
 	ioIntelligenceDefaultModelInfo,
 	providerIdentifiers,
+	type ModelRecord,
 } from "@roo-code/types"
 
-import type { ApiHandlerOptions } from "../../shared/api"
+import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import type { ApiStream } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
-import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions, SingleCompletionHandler } from "../index"
+import type {
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+	SingleCompletionHandler,
+} from "../index"
 import { RouterProvider } from "./router-provider"
+import { getIOIntelligenceModels } from "./fetchers/io-intelligence"
 import { handleProviderError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
@@ -42,6 +49,16 @@ export class IOIntelligenceHandler extends RouterProvider implements SingleCompl
 			defaultModelId: ioIntelligenceDefaultModelId,
 			defaultModelInfo: ioIntelligenceDefaultModelInfo,
 		})
+	}
+
+	override getModelCacheScope(): ModelCacheScope {
+		// Public catalog, but a key can narrow the visible model set.
+		return { urlScoped: false, keyScoped: true, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getIOIntelligenceModels(options.apiKey, ...fetchOpts)
 	}
 
 	private createSafeError(operation: string, error: unknown): Error {

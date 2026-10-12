@@ -8,6 +8,8 @@ import {
 	type ModelRecord,
 } from "@roo-code/types"
 
+import { throwIfAborted } from "../utils/abort-signal"
+
 const ioIntelligenceModelSchema = z.object({
 	id: z.string().min(1),
 	name: z.string().optional(),
@@ -56,12 +58,16 @@ export const parseIoIntelligenceModel = (model: IOIntelligenceModel): ModelInfo 
  * The catalog can be listed without an API key, while a Bearer key scopes the
  * visible models for the account (io.net exposes per-tier access). Prices are
  * published per token and normalized to per-million-token units.
+ *
+ * @param apiKey - Optional Bearer token that scopes the visible catalog.
+ * @param opts - Optional per-request controls; `signal` cancels the in-flight request.
  */
-export async function getIOIntelligenceModels(apiKey?: string): Promise<ModelRecord> {
+export async function getIOIntelligenceModels(apiKey?: string, opts?: { signal?: AbortSignal }): Promise<ModelRecord> {
 	try {
 		const response = await axios.get(`${IO_INTELLIGENCE_BASE_URL}/models`, {
 			headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
 			timeout: 10_000,
+			signal: opts?.signal,
 		})
 		const responseResult = ioIntelligenceModelsResponseSchema.safeParse(response.data)
 		if (!responseResult.success) {
@@ -90,6 +96,10 @@ export async function getIOIntelligenceModels(apiKey?: string): Promise<ModelRec
 
 		return models
 	} catch (error) {
+		// Surface cancellation as a rejection: logging and returning here would
+		// present an aborted fetch to callers as a successful (empty) catalog.
+		throwIfAborted(opts?.signal)
+
 		console.error(`Error fetching IO Intelligence models: ${getSafeErrorMessage(error, apiKey)}`)
 		return {}
 	}
