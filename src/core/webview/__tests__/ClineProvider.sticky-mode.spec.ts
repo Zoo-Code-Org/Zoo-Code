@@ -778,31 +778,70 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 
 		it("does not load a temporary-id entry that an earlier session wrote", async () => {
-			const fresh = new ClineProvider(
-				mockContext,
-				mockOutputChannel,
-				"sidebar",
-				new ContextProxy(mockContext),
-				new WebviewFocusTracker(),
-			)
-
 			// Temporary names restart from 0 on every host start, so storage can still hold
-			// an entry under this instance's name from a previous session. The constructor
-			// load must not adopt it.
-			const sharedGet = mockContext.globalState.get
-			mockContext.globalState.get = vi.fn().mockImplementation((key: string) => {
-				if (key === "viewStates")
-					return { [fresh.viewId]: { mode: "architect", currentApiConfigName: "stale-profile" } }
-				return sharedGet(key)
+			// an entry under this instance's name from a previous session. Seed the entry
+			// through the ContextProxy before the provider is constructed so the ordinary
+			// loadViewState read (which goes through the proxy cache) actually sees it.
+			const tempId = `sidebar-${ClineProvider["nextViewId"]}`
+			const proxy = new ContextProxy(mockContext)
+			await proxy.setValue("viewStates", {
+				[tempId]: { mode: "architect", currentApiConfigName: "stale-profile" },
 			})
 
-			await fresh["loadViewState"]()
+			const fresh = new ClineProvider(mockContext, mockOutputChannel, "sidebar", proxy, new WebviewFocusTracker())
+			expect(fresh.viewId).toBe(tempId)
+
+			// Let the constructor's fire-and-forget loadViewState settle.
+			await new Promise((resolve) => setTimeout(resolve, 10))
+
+			// The unowned temporary-id entry must not be adopted...
 			expect(fresh["viewLocalState"]).toStrictEqual({})
 
-			// The shared values still win, so the stale entry cannot reach getState().
+			// ...and the shared values still win, so the stale entry cannot reach getState().
 			const state = await fresh.getState()
 			expect(state.mode).toBe("code")
 			expect(state.currentApiConfigName).not.toBe("stale-profile")
+		})
+
+		it("does not merge a stale temporary-id entry into this instance's first durable write", async () => {
+			// A first write under an unowned temporary id claims the slot: fields left by an
+			// earlier session under the same name must not be adopted (and later re-keyed to
+			// the stable id) by merging into the colliding entry.
+			const tempId = `sidebar-${ClineProvider["nextViewId"]}`
+			const proxy = new ContextProxy(mockContext)
+			await proxy.setValue("viewStates", { [tempId]: { currentApiConfigName: "old-profile", updatedAt: 1 } })
+
+			const fresh = new ClineProvider(mockContext, mockOutputChannel, "sidebar", proxy, new WebviewFocusTracker())
+			expect(fresh.viewId).toBe(tempId)
+
+			await fresh.saveViewState("mode", "code")
+
+			const states = fresh["getPersistedViewStates"]({ fresh: true })
+			expect(states[tempId]).toEqual({ mode: "code", updatedAt: expect.any(Number) })
+			expect(fresh["viewLocalState"].currentApiConfigName).toBeUndefined()
+		})
+
+		it("does not mark the temporary id as authored when the durable write fails", async () => {
+			// Authorship must be recorded only after the write lands: a failed persistence
+			// that still marked the id owned would let a later load adopt an entry that was
+			// never actually stored.
+			const tempId = `sidebar-${ClineProvider["nextViewId"]}`
+			const proxy = new ContextProxy(mockContext)
+			const fresh = new ClineProvider(mockContext, mockOutputChannel, "sidebar", proxy, new WebviewFocusTracker())
+			expect(fresh.viewId).toBe(tempId)
+
+			const originalUpdate = mockContext.globalState.update
+			mockContext.globalState.update = vi.fn().mockImplementation((key: string, value: unknown) => {
+				if (key === "viewStates") {
+					return Promise.reject(new Error("storage unavailable"))
+				}
+				return Promise.resolve()
+			})
+
+			await expect(fresh.saveViewState("mode", "code")).rejects.toThrow("storage unavailable")
+			expect(fresh["wroteUnderTemporaryViewStateId"]).toBe(false)
+
+			mockContext.globalState.update = originalUpdate
 		})
 
 		it("does not adopt an entry under the temporary name that this instance never wrote", async () => {
