@@ -701,12 +701,9 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			// reported as a failed tool error - but the destination write was
 			// made on disk and must still be covered by the checkpoint/journal.
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
-			expect(mockedCheckpointSave).toHaveBeenCalledWith(
-				mockTask as Task,
-				false,
-				true,
-				[expect.objectContaining({ path: "src/new-location.ts", operation: "update" })],
-			)
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask as Task, false, true, [
+				expect.objectContaining({ path: "src/new-location.ts", operation: "update" }),
+			])
 			expect(mockTask.recordToolError).toHaveBeenCalledWith("apply_patch")
 			expect(mockPushToolResult).toHaveBeenCalledWith(
 				expect.stringContaining("could not delete the original file"),
