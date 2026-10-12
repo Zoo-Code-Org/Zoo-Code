@@ -307,71 +307,78 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		// Set when this execute() opens its own partial tool ask (diff-view branch), so
 		// the catch below can finalize it. Undefined on the saveDirectly branch.
 		let pendingPartialAsk: string | undefined
-		// Set once the approved write has reached disk (saveDirectly or saveChanges resolved).
-		// After that point the preview holds the user-approved content, not an unapproved
-		// draft: the catch teardown must stop touching it (see the finally below).
-		let approvedWriteLanded = false
 
 		if (!relPath) {
 			task.consecutiveMistakeCount++
 			task.recordToolError("write_to_file")
-			pushToolResult(await task.sayAndCreateMissingParamError("write_to_file", "path"))
-
-			// Returning here skips the try/catch teardown below: release THIS task's stream
-			// state (and only this task's) so the abort listener and any streamFailed guard do
-			// not outlive the call.
-			this.releasePartialStreamBookkeeping(task)
-			await task.diffViewProvider.reset()
+			try {
+				pushToolResult(await task.sayAndCreateMissingParamError("write_to_file", "path"))
+			} finally {
+				// Returning here skips the try/catch teardown below: release THIS task's stream
+				// state (and only this task's) so the abort listener and any streamFailed guard do
+				// not outlive the call. The finally also covers a rejected report: Task.dispose()
+				// drops listeners but never the per-task map entry, so a report that cannot be
+				// delivered must not strand the entry - the rejection still propagates after the
+				// teardown. The guarded reset keeps a failing reset() from replacing that rejection.
+				this.releasePartialStreamBookkeeping(task)
+				await this.resetDiffViewAfterWrite(task)
+			}
 			return
 		}
 
 		if (newContent === undefined) {
 			task.consecutiveMistakeCount++
 			task.recordToolError("write_to_file")
-			pushToolResult(await task.sayAndCreateMissingParamError("write_to_file", "content"))
-
-			// Returning here skips the try/catch teardown below: release THIS task's stream
-			// state (and only this task's) so the abort listener and any streamFailed guard do
-			// not outlive the call.
-			this.releasePartialStreamBookkeeping(task)
-			await task.diffViewProvider.reset()
+			try {
+				pushToolResult(await task.sayAndCreateMissingParamError("write_to_file", "content"))
+			} finally {
+				// Same rule as the missing-path exit above: the release and the reset run even
+				// when the report itself rejects.
+				this.releasePartialStreamBookkeeping(task)
+				await this.resetDiffViewAfterWrite(task)
+			}
 			return
 		}
 
 		const accessAllowed = task.rooIgnoreController?.validateAccess(relPath)
 
 		if (!accessAllowed) {
-			await task.say("rooignore_error", relPath)
-			pushToolResult(formatResponse.rooIgnoreError(relPath))
-
-			// Returning here skips the try/catch teardown below: release THIS task's stream
-			// state (and only this task's) so the abort listener and any streamFailed guard do
-			// not outlive the call.
-			this.releasePartialStreamBookkeeping(task)
-			// Streaming is not gated by this check - open() never consults rooignore - so the
-			// denied call can still be holding a preview full of content that will never be
-			// approved. Leaving it open hands the next write a live editor containing someone
-			// else's unapproved content.
-			if (task.diffViewProvider.isEditing) {
-				const discardError = await this.discardUnapprovedStreamBeforeReset(task)
-				if (discardError) {
-					await task
-						.say(
-							"error",
-							`write_to_file could not discard the preview for the denied write: ${discardError.message}`,
-						)
-						.catch((sayError) => {
-							console.error("Error reporting write_to_file discard failure:", sayError)
-						})
+			try {
+				await task.say("rooignore_error", relPath)
+				pushToolResult(formatResponse.rooIgnoreError(relPath))
+			} finally {
+				// Returning here skips the try/catch teardown below: release THIS task's stream
+				// state (and only this task's) so the abort listener and any streamFailed guard do
+				// not outlive the call. The finally earns its keep when the report itself rejects:
+				// Task.dispose() drops listeners but never the per-task map entry, so a rejected
+				// rooignore report must not strand the entry, the preview, or the adopted
+				// directories - the rejection still propagates after the teardown.
+				this.releasePartialStreamBookkeeping(task)
+				// Streaming is not gated by this check - open() never consults rooignore - so the
+				// denied call can still be holding a preview full of content that will never be
+				// approved. Leaving it open hands the next write a live editor containing someone
+				// else's unapproved content.
+				if (task.diffViewProvider.isEditing) {
+					const discardError = await this.discardUnapprovedStreamBeforeReset(task)
+					if (discardError) {
+						await task
+							.say(
+								"error",
+								`write_to_file could not discard the preview for the denied write: ${discardError.message}`,
+							)
+							.catch((sayError) => {
+								console.error("Error reporting write_to_file discard failure:", sayError)
+							})
+					}
 				}
+				// A delta that adopted parent directories before any diff view existed still owns
+				// them here: reset() drops the recorded list without touching disk, so on the no-editor
+				// path the directories of a denied write would stay on disk. When a session IS editing
+				// the provider owns them and the discard above has already removed them, which is why
+				// this runs after it and guards on isEditing itself.
+				await this.releaseEarlyDirectories(task)
+				await this.resetDiffViewAfterWrite(task)
 			}
-			// A delta that adopted parent directories before any diff view existed still owns
-			// them here: reset() drops the recorded list without touching disk, so on the no-editor
-			// path the directories of a denied write would stay on disk. When a session IS editing
-			// the provider owns them and the discard above has already removed them, which is why
-			// this runs after it and guards on isEditing itself.
-			await this.releaseEarlyDirectories(task)
-			await this.resetDiffViewAfterWrite(task)
 			return
 		}
 
@@ -470,7 +477,6 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				}
 
 				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
-				approvedWriteLanded = true
 			} else {
 				if (!task.diffViewProvider.isEditing) {
 					const partialMessage = JSON.stringify(sharedMessageProps)
@@ -505,7 +511,6 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				}
 
 				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
-				approvedWriteLanded = true
 			}
 
 			if (relPath) {
@@ -552,10 +557,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				// though isEditing is still true (reset() runs later on the success path). Discarding a
 				// landed write would rmdir() the directory that now holds the approved file (ENOTEMPTY),
 				// close its tab, and - if the user typed into the buffer meanwhile - overwrite the
-				// approved content with a blank or reverted buffer. The failure to report is the
-				// post-save step that rejected, not the write; the reset() and the release below still
-				// run, so nothing leaks.
-				if (task.diffViewProvider.isEditing && !approvedWriteLanded) {
+				// approved content with a blank or reverted buffer. The provider records the commit
+				// the moment the content is on disk, so the flag also covers a saveChanges()/
+				// saveDirectly() that rejects in its POST-commit processing (tab handling, preview
+				// restoration, diagnostics): the failure to report is that bookkeeping, not the
+				// write. The reset() and the release below still run, so nothing leaks.
+				if (task.diffViewProvider.isEditing && !task.diffViewProvider.approvedSaveCommitted) {
 					const discardError = await this.discardUnapprovedStreamBeforeReset(task)
 					if (discardError) {
 						// The report must not own the teardown: Task.say() throws once the task is

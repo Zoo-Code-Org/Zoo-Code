@@ -833,6 +833,23 @@ describe("DiffViewProvider", () => {
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
 		})
 
+		it("records the commit even when post-write processing rejects", async () => {
+			// The direct write is on disk once fs.writeFile resolves; the document open and the
+			// diagnostics collection after it are post-commit processing. A rejection there must not
+			// make WriteToFileTool's teardown treat the write as unlanded - the PREVENT_FOCUS_DISRUPTION
+			// branch has no diff view, but the flag keeps the failure semantics identical across both
+			// write paths.
+			vi.mocked(vscode.window.showTextDocument).mockRejectedValue(new Error("editor open failed"))
+
+			await expect(diffViewProvider.saveDirectly("test.ts", "new content", true, false, 1000)).rejects.toThrow(
+				"editor open failed",
+			)
+
+			const fs = await import("fs/promises")
+			expect(fs.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
+			expect(diffViewProvider.approvedSaveCommitted).toBe(true)
+		})
+
 		it("should skip diagnostics when diagnosticsEnabled is false", async () => {
 			const mockDelay = vi.mocked(delay)
 			mockDelay.mockClear()
@@ -2361,6 +2378,36 @@ describe("DiffViewProvider", () => {
 
 			expect(save).toHaveBeenCalledTimes(1)
 			expect(diffViewProvider["placeholderPath"]).toBeUndefined()
+		})
+
+		it("records the persistence commit before post-save processing, visible when that rejects", async () => {
+			// saveChanges() keeps awaiting after the save lands: tab handling, preview restoration,
+			// diagnostics. WriteToFileTool's teardown must be able to tell "the write failed" from
+			// "the write landed and its bookkeeping failed" - discarding a landed write would blank or
+			// revert the buffer over approved content. The commit is recorded the moment save() lands,
+			// so a post-save rejection still leaves the state set for the caller.
+			const save = vi.fn().mockResolvedValue(true)
+			ownedSaveSetup(save)
+			Object.assign(diffViewProvider, { keepOrCloseEditedFile: vi.fn().mockRejectedValue(new Error("tab handling failed")) })
+
+			await expect(diffViewProvider.saveChanges(false, 0)).rejects.toThrow("tab handling failed")
+
+			expect(save).toHaveBeenCalledTimes(1)
+			expect(diffViewProvider.approvedSaveCommitted).toBe(true)
+		})
+
+		it("clears the recorded commit in reset()", async () => {
+			// reset() ends the edit cycle: the next write starts with no commit recorded, or a failed
+			// save of the next edit would be mistaken for a landed one and skip its discard.
+			const save = vi.fn().mockResolvedValue(true)
+			ownedSaveSetup(save)
+
+			await expect(diffViewProvider.saveChanges(false, 0)).resolves.toBeDefined()
+			expect(diffViewProvider.approvedSaveCommitted).toBe(true)
+
+			await diffViewProvider.reset()
+
+			expect(diffViewProvider.approvedSaveCommitted).toBe(false)
 		})
 
 		it("removes the placeholder that a new-file open() wrote, driven through the public methods", async () => {

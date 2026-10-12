@@ -55,6 +55,15 @@ export class DiffViewProvider {
 	 * unlink.
 	 */
 	private placeholderPath: string | undefined
+	/**
+	 * Set the moment an approved write is confirmed on disk - after save() reports success in
+	 * saveChanges(), after the direct write in saveDirectly() - and cleared by reset().
+	 * WriteToFileTool's catch teardown reads it: saveChanges()/saveDirectly() keep awaiting after
+	 * the commit (tab handling, preview restoration, diagnostics), and a rejection in that
+	 * post-commit processing must not send the teardown into a discard that would overwrite the
+	 * approved content with a blanked or reverted buffer.
+	 */
+	approvedSaveCommitted = false
 	private documentWasOpen = false
 	// Tracks whether the target file's tab was pinned before the diff session.
 	// Closing the tab to open the diff drops VS Code's pin state, so we restore
@@ -114,6 +123,7 @@ export class DiffViewProvider {
 
 	async open(relPath: string): Promise<void> {
 		this.relPath = relPath
+		this.approvedSaveCommitted = false
 		const fileExists = this.editType === "modify"
 		const absolutePath = path.resolve(this.cwd, relPath)
 		this.isEditing = true
@@ -378,6 +388,12 @@ export class DiffViewProvider {
 				throw new DocumentSaveFailedError(absolutePath)
 			}
 		}
+
+		// The approved content is on disk from here on - a clean buffer already held it, a dirty
+		// one just saved it - even if the post-save processing below rejects. Record the commit
+		// before the first post-commit await so the caller's teardown can tell "the write failed"
+		// from "the write landed and its bookkeeping failed".
+		this.approvedSaveCommitted = true
 
 		// Ownership is released only once the approved write has landed. A save that rejects leaves
 		// the placeholder as open() created it, and the caller's teardown still has to remove it:
@@ -1367,6 +1383,7 @@ export class DiffViewProvider {
 		await this.closeAllDiffViews()
 		this.editType = undefined
 		this.isEditing = false
+		this.approvedSaveCommitted = false
 		this.originalContent = undefined
 		this.createdDirs = []
 		this.placeholderPath = undefined
@@ -1414,6 +1431,9 @@ export class DiffViewProvider {
 		// Write the content directly to the file
 		await createDirectoriesForFile(absolutePath)
 		await fs.writeFile(absolutePath, content, "utf-8")
+		// The approved content is on disk from this line on; the document open, delay, and
+		// diagnostics collection below are post-commit processing that may still reject.
+		this.approvedSaveCommitted = true
 
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory

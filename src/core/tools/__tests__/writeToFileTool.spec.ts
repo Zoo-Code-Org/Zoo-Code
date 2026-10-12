@@ -158,6 +158,10 @@ describe("writeToFileTool", () => {
 		mockCline.diffViewProvider = {
 			editType: undefined,
 			isEditing: false,
+			// Real providers record the commit the moment approved content is on disk (saveChanges
+			// or saveDirectly) and clear it in reset(); the mock starts it false and tests set it
+			// where the contract says it must be set.
+			approvedSaveCommitted: false,
 			originalContent: "",
 			open: vi.fn().mockResolvedValue(undefined),
 			update: vi.fn().mockResolvedValue(undefined),
@@ -784,6 +788,8 @@ describe("writeToFileTool", () => {
 			// file (ENOTEMPTY), close its tab, and can overwrite the approved content with a
 			// blanked or reverted buffer.
 			mockCline.diffViewProvider.isEditing = true
+			// saveChanges() resolved, so per the provider contract the commit is recorded.
+			mockCline.diffViewProvider.approvedSaveCommitted = true
 			mockCline.diffViewProvider.pushToolWriteResult.mockRejectedValue(new Error("task aborted"))
 			const state = writeToFileTool["getTaskPartialStreamState"](mockCline)
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
@@ -803,6 +809,97 @@ describe("writeToFileTool", () => {
 					expect.objectContaining({ message: "task aborted" }),
 				)
 			} finally {
+				writeToFileTool["taskPartialStreamState"].clear()
+			}
+		})
+		it("skips the discard when saveChanges rejects after its commit landed", async () => {
+			// saveChanges() awaits after the save lands (tab handling, preview restoration,
+			// diagnostics). When one of those rejects, the provider has already recorded the
+			// commit, so the teardown must treat this as a landed write: the failure to report is
+			// the bookkeeping, and a discard now would blank or revert the buffer over approved
+			// content.
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.diffViewProvider.approvedSaveCommitted = true
+			mockCline.diffViewProvider.saveChanges.mockRejectedValue(new Error("post-save processing failed"))
+			const state = writeToFileTool["getTaskPartialStreamState"](mockCline)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			try {
+				await executeWriteFileTool({})
+
+				expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, state.abortCleanup)
+				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+				expect(mockHandleError).toHaveBeenCalledWith(
+					"writing file",
+					expect.objectContaining({ message: "post-save processing failed" }),
+				)
+			} finally {
+				writeToFileTool["taskPartialStreamState"].clear()
+			}
+		})
+
+		it("releases the per-task state when the missing-parameter report itself rejects", async () => {
+			// The missing-parameter exits return before the write body's try/catch, so their own
+			// teardown is the only release. Awaiting the report unguarded let a rejected report
+			// (Task.say throws once the task is aborted) escape before the release: Task.dispose()
+			// drops listeners but never the per-task map entry, so the abort that broke the
+			// report leaked the entry the report described.
+			mockCline.sayAndCreateMissingParamError.mockRejectedValue(new Error("report failed"))
+			const state = writeToFileTool["getTaskPartialStreamState"](mockCline)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			// Driven through handle() directly: the shared helper backfills nativeArgs from the
+			// defaults, and it is the parsed nativeArgs that reach execute() - a block genuinely
+			// without a path has to be built by hand.
+			const block = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: { content: "content without a path" },
+				nativeArgs: { content: "content without a path" },
+				partial: false,
+			} as ToolUse<"write_to_file">
+
+			try {
+				await expect(
+					writeToFileTool.handle(mockCline, block, {
+						askApproval: mockAskApproval,
+						handleError: mockHandleError,
+						pushToolResult: vi.fn(),
+					}),
+				).rejects.toThrow("report failed")
+
+				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, state.abortCleanup)
+				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			} finally {
+				mockCline.sayAndCreateMissingParamError.mockResolvedValue("Missing param error")
+				writeToFileTool["taskPartialStreamState"].clear()
+			}
+		})
+
+		it("releases the per-task state and the preview when the rooignore report rejects", async () => {
+			// Same rule on the rooignore exit: the denied call can still hold a preview full of
+			// content that will never be approved, and the entry and its listener are still ours
+			// to drop. A rejected rooignore report must not strand any of them.
+			mockCline.diffViewProvider.isEditing = true
+			mockCline.say.mockRejectedValue(new Error("report failed"))
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const state = writeToFileTool["getTaskPartialStreamState"](mockCline)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+
+			try {
+				await expect(executeWriteFileTool({}, { accessAllowed: false })).rejects.toThrow("report failed")
+
+				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, state.abortCleanup)
+				expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+				// The preview of the denied write is still discarded, and the reset still runs.
+				expect(mockCline.diffViewProvider.discardUnapprovedStream).toHaveBeenCalledTimes(1)
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalledTimes(1)
+			} finally {
+				errorSpy.mockRestore()
+				mockCline.say.mockResolvedValue(undefined)
 				writeToFileTool["taskPartialStreamState"].clear()
 			}
 		})
