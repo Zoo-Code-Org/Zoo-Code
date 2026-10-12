@@ -1072,6 +1072,33 @@ describe("writeToFileTool", () => {
 			expect(mockHandleError).toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
 		})
 
+		it("removes the adopted directories when the completed block fails to parse after an empty-content stream", async () => {
+			// A new-file delta creates and adopts the parent directories before the diff view
+			// exists, and an empty content stream skips open() entirely - no editor ever takes
+			// ownership of them. When the completed call then fails to parse, the parse-failure
+			// teardown resets the provider, and reset() drops the adopted list without touching
+			// disk: the directories of a write that never happened would stay on disk with no
+			// owner left to remove them.
+			await executeWriteFileTool({ content: "" }, { isPartial: true })
+			await executeWriteFileTool({ content: "" }, { isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+
+			const block = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: {},
+			} as ToolUse<"write_to_file">
+			await writeToFileTool.handle(mockCline, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockCline.diffViewProvider.removeAdoptedDirectories).toHaveBeenCalledTimes(1)
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		})
+
 		it("releases the per-task stream state when content is missing", async () => {
 			// The missing-content return sits before execute()'s guarded scope, so it needs its own
 			// release. The state is seeded first so the assertion proves a release happened rather

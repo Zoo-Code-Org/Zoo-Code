@@ -331,6 +331,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 		this.resetTaskPartialState(task)
 		const rollbackError = await this.discardUnapprovedStreamBeforeReset(task)
+		// Same reason as the validation-rejection release: reset() drops the directories a
+		// delta adopted without touching disk, and an empty-content stream adopts them yet
+		// never opens a view to own them - a completed call that then fails to parse would
+		// leave the parent directories of a write that never happened on disk with no owner.
+		await this.releaseEarlyDirectories(task)
 		await this.resetDiffViewAfterWrite(task)
 
 		// A failed rollback is the more actionable failure (debris is still on disk), so it takes
