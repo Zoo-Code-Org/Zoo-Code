@@ -1,46 +1,48 @@
 <!--
 Thank you for contributing to Zoo Code!
 
-Before submitting your PR, please ensure:
-- It's linked to an approved GitHub Issue.
-- You've reviewed our [Contributing Guidelines](../CONTRIBUTING.md).
+Before you submit your PR, make sure of these points:
+- It links to an approved GitHub Issue.
+- You read our [Contributing Guidelines](../CONTRIBUTING.md).
+- Write in Simplified Technical English (ASD-STE100): short sentences, plain words, active voice, one idea per sentence, no contractions. Keep the title short and specific.
 -->
 
 ### Related GitHub Issue
 
 <!-- Every PR MUST be linked to an approved issue. -->
 
-Closes: # <!-- Replace with the issue number, e.g., Closes: #123 -->
+Closes: # <!-- Replace with the issue number, for example, Closes: #123 -->
 
 ### Description
 
 <!--
-Briefly summarize the changes in this PR and how they address the linked issue.
-The issue should cover the "what" and "why"; this section should focus on:
-- The "how": key implementation details, design choices, or trade-offs made.
-- Anything specific reviewers should pay attention to in this PR.
+Summarize the changes in this PR and how they solve the linked issue.
+The issue covers the "what" and the "why". This section covers:
+- The "how": key implementation details, design choices, and trade-offs.
+- Anything reviewers must check with care.
 -->
 
 ### Test Procedure
 
 <!--
-Detail the steps to test your changes. This helps reviewers verify your work.
-- How did you test this specific implementation? (e.g., unit tests, manual testing steps)
-- How can reviewers reproduce your tests or verify the fix/feature?
-- Include relevant testing environment details if applicable.
+Write the steps that test your changes. This helps reviewers check your work.
+- How did you test this change? (for example, unit tests or manual steps)
+- How can reviewers repeat your tests or check the fix or feature?
+- Add the test environment details if they matter.
 -->
 
 ### Pre-Submission Checklist
 
-<!-- Go through this checklist before marking your PR as ready for review. -->
+<!-- Complete this checklist before you mark your PR as ready for review. -->
 
 - [ ] **Issue Linked**: This PR is linked to an approved GitHub Issue (see "Related GitHub Issue" above).
 - [ ] **Scope**: My changes are focused on the linked issue (one major feature/fix per PR).
-- [ ] **Self-Review**: I have performed a thorough self-review of my code.
+- [ ] **Self-Review**: I reviewed my own code with care.
+- [ ] **Writing Style**: The PR title and description use Simplified Technical English (ASD-STE100): short sentences, plain words, active voice, one idea per sentence, no contractions.
 - [ ] **Testing**: New and/or updated tests have been added to cover my changes (if applicable).
-- [ ] **Visual Snapshot** (UI changes only): If a user would notice this change at a glance (layout, theme tokens, brand elements, empty/error states), I've added or updated a `*.visual.tsx` snapshot in `webview-ui/`. See `webview-ui/AGENTS.md` → "When a UI change needs a snapshot".
-- [ ] **Documentation Impact**: I have considered if my changes require documentation updates (see "Documentation Updates" section below).
-- [ ] **Contribution Guidelines**: I have read and agree to the [Contributor Guidelines](/CONTRIBUTING.md).
+- [ ] **Visual Snapshot** (UI changes only): If a user would notice this change at a glance (layout, theme tokens, brand elements, empty/error states), I added or updated a `*.visual.tsx` snapshot in `webview-ui/`. See `webview-ui/AGENTS.md` → "When a UI change needs a snapshot".
+- [ ] **Documentation Impact**: I checked if my changes need documentation updates (see "Documentation Updates" section below).
+- [ ] **Contribution Guidelines**: I read and agree to the [Contributor Guidelines](/CONTRIBUTING.md).
 
 ### Visual Snapshots
 
@@ -72,17 +74,17 @@ interaction has a distinct rendered state worth protecting, still commit a
 ### Documentation Updates
 
 <!--
-Does this PR necessitate updates to user-facing documentation?
+Does this PR need updates to user-facing documentation?
 - [ ] No documentation updates are required.
-- [ ] Yes, documentation updates are required. (Please describe what needs to be updated or link to a PR in the docs repository).
+- [ ] Yes, documentation updates are required. (Describe what to update, or link to a PR in the docs repository).
 -->
 
 ### Additional Notes
 
-<!-- Add any other context, questions, or information for reviewers here. -->
+<!-- Add any other facts or questions for reviewers here. -->
 
 ### Get in Touch
 
 <!--
-Please provide your Discord username for reviewers or maintainers to reach you if they have questions about your PR
+Write your Discord username. Reviewers and maintainers use it to contact you if they have questions about your PR
 -->
