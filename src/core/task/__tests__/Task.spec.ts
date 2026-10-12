@@ -6143,6 +6143,31 @@ describe("Cline", () => {
 			expect(saveSpy).not.toHaveBeenCalled()
 		})
 
+		it("does not record a baseline when cancellation arrives during the state lookup", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "racy baseline task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const saveSpy = vi.spyOn(task, "checkpointSave").mockResolvedValue(undefined)
+			const state = await mockProvider.getState()
+			type StateResult = Awaited<ReturnType<typeof mockProvider.getState>>
+			let resolveState: (value: StateResult | PromiseLike<StateResult>) => void = () => {}
+			const statePromise = new Promise<StateResult>((resolve) => (resolveState = resolve))
+			vi.spyOn(mockProvider, "getState").mockReturnValue(statePromise)
+
+			const loopPromise = taskAccess.initiateTaskLoop([])
+			// Cancellation lands while the state lookup is still pending.
+			task.abort = true
+			resolveState({ ...state, perWriteCheckpoints: true })
+			await loopPromise
+
+			// The post-lookup recheck must skip the save for the canceled task.
+			expect(saveSpy).not.toHaveBeenCalled()
+		})
+
 		it("awaits the baseline checkpoint before entering the request loop", async () => {
 			const task = new Task({
 				provider: mockProvider,

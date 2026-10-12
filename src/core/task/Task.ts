@@ -3717,7 +3717,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (!this.taskStartBaselineDone && !this._isHistoryTask && !this.abort) {
 			this.taskStartBaselineDone = true
 			const baselineEnabled = (await this.providerRef.deref()?.getState())?.perWriteCheckpoints
-			if (baselineEnabled !== false) {
+			// Cancellation can arrive while the state lookup is pending; recheck
+			// before the save so a canceled task performs no checkpoint work.
+			if (baselineEnabled !== false && !this.abort) {
 				// allowEmpty=true so a clean workspace still produces the baseline
 				// commit; awaited so the first per-write checkpoint cannot interleave.
 				await this.checkpointSave(true, true)
