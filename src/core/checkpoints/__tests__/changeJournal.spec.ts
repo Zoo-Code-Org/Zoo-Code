@@ -114,7 +114,9 @@ describe("changeJournal", () => {
 			// Corrupt the first line in place, then append a valid entry after it.
 			await fs.writeFile(
 				journalPath(tmpRoot, taskId),
-				'"{"path":"src/corrupt.ts","operation":"update"\n' + JSON.stringify(entry({ checkpointId: "after" })) + "\n",
+				'"{"path":"src/corrupt.ts","operation":"update"\n' +
+					JSON.stringify(entry({ checkpointId: "after" })) +
+					"\n",
 			)
 
 			const result = await loadChanges(tmpRoot, taskId)
