@@ -339,6 +339,25 @@ export function resolveEffectiveToolPolicy(input: EffectiveToolPolicyInput): Eff
 }
 
 /**
+ * The tool-policy inputs frozen for one API request: exactly the values that
+ * produced that request's tool requirements, captured when the request was
+ * built and consumed by every tool-call validation of its streaming response.
+ * Sharing one frozen view keeps the request's prompt and its validator from
+ * disagreeing about the effective tool policy when settings change mid-stream.
+ *
+ * Fields mirror the optionality of the provider-state read they come from: a
+ * provider state that resolves without these settings legitimately yields a
+ * snapshot whose fields are undefined — parity with the prompt build, which
+ * tolerates the same absence.
+ */
+export interface RequestPolicySnapshot {
+	disabledTools?: string[]
+	experiments?: Record<string, boolean>
+	customModes?: ModeConfig[]
+	modelInfo?: ModelInfo
+}
+
+/**
  * Builds the runtime `toolRequirements` map (tool name → false) from every entry
  * in the user and model exclusion lists.
  * A requirements entry outranks the always-available class in `validateToolUse`,

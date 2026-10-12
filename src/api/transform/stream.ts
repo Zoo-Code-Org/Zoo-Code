@@ -87,11 +87,19 @@ export interface ApiStreamToolCallDeltaChunk {
 	type: "tool_call_delta"
 	id: string
 	delta: string
+	/**
+	 * Tool name for compound-key routing. Present when the delta is emitted by the
+	 * raw-chunk path (processRawChunk), where same-ID calls must keep distinct
+	 * accumulators; legacy provider streams may omit it.
+	 */
+	name?: string
 }
 
 export interface ApiStreamToolCallEndChunk {
 	type: "tool_call_end"
 	id: string
+	/** Tool name for compound-key deduplication (present when emitted by finalizeRawChunks) */
+	name?: string
 }
 
 /**

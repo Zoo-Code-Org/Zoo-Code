@@ -30,6 +30,7 @@ import { IpcServer } from "@roo-code/ipc"
 import { Package } from "../shared/package"
 import { getAllModes, type Mode } from "../shared/modes"
 import { ClineProvider } from "../core/webview/ClineProvider"
+import type { ClineProviderFactory } from "../core/webview/ClineProviderFactory"
 import type { Task } from "../core/task/Task"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
@@ -63,6 +64,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 	constructor(
 		outputChannel: vscode.OutputChannel,
 		provider: ClineProvider,
+		private readonly providerFactory: ClineProviderFactory,
 		socketPath?: string,
 		enableLogging = false,
 	) {
@@ -211,7 +213,11 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 			}
 
 			// A fresh tab: reusing the tracked tab would evict the task it is already serving.
-			provider = await createClineTabPanel({ context: this.context, outputChannel: this.outputChannel })
+			provider = await createClineTabPanel({
+				context: this.context,
+				outputChannel: this.outputChannel,
+				webviewFocusTracker: this.sidebarProvider.webviewFocusTracker,
+			})
 			this.registerListeners(provider)
 		} else {
 			await vscode.commands.executeCommand(`${Package.name}.SidebarProvider.focus`)
@@ -247,8 +253,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
 		await provider.postMessageToWebview({ type: "invoke", invoke: "newChat", text, images })
 
+		// API-driven tasks never stop to ask the user, so the hard stop is
+		// effectively unlimited. The soft repetition tier is disabled too:
+		// without a reachable hard stop it would reject every identical call
+		// with no escalation.
 		const options: CreateTaskOptions = {
 			consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
+			toolRepetitionSoftLimit: 0,
 		}
 
 		const task = await provider.createTask(text, images, undefined, options, configuration)

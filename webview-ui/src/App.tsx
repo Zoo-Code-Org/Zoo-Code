@@ -203,6 +203,18 @@ const App = () => {
 		}
 	}, [telemetrySetting, telemetryKey, machineId, vscodeTelemetryEnabled, didHydrateState])
 
+	// Window activation and programmatic focus do not identify a chat interaction.
+	// (webviewDidLaunch is posted by ExtensionStateContext once the view state is
+	// hydrated; re-posting it here would double the launch message.)
+	useEffect(() => {
+		const onInteraction = () => vscode.postMessage({ type: "webviewDidFocus" })
+		document.addEventListener("pointerdown", onInteraction, true)
+		document.addEventListener("keydown", onInteraction, true)
+		return () => {
+			document.removeEventListener("pointerdown", onInteraction, true)
+			document.removeEventListener("keydown", onInteraction, true)
+		}
+	}, [])
 	// Initialize source map support for better error reporting
 	useEffect(() => {
 		// Initialize source maps for better error reporting in production

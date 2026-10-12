@@ -24,6 +24,8 @@ import {
 	sanitizeToolNameSurrogates,
 } from "../transform/vscode-lm-format"
 
+import { CONTEXT_WINDOW_EXCEEDED_STATUS } from "../../core/context/context-management/context-error-handling"
+
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
@@ -94,7 +96,11 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
  * contain bare markup, so passing it through is the safer default rather than a security boundary.
  * Widening to the bare case needs a reproduction first.
  */
-/** Upper bound on an incomplete `<invoke ...` tail held back between chunks. */
+// Latching on a bare `<invoke` would let any prose mentioning the tag stop real-time streaming for
+// the rest of the response, so the marker only counts once the `name="` attribute has arrived.
+const LEAKED_TOOL_CALL_START = /<\/?(?:antml:)?function_calls(?:\s|>)|<(?:antml:)?invoke\s+name="/i
+
+/** Bounds generic tag fragments, not prefixes that can still become valid recovery markup. */
 const MAX_PARTIAL_INVOKE_CARRY = 64
 
 /**
@@ -221,12 +227,30 @@ function stripTagsCompletely(text: string): string {
  * be detected intact.
  */
 export function trailingPartialToolMarkerLength(text: string): number {
+	const tailStart = text.lastIndexOf("<")
+	const tail = text.slice(tailStart).toLowerCase()
+	if (
+		tailStart !== -1 &&
+		[
+			"<function_calls",
+			"</function_calls",
+			"<antml:function_calls",
+			"</antml:function_calls",
+			"<invoke",
+			"<antml:invoke",
+		].some((marker) => marker.startsWith(tail))
+	) {
+		return tail.length
+	}
+	// Whitespace in a valid unfinished opener has no length limit in the whole-input parser.
+	if (/<(?:antml:)?invoke\s+(?:n(?:a(?:m(?:e(?:=)?)?)?)?)?$/i.test(text)) {
+		return text.length - tailStart
+	}
 	const partialTag = text.match(/<(?:antml:)?[a-zA-Z_]*$/)
 	if (partialTag) {
 		return partialTag[0].length <= MAX_PARTIAL_INVOKE_CARRY ? partialTag[0].length : 0
 	}
-	// An `<invoke` whose `name="` attribute hasn't arrived yet: hold it back so the marker can
-	// latch on the next chunk, bounded so ordinary prose is never swallowed.
+	// Non-matching invoke fragments remain bounded so ordinary prose can resume streaming.
 	const partialInvoke = text.match(/<(?:antml:)?invoke\b[^<>]*$/i)
 	return partialInvoke && partialInvoke[0].length <= MAX_PARTIAL_INVOKE_CARRY ? partialInvoke[0].length : 0
 }
@@ -358,6 +382,210 @@ function declaredParamType(schema: Record<string, unknown> | undefined, paramNam
 }
 
 /**
+ * Context-window safety for Copilot's backend
+ * -------------------------------------------
+ * Copilot's backend enforces its own context window and, for third-party `sendRequest` callers,
+ * trims an over-window request in a way that is NOT tool-pair-aware: it can drop the assistant
+ * message holding a `tool_use` while keeping the matching `tool_result`, after which Anthropic
+ * rejects the request with "unexpected tool_use_id". To keep trimming on OUR side — where
+ * pairing is preserved — we shrink oversized `tool_result` payloads before sending. Only
+ * `tool_result` text is truncated (never `tool_use`, assistant text, summaries, or environment
+ * details), and only when the request would otherwise exceed the budget.
+ */
+
+/**
+ * Conservative characters-per-token ratio used to turn a token window into a character budget.
+ *
+ * `client.countTokens` is the model's real tokenizer, but it counts only a string: it cannot price
+ * the tool schemas, image placeholders, or per-message framing the backend adds, so it cannot give
+ * the true total for the request we are about to send. It is also an async, per-call RPC, and the
+ * budget is needed for every message on every turn. We therefore keep a character estimate here
+ * and stay deliberately conservative — 3 chars/token rather than the ~4 typical of English —
+ * because the token-dense JSON, logs, and code that dominate oversized tool results tokenize to
+ * fewer characters per token than prose. Under-counting biases toward trimming too early, which is
+ * recoverable; over-counting sends an over-window request, which is not.
+ */
+const VSCODE_LM_BUDGET_CHARS_PER_TOKEN = 3
+
+/**
+ * Fraction of the context window the *entire* input (system prompt + tool schemas + conversation)
+ * is allowed to occupy. The remaining headroom absorbs char/token estimation variance and any
+ * output/overhead the backend reserves.
+ */
+const VSCODE_LM_INPUT_BUDGET_FRACTION = 0.8
+
+/** A tool_result is never shrunk below this many characters, so a truncated result stays useful. */
+const MIN_TOOL_RESULT_CHARS = 2000
+
+/**
+ * Length charged for an image block. VS Code LM cannot carry image data, so
+ * `convertToVsCodeLmMessages` replaces each image with a sentence-long textual placeholder; this
+ * is that placeholder's approximate length.
+ */
+const IMAGE_PLACEHOLDER_CHARS = 64
+
+function readToolResultText(block: Anthropic.Messages.ContentBlockParam): string | undefined {
+	if (!block || (block as { type?: string }).type !== "tool_result") {
+		return undefined
+	}
+	const content = (block as Anthropic.Messages.ToolResultBlockParam).content
+	if (typeof content === "string") {
+		return content
+	}
+	if (Array.isArray(content)) {
+		return content
+			.filter((part): part is Anthropic.Messages.TextBlockParam => (part as { type?: string })?.type === "text")
+			.map((part) => part.text ?? "")
+			.join("")
+	}
+	return undefined
+}
+
+function writeToolResultText(block: Anthropic.Messages.ContentBlockParam, text: string): void {
+	const toolResult = block as Anthropic.Messages.ToolResultBlockParam
+	const content = toolResult.content
+	if (Array.isArray(content)) {
+		// Preserve any non-text parts (e.g. images) and collapse the text into one truncated part.
+		const nonText = content.filter((part) => (part as { type?: string })?.type !== "text")
+		toolResult.content = [{ type: "text", text }, ...nonText] as typeof content
+		return
+	}
+	toolResult.content = text
+}
+
+/**
+ * Drops a trailing lone high surrogate, whose low half was cut away. A lone surrogate cannot be
+ * encoded as UTF-8, and the backend 400s the whole request when one is present.
+ */
+function trimTrailingHighSurrogate(text: string): string {
+	return text.length > 0 && (text.charCodeAt(text.length - 1) & 0xfc00) === 0xd800 ? text.slice(0, -1) : text
+}
+
+/**
+ * Middle-out truncate `text` to at most `maxChars`, keeping the head and tail and replacing the
+ * middle with a marker noting how many characters were removed. Head/tail are preserved because
+ * logs and file dumps carry the most signal at their start (structure) and end (recent output).
+ */
+export function middleOutTruncate(text: string, maxChars: number): string {
+	if (maxChars <= 0) {
+		return ""
+	}
+	if (text.length <= maxChars) {
+		return text
+	}
+
+	const buildMarker = (removed: number) =>
+		`\n\n[... ${removed.toLocaleString("en-US")} characters truncated to fit the model context window ...]\n\n`
+
+	// Reserve room for the marker, sized against the original length so the result never grows.
+	const reservedMarkerLength = buildMarker(text.length).length
+	// A budget too small to hold the marker cannot describe its own truncation without breaking the
+	// maxChars promise this function makes to callers, so drop the marker and keep a bare head.
+	if (maxChars <= reservedMarkerLength) {
+		return trimTrailingHighSurrogate(text.slice(0, maxChars))
+	}
+	const keep = maxChars - reservedMarkerLength
+	const headLength = Math.ceil(keep / 2)
+	const tailLength = keep - headLength
+	const head = trimTrailingHighSurrogate(text.slice(0, headLength))
+	let tail = tailLength > 0 ? text.slice(text.length - tailLength) : ""
+	// Likewise, don't start the tail on a lone low surrogate (its high half is in the removed middle).
+	if (tail.length > 0 && (tail.charCodeAt(0) & 0xfc00) === 0xdc00) {
+		tail = tail.slice(1)
+	}
+	const removed = text.length - head.length - tail.length
+	return `${head}${buildMarker(removed)}${tail}`
+}
+
+/** Estimated character cost of a whole conversation, using the same accounting as truncation. */
+export function estimateMessagesChars(messages: Anthropic.Messages.MessageParam[]): number {
+	return messages.reduce((sum, message) => sum + estimateContentChars(message.content), 0)
+}
+
+function estimateContentChars(content: Anthropic.Messages.MessageParam["content"]): number {
+	if (typeof content === "string") {
+		return content.length
+	}
+	if (!Array.isArray(content)) {
+		return 0
+	}
+	let total = 0
+	for (const block of content) {
+		const type = (block as { type?: string })?.type
+		if (type === "text") {
+			total += (block as Anthropic.Messages.TextBlockParam).text?.length ?? 0
+		} else if (type === "tool_result") {
+			total += readToolResultText(block)?.length ?? 0
+		} else if (type === "tool_use") {
+			total += JSON.stringify((block as Anthropic.Messages.ToolUseBlockParam).input ?? {}).length
+		} else if (type === "image") {
+			// VS Code LM cannot send image data; convertToVsCodeLmMessages substitutes a textual
+			// placeholder, so charge that placeholder's real length rather than a token-sized guess.
+			total += IMAGE_PLACEHOLDER_CHARS
+		}
+	}
+	return total
+}
+
+/**
+ * Shrinks oversized `tool_result` payloads (largest first, middle-out) until the conversation fits
+ * `budgetChars`. Mutates the tool_result blocks of the supplied messages in place — callers pass a
+ * cloned array (see `createMessage`) so stored history is never mutated. A no-op when the
+ * conversation already fits. `remainingChars` is the post-truncation cost, equal to
+ * `estimateMessagesChars(messages)`, so callers need not re-scan.
+ */
+export function truncateToolResultsToFitWindow(
+	messages: Anthropic.Messages.MessageParam[],
+	budgetChars: number,
+): { messages: Anthropic.Messages.MessageParam[]; remainingChars: number } {
+	const initialTotal = () => messages.reduce((sum, message) => sum + estimateContentChars(message.content), 0)
+	if (!Number.isFinite(budgetChars) || budgetChars <= 0) {
+		return { messages, remainingChars: initialTotal() }
+	}
+
+	let total = initialTotal()
+	if (total <= budgetChars) {
+		return { messages, remainingChars: total }
+	}
+
+	// Collect every truncatable tool_result block, largest first. The text is derived once per
+	// block here because the comparator and the truncation loop below would otherwise re-derive it.
+	const blockText = new Map<Anthropic.Messages.ContentBlockParam, string>()
+	for (const message of messages) {
+		if (!Array.isArray(message.content)) {
+			continue
+		}
+		for (const block of message.content) {
+			const text = readToolResultText(block)
+			if (text !== undefined) {
+				blockText.set(block, text)
+			}
+		}
+	}
+	const toolResultBlocks = [...blockText.keys()]
+	toolResultBlocks.sort((a, b) => (blockText.get(b)?.length ?? 0) - (blockText.get(a)?.length ?? 0))
+
+	for (const block of toolResultBlocks) {
+		if (total <= budgetChars) {
+			break
+		}
+		const text = blockText.get(block)
+		if (text === undefined || text.length <= MIN_TOOL_RESULT_CHARS) {
+			continue
+		}
+
+		const overage = total - budgetChars
+		const target = Math.max(MIN_TOOL_RESULT_CHARS, text.length - overage)
+
+		const truncated = middleOutTruncate(text, target)
+		total -= text.length - truncated.length
+		writeToolResultText(block, truncated)
+	}
+
+	return { messages, remainingChars: total }
+}
+
+/**
  * Converts one leaked parameter's raw text to the type its schema declares.
  *
  * Leaked markup carries no types — every value arrives as text — so a tool declaring an object or
@@ -463,6 +691,16 @@ export function extractLeakedToolCalls(
 	validTools: ReadonlySet<string> | LeakedToolSchemas,
 	precedingText = "",
 ): { calls: Array<{ name: string; input: Record<string, unknown> }>; leftoverText: string } {
+	const scan = new QuotingScanState()
+	scan.advance(precedingText)
+	return extractLeakedToolCallsWithState(text, validTools, scan)
+}
+
+function extractLeakedToolCallsWithState(
+	text: string,
+	validTools: ReadonlySet<string> | LeakedToolSchemas,
+	scan: QuotingScanState,
+): { calls: Array<{ name: string; input: Record<string, unknown> }>; leftoverText: string } {
 	const schemaFor = (name: string) =>
 		validTools instanceof Map ? (validTools.get(name) as Record<string, unknown> | undefined) : undefined
 	const calls: Array<{ name: string; input: Record<string, unknown> }> = []
@@ -470,10 +708,6 @@ export function extractLeakedToolCalls(
 	let leftover = ""
 	let lastIndex = 0
 
-	// Quote detection needs the text streamed before the buffer, since a fence may have opened
-	// there. Scanned once by state that only ever moves forward, not re-scanned per candidate.
-	const scan = new QuotingScanState()
-	scan.advance(precedingText)
 	let scannedUpTo = 0
 
 	const openPattern = /<(?:antml:)?invoke\s+name="([^"]+)"\s*>/gi
@@ -509,6 +743,7 @@ export function extractLeakedToolCalls(
 		openPattern.lastIndex = blockEnd
 	}
 	leftover += text.slice(lastIndex)
+	scan.advance(text.slice(scannedUpTo))
 
 	// Once a call is recovered its `<function_calls>` wrapper is spent markup, so drop every wrapper
 	// tag (cosmetic; also avoids re-teaching the model this format when the turn replays as history).
@@ -843,6 +1078,45 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			content: this.cleanMessageContent(msg.content),
 		}))
 
+		// Keep context-window trimming on OUR side. Copilot's backend trims an over-window request
+		// without preserving tool_use/tool_result pairing, which orphans a tool_result and triggers a
+		// 400 ("unexpected tool_use_id"). See truncateToolResultsToFitWindow.
+		const contextWindowTokens = this.getCondenseContextWindow()
+		if (Number.isFinite(contextWindowTokens) && contextWindowTokens > 0) {
+			const toolSchemaChars = metadata?.tools ? JSON.stringify(metadata.tools).length : 0
+			const rawBudgetChars =
+				contextWindowTokens * VSCODE_LM_INPUT_BUDGET_FRACTION * VSCODE_LM_BUDGET_CHARS_PER_TOKEN -
+				systemPrompt.length -
+				toolSchemaChars
+			// A system prompt or tool schema large enough to consume the whole budget would leave a
+			// non-positive budget, which disables trimming exactly when the request is most oversized.
+			const messagesBudgetChars = Math.max(MIN_TOOL_RESULT_CHARS, rawBudgetChars)
+			const { remainingChars } = truncateToolResultsToFitWindow(cleanedMessages, messagesBudgetChars)
+
+			// Shrinking tool_results cannot always reach the budget: each keeps MIN_TOOL_RESULT_CHARS,
+			// and the excess may be non-tool content (a huge paste, tool_use inputs, or the system
+			// prompt) that we must not touch. Dropping messages here would orphan a tool_result from
+			// its tool_use — the exact 400 this guard exists to prevent — so fail loudly instead of
+			// sending a request we already know is over the window.
+			// Admission is judged against the RAW budget, not the clamped one: the clamp exists only
+			// to keep trimming productive, so accepting up to it would send a request the window
+			// genuinely cannot hold whenever the raw budget falls below MIN_TOOL_RESULT_CHARS.
+			if (remainingChars > rawBudgetChars) {
+				// `status` is what makes checkContextWindowExceededError recognise this as a context
+				// -window failure; without it the task takes its generic retry path and re-sends the
+				// same over-window history instead of condensing.
+				throw Object.assign(
+					new Error(
+						"Zoo Code <Language Model API>: The request is too large for this model's context window " +
+							`(estimated ${remainingChars.toLocaleString("en-US")} characters against a budget of ` +
+							`${Math.max(0, Math.floor(rawBudgetChars)).toLocaleString("en-US")}), and it cannot be reduced further without ` +
+							"breaking tool-call pairing. Condense the conversation or start a new task.",
+					),
+					{ status: CONTEXT_WINDOW_EXCEEDED_STATUS },
+				)
+			}
+		}
+
 		// Convert Anthropic messages to VS Code LM messages
 		const vsCodeLmMessages: vscode.LanguageModelChatMessage[] = [
 			vscode.LanguageModelChatMessage.Assistant(sanitizeSurrogates(systemPrompt)),
@@ -857,6 +1131,86 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 
 		// Accumulate the text and count at the end of the stream to reduce token counting overhead.
 		let accumulatedText: string = ""
+
+		// Only offered tools may be recovered; their schemas keep recovered parameters typed
+		// rather than passing every value through as a string.
+		const providedTools = (metadata?.tools ?? [])
+			.filter((tool) => tool.type === "function")
+			.filter((tool) => tool.function.name.length > 0)
+		const providedToolSchemas = new Map(
+			providedTools.map((tool) => [
+				tool.function.name,
+				tool.function.parameters as Record<string, unknown> | undefined,
+			]),
+		)
+		const encodedToolAliases = new Map<string, string | undefined>()
+		for (const tool of providedTools) {
+			const encodedName = sanitizeToolNameSurrogates(tool.function.name)
+			// Raw names retain their schema and meaning even when another tool encodes to that name.
+			if (!providedToolSchemas.has(encodedName)) {
+				encodedToolAliases.set(
+					encodedName,
+					encodedToolAliases.has(encodedName) ? undefined : tool.function.name,
+				)
+			}
+		}
+		for (const [encodedName, originalName] of encodedToolAliases) {
+			if (originalName !== undefined) {
+				providedToolSchemas.set(encodedName, providedToolSchemas.get(originalName))
+			}
+		}
+		const salvageLeakedToolCalls = providedToolSchemas.size > 0
+		let salvageBuffer: string[] | undefined
+		let salvageCarry = ""
+		let salvageCarryIsInvokeWhitespace = false
+		let salvagePrecedingText: string[] = []
+		const salvageScan = new QuotingScanState()
+		let salvagedToolCallIndex = 0
+
+		const parseSalvage = (span: string): ApiStreamChunk[] => {
+			const drained: ApiStreamChunk[] = []
+			const { calls, leftoverText } = extractLeakedToolCallsWithState(span, providedToolSchemas, salvageScan)
+			if (leftoverText) {
+				drained.push({ type: "text", text: leftoverText })
+			}
+			for (const call of calls) {
+				const originalName = encodedToolAliases.get(call.name) ?? call.name
+				console.warn(
+					"Zoo Code <Language Model API>: Recovered a tool call the model emitted as text instead of a structured tool call:",
+					{ name: originalName, params: Object.keys(call.input) },
+				)
+				drained.push({
+					type: "tool_call",
+					id: `vscodelm-salvaged-${Date.now()}-${salvagedToolCallIndex++}`,
+					name: originalName,
+					arguments: JSON.stringify(call.input),
+				})
+			}
+			return drained
+		}
+
+		// Only EOF or a native call ends a text segment: even closed invokes cannot settle global
+		// wrapper stripping or text-before-call ordering while more text may arrive. No size cap is safe.
+		// Native boundaries finalize markup, but retain quote/wrapper state outside completed bodies.
+		const flushSalvage = (): ApiStreamChunk[] => {
+			if (!salvageLeakedToolCalls) {
+				return []
+			}
+
+			salvageScan.advance(salvagePrecedingText.join(""))
+			salvagePrecedingText = []
+			if (!salvageBuffer) {
+				const carried = salvageCarry
+				salvageCarry = ""
+				salvageCarryIsInvokeWhitespace = false
+				salvageScan.advance(carried)
+				return carried ? [{ type: "text", text: carried }] : []
+			}
+
+			const buffered = salvageBuffer.join("")
+			salvageBuffer = undefined
+			return parseSalvage(buffered)
+		}
 
 		try {
 			// Create the response stream with required options
@@ -881,11 +1235,50 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 					}
 
 					accumulatedText += chunk.value
-					yield {
-						type: "text",
-						text: chunk.value,
+
+					// Fast path: when we didn't offer any tools there is nothing to salvage, so
+					// stream the text straight through exactly as before.
+					if (!salvageLeakedToolCalls) {
+						yield { type: "text", text: chunk.value }
+						continue
+					}
+
+					if (salvageBuffer) {
+						salvageBuffer.push(chunk.value)
+						continue
+					}
+
+					// An unfinished invoke can carry unlimited whitespace; do not rescan it for every chunk.
+					if (salvageCarryIsInvokeWhitespace && /^\s*$/.test(chunk.value)) {
+						salvageCarry += chunk.value
+						continue
+					}
+					salvageCarryIsInvokeWhitespace = false
+
+					// Watch for the start of a leaked tool-call block, carrying a small tail across
+					// chunks so a marker split across chunk boundaries is still detected.
+					const combined = salvageCarry + chunk.value
+					const markerMatch = combined.match(LEAKED_TOOL_CALL_START)
+					if (markerMatch) {
+						const before = combined.slice(0, markerMatch.index)
+						if (before) {
+							salvagePrecedingText.push(before)
+							yield { type: "text", text: before }
+						}
+						salvageBuffer = [combined.slice(markerMatch.index)]
+						salvageCarry = ""
+					} else {
+						const carryLength = trailingPartialToolMarkerLength(combined)
+						const emit = carryLength > 0 ? combined.slice(0, combined.length - carryLength) : combined
+						salvageCarry = carryLength > 0 ? combined.slice(combined.length - carryLength) : ""
+						salvageCarryIsInvokeWhitespace = /^<(?:antml:)?invoke\s+$/i.test(salvageCarry)
+						if (emit) {
+							salvagePrecedingText.push(emit)
+							yield { type: "text", text: emit }
+						}
 					}
 				} else if (chunk instanceof vscode.LanguageModelToolCallPart) {
+					yield* flushSalvage()
 					try {
 						// Validate tool call parameters
 						if (!chunk.name || typeof chunk.name !== "string") {
@@ -932,6 +1325,9 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 					console.warn("Zoo Code <Language Model API>: Unknown chunk type received:", chunk)
 				}
 			}
+
+			// Flush any leaked tool-call recovery state accumulated during streaming.
+			yield* flushSalvage()
 
 			// Count tokens in the accumulated text after stream completion
 			const totalOutputTokens: number = await this.internalCountTokens(accumulatedText)
