@@ -92,6 +92,7 @@ import { generateSystemPrompt } from "./generateSystemPrompt"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { getCommand } from "../../utils/commands"
 import { getLMStudioModels } from "../../api/providers/fetchers/lmstudio"
+import { ALLOWED_BASE_URLS, stripTrailingSlashes } from "../../api/providers/fetchers/mimo"
 
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 
@@ -854,6 +855,28 @@ export const webviewMessageHandler = async (
 						if (!value) {
 							continue
 						}
+					} else if (key === "mimoBaseUrl") {
+						// Persistence-boundary gate. The settings schema pins this key to
+						// the four allowed Xiaomi endpoints, but ContextProxy fails open on
+						// a schema rejection and returns raw stored values — so validate
+						// again here, at the only place an off-list value could newly enter
+						// storage. Empty string means "unset" (mirroring the handler and
+						// router fallbacks) and is normalized to undefined; an off-list
+						// non-empty value is dropped with a warning so it can never reach
+						// the chat-completion client via persisted state. Trailing slashes
+						// are tolerated for the check and canonicalized away on save.
+						if (typeof value === "string" && value !== "") {
+							const normalized = stripTrailingSlashes(value)
+							if (!ALLOWED_BASE_URLS.has(normalized)) {
+								console.warn(
+									"[webviewMessageHandler] Rejected mimoBaseUrl outside the allowed Xiaomi MiMo endpoints; the value was not persisted.",
+								)
+								continue
+							}
+							newValue = normalized
+						} else {
+							newValue = undefined
+						}
 					}
 
 					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
@@ -1131,6 +1154,7 @@ export const webviewMessageHandler = async (
 						[providerIdentifiers.poe]: {},
 						[providerIdentifiers.deepseek]: {},
 						[providerIdentifiers.moonshot]: {},
+						[providerIdentifiers.mimo]: {},
 						[providerIdentifiers.opencodeGo]: {},
 						[providerIdentifiers.kenari]: {},
 						[providerIdentifiers.nanogpt]: {},
@@ -1269,6 +1293,66 @@ export const webviewMessageHandler = async (
 				})
 			}
 
+			// MiMo is conditional on apiKey. The baseUrl selects the cluster
+			// (cn/sgp/ams token-plan or pay-as-you-go), so unsaved form values are
+			// honored the same way as DeepSeek/Moonshot above.
+			const mimoApiKey = message?.values?.mimoApiKey ?? apiConfiguration.mimoApiKey
+
+			// An unsaved empty string means "unset" (the form's cleared state),
+			// matching the handler-side fallback: it must not override the stored
+			// cluster value and silently reroute the stored key to the default
+			// Singapore endpoint.
+			const unsavedMimoBaseUrlValue = message?.values?.mimoBaseUrl
+			const unsavedMimoBaseUrl =
+				typeof unsavedMimoBaseUrlValue === "string" && unsavedMimoBaseUrlValue !== ""
+					? unsavedMimoBaseUrlValue
+					: undefined
+			const mimoBaseUrl = unsavedMimoBaseUrl ?? apiConfiguration.mimoBaseUrl
+
+			// Unsaved form values bypass the settings-schema validation that pins
+			// stored mimoBaseUrl to the four allowed Xiaomi endpoints, so gate them
+			// on the fetcher's allowlist before they can carry the bearer key into
+			// modelCache. The exact match subsumes credential-bearing URLs (no
+			// allowlisted literal contains userinfo), and the raw value is never
+			// echoed since an unsaved one may embed credentials.
+			const mimoBaseUrlRejected =
+				unsavedMimoBaseUrl !== undefined && !ALLOWED_BASE_URLS.has(stripTrailingSlashes(unsavedMimoBaseUrl))
+
+			if (mimoApiKey) {
+				if (mimoBaseUrlRejected) {
+					// Same surface as a failed refresh: post the MiMo failure
+					// response and skip the candidate so no fetch is dispatched,
+					// while router aggregation for other providers continues.
+					const errorMessage =
+						"MIMO/requestRouterModels/001: MiMo model fetch rejected: the provided base URL is not an allowed Xiaomi MiMo endpoint."
+					console.error(`Error refreshing models for ${providerIdentifiers.mimo}: ${errorMessage}`)
+
+					await provider.postMessageToWebview({
+						type: RouterModelsMessageType.singleRouterModelFetchResponse,
+						success: false,
+						error: errorMessage,
+						values: { provider: providerIdentifiers.mimo },
+					})
+				} else {
+					const mimoOptions = {
+						provider: providerIdentifiers.mimo,
+						apiKey: mimoApiKey,
+						baseUrl: mimoBaseUrl,
+					}
+
+					if (message?.values?.mimoApiKey || unsavedMimoBaseUrl) {
+						// Unsaved form values win over stored config: flush refreshes the cache
+						// with them before the aggregate fetch (same pattern as DeepSeek/Moonshot).
+						await flushModels(mimoOptions, true)
+					}
+
+					candidates.push({
+						key: providerIdentifiers.mimo,
+						options: mimoOptions,
+					})
+				}
+			}
+
 			// Opencode Go's /models endpoint is public — it returns the full model list with no
 			// Authorization header — so it's fetched unconditionally like openrouter/vercel-ai-gateway
 			// above. Gating it behind a key meant the picker stayed empty (and fell back to the default
@@ -1373,10 +1457,20 @@ export const webviewMessageHandler = async (
 				}
 			})
 
+			// Echo the webview's request ID when one was provided so
+			// fetchRouterModels can correlate the response to the exact pending
+			// request (a remount may re-issue the same provider request while a
+			// stale response is in flight). Requests without an ID keep the
+			// previous response shape.
+			const requestId = message?.values?.requestId
 			await provider.postMessageToWebview({
 				type: RouterModelsMessageType.routerModels,
 				routerModels,
-				values: providerFilter ? { provider: requestedProvider } : undefined,
+				values: requestId
+					? { requestId, ...(providerFilter ? { provider: requestedProvider } : {}) }
+					: providerFilter
+						? { provider: requestedProvider }
+						: undefined,
 			})
 			break
 		}

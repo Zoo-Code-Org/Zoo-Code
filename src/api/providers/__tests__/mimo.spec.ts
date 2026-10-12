@@ -33,9 +33,11 @@ vi.mock("openai", () => {
 })
 
 import type { Anthropic } from "@anthropic-ai/sdk"
+import OpenAI from "openai"
 import { mimoDefaultModelId, mimoModels } from "@roo-code/types"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import { MimoHandler } from "../mimo"
+import { ALLOWED_BASE_URLS } from "../fetchers/mimo"
 import { convertToR1Format } from "../../transform/r1-format"
 import { sanitizeOpenAiCallId } from "../../../utils/tool-id"
 
@@ -79,29 +81,121 @@ describe("MimoHandler", () => {
 		})
 	})
 
+	describe("base URL allowlist (chat-completion path)", () => {
+		// The constructor mock stands in for the real OpenAI client, so its call
+		// log proves whether a network object was ever built for a given base URL.
+		const openAiConstructor = vi.mocked(OpenAI)
+
+		// Simulates the fail-open ContextProxy path, which can hand the handler a
+		// mimoBaseUrl outside the schema's literal union at runtime.
+		type RuntimeOptions = Omit<ApiHandlerOptions, "mimoBaseUrl"> & { mimoBaseUrl?: string }
+		const optionsWithBaseUrl = (mimoBaseUrl: string): ApiHandlerOptions => {
+			const options: RuntimeOptions = { ...mockOptions, mimoBaseUrl }
+			return options as ApiHandlerOptions
+		}
+
+		const lastClientBaseUrl = (): string | null | undefined => {
+			const calls = openAiConstructor.mock.calls
+			return calls[calls.length - 1]?.[0]?.baseURL
+		}
+
+		it("rejects an off-list base URL before any network client is constructed", () => {
+			const callsBefore = openAiConstructor.mock.calls.length
+
+			expect(() => new MimoHandler(optionsWithBaseUrl("https://attacker.example/v1"))).toThrow(
+				"MIMO/MimoHandler/001",
+			)
+			expect(openAiConstructor.mock.calls.length).toBe(callsBefore)
+		})
+
+		it("accepts every allowlisted Xiaomi endpoint", () => {
+			for (const allowedUrl of ALLOWED_BASE_URLS) {
+				new MimoHandler(optionsWithBaseUrl(allowedUrl))
+				expect(lastClientBaseUrl()).toBe(allowedUrl)
+			}
+		})
+
+		it("normalizes trailing slashes before the allowlist check", () => {
+			new MimoHandler(optionsWithBaseUrl("https://token-plan-sgp.xiaomimimo.com/v1/"))
+			expect(lastClientBaseUrl()).toBe("https://token-plan-sgp.xiaomimimo.com/v1/")
+		})
+
+		it("treats an empty base URL as unset and falls back to the default cluster", () => {
+			new MimoHandler(optionsWithBaseUrl(""))
+			expect(lastClientBaseUrl()).toBe("https://token-plan-sgp.xiaomimimo.com/v1")
+		})
+
+		it("never echoes a secret carried in the rejected URL", () => {
+			let thrown: unknown
+			try {
+				new MimoHandler(optionsWithBaseUrl("https://token-plan-sgp.xiaomimimo.com/v1?api_key=SECRET"))
+			} catch (error) {
+				thrown = error
+			}
+			expect(thrown).toBeInstanceOf(Error)
+			expect((thrown as Error).message).toContain("not an allowed Xiaomi MiMo endpoint")
+			expect((thrown as Error).message).not.toContain("SECRET")
+		})
+	})
+
 	describe("getModel", () => {
 		it("should return correct model info for mimo-v2.5-pro", () => {
 			const model = handler.getModel()
 			expect(model.id).toBe("mimo-v2.5-pro")
 			expect(model.info.contextWindow).toBe(1_048_576)
 			expect(model.info.maxTokens).toBe(131_072)
-			expect(model.info.inputPrice).toBe(1.0)
-			expect(model.info.outputPrice).toBe(3.0)
+			expect(model.info.inputPrice).toBe(0.435)
+			expect(model.info.outputPrice).toBe(0.87)
 		})
 
 		it("should return correct model info for mimo-v2.5", () => {
 			const h = new MimoHandler({ ...mockOptions, apiModelId: "mimo-v2.5" })
 			const model = h.getModel()
 			expect(model.id).toBe("mimo-v2.5")
-			expect(model.info.inputPrice).toBe(0.4)
-			expect(model.info.outputPrice).toBe(2.0)
+			expect(model.info.inputPrice).toBe(0.14)
+			expect(model.info.outputPrice).toBe(0.28)
+		})
+
+		it("should return correct model info for mimo-v2.6-pro", () => {
+			const h = new MimoHandler({ ...mockOptions, apiModelId: "mimo-v2.6-pro" })
+			const model = h.getModel()
+			expect(model.id).toBe("mimo-v2.6-pro")
+			expect(model.info.contextWindow).toBe(1_048_576)
+			expect(model.info.maxTokens).toBe(131_072)
+			expect(model.info.inputPrice).toBe(0.435)
+			expect(model.info.outputPrice).toBe(0.87)
+			expect(model.info.cacheReadsPrice).toBe(0.0036)
+		})
+
+		it("should return correct model info for mimo-v2.6-flash", () => {
+			const h = new MimoHandler({ ...mockOptions, apiModelId: "mimo-v2.6-flash" })
+			const model = h.getModel()
+			expect(model.id).toBe("mimo-v2.6-flash")
+			expect(model.info.supportsImages).toBe(true)
+			expect(model.info.inputPrice).toBe(0.14)
+			expect(model.info.outputPrice).toBe(0.28)
+		})
+
+		it("should return correct model info for mimo-v2.6-pro-ultraspeed", () => {
+			const h = new MimoHandler({ ...mockOptions, apiModelId: "mimo-v2.6-pro-ultraspeed" })
+			const model = h.getModel()
+			expect(model.id).toBe("mimo-v2.6-pro-ultraspeed")
+			expect(model.info.inputPrice).toBe(4.35)
+			expect(model.info.outputPrice).toBe(8.7)
+		})
+
+		it("should default to mimo-v2.6-pro", () => {
+			const h = new MimoHandler({ ...mockOptions, apiModelId: undefined })
+			const model = h.getModel()
+			expect(model.id).toBe(mimoDefaultModelId)
+			expect(model.info).toBe(mimoModels["mimo-v2.6-pro"])
 		})
 
 		it("should fallback to default model for unknown model ID", () => {
 			const h = new MimoHandler({ ...mockOptions, apiModelId: "unknown-model" })
 			const model = h.getModel()
 			expect(model.id).toBe("unknown-model")
-			expect(model.info).toBe(mimoModels["mimo-v2.5-pro"])
+			expect(model.info).toBe(mimoModels[mimoDefaultModelId])
 		})
 	})
 
