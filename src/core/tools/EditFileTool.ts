@@ -469,7 +469,11 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 				// B2: the change-journal entry for this edit is appended inside
 				// checkpointSave (the hook stays a single call site), keyed by the
 				// checkpoint commit that call produces.
-				void checkpointSave(task, false, true, {
+				// Await so the checkpoint (staging + commit + journal) completes
+				// before the diff state resets and queued work proceeds; fire-and-forget
+				// lets a queued write's own checkpoint interleave and lets shutdown
+				// lose the commit entirely.
+				await checkpointSave(task, false, true, {
 					path: relPath,
 					operation: isNewFile ? "create" : "update",
 					diffStats: diffStats ? { additions: diffStats.added, deletions: diffStats.removed } : undefined,

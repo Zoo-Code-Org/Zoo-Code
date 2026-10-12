@@ -803,6 +803,26 @@ describe("editFileTool", () => {
 			})
 		})
 
+		it("awaits the checkpoint before resetting the diff state", async () => {
+			// Fire-and-forget would let diffViewProvider.reset() and the queued-work
+			// handoff race an unfinished checkpoint commit (and lose it at
+			// shutdown): the save must complete before the reset.
+			let releaseCheckpoint: () => void = () => {}
+			mockedCheckpointSave.mockImplementationOnce(
+				() => new Promise<void>((resolve) => (releaseCheckpoint = resolve)),
+			)
+			let settled = false
+			const run = executeEditFileTool({}).then(() => {
+				settled = true
+			})
+			await vi.waitFor(() => expect(mockedCheckpointSave).toHaveBeenCalledOnce())
+			expect(settled).toBe(false)
+			expect(mockTask.diffViewProvider.reset).not.toHaveBeenCalled()
+			releaseCheckpoint()
+			await run
+			expect(mockTask.diffViewProvider.reset).toHaveBeenCalled()
+		})
+
 		it("does not record a checkpoint when perWriteCheckpoints is disabled", async () => {
 			mockTask.providerRef.deref = vi.fn().mockReturnValue({
 				getState: vi.fn().mockResolvedValue({
