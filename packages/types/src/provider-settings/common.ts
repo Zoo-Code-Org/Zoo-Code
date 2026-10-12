@@ -7,12 +7,29 @@ export const API_PROVIDER_FIELD = "apiProvider"
 export const SETTINGS_SHAPE_FIELD = "settingsShape"
 export const API_MODEL_ID_FIELD = "apiModelId"
 
+// Treat a persisted `null` as an unset value. Previously persisted or imported
+// profiles may store `null` for these fields; converting `null` to `undefined`
+// before validation keeps the inferred type as `NonNull<T> | undefined` (so
+// consumers don't need to handle `null`) while ensuring the whole profile is not
+// dropped during per-profile `safeParse` in ProviderSettingsManager.load().
+//
+// The argument is a nullish schema (accepts `null` and `undefined`). At runtime we
+// map `null` to `undefined` before validation; the return type strips `null` from
+// the output because it can never survive the preprocessing step.
+const nullableOptional = <Schema extends z.ZodTypeAny>(schema: Schema) =>
+	z.preprocess((value) => (value === null ? undefined : value), schema) as unknown as z.ZodType<
+		Exclude<z.infer<Schema>, null>,
+		z.ZodTypeDef,
+		z.input<Schema>
+	>
+
 export const baseProviderSettingsShape = {
 	includeMaxTokens: z.boolean().optional(),
 	todoListEnabled: z.boolean().optional(),
 	modelTemperature: z.number().nullish(),
 	rateLimitSeconds: z.number().optional(),
-	consecutiveMistakeLimit: z.number().min(0).optional(),
+	consecutiveMistakeLimit: nullableOptional(z.number().min(0).nullish()),
+	toolRepetitionSoftLimit: nullableOptional(z.number().min(0).nullish()),
 	enableReasoningEffort: z.boolean().optional(),
 	reasoningEffort: reasoningEffortSettingSchema.optional(),
 	modelMaxTokens: z.number().optional(),

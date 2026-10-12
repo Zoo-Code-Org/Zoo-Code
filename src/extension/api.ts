@@ -199,8 +199,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
 		await provider.postMessageToWebview({ type: "invoke", invoke: "newChat", text, images })
 
+		// API-driven tasks never stop to ask the user, so the hard stop is
+		// effectively unlimited. The soft repetition tier is disabled too:
+		// without a reachable hard stop it would reject every identical call
+		// with no escalation.
 		const options: CreateTaskOptions = {
 			consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
+			toolRepetitionSoftLimit: 0,
 		}
 
 		const task = await provider.createTask(text, images, undefined, options, configuration)

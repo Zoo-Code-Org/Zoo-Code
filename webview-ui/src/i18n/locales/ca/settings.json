@@ -398,6 +398,11 @@
 		"vscodeLmDescription": "L'API del model de llenguatge de VS Code us permet executar models proporcionats per altres extensions de VS Code (incloent-hi, però no limitat a, GitHub Copilot). La manera més senzilla de començar és instal·lar les extensions Copilot i Copilot Chat des del VS Code Marketplace.",
 		"awsCustomArnUse": "Introduïu un ARN vàlid d'Amazon Bedrock per al model que voleu utilitzar. Exemples de format:",
 		"awsCustomArnDesc": "Assegureu-vos que la regió a l'ARN coincideix amb la regió d'AWS seleccionada anteriorment.",
+		"awsCustomArnBaseModel": "Model subjacent",
+		"awsCustomArnBaseModelOther": "Altre (no és a la llista)",
+		"awsCustomArnBaseModelDesc": "El model al qual apunta aquest ARN. Zoo Code l'utilitza per al raonament, la temperatura, la finestra de context, la sortida màxima i els preus. Es detecta automàticament quan l'ARN indica el model.",
+		"awsCustomArnContextWindow": "Finestra de context (tokens)",
+		"awsCustomArnMaxTokens": "Tokens de sortida màxims",
 		"openRouterApiKey": "Clau API d'OpenRouter",
 		"getOpenRouterApiKey": "Obtenir clau API d'OpenRouter",
 		"vercelAiGatewayApiKey": "Clau API de Vercel AI Gateway",
@@ -667,6 +672,10 @@
 			"description": "Nombre d'errors consecutius o accions repetides abans de mostrar el diàleg 'En Zoo està tenint problemes'. Estableix a 0 per desactivar aquest mecanisme de seguretat (no s'activarà mai).",
 			"unlimitedDescription": "Reintents il·limitats habilitats (procediment automàtic). El diàleg no apareixerà mai.",
 			"warning": "⚠️ Establir a 0 permet reintents il·limitats que poden consumir un ús significatiu de l'API"
+		},
+		"toolRepetitionSoftLimit": {
+			"label": "Llindar d'avís suau de repetició",
+			"description": "Després d'aquest nombre de crides idèntiques consecutives a l'eina, l'eina es bloqueja i es demana a la IA que justifiqui el reintent, sense implicar-te. Estableix-ho a 0 per desactivar els avisos suaus."
 		},
 		"reasoningEffort": {
 			"label": "Esforç de raonament del model",

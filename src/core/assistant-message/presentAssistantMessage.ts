@@ -820,8 +820,24 @@ async function presentAssistantMessageBlock(cline: Task): Promise<void> {
 				// block directly.
 				const repetitionCheck = cline.toolRepetitionDetector.check(block)
 
-				// If execution is not allowed, notify user and break.
-				if (!repetitionCheck.allowExecution && repetitionCheck.askUser) {
+				// Soft block: do NOT involve the user. Return an error to the
+				// model asking it to justify repeating the call (or try a
+				// different approach). The detector keeps counting so continued
+				// repetition will eventually escalate to a hard block.
+				if (repetitionCheck.action === "soft_block") {
+					pushToolResult(formatResponse.toolError(repetitionCheck.message))
+					// Same family as the validation branch above: the completed block is refused
+					// before handle() runs, so a stream that had already started owns nobody but
+					// here - the model gets the justification request, and this task's partial
+					// stream state, its abort listener, and any preview are released the same way.
+					if (block.name === "write_to_file") {
+						await writeToFileTool.releaseStreamAfterValidationRejection(cline)
+					}
+					break
+				}
+
+				// Hard block: stop and ask the user for guidance.
+				if (repetitionCheck.action === "hard_block") {
 					// Handle repetition similar to mistake_limit_reached pattern.
 					const { response, text, images } = await cline.ask(
 						repetitionCheck.askUser.messageKey as ClineAsk,

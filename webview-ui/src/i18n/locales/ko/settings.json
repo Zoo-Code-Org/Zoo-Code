@@ -398,6 +398,11 @@
 		"vscodeLmDescription": "VS Code 언어 모델 API를 사용하면 GitHub Copilot을 포함한 기타 VS Code 확장 프로그램이 제공하는 모델을 실행할 수 있습니다. 시작하려면 VS Code 마켓플레이스에서 Copilot 및 Copilot Chat 확장 프로그램을 설치하는 것이 가장 쉽습니다.",
 		"awsCustomArnUse": "사용하려는 모델의 유효한 Amazon Bedrock ARN을 입력하세요. 형식 예시:",
 		"awsCustomArnDesc": "ARN의 리전이 위에서 선택한 AWS 리전과 일치하는지 확인하세요.",
+		"awsCustomArnBaseModel": "기본 모델",
+		"awsCustomArnBaseModelOther": "기타(목록에 없음)",
+		"awsCustomArnBaseModelDesc": "이 ARN이 가리키는 모델입니다. Zoo Code는 사고, temperature, 컨텍스트 창, 최대 출력 및 가격 책정에 이 모델을 사용합니다. ARN에 모델 이름이 있으면 자동으로 감지됩니다.",
+		"awsCustomArnContextWindow": "컨텍스트 창(토큰)",
+		"awsCustomArnMaxTokens": "최대 출력 토큰",
 		"openRouterApiKey": "OpenRouter API 키",
 		"getOpenRouterApiKey": "OpenRouter API 키 받기",
 		"vercelAiGatewayApiKey": "Vercel AI Gateway API 키",
@@ -667,6 +672,10 @@
 			"description": "'Zoo에 문제가 발생했습니다' 대화 상자를 표시하기 전의 연속 오류 또는 반복 작업 수. 이 안전 메커니즘을 비활성화하려면 0으로 설정하세요(절대 트리거되지 않음).",
 			"unlimitedDescription": "무제한 재시도 활성화 (자동 진행). 대화 상자가 나타나지 않습니다.",
 			"warning": "⚠️ 0으로 설정하면 무제한 재시도가 허용되어 상당한 API 사용량이 발생할 수 있습니다"
+		},
+		"toolRepetitionSoftLimit": {
+			"label": "반복 소프트 경고 임계값",
+			"description": "동일한 연속 도구 호출이 이 횟수에 도달하면 도구가 차단되고 사용자를 개입시키지 않고 AI에게 재시도 사유를 묻습니다. 0으로 설정하면 소프트 경고가 비활성화됩니다."
 		},
 		"reasoningEffort": {
 			"label": "모델 추론 노력",

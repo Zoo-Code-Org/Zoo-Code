@@ -100,7 +100,7 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 			api: { getModel: () => ({ id: "test-model", info: {} }) },
 			recordToolUsage: vi.fn(),
 			recordToolError: vi.fn(),
-			toolRepetitionDetector: { check: vi.fn().mockReturnValue({ allowExecution: true }) },
+			toolRepetitionDetector: { check: vi.fn().mockReturnValue({ action: "allow" }) },
 			providerRef: { deref: () => ({ getState: vi.fn().mockResolvedValue({ mode: "code", customModes: [] }) }) },
 			say: vi.fn().mockResolvedValue(undefined),
 			ask: vi.fn().mockResolvedValue({ response: "yesButtonClicked" }),
@@ -151,7 +151,7 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 		// but this branch.
 		mockValidate.mockReturnValue(undefined)
 		mockTask.toolRepetitionDetector.check = vi.fn().mockReturnValue({
-			allowExecution: false,
+			action: "hard_block",
 			askUser: { messageKey: "mistake_limit_reached", messageDetail: "repeated" },
 		})
 		mockTask.assistantMessageContent = writeBlock()
@@ -167,6 +167,29 @@ describe("presentAssistantMessage - a rejected write_to_file releases its stream
 			throw new Error("expected a tool_result for the rejected call")
 		}
 		expect(toolResult.content).toContain("repetition limit reached")
+	})
+
+	it("releases the streamed state when the repetition guard soft-blocks the completed block", async () => {
+		// The tiered detector refuses a repeated call with a soft block - an error back to the
+		// model, no user involved - and breaks before handle() just like the hard block. The
+		// stream this call had already started owns nobody but this branch, so the release
+		// must run on the soft exit too, not only on the hard one.
+		mockValidate.mockReturnValue(undefined)
+		mockTask.toolRepetitionDetector.check = vi.fn().mockReturnValue({
+			action: "soft_block",
+			message: "You are repeating the same tool call. Explain why you are repeating it.",
+		})
+		mockTask.assistantMessageContent = writeBlock()
+
+		await presentAssistantMessage(mockTask as unknown as Task)
+
+		expect(mockRelease).toHaveBeenCalledTimes(1)
+		expect(mockHandle).not.toHaveBeenCalled()
+		const toolResult = mockTask.userMessageContent.find((item) => item.type === "tool_result")
+		if (!toolResult) {
+			throw new Error("expected a tool_result for the soft-blocked call")
+		}
+		expect(toolResult.content).toContain("repeating the same tool call")
 	})
 
 	it("releases the streamed state when the completed block carries no native arguments", async () => {

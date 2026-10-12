@@ -398,6 +398,11 @@
 		"vscodeLmDescription": "L'API del Modello di Linguaggio di VS Code consente di eseguire modelli forniti da altre estensioni di VS Code (incluso, ma non limitato a, GitHub Copilot). Il modo più semplice per iniziare è installare le estensioni Copilot e Copilot Chat dal VS Code Marketplace.",
 		"awsCustomArnUse": "Inserisci un ARN Amazon Bedrock valido per il modello che desideri utilizzare. Esempi di formato:",
 		"awsCustomArnDesc": "Assicurati che la regione nell'ARN corrisponda alla regione AWS selezionata sopra.",
+		"awsCustomArnBaseModel": "Modello sottostante",
+		"awsCustomArnBaseModelOther": "Altro (non elencato)",
+		"awsCustomArnBaseModelDesc": "Il modello a cui punta questo ARN. Zoo Code lo usa per il ragionamento, la temperatura, la finestra di contesto, l'output massimo e i prezzi. Rilevato automaticamente quando l'ARN indica il modello.",
+		"awsCustomArnContextWindow": "Finestra di contesto (token)",
+		"awsCustomArnMaxTokens": "Token di output massimi",
 		"openRouterApiKey": "Chiave API OpenRouter",
 		"getOpenRouterApiKey": "Ottieni chiave API OpenRouter",
 		"vercelAiGatewayApiKey": "Chiave API Vercel AI Gateway",
@@ -667,6 +672,10 @@
 			"description": "Numero di errori consecutivi o azioni ripetute prima di mostrare la finestra di dialogo 'Zoo sta riscontrando problemi'. Imposta a 0 per disabilitare questo meccanismo di sicurezza (non si attiverà mai).",
 			"unlimitedDescription": "Tentativi illimitati abilitati (procedi automaticamente). La finestra di dialogo non verrà mai visualizzata.",
 			"warning": "⚠️ L'impostazione a 0 consente tentativi illimitati che possono consumare un notevole utilizzo dell'API"
+		},
+		"toolRepetitionSoftLimit": {
+			"label": "Soglia di avviso ripetizione (soft)",
+			"description": "Dopo questo numero di chiamate identiche consecutive allo strumento, lo strumento viene bloccato e all'IA viene chiesto di giustificare il nuovo tentativo, senza coinvolgerti. Imposta a 0 per disabilitare gli avvisi soft."
 		},
 		"reasoningEffort": {
 			"label": "Sforzo di ragionamento del modello",
