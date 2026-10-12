@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import React, { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useSize } from "react-use"
 import { useTranslation, Trans } from "react-i18next"
 import deepEqual from "fast-deep-equal"
@@ -196,6 +196,7 @@ export const ChatRowContent = ({
 		enableCheckpoints,
 	} = useExtensionState()
 	const { info: model } = useSelectedModel(apiConfiguration)
+	const editDescriptionId = useId()
 	const [isEditing, setIsEditing] = useState(false)
 	const [editedContent, setEditedContent] = useState("")
 	const [editMode, setEditMode] = useState<Mode>(mode || "code")
@@ -1206,6 +1207,7 @@ export const ChatRowContent = ({
 				case "text":
 					return (
 						<div className="group" role="group" aria-label={t("chat:text.rooSaid")}>
+							<span className="sr-only">{t("chat:text.rooSaid")}</span>
 							<div className="pl-6 relative">
 								<div className="absolute top-0 right-0 z-10">
 									<OpenMarkdownPreviewButton markdown={message.text} />
@@ -1229,6 +1231,10 @@ export const ChatRowContent = ({
 							className="group w-fit max-w-[70%] ml-auto flex flex-col items-end gap-1"
 							role="group"
 							aria-label={t("chat:feedback.youSaid")}>
+							<span className="sr-only">{t("chat:feedback.youSaid")}</span>
+							<span id={editDescriptionId} className="sr-only">
+								{t("chat:queuedMessages.clickToEdit")}
+							</span>
 							<div
 								className={cn(
 									"border rounded-sm overflow-hidden whitespace-pre-wrap",
@@ -1262,6 +1268,8 @@ export const ChatRowContent = ({
 										role="button"
 										tabIndex={isStreaming ? -1 : 0}
 										aria-disabled={isStreaming || undefined}
+										aria-label={message.text ? undefined : t("common:confirmation.editMessage")}
+										aria-describedby={editDescriptionId}
 										onClick={(e) => {
 											e.stopPropagation()
 											if (!isStreaming) {
@@ -1317,6 +1325,7 @@ export const ChatRowContent = ({
 					const tool = safeJsonParse<ClineSayTool>(message.text)
 					return (
 						<div className="max-w-[70%] ml-auto" style={{ marginTop: -10, width: "100%" }}>
+							<span className="sr-only">{t("chat:feedback.youSaid")}</span>
 							<CodeAccordion
 								code={tool?.diff}
 								language="diff"

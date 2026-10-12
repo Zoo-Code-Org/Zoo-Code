@@ -28,5 +28,19 @@ for (const theme of visualThemes.filter(({ name }) => name === "dark" || name ==
 			.hover({ position: { x: 2, y: 12 } })
 		await expect(conversation.getByRole("button", { name: "Open markdown in preview" })).toHaveCSS("opacity", "1")
 		await expect(conversation).toHaveScreenshot(`chat-row-assistant-preview-${theme.name}.png`)
+
+		// Keep wrapped first-line text clear of the absolute preview control, including at reflow width.
+		for (const width of [520, 320]) {
+			await page.setViewportSize({ width, height: 600 })
+			const preview = conversation.getByRole("button", { name: "Open markdown in preview" })
+			const heading = conversation.getByRole("heading", {
+				name: "Updated greeting with a longer first line to check preview spacing",
+			})
+			const previewBox = await preview.boundingBox()
+			const headingBox = await heading.boundingBox()
+			expect(previewBox).not.toBeNull()
+			expect(headingBox).not.toBeNull()
+			expect(headingBox!.x + headingBox!.width).toBeLessThanOrEqual(previewBox!.x)
+		}
 	})
 }

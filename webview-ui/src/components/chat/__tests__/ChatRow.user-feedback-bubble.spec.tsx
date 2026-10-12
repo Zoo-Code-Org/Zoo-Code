@@ -80,6 +80,24 @@ describe("ChatRow - user feedback bubble layout & contrast", () => {
 		expect(bubble!.className).not.toContain("text-vscode-editor-background")
 	})
 
+	it("names the message control from its content and describes editing separately", () => {
+		renderRow(makeUserFeedback())
+
+		const messageControl = screen.getByRole("button", { name: "hello bubble" })
+		expect(messageControl).toHaveAccessibleDescription("chat:queuedMessages.clickToEdit")
+	})
+
+	it("keeps image-only messages editable by an accessible name", () => {
+		renderRow({ ...makeUserFeedback(), text: "", images: ["data:image/png;base64,AA=="] })
+
+		const messageControl = screen.getByRole("button", {
+			name: "common:confirmation.editMessage",
+			description: "chat:queuedMessages.clickToEdit",
+		})
+		fireEvent.click(messageControl)
+		expect(screen.getByRole("textbox")).toHaveValue("")
+	})
+
 	it("still renders the message text", () => {
 		const { container } = renderRow(makeUserFeedback())
 		const bubble = container.querySelector(".cursor-text") as HTMLElement | null
@@ -235,10 +253,10 @@ describe("ChatRow - user feedback bubble layout & contrast", () => {
 		expect(screen.queryByLabelText("common:confirmation.deleteMessage")).not.toBeInTheDocument()
 	})
 
-	it("renders the feedback bubble without a header label", () => {
+	it("identifies the user with a visually hidden localized speaker label", () => {
 		renderRow(makeUserFeedback())
-		// The header label ("you said") must not be rendered for user feedback
-		expect(screen.queryByText("chat:feedback.youSaid")).not.toBeInTheDocument()
+		expect(screen.getByText("chat:feedback.youSaid")).toHaveClass("sr-only")
+		expect(screen.getByText("chat:feedback.youSaid")).not.toHaveAttribute("aria-hidden")
 		expect(screen.queryByLabelText("User icon")).not.toBeInTheDocument()
 	})
 
@@ -266,12 +284,13 @@ describe("ChatRow - assistant text and user edits", () => {
 		vi.clearAllMocks()
 	})
 
-	it("renders assistant markdown without a role header", () => {
+	it("identifies the assistant with a visually hidden localized speaker label", () => {
 		renderRow({ ts: 2, type: "say", say: "text", text: "## Updated greeting\n\nHello **Zoo**." })
 
 		expect(screen.getByRole("heading", { name: "Updated greeting" })).toBeInTheDocument()
 		expect(screen.getByText("Zoo", { selector: "strong" })).toBeInTheDocument()
-		expect(screen.queryByText("chat:text.rooSaid")).not.toBeInTheDocument()
+		expect(screen.getByText("chat:text.rooSaid")).toHaveClass("sr-only")
+		expect(screen.getByText("chat:text.rooSaid")).not.toHaveAttribute("aria-hidden")
 		expect(screen.queryByLabelText("Speech bubble icon")).not.toBeInTheDocument()
 	})
 
@@ -310,6 +329,7 @@ describe("ChatRow - assistant text and user edits", () => {
 		)
 
 		const diffContainer = container.firstElementChild
+		expect(screen.getByText("chat:feedback.youSaid")).toHaveClass("sr-only")
 		expect(diffContainer).toHaveClass("max-w-[70%]", "ml-auto")
 		expect(diffContainer).toHaveStyle({ width: "100%", marginTop: "-10px" })
 		expect(diffContainer).toContainElement(screen.getByText("User Edits"))

@@ -16,7 +16,7 @@ const messages: ClineMessage[] = [
 		ts: 3,
 		type: "say",
 		say: "text",
-		text: "## Updated greeting\n\nThe greeting now welcomes **Zoo**.\n\n## Verification\n\nThe rest of the message is unchanged.",
+		text: "## Updated greeting with a longer first line to check preview spacing\n\nThe greeting now welcomes **Zoo**.\n\n## Verification\n\nThe rest of the message is unchanged.",
 	},
 ]
 
