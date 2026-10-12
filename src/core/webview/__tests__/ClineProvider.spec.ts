@@ -4324,7 +4324,7 @@ describe("ClineProvider", () => {
 		})
 
 		it("should not activate a replacement when an unrelated profile is deleted with no view pin", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext), new WebviewFocusTracker())
 			const deletedProfile: ProviderSettingsEntry = {
 				name: "unrelated-victim",
 				id: "victim-id",
@@ -4362,7 +4362,7 @@ describe("ClineProvider", () => {
 		})
 
 		it("should prune a stale entry when deleteConfig reports the typed not-found signal", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext), new WebviewFocusTracker())
 			const ghostProfile: ProviderSettingsEntry = {
 				name: "ghost-profile",
 				id: "ghost-id",
@@ -4394,7 +4394,7 @@ describe("ClineProvider", () => {
 		})
 
 		it("should propagate a wrapped delete failure whose message merely mentions not found", async () => {
-			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext), new WebviewFocusTracker())
 			const victimProfile: ProviderSettingsEntry = {
 				name: "victim-profile",
 				id: "victim-id",
