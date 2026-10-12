@@ -890,11 +890,9 @@ jobs:
                           // CHANGES_REQUESTED stays binding across author pushes, base-branch
                           // merges, CI runs, and CodeRabbit reviews until that same
                           // maintainer's blocker is cleared by one of:
-                          //   1. the PR author explicitly re-requesting review from them,
-                          //   2. the blocking maintainer re-requesting review from themselves
-                          //      (signaling intent to re-review),
-                          //   3. a newer review from that maintainer (its state decides), or
-                          //   4. GitHub dismissing the blocking review.
+                          //   1. anyone re-requesting review from them (issue #2026),
+                          //   2. a newer review from that maintainer (its state decides), or
+                          //   3. GitHub dismissing the blocking review.
                           // Latest state per reviewer is keyed by review id (monotonically
                           // increasing) so reordered or duplicate history cannot change the
                           // result. COMMENTED reviews are neutral and never clear a blocker;
@@ -924,9 +922,9 @@ jobs:
 
                           // Clear blockers that were explicitly re-requested. A
                           // review_requested timeline event clears that maintainer's
-                          // blocker when the actor is the PR author re-requesting the
-                          // blocking maintainer, or the blocking maintainer re-requesting
-                          // themselves (signaling intent to re-review). Team requests
+                          // blocker no matter who made the request (issue #2026) — the
+                          // re-request itself signals the blocker should take another
+                          // look. Team requests
                           // carry no requested_reviewer and never clear an individual
                           // blocker; review_request_removed events only trigger
                           // reconciliation and are not clearing evidence.
@@ -945,16 +943,10 @@ jobs:
                               );
                             }
                             if (timelineEvents) {
-                              const authorLogin = pr.user?.login?.toLowerCase();
                               for (const event of timelineEvents) {
                                 if (event.event !== 'review_requested') continue;
-                                const actorLogin = event.actor?.login?.toLowerCase();
                                 const requested = event.requested_reviewer?.login?.toLowerCase();
                                 if (!requested) continue;
-                                // Clear if the PR author re-requested this maintainer, OR if the
-                                // blocking maintainer re-requested themselves (signaling intent
-                                // to re-review).
-                                if (actorLogin !== authorLogin && actorLogin !== requested) continue;
                                 const blocker = maintainerBlockers.get(requested);
                                 if (!blocker) continue;
                                 const requestedAt = Date.parse(event.created_at ?? '');
