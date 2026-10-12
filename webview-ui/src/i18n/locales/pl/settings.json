@@ -334,6 +334,10 @@
 			"label": "Podzadania",
 			"description": "Zezwalaj na tworzenie i ukończenie podzadań bez konieczności zatwierdzania"
 		},
+		"webFetch": {
+			"label": "Sieć",
+			"description": "Zezwalaj na pobieranie treści internetowych bez konieczności zatwierdzania"
+		},
 		"followupQuestions": {
 			"label": "Pytanie",
 			"description": "Automatycznie wybierz pierwszą sugerowaną odpowiedź na pytania uzupełniające po skonfigurowanym limicie czasu",

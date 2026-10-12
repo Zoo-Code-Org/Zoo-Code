@@ -26,7 +26,8 @@
 			"read": "Baca File",
 			"edit": "Edit File",
 			"command": "Jalankan Perintah",
-			"mcp": "Gunakan MCP"
+			"mcp": "Gunakan MCP",
+			"web": "Ambil Konten Web"
 		},
 		"noTools": "Tidak Ada"
 	},

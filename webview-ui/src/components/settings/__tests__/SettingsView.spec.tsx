@@ -937,6 +937,48 @@ describe("SettingsView - Blanket Auto-Deny", () => {
 			}),
 		)
 	})
+
+	it("saves web fetch auto-approval as false when it was never enabled", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView()
+
+		activateTab("autoApprove")
+
+		// Make an unrelated change so Save is enabled.
+		fireEvent.click(within(getSettingsContent()).getByTestId("always-allow-write-toggle"))
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ alwaysAllowWebFetch: false }),
+			}),
+		)
+	})
+
+	it("buffers the web fetch auto-approval toggle until Save", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView()
+
+		activateTab("autoApprove")
+
+		fireEvent.click(within(getSettingsContent()).getByTestId("always-allow-web-fetch-toggle"))
+
+		// Toggling must NOT persist before Save; it only buffers in cachedState.
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ alwaysAllowWebFetch: true }),
+			}),
+		)
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ alwaysAllowWebFetch: true }),
+			}),
+		)
+	})
 })
 
 describe("SettingsView - openAiStrictToolSchemas save round trip", () => {

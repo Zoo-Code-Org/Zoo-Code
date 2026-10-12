@@ -163,6 +163,12 @@ export const globalSettingsSchema = z.object({
 	alwaysAllowMcp: z.boolean().optional(),
 	alwaysAllowModeSwitch: z.boolean().optional(),
 	alwaysAllowSubtasks: z.boolean().optional(),
+	/**
+	 * Auto-approve `fetch_web_content` requests without prompting. Internal and
+	 * private network addresses remain blocked regardless of this setting.
+	 * @default false
+	 */
+	alwaysAllowWebFetch: z.boolean().optional(),
 	alwaysAllowExecute: z.boolean().optional(),
 	destructiveCommandGuardEnabled: z.boolean().optional(),
 	/**
