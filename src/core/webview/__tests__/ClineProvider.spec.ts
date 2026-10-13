@@ -2740,6 +2740,52 @@ describe("ClineProvider", () => {
 	})
 
 	describe("provider profile mutations", () => {
+		it("serializes provider profile mutations across provider instances", async () => {
+			// Profile mutations rewrite the shared ContextProxy stores: with a per-instance
+			// queue, a second view's mutation could commit between the first view's shared
+			// write and its snapshot compensation, and the compensation would restore a stale
+			// copy over the newer write. The queue must therefore be shared across views.
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			const order: string[] = []
+			let releaseA!: () => void
+			const gateA = new Promise<void>((resolve) => {
+				releaseA = resolve
+			})
+
+			const mutationA = providerA["enqueueProviderProfileMutation"](async () => {
+				order.push("a:start")
+				await gateA
+				order.push("a:end")
+				throw new Error("a failed")
+			})
+			const mutationB = providerB["enqueueProviderProfileMutation"](async () => {
+				order.push("b:start")
+			})
+
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			// B's mutation is queued behind A's even though they are different instances.
+			expect(order).toEqual(["a:start"])
+
+			releaseA()
+			await expect(mutationA).rejects.toThrow("a failed")
+			await mutationB
+			expect(order).toEqual(["a:start", "a:end", "b:start"])
+		})
+
 		it("should sync the view-local buffer when activating a profile over a loaded view state", async () => {
 			const writer = new ClineProvider(
 				mockContext,
@@ -4065,6 +4111,98 @@ describe("ClineProvider", () => {
 			await failingSibling.dispose()
 		})
 
+		it("leaves every sibling task on the deleted profile when another sibling's re-pin is rejected", async () => {
+			// B and C both pin the doomed profile; C's durable re-pin write fails, so the
+			// deletion compensates every pin back. Switching a task is not part of that
+			// compensation: had the task updates run per-sibling inside the re-pin loop, the
+			// rolled-back views' tasks would keep sending the replacement's settings and
+			// sticky name after the deletion failed.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const healthySibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const failingSibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await healthySibling["setViewStateId"]("task-keep-sibling-b")
+			await failingSibling["setViewStateId"]("task-keep-sibling-c")
+			await healthySibling.saveViewState("currentApiConfigName", "doomed-profile")
+			await failingSibling.saveViewState("currentApiConfigName", "doomed-profile")
+			await provider.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				{ id: "doomed-id", name: "doomed-profile", apiProvider: providerIdentifiers.anthropic },
+				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn().mockImplementation(async ({ name }: { name?: string }) =>
+					name === "doomed-profile"
+						? { name: "doomed-profile", id: "doomed-id", apiProvider: providerIdentifiers.anthropic }
+						: {
+								name: "replacement-profile",
+								id: "replacement-id",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterBaseUrl: "repl-url",
+							},
+				),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue("doomed-id"),
+			}
+
+			const makeTaskDouble = () => ({
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+				updateApiConfiguration: vi.fn(),
+				setTaskApiConfigName: vi.fn(),
+			})
+			const bTask = makeTaskDouble()
+			const cTask = makeTaskDouble()
+			// Structural cast: the double only carries the members the rebuild and sticky paths touch.
+			vi.spyOn(healthySibling, "getCurrentTask").mockReturnValue(bTask as unknown as Task)
+			vi.spyOn(failingSibling, "getCurrentTask").mockReturnValue(cTask as unknown as Task)
+
+			// C's durable re-pin write rejects; its compensation write is allowed through.
+			const siblingC = failingSibling as unknown as {
+				_saveViewLocalStateFromMutation: (values: unknown) => Promise<void>
+			}
+			vi.spyOn(siblingC, "_saveViewLocalStateFromMutation").mockRejectedValueOnce(
+				new Error("sibling re-pin failed"),
+			)
+
+			await expect(
+				provider.deleteProviderProfile({
+					id: "doomed-id",
+					name: "doomed-profile",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+			).rejects.toThrow("sibling re-pin failed")
+
+			// Both pins are compensated back to the deleted profile...
+			expect(healthySibling["viewLocalState"].currentApiConfigName).toBe("doomed-profile")
+			expect(failingSibling["viewLocalState"].currentApiConfigName).toBe("doomed-profile")
+			// ...and no task was switched to the replacement's handler or sticky name.
+			expect(bTask.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(bTask.setTaskApiConfigName).not.toHaveBeenCalledWith("replacement-profile")
+			expect(cTask.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(cTask.setTaskApiConfigName).not.toHaveBeenCalledWith("replacement-profile")
+			await provider.dispose()
+			await healthySibling.dispose()
+			await failingSibling.dispose()
+		})
+
 		it("refreshes a live sibling but leaves one that has started disposing", async () => {
 			// dispose() unregisters at its start, so a disposed sibling is normally not enumerated at all;
 			// this pins the second line of defence the row asks for. The live sibling is the positive
@@ -5125,7 +5263,7 @@ describe("ClineProvider", () => {
 					true,
 				)
 				// The queue is chained to the run, so awaiting it also waits for the compensation.
-				const queued = provider["providerProfileMutationQueue"]
+				const queued = ClineProvider["providerProfileMutationQueue"]
 				// The caller is released by the mutation timeout while the record write is still parked.
 				await expect(upsert).resolves.toBeUndefined()
 				for (let attempt = 0; attempt < 1000 && !parked; attempt++) {
@@ -5216,7 +5354,7 @@ describe("ClineProvider", () => {
 					{ apiProvider: providerIdentifiers.anthropic, apiKey: "new-a" },
 					true,
 				)
-				const queued = provider["providerProfileMutationQueue"]
+				const queued = ClineProvider["providerProfileMutationQueue"]
 				await expect(upsert).resolves.toBeUndefined()
 				for (let attempt = 0; attempt < 1000 && !parked; attempt++) {
 					await new Promise((resolve) => setImmediate(resolve))
@@ -5291,7 +5429,7 @@ describe("ClineProvider", () => {
 					{ apiProvider: providerIdentifiers.anthropic, apiKey: "new-b" },
 					true,
 				)
-				const queued = provider["providerProfileMutationQueue"]
+				const queued = ClineProvider["providerProfileMutationQueue"]
 				await expect(upsert).resolves.toBeUndefined()
 				for (let attempt = 0; attempt < 1000 && !parked; attempt++) {
 					await new Promise((resolve) => setImmediate(resolve))
