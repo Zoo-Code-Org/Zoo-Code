@@ -3719,10 +3719,11 @@ export class ClineProvider
 			const selectionAfterDelete = this.contextProxy.getValues().currentApiConfigName
 			deletedWasGlobal = profileToDelete.name === selectionAfterDelete
 
-			// The queue advances on the timeout-bounded caller result, so a cancelled deletion
-			// must stop touching durable state here. Everything below rewrites the shared
-			// selection, the shared provider settings, and other views' pins - any of those
-			// landing after the next queued mutation has run would overwrite that mutation.
+			// The mutation timeout already released the caller with a timeout rejection, so the
+			// forward half of the deletion stops here: everything below rewrites the shared
+			// selection, the shared provider settings, and other views' pins, completing a
+			// deletion no caller is waiting for any more. Throwing routes through the
+			// compensation below, which restores the landed writes while the queue is still held.
 			if (signal.aborted) {
 				this.log(
 					`deleteProviderProfile: cancelled before the selection/settings rewrite; the deletion stopped with the profile list already updated.`,
