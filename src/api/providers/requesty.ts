@@ -9,7 +9,7 @@ import {
 	requestyDefaultModelInfo,
 } from "@roo-code/types"
 
-import type { ApiHandlerOptions } from "../../shared/api"
+import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 import { calculateApiCostOpenAI } from "../../shared/cost"
 
 import { convertToOpenAiMessages } from "../transform/openai-format"
@@ -19,8 +19,14 @@ import { AnthropicProviderReasoningParams, getAnthropicProviderReasoning } from 
 
 import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { getModels } from "./fetchers/modelCache"
+import { getRequestyModels } from "./fetchers/requesty"
 import { BaseProvider } from "./base-provider"
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import type {
+	SingleCompletionHandler,
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+} from "../index"
 import { toRequestyServiceUrl } from "../../shared/utils/requesty"
 import { handleOpenAIError } from "./utils/error-handler"
 import {
@@ -86,12 +92,22 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 		})
 	}
 
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: true, keyScoped: true, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getRequestyModels(options.baseUrl, options.apiKey, ...fetchOpts)
+	}
+
 	// Model discovery is a shared single-flight fetch (see dedupedFetch in modelCache): the lookup
-	// carries no signal, because concurrent createMessage/completePrompt callers join one
-	// in-flight fetch and a per-request signal would let one caller's abort or timeout reject the
-	// shared fetch for every other waiter. Each caller handles its own cancellation (rejectOnAbort).
+	// carries no per-request signal, because concurrent createMessage/completePrompt callers join
+	// one in-flight fetch and a per-request signal would let one caller's abort or timeout reject
+	// the shared fetch for every other waiter (the flight's own controller signal is shared by all
+	// waiters). Each caller handles its own cancellation (rejectOnAbort).
 	public async fetchModel() {
-		this.models = await getModels({ provider: providerIdentifiers.requesty, baseUrl: this.baseURL })
+		this.models = await getModels({ provider: providerIdentifiers.requesty, baseUrl: this.baseURL }, this)
 		return this.getModel()
 	}
 
