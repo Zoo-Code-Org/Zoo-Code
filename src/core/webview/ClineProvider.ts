@@ -434,7 +434,11 @@ export class ClineProvider
 	public readonly taskHistoryStore: TaskHistoryStore
 	private taskHistoryStoreInitialized = false
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
-	private providerProfileMutationQueue = Promise.resolve()
+	// Shared across instances: profile mutations rewrite the shared ContextProxy stores, so a
+	// per-instance queue lets another view commit between this view's shared write and its
+	// snapshot compensation, and the compensation would restore a stale copy over the newer
+	// write. One queue serializes every view's profile mutations against each other.
+	private static providerProfileMutationQueue = Promise.resolve()
 	private historyTaskCreationQueue = Promise.resolve()
 	// Ownership token for the shared mode. A timed-out mutation keeps running after the queue
 	// advances, so a newer switch can commit while the cancelled one is still in flight; only the

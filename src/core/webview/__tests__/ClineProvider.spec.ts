@@ -5142,6 +5142,52 @@ describe("ClineProvider", () => {
 	})
 
 	describe("provider profile mutations", () => {
+		it("serializes provider profile mutations across provider instances", async () => {
+			// Profile mutations rewrite the shared ContextProxy stores: with a per-instance
+			// queue, a second view's mutation could commit between the first view's shared
+			// write and its snapshot compensation, and the compensation would restore a stale
+			// copy over the newer write. The queue must therefore be shared across views.
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			const order: string[] = []
+			let releaseA!: () => void
+			const gateA = new Promise<void>((resolve) => {
+				releaseA = resolve
+			})
+
+			const mutationA = providerA["enqueueProviderProfileMutation"](async () => {
+				order.push("a:start")
+				await gateA
+				order.push("a:end")
+				throw new Error("a failed")
+			})
+			const mutationB = providerB["enqueueProviderProfileMutation"](async () => {
+				order.push("b:start")
+			})
+
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			// B's mutation is queued behind A's even though they are different instances.
+			expect(order).toEqual(["a:start"])
+
+			releaseA()
+			await expect(mutationA).rejects.toThrow("a failed")
+			await mutationB
+			expect(order).toEqual(["a:start", "a:end", "b:start"])
+		})
+
 		it("should sync the view-local buffer when activating a profile over a loaded view state", async () => {
 			const writer = new ClineProvider(
 				mockContext,
@@ -8644,7 +8690,7 @@ describe("ClineProvider", () => {
 					{ apiProvider: providerIdentifiers.anthropic, apiKey: "new-b" },
 					true,
 				)
-				const queued = provider["providerProfileMutationQueue"]
+				const queued = ClineProvider["providerProfileMutationQueue"]
 				// The caller is released by the mutation timeout while the record write is still parked.
 				await expect(upsert).resolves.toBeUndefined()
 				for (let attempt = 0; attempt < 1000 && !parked; attempt++) {
@@ -8736,7 +8782,7 @@ describe("ClineProvider", () => {
 					{ apiProvider: providerIdentifiers.anthropic, apiKey: "new-a" },
 					true,
 				)
-				const queued = provider["providerProfileMutationQueue"]
+				const queued = ClineProvider["providerProfileMutationQueue"]
 				await expect(upsert).resolves.toBeUndefined()
 				for (let attempt = 0; attempt < 1000 && !parked; attempt++) {
 					await new Promise((resolve) => setImmediate(resolve))
@@ -8813,7 +8859,7 @@ describe("ClineProvider", () => {
 					{ apiProvider: providerIdentifiers.anthropic, apiKey: "new-b" },
 					true,
 				)
-				const queued = provider["providerProfileMutationQueue"]
+				const queued = ClineProvider["providerProfileMutationQueue"]
 				await expect(upsert).resolves.toBeUndefined()
 				for (let attempt = 0; attempt < 1000 && !parked; attempt++) {
 					await new Promise((resolve) => setImmediate(resolve))

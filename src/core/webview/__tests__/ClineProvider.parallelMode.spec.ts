@@ -1176,6 +1176,99 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(provider["viewLocalState"].currentApiConfigName).toBe("profile-a")
 		})
 
+		it("leaves every sibling task on the deleted profile when another sibling's re-pin is rejected", async () => {
+			// B and C both pin the doomed profile; C's durable re-pin write fails, so the
+			// deletion compensates every pin back. Switching a task is not part of that
+			// compensation: had the task updates run per-sibling inside the re-pin loop, the
+			// rolled-back views' tasks would keep sending the replacement's settings and
+			// sticky name after the deletion failed.
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const providerC = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await providerB["setViewStateId"]("tab-repin-fail-b")
+			await providerC["setViewStateId"]("tab-repin-fail-c")
+			await providerB.setValue("currentApiConfigName", "doomed-profile")
+			await providerC.setValue("currentApiConfigName", "doomed-profile")
+			await providerA.contextProxy.setValue("currentApiConfigName", "doomed-profile")
+			await providerA.contextProxy.setValue("listApiConfigMeta", [
+				{ id: "doomed-id", name: "doomed-profile", apiProvider: providerIdentifiers.anthropic },
+				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+
+			// Structural cast: the env mock shapes activateProfile/getProfile results uniformly.
+			vi.spyOn(providerA.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "replacement-profile",
+				id: "replacement-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterBaseUrl: "repl-url",
+			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockImplementation(
+				async (_args: { name?: string; id?: string }) =>
+					({
+						name: "replacement-profile",
+						id: "replacement-id",
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterBaseUrl: "repl-url",
+					}) as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>,
+			)
+
+			const makeTaskDouble = () => ({
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+				updateApiConfiguration: vi.fn(),
+				setTaskApiConfigName: vi.fn(),
+			})
+			const bTask = makeTaskDouble()
+			const cTask = makeTaskDouble()
+			vi.spyOn(providerB, "getCurrentTask").mockReturnValue(bTask as unknown as Task)
+			vi.spyOn(providerC, "getCurrentTask").mockReturnValue(cTask as unknown as Task)
+
+			// C's durable re-pin write rejects; its compensation write is allowed through.
+			const siblingC = providerC as unknown as {
+				_saveViewLocalStateFromMutation: (values: unknown) => Promise<void>
+			}
+			vi.spyOn(siblingC, "_saveViewLocalStateFromMutation").mockRejectedValueOnce(
+				new Error("sibling re-pin failed"),
+			)
+
+			await expect(
+				providerA.deleteProviderProfile({
+					id: "doomed-id",
+					name: "doomed-profile",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
+			).rejects.toThrow("sibling re-pin failed")
+
+			// Both pins are compensated back to the deleted profile...
+			expect(providerB["viewLocalState"].currentApiConfigName).toBe("doomed-profile")
+			expect(providerC["viewLocalState"].currentApiConfigName).toBe("doomed-profile")
+			// ...and no task was switched to the replacement's handler or sticky name.
+			expect(bTask.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(bTask.setTaskApiConfigName).not.toHaveBeenCalledWith("replacement-profile")
+			expect(cTask.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(cTask.setTaskApiConfigName).not.toHaveBeenCalledWith("replacement-profile")
+		})
+
 		it("surfaces an explicit inconsistent-state error when the compensation itself fails", async () => {
 			const provider = new ClineProvider(
 				mockContext,
