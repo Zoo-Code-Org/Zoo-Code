@@ -113,6 +113,14 @@
 	},
 	"selectMode": "Etkileşim modunu seçin",
 	"selectApiConfig": "API yapılandırmasını seçin",
+	"selectModel": "Model seç",
+	"modelSelector": {
+		"title": "Modeller",
+		"settings": "Model Ayarları",
+		"description": "Bu API yapılandırması için kullanılacak modeli seçin.",
+		"searchPlaceholder": "Model ara...",
+		"unsupportedTooltip": "Bu sağlayıcının modeli Ayarlar'da yapılandırılır"
+	},
 	"lockApiConfigAcrossModes": "Bu çalışma alanındaki tüm modlarda API yapılandırmasını kilitle",
 	"unlockApiConfigAcrossModes": "Bu çalışma alanındaki tüm modlarda API yapılandırması kilitli (kilidi açmak için tıkla)",
 	"enhancePrompt": "Ek bağlamla istemi geliştir",

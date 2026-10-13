@@ -113,6 +113,7 @@
 	},
 	"selectMode": "상호작용 모드 선택",
 	"selectApiConfig": "API 구성 선택",
+	"selectModel": "모델 선택",
 	"lockApiConfigAcrossModes": "이 워크스페이스의 모든 모드에서 API 구성 잠금",
 	"unlockApiConfigAcrossModes": "이 워크스페이스의 모든 모드에서 API 구성이 잠겨 있습니다 (클릭하여 해제)",
 	"enhancePrompt": "추가 컨텍스트로 프롬프트 향상",
@@ -133,6 +134,13 @@
 		"description": "Zoo의 행동을 맞춤화하는 전문화된 페르소나.",
 		"searchPlaceholder": "모드 검색...",
 		"noResults": "결과를 찾을 수 없습니다"
+	},
+	"modelSelector": {
+		"title": "모델",
+		"settings": "모델 설정",
+		"description": "이 API 구성에서 사용할 모델을 선택하세요.",
+		"searchPlaceholder": "모델 검색...",
+		"unsupportedTooltip": "이 공급자의 모델은 설정에서 구성합니다"
 	},
 	"errorReadingFile": "파일 읽기 오류",
 	"noValidImages": "처리된 유효한 이미지가 없습니다",

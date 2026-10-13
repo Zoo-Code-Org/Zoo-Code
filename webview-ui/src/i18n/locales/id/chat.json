@@ -143,6 +143,14 @@
 	},
 	"selectMode": "Pilih mode untuk interaksi",
 	"selectApiConfig": "Pilih konfigurasi API",
+	"selectModel": "Pilih model",
+	"modelSelector": {
+		"title": "Model",
+		"settings": "Pengaturan Model",
+		"description": "Pilih model yang digunakan untuk konfigurasi API ini.",
+		"searchPlaceholder": "Cari model...",
+		"unsupportedTooltip": "Model penyedia ini dikonfigurasi di Pengaturan"
+	},
 	"lockApiConfigAcrossModes": "Kunci konfigurasi API di semua mode dalam workspace ini",
 	"unlockApiConfigAcrossModes": "Konfigurasi API terkunci di semua mode dalam workspace ini (klik untuk membuka kunci)",
 	"enhancePrompt": "Tingkatkan prompt dengan konteks tambahan",

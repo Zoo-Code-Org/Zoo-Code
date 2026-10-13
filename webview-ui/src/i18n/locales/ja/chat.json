@@ -113,6 +113,14 @@
 	},
 	"selectMode": "対話モードを選択",
 	"selectApiConfig": "API構成を選択",
+	"selectModel": "モデルを選択",
+	"modelSelector": {
+		"title": "モデル",
+		"settings": "モデル設定",
+		"description": "この API 設定で使用するモデルを選択します。",
+		"searchPlaceholder": "モデルを検索...",
+		"unsupportedTooltip": "このプロバイダーのモデルは設定で構成します"
+	},
 	"lockApiConfigAcrossModes": "このワークスペースのすべてのモードでAPI構成をロック",
 	"unlockApiConfigAcrossModes": "このワークスペースのすべてのモードでAPI構成がロックされています（クリックで解除）",
 	"enhancePrompt": "追加コンテキストでプロンプトを強化",

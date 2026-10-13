@@ -113,6 +113,14 @@
 	},
 	"selectMode": "Selecciona el mode d'interacció",
 	"selectApiConfig": "Seleccioneu la configuració de l'API",
+	"selectModel": "Selecciona el model",
+	"modelSelector": {
+		"title": "Models",
+		"settings": "Configuració del model",
+		"description": "Tria el model que s'utilitzarà per a aquesta configuració d'API.",
+		"searchPlaceholder": "Cerca models...",
+		"unsupportedTooltip": "El model d'aquest proveïdor es configura a Configuració"
+	},
 	"lockApiConfigAcrossModes": "Bloqueja la configuració de l'API a tots els modes en aquest espai de treball",
 	"unlockApiConfigAcrossModes": "La configuració de l'API està bloquejada a tots els modes en aquest espai de treball (fes clic per desbloquejar)",
 	"enhancePrompt": "Millora la sol·licitud amb context addicional",

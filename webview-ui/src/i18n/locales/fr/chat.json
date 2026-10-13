@@ -113,6 +113,14 @@
 	},
 	"selectMode": "Sélectionner le mode d'interaction",
 	"selectApiConfig": "Sélectionner la configuration de l'API",
+	"selectModel": "Sélectionner le modèle",
+	"modelSelector": {
+		"title": "Modèles",
+		"settings": "Paramètres du modèle",
+		"description": "Choisissez le modèle utilisé pour cette configuration d'API.",
+		"searchPlaceholder": "Rechercher des modèles...",
+		"unsupportedTooltip": "Le modèle de ce fournisseur se configure dans les Paramètres"
+	},
 	"lockApiConfigAcrossModes": "Verrouiller la configuration API pour tous les modes dans cet espace de travail",
 	"unlockApiConfigAcrossModes": "La configuration API est verrouillée pour tous les modes dans cet espace de travail (cliquer pour déverrouiller)",
 	"enhancePrompt": "Améliorer la requête avec un contexte supplémentaire",

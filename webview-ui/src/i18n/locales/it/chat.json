@@ -113,6 +113,14 @@
 	},
 	"selectMode": "Seleziona modalità di interazione",
 	"selectApiConfig": "Seleziona la configurazione API",
+	"selectModel": "Seleziona modello",
+	"modelSelector": {
+		"title": "Modelli",
+		"settings": "Impostazioni del modello",
+		"description": "Scegli il modello da usare per questa configurazione API.",
+		"searchPlaceholder": "Cerca modelli...",
+		"unsupportedTooltip": "Il modello di questo provider si configura nelle Impostazioni"
+	},
 	"lockApiConfigAcrossModes": "Blocca la configurazione API per tutte le modalità in questo workspace",
 	"unlockApiConfigAcrossModes": "La configurazione API è bloccata per tutte le modalità in questo workspace (clicca per sbloccare)",
 	"enhancePrompt": "Migliora prompt con contesto aggiuntivo",

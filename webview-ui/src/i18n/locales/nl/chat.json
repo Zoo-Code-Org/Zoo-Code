@@ -113,6 +113,14 @@
 	},
 	"selectMode": "Selecteer modus voor interactie",
 	"selectApiConfig": "Selecteer API-configuratie",
+	"selectModel": "Model selecteren",
+	"modelSelector": {
+		"title": "Modellen",
+		"settings": "Modelinstellingen",
+		"description": "Kies het model dat voor deze API-configuratie wordt gebruikt.",
+		"searchPlaceholder": "Modellen zoeken...",
+		"unsupportedTooltip": "Het model van deze provider wordt in de Instellingen geconfigureerd"
+	},
 	"lockApiConfigAcrossModes": "API-configuratie vergrendelen voor alle modi in deze werkruimte",
 	"unlockApiConfigAcrossModes": "API-configuratie is vergrendeld voor alle modi in deze werkruimte (klik om te ontgrendelen)",
 	"enhancePrompt": "Prompt verbeteren met extra context",

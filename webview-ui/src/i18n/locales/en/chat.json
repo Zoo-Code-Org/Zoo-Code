@@ -140,6 +140,7 @@
 	},
 	"selectMode": "Select mode for interaction",
 	"selectApiConfig": "Select API configuration",
+	"selectModel": "Select model",
 	"lockApiConfigAcrossModes": "Lock API configuration across all modes in this workspace",
 	"unlockApiConfigAcrossModes": "API configuration is locked across all modes in this workspace (click to unlock)",
 	"enhancePrompt": "Enhance prompt with additional context",
@@ -150,6 +151,13 @@
 		"description": "Specialized personas that tailor Zoo's behavior.",
 		"searchPlaceholder": "Search modes...",
 		"noResults": "No results found"
+	},
+	"modelSelector": {
+		"title": "Models",
+		"settings": "Model Settings",
+		"description": "Choose the model used for this API configuration.",
+		"searchPlaceholder": "Search models...",
+		"unsupportedTooltip": "This provider's model is configured in Settings"
 	},
 	"enhancePromptDescription": "The 'Enhance Prompt' button helps improve your prompt by providing additional context, clarification, or rephrasing. Try typing a prompt in here and clicking the button again to see how it works.",
 	"addImages": "Add images to message",

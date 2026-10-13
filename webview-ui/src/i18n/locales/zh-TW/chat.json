@@ -140,6 +140,14 @@
 	},
 	"selectMode": "選擇互動模式",
 	"selectApiConfig": "選取 API 設定",
+	"selectModel": "選擇模型",
+	"modelSelector": {
+		"title": "模型",
+		"settings": "模型設定",
+		"description": "選擇此 API 設定使用的模型。",
+		"searchPlaceholder": "搜尋模型...",
+		"unsupportedTooltip": "此供應商的模型需在設定中配置"
+	},
 	"lockApiConfigAcrossModes": "鎖定此工作區所有模式的 API 設定",
 	"unlockApiConfigAcrossModes": "此工作區所有模式的 API 設定已鎖定（點擊解鎖）",
 	"enhancePrompt": "使用額外內容強化提示詞",

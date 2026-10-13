@@ -113,6 +113,14 @@
 	},
 	"selectMode": "Chọn chế độ tương tác",
 	"selectApiConfig": "Chọn cấu hình API",
+	"selectModel": "Chọn mô hình",
+	"modelSelector": {
+		"title": "Mô hình",
+		"settings": "Cài đặt mô hình",
+		"description": "Chọn mô hình được dùng cho cấu hình API này.",
+		"searchPlaceholder": "Tìm kiếm mô hình...",
+		"unsupportedTooltip": "Mô hình của nhà cung cấp này được cấu hình trong Cài đặt"
+	},
 	"lockApiConfigAcrossModes": "Khóa cấu hình API cho tất cả chế độ trong workspace này",
 	"unlockApiConfigAcrossModes": "Cấu hình API đã bị khóa cho tất cả chế độ trong workspace này (nhấn để mở khóa)",
 	"enhancePrompt": "Nâng cao yêu cầu với ngữ cảnh bổ sung",
