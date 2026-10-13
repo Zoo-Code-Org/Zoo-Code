@@ -36,6 +36,8 @@ import {
 	BEDROCK_SERVICE_TIER_PRICING,
 	SERVICE_TIER_KEY,
 	ApiProviderError,
+	resolveBedrockCustomArnBaseModelId,
+	BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
@@ -342,7 +344,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 	 * the prefix via parseBaseModelId before matching.
 	 */
 	private isAdaptiveThinkingModel(modelId: string): boolean {
-		const baseModelId = this.parseBaseModelId(modelId)
+		const baseModelId = this.getCapabilityModelId(modelId)
 		return (
 			baseModelId.includes("opus-4-7") ||
 			baseModelId.includes("opus-4-8") ||
@@ -452,7 +454,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		// Detect models that require the adaptive-thinking API contract (Opus/Sonnet
 		// 4.7 and 4.8). See isAdaptiveThinkingModel for details. The same guard is
 		// reused in completePrompt so both request paths stay consistent.
-		const baseModelId = this.parseBaseModelId(modelConfig.id)
+		const baseModelId = this.getCapabilityModelId(modelConfig.id)
 		const isAdaptiveThinkingModel = this.isAdaptiveThinkingModel(modelConfig.id)
 
 		// Determine if thinking should be enabled
@@ -1138,6 +1140,40 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		}
 	}
 
+	/**
+	 * Model ID used to look up model info for a custom ARN. Foundation-model ARNs use the model they name;
+	 * an explicit "Other" choice uses the generic fallback instead of a model named in the ARN.
+	 */
+	private getCustomArnLookupModelId(): string {
+		if (this.arnInfo.modelType === "foundation-model") {
+			return this.arnInfo.modelId
+		}
+
+		const baseModelId = resolveBedrockCustomArnBaseModelId(
+			this.options.awsCustomArn,
+			this.options.awsCustomArnBaseModelId,
+		)
+		if (baseModelId) {
+			return baseModelId
+		}
+
+		return this.options.awsCustomArnBaseModelId === BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL
+			? BEDROCK_CUSTOM_ARN_OTHER_BASE_MODEL
+			: this.arnInfo.modelId
+	}
+
+	/**
+	 * Model ID used for capability checks (thinking contract, 1M context, service tier, ...).
+	 * For a custom ARN this is the model it points to rather than the ARN itself.
+	 */
+	private getCapabilityModelId(modelId: string): string {
+		if (this.options.awsCustomArn && modelId === this.options.awsCustomArn) {
+			return this.getCustomArnLookupModelId()
+		}
+
+		return this.parseBaseModelId(modelId)
+	}
+
 	//This strips any region prefix that used on cross-region model inference ARNs
 	private parseBaseModelId(modelId: string): string {
 		if (!modelId) {
@@ -1225,7 +1261,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 		// If custom ARN is provided, use it
 		if (this.options.awsCustomArn) {
-			modelConfig = this.getModelById(this.arnInfo.modelId, this.arnInfo.modelType)
+			modelConfig = this.getModelById(this.getCustomArnLookupModelId(), this.arnInfo.modelType)
 
 			//If the user entered an ARN for a foundation-model they've done the same thing as picking from our list of options.
 			//We leave the model data matching the same as if a drop-down input method was used by not overwriting the model ID with the user input ARN
@@ -1253,8 +1289,8 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		}
 
 		// Check if 1M context is enabled for supported Claude 4 models
-		// Use parseBaseModelId to handle cross-region inference prefixes
-		const baseModelId = this.parseBaseModelId(modelConfig.id)
+		// getCapabilityModelId handles cross-region prefixes and custom ARNs
+		const baseModelId = this.getCapabilityModelId(modelConfig.id)
 		if (BEDROCK_1M_CONTEXT_MODEL_IDS.includes(baseModelId as any) && this.options.awsBedrock1MContext) {
 			// Update context window and pricing to 1M tier when 1M context beta is enabled
 			const tier = modelConfig.info.tiers?.[0]
@@ -1278,7 +1314,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		})
 
 		// Apply service tier pricing if specified and model supports it
-		const baseModelIdForTier = this.parseBaseModelId(modelConfig.id)
+		const baseModelIdForTier = this.getCapabilityModelId(modelConfig.id)
 		if (this.options.awsBedrockServiceTier && BEDROCK_SERVICE_TIER_MODEL_IDS.includes(baseModelIdForTier as any)) {
 			const pricingMultiplier = BEDROCK_SERVICE_TIER_PRICING[this.options.awsBedrockServiceTier]
 			if (pricingMultiplier && pricingMultiplier !== 1.0) {

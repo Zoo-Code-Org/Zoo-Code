@@ -1,14 +1,19 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 import { Message, Ollama, Tool as OllamaTool, type Config as OllamaOptions } from "ollama"
-import { ModelInfo, openAiModelInfoSaneDefaults, DEEP_SEEK_DEFAULT_TEMPERATURE } from "@roo-code/types"
+import { ModelInfo, ModelRecord, openAiModelInfoSaneDefaults, DEEP_SEEK_DEFAULT_TEMPERATURE } from "@roo-code/types"
 import { ApiStream } from "../transform/stream"
 import { BaseProvider } from "./base-provider"
-import type { ApiHandlerOptions } from "../../shared/api"
+import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 import { getOllamaModels, isSecureOllamaEndpoint } from "./fetchers/ollama"
 import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
 import { TagMatcher } from "../../utils/tag-matcher"
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import type {
+	SingleCompletionHandler,
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+} from "../index"
 
 interface OllamaChatOptions {
 	temperature: number
@@ -272,6 +277,15 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 	constructor(options: ApiHandlerOptions) {
 		super()
 		this.options = options
+	}
+
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: true, keyScoped: false, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getOllamaModels(options.baseUrl, options.apiKey, ...fetchOpts)
 	}
 
 	/**
