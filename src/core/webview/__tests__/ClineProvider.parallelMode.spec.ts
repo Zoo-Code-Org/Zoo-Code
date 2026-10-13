@@ -1330,7 +1330,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				siblingTask as unknown as ReturnType<typeof providerB.getCurrentTask>,
 			)
 
-			// The pre-return re-pin			// The pre-return re-pin resolves the replacement's settings through the manager.
+			// The pre-return re-pin resolves the replacement's settings through the manager.
 			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockImplementation(
 				async (_args: { name?: string; id?: string }) =>
 					({
