@@ -37,7 +37,7 @@ import { Task, TaskOptions } from "../../task/Task"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
 import { t } from "../../../i18n"
 
-import { ClineProvider } from "../ClineProvider"
+import { ClineProvider, ProfileDeletionActivationError } from "../ClineProvider"
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import type { MdmService } from "../../../services/mdm/MdmService"
 import { Terminal } from "../../../integrations/terminal/Terminal"
@@ -3134,6 +3134,59 @@ describe("ClineProvider", () => {
 			// Watchers must learn that the active profile was replaced.
 			expect(events).toEqual([{ name: "keeper-profile", provider: providerIdentifiers.anthropic }])
 			provider.off(RooCodeEventName.ProviderProfileChanged, listener)
+			await provider.dispose()
+		})
+
+		it("throws a distinct error when the replacement activation fails after the deletion commits", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			// @ts-ignore - Replace providerSettingsManager with a test double whose activation fails.
+			provider.providerSettingsManager = {
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				getProfile: vi.fn().mockImplementation(({ name }: { name: string }) =>
+					Promise.resolve(
+						name === "doomed-profile"
+							? {
+									name: "doomed-profile",
+									id: "doomed-id",
+									apiProvider: providerIdentifiers.openrouter,
+								}
+							: { name: "keeper-profile", id: "keeper-id", apiProvider: providerIdentifiers.anthropic },
+					),
+				),
+				activateProfile: vi.fn().mockRejectedValue(new Error("disk full")),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+			}
+			const postSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+			await provider.setValue("currentApiConfigName", "doomed-profile")
+
+			// The deletion has already committed when the activation fails: the caller must learn
+			// that from a distinct error, not from the generic "could not delete" report.
+			const error = await provider.deleteProviderProfile(doomedProfile).catch((caught: unknown) => caught)
+			expect(error).toBeInstanceOf(ProfileDeletionActivationError)
+			expect((error as Error).message).toBe(
+				"The profile was deleted, but activating replacement profile 'keeper-profile' failed.",
+			)
+			// The committed state is posted before the error surfaces.
+			expect(postSpy).toHaveBeenCalled()
+			// The committed deletion is not rolled back by the failed activation.
+			expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledTimes(1)
 			await provider.dispose()
 		})
 
