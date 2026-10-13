@@ -1908,8 +1908,9 @@ export class ClineProvider
 		activate: boolean = true,
 	): Promise<string | undefined> {
 		try {
-			return await this.enqueueProviderProfileMutation((signal) =>
-				this.persistProviderProfile(name, providerSettings, activate, signal),
+			return await this.enqueueProviderProfileMutation(
+				(signal) => this.persistProviderProfile(name, providerSettings, activate, signal),
+				{ runToCompletion: true },
 			)
 		} catch (error) {
 			this.log(

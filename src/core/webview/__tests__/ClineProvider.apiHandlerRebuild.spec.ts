@@ -576,6 +576,44 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			}
 		})
 
+		test("upsertProviderProfile finishes activation after the caller timed out", async () => {
+			vi.useFakeTimers()
+
+			try {
+				const realGetState = provider.getState.bind(provider)
+				let release!: () => void
+				const gate = new Promise<void>((resolve) => {
+					release = resolve
+				})
+				let calls = 0
+				vi.spyOn(provider, "getState").mockImplementation(async () => {
+					// 1st call: activation inside persistProviderProfile.
+					if (++calls === 1) await gate
+					return realGetState()
+				})
+
+				const upsert = provider.upsertProviderProfile(
+					"test-config",
+					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "anthropic/claude" },
+					true,
+				)
+
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
+				await expect(upsert).resolves.toBeUndefined()
+
+				const manager = provider["providerSettingsManager"]
+				expect(manager.setModeConfig).not.toHaveBeenCalled()
+
+				release()
+				await vi.advanceTimersByTimeAsync(0)
+
+				expect(manager.saveConfig).toHaveBeenCalledTimes(1)
+				expect(manager.setModeConfig).toHaveBeenCalledTimes(1)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
 		test("holds the next profile mutation until a timed-out model update settles", async () => {
 			vi.useFakeTimers()
 
