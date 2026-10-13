@@ -398,6 +398,11 @@
 		"vscodeLmDescription": "De VS Code Language Model API stelt je in staat modellen te draaien die door andere VS Code-extensies worden geleverd (waaronder GitHub Copilot). De eenvoudigste manier om te beginnen is door de Copilot- en Copilot Chat-extensies te installeren vanuit de VS Code Marketplace.",
 		"awsCustomArnUse": "Voer een geldige Amazon Bedrock ARN in voor het model dat je wilt gebruiken. Voorbeeldformaten:",
 		"awsCustomArnDesc": "Zorg ervoor dat de regio in de ARN overeenkomt met je geselecteerde AWS-regio hierboven.",
+		"awsCustomArnBaseModel": "Onderliggend model",
+		"awsCustomArnBaseModelOther": "Anders (niet vermeld)",
+		"awsCustomArnBaseModelDesc": "Het model waarnaar deze ARN verwijst. Zoo Code gebruikt het voor denken, temperatuur, contextvenster, maximale uitvoer en prijzen. Wordt automatisch gedetecteerd als de ARN het model noemt.",
+		"awsCustomArnContextWindow": "Contextvenster (tokens)",
+		"awsCustomArnMaxTokens": "Maximale uitvoertokens",
 		"openRouterApiKey": "OpenRouter API-sleutel",
 		"getOpenRouterApiKey": "OpenRouter API-sleutel ophalen",
 		"vercelAiGatewayApiKey": "Vercel AI Gateway API-sleutel",
@@ -667,6 +672,10 @@
 			"description": "Aantal opeenvolgende fouten of herhaalde acties voordat het dialoogvenster 'Zoo ondervindt problemen' wordt weergegeven. Zet op 0 om dit veiligheidsmechanisme uit te schakelen (wordt nooit geactiveerd).",
 			"unlimitedDescription": "Onbeperkt aantal nieuwe pogingen ingeschakeld (automatisch doorgaan). Het dialoogvenster zal nooit verschijnen.",
 			"warning": "⚠️ Instellen op 0 staat onbeperkte nieuwe pogingen toe, wat aanzienlijk API-gebruik kan verbruiken"
+		},
+		"toolRepetitionSoftLimit": {
+			"label": "Drempel zachte herhalingswaarschuwing",
+			"description": "Na dit aantal identieke opeenvolgende toolaanroepen wordt de tool geblokkeerd en wordt de AI gevraagd het opnieuw proberen te rechtvaardigen, zonder jou erbij te betrekken. Stel in op 0 om zachte waarschuwingen uit te schakelen."
 		},
 		"reasoningEffort": {
 			"label": "Model redeneervermogen",

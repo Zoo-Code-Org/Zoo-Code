@@ -720,11 +720,32 @@ describe("ClineProvider Task History Synchronization", () => {
 			expect(state.currentTaskId).toBe(activeTask.taskId)
 		})
 
+		it("passes the profile's tool repetition limits to the Task when resuming from history", async () => {
+			const state = await provider.getState()
+			vi.spyOn(provider, "getState").mockResolvedValue({
+				...state,
+				apiConfiguration: { ...state.apiConfiguration, consecutiveMistakeLimit: 6, toolRepetitionSoftLimit: 4 },
+			})
+
+			await provider.createTaskWithHistoryItem(createHistoryItem({ id: "resumed-task", task: "Resumed task" }), {
+				startTask: false,
+			})
+
+			expect(vi.mocked(Task)).toHaveBeenCalledWith(
+				expect.objectContaining({
+					historyItem: expect.objectContaining({ id: "resumed-task" }),
+					consecutiveMistakeLimit: 6,
+					toolRepetitionSoftLimit: 4,
+				}),
+			)
+		})
+
 		it("validates and applies the delegated child's effective profile", async () => {
 			const effectiveConfiguration = {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "allowed-child-model",
 				consecutiveMistakeLimit: 7,
+				toolRepetitionSoftLimit: 4,
 			}
 			const isProfileAllowed = vi.spyOn(ProfileValidator, "isProfileAllowed").mockReturnValue(true)
 			const parentTask = { taskId: "parent", workspacePath: "/test/workspace" } as Task
@@ -739,7 +760,9 @@ describe("ClineProvider Task History Synchronization", () => {
 			})
 
 			expect(isProfileAllowed).toHaveBeenCalledWith(effectiveConfiguration, expect.anything())
-			expect(vi.mocked(Task)).toHaveBeenCalledWith(expect.objectContaining({ consecutiveMistakeLimit: 7 }))
+			expect(vi.mocked(Task)).toHaveBeenCalledWith(
+				expect.objectContaining({ consecutiveMistakeLimit: 7, toolRepetitionSoftLimit: 4 }),
+			)
 		})
 
 		it("rejects a delegated child when its effective profile is not allowed", async () => {
