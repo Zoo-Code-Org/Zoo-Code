@@ -7058,22 +7058,6 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 
 				const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
-				// Test with negative timestamp
-
-				await messageHandler({
-					type: "deleteMessage",
-
-					value: -1000,
-				})
-
-				// Test with zero timestamp
-
-				await messageHandler({
-					type: "deleteMessage",
-
-					value: 0,
-				})
-
 				const overwriteSpy = vi.spyOn(mockCline, "overwriteClineMessages")
 
 				// A negative timestamp is still a number, so the handler proceeds and asks the webview
