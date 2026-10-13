@@ -10,10 +10,10 @@ import {
 	type ModelRecord,
 } from "@roo-code/types"
 
-import type { ApiHandlerOptions } from "../../shared/api"
+import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 import { kimiCodeOAuthManager } from "../../integrations/kimi-code/oauth"
 
-import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions, ModelCacheScope } from "../index"
 import type { ApiStream } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 
@@ -21,6 +21,7 @@ import { OpenAiHandler } from "./openai"
 import { NOT_PROVIDED } from "./constants"
 import { getModels } from "./fetchers/modelCache"
 import { throwIfAborted } from "./utils/abort-signal"
+import { getKimiCodeModels } from "./fetchers/kimi-code"
 
 const OAUTH_AUTH_METHOD: KimiCodeAuthMethod = "oauth"
 const API_KEY_AUTH_METHOD: KimiCodeAuthMethod = "api-key"
@@ -51,6 +52,14 @@ export class KimiCodeHandler extends OpenAiHandler {
 		this.kimiOptions = options
 	}
 
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: false, keyScoped: true, authScoped: true }
+	}
+
+	async fetchModels(options: GetModelsOptions): Promise<ModelRecord> {
+		return getKimiCodeModels(options.apiKey)
+	}
+
 	private async resolveAccessToken(forceRefresh = false): Promise<string> {
 		if ((this.kimiOptions.kimiCodeAuthMethod ?? OAUTH_AUTH_METHOD) === API_KEY_AUTH_METHOD) {
 			if (!this.kimiOptions.kimiCodeApiKey) throw new Error("Kimi Code API key is required")
@@ -70,11 +79,10 @@ export class KimiCodeHandler extends OpenAiHandler {
 		if (!this.modelDiscoveryAttempted) {
 			this.modelDiscoveryAttempted = true
 			try {
-				this.models = await getModels({
-					provider: providerIdentifiers.kimiCode,
-					apiKey: accessToken,
-					signal: abortSignal,
-				})
+				this.models = await getModels(
+					{ provider: providerIdentifiers.kimiCode, apiKey: accessToken, signal: abortSignal },
+					this,
+				)
 			} catch (error) {
 				// Model discovery is best-effort; preserve the configured ID and fallback metadata.
 				console.debug("[KimiCode] Model discovery failed; using fallback model metadata", {

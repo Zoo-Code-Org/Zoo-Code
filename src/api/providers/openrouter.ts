@@ -14,7 +14,7 @@ import {
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
-import type { ApiHandlerOptions } from "../../shared/api"
+import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import {
 	convertToOpenAiMessages,
@@ -31,10 +31,16 @@ import { getModelParams } from "../transform/model-params"
 
 import { getModels } from "./fetchers/modelCache"
 import { getModelEndpoints } from "./fetchers/modelEndpointCache"
+import { getOpenRouterModels } from "./fetchers/openrouter"
 
 import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
-import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions, SingleCompletionHandler } from "../index"
+import type {
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+	SingleCompletionHandler,
+} from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
 import { generateImageWithProvider, ImageGenerationResult } from "./utils/image-generation"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
@@ -160,15 +166,27 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		})
 	}
 
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: false, keyScoped: false, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getOpenRouterModels(undefined, ...fetchOpts)
+	}
+
 	private async loadDynamicModels(): Promise<void> {
 		try {
 			const [models, endpoints] = await Promise.all([
-				getModels({ provider: providerIdentifiers.openrouter }),
-				getModelEndpoints({
-					router: providerIdentifiers.openrouter,
-					modelId: this.options.openRouterModelId,
-					endpoint: this.options.openRouterSpecificProvider,
-				}),
+				getModels({ provider: providerIdentifiers.openrouter }, this),
+				getModelEndpoints(
+					{
+						router: providerIdentifiers.openrouter,
+						modelId: this.options.openRouterModelId,
+						endpoint: this.options.openRouterSpecificProvider,
+					},
+					this,
+				),
 			])
 
 			this.models = models
@@ -543,12 +561,15 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 
 	public async fetchModel() {
 		const [models, endpoints] = await Promise.all([
-			getModels({ provider: providerIdentifiers.openrouter }),
-			getModelEndpoints({
-				router: providerIdentifiers.openrouter,
-				modelId: this.options.openRouterModelId,
-				endpoint: this.options.openRouterSpecificProvider,
-			}),
+			getModels({ provider: providerIdentifiers.openrouter }, this),
+			getModelEndpoints(
+				{
+					router: providerIdentifiers.openrouter,
+					modelId: this.options.openRouterModelId,
+					endpoint: this.options.openRouterSpecificProvider,
+				},
+				this,
+			),
 		])
 
 		this.models = models
