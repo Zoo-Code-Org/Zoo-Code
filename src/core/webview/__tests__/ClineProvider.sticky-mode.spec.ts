@@ -223,6 +223,13 @@ describe("ClineProvider - Sticky Mode", () => {
 		}
 	}
 
+	afterEach(() => {
+		// Tests construct providers directly and the suite never disposes most of
+		// them; clear the static registry so a leaked instance cannot claim a stable
+		// view state id ahead of a later test.
+		ClineProvider["activeInstances"] = new Set()
+	})
+
 	beforeEach(async () => {
 		vi.clearAllMocks()
 
@@ -1761,6 +1768,39 @@ describe("ClineProvider - Sticky Mode", () => {
 			const states = provider["getPersistedViewStates"]({ fresh: true })
 			expect(states[provider.viewId]).toEqual({ mode: "architect" })
 			expect(states["stable-test-view"]).toBeUndefined()
+		})
+	})
+
+	describe("setViewStateId input validation", () => {
+		it("ignores a non-string viewStateId from a crafted message", async () => {
+			const before = provider["viewStateId"]
+			// A crafted postMessage can carry any JSON value despite the declared type.
+			await provider.setViewStateId(42 as unknown as string)
+			expect(provider["viewStateId"]).toBe(before)
+		})
+
+		it("ignores an oversized viewStateId", async () => {
+			const before = provider["viewStateId"]
+			await provider.setViewStateId("x".repeat(200))
+			expect(provider["viewStateId"]).toBe(before)
+		})
+
+		it("refuses a viewStateId already claimed by another live view", async () => {
+			const other = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				await other.setViewStateId("claimed-by-other-view")
+				await provider.setViewStateId("claimed-by-other-view")
+				expect(provider["viewStateId"]).not.toBe("claimed-by-other-view")
+				expect(other["viewStateId"]).toBe("claimed-by-other-view")
+			} finally {
+				await other.dispose()
+			}
 		})
 	})
 })
