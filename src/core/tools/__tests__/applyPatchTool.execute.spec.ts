@@ -231,6 +231,57 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			expect(mockTask.processQueuedMessages).not.toHaveBeenCalled()
 		})
 
+		it("hands off queued messages after a partial patch failure", async () => {
+			// Fidelity: upstream handed off in each handler right after every
+			// successful write, so a patch whose first write succeeded and whose
+			// later write failed still drained the queue. The deferral preserves
+			// that condition (a write happened) and only moves its timing after
+			// the checkpoint attempt; requiring full-patch success would strand
+			// queued input on any partial failure.
+			const mixedPatch = `*** Begin Patch
+*** Add File: src/new.ts
++hello
+*** Delete File: src/obsolete.ts
+*** End Patch`
+			// Add sees no existing file and succeeds; the delete's unlink fails.
+			mockedFileExistsAtPath.mockResolvedValueOnce(false)
+			mockedFsPromises.default.unlink.mockRejectedValueOnce(new Error("EBUSY"))
+
+			await tool.execute({ patch: mixedPatch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			// No whole-patch checkpoint (the patch failed), but the successful
+			// write still hands off.
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+			expect(mockTask.processQueuedMessages).toHaveBeenCalled()
+		})
+
+		it("hands off queued messages when a later file fails the access check", async () => {
+			// The rooignored path makes execute return early, but the earlier
+			// successful write had already handed off upstream - the deferred
+			// handoff preserves that too.
+			const mixedPatch = `*** Begin Patch
+*** Delete File: src/obsolete.ts
+*** Add File: src/secret.ts
++hidden
+*** End Patch`
+			const validateAccess = mockTask.rooIgnoreController?.validateAccess as MockedFunction<
+				(path: string) => boolean
+			>
+			validateAccess.mockReturnValueOnce(true).mockReturnValueOnce(false)
+
+			await tool.execute({ patch: mixedPatch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockTask.processQueuedMessages).toHaveBeenCalled()
+		})
+
 		it("does not record a checkpoint when perWriteCheckpoints is disabled", async () => {
 			// Structural cast for the test double (matches the mock style used for the controllers above).
 			const ref = (mockTask["providerRef"] as unknown as { deref: MockedFunction<() => unknown> }).deref
