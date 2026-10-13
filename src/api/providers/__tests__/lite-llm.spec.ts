@@ -1437,10 +1437,15 @@ describe("LiteLLMHandler", () => {
 			const controller = new AbortController()
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
 			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 10000 })
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({ model: expect.any(String) }),
-				expect.objectContaining({ signal: controller.signal, timeout: 10000 }),
-			)
+			const passed = mockCreate.mock.calls[0][1] as { signal?: AbortSignal; timeout?: number }
+			// The SDK receives a deadline-bounded signal merged from the caller's
+			// signal and the absolute deadline — not the caller's raw signal.
+			expect(passed.signal).toBeDefined()
+			expect(passed.signal).not.toBe(controller.signal)
+			expect(passed.timeout).toBe(10000)
+			// Caller cancellation still propagates through the merged signal.
+			controller.abort()
+			expect(passed.signal?.aborted).toBe(true)
 			vi.useRealTimers()
 		})
 
@@ -1454,6 +1459,103 @@ describe("LiteLLMHandler", () => {
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
 			await handler.completePrompt("test prompt", { timeoutMs: 0 })
 			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), undefined)
+		})
+
+		it("bounds the whole SDK retry sequence with the absolute deadline", async () => {
+			// Regression: forwarding only the remaining budget as the SDK's
+			// per-attempt `timeout` left the default two retries enabled, and each
+			// retry adds a backoff sleep that is not signal-aware — the pinned SDK
+			// reproduced three attempts and ~1,530ms elapsed for a 30ms timeout.
+			// The absolute deadline must bound completion AND the retry waits.
+			const actual = await vi.importActual<{ default: typeof OpenAI }>("openai")
+			const attemptSignals: Array<AbortSignal | null | undefined> = []
+			const hangingFetch = (_url: string | URL | Request, init?: RequestInit) =>
+				new Promise<Response>((_resolve, reject) => {
+					attemptSignals.push(init?.signal)
+					const signal = init?.signal
+					const onAbort = () =>
+						reject(signal?.reason ?? new DOMException("Request was aborted.", "AbortError"))
+					if (signal?.aborted) {
+						onAbort()
+						return
+					}
+					signal?.addEventListener("abort", onAbort, { once: true })
+				})
+			const realClient = new actual.default({
+				baseURL: "http://localhost:4000/v1",
+				apiKey: "test-key",
+				fetch: hangingFetch as unknown as typeof globalThis.fetch,
+			})
+			Object.assign(handler, { client: realClient })
+
+			const startedAt = Date.now()
+			const error = await handler.completePrompt("test prompt", { timeoutMs: 30 }).catch((e: unknown) => e)
+			const elapsed = Date.now() - startedAt
+
+			expect(error).toBeInstanceOf(Error)
+			// Deadline expiry is a timeout, not a caller cancellation.
+			expect((error as Error).name).toBe("TimeoutError")
+			// The deadline bounds the retry sequence: the first attempt is aborted
+			// at the deadline and the SDK must not run its default retries past it.
+			expect(attemptSignals).toHaveLength(1)
+			// Well inside the old ~1,530ms blow-up, comfortably above the 30ms budget.
+			expect(elapsed).toBeLessThan(1000)
+		})
+
+		it("reports deadline expiry as a timeout, not as caller cancellation, when the SDK aborts at the deadline", async () => {
+			// The SDK surfaces deadline expiry as an abort-shaped error
+			// (APIUserAbortError). With no caller abort in play it must surface as
+			// the distinct TimeoutError, never as "The LiteLLM request was aborted".
+			let capturedSignal: AbortSignal | undefined
+			mockCreate.mockImplementationOnce((_body: unknown, options?: { signal?: AbortSignal }) => {
+				capturedSignal = options?.signal
+				return new Promise<never>((_resolve, reject) => {
+					const onAbort = () =>
+						reject(Object.assign(new Error("Request was aborted."), { name: "APIUserAbortError" }))
+					if (options?.signal?.aborted) {
+						onAbort()
+						return
+					}
+					options?.signal?.addEventListener("abort", onAbort, { once: true })
+				})
+			})
+
+			const error = await handler.completePrompt("test prompt", { timeoutMs: 30 }).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("TimeoutError")
+			expect((error as Error).message).toBe("The LiteLLM completion request timed out")
+			// The SDK call carries a deadline-bounded signal even without a caller
+			// signal, so in-flight attempts are aborted at the deadline.
+			expect(capturedSignal).toBeDefined()
+			expect(capturedSignal?.aborted).toBe(true)
+		})
+
+		it("still reports caller cancellation as AbortError when a deadline is also active", async () => {
+			const controller = new AbortController()
+			let requestStartedResolve!: () => void
+			const requestStarted = new Promise<void>((resolve) => {
+				requestStartedResolve = resolve
+			})
+			mockCreate.mockImplementationOnce((_body: unknown, options?: { signal?: AbortSignal }) => {
+				requestStartedResolve()
+				return new Promise<never>((_resolve, reject) => {
+					const onAbort = () =>
+						reject(Object.assign(new Error("Request was aborted."), { name: "APIUserAbortError" }))
+					if (options?.signal?.aborted) {
+						onAbort()
+						return
+					}
+					options?.signal?.addEventListener("abort", onAbort, { once: true })
+				})
+			})
+
+			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 30000 })
+			await requestStarted
+			controller.abort()
+			const error = await promise.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("The LiteLLM request was aborted")
 		})
 
 		it("should surface a standard AbortError when the signal is aborted while the request is in flight", async () => {

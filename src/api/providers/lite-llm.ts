@@ -33,6 +33,7 @@ import {
 	createAbortError,
 	isRequestAborted,
 	mergeAbortSignalAndTimeout,
+	mergeAbortSignals,
 	rejectOnAbort,
 	throwIfAborted,
 } from "./utils/abort-signal"
@@ -429,12 +430,12 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 	}
 
 	/**
-	 * Fresh error for the per-request timeout elapsing during model discovery.
-	 * Distinct from the abort contract error on purpose: a timeout is not a
-	 * user cancellation, and callers treat the two differently.
+	 * Fresh error for the per-request absolute deadline elapsing in a given
+	 * phase. Distinct from the abort contract error on purpose: a timeout is
+	 * not a user cancellation, and callers treat the two differently.
 	 */
-	private createDiscoveryTimeoutError(providerName: string): Error {
-		const timeoutError = new Error(`The ${providerName} model discovery timed out`)
+	private createTimeoutError(providerName: string, phase: "model discovery" | "completion request"): Error {
+		const timeoutError = new Error(`The ${providerName} ${phase} timed out`)
 		timeoutError.name = "TimeoutError"
 		return timeoutError
 	}
@@ -468,7 +469,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		let model: Awaited<ReturnType<LiteLLMHandler["fetchModel"]>>
 		try {
 			if (discoverySignal) {
-				// Stryker disable next-line StringLiteral: the race's providerName is unobservable — every error escaping the race passes through the catch below, which re-normalizes via createAbortError("LiteLLM") or createDiscoveryTimeoutError("LiteLLM"), so no observable outcome can depend on the parameter value.
+				// Stryker disable next-line StringLiteral: the race's providerName is unobservable — every error escaping the race passes through the catch below, which re-normalizes via createAbortError("LiteLLM") or createTimeoutError("LiteLLM", ...), so no observable outcome can depend on the parameter value.
 				model = await rejectOnAbort(this.fetchModel(), discoverySignal, "LiteLLM")
 			} else {
 				model = await this.fetchModel()
@@ -484,7 +485,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 					// misreported as a user cancellation.
 					throw callerAbortSignal?.aborted
 						? createAbortError("LiteLLM")
-						: this.createDiscoveryTimeoutError("LiteLLM")
+						: this.createTimeoutError("LiteLLM", "model discovery")
 				}
 				// The signal never aborted: the fetcher itself failed with an
 				// AbortError-shaped error; normalize to the standard AbortError.
@@ -497,6 +498,18 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		// Check if this is a GPT-5 model that requires max_completion_tokens instead of max_tokens
 		const usesMaxCompletionTokens = this.isGpt5(modelId) || info.requiresResponsesApi
 		const reasoningEffort = this.getReasoningEffort(info)
+
+		// The absolute deadline is enforced THROUGH the SDK call, not just as a
+		// per-attempt timeout: the SDK's `timeout` option bounds one attempt,
+		// and its default two retries each add a backoff sleep that is not
+		// signal-aware (a 30ms budget otherwise elapsed ~1.5s across three
+		// attempts). The deadline signal merged with the caller's signal aborts
+		// in-flight attempts and makes the SDK's next attempt short-circuit at
+		// its pre-flight `signal.aborted` check, and the rejectOnAbort race
+		// below settles the caller at the deadline even while the SDK is
+		// mid-retry-sleep. Retries stay enabled within the remaining budget.
+		const remainingMs = deadline !== undefined ? Math.max(1, deadline - Date.now()) : undefined
+		const deadlineSignal = remainingMs !== undefined ? AbortSignal.timeout(remainingMs) : undefined
 
 		try {
 			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
@@ -523,24 +536,39 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			// timeout': the option is omitted entirely, because the OpenAI SDK treats
 			// a timeout of 0 as an immediate timeout.
 			const createOptions: OpenAI.RequestOptions = {}
-			if (options?.abortSignal) {
-				createOptions.signal = options.abortSignal
+			let requestSignal = callerAbortSignal
+			if (deadlineSignal) {
+				requestSignal = callerAbortSignal
+					? mergeAbortSignals(callerAbortSignal, deadlineSignal)
+					: deadlineSignal
 			}
-			if (deadline !== undefined) {
+			if (requestSignal) {
+				createOptions.signal = requestSignal
+			}
+			if (remainingMs !== undefined) {
 				// Only the remaining budget reaches the SDK: model discovery has
 				// already consumed part of the configured timeout.
-				createOptions.timeout = Math.max(1, deadline - Date.now())
+				createOptions.timeout = remainingMs
 			}
 
-			const response = await this.client.chat.completions.create(
+			const request = this.client.chat.completions.create(
 				requestOptions,
 				Object.keys(createOptions).length > 0 ? createOptions : undefined,
 			)
+			// Stryker disable next-line StringLiteral: the race's providerName is unobservable — its rejection is reclassified by the catch below into createTimeoutError/createAbortError, so no observable outcome can depend on the parameter value.
+			const response = deadlineSignal ? await rejectOnAbort(request, deadlineSignal, "LiteLLM") : await request
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
+			// Deadline expiry is distinct from caller cancellation: the SDK reports
+			// the deadline as an abort-shaped error (APIUserAbortError), so check
+			// the deadline first — with the caller still running it must surface as
+			// a timeout, never masquerade as the cancellation AbortError.
+			if (deadlineSignal?.aborted && !callerAbortSignal?.aborted) {
+				throw this.createTimeoutError("LiteLLM", "completion request")
+			}
 			// Aborted request: covers both the external signal and SDK-native
 			// abort errors that may surface before the signal flag propagates.
-			if (isRequestAborted(error, options?.abortSignal)) {
+			if (isRequestAborted(error, callerAbortSignal)) {
 				throw createAbortError("LiteLLM")
 			}
 			if (error instanceof Error) {
