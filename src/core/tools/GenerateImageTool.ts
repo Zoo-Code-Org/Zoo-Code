@@ -149,10 +149,6 @@ export class GenerateImageTool extends BaseTool<"generate_image"> {
 			selectedModel = modelInfo?.value || IMAGE_GENERATION_MODEL_IDS[0]
 		}
 
-		// Use the provider selection
-		const modelProvider = imageProvider
-		const apiMethod = modelInfo?.apiMethod
-
 		// Validate API key for OpenRouter
 		const openRouterApiKey = state?.openRouterImageApiKey
 
@@ -257,7 +253,7 @@ export class GenerateImageTool extends BaseTool<"generate_image"> {
 		}
 	}
 
-	override async handlePartial(task: Task, block: ToolUse<"generate_image">): Promise<void> {
+	override async handlePartial(_task: Task, _block: ToolUse<"generate_image">): Promise<void> {
 		return
 	}
 }

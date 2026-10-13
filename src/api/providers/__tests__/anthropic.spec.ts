@@ -1096,7 +1096,7 @@ describe("AnthropicHandler", () => {
 			]
 
 			const stream = handler.createMessage(systemPrompt, messagesWithReasoning)
-			const chunks: any[] = await collectStream(stream)
+			await collectStream(stream)
 
 			// Verify the API was called with filtered messages (no reasoning blocks)
 			const calledMessages = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0].messages
@@ -1139,7 +1139,7 @@ describe("AnthropicHandler", () => {
 			]
 
 			const stream = handler.createMessage(systemPrompt, messagesWithOnlyReasoning)
-			const chunks: any[] = await collectStream(stream)
+			await collectStream(stream)
 
 			// Verify empty message was filtered out
 			const calledMessages = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0].messages

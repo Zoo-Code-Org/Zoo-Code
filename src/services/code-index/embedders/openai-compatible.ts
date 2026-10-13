@@ -240,7 +240,7 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 
 		try {
 			return await response.json()
-		} catch (e) {
+		} catch {
 			const error = new Error(`Failed to parse response JSON`) as HttpError
 			error.status = response.status
 			throw error
@@ -445,7 +445,7 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 	/**
 	 * Updates global rate limit state when a 429 error occurs
 	 */
-	private async updateGlobalRateLimitState(error: HttpError): Promise<void> {
+	private async updateGlobalRateLimitState(_error: HttpError): Promise<void> {
 		const release = await OpenAICompatibleEmbedder.globalRateLimitState.mutex.acquire()
 		try {
 			const state = OpenAICompatibleEmbedder.globalRateLimitState

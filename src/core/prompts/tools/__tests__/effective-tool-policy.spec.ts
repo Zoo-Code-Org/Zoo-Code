@@ -9,7 +9,6 @@ import {
 	buildToolRequirements,
 	isToolDisabledOrExcluded,
 } from "../effective-tool-policy"
-import { getModeBySlug, defaultModeSlug } from "../../../../shared/modes"
 import type { CodeIndexManager } from "../../../../services/code-index/manager"
 
 /** Build a policy by giving the custom mode `groups` (derived from a real custom mode config). */

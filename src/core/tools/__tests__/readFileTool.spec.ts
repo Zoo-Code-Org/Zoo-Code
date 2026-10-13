@@ -19,15 +19,10 @@ import type { Task } from "../../task/Task"
 
 import { isBinaryFile } from "isbinaryfile"
 
-import { readFileTool, ReadFileTool } from "../ReadFileTool"
+import { readFileTool } from "../ReadFileTool"
 import { formatResponse } from "../../prompts/responses"
-import {
-	validateImageForProcessing,
-	processImageFile,
-	isSupportedImageFormat,
-	ImageMemoryTracker,
-} from "../helpers/imageHelpers"
-import { extractTextFromFile, addLineNumbers, getSupportedBinaryFormats } from "../../../integrations/misc/extract-text"
+import { validateImageForProcessing, processImageFile, isSupportedImageFormat } from "../helpers/imageHelpers"
+import { extractTextFromFile, getSupportedBinaryFormats } from "../../../integrations/misc/extract-text"
 import { readWithIndentation, readWithSlice } from "../../../integrations/misc/indentation-reader"
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────

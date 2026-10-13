@@ -58,7 +58,7 @@ export async function openFile(filePath: string, options: OpenFileOptions = {}) 
 				fileStat = await vscode.workspace.fs.stat(tempUri)
 				successfulUri = tempUri // Path found
 				break // Exit loop once a path is successfully stated
-			} catch (e) {
+			} catch {
 				// Stat failed for this path, continue to the next one
 			}
 		}

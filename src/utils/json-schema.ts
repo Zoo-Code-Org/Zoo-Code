@@ -159,7 +159,7 @@ const NormalizedToolSchemaInternal: z.ZodType<Record<string, unknown>, z.ZodType
 					type,
 					required,
 					properties,
-					additionalProperties,
+					additionalProperties: _additionalProperties,
 					format,
 					items,
 					minItems,

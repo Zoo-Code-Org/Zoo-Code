@@ -326,7 +326,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	private async *streamResponsesMessage(
 		modelId: string,
 		info: ModelInfo,
-		temperature: number | undefined,
+		_temperature: number | undefined,
 		maxTokens: number | undefined,
 		reasoningEffort: ReasoningEffortExtended | undefined,
 		systemPrompt: string,

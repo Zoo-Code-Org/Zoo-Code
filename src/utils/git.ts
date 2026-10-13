@@ -54,7 +54,7 @@ export async function getGitRepositoryInfo(workspaceRoot: string): Promise<GitRe
 			if (branchMatch && branchMatch[1]) {
 				gitInfo.defaultBranch = branchMatch[1]
 			}
-		} catch (error) {
+		} catch {
 			// Ignore config reading errors
 		}
 
@@ -67,13 +67,13 @@ export async function getGitRepositoryInfo(workspaceRoot: string): Promise<GitRe
 				if (branchMatch && branchMatch[1]) {
 					gitInfo.defaultBranch = branchMatch[1].trim()
 				}
-			} catch (error) {
+			} catch {
 				// Ignore HEAD reading errors
 			}
 		}
 
 		return gitInfo
-	} catch (error) {
+	} catch {
 		// Return empty object on any error
 		return {}
 	}
@@ -195,7 +195,7 @@ async function checkGitRepo(cwd: string): Promise<boolean> {
 	try {
 		await execAsync("git rev-parse --git-dir", { cwd })
 		return true
-	} catch (error) {
+	} catch {
 		return false
 	}
 }
@@ -213,7 +213,7 @@ export async function checkGitInstalled(): Promise<boolean> {
 	try {
 		await execAsync("git --version")
 		return true
-	} catch (error) {
+	} catch {
 		return false
 	}
 }
