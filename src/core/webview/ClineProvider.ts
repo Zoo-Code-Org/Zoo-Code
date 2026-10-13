@@ -2002,7 +2002,11 @@ export class ClineProvider
 				return { success: true, allowList: settings.allowList ?? ORGANIZATION_ALLOW_ALL }
 			}
 			const orgId = cloudService.getOrganizationId?.() ?? cloudService.getUserInfo?.()?.organizationId
-			if (!orgId) return { success: true, allowList: ORGANIZATION_ALLOW_ALL }
+			const storedOrgId = cloudService.getStoredOrganizationId?.()
+			// Only treat the account as personal when the session is established and no organization is known.
+			if (!orgId && !storedOrgId && cloudService.getUserInfo?.()) {
+				return { success: true, allowList: ORGANIZATION_ALLOW_ALL }
+			}
 			this.log("Organization policy unavailable for authenticated organization user; rejecting model update")
 			return { success: false, reason: "organization_policy_unavailable" }
 		} catch (error) {
@@ -2109,7 +2113,7 @@ export class ClineProvider
 					}
 
 					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
-					if (name === currentApiConfigName) {
+					if (name === this.getGlobalState("currentApiConfigName")) {
 						shouldRollbackContext = isMatchingStored
 						await this.contextProxy.setProviderSettings(appliedProfile)
 					}

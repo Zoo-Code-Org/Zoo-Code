@@ -60,6 +60,8 @@ export class CloudSettingsService extends EventEmitter<SettingsServiceEvents> im
 	private currentOrganizationId: string | null = null
 	private timer: RefreshTimer
 	private log: (...args: unknown[]) => void
+	private onAuthStateChanged?: (data: { state: AuthState; previousState: AuthState }) => Promise<void>
+	private onUserInfo?: (data: { userInfo: CloudUserInfo }) => Promise<void>
 
 	constructor(context: ExtensionContext, authService: AuthService, log?: (...args: unknown[]) => void) {
 		super()
@@ -86,7 +88,9 @@ export class CloudSettingsService extends EventEmitter<SettingsServiceEvents> im
 			await this.removeSettings()
 		}
 
-		this.authService.on("auth-state-changed", async (data: { state: AuthState; previousState: AuthState }) => {
+		this.detachAuthListeners()
+
+		this.onAuthStateChanged = async (data: { state: AuthState; previousState: AuthState }) => {
 			try {
 				if (data.state === "active-session") {
 					this.timer.start()
@@ -100,9 +104,9 @@ export class CloudSettingsService extends EventEmitter<SettingsServiceEvents> im
 			} catch (error) {
 				this.log(`[cloud-settings] error processing auth-state-changed: ${error}`, error)
 			}
-		})
+		}
 
-		this.authService.on("user-info", async (data: { userInfo: CloudUserInfo }) => {
+		this.onUserInfo = async (data: { userInfo: CloudUserInfo }) => {
 			try {
 				const newOrgId = data.userInfo?.organizationId || null
 				if (newOrgId !== this.currentOrganizationId) {
@@ -118,7 +122,10 @@ export class CloudSettingsService extends EventEmitter<SettingsServiceEvents> im
 			} catch (error) {
 				this.log(`[cloud-settings] error processing user-info: ${error}`, error)
 			}
-		})
+		}
+
+		this.authService.on("auth-state-changed", this.onAuthStateChanged)
+		this.authService.on("user-info", this.onUserInfo)
 
 		if (this.authService.hasActiveSession()) {
 			this.timer.start()
@@ -343,7 +350,19 @@ export class CloudSettingsService extends EventEmitter<SettingsServiceEvents> im
 		await this.context.globalState.update(USER_SETTINGS_CACHE_KEY, undefined)
 	}
 
+	private detachAuthListeners(): void {
+		if (this.onAuthStateChanged) {
+			this.authService.off("auth-state-changed", this.onAuthStateChanged)
+			this.onAuthStateChanged = undefined
+		}
+		if (this.onUserInfo) {
+			this.authService.off("user-info", this.onUserInfo)
+			this.onUserInfo = undefined
+		}
+	}
+
 	public dispose(): void {
+		this.detachAuthListeners()
 		this.removeAllListeners()
 		this.timer.stop()
 	}

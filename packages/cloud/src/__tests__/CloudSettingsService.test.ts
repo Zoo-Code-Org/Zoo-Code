@@ -20,6 +20,7 @@ describe("CloudSettingsService", () => {
 		getSessionToken: ReturnType<typeof vi.fn>
 		hasActiveSession: ReturnType<typeof vi.fn>
 		on: ReturnType<typeof vi.fn>
+		off: ReturnType<typeof vi.fn>
 		getStoredOrganizationId: ReturnType<typeof vi.fn>
 		getUserInfo?: ReturnType<typeof vi.fn>
 	}
@@ -65,6 +66,7 @@ describe("CloudSettingsService", () => {
 			getSessionToken: vi.fn(),
 			hasActiveSession: vi.fn().mockReturnValue(false),
 			on: vi.fn(),
+			off: vi.fn(),
 			getStoredOrganizationId: vi.fn().mockReturnValue(null),
 		}
 
@@ -130,6 +132,7 @@ describe("CloudSettingsService", () => {
 				getSessionToken: vi.fn(),
 				hasActiveSession: vi.fn().mockReturnValue(false),
 				on: vi.fn(),
+				off: vi.fn(),
 			}
 
 			// Create a new instance to test initialization
@@ -251,6 +254,7 @@ describe("CloudSettingsService", () => {
 				getSessionToken: vi.fn().mockReturnValue("valid-token"),
 				hasActiveSession: vi.fn().mockReturnValue(false),
 				on: vi.fn(),
+				off: vi.fn(),
 			}
 
 			// Create a new service instance with cached settings
@@ -302,6 +306,7 @@ describe("CloudSettingsService", () => {
 				getSessionToken: vi.fn().mockReturnValue("valid-token"),
 				hasActiveSession: vi.fn().mockReturnValue(false),
 				on: vi.fn(),
+				off: vi.fn(),
 			}
 
 			// Create a new service instance with cached settings
@@ -468,6 +473,7 @@ describe("CloudSettingsService", () => {
 				getSessionToken: vi.fn(),
 				hasActiveSession: vi.fn().mockReturnValue(false),
 				on: vi.fn(),
+				off: vi.fn(),
 			}
 
 			const testService = new CloudSettingsService(
@@ -633,6 +639,53 @@ describe("CloudSettingsService", () => {
 				"organization-settings",
 				expect.objectContaining({ allowList: { allowAll: true, providers: {} } }),
 			)
+		})
+	})
+
+	describe("stale session token and disposal", () => {
+		it("should discard a successful response when the session token changed during the request", async () => {
+			mockAuthService.hasActiveSession = vi.fn().mockReturnValue(true)
+			mockAuthService.getSessionToken = vi.fn().mockReturnValue("token-a")
+			await cloudSettingsService.initialize()
+
+			let resolveFetch!: (response: Response) => void
+			vi.mocked(fetch).mockReturnValueOnce(
+				new Promise<Response>((resolve) => {
+					resolveFetch = resolve
+				}),
+			)
+			const updated = vi.fn()
+			cloudSettingsService.on("settings-updated", updated)
+
+			const timerCallback = vi.mocked(RefreshTimer).mock.calls[0]?.[0]?.callback
+			const pending = timerCallback?.()
+
+			mockAuthService.getSessionToken = vi.fn().mockReturnValue("token-b")
+			resolveFetch({
+				ok: true,
+				json: vi.fn().mockResolvedValue({ organization: mockSettings, user: mockUserSettings }),
+			} as unknown as Response)
+
+			expect(await pending).toBe(false)
+			expect(cloudSettingsService.getSettings()).toBeUndefined()
+			expect(updated).not.toHaveBeenCalled()
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("organization-settings", mockSettings)
+		})
+
+		it("should remove its auth listeners on dispose and not duplicate them on re-initialize", async () => {
+			await cloudSettingsService.initialize()
+			const registered = mockAuthService.on.mock.calls.map((call: unknown[]) => [call[0], call[1]])
+			expect(registered.map((c: unknown[]) => c[0])).toEqual(["auth-state-changed", "user-info"])
+
+			await cloudSettingsService.initialize()
+			expect(mockAuthService.off).toHaveBeenCalledWith("auth-state-changed", registered[0]?.[1])
+			expect(mockAuthService.off).toHaveBeenCalledWith("user-info", registered[1]?.[1])
+
+			mockAuthService.off.mockClear()
+			const latest = mockAuthService.on.mock.calls.slice(-2).map((call: unknown[]) => [call[0], call[1]])
+			cloudSettingsService.dispose()
+			expect(mockAuthService.off).toHaveBeenCalledWith("auth-state-changed", latest[0]?.[1])
+			expect(mockAuthService.off).toHaveBeenCalledWith("user-info", latest[1]?.[1])
 		})
 	})
 

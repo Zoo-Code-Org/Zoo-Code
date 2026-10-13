@@ -136,6 +136,7 @@ const { mockCloudInstance } = vi.hoisted(() => ({
 		getOrganizationSettings: vi.fn().mockReturnValue(undefined),
 		getOrganizationId: vi.fn().mockReturnValue(null),
 		getUserInfo: vi.fn().mockReturnValue(null),
+		getStoredOrganizationId: vi.fn().mockReturnValue(null),
 		on: vi.fn(),
 		off: vi.fn(),
 	},
@@ -189,6 +190,7 @@ describe("ClineProvider - updateProfileModel", () => {
 		mockCloudInstance.getOrganizationSettings.mockReturnValue(undefined)
 		mockCloudInstance.getOrganizationId.mockReturnValue(null)
 		mockCloudInstance.getUserInfo.mockReturnValue(null)
+		mockCloudInstance.getStoredOrganizationId.mockReturnValue(null)
 		mockCloudInstance.getAllowList.mockReturnValue({ allowAll: true })
 
 		storedProfiles = {
@@ -752,6 +754,7 @@ describe("ClineProvider - updateProfileModel", () => {
 		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
 		mockCloudInstance.isAuthenticated.mockReturnValue(true)
 		mockCloudInstance.getOrganizationSettings.mockReturnValue(undefined)
+		mockCloudInstance.getUserInfo.mockReturnValue({ name: "personal" })
 
 		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
 			openRouterModelId: "openai/gpt-4.5",
@@ -806,6 +809,24 @@ describe("ClineProvider - updateProfileModel", () => {
 		expect(manager().updateProfileModel).not.toHaveBeenCalled()
 		expect(manager().saveConfig).not.toHaveBeenCalled()
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.violated_organization_allowlist")
+	})
+
+	it.each([
+		["session still being established (no userInfo)", null, null],
+		["stored organization present but live organization missing", { name: "u" }, "org-stored"],
+	])("rejects model update when authenticated with missing org settings: %s", async (_label, userInfo, storedOrg) => {
+		mockStoredProfile({ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openai/gpt-4" })
+		mockCloudInstance.isAuthenticated.mockReturnValue(true)
+		mockCloudInstance.getOrganizationSettings.mockReturnValue(undefined)
+		mockCloudInstance.getUserInfo.mockReturnValue(userInfo)
+		mockCloudInstance.getStoredOrganizationId.mockReturnValue(storedOrg)
+
+		await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+			openRouterModelId: "openai/gpt-4.5",
+		})
+
+		expect(manager().updateProfileModel).not.toHaveBeenCalled()
+		expect(manager().saveConfig).not.toHaveBeenCalled()
 	})
 
 	it("refreshes context and task from latest stored profile when another instance updated profile before propagation", async () => {
@@ -1259,7 +1280,8 @@ describe("ClineProvider - updateProfileModel", () => {
 		})
 
 		// Mutation 2 must not start while mutation 1 is still in-flight
-		await Promise.resolve()
+		await vi.waitFor(() => expect(manager().updateProfileModel).toHaveBeenCalledTimes(1))
+		await new Promise((resolve) => setTimeout(resolve, 10))
 		expect(mutation2Started).toBe(false)
 
 		// Once mutation 1 settles, mutation 2 advances
