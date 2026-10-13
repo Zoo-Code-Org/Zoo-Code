@@ -98,7 +98,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		// the same strict value as `??`.
 		const strictToolSchemas = this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS
 		const isAzureAiInference = this._isAzureAiInference(modelUrl)
-		const deepseekReasoner = modelId.includes("deepseek-reasoner") || enabledR1Format
+		const deepseekReasoner = this.usesR1Format(modelId)
 
 		if (modelId.includes("o1") || modelId.includes("o3") || modelId.includes("o4")) {
 			yield* this.handleO3FamilyMessage(modelId, systemPrompt, messages, metadata)
@@ -299,6 +299,14 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		}
 	}
 
+	// Single gate for everything that depends on the R1 request format: message
+	// conversion in createMessage() and reasoning retention in getModel(). Both
+	// must agree, otherwise reasoning is converted for the request but stripped
+	// from the follow-up context (or vice versa).
+	private usesR1Format(modelId: string): boolean {
+		return modelId.includes("deepseek-reasoner") || (this.options.openAiR1FormatEnabled ?? false)
+	}
+
 	override getModel() {
 		const id = this.options.openAiModelId ?? ""
 		const info: ModelInfo = this.options.openAiCustomModelInfo ?? openAiModelInfoSaneDefaults
@@ -311,7 +319,16 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			settings: { ...this.options, reasoningEffort: info.reasoningEffort },
 			defaultTemperature: 0,
 		})
-		return { id, info, ...params }
+		// Local OpenAI-compatible reasoning models (llama.cpp, LM Studio, Ollama)
+		// stream reasoning_content, but Zoo Code strips it from the follow-up context
+		// unless info.preserveReasoning is set. Whenever createMessage() treats the
+		// model as R1 (deepseek-reasoner id or the R1 format toggle), also treat it
+		// as preserving reasoning so the chain is fed back.
+		return {
+			id,
+			info: this.usesR1Format(id) ? { ...info, preserveReasoning: true } : info,
+			...params,
+		}
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {

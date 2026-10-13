@@ -89,18 +89,16 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 	protected processUsageMetrics(usage: {
 		inputTokens?: number
 		outputTokens?: number
-		details?: {
-			cachedInputTokens?: number
-			reasoningTokens?: number
-		}
+		inputTokenDetails?: { cacheReadTokens?: number }
+		outputTokenDetails?: { reasoningTokens?: number }
 		raw?: Record<string, unknown>
 	}): ApiStreamUsageChunk {
 		return {
 			type: "usage",
 			inputTokens: usage.inputTokens || 0,
 			outputTokens: usage.outputTokens || 0,
-			cacheReadTokens: usage.details?.cachedInputTokens,
-			reasoningTokens: usage.details?.reasoningTokens,
+			cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens,
+			reasoningTokens: usage.outputTokenDetails?.reasoningTokens,
 		}
 	}
 
