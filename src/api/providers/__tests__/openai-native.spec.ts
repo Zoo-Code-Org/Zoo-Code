@@ -1566,10 +1566,9 @@ describe("OpenAiNativeHandler", () => {
 				}
 			}).rejects.toThrow()
 
-			// Verify telemetry was captured (may be called multiple times due to error propagation)
-			expect(mockCaptureException).toHaveBeenCalled()
+			// A stream failure must be captured exactly once (handleStreamResponse rethrows to createMessage).
+			expect(mockCaptureException).toHaveBeenCalledTimes(1)
 
-			// Find the call with the stream error message
 			const streamErrorCall = mockCaptureException.mock.calls.find((call: any[]) =>
 				call[0]?.message?.includes("Model overloaded"),
 			)
