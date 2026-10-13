@@ -5887,13 +5887,11 @@ describe("ClineProvider", () => {
 				setModeConfig: vi.fn(),
 			} as any
 
-			// Mock the ContextProxy's getValue method to return the current config name
+			// Seed the shared current config name: the mode-default recording reads the
+			// view's effective profile, which falls back to the shared slot when this
+			// view pins no profile of its own.
 			const contextProxy = (provider as any).contextProxy
-			const getValueSpy = vi.spyOn(contextProxy, "getValue")
-			getValueSpy.mockImplementation((key: any) => {
-				if (key === "currentApiConfigName") return "current-config"
-				return undefined
-			})
+			await contextProxy.setValue("currentApiConfigName", "current-config")
 
 			// Register a stable view id so the durable per-view write is persisted
 			await provider["setViewStateId"]("stable-test-view")

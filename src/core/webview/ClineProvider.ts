@@ -2325,6 +2325,11 @@ export class ClineProvider
 				const historyItemBefore = taskHistoryItem
 				rollbackTaskWrites = async () => {
 					task["_taskMode"] = previousTaskMode
+					// Listeners were told about the new mode before the failure landed: re-emit
+					// with the restored mode so API/IPC consumers track the rollback.
+					if (previousTaskMode) {
+						task.emit(RooCodeEventName.TaskModeSwitched, task.taskId, previousTaskMode)
+					}
 					if (historyItemBefore) {
 						// Restore only the field this switch changed: re-read the item so
 						// fields the running task persisted during the write survive.
@@ -2428,71 +2433,67 @@ export class ClineProvider
 				// restored mode would otherwise shadow the fresh switch for consumers.
 				sharedAttempted = true
 				await this.setValue("mode", newMode)
-
-				this.emit(RooCodeEventName.ModeChanged, newMode)
 			}
 
-			// If workspace lock is on, keep the current API config — don't load mode-specific config
+			// If workspace lock is on, keep the current API config: the mode-linked
+			// activation below is skipped, and the committed switch falls through to the
+			// emit/post tail outside the reconciled region.
 			const lockApiConfigAcrossModes = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
-			if (lockApiConfigAcrossModes) {
-				// Keep the original post semantics: an explicit null target (pending child)
-				// posts its own state.
-				if (targetTask !== null) {
-					await this.postStateToWebview()
+			if (!lockApiConfigAcrossModes) {
+				if (signal?.aborted) return
+				if (!viewScopedSwitch) {
+					return
 				}
-				return
-			}
 
-			if (signal?.aborted) return
-			if (!viewScopedSwitch) {
-				return
-			}
+				// Load the saved API config for the new mode if it exists.
+				const savedConfigId = await this.providerSettingsManager.getModeConfigId(newMode)
+				const listApiConfig = await this.providerSettingsManager.listConfig()
 
-			// Load the saved API config for the new mode if it exists.
-			const savedConfigId = await this.providerSettingsManager.getModeConfigId(newMode)
-			const listApiConfig = await this.providerSettingsManager.listConfig()
+				if (signal?.aborted) return
 
-			if (signal?.aborted) return
+				// Update listApiConfigMeta first to ensure UI has latest data.
+				await this.updateGlobalState("listApiConfigMeta", listApiConfig)
 
-			// Update listApiConfigMeta first to ensure UI has latest data.
-			await this.updateGlobalState("listApiConfigMeta", listApiConfig)
+				// If this mode has a saved config, use it.
+				if (savedConfigId) {
+					const profile = listApiConfig.find(({ id }) => id === savedConfigId)
 
-			// If this mode has a saved config, use it.
-			if (savedConfigId) {
-				const profile = listApiConfig.find(({ id }) => id === savedConfigId)
+					if (profile?.name) {
+						// Check if the profile has actual API configuration (not just an id).
+						// In CLI mode, the ProviderSettingsManager may return empty default profiles
+						// that only contain 'id' and 'name' fields. Activating such a profile would
+						// overwrite the CLI's working API configuration with empty settings.
+						// Skip activation if the profile has no apiProvider set - this indicates
+						// an unconfigured/empty profile.
+						const fullProfile = await this.providerSettingsManager.getProfile({ name: profile.name })
+						const hasActualSettings = !!fullProfile.apiProvider
 
-				if (profile?.name) {
-					// Check if the profile has actual API configuration (not just an id).
-					// In CLI mode, the ProviderSettingsManager may return empty default profiles
-					// that only contain 'id' and 'name' fields. Activating such a profile would
-					// overwrite the CLI's working API configuration with empty settings.
-					// Skip activation if the profile has no apiProvider set - this indicates
-					// an unconfigured/empty profile.
-					const fullProfile = await this.providerSettingsManager.getProfile({ name: profile.name })
-					const hasActualSettings = !!fullProfile.apiProvider
-
-					if (hasActualSettings) {
-						activationStarted = true
-						await this.activateProviderProfileUnlocked(
-							{ name: profile.name },
-							targetTask === null ? { skipCurrentTaskRebuild: true } : undefined,
-							signal,
-						)
+						if (hasActualSettings) {
+							activationStarted = true
+							await this.activateProviderProfileUnlocked(
+								{ name: profile.name },
+								targetTask === null ? { skipCurrentTaskRebuild: true } : undefined,
+								signal,
+							)
+						} else {
+							// The task will continue with the current/default configuration.
+						}
 					} else {
 						// The task will continue with the current/default configuration.
 					}
 				} else {
-					// The task will continue with the current/default configuration.
-				}
-			} else {
-				// If no saved config for this mode, save current config as default.
-				const currentApiConfigNameAfter = this.getGlobalState("currentApiConfigName")
+					// If no saved config for this mode, save current config as default.
+					// Use this view's effective profile: with per-view pins the shared slot can
+					// belong to a sibling view, and recording that profile as this mode's default
+					// would activate the wrong profile for every later switch to it.
+					const currentApiConfigNameAfter = this.getValues().currentApiConfigName
 
-				if (currentApiConfigNameAfter) {
-					const config = listApiConfig.find((c) => c.name === currentApiConfigNameAfter)
+					if (currentApiConfigNameAfter) {
+						const config = listApiConfig.find((c) => c.name === currentApiConfigNameAfter)
 
-					if (config?.id) {
-						await this.providerSettingsManager.setModeConfig(newMode, config.id)
+						if (config?.id) {
+							await this.providerSettingsManager.setModeConfig(newMode, config.id)
+						}
 					}
 				}
 			}
@@ -2511,6 +2512,12 @@ export class ClineProvider
 				`[handleModeSwitch] Failed to persist mode "${newMode}": ${error instanceof Error ? error.message : String(error)}`,
 			)
 			throw error
+		}
+
+		// The switch has committed: notify listeners only now, so a reconciled failure
+		// never leaves listeners tracking a mode the stores rolled back from.
+		if (viewScopedSwitch) {
+			this.emit(RooCodeEventName.ModeChanged, newMode)
 		}
 
 		// The switch has committed: a UI-refresh failure must not roll it back, so the
