@@ -563,6 +563,6 @@ describe("settleOnAbort", () => {
 		// would keep this helper's closure alive for the life of the signal.
 		expect(addSpy).toHaveBeenCalledWith("abort", expect.any(Function))
 		expect(removeSpy).toHaveBeenCalledTimes(1)
-		expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+		expect(removeSpy).toHaveBeenCalledWith("abort", addSpy.mock.calls[0]?.[1])
 	})
 })

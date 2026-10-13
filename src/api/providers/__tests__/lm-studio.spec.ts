@@ -441,8 +441,9 @@ describe("LmStudioHandler abort wiring", () => {
 
 			await collectStream(handler.createMessage("system", [], { taskId: "t1", abortSignal: external.signal }))
 
-			expect(addSpy).toHaveBeenCalledWith("abort", expect.any(Function))
-			expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			const listener = addSpy.mock.calls.find(([type]) => type === "abort")?.[1]
+			expect(typeof listener).toBe("function")
+			expect(removeSpy).toHaveBeenCalledWith("abort", listener)
 		})
 
 		it("counts the input tokens for the system prompt plus every message content block", async () => {
