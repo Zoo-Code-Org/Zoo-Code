@@ -1579,10 +1579,10 @@ describe("ClineProvider - Sticky Mode", () => {
 		it("does not resolve a view id that names an Object.prototype key through the chain", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 
-			mockContext.globalState.get = vi.fn().mockImplementation((key: string) => {
-				if (key === "viewStates") return { "stable-test-view": { mode: "architect" } }
-				return undefined
-			})
+			// Seed through the durable write path so later writes land in the same
+			// backing map the assertions read: a frozen get() literal would make every
+			// post-write assertion read the seed no matter what the provider wrote.
+			await provider.contextProxy.setValue("viewStates", { "stable-test-view": { mode: "architect" } })
 
 			const states = provider["getPersistedViewStates"]({ fresh: true })
 			expect(Object.getPrototypeOf(states)).toBeNull()
@@ -1673,10 +1673,10 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Temporary ids restart from 0 on every host start, so the same name can
 			// belong to a different session. An entry this instance never wrote must not
 			// be adopted as this view's state.
-			mockContext.globalState.get = vi.fn().mockImplementation((key: string) => {
-				if (key === "viewStates") return { [provider.viewId]: { mode: "architect" } }
-				return undefined
-			})
+			// Seed through the durable write path so the assertions below read the
+			// same backing map a re-key adoption would write to: a frozen get()
+			// literal made the negative assertion unable to fail.
+			await provider.contextProxy.setValue("viewStates", { [provider.viewId]: { mode: "architect" } })
 
 			await provider["setViewStateId"]("stable-test-view")
 
