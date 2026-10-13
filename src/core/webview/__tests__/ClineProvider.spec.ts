@@ -2807,6 +2807,10 @@ describe("ClineProvider", () => {
 			await expect(mutationA).rejects.toThrow("a failed")
 			await mutationB
 			expect(order).toEqual(["a:start", "a:end", "b:start"])
+			// Dispose both providers so the static instance registry does not carry them into
+			// later tests' sibling-scanning paths.
+			await providerA.dispose()
+			await providerB.dispose()
 		})
 
 		it("should sync the view-local buffer when activating a profile over a loaded view state", async () => {
@@ -3853,8 +3857,8 @@ describe("ClineProvider", () => {
 				saveConfig,
 				getProfile: vi.fn().mockImplementation(async ({ name }) => {
 					// The cancellation lands on the survivor lookup, i.e. after the settings commit
-					// and the profile-list write - the point where the queue has already handed
-					// the turn to the next mutation.
+					// and the profile-list write - the queue still holds the turn until this run
+					// settles, so the compensation can restore what landed.
 					if (name === "keeper-profile") {
 						controller.abort()
 					}
@@ -3878,14 +3882,19 @@ describe("ClineProvider", () => {
 				"Profile deletion was cancelled before the selection and settings rewrite",
 			)
 
-			// The list write landed before the cancellation point...
-			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([keeperProfile])
-			// ...but the shared selection, the shared provider settings and any sibling view's pin
-			// must not be rewritten afterwards, and the rollback must not replay either: the next
-			// queued mutation owns those stores now.
+			// The queue stays owned until this run settles, so the cancelled deletion
+			// compensates like a rejected write: the settings are put back...
+			expect(saveConfig).toHaveBeenCalledWith(
+				"doomed-profile",
+				expect.objectContaining({ openRouterApiKey: "doomed-secret" }),
+			)
+			// ...the landed list write is rolled back...
+			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([doomedProfile, keeperProfile])
+			// ...and the stores the deletion had not reached stay untouched: the shared
+			// selection, the shared provider settings, and any view pin still agree on the
+			// pre-deletion state.
 			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("doomed-profile")
 			expect(provider.contextProxy.getValue("apiProvider")).not.toBe(providerIdentifiers.anthropic)
-			expect(saveConfig).not.toHaveBeenCalled()
 			await provider.dispose()
 		})
 
@@ -3952,10 +3961,10 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
-		// The queue advances on the timeout-bounded caller result, so a cancelled mutation keeps
-		// running after the queue moves on and its compensation finishes inside that still-running
-		// mutation. The queue's cancellation report is the last event of the run: wait for it
-		// before asserting, so the checks below observe a completed compensation.
+		// The queue stays chained to a cancelled mutation until its run settles, so the
+		// compensation finishes inside that still-running mutation before the next queued
+		// mutation starts. The queue's cancellation report is the last event of the run: wait
+		// for it before asserting, so the checks below observe a completed compensation.
 		const waitForCancellationReport = async (logSpy: { mock: { calls: [string][] } }) => {
 			for (let attempt = 0; attempt < 1000; attempt++) {
 				if (logSpy.mock.calls.some(([message]) => /errored after cancellation/.test(message))) {
