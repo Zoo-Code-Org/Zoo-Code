@@ -3837,7 +3837,9 @@ export class ClineProvider
 		// leak in from another profile, which ContextProxy.setProviderSettings deliberately
 		// prevents by clearing omitted keys. Use the view's own settings in place and take
 		// only apiProvider from the shared state when the profile does not carry one.
-		const viewApiConfiguration = mergedStateValues.apiConfiguration
+		// The overlay is read from the buffer itself: the raw apiConfiguration state key
+		// is a partial patch from shared-store paths, not a view snapshot.
+		const viewApiConfiguration = this.viewLocalState.apiConfiguration
 		const resolvedApiConfiguration = viewApiConfiguration
 			? {
 					...viewApiConfiguration,
