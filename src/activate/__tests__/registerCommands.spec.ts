@@ -451,6 +451,24 @@ describe("registerCommands handlers", () => {
 		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 	})
 
+	it("focusInput posts to neither provider when the tracked tab has no live instance", async () => {
+		// Negative coverage for the both-tracked lookup: focusPanel selects the tab,
+		// and the focus target is resolved through getInstanceForView(tabPanel). When
+		// that lookup finds no live instance (tab provider disposed or untracked), the
+		// sidebar must not receive the post - focusPanel made the tab visible, so a
+		// sidebar post would focus an input the user cannot see.
+		setPanel({} as vscode.WebviewView, "sidebar")
+		const tabPanel = {} as vscode.WebviewPanel
+		setPanel(tabPanel, "tab")
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(undefined)
+
+		await handlers["zoo-code.focusInput"]()
+
+		expect(ClineProvider.getInstanceForView as Mock).toHaveBeenCalledWith(tabPanel)
+		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+		expect(mockVisibleProvider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
 	it("setPanel keeps independent refs: clearing only the tab ref re-enables the sidebar post", async () => {
 		setPanel({} as vscode.WebviewView, "sidebar")
 		const tabPanel = {} as vscode.WebviewPanel
