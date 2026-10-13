@@ -831,8 +831,12 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 				// this.abortController field must not gate the loop: with overlapping
 				// requests it reflects the most recently created request, so reading it
 				// here would let one request's cancellation terminate another's stream.
+				// Throw rather than break: a cancellation that lands after a chunk was
+				// handed out and before the next pull must surface as the contract
+				// AbortError, not resolve with a partial stream (same rule the SDK
+				// path enforces with its own between-pulls checks).
 				if (requestController.signal.aborted) {
-					break
+					throw createAbortError(this.providerName)
 				}
 
 				const { done, value } = await reader.read()

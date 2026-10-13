@@ -1145,6 +1145,55 @@ describe("OpenAiNativeHandler", () => {
 				expect(mockCaptureException).not.toHaveBeenCalled()
 			})
 
+			it("should reject with the contract AbortError when the signal aborts between successive SSE pulls", async () => {
+				// Force the fallback path with a body that hands out exactly one SSE
+				// chunk and then hangs on the next pull, so only the loop-boundary
+				// abort check can settle the stream. Before the fix that check broke
+				// out of the loop and createMessage resolved with the partial output
+				// instead of surfacing the cancellation.
+				mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+				const mockFetch = vitest.fn().mockImplementation(() => {
+					const encoder = new TextEncoder()
+					let pulls = 0
+					const body = new ReadableStream<Uint8Array>({
+						pull: (streamController) => {
+							pulls++
+							if (pulls === 1) {
+								streamController.enqueue(
+									encoder.encode('data: {"type":"response.output_text.delta","delta":"partial"}\n\n'),
+								)
+								return
+							}
+							// Never settles: the between-pulls abort check is the only
+							// exit for a cancelled consumer.
+							return new Promise<void>(() => {})
+						},
+					})
+					return Promise.resolve({ ok: true, body })
+				})
+				global.fetch = mockFetch as typeof fetch
+
+				const signalController = new AbortController()
+				const stream = handler.createMessage(
+					systemPrompt,
+					messages,
+					makeCreateMessageMetadata({ abortSignal: signalController.signal }),
+				)
+				const iterator = stream[Symbol.asyncIterator]()
+				const first = await iterator.next()
+				expect(first.done).toBe(false)
+				expect(first.value).toMatchObject({ type: "text", text: "partial" })
+
+				// The cancellation lands after a chunk was handed out and before the
+				// next pull: the loop-boundary check must throw, not break.
+				signalController.abort()
+				await expect(iterator.next()).rejects.toMatchObject({
+					name: "AbortError",
+					message: "The OpenAI Native request was aborted",
+				})
+				expect(mockCaptureException).not.toHaveBeenCalled()
+			})
+
 			it("should not convert a non-abort stream error into an AbortError", async () => {
 				mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
 				const mockFetch = vitest.fn().mockImplementation(() => {
@@ -1362,17 +1411,20 @@ describe("OpenAiNativeHandler", () => {
 				await tick()
 				controller.abort()
 
-				// The fallback is entered (the fetch is issued) rather than an AbortError
-				// being thrown; the loop's own aborted check then breaks before reading.
-				// Both halves of the contract must hold: the fallback request carries an
-				// already-aborted signal (so a real fetch would reject instead of issuing a
-				// second POST) and the stream yields nothing after cancellation.
-				const chunks = await collected
+				// The fallback is entered (the fetch is issued) rather than the SDK error
+				// being reclassified as a cancellation. Both halves of the contract must
+				// hold: the fallback request carries an already-aborted signal (so a real
+				// fetch would reject instead of issuing a second POST), and the loop's
+				// aborted check surfaces the cancellation as the contract AbortError
+				// instead of resolving with an empty stream.
+				await expect(collected).rejects.toMatchObject({
+					name: "AbortError",
+					message: "The OpenAI Native request was aborted",
+				})
 				expect(mockFetch).toHaveBeenCalledTimes(1)
 				const fetchOptions = mockFetch.mock.calls[0]?.[1] as { signal?: AbortSignal } | undefined
 				expect(fetchOptions?.signal).toBeInstanceOf(AbortSignal)
 				expect(fetchOptions?.signal?.aborted).toBe(true)
-				expect(chunks).toHaveLength(0)
 			})
 
 			it("should rethrow a native AbortError from the SDK as-is instead of normalizing it", async () => {
@@ -1428,7 +1480,7 @@ describe("OpenAiNativeHandler", () => {
 						// First request's body: one chunk now, then a pull that stays
 						// pending until this request's external signal aborts, where it
 						// enqueues an empty [DONE] chunk so the loop's next per-request
-						// abort check can break it.
+						// abort check is the only exit.
 						const body = new ReadableStream<Uint8Array>({
 							start: (startController) => {
 								startController.enqueue(
@@ -1500,11 +1552,15 @@ describe("OpenAiNativeHandler", () => {
 				expect(secondExternal.signal.aborted).toBe(false)
 				expect(cancelCalls[1]).toBe(false)
 
-				// The first request reacts to its own abort: the loop breaks once the
-				// pending read settles, and its body is cancelled before the lock is
-				// released. No second POST is issued for the aborted request.
-				const chunks1 = await collected1
-				expect(textChunks(chunks1).map((chunk) => chunk.text)).toEqual(["one"])
+				// The first request reacts to its own abort: once the pending read
+				// settles, the loop-boundary check throws the contract AbortError (a
+				// cancelled request must not resolve with its partial output), and its
+				// body is cancelled before the lock is released. No second POST is
+				// issued for the aborted request.
+				await expect(collected1).rejects.toMatchObject({
+					name: "AbortError",
+					message: "The OpenAI Native request was aborted",
+				})
 				expect(cancelCalls[0]).toBe(true)
 				expect(fetchCall).toBe(2)
 			})
