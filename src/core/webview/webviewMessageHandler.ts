@@ -41,6 +41,7 @@ import { saveTaskMessages } from "../task-persistence"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
+import { ProfileDeletionActivationError } from "./profileDeletionError"
 import { findOriginalContent } from "./stripOriginalContent"
 import { handleCheckpointRestoreOperation } from "./checkpointRestoreHandler"
 import { generateErrorDiagnostics } from "./diagnosticsHandler"
@@ -2483,6 +2484,21 @@ export const webviewMessageHandler = async (
 					// views with stale in-memory and persisted state.
 					await provider.deleteProviderProfile(profileToDelete)
 				} catch (error) {
+					if (error instanceof ProfileDeletionActivationError) {
+						// The deletion itself landed; only the replacement activation failed. Reporting it as
+						// errors.delete_api_config would tell the user the profile is still there when it
+						// is not, prompting a second delete of the wrong thing.
+						provider.log(
+							`Profile was deleted, but replacement activation failed: ${
+								error.activationError instanceof Error
+									? error.activationError.message
+									: String(error.activationError)
+							}`,
+						)
+						vscode.window.showWarningMessage(error.message)
+						break
+					}
+
 					provider.log(
 						`Error delete api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 					)

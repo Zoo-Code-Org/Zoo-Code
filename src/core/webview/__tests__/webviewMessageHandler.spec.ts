@@ -80,6 +80,7 @@ vi.mock("@roo-code/telemetry", () => ({
 import type { ModelRecord, RooCodeSettings } from "@roo-code/types"
 
 import { webviewMessageHandler } from "../webviewMessageHandler"
+import { ProfileDeletionActivationError } from "../profileDeletionError"
 import type { ClineProvider } from "../ClineProvider"
 import { flushModels, getModels } from "../../../api/providers/fetchers/modelCache"
 import { getLMStudioModels } from "../../../api/providers/fetchers/lmstudio"
@@ -193,6 +194,7 @@ import { t } from "../../../i18n"
 vi.mock("vscode", () => {
 	const showInformationMessage = vi.fn()
 	const showErrorMessage = vi.fn()
+	const showWarningMessage = vi.fn()
 	const openTextDocument = vi.fn().mockResolvedValue({})
 	const showTextDocument = vi.fn().mockResolvedValue(undefined)
 
@@ -200,6 +202,7 @@ vi.mock("vscode", () => {
 		window: {
 			showInformationMessage,
 			showErrorMessage,
+			showWarningMessage,
 			showTextDocument,
 		},
 		workspace: {
@@ -1556,6 +1559,29 @@ describe("webviewMessageHandler - profile deletion routes through the provider m
 
 		expect(mockClineProvider.providerSettingsManager.deleteConfig).not.toHaveBeenCalled()
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.delete_api_config")
+	})
+
+	it("warns that the profile was deleted when only the replacement activation fails", async () => {
+		writable.providerSettingsManager = {
+			listConfig: vi
+				.fn()
+				.mockResolvedValue([
+					{ name: "doomed-profile", id: "doomed-id", apiProvider: providerIdentifiers.openrouter },
+				]),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		mockClineProvider.deleteProviderProfile = vi
+			.fn()
+			.mockRejectedValue(new ProfileDeletionActivationError("keeper-profile", new Error("disk full")))
+		vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(t("common:answers.yes") as never)
+
+		await webviewMessageHandler(mockClineProvider, { type: "deleteApiConfiguration", text: "doomed-profile" })
+
+		// The deletion landed: the user must not be told the delete failed.
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+			"The profile was deleted, but activating replacement profile 'keeper-profile' failed.",
+		)
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalledWith("common:errors.delete_api_config")
 	})
 })
 

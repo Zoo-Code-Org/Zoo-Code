@@ -67,6 +67,10 @@ import {
 	type TaskExecutionContext,
 } from "../task/providerHandoff"
 import { aggregateTaskCostsRecursive, type AggregatedCosts } from "./aggregateTaskCosts"
+import { ProfileDeletionActivationError } from "./profileDeletionError"
+
+// Re-exported so callers catching profile-deletion outcomes can import the provider and the error from one place.
+export { ProfileDeletionActivationError } from "./profileDeletionError"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService, getRooCodeApiUrl } from "@roo-code/cloud"
 
@@ -3074,23 +3078,43 @@ export class ClineProvider
 		// try/catch because the deletion has already landed: a failure here must not roll
 		// it back, the same placement activateProviderProfileUnlocked gives its rebuild.
 		if (deletedWasGlobal || viewWasPinnedToDeleted) {
-			const {
-				id: survivingId,
-				name: _activatedName,
-				...activatedSettings
-			} = await this.providerSettingsManager.activateProfile({ name: profileToActivate })
-			if (survivingId) {
-				const { mode } = await this.getState()
-				await this.providerSettingsManager.setModeConfig(mode, survivingId)
+			let activationFailed = false
+			let activationError: unknown
+			try {
+				const {
+					id: survivingId,
+					name: _activatedName,
+					...activatedSettings
+				} = await this.providerSettingsManager.activateProfile({ name: profileToActivate })
+				if (survivingId) {
+					const { mode } = await this.getState()
+					await this.providerSettingsManager.setModeConfig(mode, survivingId)
+				}
+				this.updateTaskApiHandlerIfNeeded(activatedSettings, { forceRebuild: true })
+				await this.persistStickyProviderProfileToCurrentTask(profileToActivate)
+				if (activatedSettings.apiProvider) {
+					this.emit(RooCodeEventName.ProviderProfileChanged, {
+						name: profileToActivate,
+						provider: activatedSettings.apiProvider,
+					})
+				}
+			} catch (error: unknown) {
+				// The deletion is already committed: post the committed state first, then surface a
+				// distinct error so the caller cannot report a successful deletion as a failed one.
+				activationFailed = true
+				activationError = error
+				this.log(
+					`deleteProviderProfile: deletion committed but activation of '${profileToActivate}' failed: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
 			}
-			this.updateTaskApiHandlerIfNeeded(activatedSettings, { forceRebuild: true })
-			await this.persistStickyProviderProfileToCurrentTask(profileToActivate)
-			if (activatedSettings.apiProvider) {
-				this.emit(RooCodeEventName.ProviderProfileChanged, {
-					name: profileToActivate,
-					provider: activatedSettings.apiProvider,
-				})
+
+			await this.postStateToWebview()
+			if (activationFailed) {
+				throw new ProfileDeletionActivationError(profileToActivate, activationError)
 			}
+			return
 		}
 
 		await this.postStateToWebview()
