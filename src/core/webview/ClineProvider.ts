@@ -2418,7 +2418,13 @@ export class ClineProvider
 					// serving the settings captured before the save under the same name.
 					if (this.pinnedProfileName === name) {
 						await this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
-						this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+						// Only rebuild when the task actually runs under the saved profile: a
+						// view pinned to this profile can hold a task that follows a different
+						// sticky profile, and the forced rebuild would silently switch that
+						// conversation to the saved profile's settings.
+						if (this.getCurrentTask()?.taskApiConfigName === name) {
+							this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+						}
 					}
 					await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
 				}
@@ -2677,9 +2683,13 @@ export class ClineProvider
 				// The active task of a pinned view holds its own API handler built from
 				// the profile's settings: rebuild it with the saved settings or the
 				// running conversation keeps sending the old token even though the
-				// view's buffer has caught up. Direct private access across sibling
-				// instances of the same class is compile-time safe.
-				instance.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+				// view's buffer has caught up. Only rebuild when the task actually runs
+				// under the saved profile: a task that follows a different sticky
+				// profile must keep its own settings. Direct private access across
+				// sibling instances of the same class is compile-time safe.
+				if (instance.getCurrentTask()?.taskApiConfigName === name) {
+					instance.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+				}
 				await instance.postStateToWebview()
 			}),
 		)
