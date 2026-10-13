@@ -195,6 +195,36 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			expect(mockTask.recordToolError).toHaveBeenCalledWith("apply_patch")
 			expect(mockedCheckpointSave).not.toHaveBeenCalled()
 		})
+		it("awaits the post-patch checkpoint before processing queued messages", async () => {
+			// A pending checkpoint must not let queued messages (and the
+			// writes they trigger) start first: execute() awaits the
+			// post-patch checkpointSave and only then processes queued
+			// messages, so a queued write's own checkpoint cannot interleave
+			// with this commit.
+			const order: string[] = []
+			;(mockTask.processQueuedMessages as MockedFunction<() => void>).mockImplementation(() => {
+				order.push("processQueuedMessages")
+			})
+			mockedCheckpointSave.mockImplementationOnce(() => {
+				order.push("checkpointSave:start")
+				return new Promise<void>((resolve) => {
+					setTimeout(() => {
+						order.push("checkpointSave:done")
+						resolve()
+					}, 10)
+				}).then(() => undefined)
+			})
+
+			await tool.execute({ patch: deletePatch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			// The checkpoint fully completes before queued messages are
+			// processed.
+			expect(order).toEqual(["checkpointSave:start", "checkpointSave:done", "processQueuedMessages"])
+		})
 	})
 
 	describe("checkpoint only for fully successful patches (B1)", () => {

@@ -239,6 +239,15 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					)
 				}
 			}
+
+			// B2: deferred from the per-file handlers - a queued write must not
+			// start until the post-patch checkpoint above has persisted. The
+			// handlers used to process queued messages right after each
+			// successful write; a write happened if and only if
+			// `successfulChanges` is non-empty, so one call here preserves that.
+			if (successfulChanges.length > 0) {
+				task.processQueuedMessages()
+			}
 		} catch (error) {
 			await handleError("apply patch", error as Error)
 			await task.diffViewProvider.reset()
@@ -349,7 +358,6 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, true)
 		pushToolResult(message)
 		await task.diffViewProvider.reset()
-		task.processQueuedMessages()
 		return { succeeded: true, wrote: true }
 	}
 
@@ -421,7 +429,6 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 		task.didEditFile = true
 		pushToolResult(`Successfully deleted ${relPath}`)
-		task.processQueuedMessages()
 		return { succeeded: true, wrote: true }
 	}
 
@@ -616,7 +623,6 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, false)
 		pushToolResult(message)
 		await task.diffViewProvider.reset()
-		task.processQueuedMessages()
 		if (!moveSucceeded) {
 			// The destination file was written on disk before the source
 			// deletion failed, so the write must still be checkpointed and
