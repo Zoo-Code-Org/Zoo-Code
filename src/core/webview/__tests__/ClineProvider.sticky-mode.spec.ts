@@ -1150,6 +1150,11 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(provider.getValue("mode")).toBe("architect")
 			expect(provider["viewLocalState"].mode).toBe("architect")
 			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("architect-profile")
+			// The kept switch must leave the task state and history on the
+			// committed mode too: rolling the task-side writes back here would
+			// diverge the task from the mode stores.
+			expect(mockTask["_taskMode"]).toBe("architect")
+			expect(updateTaskHistorySpy).toHaveBeenLastCalledWith(expect.objectContaining({ mode: "architect" }))
 		})
 
 		it("reports ModeChanged for a switch the catch keeps after activation wrote", async () => {
