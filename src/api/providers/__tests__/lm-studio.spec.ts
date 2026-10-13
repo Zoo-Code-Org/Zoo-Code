@@ -633,6 +633,25 @@ describe("LmStudioHandler abort wiring", () => {
 			expect(create.mock.calls[1][1]?.signal).toBe(external.signal)
 		})
 
+		it("fast-fails with the abort contract error for a pre-aborted signal", async () => {
+			const handler = new LmStudioHandler(options)
+			const create = lastCreate()
+			const external = new AbortController()
+			external.abort()
+
+			let caught: unknown
+			try {
+				await handler.completePrompt("hi", { abortSignal: external.signal })
+			} catch (error) {
+				caught = error
+			}
+
+			expect(caught).toBeInstanceOf(Error)
+			expect((caught as Error).name).toBe("AbortError")
+			expect((caught as Error).message).toBe("This operation was aborted")
+			expect(create).not.toHaveBeenCalled()
+		})
+
 		it("normalizes a create rejection that looks like an abort", async () => {
 			const handler = new LmStudioHandler(options)
 			const create = lastCreate()

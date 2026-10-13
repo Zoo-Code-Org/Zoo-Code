@@ -187,17 +187,30 @@ export function settleOnAbort<T>(
 		return Promise.reject(createAbortError(providerName))
 	}
 	return new Promise<T>((resolve, reject) => {
-		const onAbort = () => reject(createAbortError(providerName))
+		// Detach the exact registered listener at most once, from whichever
+		// side settles first: the abort callback (the pending promise may
+		// never settle, e.g. a wedged shared refresh) or the pending
+		// promise's fulfillment/rejection handlers (no abort ever fires).
+		let detached = false
+		const cleanup = () => {
+			if (detached) {
+				return
+			}
+			detached = true
+			signal.removeEventListener("abort", onAbort)
+		}
+		const onAbort = () => {
+			cleanup()
+			reject(createAbortError(providerName))
+		}
 		signal.addEventListener("abort", onAbort)
 		void pending.then(
 			(value) => {
-				// Stryker disable next-line StringLiteral: mirrors the event name registered above, whose path is covered by the abort tests; a mutated removal event is unobservable because a signal cannot re-dispatch "abort"
-				signal.removeEventListener("abort", onAbort)
+				cleanup()
 				resolve(value)
 			},
 			(error) => {
-				// Stryker disable next-line StringLiteral: mirrors the event name registered above, whose path is covered by the abort tests; a mutated removal event is unobservable because a signal cannot re-dispatch "abort"
-				signal.removeEventListener("abort", onAbort)
+				cleanup()
 				reject(error)
 			},
 		)

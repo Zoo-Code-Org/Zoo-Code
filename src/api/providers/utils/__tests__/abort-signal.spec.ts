@@ -521,6 +521,30 @@ describe("settleOnAbort", () => {
 		expect(removeSpy).toHaveBeenCalledWith("abort", addSpy.mock.calls[0]?.[1])
 	})
 
+	it("removes the abort listener from the abort callback when the pending promise never settles", async () => {
+		// A pending promise that never settles must not pin the listener: the
+		// abort callback itself has to detach it, or a long-lived (shared)
+		// signal accumulates one listener per cancelled request.
+		const controller = new AbortController()
+		const addSpy = vi.spyOn(controller.signal, "addEventListener")
+		const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+		const pending = new Promise<number>(() => {})
+		const racing = settleOnAbort(pending, controller.signal, "Test")
+		controller.abort()
+
+		let caught: unknown
+		try {
+			await racing
+		} catch (error) {
+			caught = error
+		}
+
+		expect(caught).toBeInstanceOf(Error)
+		expect((caught as Error).name).toBe("AbortError")
+		expect(removeSpy).toHaveBeenCalledTimes(1)
+		expect(removeSpy).toHaveBeenCalledWith("abort", addSpy.mock.calls[0]?.[1])
+	})
+
 	it("propagates a pending promise rejection unchanged and detaches the abort listener", async () => {
 		const controller = new AbortController()
 		const addSpy = vi.spyOn(controller.signal, "addEventListener")
