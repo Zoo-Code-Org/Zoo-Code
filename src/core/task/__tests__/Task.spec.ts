@@ -7119,6 +7119,34 @@ describe("Queued message processing after condense", () => {
 		expect(submitSpy).toHaveBeenCalledWith("queued text", ["img1.png"])
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
+	it("does not dequeue queued messages once the task is aborted", () => {
+		// Tools await the checkpoint before handing off queued work; a
+		// cancellation landing during that await must not consume the queued
+		// message: submitUserMessage rejects once abort is set, so dequeuing
+		// would drop the input instead of leaving it for the resume flow.
+		if (!TelemetryService.hasInstance()) {
+			TelemetryService.createInstance([])
+		}
+		const provider = createProvider()
+		const task = new Task({
+			provider,
+			apiConfiguration: apiConfig,
+			task: "initial task",
+			startTask: false,
+		})
+		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+
+		task.messageQueueService.addMessage("queued text")
+		task.abort = true
+		try {
+			task.processQueuedMessages()
+		} finally {
+			task.abort = false
+		}
+
+		expect(submitSpy).not.toHaveBeenCalled()
+		expect(task.messageQueueService.isEmpty()).toBe(false)
+	})
 
 	it("does not cross-drain queues between separate tasks", async () => {
 		const providerA = createProvider()
