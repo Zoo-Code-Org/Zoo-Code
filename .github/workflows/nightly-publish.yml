@@ -1,151 +1,151 @@
 name: Publish Pre-release Extension
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch: # Allows manual triggering.
+    push:
+        branches: [main]
+    workflow_dispatch: # Allows manual triggering.
 
 permissions:
-  contents: read
+    contents: read
 
 concurrency:
-  group: marketplace-prerelease
-  cancel-in-progress: false
+    group: marketplace-prerelease
+    cancel-in-progress: false
 
 jobs:
-  publish-prerelease:
-    runs-on: ubuntu-latest
-    environment: marketplace-prerelease
+    publish-prerelease:
+        runs-on: ubuntu-latest
+        environment: marketplace-prerelease
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Setup Node.js and pnpm
-        uses: ./.github/actions/setup-node-pnpm
-        with:
-          install-args: "--frozen-lockfile"
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+              with:
+                  install-args: "--frozen-lockfile"
 
-      - name: Validate package identity
-        run: |
-          package_name=$(node -p "require('./src/package.json').name")
-          publisher=$(node -p "require('./src/package.json').publisher")
+            - name: Validate package identity
+              run: |
+                  package_name=$(node -p "require('./src/package.json').name")
+                  publisher=$(node -p "require('./src/package.json').publisher")
 
-          test "$package_name" = "zoo-code"
-          test "$publisher" = "ZooCodeOrganization"
+                  test "$package_name" = "zoo-code"
+                  test "$publisher" = "ZooCodeOrganization"
 
-      - name: Validate publish ref
-        run: |
-          if [ "$GITHUB_REF_NAME" != "main" ]; then
-            echo "Pre-release publishes must run from main, not ${GITHUB_REF_NAME}."
-            exit 1
-          fi
+            - name: Validate publish ref
+              run: |
+                  if [ "$GITHUB_REF_NAME" != "main" ]; then
+                    echo "Pre-release publishes must run from main, not ${GITHUB_REF_NAME}."
+                    exit 1
+                  fi
 
-      - name: Skip if this push is a release merge
-        id: release-check
-        run: |
-          commit_subject=$(git log -1 --format=%s)
-          skip=false
+            - name: Skip if this push is a release merge
+              id: release-check
+              run: |
+                  commit_subject=$(git log -1 --format=%s)
+                  skip=false
 
-          if [[ "$commit_subject" =~ ^chore:\ prepare\ v[0-9]+\.[0-9]+\.[0-9]+\ release ]]; then
-            echo "Commit '${commit_subject}' looks like a release-prep merge; skipping nightly pre-release."
-            skip=true
-          fi
+                  if [[ "$commit_subject" =~ ^chore:\ prepare\ v[0-9]+\.[0-9]+\.[0-9]+\ release ]]; then
+                    echo "Commit '${commit_subject}' looks like a release-prep merge; skipping nightly pre-release."
+                    skip=true
+                  fi
 
-          echo "skip=${skip}" >> "$GITHUB_OUTPUT"
+                  echo "skip=${skip}" >> "$GITHUB_OUTPUT"
 
-      - name: Set pre-release version
-        if: steps.release-check.outputs.skip != 'true'
-        id: version
-        env:
-          RUN_NUMBER: ${{ github.run_number }}
-        run: |
-          node <<'EOF'
-          const fs = require("fs")
-          const pkgPath = "src/package.json"
-          const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"))
-          const [major, minor] = pkg.version.split(".").map(Number)
-          const prereleaseMinor = minor % 2 === 0 ? minor + 1 : minor + 2
-          const patch = 100000 + Number(process.env.RUN_NUMBER)
+            - name: Set pre-release version
+              if: steps.release-check.outputs.skip != 'true'
+              id: version
+              env:
+                  RUN_NUMBER: ${{ github.run_number }}
+              run: |
+                  node <<'EOF'
+                  const fs = require("fs")
+                  const pkgPath = "src/package.json"
+                  const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"))
+                  const [major, minor] = pkg.version.split(".").map(Number)
+                  const prereleaseMinor = minor % 2 === 0 ? minor + 1 : minor + 2
+                  const patch = 100000 + Number(process.env.RUN_NUMBER)
 
-          pkg.version = `${major}.${prereleaseMinor}.${patch}`
-          fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, "\t")}\n`)
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `number=${pkg.version}\n`)
-          console.log(`Pre-release version set to ${pkg.version}`)
-          EOF
+                  pkg.version = `${major}.${prereleaseMinor}.${patch}`
+                  fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, "\t")}\n`)
+                  fs.appendFileSync(process.env.GITHUB_OUTPUT, `number=${pkg.version}\n`)
+                  console.log(`Pre-release version set to ${pkg.version}`)
+                  EOF
 
-      - name: Build workspace packages
-        if: steps.release-check.outputs.skip != 'true'
-        env:
-          PKG_RELEASE_CHANNEL: prerelease
-        run: |
-          pnpm --filter @roo-code/build build
-          pnpm --filter @roo-code/vscode-webview build
+            - name: Build workspace packages
+              if: steps.release-check.outputs.skip != 'true'
+              env:
+                  PKG_RELEASE_CHANNEL: prerelease
+              run: |
+                  pnpm --filter @roo-code/build build
+                  pnpm --filter @roo-code/vscode-webview build
 
-      - name: Package pre-release VSIX
-        if: steps.release-check.outputs.skip != 'true'
-        env:
-          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
-          PKG_RELEASE_CHANNEL: prerelease
-        run: |
-          mkdir -p bin
-          pnpm --filter ./src exec vsce package --pre-release --no-dependencies --out ../bin
+            - name: Package pre-release VSIX
+              if: steps.release-check.outputs.skip != 'true'
+              env:
+                  POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+                  PKG_RELEASE_CHANNEL: prerelease
+              run: |
+                  mkdir -p bin
+                  pnpm --filter ./src exec vsce package --pre-release --no-dependencies --out ../bin
 
-      - name: Verify VSIX contents
-        if: steps.release-check.outputs.skip != 'true'
-        env:
-          VERSION_NUMBER: ${{ steps.version.outputs.number }}
-        run: |
-          vsix_path="bin/zoo-code-${VERSION_NUMBER}.vsix"
-          unzip -l "$vsix_path" > /tmp/zoo-code-vsix-contents.txt
-          grep -q "extension/package.json" /tmp/zoo-code-vsix-contents.txt
-          grep -q "extension/dist/extension.js" /tmp/zoo-code-vsix-contents.txt
-          grep -q "extension/webview-ui/build/assets/index.js" /tmp/zoo-code-vsix-contents.txt
-          grep -q "extension/webview-ui/audio/celebration.wav" /tmp/zoo-code-vsix-contents.txt
+            - name: Verify VSIX contents
+              if: steps.release-check.outputs.skip != 'true'
+              env:
+                  VERSION_NUMBER: ${{ steps.version.outputs.number }}
+              run: |
+                  vsix_path="bin/zoo-code-${VERSION_NUMBER}.vsix"
+                  unzip -l "$vsix_path" > /tmp/zoo-code-vsix-contents.txt
+                  grep -q "extension/package.json" /tmp/zoo-code-vsix-contents.txt
+                  grep -q "extension/dist/extension.js" /tmp/zoo-code-vsix-contents.txt
+                  grep -q "extension/webview-ui/build/assets/index.js" /tmp/zoo-code-vsix-contents.txt
+                  grep -q "extension/webview-ui/audio/celebration.wav" /tmp/zoo-code-vsix-contents.txt
 
-      - name: Validate packaged manifest identity
-        if: steps.release-check.outputs.skip != 'true'
-        env:
-          VERSION_NUMBER: ${{ steps.version.outputs.number }}
-        run: |
-          vsix_path="bin/zoo-code-${VERSION_NUMBER}.vsix"
+            - name: Validate packaged manifest identity
+              if: steps.release-check.outputs.skip != 'true'
+              env:
+                  VERSION_NUMBER: ${{ steps.version.outputs.number }}
+              run: |
+                  vsix_path="bin/zoo-code-${VERSION_NUMBER}.vsix"
 
-          artifact_name=$(unzip -p "$vsix_path" extension/package.json | jq -r '.name')
-          artifact_publisher=$(unzip -p "$vsix_path" extension/package.json | jq -r '.publisher')
+                  artifact_name=$(unzip -p "$vsix_path" extension/package.json | jq -r '.name')
+                  artifact_publisher=$(unzip -p "$vsix_path" extension/package.json | jq -r '.publisher')
 
-          test "$artifact_name" = "zoo-code"
-          test "$artifact_publisher" = "ZooCodeOrganization"
+                  test "$artifact_name" = "zoo-code"
+                  test "$artifact_publisher" = "ZooCodeOrganization"
 
-      - name: Publish pre-release to VS Code Marketplace
-        if: steps.release-check.outputs.skip != 'true'
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-          VERSION_NUMBER: ${{ steps.version.outputs.number }}
-        run: |
-          npx @vscode/vsce publish --pre-release --skip-duplicate --packagePath "bin/zoo-code-${VERSION_NUMBER}.vsix"
-          echo "Published or skipped existing ZooCodeOrganization.zoo-code ${VERSION_NUMBER} as a VS Code Marketplace pre-release"
+            - name: Publish pre-release to VS Code Marketplace
+              if: steps.release-check.outputs.skip != 'true'
+              env:
+                  VSCE_PAT: ${{ secrets.VSCE_PAT }}
+                  VERSION_NUMBER: ${{ steps.version.outputs.number }}
+              run: |
+                  npx @vscode/vsce publish --pre-release --skip-duplicate --packagePath "bin/zoo-code-${VERSION_NUMBER}.vsix"
+                  echo "Published or skipped existing ZooCodeOrganization.zoo-code ${VERSION_NUMBER} as a VS Code Marketplace pre-release"
 
-      # The VSIX built above with `vsce package --pre-release` already carries the
-      # Microsoft.VisualStudio.Code.PreRelease manifest property, which is what Open
-      # VSX reads to flag the version. `ovsx publish` ignores --pre-release for an
-      # already-packaged .vsix (it only applies when ovsx does the packaging itself),
-      # so it's intentionally omitted here.
-      #
-      # Open VSX's "latest" alias resolves to the highest semver across stable and
-      # pre-release alike (pre-release only breaks ties at equal major.minor.patch),
-      # so a nightly build can transiently become "latest" until the next stable
-      # release outranks it. This mirrors how Marketplace pre-release users already
-      # track the newest published version, so it's an accepted trade-off here too.
-      - name: Publish pre-release to Open VSX Registry
-        if: steps.release-check.outputs.skip != 'true'
-        env:
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
-          VERSION_NUMBER: ${{ steps.version.outputs.number }}
-        run: |
-          set -o pipefail
-          publish_output=$(pnpm exec ovsx publish "bin/zoo-code-${VERSION_NUMBER}.vsix" --skip-duplicate 2>&1 | tee /dev/stderr)
-          if echo "$publish_output" | grep -q "is already published"; then
-            echo "ZooCodeOrganization.zoo-code ${VERSION_NUMBER} was already published to Open VSX; skipped."
-          else
-            echo "Published ZooCodeOrganization.zoo-code ${VERSION_NUMBER} as an Open VSX pre-release"
-          fi
+            # The VSIX built above with `vsce package --pre-release` already carries the
+            # Microsoft.VisualStudio.Code.PreRelease manifest property, which is what Open
+            # VSX reads to flag the version. `ovsx publish` ignores --pre-release for an
+            # already-packaged .vsix (it only applies when ovsx does the packaging itself),
+            # so it's intentionally omitted here.
+            #
+            # Open VSX's "latest" alias resolves to the highest semver across stable and
+            # pre-release alike (pre-release only breaks ties at equal major.minor.patch),
+            # so a nightly build can transiently become "latest" until the next stable
+            # release outranks it. This mirrors how Marketplace pre-release users already
+            # track the newest published version, so it's an accepted trade-off here too.
+            - name: Publish pre-release to Open VSX Registry
+              if: steps.release-check.outputs.skip != 'true'
+              env:
+                  OVSX_PAT: ${{ secrets.OVSX_PAT }}
+                  VERSION_NUMBER: ${{ steps.version.outputs.number }}
+              run: |
+                  set -o pipefail
+                  publish_output=$(pnpm exec ovsx publish "bin/zoo-code-${VERSION_NUMBER}.vsix" --skip-duplicate 2>&1 | tee /dev/stderr)
+                  if echo "$publish_output" | grep -q "is already published"; then
+                    echo "ZooCodeOrganization.zoo-code ${VERSION_NUMBER} was already published to Open VSX; skipped."
+                  else
+                    echo "Published ZooCodeOrganization.zoo-code ${VERSION_NUMBER} as an Open VSX pre-release"
+                  fi

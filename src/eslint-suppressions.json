@@ -644,11 +644,6 @@
 			"count": 1
 		}
 	},
-	"core/config/__tests__/ProviderSettingsManager.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
 	"core/context-management/__tests__/context-management.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
@@ -909,11 +904,6 @@
 			"count": 16
 		}
 	},
-	"core/tools/__tests__/ToolRepetitionDetector.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
 	"core/tools/__tests__/askFollowupQuestionTool.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 20
@@ -966,7 +956,7 @@
 	},
 	"core/tools/__tests__/readFileTool.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 98
+			"count": 96
 		}
 	},
 	"core/tools/__tests__/runSlashCommandTool.spec.ts": {
@@ -1026,7 +1016,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 198
+			"count": 196
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
@@ -1172,11 +1162,6 @@
 	"integrations/misc/__tests__/export-markdown.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
-		}
-	},
-	"integrations/misc/__tests__/extract-text.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
 		}
 	},
 	"integrations/misc/__tests__/line-counter.spec.ts": {
