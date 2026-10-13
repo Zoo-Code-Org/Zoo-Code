@@ -223,10 +223,14 @@ describe("ClineProvider - Sticky Mode", () => {
 		}
 	}
 
-	afterEach(() => {
+	afterEach(async () => {
 		// Tests construct providers directly and the suite never disposes most of
-		// them; clear the static registry so a leaked instance cannot claim a stable
-		// view state id ahead of a later test.
+		// them; dispose the per-test provider first (dispose unregisters it from
+		// static registries such as McpServerManager's provider set, which the
+		// reset below does not clear), then clear the instance registry so a
+		// leaked instance cannot claim a stable view state id ahead of a later
+		// test.
+		await provider.dispose()
 		ClineProvider["activeInstances"] = new Set()
 	})
 
