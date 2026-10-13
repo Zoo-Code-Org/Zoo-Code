@@ -1674,8 +1674,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			const fresh = new ClineProvider(mockContext, mockOutputChannel, "sidebar", proxy, new WebviewFocusTracker())
 			expect(fresh.viewId).toBe(tempId)
 
-			// Let the constructor's fire-and-forget loadViewState settle.
-			await new Promise((resolve) => setTimeout(resolve, 10))
+			// Await the load itself instead of a fixed timer: the negative
+			// assertion must run after the load has definitely finished.
+			await fresh["loadViewState"]()
 
 			// The unowned temporary-id entry must not be adopted...
 			expect(fresh["viewLocalState"]).toStrictEqual({})
