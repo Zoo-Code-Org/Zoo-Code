@@ -312,6 +312,48 @@ describe("XAIHandler", () => {
 		)
 	})
 
+	it("createMessage should reject an allowed_tools function entry with a malformed name", async () => {
+		// The Chat Completions allowlist type accepts open records, so a
+		// function entry can carry a missing or non-string name. It must be
+		// rejected at the boundary rather than forwarded in the nested Chat
+		// Completions shape, which the Responses API cannot express.
+		const testTools = [
+			{
+				type: "function" as const,
+				function: {
+					name: "test_tool",
+					description: "A test tool",
+					parameters: { type: "object", properties: { arg1: { type: "string" } }, required: ["arg1"] },
+				},
+			},
+		]
+		const callsBefore = mockResponsesCreate.mock.calls.length
+
+		const malformedEntries = [
+			{ type: "function", function: { name: null } },
+			{ type: "function", function: null },
+			{ type: "function", function: () => 1 },
+			{ type: "function", function: { name: 123 } },
+		]
+		for (const entry of malformedEntries) {
+			const stream = handler.createMessage("test prompt", [], {
+				taskId: "test-task-id",
+				tools: testTools,
+				tool_choice: {
+					type: "allowed_tools",
+					allowed_tools: {
+						mode: "required",
+						tools: [entry, { type: "mcp", server_label: "deepwiki" }],
+					},
+				},
+			})
+			await expect(stream.next()).rejects.toThrow(
+				'allowed_tools entry of type "function" is missing a valid function name',
+			)
+		}
+		expect(mockResponsesCreate.mock.calls.length).toBe(callsBefore)
+	})
+
 	it("createMessage should map a custom tool_choice to the Responses API shape", async () => {
 		const testTools = [
 			{
@@ -352,17 +394,11 @@ describe("XAIHandler", () => {
 			},
 		]
 
-		// Entries that fail the function-name guard must pass through unchanged: a
-		// non-function type carrying a function ref, a null ref, a function value
-		// (typeof "function", not "object", whose .name is still a string), and an
-		// object whose name is not a string.
-		const probeFunction = () => 1
-		const entries = [
-			{ type: "mcp", function: { name: "leaky" } },
-			{ type: "function", function: null },
-			{ type: "function", function: probeFunction },
-			{ type: "function", function: { name: 123 } },
-		]
+		// Entries that are not function references pass through unchanged: a
+		// non-function type carrying a function ref must not be rewritten.
+		// Malformed function entries (null ref, function value, non-string name)
+		// are rejected at the boundary; see the dedicated rejection test.
+		const entries = [{ type: "mcp", function: { name: "leaky" } }]
 
 		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
 

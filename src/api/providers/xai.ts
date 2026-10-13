@@ -93,14 +93,24 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 						// Chat Completions allowlist entries nest the function reference
 						// ({ type: "function", function: { name } }); the Responses API
 						// expects the name at the top level ({ type: "function", name }).
-						const functionRef = entry["function"]
-						if (
-							entry["type"] === "function" &&
-							functionRef != null &&
-							typeof functionRef === "object" &&
-							typeof (functionRef as Record<string, unknown>)["name"] === "string"
-						) {
-							return { type: "function", name: (functionRef as Record<string, unknown>)["name"] }
+						// The Chat Completions type allows open records, so a function
+						// entry can arrive malformed (missing or non-string name).
+						// Forwarding it unchanged would send the nested Chat Completions
+						// shape to the Responses API, which cannot express that allowlist
+						// entry, and how xAI handles the malformed payload is unspecified;
+						// reject it at the boundary instead.
+						if (entry["type"] === "function") {
+							const functionRef = entry["function"]
+							const name =
+								functionRef != null && typeof functionRef === "object"
+									? (functionRef as Record<string, unknown>)["name"]
+									: undefined
+							if (typeof name !== "string") {
+								throw new Error(
+									'xAI: allowed_tools entry of type "function" is missing a valid function name',
+								)
+							}
+							return { type: "function", name }
 						}
 						return entry
 					}),
