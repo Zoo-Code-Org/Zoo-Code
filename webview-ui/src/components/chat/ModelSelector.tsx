@@ -104,8 +104,11 @@ export const ModelSelector = ({
 
 	const modelIds = React.useMemo(() => {
 		if (!filteredModelRecord) return []
-		return Object.keys(filteredModelRecord).sort((a, b) => a.localeCompare(b))
-	}, [filteredModelRecord])
+		return Object.entries(filteredModelRecord)
+			.filter(([id, info]) => id === selectedModelId || !info.deprecated)
+			.map(([id]) => id)
+			.sort((a, b) => a.localeCompare(b))
+	}, [filteredModelRecord, selectedModelId])
 
 	const searchableItems = React.useMemo(
 		() =>
@@ -158,11 +161,11 @@ export const ModelSelector = ({
 	const handleSelect = React.useCallback(
 		(modelId: string) => {
 			if (!field) return
-			handleModelChange(field, modelId)
+			if (modelId !== selectedModelId) handleModelChange(field, modelId)
 			setOpen(false)
 			setSearchValue("")
 		},
-		[field, handleModelChange],
+		[field, handleModelChange, selectedModelId],
 	)
 
 	const onClearSearch = React.useCallback(() => {

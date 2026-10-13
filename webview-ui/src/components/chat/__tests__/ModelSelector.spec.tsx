@@ -27,6 +27,17 @@ vi.mock("@/components/ui/hooks/useRooPortal", () => ({
 	useRooPortal: () => document.body,
 }))
 
+const staticModelsOverride = vi.hoisted(() => ({ value: undefined as Record<string, unknown> | undefined }))
+
+vi.mock("@/components/settings/utils/providerModelConfig", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/components/settings/utils/providerModelConfig")>()
+	return {
+		...actual,
+		getStaticModelsForProvider: (...args: Parameters<typeof actual.getStaticModelsForProvider>) =>
+			staticModelsOverride.value ?? actual.getStaticModelsForProvider(...args),
+	}
+})
+
 import { vscode } from "@/utils/vscode"
 
 describe("ModelSelector", () => {
@@ -37,6 +48,41 @@ describe("ModelSelector", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		staticModelsOverride.value = undefined
+	})
+
+	test("re-selecting the active model does not post a config update", () => {
+		render(<ModelSelector apiConfiguration={anthropicConfig} title="Select model" />)
+
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
+		fireEvent.change(screen.getByTestId("model-search-input"), { target: { value: "claude-sonnet-4-5" } })
+		const items = screen.getAllByTestId("model-selector-item")
+		const active = items.find((el) => el.querySelector(".lucide-check"))!
+		fireEvent.click(active)
+
+		expect(vscode.postMessage).not.toHaveBeenCalled()
+		expect(screen.queryByTestId("model-search-input")).not.toBeInTheDocument()
+	})
+
+	test("hides deprecated models except the currently selected one", () => {
+		const base = { contextWindow: 1000, supportsPromptCache: false }
+		staticModelsOverride.value = {
+			"model-active": { ...base, deprecated: true },
+			"model-old": { ...base, deprecated: true },
+			"model-new": base,
+		}
+
+		render(
+			<ModelSelector
+				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic, apiModelId: "model-active" }}
+				title="Select model"
+			/>,
+		)
+
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
+
+		const labels = screen.getAllByTestId("model-selector-item").map((el) => el.textContent)
+		expect(labels).toEqual(["model-active", "model-new"])
 	})
 
 	test("shows the currently selected model on the trigger for a static-model provider", () => {
