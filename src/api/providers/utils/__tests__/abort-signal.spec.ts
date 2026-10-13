@@ -1,4 +1,5 @@
 import {
+	bridgeExternalAbortSignal,
 	createAbortError,
 	isRequestAborted,
 	mergeAbortSignalAndTimeout,
@@ -414,5 +415,51 @@ describe("abort-signal utilities", () => {
 		it("returns a fresh error on each call", () => {
 			expect(createAbortError("X")).not.toBe(createAbortError("X"))
 		})
+	})
+})
+
+describe("bridgeExternalAbortSignal", () => {
+	it("returns an undefined signal and a noop dispose without an external signal", () => {
+		const { signal, dispose } = bridgeExternalAbortSignal()
+		expect(signal).toBeUndefined()
+		expect(() => dispose()).not.toThrow()
+	})
+
+	it("returns an already-aborted signal when the external signal is aborted", () => {
+		const controller = new AbortController()
+		controller.abort()
+		const { signal, dispose } = bridgeExternalAbortSignal(controller.signal)
+		expect(signal?.aborted).toBe(true)
+		expect(() => dispose()).not.toThrow()
+	})
+
+	it("aborts the per-request signal when the external signal aborts", () => {
+		const controller = new AbortController()
+		const { signal } = bridgeExternalAbortSignal(controller.signal)
+		expect(signal?.aborted).toBe(false)
+		controller.abort()
+		expect(signal?.aborted).toBe(true)
+	})
+
+	it("detaches the retained listener on dispose", () => {
+		const controller = new AbortController()
+		const addSpy = vitest.spyOn(controller.signal, "addEventListener")
+		const removeSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+		const { signal, dispose } = bridgeExternalAbortSignal(controller.signal)
+
+		expect(addSpy).toHaveBeenCalledTimes(1)
+		const [event, listener, opts] = addSpy.mock.calls[0]
+		expect(event).toBe("abort")
+		expect(opts).toEqual({ once: true })
+
+		dispose()
+		expect(removeSpy).toHaveBeenCalledTimes(1)
+		expect(removeSpy).toHaveBeenCalledWith("abort", listener)
+
+		// After dispose the bridge no longer forwards aborts: the per-request
+		// signal stays live, proving the exact retained callback was detached.
+		controller.abort()
+		expect(signal?.aborted).toBe(false)
 	})
 })

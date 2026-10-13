@@ -37,6 +37,45 @@ export function mergeAbortSignals(primarySignal: AbortSignal, secondarySignal?: 
 }
 
 /**
+ * Bridge an optional caller-owned (external) abort signal to a per-request
+ * signal, with an explicit detach handle.
+ *
+ * The returned `signal` aborts together with the external signal (immediately
+ * if it is already aborted). Callers must invoke `dispose()` once the request
+ * ends - on completion, failure, and early generator exit alike: the listener
+ * is registered on the caller's long-lived signal, and an anonymous listener
+ * left attached would outlive the request and retain the per-request
+ * controller for every completed request.
+ *
+ * With no external signal, returns `{ signal: undefined, dispose: noop }` so
+ * the client-level timeout remains the only cancellation mechanism.
+ */
+export function bridgeExternalAbortSignal(externalSignal?: AbortSignal): {
+	signal?: AbortSignal
+	dispose: () => void
+} {
+	if (!externalSignal) {
+		return { signal: undefined, dispose: () => {} }
+	}
+
+	const controller = new AbortController()
+	if (externalSignal.aborted) {
+		controller.abort()
+		return { signal: controller.signal, dispose: () => {} }
+	}
+
+	// Retain the callback so the listener can be detached once this request
+	// ends: an anonymous listener on a long-lived external signal would
+	// outlive the request and retain the per-request controller.
+	const onExternalAbort = () => controller.abort()
+	externalSignal.addEventListener("abort", onExternalAbort, { once: true })
+	return {
+		signal: controller.signal,
+		dispose: () => externalSignal.removeEventListener("abort", onExternalAbort),
+	}
+}
+
+/**
  * Throw an AbortError if the given signal is already aborted.
  *
  * Use as a fast-fail guard at the top of request-building code paths so

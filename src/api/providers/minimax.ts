@@ -13,6 +13,7 @@ import { getModelParams } from "../transform/model-params"
 import { mergeEnvironmentDetailsForMiniMax } from "../transform/minimax-format"
 
 import { BaseProvider } from "./base-provider"
+import { bridgeExternalAbortSignal } from "./utils/abort-signal"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { calculateApiCostAnthropic } from "../../shared/cost"
 import { convertOpenAIToolsToAnthropic } from "../../core/prompts/tools/native-tools/converters"
@@ -92,22 +93,8 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 		// client-level timeout configured in the constructor remains the only
 		// cancellation mechanism, preserving the existing behavior.
 		const externalAbortSignal = metadata?.abortSignal
-		let abortSignal: AbortSignal | undefined
-		let removeExternalAbortListener: (() => void) | undefined
-		if (externalAbortSignal) {
-			const controller = new AbortController()
-			if (externalAbortSignal.aborted) {
-				controller.abort()
-			} else {
-				// Retain the callback so the listener can be detached once this request
-				// ends: an anonymous listener on a long-lived external signal would
-				// outlive the request and retain the per-request controller.
-				const onExternalAbort = () => controller.abort()
-				externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
-				removeExternalAbortListener = () => externalAbortSignal.removeEventListener("abort", onExternalAbort)
-			}
-			abortSignal = controller.signal
-		}
+		const { signal: abortSignal, dispose: removeExternalAbortListener } =
+			bridgeExternalAbortSignal(externalAbortSignal)
 
 		// MiniMax M2 models support prompt caching
 		const supportsPromptCache = info.supportsPromptCache ?? false

@@ -838,6 +838,75 @@ describe("VertexHandler", () => {
 			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", listener)
 		})
 
+		it("should remove the external abort listener when message creation fails", async () => {
+			const handlerWithSignal = new AnthropicVertexHandler({
+				apiModelId: "claude-3-5-sonnet-v2@20241022",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const controller = new AbortController()
+			const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
+			const removeEventListenerSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+			handlerWithSignal["client"].messages.create = vitest
+				.fn()
+				.mockRejectedValue(new Error("vertex create error"))
+
+			const stream = handlerWithSignal.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await expect(collectStream(stream)).rejects.toThrow("vertex create error")
+
+			expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+			const [event, listener] = addEventListenerSpy.mock.calls[0]
+			expect(event).toBe("abort")
+			// The inline finally must detach the listener on the failure path too,
+			// not only on normal completion.
+			expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", listener)
+		})
+
+		it("should remove the external abort listener when the consumer returns early", async () => {
+			const handlerWithSignal = new AnthropicVertexHandler({
+				apiModelId: "claude-3-5-sonnet-v2@20241022",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const controller = new AbortController()
+			const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
+			const removeEventListenerSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+			handlerWithSignal["client"].messages.create = vitest.fn().mockImplementation(async () =>
+				asyncStreamFrom([
+					{ type: "message_start", message: { usage: { input_tokens: 1, output_tokens: 0 } } },
+					{ type: "content_block_delta", delta: { type: "text_delta", text: "first" } },
+					{ type: "content_block_delta", delta: { type: "text_delta", text: "second" } },
+				]),
+			)
+
+			const stream = handlerWithSignal.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+			const iterator = stream[Symbol.asyncIterator]()
+
+			await iterator.next()
+			await iterator.return(undefined)
+
+			expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+			const [event, listener] = addEventListenerSpy.mock.calls[0]
+			expect(event).toBe("abort")
+			// Abandoning the generator mid-stream runs the finally block too.
+			expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", listener)
+		})
+
 		it("should default message_start outputTokens to zero when output_tokens is omitted", async () => {
 			handler = new AnthropicVertexHandler({
 				apiModelId: "claude-3-5-sonnet-v2@20241022",

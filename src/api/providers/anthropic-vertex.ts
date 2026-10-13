@@ -24,6 +24,7 @@ import {
 } from "../../core/prompts/tools/native-tools/converters"
 
 import { BaseProvider } from "./base-provider"
+import { bridgeExternalAbortSignal } from "./utils/abort-signal"
 import { NOT_PROVIDED } from "./constants"
 import { parseVertexJsonCredentials } from "./utils/vertex-credentials"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
@@ -92,22 +93,8 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 		// client-level timeout configured in the constructor remains the only
 		// cancellation mechanism, preserving the existing behavior.
 		const externalAbortSignal = metadata?.abortSignal
-		let abortSignal: AbortSignal | undefined
-		let removeExternalAbortListener: (() => void) | undefined
-		if (externalAbortSignal) {
-			const controller = new AbortController()
-			if (externalAbortSignal.aborted) {
-				controller.abort()
-			} else {
-				// Retain the listener so it can be removed again once streaming
-				// finishes; otherwise a long-lived external signal would keep one
-				// listener (and its closed-over controller) per completed request.
-				const onExternalAbort = () => controller.abort()
-				externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
-				removeExternalAbortListener = () => externalAbortSignal.removeEventListener("abort", onExternalAbort)
-			}
-			abortSignal = controller.signal
-		}
+		const { signal: abortSignal, dispose: removeExternalAbortListener } =
+			bridgeExternalAbortSignal(externalAbortSignal)
 
 		/**
 		 * Vertex API has specific limitations for prompt caching:
@@ -139,8 +126,9 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 		// and prompt caching
 		const requestOptions: Anthropic.RequestOptions = {}
 		if (betas?.length) {
-			// Model definitions carry at most one beta label, so use it directly.
-			requestOptions.headers = { "anthropic-beta": betas[0] }
+			// Join rather than take the first entry: the header accepts a comma list, so a
+			// second beta added to the builder later is not silently dropped.
+			requestOptions.headers = { "anthropic-beta": betas.join(",") }
 		}
 		if (abortSignal) {
 			requestOptions.signal = abortSignal
@@ -243,6 +231,13 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 							}
 						}
 
+						break
+					}
+					case "content_block_stop": {
+						// Block complete - no action needed for now.
+						// NativeToolCallParser handles tool call completion
+						// Note: Signature for multi-turn thinking would require using stream.finalMessage()
+						// after iteration completes, which requires restructuring the streaming approach.
 						break
 					}
 				}
