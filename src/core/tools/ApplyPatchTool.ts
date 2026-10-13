@@ -57,6 +57,12 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		const { patch } = params
 		const { askApproval, handleError, pushToolResult } = callbacks
 
+		// The queued-message handoff is deferred to the finally block below, after
+		// the whole-patch checkpoint attempt: a handler that hands off early lets a
+		// queued turn start while the checkpoint is still staging or committing.
+
+		let handoffPending = false
+
 		try {
 			// Validate required parameters
 			if (!patch) {
@@ -124,25 +130,33 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 				if (change.type === "add") {
 					// Create new file
-					patchSucceeded =
-						(await this.handleAddFile(change, absolutePath, relPath, task, callbacks, isWriteProtected)) &&
-						patchSucceeded
+					const ok = await this.handleAddFile(
+						change,
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+					)
+					handoffPending = handoffPending || ok
+					patchSucceeded = ok && patchSucceeded
 				} else if (change.type === "delete") {
 					// Delete file
-					patchSucceeded =
-						(await this.handleDeleteFile(absolutePath, relPath, task, callbacks, isWriteProtected)) &&
-						patchSucceeded
+					const ok = await this.handleDeleteFile(absolutePath, relPath, task, callbacks, isWriteProtected)
+					handoffPending = handoffPending || ok
+					patchSucceeded = ok && patchSucceeded
 				} else if (change.type === "update") {
 					// Update file
-					patchSucceeded =
-						(await this.handleUpdateFile(
-							change,
-							absolutePath,
-							relPath,
-							task,
-							callbacks,
-							isWriteProtected,
-						)) && patchSucceeded
+					const ok = await this.handleUpdateFile(
+						change,
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+					)
+					handoffPending = handoffPending || ok
+					patchSucceeded = ok && patchSucceeded
 				}
 			}
 
@@ -163,6 +177,15 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		} catch (error) {
 			await handleError("apply patch", error as Error)
 			await task.diffViewProvider.reset()
+		} finally {
+			// One handoff per successful patch, after the checkpoint attempt and
+			// independent of the checkpoint setting or outcome: a queued turn can
+			// never start while the patch checkpoint is still staging or
+			// committing, and no path (disabled checkpoints, failed save, early
+			// return, error) strands the queued messages.
+			if (handoffPending) {
+				task.processQueuedMessages()
+			}
 		}
 	}
 
@@ -255,7 +278,6 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, true)
 		pushToolResult(message)
 		await task.diffViewProvider.reset()
-		task.processQueuedMessages()
 		return true
 	}
 
@@ -313,7 +335,6 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 		task.didEditFile = true
 		pushToolResult(`Successfully deleted ${relPath}`)
-		task.processQueuedMessages()
 		return true
 	}
 
@@ -479,7 +500,6 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, false)
 		pushToolResult(message)
 		await task.diffViewProvider.reset()
-		task.processQueuedMessages()
 		return true
 	}
 

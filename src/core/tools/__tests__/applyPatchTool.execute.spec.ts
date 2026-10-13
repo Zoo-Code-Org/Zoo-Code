@@ -179,6 +179,57 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			await run
 			expect(settled).toBe(true)
 		})
+		it("defers the queued-message handoff until the checkpoint completes", async () => {
+			// processQueuedMessages schedules submitUserMessage on a timer; a
+			// handler that hands off before the whole-patch checkpoint completes
+			// lets the queued turn start while the commit is still running.
+			let releaseCheckpoint: () => void = () => {}
+			mockedCheckpointSave.mockImplementationOnce(
+				() => new Promise<void>((resolve) => (releaseCheckpoint = resolve)),
+			)
+			const run = tool.execute({ patch: deletePatch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+			await vi.waitFor(() => expect(mockedCheckpointSave).toHaveBeenCalledOnce())
+			expect(mockTask.processQueuedMessages).not.toHaveBeenCalled()
+			releaseCheckpoint()
+			await run
+			expect(mockTask.processQueuedMessages).toHaveBeenCalled()
+		})
+
+		it("hands off queued messages when checkpoints are disabled", async () => {
+			// The handoff must not depend on the checkpoint setting: disabling
+			// checkpoints must not strand queued messages.
+			const ref = (mockTask["providerRef"] as unknown as { deref: MockedFunction<() => unknown> }).deref
+			ref.mockReturnValue({
+				getState: vi.fn().mockResolvedValue({ perWriteCheckpoints: false }),
+			})
+
+			await tool.execute({ patch: deletePatch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+			expect(mockTask.processQueuedMessages).toHaveBeenCalled()
+		})
+
+		it("does not hand off queued messages when the patch fails", async () => {
+			// A failed file operation must not hand off: the model is waiting
+			// on the error result, not on queued input.
+			mockedFsPromises.default.unlink.mockRejectedValueOnce(new Error("EBUSY"))
+
+			await tool.execute({ patch: deletePatch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockTask.processQueuedMessages).not.toHaveBeenCalled()
+		})
 
 		it("does not record a checkpoint when perWriteCheckpoints is disabled", async () => {
 			// Structural cast for the test double (matches the mock style used for the controllers above).
