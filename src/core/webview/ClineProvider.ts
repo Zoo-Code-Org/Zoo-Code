@@ -2718,6 +2718,16 @@ export class ClineProvider
 
 				// Direct private access: compile-time safe across sibling instances.
 				await instance._saveViewLocalStateFromMutation(values)
+				// The active task of a view pinned to the deleted profile holds its own API
+				// handler and sticky profile name built from the deleted profile: rebuild
+				// the handler with the replacement's settings and re-point the sticky name,
+				// or the running conversation keeps sending the deleted profile's
+				// configuration even though the view's buffer was re-pointed (the posted
+				// state prefers the task's own apiConfiguration).
+				if (replacementSettings) {
+					instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
+				}
+				await instance.persistStickyProviderProfileToCurrentTask(replacementName)
 				await instance.postStateToWebview()
 			}),
 		)
