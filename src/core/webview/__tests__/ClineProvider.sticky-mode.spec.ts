@@ -1203,6 +1203,59 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(postSpy).toHaveBeenCalled()
 		})
 
+		it("stays silent when a newer mutation supersedes the aborted switch", async () => {
+			// Same typed double as the activation-failure rollback test above.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			await provider.saveViewState("mode", "code")
+			await provider.contextProxy.setValue("mode", "code")
+
+			// The abort lands after this switch's mode writes, and a newer mutation
+			// immediately moves the mode stores to its own mode: this switch's commit
+			// is superseded, so announcing it would clobber the newer owner - the
+			// emit/post tail must stay silent.
+			const emitSpy = vi.spyOn(provider, "emit")
+			const postSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const controller = new AbortController()
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockImplementation(async () => {
+				controller.abort()
+				await provider.setValue("mode", "ask")
+				return undefined
+			})
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+			await provider.addClineToStack(mockTask)
+
+			await provider["handleModeSwitchUnlocked"]("architect", mockTask, controller.signal)
+
+			expect(provider.getValue("mode")).toBe("ask")
+			expect(emitSpy).not.toHaveBeenCalledWith("modeChanged", "architect")
+			expect(postSpy).not.toHaveBeenCalled()
+		})
 		it("keeps the cancellation result when the abort rollback write itself fails", async () => {
 			const mockTask = Object.assign(
 				{} as Task,

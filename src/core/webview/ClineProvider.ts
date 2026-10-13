@@ -2548,7 +2548,13 @@ export class ClineProvider
 		}
 
 		// The switch has committed: notify listeners only now, so a reconciled failure
-		// never leaves listeners tracking a mode the stores rolled back from.
+		// never leaves listeners tracking a mode the stores rolled back from. After an
+		// abort the mutation queue has advanced: announce only while this switch's
+		// committed mode is still current - a superseded commit stays silent because
+		// the newer mutation already announced its own mode.
+		if (signal?.aborted && this.getValues().mode !== newMode) {
+			return
+		}
 		if (viewScopedSwitch) {
 			this.emit(RooCodeEventName.ModeChanged, newMode)
 		}
