@@ -1723,6 +1723,7 @@ describe("RequestyHandler", () => {
 			await expect(withSettleGuard(promise)).rejects.toMatchObject({ name: "AbortError" })
 			// The SDK received a merged signal (not the caller's signal) plus the timeout.
 			expect(requestSignal).toBeDefined()
+			expect(requestSignal).toBeInstanceOf(AbortSignal)
 			expect(requestSignal).not.toBe(controller.signal)
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({ model: expect.any(String) }),
