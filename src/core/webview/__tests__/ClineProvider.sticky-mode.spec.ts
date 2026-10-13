@@ -223,10 +223,14 @@ describe("ClineProvider - Sticky Mode", () => {
 		}
 	}
 
-	afterEach(() => {
+	afterEach(async () => {
 		// Tests construct providers directly and the suite never disposes most of
-		// them; clear the static registry so a leaked instance cannot claim a stable
-		// view state id ahead of a later test.
+		// them; dispose the per-test provider first (dispose unregisters it from
+		// static registries such as McpServerManager's provider set, which the
+		// reset below does not clear), then clear the instance registry so a
+		// leaked instance cannot claim a stable view state id ahead of a later
+		// test.
+		await provider.dispose()
 		ClineProvider["activeInstances"] = new Set()
 	})
 
@@ -625,6 +629,66 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(mockTask["_taskMode"]).toBe("code")
 			expect(mockTask.emit).not.toHaveBeenCalledWith("taskModeSwitched", mockTask.taskId, "architect")
 			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", "architect")
+		})
+
+		it("rolls back every mode-switch write when the mode-linked profile activation fails", async () => {
+			// Same typed double as the abort rollback test: the private members stay
+			// out of the Object.assign intersection type.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+
+			// The task, pin, and shared writes all land; the mode-linked profile
+			// activation then rejects. The caller (submitUserMessage) logs the failure
+			// and delivers the message, so no write may stand: the message must run the
+			// pre-switch mode against the unchanged profile, not a half-applied switch
+			// that pairs the new task mode with the old profile's settings.
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			// Seed both pre-switch mode stores explicitly: the pin buffer and the
+			// shared ContextProxy value, so the restore assertions have a value that
+			// differs from the switched "architect".
+			await provider.saveViewState("mode", "code")
+			await provider.contextProxy.setValue("mode", "code")
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockRejectedValue(
+				new Error("activation read failed"),
+			)
+			await provider.addClineToStack(mockTask)
+
+			await expect(provider["handleModeSwitchUnlocked"]("architect", mockTask)).rejects.toThrow(
+				"activation read failed",
+			)
+
+			// No partial application: the task keeps its previous mode, the history
+			// entry is restored, and the view's durable pin and the shared mode are
+			// rolled back too.
+			expect(mockTask["_taskMode"]).toBe("code")
+			expect(updateTaskHistorySpy).toHaveBeenLastCalledWith(historyItem)
+			expect(provider["viewLocalState"].mode).toBe("code")
+			expect(provider.getValue("mode")).toBe("code")
 		})
 
 		it("keeps the cancellation result when the abort rollback write itself fails", async () => {
@@ -1640,10 +1704,10 @@ describe("ClineProvider - Sticky Mode", () => {
 		it("does not resolve a view id that names an Object.prototype key through the chain", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 
-			mockContext.globalState.get = vi.fn().mockImplementation((key: string) => {
-				if (key === "viewStates") return { "stable-test-view": { mode: "architect" } }
-				return undefined
-			})
+			// Seed through the durable write path so later writes land in the same
+			// backing map the assertions read: a frozen get() literal would make every
+			// post-write assertion read the seed no matter what the provider wrote.
+			await provider.contextProxy.setValue("viewStates", { "stable-test-view": { mode: "architect" } })
 
 			const states = provider["getPersistedViewStates"]({ fresh: true })
 			expect(Object.getPrototypeOf(states)).toBeNull()
@@ -1734,10 +1798,10 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Temporary ids restart from 0 on every host start, so the same name can
 			// belong to a different session. An entry this instance never wrote must not
 			// be adopted as this view's state.
-			mockContext.globalState.get = vi.fn().mockImplementation((key: string) => {
-				if (key === "viewStates") return { [provider.viewId]: { mode: "architect" } }
-				return undefined
-			})
+			// Seed through the durable write path so the assertions below read the
+			// same backing map a re-key adoption would write to: a frozen get()
+			// literal made the negative assertion unable to fail.
+			await provider.contextProxy.setValue("viewStates", { [provider.viewId]: { mode: "architect" } })
 
 			await provider["setViewStateId"]("stable-test-view")
 
