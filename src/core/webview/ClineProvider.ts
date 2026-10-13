@@ -86,6 +86,10 @@ import {
 	type TaskExecutionContext,
 } from "../task/providerHandoff"
 import { aggregateTaskCostsRecursive, type AggregatedCosts } from "./aggregateTaskCosts"
+import { ProfileDeletionActivationError } from "./profileDeletionError"
+
+// Re-exported so callers catching profile-deletion outcomes can import the provider and the error from one place.
+export { ProfileDeletionActivationError } from "./profileDeletionError"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService, getRooCodeApiUrl } from "@roo-code/cloud"
 
@@ -3775,6 +3779,12 @@ export class ClineProvider
 		// captured above would also rewrite unrelated keys (including viewStates,
 		// which ClineProvider mutates directly in storage for concurrent views)
 		// with this view's stale cached copy.
+		// Assigned inside the write group below but read after it: the activation completion block
+		// runs once the deletion has committed and must know whether this deletion displaced the
+		// profile this view or the shared selection was using.
+		let viewWasPinnedToDeleted = false
+		let deletedWasGlobal = false
+
 		try {
 			const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
 
@@ -3797,7 +3807,7 @@ export class ClineProvider
 			// writes below - needs a lock spanning ProviderSettingsManager instances, which is
 			// tracked as its own unit rather than widened into this method.
 			const selectionAfterDelete = this.contextProxy.getValues().currentApiConfigName
-			const deletedWasGlobal = profileToDelete.name === selectionAfterDelete
+			deletedWasGlobal = profileToDelete.name === selectionAfterDelete
 
 			// Stopping here is still deliberate, but for a different reason than before the queue
 			// was chained: throwing routes through the compensation below, which now always runs,
@@ -3814,7 +3824,7 @@ export class ClineProvider
 			// deleted profile while the global selection points elsewhere must still be
 			// reconfigured, or getState() would keep the deleted profile's settings under
 			// the surviving profile's name.
-			const viewWasPinnedToDeleted = this.viewLocalState.currentApiConfigName === profileToDelete.name
+			viewWasPinnedToDeleted = this.viewLocalState.currentApiConfigName === profileToDelete.name
 
 			// Whether anything is actually going to be re-pointed at the survivor: this view's
 			// own pin, the shared selection, a live sibling's pin, or a closed view's
@@ -4084,6 +4094,52 @@ export class ClineProvider
 			}
 			throw error
 		}
+
+		// The deletion has already committed at this point: these writes must not roll it back,
+		// the same placement activateProviderProfileUnlocked gives its rebuild. deleteConfig above
+		// only drops the record, so the manager store's own currentApiConfigName and the current
+		// mode's profile mapping would keep naming the deleted profile and no ProviderProfileChanged
+		// would reach the consumers that listen for it. The acting view's own handler rebuild and
+		// sticky re-point already ran inside the write group above, under the same
+		// taskApiConfigName guard, so they are deliberately not repeated here.
+		if (deletedWasGlobal || viewWasPinnedToDeleted) {
+			let activationFailed = false
+			let activationError: unknown
+			try {
+				const {
+					id: survivingId,
+					name: _activatedName,
+					...activatedSettings
+				} = await this.providerSettingsManager.activateProfile({ name: profileToActivate })
+				if (survivingId) {
+					const { mode } = await this.getState()
+					await this.providerSettingsManager.setModeConfig(mode, survivingId)
+				}
+				if (activatedSettings.apiProvider) {
+					this.emit(RooCodeEventName.ProviderProfileChanged, {
+						name: profileToActivate,
+						provider: activatedSettings.apiProvider,
+					})
+				}
+			} catch (error: unknown) {
+				// The deletion is already committed: post the committed state first, then surface a
+				// distinct error so the caller cannot report a successful deletion as a failed one.
+				activationFailed = true
+				activationError = error
+				this.log(
+					`deleteProviderProfile: deletion committed but activation of '${profileToActivate}' failed: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+			}
+
+			if (activationFailed) {
+				await this.postStateToWebview()
+				throw new ProfileDeletionActivationError(profileToActivate, activationError)
+			}
+		}
+
+		await this.postStateToWebview()
 	}
 
 	private async persistStickyProviderProfileToCurrentTask(
