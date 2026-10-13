@@ -446,6 +446,36 @@ describe("LmStudioHandler abort wiring", () => {
 			expect(removeSpy).toHaveBeenCalledWith("abort", listener)
 		})
 
+		it("cancels the request and detaches the external listener when the consumer stops early", async () => {
+			const handler = new LmStudioHandler(options)
+			vitest.spyOn(handler, "countTokens").mockResolvedValue(1)
+			const create = lastCreate()
+			const external = new AbortController()
+			const addSpy = vitest.spyOn(external.signal, "addEventListener")
+			const removeSpy = vitest.spyOn(external.signal, "removeEventListener")
+			// The SDK stream yields one chunk and then stays pending: only the
+			// consumer's early exit can end this request, so this pins the
+			// finally-block cleanup on the early-termination path.
+			create.mockResolvedValue(
+				(async function* () {
+					yield { choices: [{ delta: { content: "first" } }] }
+					await new Promise<never>(() => {})
+				})(),
+			)
+
+			const stream = handler.createMessage("system", [], { taskId: "t1", abortSignal: external.signal })
+			const first = await stream.next()
+			expect(first.value).toEqual({ type: "text", text: "first" })
+
+			await stream.return(undefined) // consumer stops early; finally must cancel the request
+
+			const opts = create.mock.calls[0][1]
+			expect(opts?.signal.aborted).toBe(true) // the request-local SDK signal is aborted
+			const listener = addSpy.mock.calls.find(([type]) => type === "abort")?.[1]
+			expect(typeof listener).toBe("function")
+			expect(removeSpy).toHaveBeenCalledWith("abort", listener) // the bridge is detached by reference
+		})
+
 		it("counts the input tokens for the system prompt plus every message content block", async () => {
 			const handler = new LmStudioHandler(options)
 			const countSpy = vitest.spyOn(handler, "countTokens").mockResolvedValue(1)
