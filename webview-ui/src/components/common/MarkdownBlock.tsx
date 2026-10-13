@@ -124,8 +124,11 @@ function prepareMentions(markdown: string): { preparedMarkdown: string; mentions
 		// The raw string (not a masked copy) is what the shared regex's boundary
 		// rules must see: masking would turn a preceding `)` or backtick into a
 		// space and make a non-mention actionable (e.g. `[file](/src/a.ts)`@problems``).
-		// Discard a match only when its range lands inside a masked literal region.
-		// Stryker disable next-line MethodExpression: equivalent: mention matches are word-boundary delimited while masked regions begin and end on non-word syntax characters, so an overlapping range is fully inside or outside and some/every agree
+		// Discard a match as soon as its range touches a masked literal region: the
+		// path branch runs to the next whitespace, so a match can extend past a link
+		// it starts before (`@/src/a.ts[link](x)` masks [10,19] but matches [0,19]);
+		// keeping a partial overlap would replace the range with a placeholder and
+		// swallow the link syntax with it.
 		if (isMasked.slice(start, end).some(Boolean)) {
 			continue
 		}
@@ -585,8 +588,10 @@ const MarkdownBlock = memo(({ markdown, mentions = false, breaks = false }: Mark
 					// Reject path traversal: task markdown is untrusted, so a
 					// `..` segment (e.g. `[x](../../.env)`) must never reach the
 					// extension's openFile. The extension re-checks workspace
-					// containment as a second line of defense.
-					if (filePath.split(/[\\/]/).includes("..")) {
+					// containment as a second line of defense. Windows separators
+					// arrive percent-encoded (react-markdown's URL transform turns
+					// `\` into `%5C`), so the encoded spelling is scanned too.
+					if (filePath.split(/%5C|[\\/]/i).includes("..")) {
 						return
 					}
 

@@ -491,6 +491,23 @@ describe("MarkdownBlock", () => {
 			expect(container.querySelector("p")?.textContent).toBe("file@problems and x@problems")
 		})
 
+		it("keeps a mention whose range only partially overlaps a link inert and preserves the link", async () => {
+			// The path branch runs to the next whitespace, so here the match spans
+			// the whole string while the link node masks only [10,19]: the overlap
+			// is partial and some/every disagree. Discarding on any overlap is the
+			// shipped rule - keeping the match would replace the range with a
+			// placeholder and swallow the link syntax with it.
+			const markdown = "@/src/a.ts[link](x)"
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
+
+			await screen.findByText("link")
+
+			expect(container.querySelectorAll("span.mention-context-highlight").length).toBe(0)
+			const anchor = container.querySelector("a")!
+			expect(anchor.textContent).toBe("link")
+			expect(anchor.getAttribute("href")).toBe("x")
+		})
+
 		it("keeps a whitespace-separated mention after a link or inline code actionable", async () => {
 			// The space is a legitimate boundary for the shared regex, so these
 			// mentions stay clickable: the masked regions end before the spaces and
@@ -691,6 +708,47 @@ describe("MarkdownBlock", () => {
 
 			const anchor = container.querySelector("a")!
 			// The click is still swallowed (preventDefault ran) but nothing is posted.
+			expect(fireEvent.click(anchor)).toBe(false)
+			expect(mockPostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "openFile" }))
+		})
+
+		it("does not post openFile when the traversal starts mid-path", async () => {
+			// A first-segment-only check would wave this through: the guard must
+			// scan every separator-delimited segment, not just the leading one.
+			const markdown = "open [the secret](src/../../.env) now"
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+			await screen.findByText(/the secret/)
+
+			const anchor = container.querySelector("a")!
+			expect(fireEvent.click(anchor)).toBe(false)
+			expect(mockPostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "openFile" }))
+		})
+
+		it("does not post openFile for backslash-separated traversal", async () => {
+			// Windows-style separators are untrusted input too: a guard that split
+			// on "/" alone sees one opaque segment and posts it. The angle brackets
+			// keep the backslashes literal (outside them, markdown consumes them
+			// as escape characters before the guard ever runs).
+			const markdown = "open [the secret](<..\\\\..\\\\.env>) now"
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+			await screen.findByText(/the secret/)
+
+			const anchor = container.querySelector("a")!
+			expect(fireEvent.click(anchor)).toBe(false)
+			expect(mockPostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "openFile" }))
+		})
+
+		it("does not post openFile for a traversal target carrying a line anchor", async () => {
+			// The line anchor is stripped before the guard runs, so the traversal
+			// check must apply to the path that would actually be posted.
+			const markdown = "open [the secret](../x.ts:12) now"
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+			await screen.findByText(/the secret/)
+
+			const anchor = container.querySelector("a")!
 			expect(fireEvent.click(anchor)).toBe(false)
 			expect(mockPostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "openFile" }))
 		})
