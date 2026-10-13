@@ -3323,6 +3323,15 @@ export class ClineProvider
 
 				// Direct private access: compile-time safe across sibling instances.
 				await instance._saveViewLocalStateFromMutation({ apiConfiguration: settings })
+
+				// The active task of a view pinned to the saved profile holds its own
+				// API handler built from that profile's settings: rebuild it with the
+				// saved settings or the running conversation keeps sending the old
+				// token even though the view's buffer has caught up. Views pinned to
+				// other profiles just reloaded their own unchanged settings.
+				if (pinned === name) {
+					instance.updateTaskApiHandlerIfNeeded(settings, { forceRebuild: true })
+				}
 				await instance.postStateToWebview()
 			}),
 		)
