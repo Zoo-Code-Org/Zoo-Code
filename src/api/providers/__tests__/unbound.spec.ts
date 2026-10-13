@@ -42,9 +42,9 @@ vi.mock("../fetchers/modelCache", () => ({
 			description: "GPT-4o",
 		},
 	}),
-	refreshModels: vi.fn(async (options) => {
+	refreshModels: vi.fn(async (options, handler) => {
 		const { getModels } = await import("../fetchers/modelCache")
-		return getModels(options)
+		return getModels(options, handler)
 	}),
 }))
 
@@ -974,6 +974,13 @@ describe("UnboundHandler", () => {
 			)
 			expect(error).toMatchObject({ name: "AbortError" })
 			expect((error as Error).message).toBe("The Unbound request was aborted")
+		})
+	})
+
+	describe("model catalog", () => {
+		it("reports its cache scope", () => {
+			const handler = new UnboundHandler({ unboundApiKey: "test-key", unboundModelId: "openai/gpt-4o" })
+			expect(handler.getModelCacheScope()).toEqual({ urlScoped: false, keyScoped: false, authScoped: false })
 		})
 	})
 })

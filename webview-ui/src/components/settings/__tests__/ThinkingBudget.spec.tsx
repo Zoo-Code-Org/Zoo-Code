@@ -84,6 +84,7 @@ describe("ThinkingBudget", () => {
 		["anthropic.claude-opus-4-8", 128_000],
 		["anthropic.claude-sonnet-5", 128_000],
 		["anthropic.claude-opus-5", 128_000],
+		["anthropic.claude-opus-5-5", 128_000],
 	] as const)("allows selecting the documented Bedrock output ceiling for %s", (apiModelId, ceiling) => {
 		render(
 			<ThinkingBudget
