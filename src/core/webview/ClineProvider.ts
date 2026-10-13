@@ -2285,40 +2285,26 @@ export class ClineProvider
 		// mode, broadcasting ModeChanged, or activating a profile on behalf of a
 		// background task would clobber the focused task's selection.
 		const viewScopedSwitch = task === undefined || task === null || this.getCurrentTask() === task
-		if (viewScopedSwitch) {
-			// Pin the view's durable per-view mode first: the pin is this view's own
-			// selection and must not be undone if the shared write later fails.
-			// If the pin write itself fails, the task-side writes above are already
-			// applied: roll them back before rethrowing so the caller cannot deliver
-			// the message with the new task mode while the view's mode and mode-linked
-			// API configuration stayed old.
-			try {
-				await this.saveViewState("mode", newMode)
-			} catch (error) {
-				if (rollbackTaskWrites) {
-					try {
-						await rollbackTaskWrites()
-					} catch (rollbackError) {
-						this.log(
-							`[handleModeSwitch] Failed to roll back task mode writes after the view mode pin write failed: ${
-								rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-							}`,
-						)
-					}
-				}
-				throw error
-			}
+		// Captured for the reconcile below: the view's pre-switch durable mode pin
+		// (undefined means the view never pinned a mode) and the pre-switch shared
+		// mode. The pin write only touches the view buffer and the per-view store, so
+		// reading the shared value here is unaffected by it.
+		const previousViewMode = this.viewLocalState.mode
+		const previousMode = this.getValue("mode")
+		let pinLanded = false
+		let sharedAttempted = false
 
-			// setValue (not the deprecated updateGlobalState) so the in-memory viewLocalState
-			// buffer stays in sync with the durable global write: getValues() merges
-			// viewLocalState on top of the ContextProxy values, so an unsynced stale
-			// restored mode would otherwise shadow the fresh switch for consumers.
-			// If the durable write fails, roll the shared write back so getValues()
-			// cannot mix a fresh shared mode with the stale pre-switch buffer.
-			const previousMode = this.getValue("mode")
-			try {
-				await this.setValue("mode", newMode)
-			} catch (error) {
+		// Explicit partial-failure behavior: every failure after the task-mode write
+		// rolls back all writes this switch owns - shared mode, view pin, task mode,
+		// and the task-history entry - so the caller (Task#submitUserMessage) delivers
+		// the submitted message on the pre-switch mode and profile instead of a
+		// half-applied switch that runs the new mode against the unchanged profile.
+		// Each restore is awaited on its own and logged on failure, never swallowed.
+		const reconcileSwitchWrites = async () => {
+			if (sharedAttempted) {
+				// The shared write may have landed before its promise rejected: restore
+				// it unconditionally so getValues() cannot mix a fresh shared mode with
+				// the rolled-back view state.
 				try {
 					await this.contextProxy.setValue("mode", previousMode)
 				} catch (rollbackError) {
@@ -2328,81 +2314,123 @@ export class ClineProvider
 						}`,
 					)
 				}
-				this.log(
-					`[handleModeSwitch] Failed to persist mode "${newMode}": ${error instanceof Error ? error.message : String(error)}`,
-				)
-				throw error
 			}
-
-			this.emit(RooCodeEventName.ModeChanged, newMode)
-		}
-
-		// If workspace lock is on, keep the current API config — don't load mode-specific config
-		const lockApiConfigAcrossModes = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
-		if (lockApiConfigAcrossModes) {
-			// Keep the original post semantics: an explicit null target (pending child)
-			// posts its own state.
-			if (targetTask !== null) {
-				await this.postStateToWebview()
-			}
-			return
-		}
-
-		if (signal?.aborted) return
-		if (!viewScopedSwitch) {
-			return
-		}
-
-		// Load the saved API config for the new mode if it exists.
-		const savedConfigId = await this.providerSettingsManager.getModeConfigId(newMode)
-		const listApiConfig = await this.providerSettingsManager.listConfig()
-
-		if (signal?.aborted) return
-
-		// Update listApiConfigMeta first to ensure UI has latest data.
-		await this.updateGlobalState("listApiConfigMeta", listApiConfig)
-
-		// If this mode has a saved config, use it.
-		if (savedConfigId) {
-			const profile = listApiConfig.find(({ id }) => id === savedConfigId)
-
-			if (profile?.name) {
-				// Check if the profile has actual API configuration (not just an id).
-				// In CLI mode, the ProviderSettingsManager may return empty default profiles
-				// that only contain 'id' and 'name' fields. Activating such a profile would
-				// overwrite the CLI's working API configuration with empty settings.
-				// Skip activation if the profile has no apiProvider set - this indicates
-				// an unconfigured/empty profile.
-				const fullProfile = await this.providerSettingsManager.getProfile({ name: profile.name })
-				const hasActualSettings = !!fullProfile.apiProvider
-
-				if (hasActualSettings) {
-					await this.activateProviderProfileUnlocked(
-						{ name: profile.name },
-						targetTask === null ? { skipCurrentTaskRebuild: true } : undefined,
-						signal,
+			if (pinLanded) {
+				try {
+					await this.saveViewState("mode", previousViewMode)
+				} catch (rollbackError) {
+					this.log(
+						`[handleModeSwitch] Failed to roll back the view mode pin after persistence failure: ${
+							rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+						}`,
 					)
+				}
+			}
+			if (rollbackTaskWrites) {
+				try {
+					await rollbackTaskWrites()
+				} catch (rollbackError) {
+					this.log(
+						`[handleModeSwitch] Failed to roll back task mode writes after the view mode pin write failed: ${
+							rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+						}`,
+					)
+				}
+			}
+		}
+
+		try {
+			if (viewScopedSwitch) {
+				// Pin the view's durable per-view mode first: the pin is this view's own
+				// selection. If any write below fails, the reconcile above restores every
+				// write that landed, including this pin, so a delivered message never runs
+				// the new task mode against an unchanged view mode or mode-linked profile.
+				await this.saveViewState("mode", newMode)
+				pinLanded = true
+
+				// setValue (not the deprecated updateGlobalState) so the in-memory viewLocalState
+				// buffer stays in sync with the durable global write: getValues() merges
+				// viewLocalState on top of the ContextProxy values, so an unsynced stale
+				// restored mode would otherwise shadow the fresh switch for consumers.
+				sharedAttempted = true
+				await this.setValue("mode", newMode)
+
+				this.emit(RooCodeEventName.ModeChanged, newMode)
+			}
+
+			// If workspace lock is on, keep the current API config — don't load mode-specific config
+			const lockApiConfigAcrossModes = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
+			if (lockApiConfigAcrossModes) {
+				// Keep the original post semantics: an explicit null target (pending child)
+				// posts its own state.
+				if (targetTask !== null) {
+					await this.postStateToWebview()
+				}
+				return
+			}
+
+			if (signal?.aborted) return
+			if (!viewScopedSwitch) {
+				return
+			}
+
+			// Load the saved API config for the new mode if it exists.
+			const savedConfigId = await this.providerSettingsManager.getModeConfigId(newMode)
+			const listApiConfig = await this.providerSettingsManager.listConfig()
+
+			if (signal?.aborted) return
+
+			// Update listApiConfigMeta first to ensure UI has latest data.
+			await this.updateGlobalState("listApiConfigMeta", listApiConfig)
+
+			// If this mode has a saved config, use it.
+			if (savedConfigId) {
+				const profile = listApiConfig.find(({ id }) => id === savedConfigId)
+
+				if (profile?.name) {
+					// Check if the profile has actual API configuration (not just an id).
+					// In CLI mode, the ProviderSettingsManager may return empty default profiles
+					// that only contain 'id' and 'name' fields. Activating such a profile would
+					// overwrite the CLI's working API configuration with empty settings.
+					// Skip activation if the profile has no apiProvider set - this indicates
+					// an unconfigured/empty profile.
+					const fullProfile = await this.providerSettingsManager.getProfile({ name: profile.name })
+					const hasActualSettings = !!fullProfile.apiProvider
+
+					if (hasActualSettings) {
+						await this.activateProviderProfileUnlocked(
+							{ name: profile.name },
+							targetTask === null ? { skipCurrentTaskRebuild: true } : undefined,
+							signal,
+						)
+					} else {
+						// The task will continue with the current/default configuration.
+					}
 				} else {
 					// The task will continue with the current/default configuration.
 				}
 			} else {
-				// The task will continue with the current/default configuration.
-			}
-		} else {
-			// If no saved config for this mode, save current config as default.
-			const currentApiConfigNameAfter = this.getGlobalState("currentApiConfigName")
+				// If no saved config for this mode, save current config as default.
+				const currentApiConfigNameAfter = this.getGlobalState("currentApiConfigName")
 
-			if (currentApiConfigNameAfter) {
-				const config = listApiConfig.find((c) => c.name === currentApiConfigNameAfter)
+				if (currentApiConfigNameAfter) {
+					const config = listApiConfig.find((c) => c.name === currentApiConfigNameAfter)
 
-				if (config?.id) {
-					await this.providerSettingsManager.setModeConfig(newMode, config.id)
+					if (config?.id) {
+						await this.providerSettingsManager.setModeConfig(newMode, config.id)
+					}
 				}
 			}
-		}
 
-		if (targetTask !== null) {
-			await this.postStateToWebview()
+			if (targetTask !== null) {
+				await this.postStateToWebview()
+			}
+		} catch (error) {
+			await reconcileSwitchWrites()
+			this.log(
+				`[handleModeSwitch] Failed to persist mode "${newMode}": ${error instanceof Error ? error.message : String(error)}`,
+			)
+			throw error
 		}
 	}
 
@@ -2535,7 +2563,13 @@ export class ClineProvider
 					// serving the settings captured before the save under the same name.
 					if (this.pinnedProfileName === name) {
 						await this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
-						this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+						// Only rebuild when the task actually runs under the saved profile: a
+						// view pinned to this profile can hold a task that follows a different
+						// sticky profile, and the forced rebuild would silently switch that
+						// conversation to the saved profile's settings.
+						if (this.getCurrentTask()?.taskApiConfigName === name) {
+							this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+						}
 					}
 					await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
 				}
@@ -2882,9 +2916,13 @@ export class ClineProvider
 				// The active task of a pinned view holds its own API handler built from
 				// the profile's settings: rebuild it with the saved settings or the
 				// running conversation keeps sending the old token even though the
-				// view's buffer has caught up. Direct private access across sibling
-				// instances of the same class is compile-time safe.
-				instance.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+				// view's buffer has caught up. Only rebuild when the task actually runs
+				// under the saved profile: a task that follows a different sticky
+				// profile must keep its own settings. Direct private access across
+				// sibling instances of the same class is compile-time safe.
+				if (instance.getCurrentTask()?.taskApiConfigName === name) {
+					instance.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+				}
 				await instance.postStateToWebview()
 			}),
 		)
