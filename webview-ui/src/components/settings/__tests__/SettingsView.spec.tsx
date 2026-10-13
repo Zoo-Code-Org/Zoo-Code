@@ -880,7 +880,6 @@ describe("SettingsView - Experimental Settings", () => {
 	})
 })
 
-
 describe("SettingsView - Blanket Auto-Deny", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
