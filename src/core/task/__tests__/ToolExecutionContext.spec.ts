@@ -151,16 +151,19 @@ describe("ToolExecutionContext", () => {
 		expect(mockTask.activeToolContexts.get("call_a")).toBe(first)
 	})
 
-	it("sets didReject on the rejected tool's context in the map, not on a sibling's", async () => {
+	it("sets didReject on the rejected tool's context only, and the serial flag keeps skipping the sibling", async () => {
 		mockTask.assistantMessageContent = [listFilesBlock("call_a"), listFilesBlock("call_b")]
+		mockTask.activeToolContexts.set("call_a", { toolCallId: "call_a", didReject: false })
+		mockTask.activeToolContexts.set("call_b", { toolCallId: "call_b", didReject: false })
 		mockTask.ask.mockResolvedValueOnce({ response: "noButtonClicked" })
 
 		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
-		mockTask.didRejectTool = false
 		mockTask.presentAssistantMessageLocked = false
 		mockTask.currentStreamingContentIndex = 1
 		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 
+		expect(mockTask.didRejectTool).toBe(true)
+		expect(listFilesHandle).toHaveBeenCalledTimes(1)
 		expect(mockTask.activeToolContexts.get("call_a")?.didReject).toBe(true)
 		expect(mockTask.activeToolContexts.get("call_b")?.didReject).toBe(false)
 	})
