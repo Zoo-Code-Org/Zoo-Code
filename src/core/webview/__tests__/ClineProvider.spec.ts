@@ -2083,8 +2083,8 @@ describe("ClineProvider", () => {
 			const pruned = provider["prunePersistedViewStates"](states)
 			expect(Object.keys(pruned)).toHaveLength(50)
 			// view-1/view-54 survive the true newest-50 selection; view-8 (updatedAt 1) does not.
-			expect(pruned["view-1"]).toBeDefined()
-			expect(pruned["view-54"]).toBeDefined()
+			expect(pruned["view-1"]).toEqual({ mode: "mode-1", updatedAt: 7 })
+			expect(pruned["view-54"]).toEqual({ mode: "mode-54", updatedAt: 48 })
 			expect(pruned["view-8"]).toBeUndefined()
 			await provider.dispose()
 		})
