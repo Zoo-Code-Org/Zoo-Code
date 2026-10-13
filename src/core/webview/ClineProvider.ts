@@ -3333,7 +3333,11 @@ export class ClineProvider
 				// saved settings or the running conversation keeps sending the old
 				// token even though the view's buffer has caught up. Views pinned to
 				// other profiles just reloaded their own unchanged settings.
-				if (pinned === name) {
+				// Only rebuild when the task actually runs under the saved profile: a
+				// view pinned to this profile can hold a task that follows a different
+				// sticky profile, and the forced rebuild would silently switch that
+				// conversation to the saved profile's settings.
+				if (pinned === name && instance.getCurrentTask()?.taskApiConfigName === name) {
 					instance.updateTaskApiHandlerIfNeeded(settings, { forceRebuild: true })
 				}
 				await instance.postStateToWebview()
