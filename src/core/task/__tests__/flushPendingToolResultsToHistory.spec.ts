@@ -1,3 +1,4 @@
+import { WebviewFocusTracker } from "../../webview/WebviewFocusTracker"
 // npx vitest run core/task/__tests__/flushPendingToolResultsToHistory.spec.ts
 
 import * as os from "os"
@@ -211,6 +212,7 @@ describe("flushPendingToolResultsToHistory", () => {
 			mockOutputChannel,
 			"sidebar",
 			new ContextProxy(mockExtensionContext),
+			new WebviewFocusTracker(),
 		) as any
 
 		mockApiConfig = {

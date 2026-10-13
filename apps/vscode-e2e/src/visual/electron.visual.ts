@@ -236,6 +236,17 @@ for (const scenario of scenarios) {
 			await expect.poll(() => contentFrame.evaluate(() => document.activeElement === document.body)).toBe(true)
 			await contentFrame.evaluate(() => document.fonts.ready)
 
+			// The selected model's metadata resolves asynchronously: router models
+			// arrive over the extension-host message channel after the webview
+			// launches. Until they land, the context-window readout renders the `1`
+			// fallback (see TaskHeader's `model?.contextWindow || 1`)
+			//  Wait for a resolved context window so the screenshot is deterministic.
+			if (scenario.scene === "chat") {
+				await expect(contentFrame.locator('[data-testid="context-window-size"]')).not.toHaveText("1", {
+					timeout: 60_000,
+				})
+			}
+
 			const sidebar = running.page.locator(".part.sidebar")
 			await expect(sidebar).toBeVisible()
 

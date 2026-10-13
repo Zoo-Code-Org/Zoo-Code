@@ -6,7 +6,7 @@ import { pbkdf2Sync } from "crypto"
 import NodeCache from "node-cache"
 import { z } from "zod"
 
-import type { ProviderName, ModelRecord } from "@roo-code/types"
+import type { ModelRecord } from "@roo-code/types"
 import { modelInfoSchema, providerIdentifiers, TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
@@ -19,22 +19,9 @@ import { fileExistsAtPath } from "../../../utils/fs"
 
 import { mergeAbortSignals, throwIfAborted } from "../utils/abort-signal"
 
-import { getOpenRouterModels } from "./openrouter"
-import { getVercelAiGatewayModels } from "./vercel-ai-gateway"
-import { getOpencodeGoModels } from "./opencode-go"
-import { getKenariModels } from "./kenari"
-import { getNanoGptModels } from "./nanogpt"
-import { getRequestyModels } from "./requesty"
-import { getUnboundModels } from "./unbound"
-import { getLiteLLMModels } from "./litellm"
 import { GetModelsOptions } from "../../../shared/api"
-import { getOllamaModels } from "./ollama"
-import { getLMStudioModels } from "./lmstudio"
-import { getPoeModels } from "./poe"
-import { getDeepSeekModels } from "./deepseek"
-import { getMoonshotModels } from "./moonshot"
-import { getZooGatewayModels } from "./zoo-gateway"
-import { getKimiCodeModels } from "./kimi-code"
+
+import type { ApiHandler } from "../../index"
 
 const memoryCache = new NodeCache({ stdTTL: 5 * 60, checkperiod: 5 * 60 })
 
@@ -93,54 +80,6 @@ function captureModelCacheEmptyResponseOnce(
 	TelemetryService.instance.captureEvent(TelemetryEventName.MODEL_CACHE_EMPTY_RESPONSE, { provider, ...properties })
 }
 
-// Providers whose model list is determined by the server URL, not just by the provider name.
-// Each unique baseUrl must be cached independently so that switching endpoints never serves
-// stale results from a previously-cached server. zoo-gateway is included too: although it's
-// auth-scoped and never actually persisted (see shouldSkipCache), getCacheKey() also keys the
-// empty-response throttle (reportedEmptyModelResponse) and the in-flight fetch map, both of
-// which must still discriminate by endpoint (e.g. staging vs. production gateway) even when
-// caching itself is skipped.
-const URL_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
-	providerIdentifiers.litellm,
-	providerIdentifiers.poe,
-	providerIdentifiers.deepseek,
-	providerIdentifiers.moonshot,
-	providerIdentifiers.ollama,
-	providerIdentifiers.lmstudio,
-	providerIdentifiers.requesty,
-	providerIdentifiers.zooGateway,
-])
-
-// Providers where the API key itself determines which models are visible (e.g. per-key
-// allowlists). For these the cache key also includes a short hash of
-// the API key so that two different keys on the same server never share a cache entry.
-// zoo-gateway and kimi-code are included so a sign-out/sign-in cycle to a different account
-// (same server, different session token) doesn't collapse into the same throttle/in-flight
-// identity -- see the URL_SCOPED_PROVIDERS comment above for why this matters despite caching
-// being skipped for both.
-const KEY_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
-	providerIdentifiers.litellm, // Per-key model allowlists are a first-class LiteLLM proxy feature
-	providerIdentifiers.poe, // Per-account model availability
-	providerIdentifiers.requesty, // Per-account custom model policies
-	providerIdentifiers.moonshot, // Per-key model visibility (api.moonshot.ai vs api.moonshot.cn)
-	providerIdentifiers.zooGateway, // Per-session-token account identity
-	providerIdentifiers.kimiCode, // Per-session-token account identity
-	providerIdentifiers.nanogpt, // Public catalog can still vary by API-key allowlist
-])
-
-// Providers whose model lists are scoped to the signed-in user (e.g. per-account
-// allowlists or org policies). For these we MUST NOT cache results on disk or
-// in memory: a sign-in/out cycle could otherwise serve a previous user's model
-// list to the next user, and stale data could mask backend allowlist updates.
-const AUTH_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
-	providerIdentifiers.zooGateway,
-	providerIdentifiers.kimiCode,
-])
-
-function isAuthScopedProvider(provider: RouterName): boolean {
-	return AUTH_SCOPED_PROVIDERS.has(provider)
-}
-
 // Memoize derived digests so the deliberately-structureless KDF runs at most once per
 // distinct input per session (getCacheKey / cacheKeyToFilename run on every cache lookup).
 const cacheDigestCache = new Map<string, string>()
@@ -197,15 +136,12 @@ function deriveApiKeyDiscriminator(apiKey: string): string {
  *   entry (relevant when the server enforces per-key model allowlists, e.g. LiteLLM, Poe,
  *   Requesty). See deriveApiKeyDiscriminator for why the value cannot be reversed to the key.
  */
-function getCacheKey(options: GetModelsOptions): string {
+function getCacheKey(options: GetModelsOptions, handler: ApiHandler): string {
 	const { provider } = options
-	const isUrlScoped = URL_SCOPED_PROVIDERS.has(provider as RouterName)
-	const isKeyScoped = KEY_SCOPED_PROVIDERS.has(provider as RouterName)
+	const scope = handler.getModelCacheScope()
+	const isUrlScoped = scope.urlScoped
+	const isKeyScoped = scope.keyScoped
 
-	// Build URL and key components independently so that key-scoped providers
-	// without a custom baseUrl still get a per-key cache entry (otherwise two
-	// different keys on the default server would collapse to the same entry).
-	// Strip trailing slashes so "http://host:4000/" and "http://host:4000" map to the same key.
 	const urlPart = isUrlScoped && options.baseUrl ? options.baseUrl.replace(/\/+$/, "") : undefined
 	const keyPart = isKeyScoped && options.apiKey ? deriveApiKeyDiscriminator(options.apiKey) : undefined
 
@@ -248,76 +184,22 @@ async function readModels(cacheKey: string): Promise<ModelRecord | undefined> {
  * Extracted to avoid duplication between getModels() and refreshModels().
  *
  * @param options - Provider options for fetching models
+ * @param handler - The provider handler that owns the catalog fetch.
  * @param signal - Cancellation signal forwarded to the dispatched fetcher. The single-flight
  * (dedupedFetch) passes its internal controller's signal; the auth-scoped direct path passes
  * none, so those fetchers keep their own bounds.
  * @returns Fresh models from the provider API
  */
-async function fetchModelsFromProvider(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+async function fetchModelsFromProvider(
+	options: GetModelsOptions,
+	handler: ApiHandler,
+	signal?: AbortSignal,
+): Promise<ModelRecord> {
 	const { provider } = options
-
-	// Fetchers read the carrier through `opts?.signal`. Spread (rather than passing a possibly
-	// undefined positional argument) so a signal-less call keeps exactly its old arity: fetchers
-	// and their tests can distinguish "no third argument" from "third argument undefined".
-	const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
-
-	let models: ModelRecord
-
-	switch (provider) {
-		case providerIdentifiers.openrouter:
-			models = await getOpenRouterModels(undefined, ...fetchOpts)
-			break
-		case providerIdentifiers.requesty:
-			// Requesty models endpoint requires an API key for per-user custom policies.
-			models = await getRequestyModels(options.baseUrl, options.apiKey, ...fetchOpts)
-			break
-		case providerIdentifiers.unbound:
-			models = await getUnboundModels(options.apiKey, ...fetchOpts)
-			break
-		case providerIdentifiers.litellm:
-			models = await getLiteLLMModels(options.apiKey ?? "", options.baseUrl, ...fetchOpts)
-			break
-		case providerIdentifiers.ollama:
-			models = await getOllamaModels(options.baseUrl, options.apiKey, ...fetchOpts)
-			break
-		case providerIdentifiers.lmstudio:
-			models = await getLMStudioModels(options.baseUrl, ...fetchOpts)
-			break
-		case providerIdentifiers.vercelAiGateway:
-			models = await getVercelAiGatewayModels(undefined, ...fetchOpts)
-			break
-		case providerIdentifiers.opencodeGo:
-			models = await getOpencodeGoModels(options.apiKey, ...fetchOpts)
-			break
-		case providerIdentifiers.kenari:
-			models = await getKenariModels(options.apiKey, ...fetchOpts)
-			break
-		case providerIdentifiers.nanogpt:
-			models = await getNanoGptModels(options.apiKey, ...fetchOpts)
-			break
-		case providerIdentifiers.poe:
-			models = await getPoeModels(options.apiKey, options.baseUrl, ...fetchOpts)
-			break
-		case providerIdentifiers.deepseek:
-			models = await getDeepSeekModels(options.baseUrl, options.apiKey, ...fetchOpts)
-			break
-		case providerIdentifiers.moonshot:
-			models = await getMoonshotModels(options.baseUrl, options.apiKey, ...fetchOpts)
-			break
-		case providerIdentifiers.zooGateway:
-			models = await getZooGatewayModels({ zooSessionToken: options.apiKey, zooGatewayBaseUrl: options.baseUrl })
-			break
-		case providerIdentifiers.kimiCode:
-			models = await getKimiCodeModels(options.apiKey)
-			break
-		default: {
-			// Ensures router is exhaustively checked if RouterName is a strict union.
-			const exhaustiveCheck: never = provider
-			throw new Error(`Unknown provider: ${exhaustiveCheck}`)
-		}
+	if (!handler.fetchModels) {
+		throw new Error(`Provider ${provider} does not expose a dynamic model catalog`)
 	}
-
-	return models
+	return handler.fetchModels(options, signal)
 }
 
 /**
@@ -331,13 +213,13 @@ async function fetchModelsFromProvider(options: GetModelsOptions, signal?: Abort
  * @param baseUrl - Optional base URL for the provider (currently used only for LiteLLM).
  * @returns The models from the cache or the fetched models.
  */
-export const getModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
+export const getModels = async (options: GetModelsOptions, handler: ApiHandler): Promise<ModelRecord> => {
 	const { provider } = options
-	const cacheKey = getCacheKey(options)
+	const cacheKey = getCacheKey(options, handler)
 
-	const shouldSkipCache = isAuthScopedProvider(provider)
+	const shouldSkipCache = handler.getModelCacheScope().authScoped
 
-	const models = shouldSkipCache ? undefined : getModelsFromCache(options)
+	const models = shouldSkipCache ? undefined : getModelsFromCache(options, handler)
 
 	if (models) {
 		return models
@@ -359,7 +241,9 @@ export const getModels = async (options: GetModelsOptions): Promise<ModelRecord>
 		// The auth-scoped fetch bypasses the single-flight entirely, so options.signal is
 		// deliberately not forwarded there: there is no shared entry to release on abort, and
 		// these fetchers bound their own requests.
-		const sharedFetch = shouldSkipCache ? fetchModelsFromProvider(options) : dedupedFetch(cacheKey, options)
+		const sharedFetch = shouldSkipCache
+			? fetchModelsFromProvider(options, handler)
+			: dedupedFetch(cacheKey, options, handler)
 
 		const fetched = await sharedFetch
 		const modelCount = Object.keys(fetched).length
@@ -400,7 +284,7 @@ export const getModels = async (options: GetModelsOptions): Promise<ModelRecord>
  * or rejection -- this only ensures at most one fetchModelsFromProvider() call is in flight per
  * cache key at a time.
  */
-function dedupedFetch(cacheKey: string, options: GetModelsOptions): Promise<ModelRecord> {
+function dedupedFetch(cacheKey: string, options: GetModelsOptions, handler: ApiHandler): Promise<ModelRecord> {
 	// A pre-aborted caller fails fast before any flight is created or joined: an aborted call
 	// must never start (or extend) a shared fetch.
 	throwIfAborted(options.signal)
@@ -427,7 +311,7 @@ function dedupedFetch(cacheKey: string, options: GetModelsOptions): Promise<Mode
 		}
 	}
 
-	const promise: Promise<ModelRecord> = fetchModelsFromProvider(options, controller.signal)
+	const promise: Promise<ModelRecord> = fetchModelsFromProvider(options, handler, controller.signal)
 		.then((models) => {
 			// Settlement never writes data into the map -- fetched data reaches callers only
 			// through the promise they awaited -- it only removes this flight's entry.
@@ -540,11 +424,11 @@ function joinFlight(cacheKey: string, record: FlightRecord, callerSignal?: Abort
  * @param options - Provider options for fetching models
  * @returns Fresh models from API, or existing cache if refresh yields worse data
  */
-export const refreshModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
+export const refreshModels = async (options: GetModelsOptions, handler: ApiHandler): Promise<ModelRecord> => {
 	const { provider } = options
-	const cacheKey = getCacheKey(options)
+	const cacheKey = getCacheKey(options, handler)
 
-	const shouldSkipCache = isAuthScopedProvider(provider)
+	const shouldSkipCache = handler.getModelCacheScope().authScoped
 
 	// De-duplication is skipped for auth-scoped providers because two concurrent calls may
 	// carry different tokens (e.g., after a sign-out/sign-in within the same session) and we
@@ -560,14 +444,16 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 		// The auth-scoped fetch bypasses the single-flight entirely, so options.signal is
 		// deliberately not forwarded there: there is no shared entry to release on abort, and
 		// these fetchers bound their own requests.
-		const sharedFetch = shouldSkipCache ? fetchModelsFromProvider(options) : dedupedFetch(cacheKey, options)
+		const sharedFetch = shouldSkipCache
+			? fetchModelsFromProvider(options, handler)
+			: dedupedFetch(cacheKey, options, handler)
 
 		// Force fresh API fetch - skip getModelsFromCache() check
 		const models = await sharedFetch
 		const modelCount = Object.keys(models).length
 
 		// Get existing cached data for comparison
-		const existingCache = shouldSkipCache ? undefined : getModelsFromCache(options)
+		const existingCache = shouldSkipCache ? undefined : getModelsFromCache(options, handler)
 		const existingCount = existingCache ? Object.keys(existingCache).length : 0
 
 		if (modelCount === 0) {
@@ -598,7 +484,7 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 		if (shouldSkipCache) {
 			return {}
 		}
-		return getModelsFromCache(options) || {}
+		return getModelsFromCache(options, handler) || {}
 	}
 }
 
@@ -607,7 +493,7 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
  * Refreshes public provider caches without blocking or requiring auth.
  * Should be called once during extension activation.
  */
-export async function initializeModelCacheRefresh(): Promise<void> {
+export async function initializeModelCacheRefresh(buildHandler: (provider: RouterName) => ApiHandler): Promise<void> {
 	// Wait for extension to fully activate before refreshing
 	setTimeout(async () => {
 		// Providers that work without API keys
@@ -627,8 +513,8 @@ export async function initializeModelCacheRefresh(): Promise<void> {
 		]
 
 		// Refresh each provider in background (fire and forget)
-		for (const { options } of publicProviders) {
-			refreshModels(options).catch(() => {
+		for (const { provider, options } of publicProviders) {
+			refreshModels(options, buildHandler(provider)).catch(() => {
 				// Silent fail - old cache remains available
 			})
 
@@ -644,18 +530,22 @@ export async function initializeModelCacheRefresh(): Promise<void> {
  * @param options - The options for fetching models, including provider, apiKey, and baseUrl
  * @param refresh - If true, immediately fetch fresh data from API
  */
-export const flushModels = async (options: GetModelsOptions, refresh: boolean = false): Promise<void> => {
+export const flushModels = async (
+	options: GetModelsOptions,
+	handler: ApiHandler,
+	refresh: boolean = false,
+): Promise<void> => {
 	if (refresh) {
 		// Don't delete memory cache - let refreshModels atomically replace it
 		// This prevents a race condition where getModels() might be called
 		// before refresh completes, avoiding a gap in cache availability
 		// Await the refresh to ensure the cache is updated before returning
-		await refreshModels(options)
+		await refreshModels(options, handler)
 	} else {
 		// Only delete memory cache when not refreshing. Use the compound cache key so that
 		// URL-scoped providers (litellm, poe, etc.) actually evict the per-server entry rather
 		// than a bare provider-name entry that was never written.
-		memoryCache.del(getCacheKey(options))
+		memoryCache.del(getCacheKey(options, handler))
 	}
 }
 
@@ -664,19 +554,19 @@ export const flushModels = async (options: GetModelsOptions, refresh: boolean = 
  * This ensures providers always have access to last known good data,
  * preventing fallback to hardcoded defaults on startup.
  *
- * @param provider - The provider to get models for.
+ * @param options - The options identifying the cache entry (provider, baseUrl, apiKey).
+ * @param handler - The handler whose cache scope determines the compound cache key.
  * @returns Models from memory cache, disk cache, or undefined if not cached.
  */
-export function getModelsFromCache(options: GetModelsOptions | ProviderName): ModelRecord | undefined {
+export function getModelsFromCache(options: GetModelsOptions, handler: ApiHandler): ModelRecord | undefined {
 	// Auth-scoped providers (e.g. zoo-gateway) must never be served from cache --
 	// their model lists are user-specific and a stale file left over from a previous
 	// session could leak another user's list. Mirror the guards in getModels/refreshModels.
-	const providerName = typeof options === "string" ? options : options.provider
-	if (isAuthScopedProvider(providerName as RouterName)) {
+	if (handler.getModelCacheScope().authScoped) {
 		return undefined
 	}
 
-	const cacheKey = typeof options === "string" ? options : getCacheKey(options)
+	const cacheKey = getCacheKey(options, handler)
 	// Check memory cache first (fast)
 	const memoryModels = memoryCache.get<ModelRecord>(cacheKey)
 	if (memoryModels) {

@@ -4,8 +4,18 @@ import type { Anthropic } from "@anthropic-ai/sdk"
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { presentAssistantMessage } from "../presentAssistantMessage"
 import { validateToolUse } from "../../tools/validateToolUse"
+import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
 import type { Task } from "../../task/Task"
 import type { AskApproval } from "../../../shared/tools"
+
+// The presenter validates against this frozen request snapshot; the mocked
+// validateToolUse never reads policy fields, and the provider-state double in
+// the task mock stays inert.
+const baseSnapshot: RequestPolicySnapshot = {
+	disabledTools: [],
+	customModes: [],
+	experiments: {},
+}
 
 vi.mock("../../task/Task")
 vi.mock("../../tools/validateToolUse", async (importOriginal) => {
@@ -256,7 +266,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 			.mockResolvedValueOnce({ response: "noButtonClicked", autoDenyDetail: NOT_ALLOWLISTED_DETAIL })
 			.mockResolvedValueOnce({ response: "yesButtonClicked" })
 
-		await presentAssistantMessage(asTask(mockTask))
+		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 
 		expect(mockTask.userMessageContent).toHaveLength(2)
 
@@ -302,7 +312,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 			.mockResolvedValueOnce({ response: "noButtonClicked", autoDenyDetail: GUARD_UNAVAILABLE_DETAIL })
 			.mockResolvedValueOnce({ response: "noButtonClicked", autoDenyDetail: NOT_ALLOWLISTED_DETAIL })
 
-		await presentAssistantMessage(asTask(mockTask))
+		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 
 		expect(mockTask.userMessageContent).toHaveLength(2)
 
@@ -380,7 +390,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 				autoDenyDetail: { kind: "denylist", command: "rm x", pattern: "rm" },
 			})
 
-		await presentAssistantMessage(asTask(mockTask))
+		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 
 		expect(mockTask.userMessageContent).toHaveLength(2)
 
@@ -437,7 +447,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 			autoDenyDetail: { kind: "denylist", command: "rm x", pattern: "rm" },
 		})
 
-		await presentAssistantMessage(asTask(mockTask))
+		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 
 		expect(mockTask.userMessageContent).toHaveLength(1)
 		const payload = JSON.parse(mockTask.userMessageContent[0].content as string)
@@ -457,7 +467,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 		// Real user click: noButtonClicked with no structured detail.
 		mockTask.ask.mockResolvedValueOnce({ response: "noButtonClicked" })
 
-		await presentAssistantMessage(asTask(mockTask))
+		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 
 		expect(mockTask.userMessageContent).toHaveLength(2)
 
@@ -486,7 +496,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 
 		mockTask.ask.mockResolvedValueOnce({ response: "noButtonClicked", text: "do not run that" })
 
-		await presentAssistantMessage(asTask(mockTask))
+		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 
 		expect(mockTask.say).toHaveBeenCalledWith("user_feedback", "do not run that", undefined)
 		expect(mockTask.didRejectTool).toBe(true)
@@ -508,7 +518,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 			},
 		)
 
-		await presentAssistantMessage(asTask(mockTask))
+		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 
 		expect(mockTask.ask).toHaveBeenCalledWith("command", "rm x", false, undefined, false, AUTO_APPROVAL_CONTEXT)
 	})
@@ -541,7 +551,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 			},
 		)
 
-		await presentAssistantMessage(asTask(mockTask))
+		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 
 		expect(mockTask.ask).toHaveBeenCalledWith(
 			"use_mcp_server",
@@ -583,7 +593,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 		// wording, and the rest of the turn aborts.
 		mockTask.ask.mockResolvedValueOnce({ response: "noButtonClicked" })
 
-		await presentAssistantMessage(asTask(mockTask))
+		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 
 		expect(mockTask.userMessageContent).toHaveLength(1)
 		const payload = JSON.parse(mockTask.userMessageContent[0].content as string)
@@ -598,7 +608,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 
 		mockTask.ask.mockResolvedValueOnce({ response: "noButtonClicked", autoDenyDetail: DCG_DENY_DETAIL })
 
-		await presentAssistantMessage(asTask(mockTask))
+		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 
 		expect(mockTask.userMessageContent).toHaveLength(1)
 		const payload = JSON.parse(mockTask.userMessageContent[0].content as string)
@@ -646,7 +656,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 
 		mockTask.ask.mockResolvedValueOnce({ response: "noButtonClicked", autoDenyDetail: DCG_DENY_DETAIL })
 
-		await presentAssistantMessage(asTask(mockTask))
+		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 
 		expect(mockTask.userMessageContent).toHaveLength(1)
 		const payload = JSON.parse(mockTask.userMessageContent[0].content as string)
@@ -665,7 +675,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 			.mockResolvedValueOnce({ response: "noButtonClicked", autoDenyDetail: DANGEROUS_SUBSTITUTION_DETAIL })
 			.mockResolvedValueOnce({ response: "yesButtonClicked" })
 
-		await presentAssistantMessage(asTask(mockTask))
+		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 
 		expect(mockTask.userMessageContent).toHaveLength(2)
 
@@ -698,7 +708,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 
 		mockTask.ask.mockResolvedValueOnce({ response: "noButtonClicked", autoDenyDetail: MALFORMED_COMMAND_DETAIL })
 
-		await presentAssistantMessage(asTask(mockTask))
+		await presentAssistantMessage(asTask(mockTask), baseSnapshot)
 
 		expect(mockTask.userMessageContent).toHaveLength(1)
 		const denialPayload = JSON.parse(mockTask.userMessageContent[0].content as string)
