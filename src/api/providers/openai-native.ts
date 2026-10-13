@@ -1285,10 +1285,8 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 				throw new DOMException(`The ${this.providerName} request was aborted`, "AbortError")
 			}
 
-			const errorMessage = error instanceof Error ? error.message : String(error)
-			const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "createMessage")
-			TelemetryService.instance.captureException(apiError)
-
+			// No captureException here: the createMessage catch captures this
+			// failure once when the rethrown error propagates.
 			if (error instanceof Error) {
 				throw new Error(`Error processing response stream: ${error.message}`)
 			}
