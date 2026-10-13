@@ -2368,3 +2368,20 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		expect(TelemetryService.instance.updateTelemetryState).not.toHaveBeenCalled()
 	})
 })
+
+it.each([true, false, undefined])(
+	"persists the output collapse preference (%s) without changing terminal mode",
+	async (value) => {
+		vi.clearAllMocks()
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { collapseCommandOutputByDefault: value },
+		})
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("collapseCommandOutputByDefault", value)
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith(
+			"terminalShellIntegrationDisabled",
+			expect.anything(),
+		)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	},
+)
