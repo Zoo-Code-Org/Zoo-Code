@@ -64,6 +64,7 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 	private credentials: QwenOAuthCredentials | null = null
 	private client: OpenAI | undefined
 	private refreshPromise: Promise<QwenOAuthCredentials> | null = null
+	private credentialLoad: Promise<QwenOAuthCredentials> | null = null
 
 	constructor(options: QwenCodeHandlerOptions) {
 		super()
@@ -186,7 +187,18 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 
 	private async ensureAuthenticated(): Promise<void> {
 		if (!this.credentials) {
-			this.credentials = await this.loadCachedQwenCredentials()
+			// Share the in-flight credential load the same way refreshAccessToken
+			// shares its refresh: a cancellation cuts only the caller's wait
+			// (settleOnAbort), the load keeps running, and a second request that
+			// starts while the first load continues reuses it instead of
+			// duplicating credential I/O. Cleared once the load settles (success
+			// or failure), so a failed load is retried by the next request.
+			if (!this.credentialLoad) {
+				this.credentialLoad = this.loadCachedQwenCredentials().finally(() => {
+					this.credentialLoad = null
+				})
+			}
+			this.credentials = await this.credentialLoad
 		}
 
 		if (!this.isTokenValid(this.credentials)) {

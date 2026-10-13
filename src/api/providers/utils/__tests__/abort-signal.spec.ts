@@ -456,6 +456,37 @@ describe("settleOnAbort", () => {
 		expect(await settleOnAbort(pending, controller.signal, "Test")).toBe(7)
 	})
 
+	it("does not leak an unhandled rejection when the signal is already aborted and pending rejects", async () => {
+		// The early return hands the caller the abort error and never awaits
+		// pending; without a rejection guard on pending, its rejection would
+		// surface as an unhandled rejection (Vitest fails the file on those).
+		const rejections: unknown[] = []
+		const onUnhandled = (reason: unknown): void => {
+			rejections.push(reason)
+		}
+		process.on("unhandledRejection", onUnhandled)
+		try {
+			const controller = new AbortController()
+			controller.abort()
+			const failure = new Error("load failed")
+
+			let caught: unknown
+			try {
+				await settleOnAbort(Promise.reject(failure), controller.signal, "Test")
+			} catch (error) {
+				caught = error
+			}
+			await new Promise((resolve) => setTimeout(resolve, 10)) // let any unhandledRejection fire
+
+			expect(caught).toBeInstanceOf(Error)
+			expect((caught as Error).name).toBe("AbortError")
+			expect((caught as Error).message).toBe("The Test request was aborted")
+			expect(rejections).toEqual([])
+		} finally {
+			process.off("unhandledRejection", onUnhandled)
+		}
+	})
+
 	it("rejects with the abort contract error when the signal aborts before the pending promise settles", async () => {
 		const controller = new AbortController()
 		let resolvePending!: (value: number) => void

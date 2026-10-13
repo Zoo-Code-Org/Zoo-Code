@@ -284,10 +284,86 @@ describe("QwenCodeHandler abort wiring", () => {
 		})
 	})
 
+	describe("credential load sharing", () => {
+		it("reuses the in-flight credential load when a cancelled request is followed by a retry", async () => {
+			// The credential read hangs until released: the first request's Stop
+			// cuts only its wait, the load keeps running, and a second request
+			// that starts while the load is still in flight must reuse it
+			// instead of issuing a fresh credential read.
+			const creds = {
+				access_token: "test-access-token",
+				refresh_token: "test-refresh-token",
+				token_type: "Bearer",
+				expiry_date: Date.now() + 3600000,
+				resource_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+			}
+			let releaseLoad: ((value: string) => void) | undefined
+			vi.mocked(fs.readFile).mockImplementation(
+				() =>
+					new Promise<string>((resolve) => {
+						releaseLoad = resolve
+					}),
+			)
+			// Release the hung read even when an assertion fails, so a failing
+			// run cannot leak the pending load (and the queued create mock)
+			// into later tests.
+			try {
+				const first = new AbortController()
+				const firstRun = collectStream(
+					handler.createMessage("test prompt", [], { taskId: "t1", abortSignal: first.signal }),
+				).catch((error: unknown) => error)
+				for (let i = 0; i < 20 && vi.mocked(fs.readFile).mock.calls.length === 0; i++) {
+					await Promise.resolve()
+				}
+				expect(fs.readFile).toHaveBeenCalledTimes(1)
+
+				first.abort() // Stop lands while the credential load is in flight
+				const firstError = await firstRun
+				expect((firstError as Error).name).toBe("AbortError")
+
+				// A second request starting while the first load still runs reuses it.
+				mockCreate.mockResolvedValueOnce(asyncStreamFrom([{ choices: [{ delta: { content: "ok" } }] }]))
+				const secondRun = collectStream(handler.createMessage("test prompt", [], { taskId: "t2" })).catch(
+					(error: unknown) => error,
+				)
+				await Promise.resolve() // let the second request enter the shared wait
+				expect(fs.readFile).toHaveBeenCalledTimes(1) // no duplicate credential read
+
+				releaseLoad!(JSON.stringify(creds)) // the shared load finishes for both waiters
+				const chunks = await secondRun
+				expect(chunks).toContainEqual({ type: "text", text: "ok" })
+				expect(fs.readFile).toHaveBeenCalledTimes(1)
+				// The settled load is cleared so later failures can start a fresh read.
+				expect(handler["credentialLoad"]).toBeNull()
+			} finally {
+				releaseLoad?.(JSON.stringify(creds))
+			}
+		})
+
+		it("clears the shared credential load after a failure so the next request retries the load", async () => {
+			vi.mocked(fs.readFile).mockRejectedValueOnce(new Error("read failed"))
+			let caught: unknown
+			try {
+				await handler.completePrompt("hi")
+			} catch (error) {
+				caught = error
+			}
+			expect((caught as Error).message).toMatch(/Failed to load Qwen OAuth credentials/)
+			expect(handler["credentialLoad"]).toBeNull()
+
+			// The settled (failed) load must be cleared: the next request starts
+			// a fresh read rather than reusing the rejected promise.
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
+			expect(await handler.completePrompt("hi")).toBe("ok")
+			expect(fs.readFile).toHaveBeenCalledTimes(2)
+		})
+	})
+
 	describe("createMessage", () => {
 		it("passes a request-local signal and bridges the external abort", async () => {
 			const external = new AbortController()
 			const addSpy = vi.spyOn(external.signal, "addEventListener")
+			const removeSpy = vi.spyOn(external.signal, "removeEventListener")
 			mockCreate.mockResolvedValueOnce(asyncStreamFrom([{ choices: [{ delta: { content: "x" } }] }]))
 
 			const stream = handler.createMessage("test prompt", [], { taskId: "t1", abortSignal: external.signal })
@@ -297,12 +373,16 @@ describe("QwenCodeHandler abort wiring", () => {
 			const opts = mockCreate.mock.calls[0][1]
 			expect(opts?.signal).toBeInstanceOf(AbortSignal)
 			expect(opts.signal).not.toBe(external.signal) // request-local, not the external signal
-			expect(addSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			const listener = addSpy.mock.calls.find(([type]) => type === "abort")?.[1]
+			expect(typeof listener).toBe("function")
 
 			external.abort()
 			expect(opts.signal.aborted).toBe(true) // the external abort is bridged to the SDK signal
 
 			await stream.next() // drain the generator
+			// The exact registered listener must be removed - removing a
+			// different function would leak the bridge on the shared Task signal.
+			expect(removeSpy).toHaveBeenCalledWith("abort", listener)
 		})
 
 		it("fast-fails with the abort contract error for a pre-aborted signal", async () => {
@@ -596,6 +676,7 @@ describe("QwenCodeHandler abort wiring", () => {
 
 		it("removes the external abort listener when the stream completes", async () => {
 			const external = new AbortController()
+			const addSpy = vi.spyOn(external.signal, "addEventListener")
 			const removeSpy = vi.spyOn(external.signal, "removeEventListener")
 			mockCreate.mockResolvedValueOnce(asyncStreamFrom([{ choices: [{ delta: { content: "ok" } }] }]))
 
@@ -603,7 +684,9 @@ describe("QwenCodeHandler abort wiring", () => {
 				handler.createMessage("test prompt", [], { taskId: "t1", abortSignal: external.signal }),
 			)
 
-			expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			const listener = addSpy.mock.calls.find(([type]) => type === "abort")?.[1]
+			expect(typeof listener).toBe("function")
+			expect(removeSpy).toHaveBeenCalledWith("abort", listener)
 		})
 	})
 

@@ -184,6 +184,10 @@ export function settleOnAbort<T>(
 		return pending
 	}
 	if (signal.aborted) {
+		// Nobody awaits `pending` after this early return: attach a no-op
+		// rejection handler so a rejecting pending promise cannot surface as
+		// an unhandled rejection while its work runs to completion.
+		void pending.catch(() => {})
 		return Promise.reject(createAbortError(providerName))
 	}
 	return new Promise<T>((resolve, reject) => {

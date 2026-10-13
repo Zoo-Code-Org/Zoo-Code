@@ -770,17 +770,29 @@ describe("QwenCodeHandler Native Tools", () => {
 
 			it("should not retry after 401 when the abort signal fires during the refresh", async () => {
 				const external = new AbortController()
-				const fetchMock = vi.fn().mockImplementation(async () => {
-					external.abort() // simulate Stop pressed while the token refresh is in flight
-					return tokenResponse()
-				})
+				// The token endpoint never responds. The abort must fire only
+				// after the refresh wait is established (settleOnAbort has
+				// registered its listener): aborting inside the fetch mock would
+				// land before the wait exists and only exercise the
+				// already-aborted fast path, not the in-flight cut.
+				const fetchMock = vi.fn().mockImplementation(() => new Promise<never>(() => {}))
 				vi.stubGlobal("fetch", fetchMock)
 				mockCreate.mockRejectedValueOnce(unauthorizedError())
 
 				const stream = handler.createMessage("test prompt", [], { taskId: "t1", abortSignal: external.signal })
+				// Start consuming before draining so the 401 attempt fails and
+				// the refresh fetch starts while microtasks are drained.
+				const pending = collectStream(stream)
+				for (let i = 0; i < 50 && fetchMock.mock.calls.length === 0; i++) {
+					await Promise.resolve()
+				}
+				expect(fetchMock).toHaveBeenCalledTimes(1)
+
+				external.abort() // Stop pressed while the token refresh wait is established
+
 				let caught: unknown
 				try {
-					await collectStream(stream)
+					await pending
 				} catch (error) {
 					caught = error
 				}
@@ -922,16 +934,24 @@ describe("QwenCodeHandler Native Tools", () => {
 
 			it("should not retry after 401 when the abort signal fires during the refresh", async () => {
 				const external = new AbortController()
-				const fetchMock = vi.fn().mockImplementation(async () => {
-					external.abort() // simulate Stop pressed while the token refresh is in flight
-					return tokenResponse()
-				})
+				// Same established-wait pattern as the createMessage case: the
+				// token endpoint never responds and the abort lands only after
+				// settleOnAbort has registered its listener on the real wait.
+				const fetchMock = vi.fn().mockImplementation(() => new Promise<never>(() => {}))
 				vi.stubGlobal("fetch", fetchMock)
 				mockCreate.mockRejectedValueOnce(unauthorizedError())
 
+				const promise = handler.completePrompt("hi", { abortSignal: external.signal })
+				for (let i = 0; i < 50 && fetchMock.mock.calls.length === 0; i++) {
+					await Promise.resolve()
+				}
+				expect(fetchMock).toHaveBeenCalledTimes(1)
+
+				external.abort() // Stop pressed while the token refresh wait is established
+
 				let caught: unknown
 				try {
-					await handler.completePrompt("hi", { abortSignal: external.signal })
+					await promise
 				} catch (error) {
 					caught = error
 				}
