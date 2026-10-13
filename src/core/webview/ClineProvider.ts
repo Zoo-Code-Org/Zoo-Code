@@ -2438,7 +2438,8 @@ export class ClineProvider
 			// emit/post tail outside the reconciled region.
 			const lockApiConfigAcrossModes = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
 			if (!lockApiConfigAcrossModes) {
-				if (signal?.aborted) return
+				// A background-task switch applies to the task only: no view pin, no
+				// ModeChanged, and no mode-linked activation on its behalf.
 				if (!viewScopedSwitch) {
 					return
 				}
@@ -2447,50 +2448,59 @@ export class ClineProvider
 				const savedConfigId = await this.providerSettingsManager.getModeConfigId(newMode)
 				const listApiConfig = await this.providerSettingsManager.listConfig()
 
-				if (signal?.aborted) return
+				// The pin and shared mode writes above have committed the mode: an abort
+				// here skips the remaining activation work but falls through to the
+				// emit/post tail so listeners and the webview learn the committed mode.
+				if (!signal?.aborted) {
+					await this.updateGlobalState("listApiConfigMeta", listApiConfig)
 
-				// Update listApiConfigMeta first to ensure UI has latest data.
-				await this.updateGlobalState("listApiConfigMeta", listApiConfig)
+					// If this mode has a saved config, use it.
+					if (savedConfigId) {
+						const profile = listApiConfig.find(({ id }) => id === savedConfigId)
 
-				// If this mode has a saved config, use it.
-				if (savedConfigId) {
-					const profile = listApiConfig.find(({ id }) => id === savedConfigId)
+						if (profile?.name) {
+							// Check if the profile has actual API configuration (not just an id).
+							// In CLI mode, the ProviderSettingsManager may return empty default profiles
+							// that only contain 'id' and 'name' fields. Activating such a profile would
+							// overwrite the CLI's working API configuration with empty settings.
+							// Skip activation if the profile has no apiProvider set - this indicates
+							// an unconfigured/empty profile.
+							const fullProfile = await this.providerSettingsManager.getProfile({ name: profile.name })
+							const hasActualSettings = !!fullProfile.apiProvider
 
-					if (profile?.name) {
-						// Check if the profile has actual API configuration (not just an id).
-						// In CLI mode, the ProviderSettingsManager may return empty default profiles
-						// that only contain 'id' and 'name' fields. Activating such a profile would
-						// overwrite the CLI's working API configuration with empty settings.
-						// Skip activation if the profile has no apiProvider set - this indicates
-						// an unconfigured/empty profile.
-						const fullProfile = await this.providerSettingsManager.getProfile({ name: profile.name })
-						const hasActualSettings = !!fullProfile.apiProvider
-
-						if (hasActualSettings) {
-							activationStarted = true
-							await this.activateProviderProfileUnlocked(
-								{ name: profile.name },
-								targetTask === null ? { skipCurrentTaskRebuild: true } : undefined,
-								signal,
-							)
+							if (hasActualSettings) {
+								// The committed-switch guard flips only when the activation has
+								// actually written the activated profile: a lookup failure (e.g. a
+								// deleted profile) throws before any write and must still reconcile.
+								await this.activateProviderProfileUnlocked(
+									{ name: profile.name },
+									{
+										...(targetTask === null ? { skipCurrentTaskRebuild: true } : {}),
+										onSharedWriteStart: () => {
+											activationStarted = true
+										},
+									},
+									signal,
+								)
+							} else {
+								// The task will continue with the current/default configuration.
+							}
 						} else {
 							// The task will continue with the current/default configuration.
 						}
 					} else {
-						// The task will continue with the current/default configuration.
-					}
-				} else {
-					// If no saved config for this mode, save current config as default.
-					// Use this view's effective profile: with per-view pins the shared slot can
-					// belong to a sibling view, and recording that profile as this mode's default
-					// would activate the wrong profile for every later switch to it.
-					const currentApiConfigNameAfter = this.getValues().currentApiConfigName
+						// If no saved config for this mode, save current config as default.
+						// Use this view's effective profile: with per-view pins the shared slot can
+						// belong to a sibling view, and recording that profile as this mode's default
+						// would activate the wrong profile for every later switch to it.
+						const currentApiConfigNameAfter = this.getValues().currentApiConfigName
 
-					if (currentApiConfigNameAfter) {
-						const config = listApiConfig.find((c) => c.name === currentApiConfigNameAfter)
+						if (currentApiConfigNameAfter) {
+							const config = listApiConfig.find((c) => c.name === currentApiConfigNameAfter)
 
-						if (config?.id) {
-							await this.providerSettingsManager.setModeConfig(newMode, config.id)
+							if (config?.id) {
+								await this.providerSettingsManager.setModeConfig(newMode, config.id)
+							}
 						}
 					}
 				}
@@ -2504,7 +2514,30 @@ export class ClineProvider
 			if (!activationStarted && !signal?.aborted) {
 				await reconcileSwitchWrites()
 			} else if (signal?.aborted) {
+				// After an abort the mutation queue has advanced: a newer mutation may
+				// already own the mode fields, so emitting here could announce a mode the
+				// newer mutation replaced - listeners are intentionally not notified on
+				// this path.
 				this.log(`[handleModeSwitch] Skipping rollback for aborted switch to "${newMode}"`)
+			} else {
+				// The activation had already written the activated profile: the switch is
+				// kept. Listeners must still learn the committed mode before the rethrow,
+				// and the webview must refresh in case the activation failed before its
+				// own state post.
+				if (viewScopedSwitch) {
+					this.emit(RooCodeEventName.ModeChanged, newMode)
+				}
+				if (targetTask !== null) {
+					try {
+						await this.postStateToWebview()
+					} catch (postError: unknown) {
+						this.log(
+							`[handleModeSwitch] Mode switch to "${newMode}" kept but the state post failed: ${
+								postError instanceof Error ? postError.message : String(postError)
+							}`,
+						)
+					}
+				}
 			}
 			this.log(
 				`[handleModeSwitch] Failed to persist mode "${newMode}": ${error instanceof Error ? error.message : String(error)}`,
@@ -2930,10 +2963,18 @@ export class ClineProvider
 			persistModeConfig?: boolean
 			persistTaskHistory?: boolean
 			skipCurrentTaskRebuild?: boolean
+			// Fires once the activation has written the activated profile to shared
+			// state, so callers can mark the switch committed at the true point of no
+			// return (a profile lookup failure must stay reconcilable).
+			onSharedWriteStart?: () => void
 		},
 		signal?: AbortSignal,
 	): Promise<void> {
 		const { name, id, ...providerSettings } = await this.providerSettingsManager.activateProfile(args)
+
+		// The manager has now written the activated profile: from here on a failure
+		// must keep the switch rather than roll the mode back onto the old profile.
+		options?.onSharedWriteStart?.()
 
 		if (signal?.aborted) return
 
