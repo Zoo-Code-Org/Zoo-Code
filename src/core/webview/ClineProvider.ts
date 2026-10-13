@@ -2409,6 +2409,10 @@ export class ClineProvider
 			}
 		}
 
+		// Once the mode-linked activation below has started writing shared state, a
+		// mode-only rollback would pair the old mode with the new profile: the catch must
+		// then keep the switch instead of reconciling.
+		let activationStarted = false
 		try {
 			if (viewScopedSwitch) {
 				// Pin the view's durable per-view mode first: the pin is this view's own
@@ -2468,6 +2472,7 @@ export class ClineProvider
 					const hasActualSettings = !!fullProfile.apiProvider
 
 					if (hasActualSettings) {
+						activationStarted = true
 						await this.activateProviderProfileUnlocked(
 							{ name: profile.name },
 							targetTask === null ? { skipCurrentTaskRebuild: true } : undefined,
@@ -2491,16 +2496,35 @@ export class ClineProvider
 					}
 				}
 			}
-
-			if (targetTask !== null) {
-				await this.postStateToWebview()
-			}
 		} catch (error) {
-			await reconcileSwitchWrites()
+			// Two reasons to keep the switch instead of reconciling: once the mode-linked
+			// activation has started writing shared state, a mode-only rollback would pair
+			// the old mode with the new profile; and after a timeout abort the queue has
+			// advanced, so a newer mutation may own these fields and replaying the
+			// pre-switch values would clobber it.
+			if (!activationStarted && !signal?.aborted) {
+				await reconcileSwitchWrites()
+			} else if (signal?.aborted) {
+				this.log(`[handleModeSwitch] Skipping rollback for aborted switch to "${newMode}"`)
+			}
 			this.log(
 				`[handleModeSwitch] Failed to persist mode "${newMode}": ${error instanceof Error ? error.message : String(error)}`,
 			)
 			throw error
+		}
+
+		// The switch has committed: a UI-refresh failure must not roll it back, so the
+		// trailing post runs outside the reconciled region and its failure is only logged.
+		if (targetTask !== null) {
+			try {
+				await this.postStateToWebview()
+			} catch (postError: unknown) {
+				this.log(
+					`[handleModeSwitch] Mode switch to "${newMode}" committed but the state post failed: ${
+						postError instanceof Error ? postError.message : String(postError)
+					}`,
+				)
+			}
 		}
 	}
 
