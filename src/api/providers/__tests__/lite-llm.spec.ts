@@ -1434,19 +1434,22 @@ describe("LiteLLMHandler", () => {
 			// The SDK call receives the remaining budget, so pin the clock: without
 			// fake timers instrumentation drift makes the remaining timeout 9999.
 			vi.useFakeTimers()
-			const controller = new AbortController()
-			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
-			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 10000 })
-			const passed = mockCreate.mock.calls[0][1] as { signal?: AbortSignal; timeout?: number }
-			// The SDK receives a deadline-bounded signal merged from the caller's
-			// signal and the absolute deadline — not the caller's raw signal.
-			expect(passed.signal).toBeDefined()
-			expect(passed.signal).not.toBe(controller.signal)
-			expect(passed.timeout).toBe(10000)
-			// Caller cancellation still propagates through the merged signal.
-			controller.abort()
-			expect(passed.signal?.aborted).toBe(true)
-			vi.useRealTimers()
+			try {
+				const controller = new AbortController()
+				mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+				await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 10000 })
+				const passed = mockCreate.mock.calls[0][1] as { signal?: AbortSignal; timeout?: number }
+				// The SDK receives a deadline-bounded signal merged from the caller's
+				// signal and the absolute deadline — not the caller's raw signal.
+				expect(passed.signal).toBeDefined()
+				expect(passed.signal).not.toBe(controller.signal)
+				expect(passed.timeout).toBe(10000)
+				// Caller cancellation still propagates through the merged signal.
+				controller.abort()
+				expect(passed.signal?.aborted).toBe(true)
+			} finally {
+				vi.useRealTimers()
+			}
 		})
 
 		it("should work without options (backward compatible)", async () => {

@@ -978,9 +978,18 @@ describe("GeminiHandler", () => {
 
 			const error = await collectStream(stream).catch((e: unknown) => e)
 			expect(error).toBeInstanceOf(Error)
-			// The catch must take the non-abort wrapping path (not the abort
-			// DOMException path) and must not crash reading a missing signal.
-			expect((error as Error).message).not.toContain("Cannot read properties")
+			// The catch must take the non-abort wrapping path, not the abort path
+			// and not a raw rethrow. i18next is not initialized with resources in
+			// unit tests (see "wraps stream failures in a new error before
+			// rethrowing"), so the localized template string is not assertable
+			// here; pin the wrapping path by its observable shape instead: a NEW
+			// Error (not the raw SDK instance), a message that is not the raw
+			// message, and a name that is not "AbortError". A removed wrapper
+			// fails the instance/message checks; an abort-path misclassification
+			// fails the name check.
+			expect(error).not.toBe(mockError)
+			expect((error as Error).name).not.toBe("AbortError")
+			expect((error as Error).message).not.toBe("Gemini stream failure")
 			expect(mockCaptureException).toHaveBeenCalledTimes(1)
 			expect(mockCaptureException).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -1000,8 +1009,12 @@ describe("GeminiHandler", () => {
 			const error = await collectStream(stream).catch((e: unknown) => e)
 			expect(error).toBeInstanceOf(Error)
 			// No metadata at all: exercises the first optional-chain position,
-			// which would crash here if the `?.` were removed.
-			expect((error as Error).message).not.toContain("Cannot read properties")
+			// which would crash here if the `?.` were removed. Pin the wrapping
+			// path by its observable shape (see the sibling test above): a NEW
+			// Error with a non-raw message and a non-AbortError name.
+			expect(error).not.toBe(mockError)
+			expect((error as Error).name).not.toBe("AbortError")
+			expect((error as Error).message).not.toBe("Gemini stream failure")
 		})
 	})
 

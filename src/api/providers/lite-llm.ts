@@ -536,12 +536,11 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			// timeout': the option is omitted entirely, because the OpenAI SDK treats
 			// a timeout of 0 as an immediate timeout.
 			const createOptions: OpenAI.RequestOptions = {}
-			let requestSignal = callerAbortSignal
-			if (deadlineSignal) {
-				requestSignal = callerAbortSignal
-					? mergeAbortSignals(callerAbortSignal, deadlineSignal)
-					: deadlineSignal
-			}
+			// mergeAbortSignals returns the caller's signal directly when no deadline
+			// exists, so one expression covers all four caller/deadline combinations.
+			const requestSignal = callerAbortSignal
+				? mergeAbortSignals(callerAbortSignal, deadlineSignal)
+				: deadlineSignal
 			if (requestSignal) {
 				createOptions.signal = requestSignal
 			}
