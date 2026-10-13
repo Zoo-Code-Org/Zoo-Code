@@ -501,6 +501,13 @@ describe("ClineProvider", () => {
 	let mockPostMessage: any
 	let updateGlobalStateSpy: any
 
+	afterEach(() => {
+		// Tests construct providers directly and many never dispose them; clear the
+		// static registry so a leaked instance cannot claim stable view state ids
+		// ahead of a later test.
+		ClineProvider["activeInstances"] = new Set()
+	})
+
 	beforeEach(() => {
 		vi.clearAllMocks()
 
@@ -2275,6 +2282,10 @@ describe("ClineProvider", () => {
 			})
 			// @ts-ignore - Replace providerSettingsManager with a test double for the profile lookup.
 			provider.providerSettingsManager = { getProfile: getProfileSpy }
+			// The ownership check requires the writer to release the id before the
+			// next view adopts it; the durable entry it wrote stays in storage.
+			await writer.dispose()
+
 			await provider.contextProxy.setValue(
 				"viewStates",
 				mockContext.globalState.get<RooCodeSettings["viewStates"]>("viewStates"),
@@ -2287,7 +2298,6 @@ describe("ClineProvider", () => {
 			})
 			expect(getProfileSpy).toHaveBeenCalledWith({ name: "my-profile" })
 			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Loaded state for viewId"))
-			await writer.dispose()
 			await provider.dispose()
 		})
 
@@ -2415,6 +2425,10 @@ describe("ClineProvider", () => {
 			}
 			// A pre-load buffer write that was never persisted must not be merged over the load.
 			provider["viewLocalState"] = { mode: "architect" }
+			// The ownership check requires the writer to release the id before the
+			// next view adopts it; the durable entry it wrote stays in storage.
+			await writer.dispose()
+
 			await provider.contextProxy.setValue(
 				"viewStates",
 				mockContext.globalState.get<RooCodeSettings["viewStates"]>("viewStates"),
@@ -2426,7 +2440,6 @@ describe("ClineProvider", () => {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "model-x",
 			})
-			await writer.dispose()
 			await provider.dispose()
 		})
 
@@ -2765,6 +2778,10 @@ describe("ClineProvider", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// The ownership check requires the writer to release the id before the
+			// next view adopts it; the durable entry it wrote stays in storage.
+			await writer.dispose()
+
 			await provider.contextProxy.setValue(
 				"viewStates",
 				mockContext.globalState.get<RooCodeSettings["viewStates"]>("viewStates"),
@@ -2777,7 +2794,6 @@ describe("ClineProvider", () => {
 			// The buffer must track the activated profile so getValues() agrees with the proxy.
 			expect(provider.getValues().currentApiConfigName).toBe("new-profile")
 			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("new-profile")
-			await writer.dispose()
 			await provider.dispose()
 		})
 
