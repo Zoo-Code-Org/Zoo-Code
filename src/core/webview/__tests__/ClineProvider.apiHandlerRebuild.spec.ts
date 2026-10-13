@@ -498,6 +498,79 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
 		})
 
+		test("only allows reset keys to be cleared, so a patch cannot set a Bedrock custom ARN", async () => {
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+				awsCustomArn: "arn:aws:bedrock:us-east-1:123456789012:inference-profile/other-model",
+			})
+
+			expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+		})
+
+		test("rejects an empty or non-string model id", async () => {
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, { openRouterModelId: "" })
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, { openRouterModelId: 42 })
+
+			expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
+		})
+
+		test("restores the previous profile when activation fails after the new profile was saved", async () => {
+			const manager = provider["providerSettingsManager"]
+			vi.mocked(manager.setModeConfig).mockRejectedValueOnce(new Error("activation failed"))
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+			})
+
+			const saved = vi.mocked(manager.saveConfig).mock.calls.map(([, config]) => config.openRouterModelId)
+			expect(saved).toEqual(["anthropic/claude", "openai/gpt-4"])
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.create_api_config")
+		})
+
+		test("reports a partial state when the previous profile cannot be restored", async () => {
+			const manager = provider["providerSettingsManager"]
+			vi.mocked(manager.setModeConfig).mockRejectedValue(new Error("activation failed"))
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+			})
+
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.update_profile_model_partial")
+		})
+
+		test("does not activate the profile after the mutation timed out while waiting for state", async () => {
+			vi.useFakeTimers()
+
+			try {
+				const realGetState = provider.getState.bind(provider)
+				let release!: () => void
+				const gate = new Promise<void>((resolve) => {
+					release = resolve
+				})
+				let calls = 0
+				vi.spyOn(provider, "getState").mockImplementation(async () => {
+					// 1st call: allow-list check. 2nd call: activation inside persistProviderProfile.
+					if (++calls === 2) await gate
+					return realGetState()
+				})
+
+				const update = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+					openRouterModelId: "anthropic/claude",
+				})
+
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
+				await update
+
+				release()
+				await vi.advanceTimersByTimeAsync(0)
+
+				expect(provider["providerSettingsManager"].setModeConfig).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
 		test("rejects a model that the organization allow-list forbids", async () => {
 			const realGetState = provider.getState.bind(provider)
 			vi.spyOn(provider, "getState").mockImplementation(async () => ({

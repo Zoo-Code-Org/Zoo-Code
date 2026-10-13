@@ -193,8 +193,11 @@ function scheduleTask(
 }
 
 // Keys a model-selector patch may touch: model IDs plus settings reset on model change.
-const PROFILE_MODEL_PATCH_KEYS: ReadonlySet<string> = new Set([
-	...modelIdKeys,
+const PROFILE_MODEL_ID_PATCH_KEYS: ReadonlySet<string> = new Set(modelIdKeys)
+
+// These keys can only be cleared. Setting `awsCustomArn` would let a patch invoke a Bedrock
+// resource that the organization allow-list never checked, because the allow-list sees `apiModelId`.
+const PROFILE_MODEL_RESET_ONLY_KEYS: ReadonlySet<string> = new Set([
 	"reasoningEffort",
 	"modelMaxTokens",
 	"modelMaxThinkingTokens",
@@ -1911,6 +1914,8 @@ export class ClineProvider
 	 * A `null` patch value clears the key.
 	 */
 	async updateProfileModel(name: string, expectedProvider: string, patch: Record<string, unknown>): Promise<void> {
+		let partialState = false
+
 		try {
 			await this.enqueueProviderProfileMutation(async (signal) => {
 				const { name: _name, ...stored } = await this.providerSettingsManager.getProfile({ name })
@@ -1924,14 +1929,20 @@ export class ClineProvider
 				const merged: Record<string, unknown> = { ...stored }
 
 				for (const [key, value] of Object.entries(patch)) {
-					if (!PROFILE_MODEL_PATCH_KEYS.has(key)) {
-						throw new Error(`Key "${key}" is not allowed in a model patch`)
-					}
+					if (PROFILE_MODEL_ID_PATCH_KEYS.has(key)) {
+						if (typeof value !== "string" || value.length === 0) {
+							throw new Error(`Key "${key}" must be a non-empty string in a model patch`)
+						}
 
-					if (value === null || value === undefined) {
+						merged[key] = value
+					} else if (PROFILE_MODEL_RESET_ONLY_KEYS.has(key)) {
+						if (value !== null && value !== undefined) {
+							throw new Error(`Key "${key}" can only be cleared in a model patch`)
+						}
+
 						delete merged[key]
 					} else {
-						merged[key] = value
+						throw new Error(`Key "${key}" is not allowed in a model patch`)
 					}
 				}
 
@@ -1943,15 +1954,37 @@ export class ClineProvider
 
 				if (signal.aborted) return
 
-				await this.persistProviderProfile(name, merged as ProviderSettings, true, signal)
+				try {
+					await this.persistProviderProfile(name, merged as ProviderSettings, true, signal)
+				} catch (persistError) {
+					// Saving and activating are separate writes. Put the previous profile back so
+					// storage, context settings, and the task do not disagree about the model.
+					try {
+						await this.persistProviderProfile(
+							name,
+							stored as ProviderSettings,
+							true,
+							new AbortController().signal,
+						)
+					} catch (restoreError) {
+						partialState = true
+						this.log(
+							`Error restoring profile after failed model update: ${JSON.stringify(restoreError, Object.getOwnPropertyNames(restoreError), 2)}`,
+						)
+					}
+
+					throw persistError
+				}
 			})
 		} catch (error) {
 			this.log(`Error update profile model: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`)
 
 			vscode.window.showErrorMessage(
-				error instanceof OrganizationAllowListViolationError
-					? error.message
-					: t("common:errors.create_api_config"),
+				partialState
+					? t("common:errors.update_profile_model_partial")
+					: error instanceof OrganizationAllowListViolationError
+						? error.message
+						: t("common:errors.create_api_config"),
 			)
 		}
 	}
@@ -1974,6 +2007,8 @@ export class ClineProvider
 		if (activate) {
 			const { mode } = await this.getState()
 
+			if (signal.aborted) return id
+
 			// These promises do the following:
 			// 1. Adds or updates the list of provider profiles.
 			// 2. Sets the current provider profile.
@@ -1991,6 +2026,8 @@ export class ClineProvider
 				this.contextProxy.setProviderSettings(providerSettings),
 			])
 
+			if (signal.aborted) return id
+
 			// Change the provider for the current task.
 			// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
 			this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
@@ -2000,6 +2037,8 @@ export class ClineProvider
 		} else {
 			await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
 		}
+
+		if (signal.aborted) return id
 
 		await this.postStateToWebview()
 		return id
