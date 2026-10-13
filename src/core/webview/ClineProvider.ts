@@ -2266,6 +2266,10 @@ export class ClineProvider
 	): Promise<void> {
 		const task = targetTask
 
+		// Captured for the pin-write rollback below: the mode this task held before
+		// the switch (bracket access: _taskMode is private to Task).
+		const previousTaskMode = task ? task["_taskMode"] : undefined
+		let rollbackTaskWrites: (() => Promise<void>) | undefined
 		// A cancelled or timed-out switch must not be partially applied: bail out
 		// before the task history / _taskMode writes as well as the durable mode
 		// write below. Aborts that land while the history write is in flight are
@@ -2311,6 +2315,21 @@ export class ClineProvider
 
 				// Only update the task's mode after successful persistence.
 				;(task as any)._taskMode = newMode
+
+				// If the view's durable mode pin below fails after these task-side writes
+				// landed, restore them: the caller delivers the message on the caught
+				// error, and the new task mode must not run against the view's unchanged
+				// mode and mode-linked API configuration.
+				const historyItemBefore = taskHistoryItem
+				rollbackTaskWrites = async () => {
+					task["_taskMode"] = previousTaskMode
+					if (historyItemBefore) {
+						// Restore only the field this switch changed: re-read the item so
+						// fields the running task persisted during the write survive.
+						const latest = this.getTaskHistoryItem(task.taskId) ?? historyItemBefore
+						await this.updateTaskHistory({ ...latest, mode: historyItemBefore.mode })
+					}
+				}
 			} catch (error) {
 				// If persistence fails, log the error but don't update the in-memory state.
 				this.log(
@@ -2337,7 +2356,26 @@ export class ClineProvider
 		if (viewScopedSwitch) {
 			// Pin the view's durable per-view mode first: the pin is this view's own
 			// selection and must not be undone if the shared write later fails.
-			await this.saveViewState("mode", newMode)
+			// If the pin write itself fails, the task-side writes above are already
+			// applied: roll them back before rethrowing so the caller cannot deliver
+			// the message with the new task mode while the view's mode and mode-linked
+			// API configuration stayed old.
+			try {
+				await this.saveViewState("mode", newMode)
+			} catch (error) {
+				if (rollbackTaskWrites) {
+					try {
+						await rollbackTaskWrites()
+					} catch (rollbackError) {
+						this.log(
+							`[handleModeSwitch] Failed to roll back task mode writes after the view mode pin write failed: ${
+								rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+							}`,
+						)
+					}
+				}
+				throw error
+			}
 
 			// setValue (not the deprecated updateGlobalState) so the in-memory viewLocalState
 			// buffer stays in sync with the durable global write: getValues() merges
@@ -2959,6 +2997,16 @@ export class ClineProvider
 
 				// Direct private access: compile-time safe across sibling instances.
 				await instance._saveViewLocalStateFromMutation(values)
+				// The active task of a view pinned to the deleted profile holds its own API
+				// handler and sticky profile name built from the deleted profile: rebuild
+				// the handler with the replacement's settings and re-point the sticky name,
+				// or the running conversation keeps sending the deleted profile's
+				// configuration even though the view's buffer was re-pointed (the posted
+				// state prefers the task's own apiConfiguration).
+				if (replacementSettings) {
+					instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
+				}
+				await instance.persistStickyProviderProfileToCurrentTask(replacementName)
 				await instance.postStateToWebview()
 			}),
 		)
