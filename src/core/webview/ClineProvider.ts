@@ -418,7 +418,11 @@ export class ClineProvider
 	public readonly taskHistoryStore: TaskHistoryStore
 	private taskHistoryStoreInitialized = false
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
-	private providerProfileMutationQueue = Promise.resolve()
+	// Shared across instances: profile mutations rewrite the shared ContextProxy stores, so a
+	// per-instance queue lets another view commit between this view's shared write and its
+	// snapshot compensation, and the compensation would restore a stale copy over the newer
+	// write. One queue serializes every view's profile mutations against each other.
+	private static providerProfileMutationQueue = Promise.resolve()
 	private historyTaskCreationQueue = Promise.resolve()
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
@@ -4598,6 +4602,22 @@ export class ClineProvider
 				}
 			}
 			throw rejected[0].reason
+		}
+
+		// Only after every sibling's re-pin landed: switching a task is not part of the durable
+		// rollback above, so doing it inside the loop would leave a successful sibling's task on
+		// the replacement's handler and sticky name while its pin was compensated back to the
+		// deleted profile. The active task of a view pinned to the deleted profile holds its own
+		// API handler and sticky profile name built from the deleted profile: rebuild the handler
+		// with the replacement's settings and re-point the sticky name, or the running
+		// conversation keeps sending the deleted profile's configuration even though the view's
+		// buffer was re-pointed (the posted state prefers the task's own apiConfiguration).
+		for (const snapshot of snapshots) {
+			if (replacementSettings) {
+				snapshot.instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
+			}
+			await snapshot.instance.persistStickyProviderProfileToCurrentTask(replacementName)
+			await snapshot.instance.postStateToWebview()
 		}
 	}
 
