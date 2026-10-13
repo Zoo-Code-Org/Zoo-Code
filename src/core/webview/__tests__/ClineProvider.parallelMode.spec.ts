@@ -1317,7 +1317,19 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
 			])
-			// The pre-return re-pin resolves the replacement's settings through the manager.
+			// B has an active task built from the doomed profile's settings: the posted
+			// state prefers the task's own apiConfiguration, so the re-pin must rebuild
+			// the task's handler and re-point its sticky profile name too.
+			const siblingTask = {
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "doomed-key" },
+				updateApiConfiguration: vi.fn(),
+				setTaskApiConfigName: vi.fn(),
+			}
+			vi.spyOn(providerB, "getCurrentTask").mockReturnValue(
+				siblingTask as unknown as ReturnType<typeof providerB.getCurrentTask>,
+			)
+
+			// The pre-return re-pin			// The pre-return re-pin resolves the replacement's settings through the manager.
 			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockImplementation(
 				async (_args: { name?: string; id?: string }) =>
 					({
@@ -1342,6 +1354,18 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				openRouterBaseUrl: "repl-url",
 			})
 			expect((await providerB.getState()).currentApiConfigName).toBe("replacement-profile")
+			// The active task's handler is rebuilt with the replacement's settings and
+			// its sticky profile name re-points to the replacement: without this the
+			// running conversation keeps sending the deleted profile's configuration.
+			// objectContaining: the replacement's settings carry the profile id alongside
+			// the provider fields (the name is stripped, the id is not).
+			expect(siblingTask.updateApiConfiguration).toHaveBeenCalledWith(
+				expect.objectContaining({
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterBaseUrl: "repl-url",
+				}),
+			)
+			expect(siblingTask.setTaskApiConfigName).toHaveBeenCalledWith("replacement-profile")
 
 			await providerA.dispose()
 			await providerB.dispose()
