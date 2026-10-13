@@ -132,6 +132,29 @@ describe("ModelSelector", () => {
 		expect(screen.queryByTestId("model-search-input")).not.toBeInTheDocument()
 	})
 
+	test("selecting a Bedrock model clears the ARN fields with null, never an empty string", () => {
+		staticModelsOverride.value = { "model-a": base, "model-b": base }
+		const bedrockConfig: ProviderSettings = {
+			apiProvider: providerIdentifiers.bedrock,
+			apiModelId: "model-a",
+			awsCustomArn: "arn:aws:bedrock:us-east-1:123456789012:inference-profile/old",
+		}
+		render(<ModelSelector apiConfiguration={bedrockConfig} title="Select model" />)
+
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
+		fireEvent.click(screen.getAllByTestId("model-selector-item")[1])
+
+		const [message] = vi.mocked(vscode.postMessage).mock.calls[0]
+		const patch: Record<string, unknown> = message.values?.patch ?? {}
+		expect(patch).toMatchObject({
+			apiModelId: "model-b",
+			awsCustomArn: null,
+			awsCustomArnBaseModelId: null,
+			awsModelContextWindow: null,
+		})
+		expect(Object.values(patch)).not.toContain("")
+	})
+
 	test("model items are real buttons so keyboard users can select them", () => {
 		staticModelsOverride.value = { "model-a": base, "model-b": base }
 

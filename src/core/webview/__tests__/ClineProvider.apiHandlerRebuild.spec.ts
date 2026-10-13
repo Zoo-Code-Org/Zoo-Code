@@ -539,7 +539,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.update_profile_model_partial")
 		})
 
-		test("does not activate the profile after the mutation timed out while waiting for state", async () => {
+		test("finishes activation after the caller timed out instead of leaving a saved but inactive profile", async () => {
 			vi.useFakeTimers()
 
 			try {
@@ -561,14 +561,100 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
 				await update
+				expect(provider["providerSettingsManager"].setModeConfig).not.toHaveBeenCalled()
 
 				release()
 				await vi.advanceTimersByTimeAsync(0)
 
-				expect(provider["providerSettingsManager"].setModeConfig).not.toHaveBeenCalled()
+				const manager = provider["providerSettingsManager"]
+				expect(manager.setModeConfig).toHaveBeenCalledTimes(1)
+				expect(vi.mocked(manager.saveConfig).mock.calls.map(([, config]) => config.openRouterModelId)).toEqual([
+					"anthropic/claude",
+				])
 			} finally {
 				vi.useRealTimers()
 			}
+		})
+
+		test("holds the next profile mutation until a timed-out model update settles", async () => {
+			vi.useFakeTimers()
+
+			try {
+				const realGetState = provider.getState.bind(provider)
+				let release!: () => void
+				const gate = new Promise<void>((resolve) => {
+					release = resolve
+				})
+				let calls = 0
+				vi.spyOn(provider, "getState").mockImplementation(async () => {
+					if (++calls === 2) await gate
+					return realGetState()
+				})
+				const manager = provider["providerSettingsManager"]
+				manager.activateProfile = vi.fn().mockResolvedValue({
+					name: "other-profile",
+					id: "other-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4.1-mini",
+				})
+
+				const update = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+					openRouterModelId: "anthropic/claude",
+				})
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1)
+				await update
+
+				const next = provider.activateProviderProfile({ name: "other-profile" })
+				await vi.advanceTimersByTimeAsync(0)
+				expect(manager.activateProfile).not.toHaveBeenCalled()
+
+				release()
+				await vi.advanceTimersByTimeAsync(0)
+				await next
+
+				expect(manager.activateProfile).toHaveBeenCalledTimes(1)
+				// One write set from the model update, one from the queued activation.
+				expect(manager.setModeConfig).toHaveBeenCalledTimes(2)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		test("waits for every activation write before restoring the previous profile", async () => {
+			const manager = provider["providerSettingsManager"]
+			const events: string[] = []
+			let releaseContext!: () => void
+			const contextWrite = new Promise<void>((resolve) => {
+				releaseContext = resolve
+			})
+			vi.mocked(manager.setModeConfig).mockImplementationOnce(async () => {
+				events.push("activation:failed")
+				throw new Error("activation failed")
+			})
+			vi.spyOn(provider.contextProxy, "setProviderSettings").mockImplementationOnce(async () => {
+				await contextWrite
+				events.push("context:written")
+			})
+			vi.mocked(manager.saveConfig).mockImplementation(async (_name, config) => {
+				events.push(`save:${config.openRouterModelId}`)
+				return "test-id"
+			})
+
+			const update = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+			})
+			await vi.waitFor(() => expect(events).toContain("activation:failed"))
+			expect(events).not.toContain("save:openai/gpt-4")
+
+			releaseContext()
+			await update
+
+			expect(events).toEqual([
+				"save:anthropic/claude",
+				"activation:failed",
+				"context:written",
+				"save:openai/gpt-4",
+			])
 		})
 
 		test("rejects a model that the organization allow-list forbids", async () => {

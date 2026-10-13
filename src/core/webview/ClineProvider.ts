@@ -273,7 +273,15 @@ export class ClineProvider
 		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
 	}
 
-	private enqueueProviderProfileMutation<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+	/**
+	 * With `runToCompletion`, a timeout only rejects the caller: the mutation is not aborted and the
+	 * queue advances once it settles. Use it for multi-write mutations that must not stop halfway
+	 * (storage saved but not activated) or overlap with the next mutation.
+	 */
+	private enqueueProviderProfileMutation<T>(
+		fn: (signal: AbortSignal) => Promise<T>,
+		options: { runToCompletion?: boolean } = {},
+	): Promise<T> {
 		const controller = new AbortController()
 		// Run fn after either outcome so a rejected mutation never poisons the queue.
 		const run = this.providerProfileMutationQueue.then(
@@ -281,6 +289,11 @@ export class ClineProvider
 			() => fn(controller.signal),
 		)
 		const callerResult = this.withProviderProfileMutationTimeout(run, () => {
+			if (options.runToCompletion) {
+				this.log("Provider profile mutation timed out; waiting for it to finish before the next mutation")
+				return
+			}
+
 			controller.abort()
 			this.log("Provider profile mutation timed out; aborting in-flight mutation")
 		})
@@ -304,7 +317,7 @@ export class ClineProvider
 
 		// Advance from the timeout-bounded result. Each fn checks its AbortSignal before
 		// writing state, so advancing the queue on timeout cannot produce stale overwrites.
-		this.providerProfileMutationQueue = callerResult.then(
+		this.providerProfileMutationQueue = (options.runToCompletion ? run : callerResult).then(
 			() => undefined,
 			() => undefined,
 		)
@@ -1917,65 +1930,65 @@ export class ClineProvider
 		let partialState = false
 
 		try {
-			await this.enqueueProviderProfileMutation(async (signal) => {
-				const { name: _name, ...stored } = await this.providerSettingsManager.getProfile({ name })
+			await this.enqueueProviderProfileMutation(
+				async (signal) => {
+					const { name: _name, ...stored } = await this.providerSettingsManager.getProfile({ name })
 
-				if (stored.apiProvider !== expectedProvider) {
-					throw new Error(
-						`Profile "${name}" provider changed from "${expectedProvider}" to "${String(stored.apiProvider)}"`,
-					)
-				}
-
-				const merged: Record<string, unknown> = { ...stored }
-
-				for (const [key, value] of Object.entries(patch)) {
-					if (PROFILE_MODEL_ID_PATCH_KEYS.has(key)) {
-						if (typeof value !== "string" || value.length === 0) {
-							throw new Error(`Key "${key}" must be a non-empty string in a model patch`)
-						}
-
-						merged[key] = value
-					} else if (PROFILE_MODEL_RESET_ONLY_KEYS.has(key)) {
-						if (value !== null && value !== undefined) {
-							throw new Error(`Key "${key}" can only be cleared in a model patch`)
-						}
-
-						delete merged[key]
-					} else {
-						throw new Error(`Key "${key}" is not allowed in a model patch`)
+					if (stored.apiProvider !== expectedProvider) {
+						throw new Error(
+							`Profile "${name}" provider changed from "${expectedProvider}" to "${String(stored.apiProvider)}"`,
+						)
 					}
-				}
 
-				const { organizationAllowList } = await this.getState()
+					const merged: Record<string, unknown> = { ...stored }
 
-				if (!ProfileValidator.isProfileAllowed(merged as ProviderSettings, organizationAllowList)) {
-					throw new OrganizationAllowListViolationError(t("common:errors.violated_organization_allowlist"))
-				}
+					for (const [key, value] of Object.entries(patch)) {
+						if (PROFILE_MODEL_ID_PATCH_KEYS.has(key)) {
+							if (typeof value !== "string" || value.length === 0) {
+								throw new Error(`Key "${key}" must be a non-empty string in a model patch`)
+							}
 
-				if (signal.aborted) return
+							merged[key] = value
+						} else if (PROFILE_MODEL_RESET_ONLY_KEYS.has(key)) {
+							if (value !== null && value !== undefined) {
+								throw new Error(`Key "${key}" can only be cleared in a model patch`)
+							}
 
-				try {
-					await this.persistProviderProfile(name, merged as ProviderSettings, true, signal)
-				} catch (persistError) {
-					// Saving and activating are separate writes. Put the previous profile back so
-					// storage, context settings, and the task do not disagree about the model.
+							delete merged[key]
+						} else {
+							throw new Error(`Key "${key}" is not allowed in a model patch`)
+						}
+					}
+
+					const { organizationAllowList } = await this.getState()
+
+					if (!ProfileValidator.isProfileAllowed(merged as ProviderSettings, organizationAllowList)) {
+						throw new OrganizationAllowListViolationError(
+							t("common:errors.violated_organization_allowlist"),
+						)
+					}
+
+					if (signal.aborted) return
+
 					try {
-						await this.persistProviderProfile(
-							name,
-							stored as ProviderSettings,
-							true,
-							new AbortController().signal,
-						)
-					} catch (restoreError) {
-						partialState = true
-						this.log(
-							`Error restoring profile after failed model update: ${JSON.stringify(restoreError, Object.getOwnPropertyNames(restoreError), 2)}`,
-						)
-					}
+						await this.persistProviderProfile(name, merged as ProviderSettings, true, signal)
+					} catch (persistError) {
+						// Saving and activating are separate writes. Put the previous profile back so
+						// storage, context settings, and the task do not disagree about the model.
+						try {
+							await this.persistProviderProfile(name, stored as ProviderSettings, true, signal)
+						} catch (restoreError) {
+							partialState = true
+							this.log(
+								`Error restoring profile after failed model update: ${JSON.stringify(restoreError, Object.getOwnPropertyNames(restoreError), 2)}`,
+							)
+						}
 
-					throw persistError
-				}
-			})
+						throw persistError
+					}
+				},
+				{ runToCompletion: true },
+			)
 		} catch (error) {
 			this.log(`Error update profile model: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`)
 
@@ -2019,12 +2032,18 @@ export class ClineProvider
 			// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
 			// We should probably switch to that and verify that it works.
 			// I left the original implementation in just to be safe.
-			await Promise.all([
+			// `allSettled` so a caller that rolls back after a failure never races a write still in flight.
+			const activationResults = await Promise.allSettled([
 				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
 				this.updateGlobalState("currentApiConfigName", name),
 				this.providerSettingsManager.setModeConfig(mode, id),
 				this.contextProxy.setProviderSettings(providerSettings),
 			])
+			const failedActivation = activationResults.find(
+				(result): result is PromiseRejectedResult => result.status === "rejected",
+			)
+
+			if (failedActivation) throw failedActivation.reason
 
 			if (signal.aborted) return id
 

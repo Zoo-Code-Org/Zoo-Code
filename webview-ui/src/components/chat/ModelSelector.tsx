@@ -142,7 +142,8 @@ export const ModelSelector = ({
 			const patch: Record<string, unknown> = { [modelIdField]: modelId }
 
 			handleModelChangeSideEffects(provider, modelId, (f, v) => {
-				patch[f] = v ?? null
+				// The host accepts only `null` to clear a key, but the shared helper clears Bedrock fields with "".
+				patch[f] = v === undefined || v === "" ? null : v
 			})
 
 			vscode.postMessage({
