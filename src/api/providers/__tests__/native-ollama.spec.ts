@@ -2538,6 +2538,68 @@ describe("NativeOllamaHandler", () => {
 			await withDeadline(settledMergedPost, 500)
 		})
 
+		it("should cancel the merged transport signal when the caller aborts while the SDK signal stays un-aborted", async () => {
+			let receivedSignal: AbortSignal | undefined
+			const fetchSpy = vi.fn((_url: string, init?: RequestInit) => {
+				receivedSignal = init?.signal ?? undefined
+				return new Promise<Response>((_resolve, reject) => {
+					init?.signal?.addEventListener(
+						"abort",
+						() => reject(new DOMException("This operation was aborted", "AbortError")),
+						{ once: true },
+					)
+				})
+			})
+			vi.stubGlobal("fetch", fetchSpy)
+
+			// Keep chat() pending so the caller aborts while the request is in
+			// flight; the SDK's own fetch signal is never aborted in this scenario.
+			let resolveChat: ((value: { message: { content: string } }) => void) | undefined
+			mockChat.mockReturnValue(
+				new Promise<{ message: { content: string } }>((resolve) => {
+					resolveChat = resolve
+				}),
+			)
+
+			const controller = new AbortController()
+			// Attach the settlement handlers up front: the caller abort may reject the
+			// prompt (discovery race) or leave it pending on chat, and either outcome
+			// must be observed without an unhandled rejection.
+			const promptOutcome = handler.completePrompt("Test prompt", { abortSignal: controller.signal }).then(
+				(content) => ({ aborted: false as const, content }),
+				(error: unknown) => ({ aborted: true as const, error }),
+			)
+
+			// completePrompt constructs the per-request client synchronously.
+			const clientOptions = OllamaMock.mock.calls.at(-1)![0] as ConstructorOptions
+			expect(clientOptions.fetch).toBeTypeOf("function")
+
+			const sdkController = new AbortController()
+			const post = clientOptions.fetch!("http://localhost:11434/api/chat", { signal: sdkController.signal })
+			expect(receivedSignal).toBeInstanceOf(AbortSignal)
+			expect(receivedSignal).not.toBe(sdkController.signal)
+			expect(receivedSignal?.aborted).toBe(false)
+
+			// Regression pin: caller-side cancellation must reach the transport
+			// even though the SDK's own signal stays un-aborted. Dropping
+			// requestSignal from the AbortSignal.any merge leaves this signal live
+			// and the POST pending forever.
+			controller.abort()
+			expect(receivedSignal?.aborted).toBe(true)
+			await withDeadline(expect(post).rejects.toMatchObject({ name: "AbortError" }), 500)
+
+			// Let the mocked chat settle so no promise dangles, then observe the
+			// prompt's outcome: aborted mid-discovery it rejects with the contract
+			// AbortError; past discovery it resolves with the late response.
+			resolveChat?.({ message: { content: "late" } })
+			const outcome = await promptOutcome
+			if (outcome.aborted) {
+				expect(outcome.error).toMatchObject({ name: "AbortError" })
+			} else {
+				expect(outcome.content).toBe("late")
+			}
+		})
+
 		it("should abort the injected transport when the SDK fetch call carries no init signal", async () => {
 			const fetchSpy = heldOpenFetch()
 			vi.stubGlobal("fetch", fetchSpy)
