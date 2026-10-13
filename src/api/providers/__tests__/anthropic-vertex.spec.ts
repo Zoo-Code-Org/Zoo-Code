@@ -1285,7 +1285,7 @@ describe("VertexHandler", () => {
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 				}),
 				undefined,
 			)
@@ -1316,7 +1316,7 @@ describe("VertexHandler", () => {
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 				}),
 				undefined,
 			)
@@ -1347,7 +1347,7 @@ describe("VertexHandler", () => {
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 				}),
 				undefined,
 			)
@@ -1380,7 +1380,7 @@ describe("VertexHandler", () => {
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 				}),
 				undefined,
 			)
@@ -1411,7 +1411,7 @@ describe("VertexHandler", () => {
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 				}),
 				undefined,
 			)
@@ -1444,7 +1444,7 @@ describe("VertexHandler", () => {
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 				}),
 				undefined,
 			)
@@ -1452,6 +1452,177 @@ describe("VertexHandler", () => {
 			const request = mockCreate.mock.calls[0][0]
 			expect(request.thinking).not.toHaveProperty("budget_tokens")
 			expect(request.temperature).toBeUndefined()
+		})
+
+		it("should surface thinking_tokens from output_tokens_details in usage chunks", async () => {
+			const thinkingTokensHandler = new AnthropicVertexHandler({
+				apiModelId: "claude-opus-4-8",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+				enableReasoningEffort: true,
+			})
+
+			const mockCreate = vitest.fn().mockImplementation(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 100,
+								output_tokens: 10,
+								output_tokens_details: {
+									thinking_tokens: 5,
+								},
+							},
+						},
+					},
+					{
+						type: "message_delta",
+						usage: {
+							output_tokens: 200,
+							output_tokens_details: {
+								thinking_tokens: 150,
+							},
+						},
+					},
+				]),
+			)
+			// Object.assign avoids the SDK's streaming-overload cast that a direct property assignment would require
+			Object.assign(thinkingTokensHandler["client"].messages, { create: mockCreate })
+
+			const stream = thinkingTokensHandler.createMessage("You are a helpful assistant", [
+				{ role: "user", content: "Hello" },
+			])
+			const chunks = await collectStream(stream)
+
+			expect(chunks).toEqual([
+				{
+					type: "usage",
+					inputTokens: 100,
+					outputTokens: 10,
+					reasoningTokens: 5,
+				},
+				{
+					type: "usage",
+					inputTokens: 0,
+					outputTokens: 200,
+					reasoningTokens: 150,
+				},
+			])
+		})
+
+		it("should omit reasoningTokens when output_tokens_details.thinking_tokens is unset", async () => {
+			const noThinkingDetailsHandler = new AnthropicVertexHandler({
+				apiModelId: "claude-opus-4-8",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+				enableReasoningEffort: true,
+			})
+
+			const mockCreate = vitest.fn().mockImplementation(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 100,
+								output_tokens: 10,
+							},
+						},
+					},
+					{
+						type: "message_delta",
+						usage: {
+							output_tokens: 200,
+						},
+					},
+				]),
+			)
+			// Object.assign avoids the SDK's streaming-overload cast that a direct property assignment would require
+			Object.assign(noThinkingDetailsHandler["client"].messages, { create: mockCreate })
+
+			const stream = noThinkingDetailsHandler.createMessage("You are a helpful assistant", [
+				{ role: "user", content: "Hello" },
+			])
+			const chunks = await collectStream(stream)
+
+			expect(chunks).toEqual([
+				{
+					type: "usage",
+					inputTokens: 100,
+					outputTokens: 10,
+				},
+				{
+					type: "usage",
+					inputTokens: 0,
+					outputTokens: 200,
+				},
+			])
+			// Property absence, not just undefined: toEqual ignores own properties whose
+			// value is undefined, so a regression that adds `reasoningTokens: undefined`
+			// to either chunk must fail these assertions.
+			expect(chunks[0]).not.toHaveProperty("reasoningTokens")
+			expect(chunks[1]).not.toHaveProperty("reasoningTokens")
+		})
+
+		it("should preserve a zero-valued thinking_tokens in message_start and message_delta usage chunks", async () => {
+			const zeroThinkingHandler = new AnthropicVertexHandler({
+				apiModelId: "claude-opus-4-8",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+				enableReasoningEffort: true,
+			})
+
+			const mockCreate = vitest.fn().mockImplementation(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 100,
+								output_tokens: 10,
+								output_tokens_details: {
+									thinking_tokens: 0,
+								},
+							},
+						},
+					},
+					{
+						type: "message_delta",
+						usage: {
+							output_tokens: 200,
+							output_tokens_details: {
+								thinking_tokens: 0,
+							},
+						},
+					},
+				]),
+			)
+			// Object.assign avoids the SDK's streaming-overload cast that a direct property assignment would require
+			Object.assign(zeroThinkingHandler["client"].messages, { create: mockCreate })
+
+			const stream = zeroThinkingHandler.createMessage("You are a helpful assistant", [
+				{ role: "user", content: "Hello" },
+			])
+			const chunks = await collectStream(stream)
+
+			// A zero-valued `thinking_tokens` is valid numeric telemetry (the
+			// model skipped thinking this turn); both usage chunks must preserve
+			// it as 0 rather than dropping it via a truthiness check.
+			expect(chunks).toEqual([
+				{
+					type: "usage",
+					inputTokens: 100,
+					outputTokens: 10,
+					reasoningTokens: 0,
+				},
+				{
+					type: "usage",
+					inputTokens: 0,
+					outputTokens: 200,
+					reasoningTokens: 0,
+				},
+			])
 		})
 	})
 
