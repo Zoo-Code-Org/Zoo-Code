@@ -119,7 +119,8 @@
 		"settings": "Modelinstellingen",
 		"description": "Kies het model dat voor deze API-configuratie wordt gebruikt.",
 		"searchPlaceholder": "Modellen zoeken...",
-		"unsupportedTooltip": "Het model van deze provider wordt in de Instellingen geconfigureerd"
+		"unsupportedTooltip": "Het model van deze provider wordt in de Instellingen geconfigureerd",
+		"loading": "Modellen laden..."
 	},
 	"lockApiConfigAcrossModes": "API-configuratie vergrendelen voor alle modi in deze werkruimte",
 	"unlockApiConfigAcrossModes": "API-configuratie is vergrendeld voor alle modi in deze werkruimte (klik om te ontgrendelen)",

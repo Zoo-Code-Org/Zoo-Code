@@ -149,7 +149,8 @@
 		"settings": "Pengaturan Model",
 		"description": "Pilih model yang digunakan untuk konfigurasi API ini.",
 		"searchPlaceholder": "Cari model...",
-		"unsupportedTooltip": "Model penyedia ini dikonfigurasi di Pengaturan"
+		"unsupportedTooltip": "Model penyedia ini dikonfigurasi di Pengaturan",
+		"loading": "Memuat model..."
 	},
 	"lockApiConfigAcrossModes": "Kunci konfigurasi API di semua mode dalam workspace ini",
 	"unlockApiConfigAcrossModes": "Konfigurasi API terkunci di semua mode dalam workspace ini (klik untuk membuka kunci)",

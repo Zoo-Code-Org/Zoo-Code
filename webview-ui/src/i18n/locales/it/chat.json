@@ -119,7 +119,8 @@
 		"settings": "Impostazioni del modello",
 		"description": "Scegli il modello da usare per questa configurazione API.",
 		"searchPlaceholder": "Cerca modelli...",
-		"unsupportedTooltip": "Il modello di questo provider si configura nelle Impostazioni"
+		"unsupportedTooltip": "Il modello di questo provider si configura nelle Impostazioni",
+		"loading": "Caricamento dei modelli..."
 	},
 	"lockApiConfigAcrossModes": "Blocca la configurazione API per tutte le modalità in questo workspace",
 	"unlockApiConfigAcrossModes": "La configurazione API è bloccata per tutte le modalità in questo workspace (clicca per sbloccare)",

@@ -2368,3 +2368,44 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		expect(TelemetryService.instance.updateTelemetryState).not.toHaveBeenCalled()
 	})
 })
+
+describe("updateProfileModel", () => {
+	let updateProfileModel: Mock<ClineProvider["updateProfileModel"]>
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		updateProfileModel = vi.fn<ClineProvider["updateProfileModel"]>().mockResolvedValue(undefined)
+		mockClineProvider.updateProfileModel = updateProfileModel
+	})
+
+	it("delegates a valid message to the provider", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateProfileModel",
+			text: "my-profile",
+			values: {
+				expectedProvider: providerIdentifiers.openrouter,
+				patch: { openRouterModelId: "a/b", reasoningEffort: null },
+			},
+		})
+
+		expect(updateProfileModel).toHaveBeenCalledWith("my-profile", providerIdentifiers.openrouter, {
+			openRouterModelId: "a/b",
+			reasoningEffort: null,
+		})
+	})
+
+	it.each([
+		["missing profile name", { values: { expectedProvider: providerIdentifiers.openrouter, patch: {} } }],
+		["missing expectedProvider", { text: "p", values: { patch: {} } }],
+		["non-object patch", { text: "p", values: { expectedProvider: providerIdentifiers.openrouter, patch: "x" } }],
+		["array patch", { text: "p", values: { expectedProvider: providerIdentifiers.openrouter, patch: [] } }],
+		["missing values", { text: "p" }],
+	])("ignores a malformed message: %s", async (_label, partial) => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateProfileModel",
+			...partial,
+		} as unknown as Parameters<typeof webviewMessageHandler>[1])
+
+		expect(updateProfileModel).not.toHaveBeenCalled()
+	})
+})

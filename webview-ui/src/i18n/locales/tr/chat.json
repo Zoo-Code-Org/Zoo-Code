@@ -119,7 +119,8 @@
 		"settings": "Model Ayarları",
 		"description": "Bu API yapılandırması için kullanılacak modeli seçin.",
 		"searchPlaceholder": "Model ara...",
-		"unsupportedTooltip": "Bu sağlayıcının modeli Ayarlar'da yapılandırılır"
+		"unsupportedTooltip": "Bu sağlayıcının modeli Ayarlar'da yapılandırılır",
+		"loading": "Modeller yükleniyor..."
 	},
 	"lockApiConfigAcrossModes": "Bu çalışma alanındaki tüm modlarda API yapılandırmasını kilitle",
 	"unlockApiConfigAcrossModes": "Bu çalışma alanındaki tüm modlarda API yapılandırması kilitli (kilidi açmak için tıkla)",

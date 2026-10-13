@@ -119,7 +119,8 @@
 		"settings": "Modelleinstellungen",
 		"description": "Wähle das Modell für diese API-Konfiguration aus.",
 		"searchPlaceholder": "Modelle suchen...",
-		"unsupportedTooltip": "Das Modell dieses Anbieters wird in den Einstellungen konfiguriert"
+		"unsupportedTooltip": "Das Modell dieses Anbieters wird in den Einstellungen konfiguriert",
+		"loading": "Modelle werden geladen..."
 	},
 	"lockApiConfigAcrossModes": "API-Konfiguration für alle Modi in diesem Arbeitsbereich sperren",
 	"unlockApiConfigAcrossModes": "API-Konfiguration ist für alle Modi in diesem Arbeitsbereich gesperrt (klicke zum Entsperren)",

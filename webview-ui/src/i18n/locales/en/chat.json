@@ -157,7 +157,8 @@
 		"settings": "Model Settings",
 		"description": "Choose the model used for this API configuration.",
 		"searchPlaceholder": "Search models...",
-		"unsupportedTooltip": "This provider's model is configured in Settings"
+		"unsupportedTooltip": "This provider's model is configured in Settings",
+		"loading": "Loading models..."
 	},
 	"enhancePromptDescription": "The 'Enhance Prompt' button helps improve your prompt by providing additional context, clarification, or rephrasing. Try typing a prompt in here and clicking the button again to see how it works.",
 	"addImages": "Add images to message",

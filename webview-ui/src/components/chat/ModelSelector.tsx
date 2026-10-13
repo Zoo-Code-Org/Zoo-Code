@@ -47,28 +47,25 @@ function getModelIdField(provider: ProviderName): string | undefined {
 
 function useModelListForProvider(provider: ProviderName | undefined, apiConfiguration?: ProviderSettings) {
 	const isStatic = provider ? isStaticModelProvider(provider) : false
-	const isUnsupported = !provider || UNSUPPORTED_QUICK_PICK_PROVIDERS.includes(provider)
+	const field = provider ? getModelIdField(provider) : undefined
+	const isUnsupported = !provider || !field || UNSUPPORTED_QUICK_PICK_PROVIDERS.includes(provider)
 	const isRouterProvider = !isStatic && !isUnsupported
 
 	const routerModels = useRouterModels({ provider, enabled: isRouterProvider })
 	const routerModelsData = routerModels.data as Record<string, Record<string, ModelInfo>> | undefined
+	const isLoading = isRouterProvider && routerModels.isLoading
 
 	return React.useMemo(() => {
-		if (!provider || isUnsupported) {
-			return { isUnsupported: true as const, field: undefined, models: null }
-		}
-
-		const field = getModelIdField(provider)
-		if (!field) {
-			return { isUnsupported: true as const, field: undefined, models: null }
+		if (!provider || !field || isUnsupported) {
+			return { isUnsupported: true as const, field: undefined, models: null, isLoading: false }
 		}
 
 		const models = isStatic
 			? getStaticModelsForProvider(provider, undefined, apiConfiguration)
 			: (routerModelsData?.[provider] ?? null)
 
-		return { isUnsupported: false as const, field, models }
-	}, [provider, isUnsupported, isStatic, apiConfiguration, routerModelsData])
+		return { isUnsupported: false as const, field, models, isLoading }
+	}, [provider, field, isUnsupported, isStatic, apiConfiguration, routerModelsData, isLoading])
 }
 
 interface ModelSelectorProps {
@@ -95,7 +92,7 @@ export const ModelSelector = ({
 	const provider: ProviderName | undefined = isRetiredProvider(providerRaw) ? undefined : providerRaw
 
 	const { id: selectedModelId, info: selectedModelInfo } = useSelectedModel(apiConfiguration)
-	const { isUnsupported, field, models } = useModelListForProvider(provider, apiConfiguration)
+	const { isUnsupported, field, models, isLoading } = useModelListForProvider(provider, apiConfiguration)
 
 	const filteredModelRecord = React.useMemo(
 		() => filterModels(models, provider, organizationAllowList),
@@ -136,26 +133,25 @@ export const ModelSelector = ({
 		setOpen(false)
 	}, [])
 
-	// Reuses the same `upsertApiConfiguration` path Settings' Save button uses,
-	// so the change persists and activates immediately for the current task.
+	// The host merges this patch into the latest stored profile, so a stale
+	// snapshot cannot overwrite newer settings. `null` clears a key.
 	const handleModelChange = React.useCallback(
 		(modelIdField: string, modelId: string) => {
-			if (!apiConfiguration || !provider) return
+			if (!provider) return
 
-			const updatedConfig = { ...apiConfiguration } as ProviderSettings
-			;(updatedConfig as Record<string, unknown>)[modelIdField] = modelId
+			const patch: Record<string, unknown> = { [modelIdField]: modelId }
 
 			handleModelChangeSideEffects(provider, modelId, (f, v) => {
-				;(updatedConfig as Record<string, unknown>)[f] = v
+				patch[f] = v ?? null
 			})
 
 			vscode.postMessage({
-				type: "upsertApiConfiguration",
+				type: "updateProfileModel",
 				text: currentApiConfigName,
-				apiConfiguration: updatedConfig,
+				values: { expectedProvider: provider, patch },
 			})
 		},
-		[apiConfiguration, currentApiConfigName, provider],
+		[currentApiConfigName, provider],
 	)
 
 	const handleSelect = React.useCallback(
@@ -250,7 +246,11 @@ export const ModelSelector = ({
 					)}
 
 					<div className="max-h-[300px] overflow-y-auto">
-						{filteredModelIds.length === 0 ? (
+						{isLoading ? (
+							<div className="py-2 px-3 text-sm text-vscode-foreground/70" role="status">
+								{t("chat:modelSelector.loading")}
+							</div>
+						) : filteredModelIds.length === 0 ? (
 							<div className="py-2 px-3 text-sm text-vscode-foreground/70">
 								{t("common:ui.no_results")}
 							</div>
@@ -260,11 +260,15 @@ export const ModelSelector = ({
 									const isSelected = modelId === selectedModelId
 									const modelInfo = filteredModelRecord?.[modelId]
 									return (
-										<div
+										<button
+											type="button"
 											key={modelId}
 											onClick={() => handleSelect(modelId)}
+											aria-current={isSelected ? "true" : undefined}
 											className={cn(
-												"px-3 py-1.5 text-sm cursor-pointer flex items-center",
+												"w-full px-3 py-1.5 text-sm text-left cursor-pointer flex items-center",
+												"bg-transparent border-0 text-vscode-foreground",
+												"focus-visible:outline focus-visible:outline-1 focus-visible:outline-vscode-focusBorder",
 												"hover:bg-vscode-list-hoverBackground",
 												isSelected
 													? "bg-vscode-list-activeSelectionBackground text-vscode-list-activeSelectionForeground"
@@ -275,7 +279,7 @@ export const ModelSelector = ({
 												<div className="truncate">{modelInfo?.displayName ?? modelId}</div>
 											</div>
 											{isSelected && <Check className="ml-auto size-4 p-0.5" />}
-										</div>
+										</button>
 									)
 								})}
 							</div>

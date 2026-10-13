@@ -428,6 +428,97 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		})
 	})
 
+	describe("updateProfileModel", () => {
+		const storedProfile = {
+			name: "test-config",
+			id: "test-id",
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4",
+			rateLimitSeconds: 5,
+			reasoningEffort: "high",
+		}
+
+		beforeEach(() => {
+			provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue(storedProfile)
+			vi.mocked(vscode.window.showErrorMessage).mockClear()
+		})
+
+		test("merges the patch into the latest stored profile, keeping newer settings and clearing null keys", async () => {
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+				reasoningEffort: null,
+			})
+
+			const saveConfig = vi.mocked(provider["providerSettingsManager"].saveConfig)
+			expect(saveConfig).toHaveBeenCalledTimes(1)
+			const [name, saved] = saveConfig.mock.calls[0]
+			expect(name).toBe("test-config")
+			expect(saved).toMatchObject({
+				id: "test-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "anthropic/claude",
+				rateLimitSeconds: 5,
+			})
+			expect(saved).not.toHaveProperty("reasoningEffort")
+			expect(saved).not.toHaveProperty("name")
+		})
+
+		test("rebuilds the current task API handler with the new model", async () => {
+			const mockTask = new Task({ ...defaultTaskOptions })
+			mockTask.api = {
+				getModel: vi.fn().mockReturnValue({ id: "openai/gpt-4", info: { contextWindow: 128000 } }),
+			} as unknown as typeof mockTask.api
+			await provider.addClineToStack(mockTask)
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+			})
+
+			expect(mockTask.updateApiConfiguration).toHaveBeenCalledWith(
+				expect.objectContaining({ openRouterModelId: "anthropic/claude" }),
+			)
+		})
+
+		test("rejects the update when the stored provider differs from the expected provider", async () => {
+			await provider.updateProfileModel("test-config", providerIdentifiers.anthropic, {
+				apiModelId: "claude-sonnet-4-5",
+			})
+
+			expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+		})
+
+		test("rejects patch keys outside the model and reset allow-list", async () => {
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+				openRouterApiKey: "stolen",
+			})
+
+			expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+		})
+
+		test("rejects a model that the organization allow-list forbids", async () => {
+			const realGetState = provider.getState.bind(provider)
+			vi.spyOn(provider, "getState").mockImplementation(async () => ({
+				...(await realGetState()),
+				organizationAllowList: {
+					allowAll: false,
+					providers: {
+						[providerIdentifiers.openrouter]: { allowAll: false, models: ["openai/gpt-4"] },
+					},
+				},
+			}))
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+			})
+
+			expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+		})
+	})
+
 	describe("activateProviderProfile", () => {
 		test("serializes provider profile mutations without interleaving", async () => {
 			const events: string[] = []

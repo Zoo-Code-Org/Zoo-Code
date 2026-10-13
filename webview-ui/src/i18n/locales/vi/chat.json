@@ -119,7 +119,8 @@
 		"settings": "Cài đặt mô hình",
 		"description": "Chọn mô hình được dùng cho cấu hình API này.",
 		"searchPlaceholder": "Tìm kiếm mô hình...",
-		"unsupportedTooltip": "Mô hình của nhà cung cấp này được cấu hình trong Cài đặt"
+		"unsupportedTooltip": "Mô hình của nhà cung cấp này được cấu hình trong Cài đặt",
+		"loading": "Đang tải mô hình..."
 	},
 	"lockApiConfigAcrossModes": "Khóa cấu hình API cho tất cả chế độ trong workspace này",
 	"unlockApiConfigAcrossModes": "Cấu hình API đã bị khóa cho tất cả chế độ trong workspace này (nhấn để mở khóa)",

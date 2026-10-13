@@ -146,7 +146,8 @@
 		"settings": "模型設定",
 		"description": "選擇此 API 設定使用的模型。",
 		"searchPlaceholder": "搜尋模型...",
-		"unsupportedTooltip": "此供應商的模型需在設定中配置"
+		"unsupportedTooltip": "此供應商的模型需在設定中配置",
+		"loading": "正在載入模型..."
 	},
 	"lockApiConfigAcrossModes": "鎖定此工作區所有模式的 API 設定",
 	"unlockApiConfigAcrossModes": "此工作區所有模式的 API 設定已鎖定（點擊解鎖）",

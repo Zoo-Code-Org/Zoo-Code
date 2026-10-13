@@ -10,11 +10,13 @@ vi.mock("@/utils/vscode", () => ({
 	},
 }))
 
+const extensionState = vi.hoisted(() => ({
+	organizationAllowList: { allowAll: true, providers: {} } as Record<string, unknown>,
+	currentApiConfigName: "default",
+}))
+
 vi.mock("@/context/ExtensionStateContext", () => ({
-	useExtensionState: () => ({
-		organizationAllowList: { allowAll: true, providers: {} },
-		currentApiConfigName: "default",
-	}),
+	useExtensionState: () => extensionState,
 }))
 
 vi.mock("@/i18n/TranslationContext", () => ({
@@ -25,6 +27,18 @@ vi.mock("@/i18n/TranslationContext", () => ({
 
 vi.mock("@/components/ui/hooks/useRooPortal", () => ({
 	useRooPortal: () => document.body,
+}))
+
+const routerModelsResult = vi.hoisted(() => ({
+	value: { data: undefined, isLoading: false } as { data: unknown; isLoading: boolean },
+	calls: [] as unknown[],
+}))
+
+vi.mock("@/components/ui/hooks/useRouterModels", () => ({
+	useRouterModels: (opts: unknown) => {
+		routerModelsResult.calls.push(opts)
+		return routerModelsResult.value
+	},
 }))
 
 const staticModelsOverride = vi.hoisted(() => ({ value: undefined as Record<string, unknown> | undefined }))
@@ -40,6 +54,8 @@ vi.mock("@/components/settings/utils/providerModelConfig", async (importOriginal
 
 import { vscode } from "@/utils/vscode"
 
+const base = { contextWindow: 1000, supportsPromptCache: false }
+
 describe("ModelSelector", () => {
 	const anthropicConfig: ProviderSettings = {
 		apiProvider: providerIdentifiers.anthropic,
@@ -49,46 +65,15 @@ describe("ModelSelector", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		staticModelsOverride.value = undefined
-	})
-
-	test("re-selecting the active model does not post a config update", () => {
-		render(<ModelSelector apiConfiguration={anthropicConfig} title="Select model" />)
-
-		fireEvent.click(screen.getByTestId("model-selector-trigger"))
-		fireEvent.change(screen.getByTestId("model-search-input"), { target: { value: "claude-sonnet-4-5" } })
-		const items = screen.getAllByTestId("model-selector-item")
-		const active = items.find((el) => el.querySelector(".lucide-check"))!
-		fireEvent.click(active)
-
-		expect(vscode.postMessage).not.toHaveBeenCalled()
-		expect(screen.queryByTestId("model-search-input")).not.toBeInTheDocument()
-	})
-
-	test("hides deprecated models except the currently selected one", () => {
-		const base = { contextWindow: 1000, supportsPromptCache: false }
-		staticModelsOverride.value = {
-			"model-active": { ...base, deprecated: true },
-			"model-old": { ...base, deprecated: true },
-			"model-new": base,
-		}
-
-		render(
-			<ModelSelector
-				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic, apiModelId: "model-active" }}
-				title="Select model"
-			/>,
-		)
-
-		fireEvent.click(screen.getByTestId("model-selector-trigger"))
-
-		const labels = screen.getAllByTestId("model-selector-item").map((el) => el.textContent)
-		expect(labels).toEqual(["model-active", "model-new"])
+		routerModelsResult.value = { data: undefined, isLoading: false }
+		routerModelsResult.calls = []
+		extensionState.organizationAllowList = { allowAll: true, providers: {} }
 	})
 
 	test("shows the currently selected model on the trigger for a static-model provider", () => {
 		render(<ModelSelector apiConfiguration={anthropicConfig} title="Select model" />)
 
-		expect(screen.getByTestId("model-selector-trigger")).toBeInTheDocument()
+		expect(screen.getByTestId("model-selector-trigger")).toHaveTextContent("claude-sonnet-4-5")
 	})
 
 	test("disables the trigger when disabled", () => {
@@ -112,7 +97,18 @@ describe("ModelSelector", () => {
 		expect(filteredItems.length).toBeLessThan(allItems.length)
 	})
 
-	test("selecting a model persists it via upsertApiConfiguration and closes the popover", () => {
+	test("shows the description instead of a search bar when there are 6 or fewer models", () => {
+		staticModelsOverride.value = { "model-a": base, "model-b": base }
+
+		render(<ModelSelector apiConfiguration={anthropicConfig} title="Select model" />)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
+
+		expect(screen.queryByTestId("model-search-input")).not.toBeInTheDocument()
+		expect(screen.getByText("chat:modelSelector.description")).toBeInTheDocument()
+		expect(screen.getAllByTestId("model-selector-item")).toHaveLength(2)
+	})
+
+	test("selecting a model patches the latest profile via updateProfileModel and closes the popover", () => {
 		render(<ModelSelector apiConfiguration={anthropicConfig} title="Select model" />)
 
 		fireEvent.click(screen.getByTestId("model-selector-trigger"))
@@ -121,11 +117,154 @@ describe("ModelSelector", () => {
 		fireEvent.click(screen.getAllByTestId("model-selector-item")[0])
 
 		expect(vscode.postMessage).toHaveBeenCalledWith({
-			type: "upsertApiConfiguration",
+			type: "updateProfileModel",
 			text: "default",
-			apiConfiguration: expect.objectContaining({ apiModelId: "claude-opus-4-6" }),
+			values: {
+				expectedProvider: providerIdentifiers.anthropic,
+				patch: expect.objectContaining({
+					apiModelId: "claude-opus-4-6",
+					reasoningEffort: null,
+					modelMaxTokens: null,
+					modelMaxThinkingTokens: null,
+				}),
+			},
 		})
 		expect(screen.queryByTestId("model-search-input")).not.toBeInTheDocument()
+	})
+
+	test("model items are real buttons so keyboard users can select them", () => {
+		staticModelsOverride.value = { "model-a": base, "model-b": base }
+
+		render(<ModelSelector apiConfiguration={anthropicConfig} title="Select model" />)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
+
+		for (const item of screen.getAllByTestId("model-selector-item")) {
+			expect(item.tagName).toBe("BUTTON")
+		}
+	})
+
+	test("re-selecting the active model does not post a config update", () => {
+		render(<ModelSelector apiConfiguration={anthropicConfig} title="Select model" />)
+
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
+		fireEvent.change(screen.getByTestId("model-search-input"), { target: { value: "claude-sonnet-4-5" } })
+		const items = screen.getAllByTestId("model-selector-item")
+		const active = items.find((el) => el.querySelector(".lucide-check"))!
+		fireEvent.click(active)
+
+		expect(vscode.postMessage).not.toHaveBeenCalled()
+		expect(screen.queryByTestId("model-search-input")).not.toBeInTheDocument()
+	})
+
+	test("hides deprecated models except the currently selected one", () => {
+		staticModelsOverride.value = {
+			"model-active": { ...base, deprecated: true },
+			"model-old": { ...base, deprecated: true },
+			"model-new": base,
+		}
+
+		render(
+			<ModelSelector
+				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic, apiModelId: "model-active" }}
+				title="Select model"
+			/>,
+		)
+
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
+
+		const labels = screen.getAllByTestId("model-selector-item").map((el) => el.textContent)
+		expect(labels).toEqual(["model-active", "model-new"])
+	})
+
+	test("hides models excluded by the organization allow-list", () => {
+		staticModelsOverride.value = { "model-a": base, "model-b": base, "model-c": base }
+		extensionState.organizationAllowList = {
+			allowAll: false,
+			providers: { [providerIdentifiers.anthropic]: { allowAll: false, models: ["model-a", "model-c"] } },
+		}
+
+		render(
+			<ModelSelector
+				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic, apiModelId: "model-a" }}
+				title="Select model"
+			/>,
+		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
+
+		const labels = screen.getAllByTestId("model-selector-item").map((el) => el.textContent)
+		expect(labels).toEqual(["model-a", "model-c"])
+	})
+
+	describe("dynamic-model providers", () => {
+		const openRouterConfig: ProviderSettings = {
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "vendor/model-one",
+		}
+
+		test("lists router models and selects through openRouterModelId", () => {
+			routerModelsResult.value = {
+				isLoading: false,
+				data: { openrouter: { "vendor/model-one": base, "vendor/model-two": base } },
+			}
+
+			render(<ModelSelector apiConfiguration={openRouterConfig} title="Select model" />)
+			fireEvent.click(screen.getByTestId("model-selector-trigger"))
+
+			const items = screen.getAllByTestId("model-selector-item")
+			expect(items.map((el) => el.textContent)).toEqual(["vendor/model-one", "vendor/model-two"])
+
+			fireEvent.click(items[1])
+
+			expect(vscode.postMessage).toHaveBeenCalledWith({
+				type: "updateProfileModel",
+				text: "default",
+				values: {
+					expectedProvider: providerIdentifiers.openrouter,
+					patch: expect.objectContaining({ openRouterModelId: "vendor/model-two" }),
+				},
+			})
+		})
+
+		test("shows a loading state, not 'no results', while router models load", () => {
+			routerModelsResult.value = { data: undefined, isLoading: true }
+
+			render(<ModelSelector apiConfiguration={openRouterConfig} title="Select model" />)
+			fireEvent.click(screen.getByTestId("model-selector-trigger"))
+
+			expect(screen.getByText("chat:modelSelector.loading")).toBeInTheDocument()
+			expect(screen.queryByText("common:ui.no_results")).not.toBeInTheDocument()
+		})
+
+		test("shows 'no results' when the router returns no models", () => {
+			routerModelsResult.value = { data: { openrouter: {} }, isLoading: false }
+
+			render(<ModelSelector apiConfiguration={openRouterConfig} title="Select model" />)
+			fireEvent.click(screen.getByTestId("model-selector-trigger"))
+
+			expect(screen.getByText("common:ui.no_results")).toBeInTheDocument()
+			expect(screen.queryByText("chat:modelSelector.loading")).not.toBeInTheDocument()
+		})
+
+		test("shows 'no results' when the router request failed", () => {
+			routerModelsResult.value = { data: undefined, isLoading: false }
+
+			render(<ModelSelector apiConfiguration={openRouterConfig} title="Select model" />)
+			fireEvent.click(screen.getByTestId("model-selector-trigger"))
+
+			expect(screen.getByText("common:ui.no_results")).toBeInTheDocument()
+		})
+
+		test("does not request router models for providers without a model field", () => {
+			render(
+				<ModelSelector apiConfiguration={{ apiProvider: providerIdentifiers.fakeAi }} title="Select model" />,
+			)
+
+			expect(routerModelsResult.calls.length).toBeGreaterThan(0)
+			expect(routerModelsResult.calls.every((opts) => (opts as { enabled: boolean }).enabled === false)).toBe(
+				true,
+			)
+			expect(screen.getByTestId("model-selector-unsupported-trigger")).toBeInTheDocument()
+		})
 	})
 
 	test("falls back to a degraded trigger for providers without a simple model list, and jumps to Settings on click", () => {

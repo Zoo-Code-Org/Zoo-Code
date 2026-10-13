@@ -119,7 +119,8 @@
 		"settings": "Paramètres du modèle",
 		"description": "Choisissez le modèle utilisé pour cette configuration d'API.",
 		"searchPlaceholder": "Rechercher des modèles...",
-		"unsupportedTooltip": "Le modèle de ce fournisseur se configure dans les Paramètres"
+		"unsupportedTooltip": "Le modèle de ce fournisseur se configure dans les Paramètres",
+		"loading": "Chargement des modèles..."
 	},
 	"lockApiConfigAcrossModes": "Verrouiller la configuration API pour tous les modes dans cet espace de travail",
 	"unlockApiConfigAcrossModes": "La configuration API est verrouillée pour tous les modes dans cet espace de travail (cliquer pour déverrouiller)",

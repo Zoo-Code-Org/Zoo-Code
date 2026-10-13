@@ -56,6 +56,7 @@ import {
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	getModelId,
 	isRetiredProvider,
+	modelIdKeys,
 	providerIdentifiers,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
@@ -190,6 +191,17 @@ function scheduleTask(
 		}
 	})
 }
+
+// Keys a model-selector patch may touch: model IDs plus settings reset on model change.
+const PROFILE_MODEL_PATCH_KEYS: ReadonlySet<string> = new Set([
+	...modelIdKeys,
+	"reasoningEffort",
+	"modelMaxTokens",
+	"modelMaxThinkingTokens",
+	"awsCustomArn",
+	"awsCustomArnBaseModelId",
+	"awsModelContextWindow",
+])
 
 type GetStateOptions = {
 	includeTaskHistory?: boolean
@@ -1880,49 +1892,9 @@ export class ClineProvider
 		activate: boolean = true,
 	): Promise<string | undefined> {
 		try {
-			return await this.enqueueProviderProfileMutation(async (signal) => {
-				// TODO: Do we need to be calling `activateProfile`? It's not
-				// clear to me what the source of truth should be; in some cases
-				// we rely on the `ContextProxy`'s data store and in other cases
-				// we rely on the `ProviderSettingsManager`'s data store. It might
-				// be simpler to unify these two.
-				const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
-
-				if (signal.aborted) return id
-
-				if (activate) {
-					const { mode } = await this.getState()
-
-					// These promises do the following:
-					// 1. Adds or updates the list of provider profiles.
-					// 2. Sets the current provider profile.
-					// 3. Sets the current mode's provider profile.
-					// 4. Copies the provider settings to the context.
-					//
-					// Note: 1, 2, and 4 can be done in one `ContextProxy` call:
-					// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
-					// We should probably switch to that and verify that it works.
-					// I left the original implementation in just to be safe.
-					await Promise.all([
-						this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
-						this.updateGlobalState("currentApiConfigName", name),
-						this.providerSettingsManager.setModeConfig(mode, id),
-						this.contextProxy.setProviderSettings(providerSettings),
-					])
-
-					// Change the provider for the current task.
-					// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
-					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
-
-					// Keep the current task's sticky provider profile in sync with the newly-activated profile.
-					await this.persistStickyProviderProfileToCurrentTask(name)
-				} else {
-					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
-				}
-
-				await this.postStateToWebview()
-				return id
-			})
+			return await this.enqueueProviderProfileMutation((signal) =>
+				this.persistProviderProfile(name, providerSettings, activate, signal),
+			)
 		} catch (error) {
 			this.log(
 				`Error create new api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
@@ -1931,6 +1903,106 @@ export class ClineProvider
 			vscode.window.showErrorMessage(t("common:errors.create_api_config"))
 			return undefined
 		}
+	}
+
+	/**
+	 * Applies a model change to the latest stored profile inside the mutation queue,
+	 * so a stale webview snapshot cannot overwrite newer profile settings.
+	 * A `null` patch value clears the key.
+	 */
+	async updateProfileModel(name: string, expectedProvider: string, patch: Record<string, unknown>): Promise<void> {
+		try {
+			await this.enqueueProviderProfileMutation(async (signal) => {
+				const { name: _name, ...stored } = await this.providerSettingsManager.getProfile({ name })
+
+				if (stored.apiProvider !== expectedProvider) {
+					throw new Error(
+						`Profile "${name}" provider changed from "${expectedProvider}" to "${String(stored.apiProvider)}"`,
+					)
+				}
+
+				const merged: Record<string, unknown> = { ...stored }
+
+				for (const [key, value] of Object.entries(patch)) {
+					if (!PROFILE_MODEL_PATCH_KEYS.has(key)) {
+						throw new Error(`Key "${key}" is not allowed in a model patch`)
+					}
+
+					if (value === null || value === undefined) {
+						delete merged[key]
+					} else {
+						merged[key] = value
+					}
+				}
+
+				const { organizationAllowList } = await this.getState()
+
+				if (!ProfileValidator.isProfileAllowed(merged as ProviderSettings, organizationAllowList)) {
+					throw new OrganizationAllowListViolationError(t("common:errors.violated_organization_allowlist"))
+				}
+
+				if (signal.aborted) return
+
+				await this.persistProviderProfile(name, merged as ProviderSettings, true, signal)
+			})
+		} catch (error) {
+			this.log(`Error update profile model: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`)
+
+			vscode.window.showErrorMessage(
+				error instanceof OrganizationAllowListViolationError
+					? error.message
+					: t("common:errors.create_api_config"),
+			)
+		}
+	}
+
+	private async persistProviderProfile(
+		name: string,
+		providerSettings: ProviderSettings,
+		activate: boolean,
+		signal: AbortSignal,
+	): Promise<string | undefined> {
+		// TODO: Do we need to be calling `activateProfile`? It's not
+		// clear to me what the source of truth should be; in some cases
+		// we rely on the `ContextProxy`'s data store and in other cases
+		// we rely on the `ProviderSettingsManager`'s data store. It might
+		// be simpler to unify these two.
+		const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
+
+		if (signal.aborted) return id
+
+		if (activate) {
+			const { mode } = await this.getState()
+
+			// These promises do the following:
+			// 1. Adds or updates the list of provider profiles.
+			// 2. Sets the current provider profile.
+			// 3. Sets the current mode's provider profile.
+			// 4. Copies the provider settings to the context.
+			//
+			// Note: 1, 2, and 4 can be done in one `ContextProxy` call:
+			// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
+			// We should probably switch to that and verify that it works.
+			// I left the original implementation in just to be safe.
+			await Promise.all([
+				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+				this.updateGlobalState("currentApiConfigName", name),
+				this.providerSettingsManager.setModeConfig(mode, id),
+				this.contextProxy.setProviderSettings(providerSettings),
+			])
+
+			// Change the provider for the current task.
+			// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
+			this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+
+			// Keep the current task's sticky provider profile in sync with the newly-activated profile.
+			await this.persistStickyProviderProfileToCurrentTask(name)
+		} else {
+			await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
+		}
+
+		await this.postStateToWebview()
+		return id
 	}
 
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {
