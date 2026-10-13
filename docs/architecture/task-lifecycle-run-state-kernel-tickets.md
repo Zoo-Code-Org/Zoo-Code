@@ -284,11 +284,11 @@ A direct swap is unsafe. The fields are read across `src`. The safe path runs th
 
 ### Developer Notes
 
-- [ ] Add a `run: RunState` field to `Task`. It always runs. It is not gated.
+- [ ] Add a `runState: RunState` field to `Task`. It always runs. It is not gated.
 - [ ] Add the write-helper pattern: one method per event that sets the old field and drives the event into `nextRunState`. Keep the field authoritative.
 - [ ] If the kernel rejects an event that the code applies, keep the field write. Record the rejection for RSK-05.
-- [ ] Add the projection: a pure function from the current field values to the expected `RunState`. RSK-05 compares against it.
-- [ ] Do not read `run` for control flow.
+- [ ] Add the projection: a pure function from the current field values to the expected `RunStateFields`, the values the kernel getters report. RSK-05 compares against it.
+- [ ] Do not read `runState` for control flow.
 
 Exit criteria: the helpers and the projection exist and are unit-tested. No write site uses them yet. Behavior is unchanged.
 
@@ -309,7 +309,7 @@ Shadow mode must report disagreement. Before any read flips, the kernel must agr
 
 ### Developer Notes
 
-- [ ] After each helper call, compare `run` with the projection from RSK-04, for the routed fields only. A field whose writes are not routed yet gets no events, so a comparison of it reports a false mismatch. Keep the routed fields in one list that each routing ticket extends: RSK-06 adds the latches and `phase`, and RSK-10 adds the stream, ask, and turn regions.
+- [ ] After each helper call, compare `runState` with the projection from RSK-04, for the routed fields only. A field whose writes are not routed yet gets no events, so a comparison of it reports a false mismatch. Keep the routed fields in one list that each routing ticket extends: RSK-06 adds the latches and `isInitialized`, and RSK-10 adds the stream, ask, and turn regions.
 - [ ] Log each mismatch and each rejected event with the state, the event, the field values, and `taskId`.
 - [ ] Tag each mismatch with a race ID when it matches a known window. Count tagged and untagged mismatches as separate metrics.
 - [ ] Load the ignore list from the known-races table. An entry with a fix ticket stays in the list only until that ticket merges. R-1 stays until RSK-17 merges. R-3 stays until RSK-20 merges. R-4 stays until RSK-19 merges.
