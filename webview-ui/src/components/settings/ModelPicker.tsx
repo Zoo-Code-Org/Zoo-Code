@@ -137,6 +137,7 @@ export const ModelPicker = ({
 					onChange={onSelect}
 					activeProvider={activeProvider}
 					organizationAllowList={organizationAllowList}
+					contentClassName="w-[var(--radix-popover-trigger-width)]"
 					renderTrigger={({ displayValue: value, placeholder }) => (
 						<Button
 							variant="combobox"

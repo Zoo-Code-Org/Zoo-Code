@@ -12,18 +12,32 @@ import { vscode } from "@src/utils/vscode"
 const getVsCodeLmModels = async (signal?: AbortSignal) =>
 	new Promise<LanguageModelChatSelector[]>((resolve, reject) => {
 		let settled = false
-		const cleanup = () => {
-			window.removeEventListener("message", handler)
-			clearTimeout(timeout)
-		}
 
 		const finish = (fn: () => void) => {
-			if (settled || signal?.aborted) {
-				return
-			}
+			if (settled) return
 			settled = true
 			cleanup()
 			fn()
+		}
+
+		const handleAbort = () => {
+			if (settled) return
+			settled = true
+			cleanup()
+			reject(new DOMException("Aborted", "AbortError"))
+		}
+
+		const cleanup = () => {
+			window.removeEventListener("message", handler)
+			signal?.removeEventListener("abort", handleAbort)
+			clearTimeout(timeout)
+		}
+
+		// If the signal is already aborted, reject immediately without
+		// registering listeners or starting a timer.
+		if (signal?.aborted) {
+			reject(new DOMException("Aborted", "AbortError"))
+			return
 		}
 
 		const timeout = setTimeout(() => {
@@ -38,15 +52,7 @@ const getVsCodeLmModels = async (signal?: AbortSignal) =>
 			}
 		}
 
-		signal?.addEventListener("abort", () => {
-			if (settled) {
-				return
-			}
-			settled = true
-			cleanup()
-			reject(new DOMException("Aborted", "AbortError"))
-		})
-
+		signal?.addEventListener("abort", handleAbort, { once: true })
 		window.addEventListener("message", handler)
 		vscode.postMessage({ type: VsCodeLmModelsMessageType.requestVsCodeLmModels })
 	})

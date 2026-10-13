@@ -110,4 +110,33 @@ describe("useVsCodeLmModels", () => {
 		addSpy.mockRestore()
 		removeSpy.mockRestore()
 	})
+
+	it("rejects and removes the message listener when the query is aborted", async () => {
+		const { queryClient, Wrapper } = wrapper()
+		const addSpy = vi.spyOn(window, "addEventListener")
+		const removeSpy = vi.spyOn(window, "removeEventListener")
+
+		const { result } = renderHook(() => useVsCodeLmModels(true), { wrapper: Wrapper })
+
+		const registeredHandler = addSpy.mock.calls.find(([eventName]) => eventName === "message")?.[1]
+		expect(registeredHandler).toBeDefined()
+
+		await queryClient.cancelQueries({ queryKey: ["vsCodeLmModels"] })
+
+		await waitFor(() => {
+			expect(removeSpy).toHaveBeenCalledWith("message", registeredHandler)
+		})
+		expect(result.current.isLoading).toBe(false)
+		expect(result.current.data).toBeUndefined()
+
+		// A later response must not populate the aborted query.
+		emitMessage({
+			type: VsCodeLmModelsMessageType.vsCodeLmModels,
+			vsCodeLmModels: [{ vendor: "copilot", family: "gpt-4o" }],
+		})
+		expect(result.current.data).toBeUndefined()
+
+		addSpy.mockRestore()
+		removeSpy.mockRestore()
+	})
 })
