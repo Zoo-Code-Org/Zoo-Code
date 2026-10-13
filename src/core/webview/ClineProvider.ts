@@ -3419,10 +3419,17 @@ export class ClineProvider
 		// conversation keeps sending the deleted profile's configuration even though the view's
 		// buffer was re-pointed (the posted state prefers the task's own apiConfiguration).
 		for (const snapshot of snapshots) {
-			if (replacementSettings) {
-				snapshot.instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
+			// Only re-point when the task actually runs under the deleted profile:
+			// a view pinned to it can hold a task that follows a different sticky
+			// profile, and forcing the replacement would silently switch that
+			// conversation and rewrite its persisted profile name without the user
+			// asking.
+			if (snapshot.instance.getCurrentTask()?.taskApiConfigName === deletedProfileName) {
+				if (replacementSettings) {
+					snapshot.instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
+				}
+				await snapshot.instance.persistStickyProviderProfileToCurrentTask(replacementName)
 			}
-			await snapshot.instance.persistStickyProviderProfileToCurrentTask(replacementName)
 			await snapshot.instance.postStateToWebview()
 		}
 	}
