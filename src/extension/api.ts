@@ -107,7 +107,15 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 						this.log(
 							`[API] StartNewTask -> ${command.data.text}, ${JSON.stringify(command.data.configuration)}`,
 						)
-						await this.startNewTask(command.data)
+						try {
+							await this.startNewTask(command.data)
+						} catch (error) {
+							// IpcServer does not await async listeners: an uncaught rejection here
+							// would surface as an unhandled rejection in the extension host.
+							this.log(
+								`[API] StartNewTask failed: ${error instanceof Error ? error.message : String(error)}`,
+							)
+						}
 						break
 					case TaskCommandName.CancelTask:
 						this.log(`[API] CancelTask`)
@@ -231,17 +239,32 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		// hang task creation; if the bound expires, fail task creation rather than start
 		// the task against stale shared defaults.
 		let readinessTimer: ReturnType<typeof setTimeout> | undefined
-		await Promise.race([
-			provider.viewStateReadiness,
-			new Promise<never>((_, reject) => {
-				readinessTimer = setTimeout(
-					() => reject(new Error("Timed out waiting for the view state to become ready")),
-					3000,
-				)
-			}),
-		]).finally(() => {
-			clearTimeout(readinessTimer)
-		})
+		try {
+			await Promise.race([
+				provider.viewStateReadiness,
+				new Promise<never>((_, reject) => {
+					readinessTimer = setTimeout(
+						() => reject(new Error("Timed out waiting for the view state to become ready")),
+						3000,
+					)
+				}),
+			]).finally(() => {
+				clearTimeout(readinessTimer)
+			})
+		} catch (error) {
+			if (
+				provider.viewLaunched ||
+				!(error instanceof Error) ||
+				error.message !== "Timed out waiting for the view state to become ready"
+			) {
+				throw error
+			}
+			// Headless API callers create tasks without ever launching a webview: the
+			// readiness bound expiring keeps the pre-existing shared-state fallback.
+			// A launched view whose readiness failed is a real failure and rethrows.
+			this.log("[API#startNewTask] webview not launched; continuing in headless mode")
+		}
+
 		// Disposal resolves viewStateReadiness to release waiters: a provider torn down while
 		// the wait was pending must fail task creation rather than create a task against the
 		// disposed view (its posts and task registration would be orphaned).

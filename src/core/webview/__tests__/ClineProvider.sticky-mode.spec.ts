@@ -627,6 +627,55 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", "architect")
 		})
 
+		it("rolls back the task mode and history when the view mode pin write fails", async () => {
+			// Same typed double as the abort rollback test: the private members stay
+			// out of the Object.assign intersection type.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+
+			// The task-history write lands; the view's durable mode pin write then
+			// rejects. The caller (submitUserMessage) logs the failure and delivers the
+			// message, so the task-side writes must not stand.
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			vi.spyOn(provider, "saveViewState").mockRejectedValueOnce(new Error("pin write failed"))
+			await provider.addClineToStack(mockTask)
+
+			await expect(provider["handleModeSwitchUnlocked"]("architect", mockTask)).rejects.toThrow(
+				"pin write failed",
+			)
+
+			// No partial application: the task keeps its previous mode and the history
+			// entry is restored, so the delivered message cannot run the new task mode
+			// against the view's unchanged mode and mode-linked API configuration.
+			expect(mockTask["_taskMode"]).toBe("code")
+			expect(updateTaskHistorySpy).toHaveBeenLastCalledWith(historyItem)
+		})
+
 		it("keeps the cancellation result when the abort rollback write itself fails", async () => {
 			const mockTask = Object.assign(
 				{} as Task,

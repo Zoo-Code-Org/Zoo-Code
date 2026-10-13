@@ -3839,6 +3839,14 @@ describe("Cline", () => {
 
 				const submitted = task.submitUserMessage("select while initializing", undefined, "architect")
 
+				// Flush microtasks: the switch must still wait for the pending
+				// initialization. Without the await, the mocked switch would already have
+				// run here and the end-state assertion could not tell the orders apart.
+				for (let i = 0; i < 5; i++) {
+					await Promise.resolve()
+				}
+				expect(mockProvider.handleModeSwitch).not.toHaveBeenCalled()
+
 				// Resolve the pending provider state only after the submission has started,
 				// carrying the provider's pre-switch mode.
 				releaseState(Object.assign({} as ProviderState, { mode: "ask" }))

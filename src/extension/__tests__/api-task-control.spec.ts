@@ -198,21 +198,68 @@ describe("API task controls", () => {
 		})
 
 		it("cancels the readiness timeout when the view becomes ready within the bound", async () => {
-			const clearSpy = vi.spyOn(globalThis, "clearTimeout")
+			// Fake timers pin the exact timer surface: a global clearTimeout spy would
+			// also fire for the flush sleep and library internals, so it could not
+			// prove the readiness bound's own timer was cancelled.
+			vi.useFakeTimers()
 			let resolveReady!: () => void
 			sidebarProvider.viewStateReadiness = new Promise<void>((resolve) => {
 				resolveReady = resolve
 			})
 
 			const started = api.startNewTask({ configuration, text: "ready task" })
-			await new Promise((resolve) => setTimeout(resolve, 50))
+			await vi.advanceTimersByTimeAsync(50)
 			resolveReady()
 
-			await expect(started).resolves.toBe("sidebar-task")
-			// The bound's timer must be cancelled once readiness wins: a live timer would
-			// later reject an unawaited promise and surface as an unhandled rejection.
-			expect(clearSpy).toHaveBeenCalled()
-			clearSpy.mockRestore()
+			try {
+				await expect(started).resolves.toBe("sidebar-task")
+				// The readiness bound's timer must be gone once readiness wins: a live
+				// timer would later reject an unawaited promise and surface as an
+				// unhandled rejection.
+				expect(vi.getTimerCount()).toBe(0)
+				// No late rejection can fire after the bound either.
+				await vi.advanceTimersByTimeAsync(3000)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("continues with the shared-state fallback when the webview never launches", async () => {
+			// Headless API callers create tasks without ever launching a webview: the
+			// readiness bound expiring must not reject them - the pre-existing
+			// shared-state fallback still applies.
+			vi.useFakeTimers()
+			sidebarProvider.viewLaunched = false
+			sidebarProvider.viewStateReadiness = new Promise<void>(() => {})
+
+			const started = api.startNewTask({ configuration, text: "headless task" })
+			await vi.advanceTimersByTimeAsync(3000)
+
+			try {
+				await expect(started).resolves.toBe("sidebar-task")
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("still rejects when the webview launched but the readiness bound expires", async () => {
+			// A launched view whose readiness never settles is a real failure: the
+			// task must not consume shared defaults behind a live view.
+			vi.useFakeTimers()
+			sidebarProvider.viewStateReadiness = new Promise<void>(() => {})
+
+			const started = api.startNewTask({ configuration, text: "stuck view task" })
+			// Attach the rejection handler before advancing: with fake timers the
+			// bound fires during the advance, and a handler attached afterwards would
+			// see the rejection briefly unhandled.
+			const settled = expect(started).rejects.toThrow("Timed out waiting for the view state to become ready")
+			await vi.advanceTimersByTimeAsync(3000)
+
+			try {
+				await settled
+			} finally {
+				vi.useRealTimers()
+			}
 		})
 
 		it("fails task creation when the provider is disposed while the readiness wait is pending", async () => {
