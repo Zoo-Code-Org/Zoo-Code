@@ -6310,6 +6310,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * @param context - Context string for logging (e.g., the calling tool name)
 	 */
 	public processQueuedMessages(): void {
+		// An aborted task must not dequeue queued messages: submitUserMessage
+		// rejects once abort is set, so consuming the queue here would drop the
+		// message instead of leaving it for the resume/abort flow. Tools await
+		// checkpoint saves before handing off, so a cancellation can land between
+		// the write and this call.
+		if (this.abort) {
+			return
+		}
 		try {
 			if (!this.messageQueueService.isEmpty()) {
 				const queued = this.messageQueueService.dequeueMessage()
