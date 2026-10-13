@@ -2771,6 +2771,7 @@ export class ClineProvider
 						// serving the settings captured before the save under the same name.
 						if (this.pinnedProfileName === name) {
 							await this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
+							this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
 						}
 						await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
 					}
@@ -3313,6 +3314,12 @@ export class ClineProvider
 				if (snapshot.instance._disposed) {
 					return
 				}
+				// The active task of a pinned view holds its own API handler built from
+				// the profile's settings: rebuild it with the saved settings or the
+				// running conversation keeps sending the old token even though the
+				// view's buffer has caught up. Direct private access across sibling
+				// instances of the same class is compile-time safe.
+				snapshot.instance.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
 				await snapshot.instance.postStateToWebview()
 			}),
 		)
