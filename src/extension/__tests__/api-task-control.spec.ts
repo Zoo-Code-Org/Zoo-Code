@@ -216,14 +216,17 @@ describe("API task controls", () => {
 			await vi.advanceTimersByTimeAsync(50)
 			resolveReady()
 
-			await expect(started).resolves.toBe("sidebar-task")
-			// The readiness bound's timer must be gone once readiness wins: a live timer
-			// would later reject an unawaited promise and surface as an unhandled
-			// rejection.
-			expect(vi.getTimerCount()).toBe(0)
-			// No late rejection can fire after the bound either.
-			await vi.advanceTimersByTimeAsync(3000)
-			vi.useRealTimers()
+			try {
+				await expect(started).resolves.toBe("sidebar-task")
+				// The readiness bound's timer must be gone once readiness wins: a live timer
+				// would later reject an unawaited promise and surface as an unhandled
+				// rejection.
+				expect(vi.getTimerCount()).toBe(0)
+				// No late rejection can fire after the bound either.
+				await vi.advanceTimersByTimeAsync(3000)
+			} finally {
+				vi.useRealTimers()
+			}
 		})
 
 		it("fails task creation when the provider is disposed while the readiness wait is pending", async () => {
