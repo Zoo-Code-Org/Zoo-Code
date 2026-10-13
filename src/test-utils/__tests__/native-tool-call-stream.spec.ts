@@ -14,7 +14,7 @@ describe("collectStreamAndParseToolCalls", () => {
 		expect(chunks).toHaveLength(2)
 		expect(parserEvents).toEqual([
 			{ type: "tool_call_start", id: "call_abc", name: "read_file" },
-			{ type: "tool_call_delta", id: "call_abc", delta: '{"path":"foo.ts"}' },
+			{ type: "tool_call_delta", id: "call_abc", name: "read_file", delta: '{"path":"foo.ts"}' },
 		])
 	})
 
@@ -42,8 +42,8 @@ describe("collectStreamAndParseToolCalls", () => {
 
 		expect(parserEvents).toEqual([
 			{ type: "tool_call_start", id: "call_buf", name: "write_file" },
-			{ type: "tool_call_delta", id: "call_buf", delta: '{"path":' },
-			{ type: "tool_call_delta", id: "call_buf", delta: '"bar.ts"}' },
+			{ type: "tool_call_delta", id: "call_buf", name: "write_file", delta: '{"path":' },
+			{ type: "tool_call_delta", id: "call_buf", name: "write_file", delta: '"bar.ts"}' },
 		])
 	})
 
@@ -60,8 +60,8 @@ describe("collectStreamAndParseToolCalls", () => {
 		expect(parserEvents).toEqual([
 			{ type: "tool_call_start", id: "call_0", name: "read_file" },
 			{ type: "tool_call_start", id: "call_1", name: "write_file" },
-			{ type: "tool_call_delta", id: "call_0", delta: '"a"' },
-			{ type: "tool_call_delta", id: "call_1", delta: '"b"' },
+			{ type: "tool_call_delta", id: "call_0", name: "read_file", delta: '"a"' },
+			{ type: "tool_call_delta", id: "call_1", name: "write_file", delta: '"b"' },
 		])
 	})
 

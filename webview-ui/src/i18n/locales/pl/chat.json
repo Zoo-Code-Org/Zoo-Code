@@ -343,10 +343,10 @@
 		"title": "Zoo Code {{version}} wydany",
 		"support": "Wesprzyj Zoo Code, dając nam gwiazdkę na <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Co nowego:",
-			"highlight1": "✨ Obsługa nowych modeli: Korzystaj z GPT-6.1 Sol, poprawionego limitu wyjściowego Claude Opus 5.5 i wybierz DeepSeek V4.1 Flash w OpenCode Go.",
-			"highlight2": "🧭 Niezawodne przerywanie zadań i obsługa przerwań: Zachowaj pierwszy powód przerwania, resetuj stan przerwania strumienia przy każdym żądaniu i zapobiegaj ponownemu uruchamianiu odrzuconych podzadań przez przerwane zadania.",
-			"highlight3": "🛠️ Niezawodne narzędzia, prompty i strumieniowanie interfejsu: Zachowaj argumenty narzędzi przesyłane strumieniowo w całości, egzekwuj zasady używania narzędzi MCP, zapobiegaj zmyślonym numerom linii i usprawnij aktualizacje czatu."
+			"heading": "Nowości w Zoo Code v3.88.0",
+			"highlight1": "✨ Obsługa dostawców i modeli: Korzystaj z Grok Build oraz ulepszonej obsługi modeli niestandardowych. Ta wersja poprawia także limity modeli Bedrock i wysyła ustawienie szczegółowości Codex.",
+			"highlight2": "🧭 Niezawodność zadań: Ta wersja poprawia obsługę przerywania, kontynuowanie tur narzędzi oraz zapisywanie wiadomości zadań.",
+			"highlight3": "⚡ Szybsza edycja i czat: Zapisywanie plików nie używa już domyślnie sztucznych opóźnień. Wiadomości czatu zawierają mniej danych plików, a akcje kodu trafiają do ostatnio aktywnego czatu."
 		},
 		"cloudAgents": {
 			"heading": "Nowości w chmurze:",
