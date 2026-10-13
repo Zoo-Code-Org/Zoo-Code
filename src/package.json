@@ -290,38 +290,31 @@
 				{
 					"command": "zoo-code.plusButtonClickedInTab",
 					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
-				}
-,
+				},
 				{
 					"command": "zoo-code.settingsButtonClickedInTab",
 					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
-				}
-,
+				},
 				{
 					"command": "zoo-code.marketplaceButtonClickedInTab",
 					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
-				}
-,
+				},
 				{
 					"command": "zoo-code.historyButtonClickedInTab",
 					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
-				}
-,
+				},
 				{
 					"command": "zoo-code.plusButtonClicked",
 					"when": "activeWebviewPanelId != zoo-code.TabPanelProvider"
-				}
-,
+				},
 				{
 					"command": "zoo-code.settingsButtonClicked",
 					"when": "activeWebviewPanelId != zoo-code.TabPanelProvider"
-				}
-,
+				},
 				{
 					"command": "zoo-code.marketplaceButtonClicked",
 					"when": "activeWebviewPanelId != zoo-code.TabPanelProvider"
-				}
-,
+				},
 				{
 					"command": "zoo-code.historyButtonClicked",
 					"when": "activeWebviewPanelId != zoo-code.TabPanelProvider"
