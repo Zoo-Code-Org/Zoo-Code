@@ -352,6 +352,38 @@ describe("KimiCodeHandler", () => {
 		expect(createCompletion).not.toHaveBeenCalled()
 	})
 
+	it("retries model discovery on a later request when the caller aborts during discovery", async () => {
+		// The SDK client binds globalThis.fetch at construction, so the completion
+		// stub must be installed before the handler is created.
+		vi.spyOn(globalThis, "fetch").mockImplementation(
+			async () => new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 }),
+		)
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })
+		const controller = new AbortController()
+		// The caller cancels while discovery is in flight. The swallowed
+		// cancellation must not consume the single discovery attempt.
+		mockGetModels.mockImplementationOnce(async () => {
+			controller.abort()
+			throw new DOMException("This operation was aborted", "AbortError")
+		})
+		const gen = handler.createMessage("system", [{ role: "user", content: "test" }], {
+			taskId: "test-task",
+			abortSignal: controller.signal,
+		})
+		await expect(async () => {
+			for await (const _ of gen) {
+				// consume
+			}
+		}).rejects.toMatchObject({ name: "AbortError" })
+		expect(mockGetModels).toHaveBeenCalledTimes(1)
+
+		// A later request on the same handler must retry discovery rather than
+		// keep the fallback metadata.
+		mockGetModels.mockImplementationOnce(async () => ({ "test-model": { maxTokens: 1000 } }))
+		await handler.completePrompt("second")
+		expect(mockGetModels).toHaveBeenCalledTimes(2)
+	})
+
 	it("forwards completePrompt abort options and timeoutMs through the override on both 401 retry attempts", async () => {
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
 		const unauthorized = Object.assign(new Error("Unauthorized"), { status: 401 })

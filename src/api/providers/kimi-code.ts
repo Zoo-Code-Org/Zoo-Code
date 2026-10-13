@@ -20,7 +20,7 @@ import { getModelParams } from "../transform/model-params"
 import { OpenAiHandler } from "./openai"
 import { NOT_PROVIDED } from "./constants"
 import { getModels } from "./fetchers/modelCache"
-import { throwIfAborted } from "./utils/abort-signal"
+import { isRequestAborted, throwIfAborted } from "./utils/abort-signal"
 import { getKimiCodeModels } from "./fetchers/kimi-code"
 
 const OAUTH_AUTH_METHOD: KimiCodeAuthMethod = "oauth"
@@ -84,6 +84,13 @@ export class KimiCodeHandler extends OpenAiHandler {
 					this,
 				)
 			} catch (error) {
+				// A caller cancellation must not consume the single discovery attempt:
+				// reset the flag so a later request on this handler retries discovery
+				// instead of keeping fallback metadata. Ordinary discovery failures
+				// keep the one-attempt behavior.
+				if (isRequestAborted(error, abortSignal)) {
+					this.modelDiscoveryAttempted = false
+				}
 				// Model discovery is best-effort; preserve the configured ID and fallback metadata.
 				console.debug("[KimiCode] Model discovery failed; using fallback model metadata", {
 					message: error instanceof Error ? error.message : String(error),
