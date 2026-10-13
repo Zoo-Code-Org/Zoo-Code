@@ -8496,6 +8496,17 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 					apiKey: "old-key",
 				}
 				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+
+				// The sibling has an active task built from the pre-save settings.
+				// Task is a class; the double assertion is the only way to attach a
+				// minimal double without the full provider/services graph.
+				const siblingTask = {
+					apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "old-key" },
+					updateApiConfiguration: vi.fn(),
+				}
+				vi.spyOn(sibling, "getCurrentTask").mockReturnValue(
+					siblingTask as unknown as ReturnType<typeof sibling.getCurrentTask>,
+				)
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				// @ts-ignore - Replace providerSettingsManager with a test double.
 				provider.providerSettingsManager = {
@@ -8513,6 +8524,13 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				// A save that does not activate still rewrites the profile; the pinned
 				// sibling must not keep serving the pre-save snapshot.
 				expect(sibling["viewLocalState"].apiConfiguration).toEqual({
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "new-key",
+				})
+
+				// The active task's handler must be rebuilt with the saved settings,
+				// not just the view buffer.
+				expect(siblingTask.updateApiConfiguration).toHaveBeenCalledWith({
 					apiProvider: providerIdentifiers.anthropic,
 					apiKey: "new-key",
 				})
