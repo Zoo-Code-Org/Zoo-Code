@@ -1803,7 +1803,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// parentTaskId/rootTaskId; writing this live Task's stale values would
 			// silently reattach the severed parent-child link.
 			if (this.abandoned) {
-				return false
+				// The message write succeeded, and the boolean reflects the message write
+				// only (see method docs): returning false here would make callers retry an
+				// already-persisted save (persistQueuedFeedbackAndAcknowledge) or skip a
+				// durable-state-gated update whose on-disk record is in fact current
+				// (finalizePartialToolAsk). Only the history write is intentionally skipped.
+				return true
 			}
 
 			const provider = this.providerRef.deref()

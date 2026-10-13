@@ -8024,7 +8024,9 @@ describe("saveClineMessages abandoned guard (#1021)", () => {
 
 			const saved = await getTaskTestAccess(task).saveClineMessages()
 
-			expect(saved).toBe(false)
+			// The boolean reflects the message write only: the write succeeded, so the
+			// save reports success even though the history update is skipped.
+			expect(saved).toBe(true)
 			expect(saveSpy).toHaveBeenCalledTimes(1) // messages are still persisted
 			expect(saveSpy).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -8096,7 +8098,8 @@ describe("saveClineMessages abandoned guard (#1021)", () => {
 
 			const saved = await savePromise
 
-			expect(saved).toBe(false)
+			// Write-success contract: the guard skips the history update, not the save.
+			expect(saved).toBe(true)
 			expect(saveSpy).toHaveBeenCalledTimes(1) // messages are still persisted
 			expect(saveSpy).toHaveBeenCalledWith(
 				expect.objectContaining({
