@@ -2864,6 +2864,89 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("does not re-point a pinned sibling's task that follows another profile when its profile is deleted", async () => {
+			// Defensive: the doubles in this suite can leave console writes pending
+			// at worker teardown.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				const oldProfile: ProviderSettingsEntry = {
+					name: "old-profile",
+					id: "old-id",
+					apiProvider: providerIdentifiers.openrouter,
+				}
+				const keeperProfile: ProviderSettingsEntry = {
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}
+				await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+				await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+				// The sibling pins the profile being deleted, but its active task
+				// follows a different sticky profile: the deletion must re-point the
+				// sibling's buffer to the surviving profile without switching that
+				// conversation's handler or rewriting its persisted profile name.
+				sibling["viewLocalState"].currentApiConfigName = "old-profile"
+				sibling["viewLocalState"].apiConfiguration = {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "deleted-profile-secret",
+				}
+				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+				const siblingTask = {
+					apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "other-key" },
+					taskApiConfigName: "other-profile",
+					taskId: "sibling-task",
+					setTaskApiConfigName: vi.fn(),
+					updateApiConfiguration: vi.fn(),
+				}
+				vi.spyOn(sibling, "getCurrentTask").mockReturnValue(
+					siblingTask as unknown as ReturnType<typeof sibling.getCurrentTask>,
+				)
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+				})
+				vi.spyOn(provider.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
+
+				await provider.deleteProviderProfile(oldProfile)
+
+				// The sibling's view buffer is still re-pointed to the surviving
+				// profile...
+				expect(sibling["viewLocalState"].currentApiConfigName).toBe("keeper-profile")
+				expect(sibling["viewLocalState"].apiConfiguration).toEqual({
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+				})
+				// ...but the task follows another profile: neither the handler rebuild
+				// nor the sticky-name rewrite may touch it.
+				expect(siblingTask.updateApiConfiguration).not.toHaveBeenCalled()
+				expect(siblingTask.setTaskApiConfigName).not.toHaveBeenCalled()
+				// Let queued view-local persistence settle while the console spies are
+				// still installed, so teardown has no pending writes.
+				await new Promise((resolve) => setTimeout(resolve, 50))
+			} finally {
+				await sibling.dispose()
+				await provider.dispose()
+			}
+		})
+
 		it("leaves the view buffer untouched when the deleted profile is neither globally active nor view-pinned", async () => {
 			const provider = new ClineProvider(
 				mockContext,
