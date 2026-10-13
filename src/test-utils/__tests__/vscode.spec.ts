@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 
 import {
+	makeCompositeDisposable,
 	makeDisposable,
 	makeEventEmitter,
 	makeExtensionContext,
@@ -65,6 +66,22 @@ describe("VS Code test utilities", () => {
 		expect(listener).toHaveBeenCalledOnce()
 
 		emitter.dispose()
+	})
+
+	it("disposes composite subscriptions only once and keeps composites independent", () => {
+		const first = makeDisposable()
+		const second = makeDisposable()
+		const other = makeDisposable()
+		const composite = makeCompositeDisposable(first, second)
+		const independent = makeCompositeDisposable(other)
+
+		composite.dispose()
+		composite.dispose()
+		expect(first.dispose).toHaveBeenCalledOnce()
+		expect(second.dispose).toHaveBeenCalledOnce()
+		expect(other.dispose).not.toHaveBeenCalled()
+		independent.dispose()
+		expect(other.dispose).toHaveBeenCalledOnce()
 	})
 
 	it("creates configurable workspace settings", async () => {
