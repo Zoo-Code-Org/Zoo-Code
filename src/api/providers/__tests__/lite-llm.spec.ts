@@ -70,9 +70,9 @@ vi.mock("../fetchers/modelCache", () => ({
 			"vertex_ai/gemini-3-pro": { ...litellmDefaultModelInfo, maxTokens: 8192 },
 		})
 	}),
-	refreshModels: vi.fn(async (options) => {
+	refreshModels: vi.fn(async (options, handler) => {
 		const { getModels } = await import("../fetchers/modelCache")
-		return getModels(options)
+		return getModels(options, handler)
 	}),
 	getModelsFromCache: vi.fn().mockReturnValue(undefined),
 }))
@@ -2073,6 +2073,13 @@ describe("LiteLLMHandler", () => {
 			// Assert the mapped usage values, not just the type: this branch maps
 			// prompt_tokens/completion_tokens onto the usage chunk (L365-366).
 			expect(chunks[0]).toMatchObject({ type: "usage", inputTokens: 5, outputTokens: 7 })
+		})
+	})
+
+	describe("model catalog", () => {
+		it("reports its cache scope", () => {
+			const handler = new LiteLLMHandler(mockOptions)
+			expect(handler.getModelCacheScope()).toEqual({ urlScoped: true, keyScoped: true, authScoped: false })
 		})
 	})
 })

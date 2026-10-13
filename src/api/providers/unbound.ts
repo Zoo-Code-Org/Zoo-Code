@@ -9,7 +9,7 @@ import {
 	unboundDefaultModelInfo,
 } from "@roo-code/types"
 
-import type { ApiHandlerOptions } from "../../shared/api"
+import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 import { calculateApiCostOpenAI } from "../../shared/cost"
 
 import { convertToOpenAiMessages } from "../transform/openai-format"
@@ -19,8 +19,14 @@ import { OpenAiReasoningParams } from "../transform/reasoning"
 
 import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { getModels } from "./fetchers/modelCache"
+import { getUnboundModels } from "./fetchers/unbound"
 import { BaseProvider } from "./base-provider"
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import type {
+	SingleCompletionHandler,
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+} from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
@@ -73,11 +79,23 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 		})
 	}
 
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: false, keyScoped: false, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getUnboundModels(options.apiKey, ...fetchOpts)
+	}
+
 	public async fetchModel() {
-		this.models = await getModels({
-			provider: providerIdentifiers.unbound,
-			apiKey: this.options.unboundApiKey,
-		})
+		this.models = await getModels(
+			{
+				provider: providerIdentifiers.unbound,
+				apiKey: this.options.unboundApiKey,
+			},
+			this,
+		)
 		return this.getModel()
 	}
 

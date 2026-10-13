@@ -11,92 +11,127 @@
 </sub>
 </div>
 
-# Contribuindo para o Zoo Code
+<a id="contributing-to-zoo-code"></a>
 
-O Zoo Code é um projeto impulsionado pela comunidade, e valorizamos profundamente cada contribuição. Para agilizar a colaboração, operamos com base em uma [abordagem de "primeiro a issue"](#abordagem-de-primeiro-a-issue), o que significa que todas as [Pull Requests (PRs)](#enviando-uma-pull-request) devem primeiro estar vinculadas a uma Issue do GitHub. Por favor, revise este guia com atenção.
+# Contribuir com o Zoo Code
+
+O Zoo Code é um projeto da comunidade. Valorizamos toda contribuição. Trabalhamos com a abordagem [Issue-First](#issue-first-approach). Isso significa que cada [Pull Request (PR)](#submitting-a-pull-request) precisa ter um link para uma issue do GitHub. Leia este guia com atenção.
+
+<a id="table-of-contents"></a>
 
 ## Índice
 
-- [Antes de contribuir](#antes-de-contribuir)
-- [Encontrando e planejando sua contribuição](#encontrando-e-planejando-sua-contribuição)
-- [Processo de desenvolvimento e envio](#processo-de-desenvolvimento-e-envio)
-- [Expectativas de Pull Request](#expectativas-de-pull-request)
-- [Contribuições assistidas por IA](#contribuições-assistidas-por-ia)
-- [Legal](#legal)
+- [Antes de contribuir](#before-you-contribute)
+- [Encontrar e planejar sua contribuição](#finding--planning-your-contribution)
+- [Desenvolvimento e envio](#development--submission-process)
+    - [Expectativas para Pull Requests](#pull-request-expectations)
+    - [Contribuições com ajuda de IA](#ai-assisted-contributions)
+    - [Estilo de escrita](#writing-style)
+- [Questões legais](#legal)
+
+<a id="before-you-contribute"></a>
 
 ## Antes de contribuir
 
-### 1. Código de Conduta
+<a id="1-code-of-conduct"></a>
 
-Todos os contribuidores devem aderir ao nosso [Código de Conduta](./CODE_OF_CONDUCT.md).
+### 1. Código de conduta
 
-### 2. Roteiro do projeto
+Todas as pessoas que contribuem precisam seguir nosso [código de conduta](./CODE_OF_CONDUCT.md).
 
-Nosso roteiro guia a direção do projeto. Alinhe suas contribuições com estes objetivos principais:
+<a id="2-project-roadmap"></a>
+
+### 2. Plano de desenvolvimento do projeto
+
+Nosso plano de desenvolvimento mostra a direção do projeto. Alinhe suas contribuições com estes objetivos:
+
+<a id="reliability-first"></a>
 
 ### Confiabilidade em primeiro lugar
 
-- Garanta que a edição de diff e a execução de comandos sejam consistentemente confiáveis.
-- Reduza os pontos de atrito que desencorajam o uso regular.
-- Garanta uma operação tranquila em todas as localidades e plataformas.
-- Expanda o suporte robusto para uma ampla variedade de provedores e modelos de IA.
+- Faça a edição por diff e a execução de comandos funcionarem de forma confiável todas as vezes.
+- Remova os problemas que impedem as pessoas de usar o Zoo Code todos os dias.
+- Faça o Zoo Code funcionar em todas as configurações regionais e plataformas.
+- Dê suporte a mais provedores e modelos de IA.
 
-### Experiência do usuário aprimorada
+<a id="enhanced-user-experience"></a>
 
-- Simplifique a UI/UX para clareza e intuitividade.
-- Melhore continuamente o fluxo de trabalho para atender às altas expectativas que os desenvolvedores têm das ferramentas de uso diário.
+### Melhor experiência de uso
 
-### Liderando no desempenho do agente
+- Deixe a UI e a UX claras e fáceis de usar.
+- Melhore o fluxo de trabalho. Desenvolvedores esperam alta qualidade das ferramentas que usam todos os dias.
 
-- Estabeleça benchmarks de avaliação abrangentes (evals) para medir a produtividade do mundo real.
-- Facilite para que todos possam executar e interpretar facilmente essas avaliações.
-- Envie melhorias que demonstrem aumentos claros nas pontuações de avaliação.
+<a id="leading-on-agent-performance"></a>
 
-Mencione o alinhamento com essas áreas em seus PRs.
+### Foco no desempenho dos agentes
 
-### 3. Junte-se à comunidade do Zoo Code
+- Crie benchmarks de avaliação (evals) que meçam a produtividade real.
+- Deixe os evals fáceis de executar e de ler.
+- Entregue melhorias que aumentem claramente as pontuações dos evals.
 
-- **Discord:** Entre no nosso [Discord](https://discord.gg/VxfP4Vx3gX).
-- **Reddit:** Entre no nosso [Reddit](https://www.reddit.com/r/ZooCode/).
+Nos seus PRs, diga quais dessas áreas a mudança apoia.
 
-## Encontrando e planejando sua contribuição
+<a id="3-join-the-zoo-code-community"></a>
 
-### Tipos de contribuições
+### 3. Participe da comunidade do Zoo Code
 
-- **Correções de bugs:** abordando problemas de código.
-- **Novos recursos:** adicionando funcionalidade.
-- **Documentação:** melhorando guias e clareza.
+- **Discord:** Participe do nosso [Discord](https://discord.gg/VxfP4Vx3gX).
+- **Reddit:** Participe do nosso [Reddit](https://www.reddit.com/r/ZooCode/).
 
-### Abordagem de primeiro a issue
+<a id="finding--planning-your-contribution"></a>
 
-Todas as contribuições começam com uma Issue do GitHub usando nossos modelos simplificados.
+## Encontrar e planejar sua contribuição
 
-- **Verifique as issues existentes**: Pesquise nas [Issues do GitHub](https://github.com/Zoo-Code-Org/Zoo-Code/issues).
+<a id="types-of-contributions"></a>
+
+### Tipos de contribuição
+
+- **Correções de bugs:** Corrija problemas no código.
+- **Novos recursos:** Adicione funções.
+- **Documentação:** Melhore os guias e deixe-os mais claros.
+
+<a id="issue-first-approach"></a>
+
+### Abordagem Issue-First
+
+Cada contribuição começa com uma issue do GitHub. Use nossos modelos curtos.
+
+- **Confira as issues existentes**: Pesquise nas [GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues).
 - **Crie uma issue** usando:
-    - **Melhorias:** modelo "Solicitação de melhoria" (linguagem simples focada no benefício do usuário).
-    - **Bugs:** modelo "Relatório de bug" (reprodução mínima + esperado vs. real + versão).
-- **Quer trabalhar nisso?** Comente "Reivindicando" na issue e envie uma DM para a equipe principal no [Discord](https://discord.gg/VxfP4Vx3gX) para ser atribuído. A atribuição será confirmada no tópico.
-- **Os PRs devem ser vinculados à issue.** PRs não vinculados podem ser fechados.
+    - **Melhorias:** O modelo "Enhancement Request" (linguagem simples, com foco no benefício para quem usa).
+    - **Bugs:** O modelo "Bug Report" (reprodução mínima, resultado esperado e real, versão).
+- **Escreva a issue** seguindo o [estilo de escrita](#writing-style) abaixo.
+- **Quer trabalhar nela?** Comente "Claiming" na issue. Depois, entre em contato com a equipe principal no [Discord](https://discord.gg/VxfP4Vx3gX) para receber a atribuição. A equipe confirma a atribuição na conversa.
+- **PRs precisam ter um link para a issue.** Podemos fechar PRs sem esse link.
 
-### Decidindo no que trabalhar
+<a id="deciding-what-to-work-on"></a>
 
-- Confira a [página de GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues) para ver as issues.
-- Para documentação, visite [Documentação do Zoo Code](https://github.com/Zoo-Code-Org/Zoo-Code-Docs).
+### Escolher no que trabalhar
 
-### Relatando bugs
+- Veja a [página de GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues).
+- Para documentação, acesse [Zoo Code Docs](https://github.com/Zoo-Code-Org/Zoo-Code-Docs).
 
-- Verifique primeiro os relatórios existentes.
-- Crie um novo bug usando o [modelo "Relatório de bug"](https://github.com/Zoo-Code-Org/Zoo-Code/issues/new/choose) com:
+<a id="reporting-bugs"></a>
+
+### Relatar bugs
+
+- Primeiro, confira os relatos existentes.
+- Crie um novo relato com o [modelo "Bug Report"](https://github.com/Zoo-Code-Org/Zoo-Code/issues/new/choose) e inclua:
     - Passos de reprodução claros e numerados
-    - Resultado esperado vs. real
-    - Versão do Zoo Code (obrigatório); provedor/modelo de IA, se relevante
-- **Problemas de segurança**: Relate em particular por meio de [avisos de segurança](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new).
+    - Resultado esperado e resultado real
+    - Versão do Zoo Code (obrigatória)
+    - Provedor de API e modelo, se forem relevantes
+- **Problemas de segurança**: Relate em particular pelos [avisos de segurança](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new).
 
-## Processo de desenvolvimento e envio
+<a id="development--submission-process"></a>
 
-### Configuração de desenvolvimento
+## Desenvolvimento e envio
 
-1. **Fork e Clone:**
+<a id="development-setup"></a>
+
+### Preparar o ambiente de desenvolvimento
+
+1. **Faça um fork e clone:**
 
 ```
 git clone https://github.com/YOUR_USERNAME/Zoo-Code.git
@@ -110,60 +145,117 @@ pnpm install
 
 3. **Depuração:** Abra com o VS Code (`F5`).
 
-### Diretrizes para escrever código
+<a id="writing-code-guidelines"></a>
 
-- Um PR focado por recurso ou correção.
-- Siga as melhores práticas do ESLint e TypeScript.
-- Escreva commits claros e descritivos referenciando issues (por exemplo, `Corrige #123`).
-- Forneça testes completos (`npm test`).
-- Faça o rebase para o branch `main` mais recente antes do envio.
+### Orientações para escrever código
 
-### Enviando uma Pull Request
+- Faça um PR focado por recurso ou correção.
+- Siga as boas práticas de ESLint e TypeScript.
+- Escreva commits claros e descritivos que façam referência às issues (por exemplo, `Fixes #123`). Siga o [estilo de escrita](#writing-style).
+- Teste sua mudança por completo (`npm test`).
+- Antes de enviar, faça rebase na versão mais recente da branch `main`.
 
-- Comece como um **PR de rascunho** se estiver buscando feedback inicial.
-- Descreva claramente suas alterações seguindo o Modelo de Pull Request.
-- Vincule a issue na descrição/título do PR (por exemplo, "Corrige #123").
-- Forneça capturas de tela/vídeos para alterações na interface do usuário.
-- Indique se as atualizações da documentação são necessárias.
+<a id="submitting-a-pull-request"></a>
 
-### Política de Pull Request
+### Enviar um Pull Request
 
-- Deve fazer referência a uma Issue do GitHub atribuída. Para ser atribuído: comente "Reivindicando" na issue e envie uma DM para a equipe principal no [Discord](https://discord.gg/VxfP4Vx3gX). A atribuição será confirmada no tópico.
-- PRs não vinculados podem ser fechados.
-- Os PRs devem passar nos testes de CI, estar alinhados com o roteiro e ter documentação clara.
+- Comece como **Draft PR** se quiser receber comentários antes de terminar.
+- Descreva suas mudanças com o Pull Request Template. Siga o [estilo de escrita](#writing-style).
+- Inclua o link da issue na descrição ou no título do PR (por exemplo, "Fixes #123").
+- Adicione capturas de tela ou vídeos para mudanças na UI.
+- Diga se a mudança exige atualizações na documentação.
+
+<a id="pull-request-policy"></a>
+
+### Política de Pull Requests
+
+- O PR precisa fazer referência a uma issue do GitHub atribuída a você. Para receber a atribuição, comente "Claiming" na issue. Depois, entre em contato com a equipe principal no [Discord](https://discord.gg/VxfP4Vx3gX). A equipe confirma a atribuição na conversa.
+- Podemos fechar PRs sem esse link.
+- Um PR precisa passar nos testes de CI, seguir o plano de desenvolvimento e ter documentação clara.
+
+<a id="review-process"></a>
 
 ### Processo de revisão
 
-- **Triagem diária:** verificações rápidas pelos mantenedores.
-- **Revisão aprofundada semanal:** avaliação abrangente.
-- **Itere prontamente** com base no feedback.
+Um PR pronto para revisão precisa atender a estas condições:
 
-### Expectativas de Pull Request
+- Passar nas verificações obrigatórias de CI.
+- Resolver os comentários da revisão que exigem ação.
+- Receber uma nova aprovação de um mantenedor ou CODEOWNER. Isso acontece depois que a revisão automática do commit mais recente termina.
 
-As Pull Requests devem ser revisáveis, testadas e manuteníveis. Antes de abrir uma PR, certifique-se de que:
+A revisão automática pode adicionar um comentário com orientações e etiquetas de estado gerenciadas pelo sistema. Siga o próximo passo indicado no comentário. Não edite as etiquetas por conta própria. Novos commits reiniciam o estado da revisão do código alterado.
 
-- A mudança é limitada a um issue, bug ou melhoria específica.
-- Você pode explicar o que a mudança faz e por que está correta.
-- Você testou a mudança localmente onde for prático.
-- Você está disposto a responder ao feedback da revisão e fazer alterações de acompanhamento razoáveis.
-- A PR não requer que os mantenedores reescrevam, redesenhem ou assumam substancialmente a propriedade da implementação antes de poder ser mesclada.
+A etiqueta `community-approved` mostra uma nova aprovação da comunidade no commit mais recente. O PR então aguarda a revisão de um mantenedor. A etiqueta serve como orientação de prioridade para os mantenedores. Ela não substitui a revisão de um mantenedor nem uma verificação obrigatória. O fluxo de revisão gerencia a etiqueta.
 
-Os mantenedores podem fechar PRs que estejam incompletas, muito amplas, inativas, não alinhadas com a direção do projeto ou que criem uma carga desproporcionada de revisão ou manutenção. Fechar uma PR não é um julgamento sobre o contribuidor; é uma decisão dos mantenedores de que a mudança não pode ser aceita em sua forma atual.
+A revisão automática ajuda os mantenedores. Ela não substitui a aprovação humana. Pessoas que contribuem de fora da equipe não podem dar instruções ao CodeRabbit por comentários. Uma revisão que atende aos critérios reinicia sozinha depois que o CI obrigatório passa. Os mantenedores cuidam dos reinícios excepcionais. Os avisos são orientações, salvo se a política do repositório disser o contrário. As verificações obrigatórias nativas do GitHub, as regras de CODEOWNER e as proteções de revisão decidem se um PR pode ser integrado.
 
-### Contribuições assistidas por IA
+- **Triagem diária:** Os mantenedores fazem verificações rápidas.
+- **Revisão detalhada semanal:** Os mantenedores fazem uma avaliação completa.
+- **Faça ajustes rapidamente** quando receber comentários.
 
-O uso de ferramentas de IA é permitido, mas os contribuidores permanecem totalmente responsáveis por suas submissões.
+<a id="pull-request-expectations"></a>
 
-Se você usar ferramentas de IA para ajudar a criar uma PR, você deve:
+### Expectativas para Pull Requests
 
-- Revisar e entender cada mudança significativa.
-- Ser capaz de explicar a implementação e as compensações em suas próprias palavras.
-- Testar a mudança você mesmo. Se os testes não forem práticos no seu ambiente, explique o motivo na descrição da PR e descreva como os revisores podem verificar a mudança.
-- Verificar se o código gerado é correto, necessário e compatível com a licença do projeto.
-- Considere divulgar a assistência de IA na descrição da PR quando ela tiver influenciado materialmente o código, testes ou design — isso ajuda os revisores a fornecer um feedback melhor.
+Um PR precisa ser fácil de revisar, testado e fácil de manter. Antes de abrir um PR, confira estes pontos:
 
-Por favor, não envie mudanças geradas por IA que você não entenda ou que não possa manter durante a revisão. Os mantenedores podem fechar PRs que pareçam substancialmente assistidas por IA mas que careçam de verificação humana, justificativa clara ou acompanhamento da revisão.
+- A mudança trata de uma única issue, bug ou melhoria específica.
+- Você consegue explicar o que a mudança faz e por que está correta.
+- Você testou a mudança no seu computador, quando possível.
+- Você vai responder aos comentários da revisão e fazer ajustes posteriores razoáveis.
+- Os mantenedores não precisam reescrever, redesenhar ou assumir a responsabilidade pela mudança antes de integrá-la.
 
-## Legal
+Os mantenedores podem fechar um PR por estes motivos:
 
-Ao contribuir, você concorda que suas contribuições serão licenciadas sob a Licença Apache 2.0, consistente com o licenciamento do Zoo Code.
+- Está incompleto.
+- Tem um escopo amplo demais.
+- Está inativo.
+- Não segue a direção do projeto.
+- Cria trabalho demais de revisão ou manutenção.
+
+Fechar um PR não é um julgamento sobre quem contribui. Significa que os mantenedores não podem aceitar a mudança na forma atual.
+
+Um bot também fecha PRs automaticamente:
+
+- **60 dias de inatividade:** O bot marca um PR como inativo após 60 dias sem atividade. Se não houver atividade por mais 7 dias, o bot fecha o PR. Um novo comentário, commit ou revisão reinicia o contador.
+- **14 dias de inatividade do autor:** Quando alguém solicita mudanças na revisão, o bot adiciona a etiqueta `awaiting-author`. A atividade do autor reinicia o contador de inatividade. Quando as mudanças estiverem prontas, peça uma nova revisão à pessoa que revisou.
+
+Para impedir o fechamento automático de um PR, adicione a etiqueta `do-not-close`, `pinned` ou `work-in-progress`.
+
+<a id="ai-assisted-contributions"></a>
+
+### Contribuições com ajuda de IA
+
+Você pode usar ferramentas de IA. Ainda é totalmente responsável pelo que envia.
+
+Se usar ferramentas de IA para ajudar a criar um PR, você precisa:
+
+- Revisar e entender cada mudança importante.
+- Explicar a implementação e as escolhas envolvidas com suas próprias palavras.
+- Testar a mudança por conta própria. Se não puder testar no seu ambiente, explique o motivo na descrição do PR. Descreva também como as pessoas que revisam podem verificar a mudança.
+- Conferir se o código gerado está correto, é necessário e é compatível com a licença do projeto.
+- Considerar informar sobre a ajuda de IA na descrição do PR. Faça isso quando a IA tiver alterado muito o código, os testes ou o projeto da solução. Isso ajuda a receber comentários melhores na revisão.
+
+Não envie mudanças geradas por IA que você não entende. Não envie mudanças que não consegue manter durante a revisão. Os mantenedores podem fechar um PR que pareça ter usado muita ajuda de IA. Podem fazer isso se não houver verificação humana, motivo claro ou acompanhamento na revisão.
+
+<a id="writing-style"></a>
+
+### Estilo de escrita
+
+Estas regras se aplicam apenas a textos em inglês. Escreva títulos e textos de issues, títulos e descrições de PRs e mensagens de commit em Simplified Technical English (ASD-STE100). Veja [ASD-STE100](https://www.asd-ste100.org/). Os modelos de issue e PR trazem o mesmo lembrete.
+
+- Use frases curtas. Use no máximo 20 palavras para uma instrução.
+- Use palavras simples. Escreva "use", não "utilize". Escreva "start", não "commence".
+- Use a voz ativa. Escreva "the parser reads the file", não "the file is read by the parser".
+- Escreva uma ideia em cada frase.
+- Não use contrações, ponto e vírgula ou travessões.
+- Mantenha o título curto e específico.
+- Não altere logs exatos, mensagens de erro, identificadores, comandos ou evidências de reprodução. Cole tudo como está.
+
+Estas regras são orientações para escrever em inglês. Quem revisa não verifica conformidade formal com ASD-STE100. Código, identificadores e sintaxe de comandos não fazem parte desta regra.
+
+<a id="legal"></a>
+
+## Questões legais
+
+Ao contribuir, você concorda que suas contribuições usem a licença Apache 2.0. Essa é a licença do Zoo Code.
