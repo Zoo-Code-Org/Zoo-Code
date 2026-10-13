@@ -121,6 +121,8 @@ vi.mock("@roo-code/cloud", () => ({
 		get instance() {
 			return {
 				isAuthenticated: vi.fn().mockReturnValue(false),
+				on: vi.fn(),
+				off: vi.fn(),
 			}
 		},
 	},
@@ -1662,19 +1664,35 @@ describe("ClineProvider - Sticky Mode", () => {
 				[tempId]: { mode: "architect", currentApiConfigName: "stale-profile" },
 			})
 
+			// The constructor fires loadViewState without awaiting it. Capture the in-flight
+			// promise so the assertions below run against a settled buffer instead of racing
+			// a fixed delay that only passes by luck on a fast machine.
+			// Private member: no typed API exposes the load promise, hence the double assertion.
+			const proto = ClineProvider.prototype as unknown as { loadViewState: () => Promise<void> }
+			const originalLoad = proto.loadViewState
+			let loadDone: Promise<void> = Promise.resolve()
+			proto.loadViewState = function (this: unknown) {
+				loadDone = originalLoad.call(this)
+				return loadDone
+			}
 			const fresh = new ClineProvider(mockContext, mockOutputChannel, "sidebar", proxy, new WebviewFocusTracker())
-			expect(fresh.viewId).toBe(tempId)
+			try {
+				expect(fresh.viewId).toBe(tempId)
+				await loadDone
 
-			// Let the constructor's fire-and-forget loadViewState settle.
-			await new Promise((resolve) => setTimeout(resolve, 10))
+				// The unowned temporary-id entry must not be adopted...
+				expect(fresh["viewLocalState"]).toStrictEqual({})
 
-			// The unowned temporary-id entry must not be adopted...
-			expect(fresh["viewLocalState"]).toStrictEqual({})
-
-			// ...and the shared values still win, so the stale entry cannot reach getState().
-			const state = await fresh.getState()
-			expect(state.mode).toBe("code")
-			expect(state.currentApiConfigName).not.toBe("stale-profile")
+				// ...and the shared values still win, so the stale entry cannot reach getState().
+				const state = await fresh.getState()
+				expect(state.mode).toBe("code")
+				expect(state.currentApiConfigName).not.toBe("stale-profile")
+			} finally {
+				proto.loadViewState = originalLoad
+				// The constructor registers the instance in ClineProvider.activeInstances;
+				// leaving it there would leak it into every later test in this worker.
+				await fresh.dispose()
+			}
 		})
 
 		it("does not merge a stale temporary-id entry into this instance's first durable write", async () => {
@@ -1686,13 +1704,17 @@ describe("ClineProvider - Sticky Mode", () => {
 			await proxy.setValue("viewStates", { [tempId]: { currentApiConfigName: "old-profile", updatedAt: 1 } })
 
 			const fresh = new ClineProvider(mockContext, mockOutputChannel, "sidebar", proxy, new WebviewFocusTracker())
-			expect(fresh.viewId).toBe(tempId)
+			try {
+				expect(fresh.viewId).toBe(tempId)
 
-			await fresh.saveViewState("mode", "code")
+				await fresh.saveViewState("mode", "code")
 
-			const states = fresh["getPersistedViewStates"]({ fresh: true })
-			expect(states[tempId]).toEqual({ mode: "code", updatedAt: expect.any(Number) })
-			expect(fresh["viewLocalState"].currentApiConfigName).toBeUndefined()
+				const states = fresh["getPersistedViewStates"]({ fresh: true })
+				expect(states[tempId]).toEqual({ mode: "code", updatedAt: expect.any(Number) })
+				expect(fresh["viewLocalState"].currentApiConfigName).toBeUndefined()
+			} finally {
+				await fresh.dispose()
+			}
 		})
 
 		it("does not mark the temporary id as authored when the durable write fails", async () => {
@@ -1712,10 +1734,15 @@ describe("ClineProvider - Sticky Mode", () => {
 				return Promise.resolve()
 			})
 
-			await expect(fresh.saveViewState("mode", "code")).rejects.toThrow("storage unavailable")
-			expect(fresh["wroteUnderTemporaryViewStateId"]).toBe(false)
-
-			mockContext.globalState.update = originalUpdate
+			try {
+				await expect(fresh.saveViewState("mode", "code")).rejects.toThrow("storage unavailable")
+				expect(fresh["wroteUnderTemporaryViewStateId"]).toBe(false)
+			} finally {
+				// Restore even when an assertion fails: a rejecting stub left in place makes
+				// every later test in this worker fail for an unrelated reason.
+				mockContext.globalState.update = originalUpdate
+				await fresh.dispose()
+			}
 		})
 
 		it("does not adopt an entry under the temporary name that this instance never wrote", async () => {
