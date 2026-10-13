@@ -1322,6 +1322,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			// the task's handler and re-point its sticky profile name too.
 			const siblingTask = {
 				apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "doomed-key" },
+				taskApiConfigName: "doomed-profile",
 				updateApiConfiguration: vi.fn(),
 				setTaskApiConfigName: vi.fn(),
 			}
