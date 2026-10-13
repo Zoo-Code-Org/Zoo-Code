@@ -2071,8 +2071,8 @@ describe("ClineProvider", () => {
 			const pruned = provider["prunePersistedViewStates"](states)
 
 			expect(Object.keys(pruned)).toHaveLength(50)
-			expect(pruned["view-54"]).toBeDefined()
-			expect(pruned["view-5"]).toBeDefined()
+			expect(pruned["view-54"]).toEqual({ mode: "mode-54", updatedAt: 54 })
+			expect(pruned["view-5"]).toEqual({ mode: "mode-5", updatedAt: 5 })
 			expect(pruned["view-4"]).toBeUndefined()
 
 			await provider.dispose()

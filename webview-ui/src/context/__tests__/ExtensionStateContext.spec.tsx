@@ -179,7 +179,7 @@ describe("ExtensionStateContext", () => {
 		}
 	})
 
-	it("reseeds view-local mode and API profile from a new state payload after local edits", () => {
+	it("applies mode and profile from a later state payload after local edits", () => {
 		render(
 			<ExtensionStateContextProvider>
 				<ViewLocalStateTestComponent />
