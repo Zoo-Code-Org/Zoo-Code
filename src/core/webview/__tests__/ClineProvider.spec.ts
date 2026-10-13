@@ -1928,8 +1928,8 @@ describe("ClineProvider", () => {
 			const pruned = provider["prunePersistedViewStates"](states)
 
 			expect(Object.keys(pruned)).toHaveLength(50)
-			expect(pruned["view-54"]).toBeDefined()
-			expect(pruned["view-5"]).toBeDefined()
+			expect(pruned["view-54"]).toEqual({ mode: "mode-54", updatedAt: 54 })
+			expect(pruned["view-5"]).toEqual({ mode: "mode-5", updatedAt: 5 })
 			expect(pruned["view-4"]).toBeUndefined()
 
 			await provider.dispose()
@@ -8734,6 +8734,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				// minimal double without the full provider/services graph.
 				const siblingTask = {
 					apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "old-key" },
+					taskApiConfigName: "saved-profile",
 					updateApiConfiguration: vi.fn(),
 				}
 				vi.spyOn(sibling, "getCurrentTask").mockReturnValue(
@@ -8774,6 +8775,101 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			}
 		})
 
+		it("does not rebuild a pinned sibling's task that runs under another profile", async () => {
+			// Defensive: the doubles in this suite can leave console writes pending
+			// at worker teardown.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				// The sibling pins the saved profile, but its active task follows a
+				// different sticky profile: the save must refresh the view overlay
+				// without switching that conversation to the saved profile's settings.
+				sibling["viewLocalState"].currentApiConfigName = "saved-profile"
+				sibling["viewLocalState"].apiConfiguration = {
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "old-key",
+				}
+				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+
+				const siblingTask = {
+					apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "other-key" },
+					taskApiConfigName: "other-profile",
+					updateApiConfiguration: vi.fn(),
+				}
+				vi.spyOn(sibling, "getCurrentTask").mockReturnValue(
+					siblingTask as unknown as ReturnType<typeof sibling.getCurrentTask>,
+				)
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				// @ts-ignore - Replace providerSettingsManager with a test double.
+				provider.providerSettingsManager = {
+					saveConfig: vi.fn().mockResolvedValue("saved-id"),
+					listConfig: vi.fn().mockResolvedValue([]),
+					setModeConfig: vi.fn(),
+				}
+
+				await provider.upsertProviderProfile(
+					"saved-profile",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "new-key" },
+					false,
+				)
+
+				// The pinned view's overlay still catches up with the saved settings...
+				expect(sibling["viewLocalState"].apiConfiguration).toEqual({
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "new-key",
+				})
+				// ...but the task runs under another profile: its handler must not be
+				// switched to the saved profile's settings.
+				expect(siblingTask.updateApiConfiguration).not.toHaveBeenCalled()
+				// Let queued view-local persistence settle while the console spies are
+				// still installed, so teardown has no pending writes.
+				await new Promise((resolve) => setTimeout(resolve, 50))
+			} finally {
+				await sibling.dispose()
+			}
+		})
+
+		it("does not rebuild the acting view's task when it runs under another profile", async () => {
+			// The acting view pins the saved profile while its own task follows a
+			// different sticky profile: the non-activating save refreshes the view
+			// overlay but must leave the task's handler alone.
+			const task = {
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "other-key" },
+				taskApiConfigName: "other-profile",
+				updateApiConfiguration: vi.fn(),
+			}
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(
+				task as unknown as ReturnType<typeof provider.getCurrentTask>,
+			)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			provider["viewLocalState"].currentApiConfigName = "saved-profile"
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				saveConfig: vi.fn().mockResolvedValue("saved-id"),
+				listConfig: vi.fn().mockResolvedValue([]),
+				setModeConfig: vi.fn(),
+			}
+
+			await provider.upsertProviderProfile(
+				"saved-profile",
+				{ apiProvider: providerIdentifiers.anthropic, apiKey: "new-key" },
+				false,
+			)
+
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "new-key",
+			})
+			expect(task.updateApiConfiguration).not.toHaveBeenCalled()
+		})
 		it("does not leak shared provider keys into a pinned view's api configuration", async () => {
 			vi.spyOn(console, "log").mockImplementation(() => {})
 			vi.spyOn(console, "warn").mockImplementation(() => {})
