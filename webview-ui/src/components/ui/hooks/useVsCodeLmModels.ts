@@ -5,6 +5,10 @@ import { type ExtensionMessage, VsCodeLmModelsMessageType } from "@roo-code/type
 
 import { vscode } from "@src/utils/vscode"
 
+// The query key is a constant ("vsCodeLmModels"), so at most one in-flight
+// request can exist at any moment. No requestId correlation is needed: if
+// React Query retries, it aborts the previous signal before firing the next
+// request, so responses are always matched to the current queryFn invocation.
 const getVsCodeLmModels = async (signal?: AbortSignal) =>
 	new Promise<LanguageModelChatSelector[]>((resolve, reject) => {
 		let settled = false

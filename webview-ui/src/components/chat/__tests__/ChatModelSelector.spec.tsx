@@ -136,22 +136,24 @@ describe("ChatModelSelector", () => {
 		})
 	})
 
-	it("does not persist when no apiProvider is stored on the active profile", async () => {
+	it("disables the trigger when no apiProvider is stored on the active profile", async () => {
 		// Profiles without apiProvider get their provider-specific fields stripped
-		// by the schema validator, so the adapter must refuse to write rather
-		// than silently lose the selection on reload.
+		// by the schema validator, so the adapter must disable the trigger rather
+		// than let the user pick a model that would be silently dropped on reload.
 		setState({ apiConfiguration: {} })
 
 		renderSelector()
 
+		const trigger = screen.getByTestId("chat-model-selector-trigger")
+		expect(trigger).toBeDisabled()
+
+		// Clicking a disabled trigger must not open the popover, so no model
+		// option should be reachable.
 		await act(async () => {
-			fireEvent.click(screen.getByTestId("chat-model-selector-trigger"))
+			fireEvent.click(trigger)
 		})
 
-		await act(async () => {
-			fireEvent.click(screen.getByTestId("model-option-model-a"))
-		})
-
+		expect(screen.queryByTestId("model-option-model-a")).not.toBeInTheDocument()
 		expect(mockPostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
 	})
 

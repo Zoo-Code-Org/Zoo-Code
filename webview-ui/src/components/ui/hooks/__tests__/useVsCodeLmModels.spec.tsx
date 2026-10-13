@@ -88,10 +88,15 @@ describe("useVsCodeLmModels", () => {
 		expect(result.current.data).toEqual([])
 	})
 
-	it("removes the window message listener once the request resolves", async () => {
+	it("removes the same window message listener it registered once the request resolves", async () => {
 		const { Wrapper } = wrapper()
+		const addSpy = vi.spyOn(window, "addEventListener")
 		const removeSpy = vi.spyOn(window, "removeEventListener")
+
 		renderHook(() => useVsCodeLmModels(true), { wrapper: Wrapper })
+
+		const registeredHandler = addSpy.mock.calls.find(([eventName]) => eventName === "message")?.[1]
+		expect(registeredHandler).toBeDefined()
 
 		emitMessage({
 			type: VsCodeLmModelsMessageType.vsCodeLmModels,
@@ -99,8 +104,10 @@ describe("useVsCodeLmModels", () => {
 		})
 
 		await waitFor(() => {
-			expect(removeSpy).toHaveBeenCalledWith("message", expect.any(Function))
+			expect(removeSpy).toHaveBeenCalledWith("message", registeredHandler)
 		})
+
+		addSpy.mockRestore()
 		removeSpy.mockRestore()
 	})
 })

@@ -64,7 +64,7 @@ export const ChatModelSelector = ({ disabled = false, title, triggerClassName = 
 		return !providerConfig?.allowAll
 	}, [organizationAllowList, provider])
 
-	const isDisabled = disabled || !modelIdKey || !currentApiConfigName
+	const isDisabled = disabled || !modelIdKey || !currentApiConfigName || !apiConfiguration?.apiProvider
 
 	return (
 		<ModelSelect

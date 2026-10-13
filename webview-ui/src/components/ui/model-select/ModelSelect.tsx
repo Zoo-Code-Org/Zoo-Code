@@ -153,16 +153,10 @@ export const ModelSelect = ({
 				</PopoverTrigger>
 			)}
 			<PopoverContent
-				className={cn(
-					"p-0 w-[var(--radix-popover-trigger-width)]",
-					// Compact (custom trigger) popovers anchor under the trigger;
-					// default settings popovers keep the radix centred alignment.
-					renderTrigger && "w-[300px]",
-					contentClassName,
-				)}
+				className={cn("p-0 w-[300px]", contentClassName)}
 				container={portalContainer}
-				align={renderTrigger ? "start" : undefined}
-				sideOffset={renderTrigger ? 4 : undefined}>
+				align="start"
+				sideOffset={4}>
 				<Command>
 					<div className="relative">
 						<CommandInput
