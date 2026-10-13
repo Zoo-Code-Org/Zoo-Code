@@ -295,16 +295,8 @@ export class ClineProvider
 			rejectQueuedCaller = reject
 		})
 
-		let releaseQueue: () => void = () => {}
-		const queueReleased = new Promise<void>((resolve) => {
-			releaseQueue = resolve
-		})
-		let queueDeadlineId: ReturnType<typeof setTimeout> | undefined
-
 		const invoke = () => {
 			isInvoked = true
-			// Release the queue even if the operation ignores its abort signal, so later mutations cannot deadlock.
-			queueDeadlineId = setTimeout(releaseQueue, ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 10_000)
 			if (this._disposed) {
 				return Promise.reject(new Error("ClineProvider is disposed"))
 			}
@@ -340,16 +332,10 @@ export class ClineProvider
 		)
 
 		// Keep serialization in place until the mutation and any rollback settle before starting next mutation.
-		void run
-			.then(
-				() => undefined,
-				() => undefined,
-			)
-			.then(() => {
-				if (queueDeadlineId) clearTimeout(queueDeadlineId)
-				releaseQueue()
-			})
-		this.providerProfileMutationQueue = queueReleased
+		this.providerProfileMutationQueue = run.then(
+			() => undefined,
+			() => undefined,
+		)
 		return callerResult
 	}
 

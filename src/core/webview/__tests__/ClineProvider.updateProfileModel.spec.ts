@@ -1095,43 +1095,6 @@ describe("ClineProvider - updateProfileModel", () => {
 		}
 	})
 
-	it("releases the mutation queue after the secondary deadline when an operation never settles", async () => {
-		vi.useFakeTimers()
-		try {
-			mockStoredProfile({
-				apiProvider: providerIdentifiers.openrouter,
-				openRouterModelId: "openai/gpt-4",
-				openRouterApiKey: "my-key",
-			})
-
-			const originalSetProviderSettings = provider.contextProxy.setProviderSettings.bind(provider.contextProxy)
-			let setSettingsCalls = 0
-			vi.spyOn(provider.contextProxy, "setProviderSettings").mockImplementation(async (settings) => {
-				setSettingsCalls++
-				if (setSettingsCalls === 1) {
-					await new Promise<void>(() => {})
-				}
-				return originalSetProviderSettings(settings)
-			})
-
-			const mutation1 = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
-				openRouterModelId: "openai/gpt-4.5",
-			})
-			await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 100)
-			await mutation1
-
-			const mutation2 = provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
-				openRouterModelId: "openai/gpt-5",
-			})
-			await vi.advanceTimersByTimeAsync(10_000 + 100)
-			await mutation2
-
-			expect(storedProfiles["test-config"].openRouterModelId).toBe("openai/gpt-5")
-		} finally {
-			vi.useRealTimers()
-		}
-	})
-
 	it("preserves newer profile saved by another provider instance and skips rollback", async () => {
 		mockStoredProfile({
 			apiProvider: providerIdentifiers.openrouter,
