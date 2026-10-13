@@ -40,8 +40,9 @@ vitest.mock("../fetchers/modelCache", () => ({
 			"glm-5.1": { ...opencodeGoModels["glm-5.1"] },
 			// Anthropic-format model used to exercise the /v1/messages path.
 			"qwen3.7-max": { ...opencodeGoModels["qwen3.7-max"] },
-			// Responses-format model (Zoo-Code-Org/Zoo-Code#1431).
+			// Responses-format models (Zoo-Code-Org/Zoo-Code#1431 and issue #1979).
 			"gpt-5.6-luna": { ...opencodeGoModels["gpt-5.6-luna"] },
+			"gpt-6-luna": { ...opencodeGoModels["gpt-6-luna"] },
 		})
 	}),
 	refreshModels: vitest.fn().mockImplementation(function () {
@@ -49,6 +50,7 @@ vitest.mock("../fetchers/modelCache", () => ({
 			"glm-5.1": { ...opencodeGoModels["glm-5.1"] },
 			"qwen3.7-max": { ...opencodeGoModels["qwen3.7-max"] },
 			"gpt-5.6-luna": { ...opencodeGoModels["gpt-5.6-luna"] },
+			"gpt-6-luna": { ...opencodeGoModels["gpt-6-luna"] },
 		})
 	}),
 	getModelsFromCache: vitest.fn().mockReturnValue(undefined),
@@ -833,7 +835,7 @@ describe("OpencodeGoHandler", () => {
 		})
 	})
 
-	describe("Responses-format models (gpt-5.6-luna)", () => {
+	describe("Responses-format models (gpt-5.6-luna, gpt-6-luna)", () => {
 		// gpt-5.6-luna is Responses-only on the Go gateway: its chat-completions
 		// adapter fails with an opaque HTTP 500 (Zoo-Code-Org/Zoo-Code#1431),
 		// so the handler must route it through /v1/responses and never fall
@@ -841,6 +843,10 @@ describe("OpencodeGoHandler", () => {
 		const lunaOptions: ApiHandlerOptions = {
 			opencodeGoApiKey: "test-key",
 			opencodeGoModelId: "gpt-5.6-luna",
+		}
+		const gpt6LunaOptions: ApiHandlerOptions = {
+			opencodeGoApiKey: "test-key",
+			opencodeGoModelId: "gpt-6-luna",
 		}
 
 		beforeEach(() => {
@@ -978,6 +984,21 @@ describe("OpencodeGoHandler", () => {
 			await collectStream(handler.createMessage("sys", messages))
 
 			expect(mockResponsesCreate).toHaveBeenCalledTimes(1)
+			expect(mockCreate).not.toHaveBeenCalled()
+			expect(mockAnthropicCreate).not.toHaveBeenCalled()
+		})
+
+		it("routes gpt-6-luna streaming through responses.create only", async () => {
+			const handler = new OpencodeGoHandler(gpt6LunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const chunks = await collectStream(handler.createMessage("sys", messages))
+
+			expect(chunks).toContainEqual({ type: "text", text: "Hello" })
+			expect(mockResponsesCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: "gpt-6-luna", stream: true }),
+				expect.anything(),
+			)
 			expect(mockCreate).not.toHaveBeenCalled()
 			expect(mockAnthropicCreate).not.toHaveBeenCalled()
 		})
@@ -1315,6 +1336,20 @@ describe("OpencodeGoHandler", () => {
 			expect(callArgs.temperature).toBeUndefined()
 		})
 
+		it("completePrompt routes gpt-6-luna through responses.create only", async () => {
+			mockResponsesCreate.mockResolvedValue({ output_text: "Luna 6 response" })
+			const handler = new OpencodeGoHandler(gpt6LunaOptions)
+
+			expect(await handler.completePrompt("ping")).toBe("Luna 6 response")
+
+			expect(mockResponsesCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: "gpt-6-luna", store: false }),
+				expect.anything(),
+			)
+			expect(mockCreate).not.toHaveBeenCalled()
+			expect(mockAnthropicCreate).not.toHaveBeenCalled()
+		})
+
 		it("forwards Responses-specific max_output_tokens and reasoning in completePrompt", async () => {
 			mockResponsesCreate.mockResolvedValue({ output_text: "Hello!" })
 			const handler = new OpencodeGoHandler({ ...lunaOptions, includeMaxTokens: true, modelMaxTokens: 7_500 })
@@ -1364,6 +1399,7 @@ describe("OpencodeGoHandler", () => {
 
 		it("classifies documented Responses models as Responses-format and other models as not", () => {
 			expect(isOpencodeGoResponsesFormatModel("gpt-5.6-luna")).toBe(true)
+			expect(isOpencodeGoResponsesFormatModel("gpt-6-luna")).toBe(true)
 			expect(isOpencodeGoResponsesFormatModel("grok-4.5")).toBe(false)
 			expect(isOpencodeGoResponsesFormatModel("grok-4.6")).toBe(true)
 			expect(isOpencodeGoResponsesFormatModel("muse-spark-1.3-contributor")).toBe(true)
