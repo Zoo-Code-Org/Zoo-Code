@@ -1,12 +1,10 @@
 import { useCallback, useMemo } from "react"
 
-import type { ProviderName } from "@roo-code/types"
-
 import { cn } from "@/lib/utils"
 import { useRooPortal } from "@/components/ui/hooks/useRooPortal"
 import { vscode } from "@/utils/vscode"
 import { useExtensionState } from "@/context/ExtensionStateContext"
-import { ModelPicker } from "@/components/settings/ModelPicker"
+import { ModelSelect } from "@/components/ui/model-select/ModelSelect"
 
 import { useChatModelSelector } from "./hooks/useChatModelSelector"
 
@@ -19,12 +17,9 @@ interface ChatModelSelectorProps {
 /**
  * Compact model picker for the chat input bar.
  *
- * It reuses the settings page {@link ModelPicker} in `compact` mode (search,
- * filtering, custom-model escape hatch and org-policy filtering all live there)
- * and adds a chat-specific trigger plus a persistence adapter: the settings
- * picker writes to the local settings buffer via `setApiConfigurationField`,
- * while the chat bar persists the selection to the active API configuration
- * profile via `upsertApiConfiguration`.
+ * Wraps the shared {@link ModelSelect} with a chat-specific trigger and a
+ * persistence adapter: selections are written to the active API configuration
+ * profile via `upsertApiConfiguration` rather than the settings buffer.
  */
 export const ChatModelSelector = ({ disabled = false, title, triggerClassName = "" }: ChatModelSelectorProps) => {
 	const { apiConfiguration, organizationAllowList, currentApiConfigName } = useExtensionState()
@@ -33,29 +28,33 @@ export const ChatModelSelector = ({ disabled = false, title, triggerClassName = 
 
 	const portalContainer = useRooPortal("roo-portal")
 
-	// Persist the selection to the active profile. The picker applies
-	// `valueTransform` before calling back, so the adapter stores the received
-	// value directly under the provider's model field.
-	const persistModel = useCallback(
-		(value: unknown) => {
-			if (!modelIdKey || !apiConfiguration || !currentApiConfigName) {
+	// Compute the display string for the currently stored selection.
+	const displayValue = useMemo(() => {
+		if (!modelIdKey) return ""
+		const stored = apiConfiguration?.[modelIdKey]
+		if (!stored) return ""
+		return displayTransform ? displayTransform(stored) : String(stored)
+	}, [apiConfiguration, modelIdKey, displayTransform])
+
+	// Persist the selection to the active profile. ModelSelect delivers the
+	// raw model id, so apply valueTransform before writing.
+	const persistSelection = useCallback(
+		(modelId: string) => {
+			// Refuse to write until the user has actually picked a provider —
+			// the profile schema strips provider-specific fields from
+			// provider-less profiles, so the selection would be dropped on reload.
+			if (!modelIdKey || !apiConfiguration || !currentApiConfigName || !apiConfiguration.apiProvider) {
 				return
 			}
 
+			const value = valueTransform ? valueTransform(modelId) : modelId
 			vscode.postMessage({
 				type: "upsertApiConfiguration",
 				text: currentApiConfigName,
 				apiConfiguration: { ...apiConfiguration, [modelIdKey]: value },
 			})
 		},
-		[modelIdKey, apiConfiguration, currentApiConfigName],
-	)
-
-	const setApiConfigurationField = useCallback(
-		<K extends keyof typeof apiConfiguration>(_field: K, value: (typeof apiConfiguration)[K]) => {
-			persistModel(value)
-		},
-		[persistModel],
+		[modelIdKey, apiConfiguration, currentApiConfigName, valueTransform],
 	)
 
 	// Free-form model ids are only offered when the provider is unrestricted.
@@ -68,26 +67,19 @@ export const ChatModelSelector = ({ disabled = false, title, triggerClassName = 
 	const isDisabled = disabled || !modelIdKey || !currentApiConfigName
 
 	return (
-		<ModelPicker
-			compact
-			apiConfiguration={apiConfiguration ?? {}}
-			setApiConfigurationField={setApiConfigurationField}
+		<ModelSelect
 			models={models}
-			modelIdKey={modelIdKey ?? "apiModelId"}
-			defaultModelId={defaultModelId}
-			serviceName=""
-			serviceUrl=""
-			organizationAllowList={organizationAllowList}
-			activeProviderOverride={provider as ProviderName | undefined}
-			valueTransform={valueTransform}
-			displayTransform={displayTransform}
-			tooltip={title}
+			value={displayValue}
+			onChange={persistSelection}
 			disabled={isDisabled}
 			isLoading={isLoading}
 			hideCustomModel={hideCustomModel}
+			activeProvider={provider}
+			organizationAllowList={organizationAllowList}
 			contentClassName="overflow-hidden"
 			portalContainer={portalContainer}
-			renderTrigger={({ displayValue, isLoading: loading, placeholder }) => (
+			tooltip={title}
+			renderTrigger={({ displayValue: value, isLoading: loading, placeholder }) => (
 				<button
 					type="button"
 					disabled={isDisabled}
@@ -102,7 +94,7 @@ export const ChatModelSelector = ({ disabled = false, title, triggerClassName = 
 						triggerClassName,
 					)}>
 					<span className="truncate max-w-[20ch]">
-						{loading ? "…" : displayValue || defaultModelId || placeholder}
+						{loading ? "…" : value || defaultModelId || placeholder}
 					</span>
 				</button>
 			)}

@@ -136,8 +136,10 @@ describe("ChatModelSelector", () => {
 		})
 	})
 
-	it("preserves the stored provider without injecting a provider override", async () => {
-		// No apiProvider is stored; the adapter must not write one back.
+	it("does not persist when no apiProvider is stored on the active profile", async () => {
+		// Profiles without apiProvider get their provider-specific fields stripped
+		// by the schema validator, so the adapter must refuse to write rather
+		// than silently lose the selection on reload.
 		setState({ apiConfiguration: {} })
 
 		renderSelector()
@@ -150,8 +152,32 @@ describe("ChatModelSelector", () => {
 			fireEvent.click(screen.getByTestId("model-option-model-a"))
 		})
 
+		expect(mockPostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+	})
+
+	it("preserves the stored provider without injecting a provider override", async () => {
+		setState({
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-a",
+			},
+		})
+
+		renderSelector()
+
+		await act(async () => {
+			fireEvent.click(screen.getByTestId("chat-model-selector-trigger"))
+		})
+
+		await act(async () => {
+			fireEvent.click(screen.getByTestId("model-option-model-b"))
+		})
+
 		const payload = mockPostMessage.mock.calls.find(([msg]) => msg.type === "upsertApiConfiguration")?.[0]
-		expect(payload?.apiConfiguration).not.toHaveProperty("apiProvider")
+		expect(payload?.apiConfiguration).toBeDefined()
+		// The adapter must not rewrite apiProvider even though the hook defaults
+		// to OpenRouter when no provider is set.
+		expect(payload?.apiConfiguration).toHaveProperty("apiProvider", providerIdentifiers.openrouter)
 	})
 
 	it("lists VS Code LM models keyed as vendor/family even when custom models are restricted", async () => {
