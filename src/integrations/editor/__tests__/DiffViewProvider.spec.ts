@@ -1527,6 +1527,55 @@ describe("DiffViewProvider", () => {
 			expect(mockTask.observationRegistry.has(`${mockCwd}/test.txt`)).toBe(false)
 		})
 
+		it("withdraws the preview observation on a rejected update save once reset runs", async () => {
+			// The full trigger: the model never read the file, open() records the
+			// preview entry (complete: false), and saveChanges(..., "update") is
+			// rejected as only-partially-read. The discard cleanup reloads the
+			// buffer; nothing wrote, so the token is unchanged and nothing forgets
+			// the entry. Finalization - reached by every tool catch and by
+			// revertChanges through finalizeSession - must withdraw it, or a later
+			// apply_diff is authorized by a look the model never made (the
+			// edit-path test above covers only the first attempt).
+			mockTask.observationRegistry.clear()
+			await openPreview()
+			expect(mockTask.observationRegistry.has(`${mockCwd}/test.txt`)).toBe(true)
+
+			await expect(diffViewProvider.saveChanges(false, 0, "update")).rejects.toThrow(/only partially read/)
+			// The rejected update leaves the preview entry in place - the leftover
+			// the withdrawal must catch.
+			expect(mockTask.observationRegistry.has(`${mockCwd}/test.txt`)).toBe(true)
+
+			await diffViewProvider.reset()
+			expect(mockTask.observationRegistry.has(`${mockCwd}/test.txt`)).toBe(false)
+		})
+
+		it("keeps an observation the model earned at the same token after the preview", async () => {
+			// A read_file after the preview records complete: true at the same
+			// version token (nothing wrote in between). The withdrawal must not
+			// touch it: the model did read the file, and its earned authorization
+			// outlives the preview.
+			mockTask.observationRegistry.clear()
+			await openPreview()
+			const previewEntry = mockTask.observationRegistry.get(`${mockCwd}/test.txt`)
+			expect(previewEntry).toBeDefined()
+			mockTask.observationRegistry.observe(`${mockCwd}/test.txt`, previewEntry!.version, true)
+
+			await diffViewProvider.reset()
+			expect(mockTask.observationRegistry.get(`${mockCwd}/test.txt`)?.complete).toBe(true)
+		})
+
+		it("keeps an entry whose token moved on - the preview no longer owns it", async () => {
+			// A landed publish (or a later session) replaced the entry: the version
+			// no longer names the preview's token, so the withdrawal leaves it
+			// alone even though the flag still reads incomplete.
+			mockTask.observationRegistry.clear()
+			await openPreview()
+			mockTask.observationRegistry.observe(`${mockCwd}/test.txt`, "landed-token", false)
+
+			await diffViewProvider.reset()
+			expect(mockTask.observationRegistry.get(`${mockCwd}/test.txt`)?.version).toBe("landed-token")
+		})
+
 		it("still publishes a targeted edit authorized by a pre-preview observation", async () => {
 			// The same preview must not break the legitimate case: the model read the
 			// file (partially) and nothing changed before the preview, so the restored

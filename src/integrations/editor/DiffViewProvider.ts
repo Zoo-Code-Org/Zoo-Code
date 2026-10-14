@@ -160,6 +160,13 @@ export class DiffViewProvider {
 	 * caller never read, publishing stale content over the intervening change.
 	 */
 	private preOpenObservation: { version: string; complete: boolean } | null | undefined = undefined
+	// The observation this session's preview recorded (path + token), if any.
+	// performFinalReset() withdraws it while the entry still holds that token: the
+	// preview is the tool's own look, not a read the model made, and on the exit
+	// paths that never reach saveChanges' restore (rejected update saves, cancelled
+	// tools, reverts) a leftover entry would authorize a later targeted edit for a
+	// file the model never read.
+	private previewRecordedObservation: { path: string; version: string } | undefined = undefined
 	// The on-disk version open() stat-matched, kept so accept-time adoption can
 	// verify the save was authorized against that exact version.
 	private openToken: string | undefined = undefined
@@ -259,6 +266,7 @@ export class DiffViewProvider {
 				this.openToken = versionTokenOfStat(preStats)
 				if (displayTask && !displayTask.observationRegistry.has(absolutePath)) {
 					displayTask.observationRegistry.observe(absolutePath, this.openToken, false)
+					this.previewRecordedObservation = { path: absolutePath, version: this.openToken }
 				}
 			}
 		} else {
@@ -1862,6 +1870,23 @@ export class DiffViewProvider {
 
 	/** The teardown itself: what one finalization of a session consists of. */
 	private async performFinalReset(): Promise<void> {
+		// Withdraw a preview observation that no save path restored. Every caller
+		// reaches finalization - tool catch blocks call reset(), and revertChanges
+		// arrives through finalizeSession - so this single hook covers the exits
+		// that never touch saveChanges' restore. The entry is dropped only while it
+		// still holds the preview's token AND the preview's incomplete flag: a
+		// successful publish replaces the token first, and a model read_file records
+		// complete: true, so earned observations survive.
+		const previewRecorded = this.previewRecordedObservation
+		this.previewRecordedObservation = undefined
+		if (previewRecorded) {
+			const previewTask = this.taskRef.deref()
+			const stillPreview = previewTask?.observationRegistry.get(previewRecorded.path)
+			if (stillPreview && stillPreview.version === previewRecorded.version && !stillPreview.complete) {
+				previewTask.observationRegistry.forget(previewRecorded.path)
+			}
+		}
+
 		// Dispose touch listeners and cancel any pending deferred scroll BEFORE any
 		// async editor manipulation. closeAllDiffViews() awaits tab-close operations,
 		// so leaving listeners/timers live across that await could let a stale handler
