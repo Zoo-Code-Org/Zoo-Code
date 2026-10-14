@@ -516,7 +516,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			if (requestController.signal.aborted) {
 				throw createAbortError(this.providerName)
 			}
-		} catch (sdkErr: any) {
+		} catch (sdkErr: unknown) {
 			// If this request's own controller aborted and the SDK error is the
 			// cancellation itself — classified from the error alone via
 			// isRequestAborted, never from the signal, so a terminal SDK error

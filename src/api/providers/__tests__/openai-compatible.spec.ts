@@ -257,7 +257,7 @@ describe("OpenAICompatibleHandler", () => {
 		})
 
 		// Test 1: createMessage() with a real AI SDK APICallError 429 (the AI SDK
-		// exposes the HTTP status as statusCode, not status) ??verify the wrapped error
+		// exposes the HTTP status as statusCode, not status) →verify the wrapped error
 		// surfaces .status === 429 and the provider name in its message.
 		it("should throw error with .status 429 when API returns 429", async () => {
 			const rateLimitError = new APICallError({
@@ -292,7 +292,7 @@ describe("OpenAICompatibleHandler", () => {
 			expect(thrownError.message).toContain("TestProvider")
 		})
 
-		// Test 2: createMessage() with mock 500 response ??verify error is properly tagged
+		// Test 2: createMessage() with mock 500 response →verify error is properly tagged
 		it("should throw error with .status 500 and provider name when API returns 500", async () => {
 			const serverError = Object.assign(new Error("Internal Server Error"), { status: 500 })
 
@@ -445,7 +445,7 @@ describe("OpenAICompatibleHandler", () => {
 			)
 		})
 
-		// Test 3: completePrompt() with mock 4xx/5xx ??verify error carries .status and provider name
+		// Test 3: completePrompt() with mock 4xx/5xx →verify error carries .status and provider name
 		it("should throw error with .status and provider name when generateText throws 400", async () => {
 			const badRequestError = Object.assign(new Error("Bad Request"), { status: 400 })
 
