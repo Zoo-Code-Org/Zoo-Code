@@ -488,7 +488,7 @@ describe("safeWriteJson", () => {
 
 	test("should pass null to merge callback when file does not exist", async () => {
 		const newFilePath = path.join(tempDir, "nonexistent.json")
-		const mergeFn = vi.fn((existing, incoming) => incoming)
+		const mergeFn = vi.fn((_existing, incoming) => incoming)
 
 		await safeWriteJson(newFilePath, { value: 42 }, { merge: mergeFn })
 
