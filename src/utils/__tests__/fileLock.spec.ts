@@ -137,7 +137,7 @@ test("terminates on a three-link cycle instead of recursing forever", async () =
 	// Terminated with exactly one lock acquisition on a cycle member, and the
 	// total hop budget held across all frames.
 	expect(lockfile.lock).toHaveBeenCalledTimes(1)
-	expect(fsPromises.readlink.mock.calls.length).toBeLessThanOrEqual(64)
+	expect(vi.mocked(fsPromises.readlink).mock.calls.length).toBeLessThanOrEqual(64)
 
 	await releaseLock()
 })

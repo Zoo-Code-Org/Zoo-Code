@@ -1,7 +1,0 @@
-fix(u5): restore the unicode spec's clipped-lines expectations the auto-merge dropped
-
-The rebase onto main's new unicode tests auto-merged them in but lost this
-unit's hasClippedLines additions to the expected objects, so the three
-clipping tests asserted the pre-feature shape and failed on CI (and
-locally). Restoring the unit's spec content: 76 tests green across the
-indentation-reader specs.
