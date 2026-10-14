@@ -4,13 +4,7 @@ import { execFile } from "child_process"
 import type { ChildProcess } from "child_process"
 import * as path from "path"
 
-import {
-	PostCommitDurabilityError,
-	resolveLockKey,
-	safeWriteText,
-	StagingPathError,
-	type SafeWriteTextOptions,
-} from "../safeWriteText"
+import { PostCommitDurabilityError, resolveLockKey, safeWriteText, StagingPathError } from "../safeWriteText"
 
 // Full mock for fs/promises — all methods are vi.fn() stubs
 vi.mock("fs/promises", () => ({
