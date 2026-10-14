@@ -42,7 +42,6 @@ export function isPathOutsideWorkspace(filePath: string): boolean {
  */
 export function decodeUntrustedPathToStable(filePath: string, maxIterations = 8): string | null {
 	let current = filePath
-	// Stryker disable next-line EqualityOperator,UpdateOperator,ConditionalExpression: defensive iteration bound; valid percent-encoding strictly reduces escape depth per decode, so the bound is never hit for production input (pinned by the direct bound test)
 	for (let i = 0; i < maxIterations; i++) {
 		let decoded: string
 		try {
@@ -56,7 +55,6 @@ export function decodeUntrustedPathToStable(filePath: string, maxIterations = 8)
 		}
 		current = decoded
 	}
-	// Stryker disable next-line EqualityOperator,ConditionalExpression,BlockStatement: defensive bound; valid percent-encoding strictly reduces escape depth per iteration, so non-stabilization is unreachable for real input
 	return null
 }
 
@@ -73,7 +71,6 @@ async function realPathOfExistingAncestor(filePath: string): Promise<string | nu
 			return await fs.promises.realpath(current)
 		} catch (error) {
 			const code = (error as NodeJS.ErrnoException).code
-			// Stryker disable next-line EqualityOperator,ConditionalExpression,BlockStatement: ENOENT is the only expected code on a walk toward an existing ancestor; anything else (EACCES, EIO, ...) must fail closed
 			if (code !== "ENOENT") {
 				return null
 			}
@@ -90,13 +87,11 @@ async function realPathOfExistingAncestor(filePath: string): Promise<string | nu
 				}
 			} catch (lstatError) {
 				const lstatCode = (lstatError as NodeJS.ErrnoException).code
-				// Stryker disable next-line EqualityOperator,ConditionalExpression,BlockStatement: only ENOENT means the entry is genuinely absent and the walk may continue; any other lstat error (EACCES, EIO, ...) must fail closed
 				if (lstatCode !== "ENOENT") {
 					return null
 				}
 			}
 			const parent = path.dirname(current)
-			// Stryker disable next-line EqualityOperator,ConditionalExpression,BlockStatement: root guard against a non-terminating walk (path.dirname stabilizes at the filesystem root)
 			if (parent === current) {
 				return null
 			}
@@ -116,26 +111,20 @@ async function realPathOfExistingAncestor(filePath: string): Promise<string | nu
  */
 export async function isRealPathOutsideWorkspace(filePath: string): Promise<boolean> {
 	const folders = vscode.workspace.workspaceFolders
-	// Stryker disable next-line ConditionalExpression,LogicalOperator: equivalent - with no folders the realFolders set stays empty and the empty-set fail-closed below returns the same result
 	if (!folders || folders.length === 0) {
-		// Stryker disable next-line BlockStatement: no workspace means no allowed root; everything is outside (mirrors isPathOutsideWorkspace)
 		return true
 	}
 	const target = await realPathOfExistingAncestor(filePath)
-	// Stryker disable next-line ConditionalExpression,BlockStatement: unresolvable target (unexpected fs error) fails closed
 	if (!target) {
 		return true
 	}
-	// Stryker disable next-line ArrayDeclaration: equivalent - the array is always populated (or fails closed at the empty check) before the containment test, so the initial literal is unobservable
 	const realFolders: string[] = []
 	for (const folder of folders) {
 		const real = await realPathOfExistingAncestor(folder.uri.fsPath)
-		// Stryker disable next-line ConditionalExpression: equivalent - a null real can never match a resolved target, and the empty-set fail-closed is unaffected by an extra null entry
 		if (real) {
 			realFolders.push(real)
 		}
 	}
-	// Stryker disable next-line EqualityOperator,ConditionalExpression,BlockStatement: if no folder could be realized the containment set is empty, so fail closed
 	if (realFolders.length === 0) {
 		return true
 	}
