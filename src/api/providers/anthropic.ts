@@ -1,7 +1,6 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import { Stream as AnthropicStream } from "@anthropic-ai/sdk/streaming"
 import { CacheControlEphemeral } from "@anthropic-ai/sdk/resources"
-import OpenAI from "openai"
 
 import {
 	type ModelInfo,
@@ -19,7 +18,6 @@ import { ApiStream } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 import { filterNonAnthropicBlocks } from "../transform/anthropic-filter"
 import { getAnthropicProviderReasoning } from "../transform/reasoning"
-import { handleProviderError } from "./utils/error-handler"
 
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
@@ -274,12 +272,19 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 						cache_read_input_tokens,
 					} = chunk.message.usage
 
+					// `output_tokens_details.thinking_tokens` decomposes the billed
+					// output into internal reasoning tokens (0 ⇒ the model skipped
+					// thinking this turn). `output_tokens` already includes them for
+					// billing; this field exists for per-turn thinking telemetry.
+					const startThinkingTokens = chunk.message.usage.output_tokens_details?.thinking_tokens
+
 					yield {
 						type: "usage",
 						inputTokens: input_tokens,
 						outputTokens: output_tokens,
 						cacheWriteTokens: cache_creation_input_tokens || undefined,
 						cacheReadTokens: cache_read_input_tokens || undefined,
+						...(typeof startThinkingTokens === "number" ? { reasoningTokens: startThinkingTokens } : {}),
 					}
 
 					inputTokens += input_tokens
@@ -289,16 +294,22 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 
 					break
 				}
-				case "message_delta":
+				case "message_delta": {
 					// Tells us stop_reason, stop_sequence, and output tokens
 					// along the way and at the end of the message.
+					// Carries the final `thinking_tokens` decomposition for the
+					// whole message (the `message_start` snapshot typically has none).
+					const deltaThinkingTokens = chunk.usage.output_tokens_details?.thinking_tokens
+
 					yield {
 						type: "usage",
 						inputTokens: 0,
 						outputTokens: chunk.usage.output_tokens || 0,
+						...(typeof deltaThinkingTokens === "number" ? { reasoningTokens: deltaThinkingTokens } : {}),
 					}
 
 					break
+				}
 				case "message_stop":
 					// No usage data, just an indicator that the message is done.
 					break
@@ -450,7 +461,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		}
 	}
 
-	async completePrompt(prompt: string, options?: CompletePromptOptions) {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions) {
 		const { id: model, temperature } = this.getModel()
 
 		let message

@@ -84,7 +84,6 @@ describe("autoImportSettings", () => {
 	let mockContextProxy: any
 	let mockCustomModesManager: any
 	let mockOutputChannel: any
-	let mockProvider: any
 
 	beforeEach(() => {
 		// Reset all mocks
@@ -116,14 +115,6 @@ describe("autoImportSettings", () => {
 		// Mock custom modes manager
 		mockCustomModesManager = {
 			updateCustomMode: vi.fn().mockResolvedValue(undefined),
-		}
-
-		// mockProvider must be initialized AFTER its dependencies
-		mockProvider = {
-			providerSettingsManager: mockProviderSettingsManager,
-			contextProxy: mockContextProxy,
-			upsertProviderProfile: vi.fn().mockResolvedValue({ success: true }),
-			postStateToWebview: vi.fn().mockResolvedValue({ success: true }),
 		}
 
 		// Reset fs mock

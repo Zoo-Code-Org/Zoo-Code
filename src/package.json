@@ -3,7 +3,7 @@
 	"displayName": "%extension.displayName%",
 	"description": "%extension.description%",
 	"publisher": "ZooCodeOrganization",
-	"version": "3.86.0",
+	"version": "3.88.0",
 	"icon": "assets/icons/icon.png",
 	"galleryBanner": {
 		"color": "#617A91",
@@ -597,7 +597,7 @@
 		"@types/vscode": "1.100.0",
 		"@vitest/coverage-v8": "4.1.9",
 		"@vscode/vsce": "3.9.2",
-		"ai": "6.0.218",
+		"ai": "7.0.137",
 		"esbuild-wasm": "0.28.1",
 		"execa": "9.6.1",
 		"mkdirp": "3.0.1",

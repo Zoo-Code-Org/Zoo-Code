@@ -15,7 +15,10 @@ vi.mock("@src/utils/vscode", () => ({ vscode: { postMessage: vi.fn() } }))
 // save round trip can be observed without rendering the whole provider tree.
 vi.mock("../ApiOptions", () => ({
 	__esModule: true,
-	default: ({ apiConfiguration, setApiConfigurationField }: Pick<ApiOptionsProps, "apiConfiguration" | "setApiConfigurationField">) => (
+	default: ({
+		apiConfiguration,
+		setApiConfigurationField,
+	}: Pick<ApiOptionsProps, "apiConfiguration" | "setApiConfigurationField">) => (
 		<div data-testid="api-options">
 			<span data-testid="received-strict">{String(apiConfiguration?.openAiStrictToolSchemas)}</span>
 			<button
