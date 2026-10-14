@@ -483,7 +483,7 @@ describe("OpenAiHandler", () => {
 		})
 
 		it("should handle tool calls in streaming responses", async () => {
-			mockCreate.mockImplementation(async (options) =>
+			mockCreate.mockImplementation(async (_options) =>
 				asyncStreamFrom([
 					{
 						choices: [
@@ -560,7 +560,7 @@ describe("OpenAiHandler", () => {
 		})
 
 		it("should yield tool calls even when finish_reason is not set (fallback behavior)", async () => {
-			mockCreate.mockImplementation(async (options) =>
+			mockCreate.mockImplementation(async (_options) =>
 				asyncStreamFrom([
 					{
 						choices: [
@@ -1627,6 +1627,46 @@ describe("OpenAiHandler", () => {
 			expect(model.id).toBe("")
 			expect(model.info).toBeDefined()
 		})
+
+		it("should set preserveReasoning when openAiR1FormatEnabled is on", () => {
+			const r1Handler = new OpenAiHandler({
+				...mockOptions,
+				openAiR1FormatEnabled: true,
+			})
+			const model = r1Handler.getModel()
+			expect(model.info).toEqual({ ...openAiModelInfoSaneDefaults, preserveReasoning: true })
+		})
+
+		it("should set preserveReasoning for deepseek-reasoner model ids without the toggle", () => {
+			const deepseekHandler = new OpenAiHandler({
+				...mockOptions,
+				openAiModelId: "deepseek-reasoner",
+			})
+			const model = deepseekHandler.getModel()
+			expect(model.info.preserveReasoning).toBe(true)
+		})
+
+		it("should merge preserveReasoning into custom model info when openAiR1FormatEnabled is on", () => {
+			const customInfo: ModelInfo = {
+				...openAiModelInfoSaneDefaults,
+				contextWindow: 32_768,
+				supportsImages: false,
+			}
+			const r1Handler = new OpenAiHandler({
+				...mockOptions,
+				openAiCustomModelInfo: customInfo,
+				openAiR1FormatEnabled: true,
+			})
+			const model = r1Handler.getModel()
+			expect(model.info).toEqual({ ...customInfo, preserveReasoning: true })
+			expect(model.info.contextWindow).toBe(32_768)
+			expect(model.info.supportsImages).toBe(false)
+		})
+
+		it("should not set preserveReasoning by default", () => {
+			const model = handler.getModel()
+			expect(model.info.preserveReasoning).toBeUndefined()
+		})
 	})
 
 	describe("Azure AI Inference Service", () => {
@@ -1930,7 +1970,7 @@ describe("OpenAiHandler", () => {
 			]
 
 			const stream = o3Handler.createMessage(systemPrompt, messages)
-			const chunks = await collectStream(stream)
+			await collectStream(stream)
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -2013,7 +2053,7 @@ describe("OpenAiHandler", () => {
 		it("should handle tool calls with O3 model in streaming mode", async () => {
 			const o3Handler = new OpenAiHandler(o3Options)
 
-			mockCreate.mockImplementation(async (options) =>
+			mockCreate.mockImplementation(async (_options) =>
 				asyncStreamFrom([
 					{
 						choices: [
@@ -2073,7 +2113,7 @@ describe("OpenAiHandler", () => {
 		it("should yield tool calls for O3 model even when finish_reason is not set (fallback behavior)", async () => {
 			const o3Handler = new OpenAiHandler(o3Options)
 
-			mockCreate.mockImplementation(async (options) =>
+			mockCreate.mockImplementation(async (_options) =>
 				asyncStreamFrom([
 					{
 						choices: [
@@ -2132,7 +2172,7 @@ describe("OpenAiHandler", () => {
 			]
 
 			const stream = o3Handler.createMessage(systemPrompt, messages)
-			const chunks = await collectStream(stream)
+			await collectStream(stream)
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -2173,7 +2213,7 @@ describe("OpenAiHandler", () => {
 			]
 
 			const stream = o3Handler.createMessage(systemPrompt, messages)
-			const chunks = await collectStream(stream)
+			await collectStream(stream)
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({

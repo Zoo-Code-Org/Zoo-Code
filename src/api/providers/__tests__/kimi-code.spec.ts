@@ -65,13 +65,13 @@ describe("KimiCodeHandler", () => {
 	it("uses API key when auth method is api-key", async () => {
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "my-api-key" })
 		const gen = handler.createMessage("system", [{ role: "user", content: "test" }])
-		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+		vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
 			new Response(JSON.stringify({ choices: [{ message: { content: "response" }, finish_reason: "stop" }] }), {
 				status: 200,
 			}),
 		)
 		try {
-			for await (const chunk of gen) {
+			for await (const _chunk of gen) {
 				// consume
 			}
 		} catch {
@@ -84,7 +84,7 @@ describe("KimiCodeHandler", () => {
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
 		const gen = handler.createMessage("system", [{ role: "user", content: "test" }])
 		try {
-			for await (const chunk of gen) {
+			for await (const _chunk of gen) {
 				// consume
 			}
 		} catch {
@@ -98,7 +98,7 @@ describe("KimiCodeHandler", () => {
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
 		const gen = handler.createMessage("system", [{ role: "user", content: "test" }])
 		await expect(async () => {
-			for await (const chunk of gen) {
+			for await (const _chunk of gen) {
 				// consume
 			}
 		}).rejects.toThrow("Not authenticated with Kimi Code")
@@ -108,7 +108,7 @@ describe("KimiCodeHandler", () => {
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key" })
 		const gen = handler.createMessage("system", [{ role: "user", content: "test" }])
 		await expect(async () => {
-			for await (const chunk of gen) {
+			for await (const _chunk of gen) {
 				// consume
 			}
 		}).rejects.toThrow("Kimi Code API key is required")
@@ -125,7 +125,7 @@ describe("KimiCodeHandler", () => {
 		)
 		const gen = handler.createMessage("system", [{ role: "user", content: "test" }])
 		try {
-			for await (const chunk of gen) {
+			for await (const _chunk of gen) {
 				// consume
 			}
 		} catch {
@@ -161,10 +161,10 @@ describe("KimiCodeHandler", () => {
 
 	it("does not retry on 401 when using API key auth", async () => {
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })
-		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(null, { status: 401 }))
+		vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(null, { status: 401 }))
 		const gen = handler.createMessage("system", [{ role: "user", content: "test" }])
 		await expect(async () => {
-			for await (const chunk of gen) {
+			for await (const _chunk of gen) {
 				// consume
 			}
 		}).rejects.toThrow()
@@ -176,7 +176,7 @@ describe("KimiCodeHandler", () => {
 		vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(null, { status: 500 }))
 		const gen = handler.createMessage("system", [{ role: "user", content: "test" }])
 		await expect(async () => {
-			for await (const chunk of gen) {
+			for await (const _chunk of gen) {
 				// consume
 			}
 		}).rejects.toThrow()
@@ -188,7 +188,7 @@ describe("KimiCodeHandler", () => {
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })
 		const gen = handler.createMessage("system", [{ role: "user", content: "test" }])
 		try {
-			for await (const chunk of gen) {
+			for await (const _chunk of gen) {
 				// consume
 			}
 		} catch {
@@ -202,7 +202,7 @@ describe("KimiCodeHandler", () => {
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })
 		const gen = handler.createMessage("system", [{ role: "user", content: "test" }])
 		try {
-			for await (const chunk of gen) {
+			for await (const _chunk of gen) {
 				// consume
 			}
 		} catch {
@@ -232,7 +232,7 @@ describe("KimiCodeHandler", () => {
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })
 		const gen = handler.createMessage("system", [{ role: "user", content: "test" }])
 		try {
-			for await (const chunk of gen) {
+			for await (const _chunk of gen) {
 				// consume
 			}
 		} catch {
