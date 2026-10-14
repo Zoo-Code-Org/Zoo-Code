@@ -8,9 +8,12 @@ import { ExperimentalSettings } from "../ExperimentalSettings"
 import { AppProviders } from "../../../../playwright/AppProviders"
 
 export function ExperimentalSettingsStory() {
+	// PREVENT_FOCUS_DISRUPTION stands in for the enabled-toggle state: the
+	// dynamicThinkingEffort toggle is hidden (showInSettings: false) until the
+	// set_thinking_effort tool is registered.
 	const [experiments, setExperiments] = useState<Experiments>({
 		...experimentDefault,
-		[EXPERIMENT_IDS.DYNAMIC_THINKING_EFFORT]: true,
+		[EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION]: true,
 	})
 
 	return (

@@ -838,36 +838,30 @@ describe("SettingsView - Experimental Settings", () => {
 		vi.clearAllMocks()
 	})
 
-	it("includes the dynamic thinking effort toggle in the updateSettings payload on save", () => {
-		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: experimentDefault })
+	it("does not render the dynamic thinking effort toggle while the tool is unregistered", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({
+			experiments: { ...experimentDefault, dynamicThinkingEffort: true },
+		})
 		activateTab("experimental")
-		const content = getSettingsContent()
-		const label = within(content).getByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name").closest("label")!
-		const checkbox = within(label).getByRole("checkbox")
-		expect(checkbox).not.toBeChecked()
-		fireEvent.click(checkbox)
-		fireEvent.click(screen.getByTestId("save-button"))
-		expect(vscode.postMessage).toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: "updateSettings",
-				updatedSettings: expect.objectContaining({
-					experiments: expect.objectContaining({ dynamicThinkingEffort: true }),
-				}),
-			}),
-		)
+		expect(
+			within(getSettingsContent()).queryByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name"),
+		).not.toBeInTheDocument()
 	})
 
-	it("persists the unset representation of dynamicThinkingEffort as false on save", () => {
-		const experiments: Record<string, boolean> = { ...experimentDefault }
-		delete experiments.dynamicThinkingEffort
-		const { activateTab, getSettingsContent } = renderSettingsView({ experiments })
+	it("keeps dynamicThinkingEffort in the updateSettings payload while its toggle is hidden", () => {
+		// Hiding the toggle (set_thinking_effort tool not registered yet) must not
+		// drop the flag from the save payload: the experiments object round-trips
+		// wholesale, so a persisted value survives until the tool PR resurfaces it.
+		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: experimentDefault })
 		activateTab("experimental")
-		const content = getSettingsContent()
-		const label = within(content).getByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name").closest("label")!
-		const checkbox = within(label).getByRole("checkbox")
-		expect(checkbox).not.toBeChecked()
-		fireEvent.click(checkbox)
-		fireEvent.click(checkbox)
+		expect(
+			within(getSettingsContent()).queryByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name"),
+		).not.toBeInTheDocument()
+		// Dirty the form via a visible experimental toggle (save posts only when dirty).
+		const visibleLabel = within(getSettingsContent())
+			.getByText("settings:experimental.PREVENT_FOCUS_DISRUPTION.name")
+			.closest("label")!
+		fireEvent.click(within(visibleLabel).getByRole("checkbox"))
 		fireEvent.click(screen.getByTestId("save-button"))
 		expect(vscode.postMessage).toHaveBeenCalledWith(
 			expect.objectContaining({

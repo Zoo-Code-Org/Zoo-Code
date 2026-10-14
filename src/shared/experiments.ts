@@ -26,7 +26,10 @@ export const experimentConfigsMap: Record<ExperimentKey, ExperimentConfig> = {
 	CUSTOM_TOOLS: { enabled: false },
 	// TODO: add i18n keys (settings:experimental.PARALLEL_TOOL_EXECUTION.name/.description) in the same PR that sets showInSettings: true
 	PARALLEL_TOOL_EXECUTION: { enabled: false, showInSettings: false },
-	DYNAMIC_THINKING_EFFORT: { enabled: false },
+	// TODO: set showInSettings: true in the PR that registers the set_thinking_effort
+	// native tool (definition + handler); until then the toggle would only persist a
+	// flag with no model-facing effect.
+	DYNAMIC_THINKING_EFFORT: { enabled: false, showInSettings: false },
 }
 
 export const experimentDefault = Object.fromEntries(

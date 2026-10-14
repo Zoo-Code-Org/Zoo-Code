@@ -2,7 +2,8 @@
 //
 // DTE series 2/5 — task-local thinking effort state on Task:
 // setRuntimeThinkingEffort / getRuntimeThinkingEffort, the in-memory
-// apiConfiguration merge + restore.
+// effective-effort handler rebuild (the profile-derived apiConfiguration
+// projection never carries the override).
 
 import { ProviderSettings, type ReasoningEffortExtended } from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
@@ -74,7 +75,6 @@ vi.mock("../../task-persistence", async (importOriginal) => ({
 type RuntimeThinkingEffortAccess = {
 	runtimeThinkingEffort?: ReasoningEffortExtended
 	runtimeThinkingEffortSource?: string
-	preOverrideReasoningEffort?: ProviderSettings["reasoningEffort"]
 	getRuntimeThinkingEffortMetadata: () => { reasoningEffort?: ReasoningEffortExtended }
 }
 
@@ -130,67 +130,88 @@ describe("Task runtime thinking effort (DTE series 2/5)", () => {
 	})
 
 	describe("setRuntimeThinkingEffort", () => {
-		it("stores effort + source, merges into the in-memory apiConfiguration, and rebuilds the handler", () => {
+		it("stores effort + source and rebuilds the handler with the override applied", () => {
 			task.setRuntimeThinkingEffort("xhigh", "test-source")
 
 			expect(task.getRuntimeThinkingEffort()).toEqual({ effort: "xhigh", source: "test-source" })
 			expect(getPrivateAccess(task).runtimeThinkingEffort).toBe("xhigh")
 			expect(getPrivateAccess(task).runtimeThinkingEffortSource).toBe("test-source")
 
-			// The in-memory copy carries the override...
-			expect(task.apiConfiguration).toEqual(
-				expect.objectContaining({
-					apiProvider: providerIdentifiers.anthropic,
-					apiKey: "test-key",
-					reasoningEffort: "xhigh",
-				}),
-			)
-			// ...without mutating the settings object the provider handed in.
+			// The settings object the provider handed in is never mutated.
 			expect(mockApiConfiguration).toEqual(
 				expect.objectContaining({
 					reasoningEffort: SETTINGS_EFFORT,
 				}),
 			)
-			// The handler is rebuilt from the merged copy (last build call).
+			// The handler is rebuilt with the override applied (last build call)...
 			const lastCall = vi.mocked(buildApiHandler).mock.calls.at(-1)
 			expect(lastCall?.[0]).toEqual(expect.objectContaining({ reasoningEffort: "xhigh" }))
-			// The merged copy is a fresh object, not the settings object.
+			// ...from a fresh copy, not the settings object itself.
 			expect(lastCall?.[0]).not.toBe(mockApiConfiguration)
 		})
 
-		it("does not re-capture the settings value when re-set while active", () => {
+		it("replaces effort + source when re-set while active and restores on clear", () => {
 			task.setRuntimeThinkingEffort("high", "first")
 			task.setRuntimeThinkingEffort("medium", "second")
 
 			expect(task.getRuntimeThinkingEffort()).toEqual({ effort: "medium", source: "second" })
-			// The settings-derived value captured at first activation is preserved.
-			expect(getPrivateAccess(task).preOverrideReasoningEffort).toBe(SETTINGS_EFFORT)
+			const lastSet = vi.mocked(buildApiHandler).mock.calls.at(-1)
+			expect(lastSet?.[0]).toEqual(expect.objectContaining({ reasoningEffort: "medium" }))
 
-			// Clearing restores the original settings value, not the intermediate one.
+			// Clearing rebuilds from the profile projection, not the intermediate effort.
 			task.setRuntimeThinkingEffort(undefined)
-			expect(task.apiConfiguration.reasoningEffort).toBe(SETTINGS_EFFORT)
+			const lastClear = vi.mocked(buildApiHandler).mock.calls.at(-1)
+			expect(lastClear?.[0]).toEqual(expect.objectContaining({ reasoningEffort: SETTINGS_EFFORT }))
 		})
 
 		it("restores the settings-derived effort when cleared with undefined", () => {
 			task.setRuntimeThinkingEffort("max")
-			expect(task.apiConfiguration.reasoningEffort).toBe("max")
+			const lastSet = vi.mocked(buildApiHandler).mock.calls.at(-1)
+			expect(lastSet?.[0]).toEqual(expect.objectContaining({ reasoningEffort: "max" }))
 
 			// A label passed on the clearing call must not survive into source.
 			task.setRuntimeThinkingEffort(undefined, "stale-source")
 
 			expect(task.getRuntimeThinkingEffort()).toEqual({ effort: undefined, source: undefined })
-			expect(task.apiConfiguration.reasoningEffort).toBe(SETTINGS_EFFORT)
-			// The rest of the configuration is preserved through the restore.
+			// The profile effort survives the set/clear cycle with the rest of the
+			// configuration intact.
 			expect(task.apiConfiguration).toEqual(
 				expect.objectContaining({
 					apiProvider: providerIdentifiers.anthropic,
 					apiModelId: "claude-opus-4-7",
 					apiKey: "test-key",
+					reasoningEffort: SETTINGS_EFFORT,
 				}),
 			)
-			// The handler is rebuilt from the restored copy.
+			// The handler is rebuilt from the projection.
 			const lastCall = vi.mocked(buildApiHandler).mock.calls.at(-1)
 			expect(lastCall?.[0]).toEqual(expect.objectContaining({ reasoningEffort: SETTINGS_EFFORT }))
+		})
+
+		it("never lets the override enter apiConfiguration (webview projection + profile save contract)", () => {
+			// ClineProvider.getStateToPostToWebview posts the active task's
+			// apiConfiguration object to the webview, and SettingsView returns it on
+			// save (upsertApiConfiguration -> saveConfig). If the override entered the
+			// projection, any settings save during an active override would persist the
+			// task-local effort into the selected profile.
+			task.setRuntimeThinkingEffort("xhigh", "test-ui")
+
+			expect(task.apiConfiguration).toBe(mockApiConfiguration)
+			expect(task.apiConfiguration.reasoningEffort).toBe(SETTINGS_EFFORT)
+
+			// A profile switch while active keeps the projection profile-pure too.
+			const newConfig = {
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-opus-4-8",
+				apiKey: "test-key",
+				reasoningEffort: "medium",
+			} as ProviderSettings
+			task.updateApiConfiguration(newConfig)
+			expect(task.apiConfiguration).toBe(newConfig)
+			expect(task.apiConfiguration.reasoningEffort).toBe("medium")
+
+			task.setRuntimeThinkingEffort(undefined)
+			expect(task.apiConfiguration.reasoningEffort).toBe("medium")
 		})
 
 		it("is a no-op when cleared while inactive (no handler rebuild)", () => {
@@ -221,7 +242,7 @@ describe("Task runtime thinking effort (DTE series 2/5)", () => {
 	})
 
 	describe("updateApiConfiguration while an override is active", () => {
-		it("re-captures the incoming profile's effort as the restore value and keeps the override applied", () => {
+		it("keeps the override applied over the new profile and restores the new profile on clear", () => {
 			task.setRuntimeThinkingEffort("xhigh", "test-source")
 
 			// A profile switch lands a different settings-derived effort while the override is active.
@@ -233,19 +254,9 @@ describe("Task runtime thinking effort (DTE series 2/5)", () => {
 			} as ProviderSettings
 			task.updateApiConfiguration(newConfig)
 
-			// The override still wins in the in-memory copy...
-			expect(task.apiConfiguration).toEqual(
-				expect.objectContaining({
-					apiModelId: "claude-opus-4-8",
-					apiKey: "test-key-2",
-					reasoningEffort: "xhigh",
-				}),
-			)
-			// ...the override remains active...
+			// The override remains active...
 			expect(task.getRuntimeThinkingEffort()).toEqual({ effort: "xhigh", source: "test-source" })
-			// ...and the NEW profile's value is now the restore target.
-			expect(getPrivateAccess(task).preOverrideReasoningEffort).toBe("medium")
-			// The handler was rebuilt from the merged new copy.
+			// ...and the handler was rebuilt over the NEW profile with the override applied.
 			const lastCall = vi.mocked(buildApiHandler).mock.calls.at(-1)
 			expect(lastCall?.[0]).toEqual(
 				expect.objectContaining({ apiModelId: "claude-opus-4-8", reasoningEffort: "xhigh" }),
@@ -254,7 +265,6 @@ describe("Task runtime thinking effort (DTE series 2/5)", () => {
 
 			// Clearing restores the NEW profile's effort, not the stale original one.
 			task.setRuntimeThinkingEffort(undefined)
-			expect(task.apiConfiguration.reasoningEffort).toBe("medium")
 			expect(task.apiConfiguration).toEqual(
 				expect.objectContaining({
 					apiModelId: "claude-opus-4-8",
@@ -308,7 +318,6 @@ describe("Task runtime thinking effort (DTE series 2/5)", () => {
 			const access = getPrivateAccess(task)
 			expect(access.runtimeThinkingEffort).toBeUndefined()
 			expect(access.runtimeThinkingEffortSource).toBeUndefined()
-			expect(access.preOverrideReasoningEffort).toBeUndefined()
 			expect(task.apiConfiguration.reasoningEffort).toBe(SETTINGS_EFFORT)
 		})
 	})

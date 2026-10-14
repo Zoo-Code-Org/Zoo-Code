@@ -283,6 +283,7 @@ vi.mock("../../task/Task", () => ({
 			apiConversationHistory: [],
 			overwriteClineMessages: vi.fn(),
 			overwriteApiConversationHistory: vi.fn(),
+			apiConfiguration: options?.apiConfiguration,
 			getTaskNumber: vi.fn().mockReturnValue(0),
 			setTaskNumber: vi.fn(),
 			setParentTask: vi.fn(),
@@ -431,6 +432,7 @@ describe("ClineProvider", () => {
 				apiConversationHistory: [],
 				overwriteClineMessages: vi.fn(),
 				overwriteApiConversationHistory: vi.fn(),
+				apiConfiguration: options?.apiConfiguration,
 				getTaskNumber: vi.fn().mockReturnValue(0),
 				setTaskNumber: vi.fn(),
 				setParentTask: vi.fn(),
@@ -2024,6 +2026,42 @@ describe("ClineProvider", () => {
 			expect((await provider.getStateToPostToWebview()).apiConfiguration).toMatchObject(configuration)
 		},
 	)
+
+	test("getStateToPostToWebview posts the active task's apiConfiguration object to the webview", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setProviderSettings({
+			apiProvider: providerIdentifiers.anthropic,
+			apiModelId: "claude-opus-4-7",
+			reasoningEffort: "low",
+		})
+
+		const taskConfiguration = {
+			apiProvider: providerIdentifiers.anthropic,
+			apiModelId: "claude-opus-4-8",
+			reasoningEffort: "high",
+		} as ProviderSettings
+		const mockCline = new Task({ ...defaultTaskOptions, apiConfiguration: taskConfiguration })
+		await provider.addClineToStack(mockCline)
+
+		try {
+			// The webview projection is the ACTIVE TASK's apiConfiguration object itself:
+			// SettingsView buffers it into cachedState and returns it on save
+			// (upsertApiConfiguration -> saveConfig). That is why the task-local thinking
+			// effort override must never enter apiConfiguration (asserted at the Task
+			// layer in Task.runtime-thinking-effort.test.ts): a settings save during an
+			// active override would otherwise persist the override into the profile.
+			const posted = await provider.getStateToPostToWebview()
+			// The webview projection is the ACTIVE TASK's apiConfiguration object itself:
+			// SettingsView buffers it into cachedState and returns it on save
+			// (upsertApiConfiguration -> saveConfig). That is why the task-local thinking
+			// effort override must never enter apiConfiguration (asserted at the Task
+			// layer in Task.runtime-thinking-effort.test.ts): a settings save during an
+			// active override would otherwise persist the override into the profile.
+			expect(posted.apiConfiguration).toBe(taskConfiguration)
+		} finally {
+			await provider.removeClineFromStack()
+		}
+	})
 
 	test("getState returns the saved destructive command guard setting", async () => {
 		await provider.contextProxy.setValue("destructiveCommandGuardEnabled", true)

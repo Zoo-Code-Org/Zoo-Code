@@ -76,8 +76,8 @@ describe("experiments", () => {
 			expect(experimentConfigsMap.DYNAMIC_THINKING_EFFORT).toMatchObject({
 				enabled: false,
 			})
-			// Visible in the Settings panel (showInSettings defaults to true).
-			expect(experimentConfigsMap.DYNAMIC_THINKING_EFFORT.showInSettings).toBeUndefined()
+			// Hidden from the Settings panel until the set_thinking_effort tool exists.
+			expect(experimentConfigsMap.DYNAMIC_THINKING_EFFORT.showInSettings).toBe(false)
 		})
 
 		it("is disabled by default", () => {

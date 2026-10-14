@@ -418,9 +418,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// never persisted to settings; cleared on dispose (see dispose()).
 	private runtimeThinkingEffort?: ReasoningEffortExtended
 	private runtimeThinkingEffortSource?: string
-	// Settings-derived effort captured when the override activates, so clearing
-	// (undefined) restores it in the in-memory apiConfiguration copy.
-	private preOverrideReasoningEffort?: ProviderSettings["reasoningEffort"]
 	private rateLimitClock: RateLimitClock
 	private autoApprovalHandler: AutoApprovalHandler
 
@@ -2481,18 +2478,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * @param newApiConfiguration - The new API configuration to use
 	 */
 	public updateApiConfiguration(newApiConfiguration: ProviderSettings): void {
-		// Update the configuration and rebuild the API handler
-		if (this.runtimeThinkingEffort !== undefined) {
-			// DTE series 2/5: a task-local override is active, so re-capture the
-			// incoming profile's value as the restore value and re-apply the
-			// override on top of the new in-memory copy — clearing the override
-			// must restore the NEW profile's value, not the stale one.
-			this.preOverrideReasoningEffort = newApiConfiguration.reasoningEffort
-			this.apiConfiguration = { ...newApiConfiguration, reasoningEffort: this.runtimeThinkingEffort }
-		} else {
-			this.apiConfiguration = newApiConfiguration
-		}
-		this.api = buildApiHandler(this.apiConfiguration)
+		// Update the configuration and rebuild the API handler.
+		// DTE series 2/5: apiConfiguration stays the profile-derived projection;
+		// an active task-local override is applied to the rebuilt handler only, so
+		// a profile switch keeps the override live and clearing it later restores
+		// the NEW profile's value (it is the configuration itself now).
+		this.apiConfiguration = newApiConfiguration
+		this.api = buildApiHandler(
+			this.runtimeThinkingEffort !== undefined
+				? { ...newApiConfiguration, reasoningEffort: this.runtimeThinkingEffort }
+				: newApiConfiguration,
+		)
 
 		// Refresh only the soft tool-repetition limit from the new profile so an
 		// active task immediately enforces it. The task-level
@@ -2514,12 +2510,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 *
 	 * Resolution order for the affected requests (strongest first): this
 	 * task-local override → settings `reasoningEffort` → model default. The
-	 * override applies to the NEXT API request only (no mid-stream effect): it is
-	 * passed per request as `metadata.reasoningEffort` and, while active, is
-	 * merged into the in-memory `apiConfiguration` copy (profile-switch /
-	 * `updateApiConfiguration` precedent) so the rebuilt handler reflects it too.
-	 * `undefined` clears the override and restores the settings-derived value in
-	 * the copy. Nothing is ever written to persisted settings.
+	 * override applies to the NEXT API request only (no mid-stream effect): it
+	 * is passed per request as `metadata.reasoningEffort` and applied to the
+	 * rebuilt API handler. `apiConfiguration` itself stays the profile-derived
+	 * projection — the override never enters it — so the webview state (which
+	 * posts the active task's `apiConfiguration`) and any profile save built
+	 * from it can never carry the task-local effort. `undefined` clears the
+	 * override and rebuilds the handler from the projection.
 	 *
 	 * @param effort - The task-local effort, or `undefined` to clear.
 	 * @param source - Optional provenance label (UI wiring lands in a later PR).
@@ -2529,24 +2526,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.runtimeThinkingEffort = effort
 		this.runtimeThinkingEffortSource = effort === undefined ? undefined : source
 
-		if (effort !== undefined) {
-			// Capture the settings-derived value once so clearing can restore it.
-			if (!wasActive) {
-				this.preOverrideReasoningEffort = this.apiConfiguration.reasoningEffort
-			}
-			// Merge into the in-memory copy (never the persisted settings object).
-			this.apiConfiguration = { ...this.apiConfiguration, reasoningEffort: effort }
-		} else if (wasActive) {
-			// Restore the settings-derived value captured when the override activated.
-			this.apiConfiguration = { ...this.apiConfiguration, reasoningEffort: this.preOverrideReasoningEffort }
-			this.preOverrideReasoningEffort = undefined
-		} else {
+		if (effort === undefined && !wasActive) {
 			// Already inactive: nothing to clear.
 			return
 		}
 
-		// Rebuild the handler from the updated copy so the next request uses it.
-		this.api = buildApiHandler(this.apiConfiguration)
+		// Rebuild the handler with the effective effort applied. The projection
+		// (this.apiConfiguration) is untouched, so clearing needs no restore: the
+		// handler is simply rebuilt from the profile-derived configuration.
+		this.api = buildApiHandler(
+			effort !== undefined ? { ...this.apiConfiguration, reasoningEffort: effort } : this.apiConfiguration,
+		)
 	}
 
 	/**
