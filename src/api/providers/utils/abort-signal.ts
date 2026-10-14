@@ -154,7 +154,6 @@ export function rejectOnAbort<T>(pending: Promise<T>, signal: AbortSignal, provi
 	}
 	return new Promise<T>((resolve, reject) => {
 		const onAbort = () => reject(createAbortError(providerName))
-		// Stryker disable next-line ObjectLiteral,BooleanLiteral: a signal fires its abort event exactly once and the settle handler removes this listener, so the once flag is unobservable
 		signal.addEventListener("abort", onAbort, { once: true })
 		void pending.then(
 			(value) => {
