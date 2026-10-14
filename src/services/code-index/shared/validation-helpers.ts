@@ -16,12 +16,12 @@ export function sanitizeErrorMessage(errorMessage: string): string {
 	// Replace URLs first (http, https, ftp, file protocols)
 	// This needs to be done before file paths to avoid partial replacements
 	sanitized = sanitized.replace(
-		/(?:https?|ftp|file):\/\/(?:localhost|[\w\-\.]+)(?::\d+)?(?:\/[\w\-\.\/\?\&\=\#]*)?/gi,
+		/(?:https?|ftp|file):\/\/(?:localhost|[\w\-.]+)(?::\d+)?(?:\/[\w\-./?&=#]*)?/gi,
 		"[REDACTED_URL]",
 	)
 
 	// Replace email addresses
-	sanitized = sanitized.replace(/[\w\-\.]+@[\w\-\.]+\.\w+/g, "[REDACTED_EMAIL]")
+	sanitized = sanitized.replace(/[\w\-.]+@[\w\-.]+\.\w+/g, "[REDACTED_EMAIL]")
 
 	// Replace IP addresses (IPv4)
 	sanitized = sanitized.replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, "[REDACTED_IP]")
@@ -32,7 +32,7 @@ export function sanitizeErrorMessage(errorMessage: string): string {
 	// Replace file paths (Unix and Windows style)
 	// Matches paths like /Users/username/path, C:\Users\path, ./relative/path, ../relative/path
 	sanitized = sanitized.replace(
-		/(?:\/[\w\-\.]+)+(?:\/[\w\-\.\s]*)*|(?:[A-Za-z]:\\[\w\-\.\\]+)|(?:\.{1,2}\/[\w\-\.\/]+)/g,
+		/(?:\/[\w\-.]+)+(?:\/[\w\-.\s]*)*|(?:[A-Za-z]:\\[\w\-.\\]+)|(?:\.{1,2}\/[\w\-./]+)/g,
 		"[REDACTED_PATH]",
 	)
 

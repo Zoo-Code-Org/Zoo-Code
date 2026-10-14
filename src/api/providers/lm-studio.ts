@@ -204,7 +204,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				inputTokens,
 				outputTokens,
 			} as const
-		} catch (error) {
+		} catch {
 			throw new Error(
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
 			)
@@ -232,7 +232,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		}
 	}
 
-	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
 		try {
 			// Create params object with optional draft model
 			const params: any = {
@@ -254,7 +254,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				throw handleOpenAIError(error, this.providerName)
 			}
 			return response.choices[0]?.message.content || ""
-		} catch (error) {
+		} catch {
 			throw new Error(
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
 			)
@@ -271,7 +271,7 @@ export async function getLmStudioModels(baseUrl = "http://localhost:1234") {
 		const response = await axios.get(`${baseUrl}/v1/models`)
 		const modelsArray = response.data?.data?.map((model: any) => model.id) || []
 		return [...new Set<string>(modelsArray)]
-	} catch (error) {
+	} catch {
 		return []
 	}
 }
