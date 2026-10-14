@@ -654,6 +654,25 @@ describe("Stryker suppression directive prohibition", () => {
 		)
 	})
 
+	it("ignores directive-looking JSX text in tsx sources", () => {
+		assert.doesNotThrow(() =>
+			assertNoDisableDirectives(
+				"const el = <div> // Stryker disable all\n</div>\n",
+				new Set([1, 2]),
+				"source.tsx",
+			),
+		)
+		assert.throws(
+			() =>
+				assertNoDisableDirectives(
+					"const el = <div>{ // Stryker disable next-line all: reason\nx}</div>\n",
+					new Set([1, 2]),
+					"source.tsx",
+				),
+			/Stryker suppression comments are not allowed/,
+		)
+	})
+
 	it("accepts sources without suppression comments", () => {
 		assert.doesNotThrow(() => assertNoDisableDirectives("return value <= limit\n", new Set([1]), "source.ts"))
 		assert.doesNotThrow(() =>

@@ -169,6 +169,9 @@ export function assertNoDisableDirectives(source, lineNumbers, filePath) {
 		for (const range of ranges ?? []) {
 			if (seen.has(range.pos)) continue
 			seen.add(range.pos)
+			// getLeadingCommentRanges is text-based: inside JSX, directive-looking rendered text
+			// (e.g. <div> // Stryker disable all) is JsxText, not a comment, and must not fail.
+			if (ts.getTokenAtPosition(sourceFile, range.pos).kind === ts.SyntaxKind.JsxText) continue
 			if (!SUPPRESSION_DIRECTIVE.test(source.slice(range.pos, range.end))) continue
 			const lineNumber = (source.slice(0, range.pos).match(/\n/g)?.length ?? 0) + 1
 			if (lineNumbers.has(lineNumber)) {
