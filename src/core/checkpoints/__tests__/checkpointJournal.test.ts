@@ -17,7 +17,7 @@ vi.mock("vscode", () => ({
 	},
 	Uri: {
 		file: vi.fn((p: string) => ({ fsPath: p })),
-		parse: vi.fn((uri: string) => ({ with: vi.fn(() => ({})) })),
+		parse: vi.fn((_uri: string) => ({ with: vi.fn(() => ({})) })),
 	},
 	commands: {
 		executeCommand: vi.fn(),
