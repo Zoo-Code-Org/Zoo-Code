@@ -370,7 +370,6 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			let lastUsageMetadata: GenerateContentResponseUsageMetadata | undefined
 			let pendingGroundingMetadata: GroundingMetadata | undefined
 			let finalResponse: { responseId?: string } | undefined
-			let finishReason: string | undefined
 
 			// Gemini provides no call ID, so one is synthesized here. The
 			// request-unique component keeps persisted pending-action IDs (#1714)
@@ -389,7 +388,6 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 				// Track the final structured response (per SDK pattern: candidate.finishReason)
 				if (chunk.candidates && chunk.candidates[0]?.finishReason) {
 					finalResponse = chunk as { responseId?: string }
-					finishReason = chunk.candidates[0].finishReason
 				}
 				// Process candidates and their parts to separate thoughts from content
 				if (chunk.candidates && chunk.candidates.length > 0) {

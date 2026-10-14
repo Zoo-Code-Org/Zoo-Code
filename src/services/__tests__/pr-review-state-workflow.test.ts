@@ -980,6 +980,71 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
 	})
 
+	it("keeps has-conflicts while mergeability is unknown and required CI is missing (#2025)", async () => {
+		// A conflicting PR gets no merge-ref CI run, so its required checks are
+		// missing. Unknown mergeability must not read that as a reason to strip
+		// an existing has-conflicts label; the other state labels still clear.
+		const result = await runWorkflow({
+			eventName: "push",
+			mergeable: null,
+			mergeableState: "unknown",
+			labels: ["has-conflicts", "awaiting-author"],
+			omitRequiredRuns: true,
+		})
+
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-author" }))
+		expect(latestGateStatus(result)?.description).toContain("required CI checks")
+	})
+
+	it("keeps has-conflicts while mergeability is unknown and required CI has failed (#2025)", async () => {
+		const result = await runWorkflow({
+			mergeable: null,
+			mergeableState: "unknown",
+			labels: ["has-conflicts", "awaiting-author"],
+			requiredConclusion: "failure",
+		})
+
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-author" }))
+		expect(latestGateStatus(result)?.description).toContain("failing required CI checks")
+	})
+
+	it("does not add has-conflicts while mergeability is unknown and required CI is missing (#2025)", async () => {
+		const result = await runWorkflow({
+			mergeable: null,
+			mergeableState: "unknown",
+			labels: ["awaiting-author"],
+			omitRequiredRuns: true,
+		})
+
+		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-author" }))
+		expect(latestGateStatus(result)?.description).toContain("required CI checks")
+	})
+
+	it("strips has-conflicts when mergeability is known clean and required CI is missing (#2025)", async () => {
+		const result = await runWorkflow({
+			labels: ["has-conflicts"],
+			omitRequiredRuns: true,
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+		expect(latestGateStatus(result)?.description).toContain("required CI checks")
+	})
+
+	it("labels has-conflicts when mergeability is known dirty even with required CI missing (#2025)", async () => {
+		const result = await runWorkflow({
+			conflict: true,
+			omitRequiredRuns: true,
+		})
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+		expect(latestGateStatus(result)?.description).toContain("merge conflicts")
+	})
+
 	it("uses a legacy commit status for an unpinned required context", async () => {
 		const result = await runWorkflow({
 			requiredIntegrationId: null,

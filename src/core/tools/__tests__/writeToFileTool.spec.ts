@@ -161,7 +161,7 @@ describe("writeToFileTool", () => {
 			pushToolWriteResult: vi.fn().mockImplementation(async function (
 				this: any,
 				task: any,
-				cwd: string,
+				_cwd: string,
 				isNewFile: boolean,
 			) {
 				// Simulate the behavior of pushToolWriteResult

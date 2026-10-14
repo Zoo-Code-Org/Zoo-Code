@@ -68,6 +68,8 @@
 			"rollup": "4.60.4",
 			"vite": "8.1.0",
 			"undici": "6.28.1",
+			"@ai-sdk/provider@3": "3.0.13",
+			"@ai-sdk/provider-utils@4": "4.0.35",
 			"form-data": ">=4.0.4",
 			"bluebird": ">=3.7.2",
 			"glob": "11.1.0",

@@ -214,7 +214,7 @@ describe("LiteLLMHandler", () => {
 			})
 
 			const generator = handler.createMessage(systemPrompt, messages)
-			const results = await collectStream(generator)
+			await collectStream(generator)
 
 			// Verify that create was called with max_completion_tokens instead of max_tokens
 			const createCall = mockCreate.mock.calls[0][0]

@@ -15,7 +15,6 @@ import { ApiHandlerOptions } from "../../shared/api"
 
 import { convertToMistralMessages } from "../transform/mistral-format"
 import { ApiStream } from "../transform/stream"
-import { handleProviderError } from "./utils/error-handler"
 import { createAbortError, isRequestAborted, mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
 import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 
