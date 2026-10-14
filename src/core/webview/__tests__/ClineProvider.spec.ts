@@ -7833,9 +7833,11 @@ describe("ClineProvider", () => {
 				// nor the sticky-name rewrite may touch it.
 				expect(siblingTask.updateApiConfiguration).not.toHaveBeenCalled()
 				expect(siblingTask.setTaskApiConfigName).not.toHaveBeenCalled()
-				// Let queued view-local persistence settle while the console spies are
-				// still installed, so teardown has no pending writes.
-				await new Promise((resolve) => setTimeout(resolve, 50))
+				// Wait on the serialized view-state write queue that every
+				// viewStates mutation goes through, so queued persistence finishes
+				// while the console spies are still installed and teardown has no
+				// pending writes.
+				await ClineProvider["persistedViewStateWriteQueue"]
 			} finally {
 				await sibling.dispose()
 				await provider.dispose()
@@ -15115,6 +15117,11 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 					apiProvider: providerIdentifiers.anthropic,
 					apiKey: "new-key",
 				})
+				// Wait on the serialized view-state write queue that every
+				// viewStates mutation goes through, so queued persistence finishes
+				// while the console spies are still installed and teardown has no
+				// pending writes.
+				await ClineProvider["persistedViewStateWriteQueue"]
 			} finally {
 				await sibling.dispose()
 			}
