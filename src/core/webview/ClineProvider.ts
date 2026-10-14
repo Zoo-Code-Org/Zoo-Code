@@ -2929,6 +2929,7 @@ export class ClineProvider
 			persistModeConfig?: boolean
 			persistTaskHistory?: boolean
 			skipCurrentTaskRebuild?: boolean
+			preserveForeignTask?: boolean
 		},
 	) {
 		return this.enqueueProviderProfileMutation((signal) =>
@@ -2942,6 +2943,7 @@ export class ClineProvider
 			persistModeConfig?: boolean
 			persistTaskHistory?: boolean
 			skipCurrentTaskRebuild?: boolean
+			preserveForeignTask?: boolean
 			// Fires once the activation has written the activated profile to shared
 			// state, so callers can mark the switch committed at the true point of no
 			// return (a profile lookup failure must stay reconcilable).
@@ -2996,8 +2998,18 @@ export class ClineProvider
 			await this.providerSettingsManager.setModeConfig(mode, id)
 		}
 
-		// Change the provider for the current task.
-		this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true, skipCurrentTaskRebuild })
+		// Change the provider for the current task. A launch-time pin repair
+		// (preserveForeignTask) must not switch a task that follows a different
+		// sticky profile: the repair deliberately leaves the task's sticky profile
+		// untouched, so its handler and credentials must stay on that profile too.
+		const foreignTaskFollowed =
+			options?.preserveForeignTask === true &&
+			this.getCurrentTask()?.taskApiConfigName !== undefined &&
+			this.getCurrentTask()?.taskApiConfigName !== name
+		this.updateTaskApiHandlerIfNeeded(providerSettings, {
+			forceRebuild: true,
+			skipCurrentTaskRebuild: skipCurrentTaskRebuild || foreignTaskFollowed,
+		})
 
 		// Update the current task's sticky provider profile, unless this activation is
 		// being used purely as a non-persisting restoration (e.g., reopening a task from history).
