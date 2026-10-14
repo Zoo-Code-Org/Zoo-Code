@@ -9,7 +9,7 @@ import { customToolRegistry } from "@roo-code/core"
 import { t } from "../../i18n"
 
 import { defaultModeSlug, getModeBySlug } from "../../shared/modes"
-import type { AutoApprovalContext, ToolParamName, ToolResponse, ToolUse, McpToolUse } from "../../shared/tools"
+import type { AutoApprovalContext, ToolResponse, ToolUse, McpToolUse } from "../../shared/tools"
 
 import { buildAutoDenyReason } from "../auto-approval"
 
@@ -191,7 +191,7 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 			// Store approval feedback to merge into tool result (GitHub #10465)
 			let approvalFeedback: { text: string; images?: string[] } | undefined
 
-			const pushToolResult = (content: ToolResponse, feedbackImages?: string[]) => {
+			const pushToolResult = (content: ToolResponse, _feedbackImages?: string[]) => {
 				if (hasToolResult) {
 					console.warn(
 						`[presentAssistantMessage] Skipping duplicate tool_result for mcp_tool_use: ${toolCallId}`,
@@ -238,8 +238,6 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 
 				hasToolResult = true
 			}
-
-			const toolDescription = () => `[mcp_tool: ${mcpBlock.serverName}/${mcpBlock.toolName}]`
 
 			const askApproval = async (
 				type: ClineAsk,

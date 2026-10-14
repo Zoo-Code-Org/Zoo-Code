@@ -10,12 +10,6 @@ export default [
 		rules: {
 			"prefer-const": ["error", { destructuring: "all" }],
 
-			// TODO: The rules listed below should be re-enabled once their existing violations are fixed.
-			"no-regex-spaces": "off",
-			"no-useless-escape": "off",
-			"no-empty": "off",
-
-			"@typescript-eslint/no-unused-vars": "off",
 			// Enforced; existing violations are suppressed in eslint-suppressions.json and cleaned up incrementally.
 			"@typescript-eslint/no-explicit-any": "error",
 			"@typescript-eslint/no-require-imports": "off",

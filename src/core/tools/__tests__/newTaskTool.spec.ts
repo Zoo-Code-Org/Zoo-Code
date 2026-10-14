@@ -176,7 +176,7 @@ describe("newTaskTool", () => {
 		expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("Delegated to child task"))
 	})
 
-	it("should not un-escape single escaped \@", async () => {
+	it("should not un-escape single escaped @", async () => {
 		const block: ToolUse<"new_task"> = {
 			type: "tool_use", // Add required 'type' property
 			name: "new_task", // Correct property name

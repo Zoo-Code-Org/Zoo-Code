@@ -1,13 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk"
 
-import { parseMentions, ParseMentionsResult, MentionContentBlock } from "./index"
+import { parseMentions, MentionContentBlock } from "./index"
 import { FileContextTracker } from "../context-tracking/FileContextTracker"
 import type { SkillLookup } from "../../services/skills/skillInvocation"
 
 // Internal aliases for the Anthropic content block subtypes used during processing.
 type TextPart = Anthropic.Messages.TextBlockParam
 type ImagePart = Anthropic.Messages.ImageBlockParam
-type ToolResultPart = Anthropic.Messages.ToolResultBlockParam
 
 export interface ProcessUserContentMentionsResult {
 	content: Anthropic.Messages.ContentBlockParam[]
