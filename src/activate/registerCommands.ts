@@ -310,7 +310,6 @@ export const openClineInNewTab = async ({ context, outputChannel, webviewFocusTr
 		// holds this in-flight creation, every other caller receives that
 		// same promise (guard above), so no replacement can be stored before
 		// this finally block runs — the equality check pins the invariant.
-		// Stryker disable next-line ConditionalExpression: defensive clobber guard, unreachable per the ordering argument above.
 		if (pendingTabPanelCreation === creation) {
 			pendingTabPanelCreation = undefined
 		}
@@ -424,7 +423,6 @@ const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTrac
 		})
 
 		// Save as tab type panel.
-		// Stryker disable next-line StringLiteral: setPanel branches only on type === "sidebar", so any other literal routes to the identical tab-ref assignment
 		setPanel(newPanel, "tab")
 
 		// TODO: Use better svg icon with light and dark variants (see
@@ -445,7 +443,6 @@ const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTrac
 				// only the active one is the current tab, and the title-bar
 				// commands must resolve that instance, not the last created one.
 				if (panel.active) {
-					// Stryker disable next-line StringLiteral: setPanel only distinguishes "sidebar"; any other value routes to the tab-ref assignment
 					setPanel(panel, "tab")
 				}
 				if (panel.visible) {
@@ -462,7 +459,6 @@ const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTrac
 		newPanel.onDidDispose(
 			() => {
 				if (tabPanel === newPanel) {
-					// Stryker disable next-line StringLiteral: setPanel branches only on type === "sidebar", so any other literal routes to the identical tab-ref assignment
 					setPanel(undefined, "tab")
 				}
 			},
