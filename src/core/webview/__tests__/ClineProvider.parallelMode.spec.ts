@@ -3,8 +3,6 @@
 import * as vscode from "vscode"
 
 import {
-	type ExtensionMessage,
-	type ExtensionState,
 	type ProviderSettingsEntry,
 	type ProviderSettingsWithId,
 	type RooCodeSettings,
@@ -13,16 +11,12 @@ import {
 	providerIdentifiers,
 } from "@roo-code/types"
 
-import { defaultModeSlug } from "../../../shared/modes"
 import { ContextProxy } from "../../config/ContextProxy"
 import { WebviewFocusTracker } from "../WebviewFocusTracker"
 import { ClineProvider } from "../ClineProvider"
-import { switchModeTool } from "../../tools/SwitchModeTool"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import type { Task } from "../../task/Task"
-import type { ToolCallbacks } from "../../tools/BaseTool"
-import type { ToolUse } from "../../../shared/tools"
 
 // Mock p-wait-for
 vi.mock("p-wait-for", () => ({
