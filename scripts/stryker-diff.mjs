@@ -473,12 +473,16 @@ export function loadEquivalences(repoRoot) {
 }
 
 export function applyEquivalences(counts, equivalences, packageEntry, reportedFiles = new Set()) {
-	const index = new Map(equivalences.map((entry) => [`${entry.file}:${entry.line}:${entry.mutator}`, entry]))
+	// The key includes the replacement: one condition yields both `=> true` and `=> false`
+	// ConditionalExpression mutants, and only the reviewed replacement may be accepted.
+	const index = new Map(
+		equivalences.map((entry) => [`${entry.file}:${entry.line}:${entry.mutator}:${entry.replacement}`, entry]),
+	)
 	const used = new Set()
 	const blocking = []
 	let equivalent = 0
 	for (const mutant of counts.blocking) {
-		const key = `${packageEntry.root}/${mutant.filePath}:${mutant.location?.start?.line}:${mutant.mutatorName}`
+		const key = `${packageEntry.root}/${mutant.filePath}:${mutant.location?.start?.line}:${mutant.mutatorName}:${mutant.replacement}`
 		if (index.has(key)) {
 			used.add(key)
 			equivalent++
@@ -490,7 +494,7 @@ export function applyEquivalences(counts, equivalences, packageEntry, reportedFi
 		(entry) =>
 			entry.file.startsWith(packageEntry.sourceRoot) &&
 			reportedFiles.has(entry.file) &&
-			!used.has(`${entry.file}:${entry.line}:${entry.mutator}`),
+			!used.has(`${entry.file}:${entry.line}:${entry.mutator}:${entry.replacement}`),
 	)
 	return { ...counts, blocking, equivalent, unusedEquivalences }
 }
@@ -600,7 +604,7 @@ export function formatSummary(rows, advisories, manifest = {}) {
 		"## Changed-code mutation testing",
 		"",
 		"| Package | Changed executable lines | Valid | Killed | Timeout | Survived | No coverage | Equivalent | Result |",
-		"| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+		"| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
 	]
 	for (const row of rows) {
 		lines.push(
@@ -707,7 +711,7 @@ export function evaluateReport(report, packageEntry, equivalences = []) {
 	if (counts.unusedEquivalences.length > 0) {
 		advisories.push(
 			`${packageEntry.id} matched none of its accepted equivalence entries for files under test ` +
-				`(${counts.unusedEquivalences.map((entry) => `${entry.file}:${entry.line}:${entry.mutator}`).join(", ")}). ` +
+				`(${counts.unusedEquivalences.map((entry) => `${entry.file}:${entry.line}:${entry.mutator}:${entry.replacement}`).join(", ")}). ` +
 				"The code shifted or the mutant is now killed; update or remove the stale entries.",
 		)
 	}

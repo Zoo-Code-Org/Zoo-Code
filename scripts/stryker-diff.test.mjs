@@ -1013,9 +1013,27 @@ describe("accepted equivalent mutants", () => {
 		},
 	}
 	const equivalences = [
-		{ file: "src/utils/pathUtils.ts", line: 45, mutator: "EqualityOperator", reason: "defensive bound never hit" },
-		{ file: "src/utils/pathUtils.ts", line: 99, mutator: "BlockStatement", reason: "entry whose mutant is gone" },
-		{ file: "src/other.ts", line: 7, mutator: "Foo", reason: "file not part of this run" },
+		{
+			file: "src/utils/pathUtils.ts",
+			line: 45,
+			mutator: "EqualityOperator",
+			replacement: "<=",
+			reason: "defensive bound never hit",
+		},
+		{
+			file: "src/utils/pathUtils.ts",
+			line: 99,
+			mutator: "BlockStatement",
+			replacement: "{}",
+			reason: "entry whose mutant is gone",
+		},
+		{
+			file: "src/other.ts",
+			line: 7,
+			mutator: "Foo",
+			replacement: "bar",
+			reason: "file not part of this run",
+		},
 	]
 
 	it("removes accepted equivalent mutants from the blocking set", () => {
@@ -1024,6 +1042,42 @@ describe("accepted equivalent mutants", () => {
 		assert.equal(counts.survived, 2)
 		assert.equal(counts.blocking.length, 1)
 		assert.equal(counts.blocking[0].mutatorName, "ConditionalExpression")
+	})
+
+	it("accepts only the reviewed replacement when two mutants share a key", () => {
+		const twoMutants = {
+			files: {
+				"utils/pathUtils.ts": {
+					mutants: [
+						{
+							status: "Survived",
+							mutatorName: "ConditionalExpression",
+							replacement: "true",
+							location: { start: { line: 50 } },
+						},
+						{
+							status: "Survived",
+							mutatorName: "ConditionalExpression",
+							replacement: "false",
+							location: { start: { line: 50 } },
+						},
+					],
+				},
+			},
+		}
+		const reviewed = [
+			{
+				file: "src/utils/pathUtils.ts",
+				line: 50,
+				mutator: "ConditionalExpression",
+				replacement: "true",
+				reason: "only the true replacement is equivalent here",
+			},
+		]
+		const counts = evaluateReport(twoMutants, packageEntry, reviewed)
+		assert.equal(counts.equivalent, 1)
+		assert.equal(counts.blocking.length, 1)
+		assert.equal(counts.blocking[0].replacement, "false")
 	})
 
 	it("advises about stale entries only for files present in the report", () => {
@@ -1036,6 +1090,52 @@ describe("accepted equivalent mutants", () => {
 		const counts = evaluateReport(report, packageEntry)
 		assert.equal(counts.blocking.length, 2)
 		assert.equal(counts.equivalent, 0)
+	})
+
+	it("applies registry equivalences through the runManifest pipeline", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-equiv-manifest-"))
+		const packageEntry = {
+			id: "core",
+			root: "packages/core",
+			sourceRoot: "packages/core/",
+			vitestConfig: "vitest.unit.config.ts",
+			selectors: ["src/value.ts:1-1"],
+			changedExecutableLines: 1,
+		}
+		try {
+			const row = runManifest(repo, { packages: [{ ...packageEntry }] }, path.join(repo, "reports"), {
+				runMutation: (_repoRoot, _entry, _reportRoot, dryRunOnly) =>
+					dryRunOnly ? "Instrumented 1 source file(s) with 1 mutant(s)" : "",
+				readMutationReport: () => ({
+					files: {
+						"src/value.ts": {
+							mutants: [
+								{
+									status: "Survived",
+									mutatorName: "BooleanLiteral",
+									replacement: "false",
+									location: { start: { line: 1 } },
+								},
+							],
+						},
+					},
+				}),
+				readEquivalences: () => [
+					{
+						file: "packages/core/src/value.ts",
+						line: 1,
+						mutator: "BooleanLiteral",
+						replacement: "false",
+						reason: "the mutated branch is unreachable in every caller",
+					},
+				],
+			})[0]
+			assert.equal(row.equivalent, 1)
+			assert.equal(row.result, "Passed")
+			assert.deepEqual(row.advisories, [])
+		} finally {
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
 	})
 
 	it("loads no equivalences when the registry file is absent", () => {
@@ -1051,6 +1151,7 @@ describe("accepted equivalent mutants", () => {
 			assert.match(entry.file, /^(src|packages)\//)
 			assert.ok(Number.isInteger(entry.line))
 			assert.ok(entry.mutator)
+			assert.equal(typeof entry.replacement, "string")
 			assert.ok(entry.reason.length > 20)
 		}
 	})
@@ -1075,6 +1176,9 @@ describe("accepted equivalent mutants", () => {
 			[],
 			{},
 		)
+		const header = summary.split("\n").find((line) => line.includes("| Equivalent |")) ?? ""
+		const delimiter = summary.split("\n")[summary.split("\n").indexOf(header) + 1] ?? ""
+		assert.equal(header.split("|").length, delimiter.split("|").length)
 		assert.ok(summary.includes("| Equivalent |"))
 		assert.ok(summary.includes("| 1 | Passed |"))
 	})
