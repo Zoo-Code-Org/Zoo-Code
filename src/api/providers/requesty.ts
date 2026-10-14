@@ -176,7 +176,6 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 				controller.abort()
 			} else {
 				const onExternalAbort = () => controller.abort()
-				// Stryker disable next-line ObjectLiteral,BooleanLiteral: a signal fires its abort event exactly once, and the finally block removes this listener explicitly, so the once flag is unobservable
 				externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
 				removeExternalAbortListener = () => externalAbortSignal.removeEventListener("abort", onExternalAbort)
 			}
