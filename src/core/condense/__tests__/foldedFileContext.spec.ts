@@ -1,6 +1,5 @@
 // npx vitest src/core/condense/__tests__/foldedFileContext.spec.ts
 
-import * as path from "path"
 import { Anthropic } from "@anthropic-ai/sdk"
 import type { ModelInfo } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"

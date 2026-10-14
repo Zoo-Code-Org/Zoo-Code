@@ -89,6 +89,7 @@ describe("prepareApiConversationMessage", () => {
 			createMessage: vi.fn<ApiHandler["createMessage"]>(),
 			getModel: vi.fn<ApiHandler["getModel"]>(),
 			countTokens: vi.fn<ApiHandler["countTokens"]>(),
+			getModelCacheScope: vi.fn<ApiHandler["getModelCacheScope"]>(),
 			getEncryptedContent: () => ({ encrypted_content: "encrypted", ...(id ? { id } : {}) }),
 		}
 		const result = prepareApiConversationMessage({

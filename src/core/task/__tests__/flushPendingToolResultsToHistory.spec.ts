@@ -96,7 +96,7 @@ vi.mock("vscode", () => {
 				stat: vi.fn().mockResolvedValue({ type: 1 }),
 			},
 			onDidSaveTextDocument: vi.fn(() => mockDisposable),
-			getConfiguration: vi.fn(() => ({ get: (key: string, defaultValue: any) => defaultValue })),
+			getConfiguration: vi.fn(() => ({ get: (_key: string, defaultValue: any) => defaultValue })),
 		},
 		env: {
 			uriScheme: "vscode",
@@ -173,7 +173,7 @@ describe("flushPendingToolResultsToHistory", () => {
 
 		mockExtensionContext = {
 			globalState: {
-				get: vi.fn().mockImplementation((key: keyof GlobalState) => undefined),
+				get: vi.fn().mockImplementation((_key: keyof GlobalState) => undefined),
 				update: vi.fn().mockImplementation((_key, _value) => Promise.resolve()),
 				keys: vi.fn().mockReturnValue([]),
 			},

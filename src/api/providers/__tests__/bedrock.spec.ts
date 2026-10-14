@@ -1506,12 +1506,8 @@ describe("AwsBedrockHandler", () => {
 	})
 
 	describe("error telemetry", () => {
-		let mockSend: ReturnType<typeof vi.fn>
-
 		beforeEach(() => {
 			mockCaptureException.mockClear()
-			// Get access to the mock send function from the mocked client
-			mockSend = vi.mocked(BedrockRuntimeClient).mock.results[0]?.value?.send
 		})
 
 		it("should capture telemetry on createMessage error", async () => {
