@@ -1,0 +1,161 @@
+{
+	"$comment": "Maintainer-accepted equivalent mutants for the changed-code mutation gate (https://github.com/Zoo-Code-Org/Zoo-Code/issues/2050). Matched on file + line + mutator against the Stryker report; when code shifts the entry stops matching and the mutant resurfaces as an advisory finding. Evidence: mutation repro of the 38 previously-suppressed lines at PR #2051 head.",
+	"equivalences": [
+		{
+			"file": "src/api/providers/openai-codex.ts",
+			"line": 276,
+			"mutator": "ConditionalExpression",
+			"reason": "the false mutant differs only if an abort lands between the OAuth race settle and this catch, a microtask window"
+		},
+		{
+			"file": "src/api/providers/openai-codex.ts",
+			"line": 1459,
+			"mutator": "ConditionalExpression",
+			"reason": "the false mutant differs only if an abort lands between the transport last pre-yield check and this consumer resumption"
+		},
+		{
+			"file": "src/api/providers/openai.ts",
+			"line": 96,
+			"mutator": "LogicalOperator",
+			"reason": "an unset option makes && yield undefined so the parameter default supplies the same strict value as ??"
+		},
+		{
+			"file": "src/api/providers/openai.ts",
+			"line": 381,
+			"mutator": "LogicalOperator",
+			"reason": "an unset option makes && yield undefined so the parameter default supplies the same strict value as ??"
+		},
+		{
+			"file": "src/api/providers/utils/abort-signal.ts",
+			"line": 118,
+			"mutator": "BooleanLiteral",
+			"reason": "a signal fires its abort event exactly once and the settle handler removes this listener, so the once flag is unobservable"
+		},
+		{
+			"file": "src/api/providers/utils/abort-signal.ts",
+			"line": 118,
+			"mutator": "ObjectLiteral",
+			"reason": "a signal fires its abort event exactly once and the settle handler removes this listener, so the once flag is unobservable"
+		},
+		{
+			"file": "src/core/assistant-message/NativeToolCallParser.ts",
+			"line": 380,
+			"mutator": "ConditionalExpression",
+			"reason": "the guard and delete are both GC-only; observable behavior is identical"
+		},
+		{
+			"file": "src/core/assistant-message/NativeToolCallParser.ts",
+			"line": 381,
+			"mutator": "CallExpression",
+			"reason": "deleting an empty WeakMap entry is only observable as GC eligibility"
+		},
+		{
+			"file": "src/core/task/Task.ts",
+			"line": 4176,
+			"mutator": "ConditionalExpression",
+			"reason": "only tool_use and mcp_tool_use entries ever carry an id, so the guard is always true on this path"
+		},
+		{
+			"file": "src/core/task/Task.ts",
+			"line": 4228,
+			"mutator": "ConditionalExpression",
+			"reason": "event.name is always a string on this path; delta events carry the tracked start name"
+		},
+		{
+			"file": "src/core/task/Task.ts",
+			"line": 4244,
+			"mutator": "ConditionalExpression",
+			"reason": "makeStreamingKey always returns a string and the legacy lookup branch is unreachable"
+		},
+		{
+			"file": "src/core/task/Task.ts",
+			"line": 4252,
+			"mutator": "ConditionalExpression",
+			"reason": "streamingKey is always a defined string on this path (same invariant as the guard above)"
+		},
+		{
+			"file": "src/core/task/Task.ts",
+			"line": 4252,
+			"mutator": "EqualityOperator",
+			"reason": "streamingKey is always a defined string on this path (same invariant as the guard above)"
+		},
+		{
+			"file": "src/core/task/Task.ts",
+			"line": 4642,
+			"mutator": "LogicalOperator",
+			"reason": "finalizeRawChunks emits end events with the tracked start name, so the ?? fallback is unreachable"
+		},
+		{
+			"file": "src/core/task/Task.ts",
+			"line": 4658,
+			"mutator": "ConditionalExpression",
+			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves"
+		},
+		{
+			"file": "src/core/task/Task.ts",
+			"line": 4658,
+			"mutator": "EqualityOperator",
+			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves"
+		},
+		{
+			"file": "src/core/task/Task.ts",
+			"line": 4658,
+			"mutator": "LogicalOperator",
+			"reason": "the both-miss case is unreachable via the raw-chunk pipeline: end events carry the locked start name so the compound key resolves"
+		},
+		{
+			"file": "src/core/task/Task.ts",
+			"line": 4663,
+			"mutator": "ConditionalExpression",
+			"reason": "unreachable defensive region: getStreamingToolCallById can only resolve when the both-miss case is reachable"
+		},
+		{
+			"file": "src/utils/pathUtils.ts",
+			"line": 45,
+			"mutator": "EqualityOperator",
+			"reason": "defensive iteration bound: valid percent-encoding strictly reduces escape depth per decode, so the bound is never hit"
+		},
+		{
+			"file": "src/utils/pathUtils.ts",
+			"line": 74,
+			"mutator": "ConditionalExpression",
+			"reason": "ENOENT is the only expected code on a walk toward an existing ancestor; anything else must fail closed"
+		},
+		{
+			"file": "src/utils/pathUtils.ts",
+			"line": 85,
+			"mutator": "ConditionalExpression",
+			"reason": "lstat succeeding after realpath ENOENT means a dangling symlink, so the true branch is unreachable"
+		},
+		{
+			"file": "src/utils/pathUtils.ts",
+			"line": 114,
+			"mutator": "ConditionalExpression",
+			"reason": "with no folders the realFolders set stays empty and the empty-set fail-closed returns the same result"
+		},
+		{
+			"file": "src/utils/pathUtils.ts",
+			"line": 114,
+			"mutator": "LogicalOperator",
+			"reason": "with no folders the realFolders set stays empty and the empty-set fail-closed returns the same result"
+		},
+		{
+			"file": "src/utils/pathUtils.ts",
+			"line": 121,
+			"mutator": "ArrayDeclaration",
+			"reason": "the array is always populated (or fails closed at the empty check) before the containment test, so the initial literal is unobservable"
+		},
+		{
+			"file": "src/utils/pathUtils.ts",
+			"line": 124,
+			"mutator": "ConditionalExpression",
+			"reason": "a null real can never match a resolved target, and the empty-set fail-closed is unaffected by an extra null entry"
+		},
+		{
+			"file": "src/utils/pathUtils.ts",
+			"line": 128,
+			"mutator": "ConditionalExpression",
+			"reason": "if no folder could be realized the containment set is empty, so fail-closed is equivalent"
+		}
+	]
+}
