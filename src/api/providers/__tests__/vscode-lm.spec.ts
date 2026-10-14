@@ -4253,6 +4253,86 @@ describe("VsCodeLmHandler", () => {
 			}
 		})
 
+		it("should not treat an Infinity timeoutMs as an immediate timeout", async () => {
+			let releaseStream: () => void = () => {}
+			const streamGate = new Promise<void>((resolve) => {
+				releaseStream = resolve
+			})
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					await streamGate
+					yield new vscode.LanguageModelTextPart("Completed text")
+				})(),
+				text: (async function* () {
+					await streamGate
+					yield "Completed text"
+				})(),
+			})
+
+			handler["client"] = mockLanguageModelChat
+
+			vi.useFakeTimers()
+			try {
+				const promise = handler.completePrompt("Test prompt", { timeoutMs: Infinity })
+				for (let i = 0; i < 20; i++) {
+					await Promise.resolve()
+				}
+				expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(1)
+
+				// Infinity must mean "no timeout": Node would coerce a non-finite delay to 1ms, so the guard must reject non-finite values before setTimeout.
+				expect(vi.getTimerCount()).toBe(0)
+				await vi.advanceTimersByTimeAsync(1000)
+				expect(tokenSourceInstance().token.isCancellationRequested).toBe(false)
+
+				releaseStream()
+				const result = await promise
+				expect(result).toBe("Completed text")
+				expect(tokenSourceInstance().token.isCancellationRequested).toBe(false)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("should cap an overflowing timeoutMs instead of firing immediately", async () => {
+			let releaseStream: () => void = () => {}
+			const streamGate = new Promise<void>((resolve) => {
+				releaseStream = resolve
+			})
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					await streamGate
+					yield new vscode.LanguageModelTextPart("Completed text")
+				})(),
+				text: (async function* () {
+					await streamGate
+					yield "Completed text"
+				})(),
+			})
+
+			handler["client"] = mockLanguageModelChat
+
+			vi.useFakeTimers()
+			try {
+				const promise = handler.completePrompt("Test prompt", { timeoutMs: 2_147_483_648 })
+				for (let i = 0; i < 20; i++) {
+					await Promise.resolve()
+				}
+				expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(1)
+
+				// 2^31 ms overflows Node's timer clamp to 1ms; the guard caps the delay at 2^31-1 so the request is not cancelled within the first second.
+				expect(vi.getTimerCount()).toBe(1)
+				await vi.advanceTimersByTimeAsync(1000)
+				expect(tokenSourceInstance().token.isCancellationRequested).toBe(false)
+
+				releaseStream()
+				const result = await promise
+				expect(result).toBe("Completed text")
+				expect(tokenSourceInstance().token.isCancellationRequested).toBe(false)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
 		it("should clear the timeout timer when the completion finishes before it elapses", async () => {
 			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
 				stream: (async function* () {
