@@ -600,7 +600,7 @@ describe("ClineProvider - Sticky Mode", () => {
 				totalCost: 0,
 			}
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
-			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
 				return Promise.resolve([])
 			})
 			await provider.addClineToStack(mockTask)

@@ -5500,7 +5500,7 @@ describe("ClineProvider", () => {
 			let recordWrites = 0
 			let parked = false
 			let releaseRecordWrite!: (id: string) => void
-			const saveConfig = vi.spyOn(manager, "saveConfig").mockImplementation(() => {
+			vi.spyOn(manager, "saveConfig").mockImplementation(() => {
 				recordWrites += 1
 				if (recordWrites === 1) {
 					return new Promise<string>((resolve) => {
