@@ -24,7 +24,18 @@ export const LOCK_STALE_MS = 31_000
  * canonicalized the lexical absolute path is kept: lock keys stay stable and the
  * write's own resolution still decides where content lands.
  */
-async function canonicalLockPath(filePath: string): Promise<string> {
+/**
+ * Total link hops canonicalLockPath may follow across ALL its frames. The
+ * per-frame walk bound alone does not terminate: a cycle whose length does not
+ * divide that bound (a 3-link cycle a -> b -> c -> a against a bound of 8)
+ * makes every frame land on a different cycle member, so the recursion below
+ * restarts its budget forever. This runs on the lock path - resolveLockKey
+ * hands a cycle member to withFileLock - so an unbounded walk hangs
+ * guardedWrite and safeWriteJson, not just the walker.
+ */
+const MAX_TOTAL_LINK_HOPS = 64
+
+async function canonicalLockPath(filePath: string, remainingLinkHops = MAX_TOTAL_LINK_HOPS): Promise<string> {
 	const absoluteFilePath = path.resolve(filePath)
 
 	// A file symlink has to produce the same key the writer's lock uses
@@ -35,7 +46,8 @@ async function canonicalLockPath(filePath: string): Promise<string> {
 	// parent would take a different lock and the two operations would stop excluding
 	// each other. The walk is bounded so a two-link cycle terminates.
 	let linkCursor = absoluteFilePath
-	for (let depth = 0; depth < 8; depth++) {
+	const frameBudget = Math.min(8, remainingLinkHops)
+	for (let depth = 0; depth < frameBudget; depth++) {
 		const referent = await fs.readlink(linkCursor).catch(() => undefined)
 		if (referent === undefined) {
 			break
@@ -43,7 +55,11 @@ async function canonicalLockPath(filePath: string): Promise<string> {
 		linkCursor = path.resolve(path.dirname(linkCursor), referent)
 	}
 	if (linkCursor !== absoluteFilePath) {
-		return await canonicalLockPath(linkCursor)
+		// Recurse with the REMAINING hop budget, not a fresh one: once the total
+		// is spent the next frame walks zero hops and canonicalizes the ancestors
+		// of the cycle member it stopped on, so a cycle terminates on a stable key
+		// instead of recursing forever.
+		return await canonicalLockPath(linkCursor, Math.max(0, remainingLinkHops - frameBudget))
 	}
 	const missing: string[] = []
 	let cursor = absoluteFilePath

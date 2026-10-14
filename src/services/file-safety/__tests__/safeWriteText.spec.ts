@@ -1175,6 +1175,47 @@ describe("safeWriteText", () => {
 		expect(fs.rename).not.toHaveBeenCalled()
 	})
 
+	it("fsyncs the copied target after the exclusive-copy fallback", async () => {
+		// The copy creates a NEW inode at the target: the staged inode's pre-commit
+		// fsync does not cover it and step 4b flushes only the parent directory.
+		// Without this flush a crash on FAT32/exFAT/SMB can leave a zero-length or
+		// partial target while the write reported success - and the retry then gets
+		// the 'already exists' verdict on damaged bytes.
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.link).mockRejectedValue(Object.assign(new Error("ENOTSUP"), { code: "ENOTSUP" }))
+		vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+		await safeWriteText(targetPath, "new data", { failIfExist: true, platform: "linux" })
+
+		// The copied target itself was opened and fsynced AFTER the copy landed...
+		expect(fsSync.openSync).toHaveBeenCalledWith(targetPath, "r")
+		const copyOrder = vi.mocked(fs.copyFile).mock.invocationCallOrder[0]
+		const openCalls = vi.mocked(fsSync.openSync).mock.calls
+		const targetOpenIndex = openCalls.findIndex((call) => String(call[0]) === targetPath)
+		expect(targetOpenIndex).toBeGreaterThanOrEqual(0)
+		const targetOpenOrder = vi.mocked(fsSync.openSync).mock.invocationCallOrder[targetOpenIndex]
+		expect(targetOpenOrder).toBeGreaterThan(copyOrder)
+		// ...and the write still reports success.
+	})
+
+	it("reports a durability failure when the copied target cannot be fsynced", async () => {
+		// The bytes are at the target but not known to be on disk: the same
+		// durability verdict the directory fsync failure gets, never a swallowed
+		// success.
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.link).mockRejectedValue(Object.assign(new Error("ENOTSUP"), { code: "ENOTSUP" }))
+		vi.mocked(fsSync.openSync).mockImplementation((target) => {
+			if (String(target) === targetPath) throw new Error("EIO")
+			return 1
+		})
+
+		await expect(safeWriteText(targetPath, "new data", { failIfExist: true, platform: "linux" })).rejects.toThrow(
+			PostCommitDurabilityError,
+		)
+	})
+
 	it("refuses the write when the exclusive copy finds an existing target", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)

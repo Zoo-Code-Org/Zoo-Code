@@ -127,9 +127,11 @@ export class StagingPathError extends Error {
 export class PostCommitDurabilityError extends Error {
 	readonly targetPath: string
 
-	constructor(targetPath: string, cause: unknown) {
+	constructor(targetPath: string, cause: unknown, copiedTargetFsync = false) {
 		super(
-			"The rename committed but the parent directory could not be fsynced -- the content is at the target path reported on this error, and the directory entry may not be durable.",
+			copiedTargetFsync
+				? "The exclusive copy committed but the copied target could not be fsynced -- the content is at the target path reported on this error, and it may not survive a crash on a volume without hard links."
+				: "The rename committed but the parent directory could not be fsynced -- the content is at the target path reported on this error, and the directory entry may not be durable.",
 			{ cause },
 		)
 		this.name = "PostCommitDurabilityError"
@@ -651,6 +653,25 @@ export async function safeWriteText(
 							throw new TargetExistsError(targetPath)
 						}
 						throw copyError
+					}
+					// The copy created a NEW inode at the target: the staged inode was
+					// fsynced before the commit, but the copied bytes live on an inode
+					// nobody has flushed, and step 4b fsyncs only the parent directory.
+					// On FAT32/exFAT and SMB mounts a crash right after the publish can
+					// then leave a zero-length or partial target while the write reported
+					// success - and a retry would get the 'already exists' verdict on
+					// damaged bytes. Flush the copied target here; a failure is reported
+					// like the directory fsync failure, as a durability verdict on bytes
+					// that are already at the target.
+					try {
+						const copiedFd = fsSync.openSync(targetPath, "r")
+						try {
+							_fsyncFile(copiedFd)
+						} finally {
+							fsSync.closeSync(copiedFd)
+						}
+					} catch (error: unknown) {
+						throw new PostCommitDurabilityError(targetPath, error, true)
 					}
 				}
 			} else {

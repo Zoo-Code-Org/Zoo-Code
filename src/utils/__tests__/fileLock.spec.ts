@@ -105,3 +105,39 @@ test("locks the referent of a file symlink whose target is temporarily absent", 
 
 	await releaseLock()
 })
+test("terminates on a three-link cycle instead of recursing forever", async () => {
+	// a -> b -> c -> a: the cycle length does not divide the per-frame walk bound,
+	// so a recursion that restarts its hop budget on every frame never terminates -
+	// each frame walks 8 hops, lands on a different cycle member, and recurses.
+	// resolveLockKey hands a cycle member to withFileLock, so an unbounded
+	// canonicalLockPath hangs every guarded writer on the lock path, not just the
+	// walker. The readlink mock yields to a timer so a regression fails on the
+	// test timeout instead of starving the event loop.
+	// Top-level test: clear the shared doubles so the counts below are this test's own.
+	vi.mocked(lockfile.lock).mockClear()
+	vi.mocked(fsPromises.readlink).mockClear()
+	vi.mocked(fsPromises.realpath).mockClear()
+
+	const a = path.join(STORE, "cyc", "a.json")
+	const b = path.join(STORE, "cyc", "b.json")
+	const c = path.join(STORE, "cyc", "c.json")
+	const cycle: Record<string, string> = { [a]: b, [b]: c, [c]: a }
+	vi.mocked(fsPromises.readlink).mockImplementation(async (target: unknown) => {
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		const referent = cycle[String(target)]
+		if (referent === undefined) throw Object.assign(new Error("EINVAL"), { code: "EINVAL" })
+		return referent
+	})
+	vi.mocked(fsPromises.realpath).mockImplementation(async () => {
+		throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+	})
+
+	const releaseLock = await acquireFileLock(a)
+
+	// Terminated with exactly one lock acquisition on a cycle member, and the
+	// total hop budget held across all frames.
+	expect(lockfile.lock).toHaveBeenCalledTimes(1)
+	expect(fsPromises.readlink.mock.calls.length).toBeLessThanOrEqual(64)
+
+	await releaseLock()
+})
