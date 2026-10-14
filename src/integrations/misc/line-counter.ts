@@ -13,7 +13,7 @@ export async function countFileLines(filePath: string): Promise<number> {
 	// Check if file exists
 	try {
 		await fs.promises.access(filePath, fs.constants.F_OK)
-	} catch (error) {
+	} catch {
 		throw new Error(`File not found: ${filePath}`)
 	}
 
@@ -77,7 +77,7 @@ export async function countFileLinesAndTokens(
 	// Check if file exists
 	try {
 		await fs.promises.access(filePath, fs.constants.F_OK)
-	} catch (error) {
+	} catch {
 		throw new Error(`File not found: ${filePath}`)
 	}
 
@@ -105,7 +105,7 @@ export async function countFileLinesAndTokens(
 				const contentBlocks: Anthropic.Messages.ContentBlockParam[] = [{ type: "text", text: bufferText }]
 				const chunkTokens = await countTokens(contentBlocks)
 				tokenEstimate += chunkTokens
-			} catch (error) {
+			} catch {
 				// On tokenizer error, use conservative estimate: 2 char ≈ 1 token
 				tokenEstimate += Math.ceil(bufferText.length / 2)
 			}
