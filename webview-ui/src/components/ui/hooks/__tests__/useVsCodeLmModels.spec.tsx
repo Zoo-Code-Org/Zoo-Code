@@ -14,7 +14,7 @@ vi.mock("@src/utils/vscode", () => ({
 
 import { vscode } from "@src/utils/vscode"
 
-import { useVsCodeLmModels } from "../useVsCodeLmModels"
+import { getVsCodeLmModels, useVsCodeLmModels } from "../useVsCodeLmModels"
 
 const wrapper = () => {
 	const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -135,6 +135,67 @@ describe("useVsCodeLmModels", () => {
 			vsCodeLmModels: [{ vendor: "copilot", family: "gpt-4o" }],
 		})
 		expect(result.current.data).toBeUndefined()
+
+		addSpy.mockRestore()
+		removeSpy.mockRestore()
+	})
+
+	it("rejects with a timeout error if no response arrives within 10 seconds", async () => {
+		const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+		const Wrapper = ({ children }: { children: React.ReactNode }) => (
+			<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+		)
+		const addSpy = vi.spyOn(window, "addEventListener")
+		const removeSpy = vi.spyOn(window, "removeEventListener")
+
+		vi.useFakeTimers()
+		try {
+			const { result } = renderHook(() => useVsCodeLmModels(true), { wrapper: Wrapper })
+
+			const registeredHandler = addSpy.mock.calls.find(([eventName]) => eventName === "message")?.[1]
+			expect(registeredHandler).toBeDefined()
+
+			// Advance the real wall clock that the hook's internal setTimeout depends
+			// on. React Query schedules its own timers on the same clock, so we let
+			// them fire as well; after 10s the request promise must be rejected with
+			// the timeout error and the message listener removed.
+			await vi.advanceTimersByTimeAsync(10_000)
+
+			// Listener is cleaned up as part of the timeout path.
+			expect(removeSpy).toHaveBeenCalledWith("message", registeredHandler)
+			// React Query exposes the rejection as `error` on the result.
+			await vi.waitFor(() => {
+				expect(result.current.isError).toBe(true)
+			})
+			expect(result.current.error).toBeInstanceOf(Error)
+			expect((result.current.error as Error).message).toBe("VS Code LM models request timed out")
+		} finally {
+			vi.useRealTimers()
+			addSpy.mockRestore()
+			removeSpy.mockRestore()
+		}
+	})
+
+	it("rejects immediately when the signal is already aborted on entry", async () => {
+		// The already-aborted branch must never register a window listener, never
+		// start a timer and never post a request, otherwise we leak listeners when
+		// React Query hands us a cancelled signal.
+		const addSpy = vi.spyOn(window, "addEventListener")
+		const removeSpy = vi.spyOn(window, "removeEventListener")
+
+		const controller = new AbortController()
+		controller.abort()
+
+		const aborted = await getVsCodeLmModels(controller.signal).then(
+			() => undefined,
+			(err: unknown) => err,
+		)
+		expect(aborted).toBeInstanceOf(DOMException)
+		expect((aborted as DOMException).name).toBe("AbortError")
+
+		expect(addSpy).not.toHaveBeenCalledWith("message", expect.any(Function))
+		expect(removeSpy).not.toHaveBeenCalledWith("message", expect.any(Function))
+		expect(vscode.postMessage).not.toHaveBeenCalled()
 
 		addSpy.mockRestore()
 		removeSpy.mockRestore()

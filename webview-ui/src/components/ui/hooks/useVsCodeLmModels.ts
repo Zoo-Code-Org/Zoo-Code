@@ -9,7 +9,9 @@ import { vscode } from "@src/utils/vscode"
 // request can exist at any moment. No requestId correlation is needed: if
 // React Query retries, it aborts the previous signal before firing the next
 // request, so responses are always matched to the current queryFn invocation.
-const getVsCodeLmModels = async (signal?: AbortSignal) =>
+// Exported for tests so we can exercise the already-aborted signal branch
+// directly without going through React Query.
+export const getVsCodeLmModels = async (signal?: AbortSignal) =>
 	new Promise<LanguageModelChatSelector[]>((resolve, reject) => {
 		let settled = false
 
