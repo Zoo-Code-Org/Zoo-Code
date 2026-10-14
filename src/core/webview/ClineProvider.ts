@@ -2670,9 +2670,6 @@ export class ClineProvider
 				} else {
 					const listApiConfigMeta = await this.providerSettingsManager.listConfig()
 					await this.updateGlobalState("listApiConfigMeta", listApiConfigMeta)
-					// Stryker disable next-line CallExpression,ObjectLiteral: _updateViewLocalStateFromMutation
-					// applies only mode, currentApiConfigName, apiConfiguration and provider-settings keys, so a
-					// listApiConfigMeta-only payload (deleted call or empty object) is a behavior-preserving no-op.
 					this._updateViewLocalStateFromMutation({ listApiConfigMeta })
 
 					// A save that does not activate still changes the profile's settings, and
@@ -2825,10 +2822,6 @@ export class ClineProvider
 		// settings still carry its configuration.
 		const deletedWasGlobal = profileToDelete.name === globalSettings.currentApiConfigName
 
-		// Stryker disable next-line ConditionalExpression: in this fallback the view
-		// does not pin the deleted profile, so when the deleted profile was not the
-		// shared selection profileToActivate equals the shared selection itself;
-		// forcing the branch only rewrites that same value back into the store.
 		if (deletedWasGlobal) {
 			// The shared selection changed, but this view's own pin (if any) still
 			// names a surviving profile: update the shared store only, leaving the

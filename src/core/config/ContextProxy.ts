@@ -495,9 +495,6 @@ export class ContextProxy {
 		// Invalidate writes issued before this refresh: once the re-seed below lands,
 		// their completions hold obsolete values that must not re-record over the
 		// freshly loaded durable records.
-		// Stryker disable next-line AssignmentOperator: increment vs decrement is unobservable - the
-		// generation counter is compared only via !== between values captured from the same lineage,
-		// and negating every reachable value preserves every such comparison (equivalent mutant).
 		this.resetGeneration += 1
 		// The refresh re-syncs the whole secret cache from storage and re-seeds the
 		// durable records with the loaded values, so a later rollback of a pending
@@ -701,9 +698,6 @@ export class ContextProxy {
 		// Invalidate writes issued before this reset: once the durable maps below
 		// are cleared and re-seeded by the re-initialization, their completions hold
 		// obsolete values that must not re-record over the re-seeded records.
-		// Stryker disable next-line AssignmentOperator: increment vs decrement is unobservable - the
-		// generation counter is compared only via !== between values captured from the same lineage,
-		// and negating every reachable value preserves every such comparison (equivalent mutant).
 		this.resetGeneration += 1
 		// Clear in-memory caches. The write tokens are left in place: the durable
 		// records below carry the rollback protection (see the in-write token guard,
