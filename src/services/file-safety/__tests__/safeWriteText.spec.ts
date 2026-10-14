@@ -14,7 +14,6 @@ import {
 	createStagingFile,
 	StagingHandle,
 	TargetMovedError,
-	type SafeWriteTextOptions,
 } from "../safeWriteText"
 
 // Full mock for fs/promises — all methods are vi.fn() stubs
@@ -1756,8 +1755,8 @@ describe("parent directories created by safeWriteText", () => {
 // open the staging file inside a private staging directory owned by this write" and "bind the
 // handle to the exact staging inode before the rename".
 describe("staging capability", () => {
-	const targetPath = "/tmp/test-dir/target.txt"
 	const dirPath = path.resolve("/tmp/test-dir")
+	const targetPath = "/tmp/test-dir/target.txt"
 
 	beforeEach(() => {
 		mockDefaults()
@@ -1840,7 +1839,6 @@ describe("staging capability", () => {
 // nothing, and leave neither a staging file, a staging directory, nor a parent tree behind.
 describe("parent directory setup failures", () => {
 	const targetPath = "/tmp/test-dir/target.txt"
-	const dirPath = path.resolve("/tmp/test-dir")
 
 	beforeEach(() => {
 		mockDefaults()

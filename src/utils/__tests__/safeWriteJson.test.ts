@@ -5,7 +5,6 @@ import * as os from "os"
 
 import { ConfinedPathEscapeError, safeWriteJson } from "../safeWriteJson"
 import { PostCommitDurabilityError, TargetMovedError } from "../../services/file-safety/safeWriteText"
-import * as lockfile from "proper-lockfile"
 
 // Capture actual implementations before the vi.mock factory runs,
 // so they are never wrapped by vi.fn() — avoids infinite recursion when
@@ -1090,7 +1089,7 @@ describe("safeWriteJson", () => {
 			"../../services/file-safety/safeWriteText",
 		)
 		// Typed parameters so the recorded call's options are readable without a cast.
-		const publishSpy = vi.fn(async (_target: string, _content: string, options?: Record<string, unknown>) => {})
+		const publishSpy = vi.fn(async (_target: string, _content: string, _options?: Record<string, unknown>) => {})
 		vi.doMock("../../services/file-safety/safeWriteText", () => ({ ...real, safeWriteText: publishSpy }))
 		const { safeWriteJson: pinnedSafeWriteJson } = await import("../safeWriteJson")
 

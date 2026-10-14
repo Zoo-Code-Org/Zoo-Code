@@ -1,5 +1,6 @@
 import { DiffViewProvider, DIFF_VIEW_URI_SCHEME, DIFF_VIEW_LABEL_CHANGES } from "../DiffViewProvider"
 import * as vscode from "vscode"
+import * as path from "path"
 import delay from "delay"
 import { DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 

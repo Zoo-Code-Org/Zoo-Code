@@ -239,7 +239,6 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		"takes one lock when the requested path names the referent directory by its 8.3 short name",
 		async () => {
 			const dir = await makeDir("lockkey-short-")
-			const referent = path.join(dir, "history_item.json")
 			currentLink = path.join(dir, "link.json")
 			const shortDir = path.join(path.dirname(dir), "LOCKKE~1")
 
@@ -280,7 +279,6 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		"takes one lock when the parent does not exist yet and the two spellings differ by case",
 		async () => {
 			const dir = await makeDir("lockkey-create-")
-			const missing = path.join(dir, "not-yet", "history_item.json")
 			const otherSpelling = path.join(path.dirname(dir), path.basename(dir).toUpperCase(), "history_item.json")
 			mockedRealpath.mockRejectedValue(enoent)
 			// The parent is absent, which is what makes realpath fail above; the file itself is
