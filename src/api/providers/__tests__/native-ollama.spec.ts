@@ -1049,6 +1049,19 @@ describe("NativeOllamaHandler", () => {
 			expect(OllamaMock).toHaveBeenCalledTimes(1)
 		})
 
+		it("should round a fractional timeoutMs up before scheduling the timer", async () => {
+			// Node truncates non-integer setTimeout delays (1500.5 fires at
+			// 1500 ms); round up so the semantics match the shared helper.
+			const setTimeoutSpy = vitest.spyOn(global, "setTimeout")
+			mockChat.mockResolvedValue({
+				message: { content: "Response" },
+			})
+
+			await handler.completePrompt("Test prompt", { timeoutMs: 1500.5 })
+
+			expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 1501)
+		})
+
 		it("should cap an overflowing timeoutMs instead of scheduling a 1ms timer", async () => {
 			const setTimeoutSpy = vitest.spyOn(global, "setTimeout")
 			mockChat.mockResolvedValue({
