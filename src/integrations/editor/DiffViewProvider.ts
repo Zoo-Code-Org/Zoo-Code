@@ -59,6 +59,24 @@ export class DiffViewProvider {
 	 */
 	private guardedSaveInFlight: Promise<unknown> | undefined
 	/**
+	 * The adoption probe and discard cleanup that a rejected saveChanges() runs after its
+	 * guarded publish settles, if any. The publish gate above only covers the write: the
+	 * probe reads the disk to decide whether autosave had already published the bytes, and
+	 * the cleanup reloads the buffer and closes the session's tabs. A rollback starting
+	 * inside that window would be judged against its own write - the probe would match the
+	 * rollback's bytes, not the published ones - or would re-write originalContent over the
+	 * newer disk bytes the cleanup just preserved. revertChanges() waits for this promise,
+	 * and skips its rollback entirely when the cleanup handled the session.
+	 */
+	private rejectedSaveCleanupInFlight: Promise<boolean> | undefined
+	/**
+	 * Whether a rejected save's discard cleanup ran over this session. The cleanup reverts
+	 * the buffer to the disk content, closes the diff views and restores the preview tabs;
+	 * a cancellation that arrives after it must finalize the session without applying
+	 * originalContent, because that write is the exact loss the cleanup exists to prevent.
+	 */
+	private rejectedSaveCleanupHandled = false
+	/**
 	 * Whether this edit session has been closed (its reset has been claimed). A caller that
 	 * waited for someone else's teardown cannot decide this by reading provider state: isEditing
 	 * and activeDiffEditor are exactly what the finalization changes, so two callers that both
@@ -174,6 +192,9 @@ export class DiffViewProvider {
 		// of the previous session and was never read back must not make this session's first
 		// save report itself cancelled without publishing.
 		this.teardownCancellationRequested = false
+		// The rejected-save cleanup verdict belongs to a save of the previous session: a new
+		// session's cancellation must not inherit it and skip its own rollback.
+		this.rejectedSaveCleanupHandled = false
 		// A new session has to be finalizable: a provider that was reset once would otherwise
 		// report its finalization as already claimed.
 		this.sessionFinalizationClaimed = false
@@ -675,9 +696,6 @@ export class DiffViewProvider {
 	async saveChanges(
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
-		// Stryker disable next-line StringLiteral: an empty kind dispatches exactly
-		// like "update" in guardedWrite (only "edit" and "create" branch distinctly),
-		// so the StringLiteral mutant here is equivalent.
 		writeKind: GuardedWriteKind = "update",
 	): Promise<{
 		newProblemsMessage: string | undefined
@@ -687,6 +705,9 @@ export class DiffViewProvider {
 		if (!this.relPath || !this.newContent || !this.activeDiffEditor) {
 			return { newProblemsMessage: undefined, userEdits: undefined, finalContent: undefined }
 		}
+		// A fresh attempt owns a fresh cleanup verdict: a rejection earlier in this session
+		// must not make a later cancellation skip this save's rollback.
+		this.rejectedSaveCleanupHandled = false
 
 		const absolutePath = path.resolve(this.cwd, this.relPath)
 		const updatedDocument = this.activeDiffEditor.document
@@ -754,103 +775,126 @@ export class DiffViewProvider {
 			// moved, and the cleanup below would report a failure for content that is
 			// already published. When a stat-matched read returns the same bytes the
 			// write already happened, so adopt that state instead of failing.
-			if (
-				// Stryker disable next-line LogicalOperator: GuardRejectedError is only thrown
-				// by guardedWrite, and guardedWrite is reached only after the !saveTask check
-				// above has thrown a plain Error. So whenever this operand is evaluated saveTask
-				// is provably non-null: dropping it cannot change which branch is taken.
-				error instanceof GuardRejectedError &&
-				saveTask &&
-				encodedContent &&
-				// The match must be attributable to THIS save: adoption exists for the
-				// autosave shape, where the preview already put the accepted bytes on disk and
-				// only the version token moved. A rejection caused by an external writer, or
-				// by a save that was never authorized at all, must stay a rejection - the
-				// matching bytes are what the clobber looks like from here.
-				this.canAdoptPublishedContent(writeKind) &&
-				// Only the autosave shape: a clean buffer means its content is what autosave
-				// already put on disk. A dirty buffer means the disk content came from
-				// someone else, so the discard cleanup below is still the right outcome.
-				!updatedDocument.isDirty &&
-				(await this.adoptAlreadyPublishedContent(saveTask, absolutePath, encodedContent))
-			) {
-				// The publish is already satisfied; fall through to the normal
-				// post-save flow rather than reporting a rejection.
-			} else {
-				// Discard-only failure cleanup. The publish was rejected (stale
-				// version, unobserved target, a partial-read observation, or an
-				// unavailable task), so the on-disk content is the newer source of
-				// truth. Reload it
-				// into the buffer (discarding the rejected edit), remove the empty
-				// new-file placeholder while it is still exactly the file open()
-				// wrote, and close the diff views. Never use revertChanges() here:
-				// it restores originalContent and saves it, which would overwrite
-				// the newer disk content that caused the rejection. Best-effort —
-				// the guard verdict is rethrown below.
-				try {
-					// Dispose before any programmatic activation: showTextDocument can
-					// change the active editor even with preserveFocus, so a listener
-					// still attached here would record this cleanup as a user touch and
-					// let the auto-close preferences keep the transient tab open.
-					this.disposeActiveEditorListener()
-					this.cancelDeferredScroll()
+			// The whole decision runs as one registered pass: the publish gate above
+			// released when guardedWrite settled, but this tail keeps working the same
+			// disk bytes and session tabs. revertChanges() waits on this promise instead
+			// of writing its rollback while the adoption probe reads the disk, and skips
+			// the rollback entirely once the discard cleanup has handled the session.
+			const rejectedSaveCleanup = (async (): Promise<boolean> => {
+				if (
+					error instanceof GuardRejectedError &&
+					saveTask &&
+					encodedContent &&
+					// The match must be attributable to THIS save: adoption exists for the
+					// autosave shape, where the preview already put the accepted bytes on disk and
+					// only the version token moved. A rejection caused by an external writer, or
+					// by a save that was never authorized at all, must stay a rejection - the
+					// matching bytes are what the clobber looks like from here.
+					this.canAdoptPublishedContent(writeKind) &&
+					// Only the autosave shape: a clean buffer means its content is what autosave
+					// already put on disk. A dirty buffer means the disk content came from
+					// someone else, so the discard cleanup below is still the right outcome.
+					!updatedDocument.isDirty &&
+					(await this.adoptAlreadyPublishedContent(saveTask, absolutePath, encodedContent))
+				) {
+					// The publish is already satisfied; fall through to the normal
+					// post-save flow rather than reporting a rejection.
+					return true
+				} else {
+					// Discard-only failure cleanup. The publish was rejected (stale
+					// version, unobserved target, a partial-read observation, or an
+					// unavailable task), so the on-disk content is the newer source of
+					// truth. Reload it
+					// into the buffer (discarding the rejected edit), remove the empty
+					// new-file placeholder while it is still exactly the file open()
+					// wrote, and close the diff views. Never use revertChanges() here:
+					// it restores originalContent and saves it, which would overwrite
+					// the newer disk content that caused the rejection. Best-effort —
+					// the guard verdict is rethrown below.
+					try {
+						// Dispose before any programmatic activation: showTextDocument can
+						// change the active editor even with preserveFocus, so a listener
+						// still attached here would record this cleanup as a user touch and
+						// let the auto-close preferences keep the transient tab open.
+						this.disposeActiveEditorListener()
+						this.cancelDeferredScroll()
 
-					const ownedTeardown = await this.runTeardown(async () => {
-						let discardSucceeded = !updatedDocument.isDirty
-						if (updatedDocument.isDirty) {
-							discardSucceeded = await this.revertDocument(updatedDocument)
-						}
-						if (
-							discardSucceeded &&
-							this.editType === "create" &&
-							(this.placeholderVersion !== undefined || this.placeholderIdentity !== undefined)
-						) {
-							// Cleanup has to be serialized with the same resolved-path advisory lock
-							// every other writer to this file uses. A token check and an unlink in
-							// separate steps let a peer writer commit in the gap and lose its write.
-							// A differing token, or a lock that cannot be taken, leaves the file in place.
-							await withFileLock(await resolveLockKey(absolutePath), async () => {
-								if (!(await this._placeholderStillOurs(absolutePath))) {
-									return
-								}
-								let unlinked = false
-								try {
-									await fs.unlink(absolutePath)
-									unlinked = true
-								} catch {
-									// the placeholder vanished or the unlink failed
-								}
-								if (!unlinked) {
-									return
-								}
-								// The file is gone, so its tab must go too: closing only the diff
-								// views would leave a clean plain-text tab for a deleted file.
-								await this.closeFileTab(absolutePath)
-								// The directories open() created for the new file must go with it,
-								// innermost first. rmdir refuses a directory another writer populated
-								// in the meantime, so the cleanup stops at the first failure.
-								for (let i = this.createdDirs.length - 1; i >= 0; i--) {
-									try {
-										await fs.rmdir(this.createdDirs[i])
-									} catch {
-										break
+						const ownedTeardown = await this.runTeardown(async () => {
+							let discardSucceeded = !updatedDocument.isDirty
+							if (updatedDocument.isDirty) {
+								discardSucceeded = await this.revertDocument(updatedDocument)
+							}
+							if (
+								discardSucceeded &&
+								this.editType === "create" &&
+								(this.placeholderVersion !== undefined || this.placeholderIdentity !== undefined)
+							) {
+								// Cleanup has to be serialized with the same resolved-path advisory lock
+								// every other writer to this file uses. A token check and an unlink in
+								// separate steps let a peer writer commit in the gap and lose its write.
+								// A differing token, or a lock that cannot be taken, leaves the file in place.
+								await withFileLock(await resolveLockKey(absolutePath), async () => {
+									if (!(await this._placeholderStillOurs(absolutePath))) {
+										return
 									}
-								}
-							})
-						}
-						await this.closeOwnDiffView(absolutePath)
-						// Opening the diff evicted any preview tab the file had. This path closes its own diff
-						// view and rethrows, so this pass is the only one that can put that preview state back;
-						// a caller that merely waited for it must not restore the tabs a second time. It runs
-						// INSIDE the pass rather than after it: the pass is what owns the session, and a
-						// cancellation that arrives while the tabs are being put back has to wait for that
-						// pass instead of starting a second teardown over the same tabs. reset() stays with
-						// the tool caller's error handling, which owns the provider lifecycle.
-						await this.restorePreviewTabs()
-					})
-				} catch {
-					// cleanup is best-effort; the guard verdict below is the outcome
+									let unlinked = false
+									try {
+										await fs.unlink(absolutePath)
+										unlinked = true
+									} catch {
+										// the placeholder vanished or the unlink failed
+									}
+									if (!unlinked) {
+										return
+									}
+									// The file is gone, so its tab must go too: closing only the diff
+									// views would leave a clean plain-text tab for a deleted file.
+									await this.closeFileTab(absolutePath)
+									// The directories open() created for the new file must go with it,
+									// innermost first. rmdir refuses a directory another writer populated
+									// in the meantime, so the cleanup stops at the first failure.
+									for (let i = this.createdDirs.length - 1; i >= 0; i--) {
+										try {
+											await fs.rmdir(this.createdDirs[i])
+										} catch {
+											break
+										}
+									}
+								})
+							}
+							await this.closeOwnDiffView(absolutePath)
+							// Opening the diff evicted any preview tab the file had. This path closes its own diff
+							// view and rethrows, so this pass is the only one that can put that preview state back;
+							// a caller that merely waited for it must not restore the tabs a second time. It runs
+							// INSIDE the pass rather than after it: the pass is what owns the session, and a
+							// cancellation that arrives while the tabs are being put back has to wait for that
+							// pass instead of starting a second teardown over the same tabs. reset() stays with
+							// the tool caller's error handling, which owns the provider lifecycle.
+							await this.restorePreviewTabs()
+						})
+					} catch {
+						// cleanup is best-effort; the guard verdict below is the outcome
+					}
+					// The discard pass has run over this session. Whatever each step
+					// managed, the buffer and tabs are now the cleanup's resting state, and a
+					// rollback applying originalContent here would overwrite the newer disk
+					// bytes the cleanup exists to preserve.
+					this.rejectedSaveCleanupHandled = true
+					return false
 				}
+			})()
+			this.rejectedSaveCleanupInFlight = rejectedSaveCleanup
+			let adopted = false
+			try {
+				adopted = await rejectedSaveCleanup
+			} finally {
+				// Cleared only while the entry is still this save's link, so a retried
+				// save's promise is never dropped by an earlier save finishing late.
+				if (this.rejectedSaveCleanupInFlight === rejectedSaveCleanup) {
+					this.rejectedSaveCleanupInFlight = undefined
+				}
+			}
+			if (!adopted) {
 				throw error
 			}
 		}
@@ -1093,6 +1137,27 @@ export class DiffViewProvider {
 		const pendingGuardedSave = this.guardedSaveInFlight
 		if (pendingGuardedSave) {
 			await pendingGuardedSave.catch(() => {})
+		}
+		// The publish gate only covers the write itself. A rejected publish keeps working
+		// the same bytes and tabs after it settles: its adoption probe reads the disk and
+		// its discard cleanup reloads the buffer and closes the session's views. A rollback
+		// starting inside that window would apply originalContent while the probe reads
+		// (judging the published bytes against the rollback's own write) or re-write
+		// originalContent after the cleanup already preserved the newer disk content, so
+		// the rollback waits for the decision too.
+		const pendingRejectedSaveCleanup = this.rejectedSaveCleanupInFlight
+		if (pendingRejectedSaveCleanup) {
+			await pendingRejectedSaveCleanup.catch(() => {})
+		}
+		if (this.rejectedSaveCleanupHandled) {
+			// The rejected save's cleanup already handled this session: the buffer was
+			// reloaded from disk, the diff views closed, and a create's placeholder
+			// unlinked. Applying originalContent and saving it now would overwrite the
+			// newer disk bytes that caused the rejection - the same loss the cleanup exists
+			// to prevent, one pass later. Finalize the session; the tabs and buffers are
+			// already in the cleanup's resting state.
+			await this.reset()
+			return
 		}
 
 		const fileExists = this.editType === "modify"

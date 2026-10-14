@@ -3135,6 +3135,135 @@ describe("DiffViewProvider", () => {
 			expect(fs.unlink).not.toHaveBeenCalled()
 			expect(diffViewProvider["closeOwnDiffView"]).toHaveBeenCalled()
 		})
+
+		it("a cancellation that lands during the adoption probe waits for the probe's decision", async () => {
+			// The publish gate releases when guardedWrite settles, but a rejected publish
+			// keeps reading the disk in the adoption probe. A rollback that wrote
+			// originalContent inside that window would be judged against its own write -
+			// the probe would match the rollback's bytes, not the published ones - so the
+			// rollback has to wait for the probe's decision before touching the document.
+			let probeEntered = false
+			let probeDone = false
+			let releaseProbe: () => void = () => {}
+			const probeGate = new Promise<void>((resolve) => {
+				releaseProbe = resolve
+			})
+			vi.mocked(fs.readFile).mockImplementation(async () => {
+				probeEntered = true
+				await probeGate
+				probeDone = true
+				return "new content"
+			})
+			// Records whether the probe read had completed at each rollback write, so the
+			// ordering assertion is about the writes themselves, not call counts.
+			const rollbackWritesAfterProbe: boolean[] = []
+			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
+			applyEdit.mockImplementation(() => {
+				rollbackWritesAfterProbe.push(probeDone)
+				return Promise.resolve(true)
+			})
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
+					save: vi.fn().mockImplementation(() => {
+						rollbackWritesAfterProbe.push(probeDone)
+						return Promise.resolve(undefined)
+					}),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider.editType = "modify"
+			diffViewProvider["originalContent"] = "original"
+			// The token moved (the CAS rejects) but the disk still carries exactly the
+			// bytes this save intended: the probe's decision is to adopt the publish.
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, versionTokenOfStat(previewStats), true)
+			vi.mocked(computeVersionToken).mockResolvedValue("moved")
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+
+			const save = diffViewProvider.saveChanges(false)
+			while (!probeEntered) {
+				await new Promise((resolve) => setImmediate(resolve))
+			}
+
+			const revert = diffViewProvider.revertChanges()
+			await new Promise((resolve) => setImmediate(resolve))
+
+			// The rollback has not touched the document: the probe still owns the decision.
+			expect(applyEdit).not.toHaveBeenCalled()
+
+			releaseProbe()
+			const [result] = await Promise.all([save, revert])
+
+			// The probe adopted the publish, but the cancellation claimed the session, so
+			// the save reports no completed flow of its own...
+			expect(result).toEqual({
+				newProblemsMessage: undefined,
+				userEdits: undefined,
+				finalContent: undefined,
+			})
+			// ...and the rollback is the last writer: both of its writes happened after
+			// the probe read, never against the bytes it was matching.
+			expect(rollbackWritesAfterProbe).toEqual([true, true])
+			// One pass over the tabs: the save added no cleanup of its own.
+			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalledTimes(1)
+		})
+
+		it("a cancellation that lands after the rejected-save cleanup skips the rollback and finalizes", async () => {
+			// The discard cleanup reloaded the newer disk content and closed this
+			// session's views. A rollback after it would apply originalContent and save
+			// it over the bytes the cleanup just preserved - the same loss, one pass
+			// later - so a cancellation that arrives once the cleanup has finished must
+			// finalize the session without a second revert.
+			const documentSave = vi.fn().mockResolvedValue(undefined)
+			const dirtyEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: true,
+					save: documentSave,
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			revertClearsDirty(dirtyEditor.document)
+			diffViewProvider.editType = "modify"
+			diffViewProvider["originalContent"] = "original"
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, versionTokenOfStat(previewStats), true)
+			vi.mocked(computeVersionToken).mockResolvedValue("moved")
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			// The disk carries someone else's bytes and the buffer is dirty: adoption
+			// refuses, so the discard cleanup runs and handles the session.
+			vi.mocked(fs.readFile).mockResolvedValue("external bytes")
+
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow("Stale version")
+
+			const applyEdit = vi.mocked(vscode.workspace.applyEdit)
+			applyEdit.mockResolvedValue(true)
+
+			await diffViewProvider.revertChanges()
+
+			// No rollback: originalContent is neither applied to the buffer nor saved.
+			expect(applyEdit).not.toHaveBeenCalled()
+			expect(documentSave).not.toHaveBeenCalled()
+			// No second pass over the tabs either - the cleanup already closed this
+			// provider's diff view, and the newer disk bytes stand untouched.
+			expect(diffViewProvider["closeAllDiffViews"]).not.toHaveBeenCalled()
+			// The session is finalized exactly once.
+			expect(diffViewProvider["sessionFinalizationClaimed"]).toBe(true)
+			expect(diffViewProvider["isEditing"]).toBe(false)
+		})
 	})
 
 	describe("saveChanges method with diagnostic settings", () => {
