@@ -8,16 +8,23 @@ import {
 	nanoGptDefaultModelInfo,
 	providerIdentifiers,
 	type ModelInfo,
+	type ModelRecord,
 	type NanoGptRoutingPreference,
 	type ReasoningEffortExtended,
 } from "@roo-code/types"
 
-import type { ApiHandlerOptions } from "../../shared/api"
+import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import type { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
-import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions, SingleCompletionHandler } from "../index"
+import type {
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+	SingleCompletionHandler,
+} from "../index"
 import { RouterProvider } from "./router-provider"
+import { getNanoGptModels } from "./fetchers/nanogpt"
 import { handleProviderError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
@@ -95,6 +102,15 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 			defaultModelId: nanoGptDefaultModelId,
 			defaultModelInfo: nanoGptDefaultModelInfo,
 		})
+	}
+
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: false, keyScoped: true, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getNanoGptModels(options.apiKey, ...fetchOpts)
 	}
 
 	private getRequestModelId(canonicalModelId: string): string {
