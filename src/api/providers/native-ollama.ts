@@ -6,7 +6,7 @@ import { ApiStream } from "../transform/stream"
 import { BaseProvider } from "./base-provider"
 import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 import { getOllamaModels, isSecureOllamaEndpoint } from "./fetchers/ollama"
-import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
+import { createAbortError, mergeAbortSignalAndTimeout, rejectOnAbort } from "./utils/abort-signal"
 import { TagMatcher } from "../../utils/tag-matcher"
 import type {
 	SingleCompletionHandler,
@@ -28,47 +28,6 @@ interface OllamaChatOptions {
 type ReasoningContentBlock = { type: "reasoning"; text: string }
 type ThinkingContentBlock = { type: "thinking"; thinking: string }
 type AssistantContentBlock = Anthropic.ContentBlock | ReasoningContentBlock | ThinkingContentBlock
-
-/**
- * Creates the canonical abort error shared by every cancellation path so
- * callers can identify cancellations by `name === "AbortError"`.
- */
-function createAbortError(): Error {
-	const abortError = new Error("This operation was aborted")
-	abortError.name = "AbortError"
-	return abortError
-}
-
-/**
- * Races `pending` against `signal`: if the signal aborts before the promise
- * settles, the returned promise rejects with an AbortError instead of
- * resolving with a stale result. The abort listener is removed as soon as
- * `pending` settles (in either direction), so a reusable caller signal does
- * not accumulate one listener per race; a cancelled in-flight request still
- * settles in the background.
- */
-export function raceWithAbortSignal<T>(pending: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
-	if (!signal) {
-		return pending
-	}
-	if (signal.aborted) {
-		return Promise.reject(createAbortError())
-	}
-	return new Promise<T>((resolve, reject) => {
-		const onAbort = () => reject(createAbortError())
-		signal.addEventListener("abort", onAbort)
-		pending.then(
-			(value) => {
-				signal.removeEventListener("abort", onAbort)
-				resolve(value)
-			},
-			(error) => {
-				signal.removeEventListener("abort", onAbort)
-				reject(error)
-			},
-		)
-	})
-}
 
 function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessageParam[]): Message[] {
 	const ollamaMessages: Message[] = []
@@ -304,9 +263,18 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		// Use constructor `headers` option instead of mutating (request as any).config.
 		// The credential is only attached when the endpoint is HTTPS or loopback;
 		// sending it over plaintext HTTP to a remote host would leak it (CWE-319).
-		if (this.options.ollamaApiKey && isSecureOllamaEndpoint(clientOptions.host)) {
-			clientOptions.headers = {
-				Authorization: `Bearer ${this.options.ollamaApiKey}`,
+		if (this.options.ollamaApiKey) {
+			if (isSecureOllamaEndpoint(clientOptions.host)) {
+				clientOptions.headers = {
+					Authorization: `Bearer ${this.options.ollamaApiKey}`,
+				}
+			} else {
+				// The credential is dropped to avoid leaking it over plaintext
+				// HTTP (CWE-319); surface the drop so a bare 401 from an auth
+				// proxy is diagnosable. The key itself is never logged.
+				console.warn(
+					`[NativeOllama] ollamaApiKey is set but the endpoint "${clientOptions.host}" is not https or loopback; the Authorization header is not sent (the credential would leak over plaintext). Use an https:// or loopback endpoint to authenticate.`,
+				)
 			}
 		}
 
@@ -474,7 +442,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		if (externalAbortSignal?.aborted) {
 			// The request is already cancelled: reject before allocating the
 			// per-request client or transport so nothing is left to clean up.
-			throw createAbortError()
+			throw createAbortError("Ollama")
 		}
 
 		const requestController = new AbortController()
@@ -494,7 +462,9 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			// fetch receives the signal so an aborted request is cancelled at
 			// the network level, and the race rejects a request aborted during
 			// discovery instead of proceeding to chat() with a stale model.
-			const { id: modelId } = await raceWithAbortSignal(this.fetchModel(externalAbortSignal), externalAbortSignal)
+			const { id: modelId } = externalAbortSignal
+				? await rejectOnAbort(this.fetchModel(externalAbortSignal), externalAbortSignal, "Ollama")
+				: await this.fetchModel(undefined)
 			// Stryker disable next-line MethodExpression,StringLiteral: DEEP_SEEK_DEFAULT_TEMPERATURE (0.0) is numerically equal to the 0 fallback, so the R1 check cannot change the emitted temperature
 			const useR1Format = modelId.toLowerCase().includes("deepseek-r1")
 
@@ -537,7 +507,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			// instead of being consumed after cancellation.
 			if (externalAbortSignal?.aborted) {
 				stream.abort()
-				throw createAbortError()
+				throw createAbortError("Ollama")
 			}
 
 			let totalInputTokens = 0
@@ -715,7 +685,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 				if (abortSignal.aborted) {
 					requestController.abort()
 					client.abort()
-					throw createAbortError()
+					throw createAbortError("Ollama")
 				} else {
 					onAbort = () => {
 						requestController.abort()
@@ -736,7 +706,11 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			// remains the backstop that rejects a stalled discovery instead of
 			// hanging past the deadline.
 			const discoverySignal = mergeAbortSignalAndTimeout(requestController.signal, options?.timeoutMs)
-			const { id: modelId } = await raceWithAbortSignal(this.fetchModel(discoverySignal), discoverySignal)
+			// mergeAbortSignalAndTimeout yields undefined when neither an external
+			// signal nor a positive timeout applies; no race is needed then.
+			const { id: modelId } = discoverySignal
+				? await rejectOnAbort(this.fetchModel(discoverySignal), discoverySignal, "Ollama")
+				: await this.fetchModel(discoverySignal)
 
 			const useR1Format = modelId.toLowerCase().includes("deepseek-r1")
 

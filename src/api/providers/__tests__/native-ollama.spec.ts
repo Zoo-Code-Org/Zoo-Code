@@ -2,7 +2,7 @@
 
 import { Anthropic } from "@anthropic-ai/sdk"
 
-import { NativeOllamaHandler, raceWithAbortSignal } from "../native-ollama"
+import { NativeOllamaHandler } from "../native-ollama"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { getOllamaModels } from "../fetchers/ollama"
 
@@ -973,7 +973,7 @@ describe("NativeOllamaHandler", () => {
 
 			const promise = handler.completePrompt("Test prompt", { abortSignal: controller.signal })
 			controller.abort()
-			await expect(promise).rejects.toThrow("This operation was aborted")
+			await expect(promise).rejects.toThrow("The Ollama request was aborted")
 
 			expect(capturedInstanceAbort).toBeDefined()
 			expect(capturedInstanceAbort).toHaveBeenCalledTimes(1)
@@ -1000,7 +1000,7 @@ describe("NativeOllamaHandler", () => {
 			})
 
 			await expect(handler.completePrompt("Test prompt", { abortSignal: controller.signal })).rejects.toThrow(
-				"This operation was aborted",
+				"The Ollama request was aborted",
 			)
 
 			expect(capturedInstanceAbort).toBeDefined()
@@ -2201,10 +2201,11 @@ describe("NativeOllamaHandler", () => {
 			)
 		})
 
-		it("should not attach the API key for a remote HTTP endpoint", async () => {
+		it("should not attach the API key for a remote HTTP endpoint and warn about the drop", async () => {
 			mockChat.mockResolvedValue({
 				message: { content: "Response" },
 			})
+			const warnSpy = vitest.spyOn(console, "warn").mockImplementation(() => {})
 
 			const handler = new NativeOllamaHandler({
 				apiModelId: "llama2",
@@ -2219,6 +2220,28 @@ describe("NativeOllamaHandler", () => {
 			// so the Authorization header must be omitted.
 			const callArgs = OllamaMock.mock.calls[0][0]
 			expect(callArgs.headers).toBeUndefined()
+			// The silent drop is a diagnosis trap (bare 401 behind an auth
+			// proxy), so the gate warns - without echoing the key itself.
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("ollamaApiKey"))
+			expect(warnSpy.mock.calls.flat().join(" ")).not.toContain("test-api-key-123")
+		})
+
+		it("should not warn when the API key is attached to a secure endpoint", async () => {
+			mockChat.mockResolvedValue({
+				message: { content: "Response" },
+			})
+			const warnSpy = vitest.spyOn(console, "warn").mockImplementation(() => {})
+
+			const handler = new NativeOllamaHandler({
+				apiModelId: "llama2",
+				ollamaModelId: "llama2",
+				ollamaBaseUrl: "https://ollama.example.com:11434",
+				ollamaApiKey: "test-api-key-123",
+			})
+
+			await handler.completePrompt("Test prompt")
+
+			expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("ollamaApiKey"))
 		})
 
 		it("should attach the API key for an HTTPS endpoint", async () => {
@@ -2277,65 +2300,6 @@ describe("NativeOllamaHandler", () => {
 			mockChat.mockResolvedValue({ message: { content: "Response" } })
 			await bareHandler.completePrompt("Test prompt")
 			expect(OllamaMock.mock.calls[0][0]).toEqual(expect.objectContaining({ host: "http://localhost:11434" }))
-		})
-	})
-
-	describe("raceWithAbortSignal", () => {
-		it("should resolve with the pending result when no signal is given", async () => {
-			const result = await raceWithAbortSignal(Promise.resolve("value"), undefined)
-			expect(result).toBe("value")
-		})
-
-		it("should reject with AbortError when the signal is already aborted", async () => {
-			const controller = new AbortController()
-			controller.abort()
-			const pending = new Promise<string>(() => {})
-			const settledPre = expect(raceWithAbortSignal(pending, controller.signal)).rejects.toMatchObject({
-				name: "AbortError",
-			})
-			await withDeadline(settledPre, 500)
-		})
-
-		it("should reject with AbortError when the signal aborts before the promise settles", async () => {
-			const controller = new AbortController()
-			const pending = new Promise<string>(() => {})
-			const raced = raceWithAbortSignal(pending, controller.signal)
-			controller.abort()
-			const settledAbort = expect(raced).rejects.toMatchObject({ name: "AbortError" })
-			await withDeadline(settledAbort, 500)
-		})
-
-		it("should resolve when the promise settles before the signal aborts", async () => {
-			const controller = new AbortController()
-			const raced = raceWithAbortSignal(Promise.resolve("done"), controller.signal)
-			const result = await withDeadline(raced, 500)
-			expect(result).toBe("done")
-			controller.abort() // a late abort must not disturb the settled result
-		})
-
-		it("should remove the abort listener when pending settles, on resolve and reject", async () => {
-			const resolveController = new AbortController()
-			const resolveAddSpy = vitest.spyOn(resolveController.signal, "addEventListener")
-			const resolveRemoveSpy = vitest.spyOn(resolveController.signal, "removeEventListener")
-			const resolved = await raceWithAbortSignal(Promise.resolve("done"), resolveController.signal)
-			expect(resolved).toBe("done")
-			// The listener detached must be the exact reference that was
-			// registered, so a reused caller signal cannot keep it.
-			expect(resolveRemoveSpy).toHaveBeenCalledWith("abort", resolveAddSpy.mock.calls[0]?.[1])
-
-			const rejectController = new AbortController()
-			const rejectAddSpy = vitest.spyOn(rejectController.signal, "addEventListener")
-			const rejectRemoveSpy = vitest.spyOn(rejectController.signal, "removeEventListener")
-			const rejected = expect(
-				raceWithAbortSignal(
-					new Promise<string>((_resolve, reject) => {
-						reject(new Error("boom"))
-					}),
-					rejectController.signal,
-				),
-			).rejects.toThrow("boom")
-			await withDeadline(rejected, 500)
-			expect(rejectRemoveSpy).toHaveBeenCalledWith("abort", rejectAddSpy.mock.calls[0]?.[1])
 		})
 	})
 
