@@ -102,9 +102,6 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	}
 
 	private hasPathStabilizedForTask(state: TaskPartialStreamState, partialPath: string | undefined): boolean {
-		// Stryker disable next-line ConditionalExpression: the `!== undefined` clause is redundant: when
-		// lastSeenPartialPath is undefined, the second clause only matches an undefined partialPath, which
-		// the `!!partialPath` in the return value rejects either way -- no test can distinguish the two.
 		const pathHasStabilized = state.lastSeenPartialPath !== undefined && state.lastSeenPartialPath === partialPath
 		state.lastSeenPartialPath = partialPath
 		return pathHasStabilized && !!partialPath
@@ -422,10 +419,6 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
 				// saveDirectly() performs the write itself and reports a failing write, so returning means
 				// the content is on disk: from here the rollback has to stand down.
-				// Stryker disable next-line AssignmentExpression: equivalent on this path - the
-				// approval flag already stands the rollback down, so removing the assignment changes no
-				// observable behaviour today. It stays because this branch lands the write without a diff
-				// view, and the commit point is the fact that says so.
 				writeCommitted = true
 			} else {
 				if (!task.diffViewProvider.isEditing) {
@@ -503,10 +496,6 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				// Two independent stand-downs: the user approved this content, or the write is already
 				// durable. Either one makes a rollback undo something the user wanted rather than
 				// cleaning up this call's debris.
-				// Stryker disable next-line LogicalOperator: writeCommitted is the second, independent
-				// stand-down - every path that sets it has already set writeApproved, so no test can tell &&
-				// from || here. It stays because it names the durable fact the provider signals at the
-				// save, not the approval fact, and it is the guard that survives if the approval flag moves.
 				if (!writeApproved && !writeCommitted) {
 					reverted = await this.discardUnapprovedStreamBeforeReset(task)
 				}
