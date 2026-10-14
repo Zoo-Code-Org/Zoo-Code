@@ -47,7 +47,7 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 
 		try {
 			provider?.log(message)
-		} catch (err) {
+		} catch {
 			// NO-OP
 		}
 	}
@@ -371,7 +371,7 @@ export async function checkpointRestore(
 		// task flow and the communication between the webview and the
 		// `Task` instance.
 		provider?.cancelTask()
-	} catch (err) {
+	} catch {
 		provider?.log("[checkpointRestore] disabling checkpoints for this task")
 		task.enableCheckpoints = false
 	}
@@ -390,7 +390,7 @@ export type CheckpointDiffOptions = {
 	mode: "from-init" | "checkpoint" | "to-current" | "full"
 }
 
-export async function checkpointDiff(task: Task, { ts, previousCommitHash, commitHash, mode }: CheckpointDiffOptions) {
+export async function checkpointDiff(task: Task, { commitHash, mode }: CheckpointDiffOptions) {
 	const service = await getCheckpointService(task)
 
 	if (!service) {
@@ -460,7 +460,7 @@ export async function checkpointDiff(task: Task, { ts, previousCommitHash, commi
 				}),
 			]),
 		)
-	} catch (err) {
+	} catch {
 		const provider = task.providerRef.deref()
 		provider?.log("[checkpointDiff] disabling checkpoints for this task")
 		task.enableCheckpoints = false

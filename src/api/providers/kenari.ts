@@ -7,15 +7,22 @@ import {
 	KENARI_DEFAULT_TEMPERATURE,
 	KENARI_BASE_URL,
 	providerIdentifiers,
+	type ModelRecord,
 } from "@roo-code/types"
 
-import { ApiHandlerOptions } from "../../shared/api"
+import { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import { ApiStream } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import type {
+	SingleCompletionHandler,
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+} from "../index"
 import { RouterProvider } from "./router-provider"
+import { getKenariModels } from "./fetchers/kenari"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
 /**
@@ -45,6 +52,15 @@ export class KenariHandler extends RouterProvider implements SingleCompletionHan
 			defaultModelId: kenariDefaultModelId,
 			defaultModelInfo: kenariDefaultModelInfo,
 		})
+	}
+
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: false, keyScoped: false, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getKenariModels(options.apiKey, ...fetchOpts)
 	}
 
 	/**
@@ -124,7 +140,7 @@ export class KenariHandler extends RouterProvider implements SingleCompletionHan
 	 * @returns The model's reply text, or an empty string if no content is returned.
 	 * @throws Error with a Kenari-specific prefix if the request fails.
 	 */
-	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
 		const { id: modelId, info } = await this.fetchModel()
 
 		try {

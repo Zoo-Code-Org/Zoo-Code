@@ -4,7 +4,6 @@ import delay from "delay"
 import type { CommandId } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
-import { Package } from "../shared/package"
 import { getCommand } from "../utils/commands"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import type { WebviewFocusTracker } from "../core/webview/WebviewFocusTracker"
@@ -14,7 +13,6 @@ import { handleNewTask } from "./handleTask"
 import { importSettingsWithFeedback } from "../core/config/importExport"
 import { MdmService } from "../services/mdm/MdmService"
 import { registerRipgrepDiagnosticCommand } from "../services/ripgrep/diagnostic"
-import { t } from "../i18n"
 
 /**
  * Helper to get the visible ClineProvider instance or log if not found.
@@ -239,7 +237,7 @@ export const openClineInNewTab = async ({ context, outputChannel, webviewFocusTr
 	let mdmService: MdmService | undefined
 	try {
 		mdmService = MdmService.getInstance()
-	} catch (error) {
+	} catch {
 		// MDM service not initialized, which is fine - extension can work without it
 		mdmService = undefined
 	}
