@@ -537,6 +537,35 @@ describe("XAIHandler", () => {
 		})
 	})
 
+	it("createMessage should normalize an SDK abort raised while iterating the response stream", async () => {
+		const controller = new AbortController()
+		const sdkAbortError = new APIUserAbortError()
+
+		// responses.create resolves; the cancellation lands while the stream is
+		// being consumed, so the SDK abort error escapes from the iterator.
+		mockResponsesCreate.mockResolvedValueOnce({
+			[Symbol.asyncIterator]: () => ({
+				next: async () => {
+					controller.abort()
+					throw sdkAbortError
+				},
+			}),
+		})
+
+		const stream = handler.createMessage(
+			"test prompt",
+			[],
+			makeCreateMessageMetadata({ abortSignal: controller.signal }),
+		)
+
+		// The raw SDK abort error (name "Error") must be normalized to the
+		// contract AbortError even though it escapes outside the create call.
+		await expect(stream.next()).rejects.toMatchObject({
+			name: "AbortError",
+			message: "The xAI request was aborted",
+		})
+	})
+
 	it("should reject with AbortError when createMessage is called with an already-aborted signal", async () => {
 		const abortedController = new AbortController()
 		abortedController.abort()

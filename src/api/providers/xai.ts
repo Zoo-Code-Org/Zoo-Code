@@ -159,7 +159,19 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 			}
 
 			const normalizeUsage = createUsageNormalizer()
-			yield* processResponsesApiStream(stream, normalizeUsage)
+			try {
+				yield* processResponsesApiStream(stream, normalizeUsage)
+			} catch (error) {
+				// An abort landing after responses.create resolved surfaces here as
+				// the SDK's APIUserAbortError thrown from stream iteration (name
+				// "Error", message "Request was aborted."), outside the create
+				// catch above. Normalize it to the contract AbortError too, so
+				// callers never classify a cancellation as a provider failure.
+				if (isRequestAborted(error, abortSignal)) {
+					throw createAbortError(this.providerName)
+				}
+				throw error
+			}
 		} finally {
 			// Release the listener once the stream is consumed, whether the
 			// request completed, failed, or the generator was closed early.
