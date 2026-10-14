@@ -467,10 +467,14 @@ describe("LmStudioHandler abort wiring", () => {
 			const first = await stream.next()
 			expect(first.value).toEqual({ type: "text", text: "first" })
 
+			const opts = create.mock.calls[0][1]
+			// No premature abort: while the consumer is still iterating, the
+			// request-local signal must still be live.
+			expect(opts?.signal.aborted).toBe(false)
+
 			await stream.return(undefined) // consumer stops early; finally must cancel the request
 
-			const opts = create.mock.calls[0][1]
-			expect(opts?.signal.aborted).toBe(true) // the request-local SDK signal is aborted
+			expect(opts.signal.aborted).toBe(true) // the request-local SDK signal is aborted
 			const listener = addSpy.mock.calls.find(([type]) => type === "abort")?.[1]
 			expect(typeof listener).toBe("function")
 			expect(removeSpy).toHaveBeenCalledWith("abort", listener) // the bridge is detached by reference
