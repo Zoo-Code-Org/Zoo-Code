@@ -1376,18 +1376,22 @@ describe("OpenAiNativeHandler", () => {
 				// Regression guard for the catch-path condition: a terminal SDK error that
 				// merely races the abort must not be reclassified as a cancellation, so the
 				// fallback still runs instead of throwing an AbortError.
-				const mockFetch = vitest.fn().mockImplementation((_url: unknown, options: { signal?: AbortSignal }) => {
-					const body = new ReadableStream<Uint8Array>({
-						start: (startController) => {
-							startController.enqueue(
-								new TextEncoder().encode('data: {"type":"response.text.delta","delta":"fallback"}\n\n'),
-							)
-							startController.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-							startController.close()
-						},
+				const mockFetch = vitest
+					.fn()
+					.mockImplementation((_url: unknown, _options: { signal?: AbortSignal }) => {
+						const body = new ReadableStream<Uint8Array>({
+							start: (startController) => {
+								startController.enqueue(
+									new TextEncoder().encode(
+										'data: {"type":"response.text.delta","delta":"fallback"}\n\n',
+									),
+								)
+								startController.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+								startController.close()
+							},
+						})
+						return Promise.resolve({ ok: true, body })
 					})
-					return Promise.resolve({ ok: true, body })
-				})
 				global.fetch = mockFetch as typeof fetch
 				const controller = new AbortController()
 				const terminalError = new Error("SDK connection reset")
@@ -2787,7 +2791,7 @@ describe("OpenAiNativeHandler", () => {
 			const stream = gpt5Handler.createMessage(systemPrompt, messages, {
 				taskId: "task1",
 			})
-			for await (const chunk of stream) {
+			for await (const _chunk of stream) {
 				// consume
 			}
 
@@ -2832,7 +2836,7 @@ describe("OpenAiNativeHandler", () => {
 				const stream = handler.createMessage(systemPrompt, messages)
 
 				await expect(async () => {
-					for await (const chunk of stream) {
+					for await (const _chunk of stream) {
 						// Should throw before yielding anything
 					}
 				}).rejects.toThrow(expectedMessage)
@@ -3297,7 +3301,7 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 
 			// Should throw an error (using the same error format as GPT-5)
 			await expect(async () => {
-				for await (const chunk of stream) {
+				for await (const _chunk of stream) {
 					// consume stream
 				}
 			}).rejects.toThrow("Rate limit exceeded")

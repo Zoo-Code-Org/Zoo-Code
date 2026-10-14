@@ -10,7 +10,6 @@ import {
 	OpenAiNativeModelId,
 	openAiNativeModels,
 	OPENAI_NATIVE_DEFAULT_TEMPERATURE,
-	type ReasoningEffort,
 	type VerbosityLevel,
 	type ReasoningEffortExtended,
 	OpenAiServiceTier,
@@ -212,7 +211,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		this.streamedToolCallIds.clear()
 
 		// Use Responses API for ALL models
-		const { verbosity, reasoning } = this.getModel()
+		const { verbosity } = this.getModel()
 
 		// Resolve reasoning effort for models that support it
 		const reasoningEffort = this.getReasoningEffort(model)
@@ -548,7 +547,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		}
 	}
 
-	private formatFullConversation(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): any {
+	private formatFullConversation(_systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): any {
 		// Format the entire conversation history for the Responses API using structured format
 		// The Responses API (like Realtime API) accepts a list of items, which can be messages, function calls, or function call outputs.
 		const formattedInput: any[] = []
@@ -665,8 +664,8 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		requestBody: any,
 		model: OpenAiNativeModel,
 		metadata?: ApiHandlerCreateMessageMetadata,
-		systemPrompt?: string,
-		messages?: Anthropic.Messages.MessageParam[],
+		_systemPrompt?: string,
+		_messages?: Anthropic.Messages.MessageParam[],
 	): ApiStream {
 		const apiKey = this.options.openAiNativeApiKey ?? NOT_PROVIDED
 		const baseUrl = this.options.openAiNativeBaseUrl || "https://api.openai.com"
@@ -822,8 +821,6 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		let buffer = ""
 		let hasContent = false
 		let streamCompleted = false
-		const totalInputTokens = 0
-		const totalOutputTokens = 0
 
 		try {
 			while (true) {
@@ -841,7 +838,6 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 
 				const { done, value } = await reader.read()
 				if (done) {
-					// Stryker disable next-line BooleanLiteral: done from reader.read() implies the stream is closed, and cancel() on a closed stream never invokes the underlying cancel algorithm, so this flag cannot change observable behavior.
 					streamCompleted = true
 					break
 				}
@@ -1302,7 +1298,6 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			// terminate — an overlapping request's stream. Cancel is a no-op once the
 			// stream has already completed or failed; the guarded catch keeps this
 			// best-effort cleanup from masking the original error.
-			// Stryker disable next-line ConditionalExpression: when streamCompleted is true the stream is already closed, so reader.cancel() is a no-op; forcing this branch true cannot change observable behavior.
 			if (!streamCompleted) {
 				await reader.cancel().catch(() => undefined)
 			}

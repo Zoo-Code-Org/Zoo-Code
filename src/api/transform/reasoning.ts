@@ -172,7 +172,6 @@ export const getOpenAiReasoning = ({
 export const getGeminiReasoning = ({
 	model,
 	reasoningBudget,
-	reasoningEffort,
 	settings,
 }: GetModelReasoningOptions): GeminiReasoningParams | undefined => {
 	// Budget-based (2.5) models: use thinkingBudget, not thinkingLevel.

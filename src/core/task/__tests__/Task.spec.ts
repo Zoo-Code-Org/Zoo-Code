@@ -3181,9 +3181,6 @@ describe("Cline", () => {
 			})
 
 			it("should enforce rate limiting across parent and subtask", async () => {
-				// Add a spy to track getState calls
-				const getStateSpy = vi.spyOn(mockProvider, "getState")
-
 				// Shared clock so parent and child see each other's timestamps
 				const sharedClock = createRateLimitClock()
 
@@ -3647,7 +3644,7 @@ describe("Cline", () => {
 						apiProvider: providerIdentifiers.openai,
 						openAiModelId: modelId,
 					}
-					const task = new Task({
+					new Task({
 						provider: mockProvider,
 						apiConfiguration: config,
 						task: "test task",
@@ -4587,7 +4584,7 @@ describe("Cline", () => {
 										value: { type: "text", text: "first chunk" },
 									})
 								}
-								return new Promise<IteratorResult<ApiStreamChunk>>((resolve, reject) => {
+								return new Promise<IteratorResult<ApiStreamChunk>>((_resolve, reject) => {
 									if (metadata?.abortSignal?.aborted) {
 										return reject(new Error("Request cancelled by user"))
 									}

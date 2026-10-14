@@ -280,7 +280,7 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 		}
 	}
 
-	async completePrompt(prompt: string, options?: CompletePromptOptions) {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions) {
 		try {
 			const {
 				id,
