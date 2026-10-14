@@ -465,7 +465,6 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			const { id: modelId } = externalAbortSignal
 				? await rejectOnAbort(this.fetchModel(externalAbortSignal), externalAbortSignal, "Ollama")
 				: await this.fetchModel(undefined)
-			// Stryker disable next-line MethodExpression,StringLiteral: DEEP_SEEK_DEFAULT_TEMPERATURE (0.0) is numerically equal to the 0 fallback, so the R1 check cannot change the emitted temperature
 			const useR1Format = modelId.toLowerCase().includes("deepseek-r1")
 
 			const ollamaMessages: Message[] = [
@@ -622,7 +621,6 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		} finally {
 			// Detach the external-signal listener so it cannot outlive this request,
 			// including when model discovery rejects before the chat request starts.
-			// Stryker disable next-line LogicalOperator: onExternalAbort is only assigned when externalAbortSignal is present, so || is equivalent
 			if (onExternalAbort && externalAbortSignal) {
 				externalAbortSignal.removeEventListener("abort", onExternalAbort)
 			}
@@ -737,7 +735,6 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			throw error
 		} finally {
 			clearTimeout(timeoutId)
-			// Stryker disable next-line LogicalOperator: onAbort is only assigned when abortSignal is present, so || is equivalent
 			if (onAbort && abortSignal) {
 				abortSignal.removeEventListener("abort", onAbort)
 			}
