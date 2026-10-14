@@ -8,7 +8,7 @@ import type { BigIntStats } from "fs"
 import * as fs from "fs/promises"
 import { acquireFileLock } from "../fileLock"
 import { safeWriteJson } from "../safeWriteJson"
-import { resolveLockKey } from "../../services/file-safety/safeWriteText"
+import { DaclPublishRefusedError, resolveLockKey } from "../../services/file-safety/safeWriteText"
 
 // The Windows DACL helpers shell out to icacls, which cannot run under a sandboxed test host:
 // every write would fail the restore check and roll back. Stub that one boundary, the same way
@@ -270,7 +270,14 @@ it("does not merge from a symlink an unscoped write is not going to publish thro
 	mockedAcquireFileLock.mockImplementation(async () => async () => {})
 	const merge = vi.fn((existing: unknown, next: unknown) => ({ had: existing !== null, next }))
 
-	await safeWriteJson(link, { id: "task-3" }, { merge })
+	if (process.platform === "win32") {
+		// On Windows the DACL capture succeeds over the existing link (stubbed icacls), and a
+		// captured-DACL publish over a symbolic link is refused BEFORE the commit rename. The
+		// merge read - this test's subject - has already happened by then; nothing is committed.
+		await expect(safeWriteJson(link, { id: "task-3" }, { merge })).rejects.toThrow(DaclPublishRefusedError)
+	} else {
+		await safeWriteJson(link, { id: "task-3" }, { merge })
+	}
 
 	expect(merge).toHaveBeenCalledWith(null, { id: "task-3" })
 })
@@ -304,7 +311,13 @@ it("serializes a writer that names the referent directly while the link still ex
 		}
 	})
 
-	await safeWriteJson(link, { id: "task-4" })
+	if (process.platform === "win32") {
+		// Captured-DACL publish over a symbolic link: the capture ran, and the write is refused
+		// before the commit rename - the locks below are still taken and released around it.
+		await expect(safeWriteJson(link, { id: "task-4" })).rejects.toThrow(DaclPublishRefusedError)
+	} else {
+		await safeWriteJson(link, { id: "task-4" })
+	}
 
 	// Both identities, in sorted key order, so two writers approaching the pair from opposite sides
 	// cannot each hold one and wait for the other; both released, in reverse.
@@ -323,13 +336,21 @@ it("serializes a writer that names the referent directly while the link still ex
 			expect.anything(),
 			expect.any(Function),
 		)
+		// The refusal prevents the post-commit ACL steps: neither /restore nor the restrictive
+		// fallback (drop inheritance + grant) runs.
+		const aclArgs = vi.mocked(execFile).mock.calls.map((call) => String(call[1]))
+		expect(aclArgs.some((a) => a.includes("/restore"))).toBe(false)
+		expect(aclArgs.some((a) => a.includes("/inheritance"))).toBe(false)
 	} else {
 		expect(execFile).not.toHaveBeenCalled()
 	}
 
-	// Taking the extra lock must not move the publish target: the bytes land on the link, and the
-	// referent keeps the content its own writer put there.
-	expect(JSON.parse(await fs.readFile(link, "utf8"))).toEqual({ id: "task-4" })
+	// Taking the extra lock must not move the publish target: on linux the bytes land on the link;
+	// on win32 the refusal leaves the link bytes untouched. Either way the referent keeps the
+	// content its own writer put there.
+	expect(JSON.parse(await fs.readFile(link, "utf8"))).toEqual(
+		process.platform === "win32" ? { had: "link content" } : { id: "task-4" },
+	)
 	expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ had: "referent content" })
 })
 
