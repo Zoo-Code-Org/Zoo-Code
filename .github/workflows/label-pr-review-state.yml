@@ -32,8 +32,15 @@ on:
     # provides a trusted base-repository event that can reconcile those PRs promptly.
     issue_comment:
         types: [created, edited]
+    # Fork pull_request_review runs get a read-only token and skip their label
+    # writes. This workflow lists itself so such a run's completion re-triggers
+    # it with a privileged token that writes the computed labels (issue #2046).
+    # The resolve job accepts a workflow_run of this workflow only when the
+    # completed run was itself a pull_request_review run, so the chain stops
+    # after one hop. The privileged follow-up takes no artifact input and never
+    # checks out code, so no untrusted PR code or artifacts are touched.
     workflow_run:
-        workflows: ["Code QA Roo Code", "E2E Tests (Mocked)", "Webview Visual Regression", "CodeQL Advanced"]
+        workflows: ["Code QA Roo Code", "E2E Tests (Mocked)", "Webview Visual Regression", "CodeQL Advanced", "Label PR review state"]
         types: [completed]
 
 permissions:
@@ -85,9 +92,17 @@ concurrency:
 jobs:
     resolve:
         name: Zoo Code / resolve PRs to reconcile
+        # The second clause is the loop guard for the self workflow_run
+        # follow-up (issue #2046): accept a workflow_run of this workflow only
+        # when the completed run was triggered by pull_request_review. A run
+        # triggered by workflow_run has event 'workflow_run', so the next level
+        # is filtered out and the chain stops after one hop.
         if: >-
-            github.event_name != 'issue_comment' ||
-            (github.event.issue.pull_request && github.event.comment.user.login == 'coderabbitai[bot]')
+            (github.event_name != 'issue_comment' ||
+            (github.event.issue.pull_request && github.event.comment.user.login == 'coderabbitai[bot]')) &&
+            (github.event_name != 'workflow_run' ||
+            github.event.workflow_run.name != 'Label PR review state' ||
+            github.event.workflow_run.event == 'pull_request_review')
         runs-on: ubuntu-latest
         outputs:
             pr_numbers: ${{ steps.resolve.outputs.pr_numbers }}
@@ -121,6 +136,22 @@ jobs:
                           (!context.payload.issue?.pull_request ||
                            context.payload.comment?.user?.login?.toLowerCase() !== 'coderabbitai[bot]')) {
                         core.info('Ignoring untrusted issue comment event');
+                        core.setOutput('pr_numbers', '[]');
+                        return;
+                      }
+
+                      // Loop guard for the self workflow_run follow-up (issue #2046),
+                      // mirroring the job-level `if`: accept a workflow_run of this
+                      // workflow only when the completed run was triggered by
+                      // pull_request_review. A run triggered by workflow_run has event
+                      // 'workflow_run', so the chain stops after one hop.
+                      if (context.eventName === 'workflow_run' &&
+                          context.payload.workflow_run?.name === 'Label PR review state' &&
+                          context.payload.workflow_run?.event !== 'pull_request_review') {
+                        core.info(
+                          'Ignoring workflow_run of this workflow not triggered by a ' +
+                          'pull_request_review run'
+                        );
                         core.setOutput('pr_numbers', '[]');
                         return;
                       }
@@ -195,6 +226,9 @@ jobs:
         if: >-
             (github.event_name != 'issue_comment' ||
             (github.event.issue.pull_request && github.event.comment.user.login == 'coderabbitai[bot]')) &&
+            (github.event_name != 'workflow_run' ||
+            github.event.workflow_run.name != 'Label PR review state' ||
+            github.event.workflow_run.event == 'pull_request_review') &&
             needs.resolve.outputs.pr_numbers != '[]'
         strategy:
             fail-fast: false
