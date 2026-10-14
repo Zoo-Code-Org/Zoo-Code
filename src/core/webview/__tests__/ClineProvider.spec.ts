@@ -1980,7 +1980,7 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			// Seed a pre-launch entry under the temporary id so the re-key has real work to do.
-			mockContext.globalState.update("viewStates", {
+			await mockContext.globalState.update("viewStates", {
 				[provider["temporaryViewStateId"]]: { mode: "architect", updatedAt: 1 },
 			})
 
@@ -2029,7 +2029,7 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			// A string in storage is corrupt: the fresh-read guard must not spread it.
-			mockContext.globalState.update("viewStates", "corrupted-storage-value")
+			await mockContext.globalState.update("viewStates", "corrupted-storage-value")
 			expect(provider["getPersistedViewStates"]({ fresh: true })).toEqual({})
 			await provider.dispose()
 		})
@@ -2158,7 +2158,7 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			// Seed storage directly (bypassing the ContextProxy cache) so only the fresh read sees it.
-			mockContext.globalState.update("viewStates", {
+			await mockContext.globalState.update("viewStates", {
 				[provider["temporaryViewStateId"]]: { mode: "architect", updatedAt: 1 },
 			})
 			await provider["setViewStateId"]("stable-sidebar-view")
@@ -2176,7 +2176,7 @@ describe("ClineProvider", () => {
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-			mockContext.globalState.update("viewStates", {
+			await mockContext.globalState.update("viewStates", {
 				[provider["temporaryViewStateId"]]: { mode: "temp-mode", updatedAt: 1 },
 				"stable-sidebar-view": { mode: "stable-mode", updatedAt: 5 },
 			})
@@ -2202,7 +2202,7 @@ describe("ClineProvider", () => {
 
 			// An entry written under this view's counter key by another window (or an earlier
 			// session) must stay put instead of being re-keyed onto this window's stable id.
-			mockContext.globalState.update("viewStates", {
+			await mockContext.globalState.update("viewStates", {
 				[provider.viewId]: { mode: "architect", updatedAt: 1 },
 			})
 
@@ -2226,7 +2226,7 @@ describe("ClineProvider", () => {
 			await provider["setViewStateId"]("stable-sidebar-view")
 			// The cache only knows this view's entry; storage gains an extra view directly.
 			await provider.contextProxy.setValue("viewStates", { "stable-sidebar-view": { mode: "architect" } })
-			mockContext.globalState.update("viewStates", {
+			await mockContext.globalState.update("viewStates", {
 				"stable-sidebar-view": { mode: "architect" },
 				"stable-editor-view": { mode: "code" },
 			})
@@ -3350,9 +3350,11 @@ describe("ClineProvider", () => {
 				// nor the sticky-name rewrite may touch it.
 				expect(siblingTask.updateApiConfiguration).not.toHaveBeenCalled()
 				expect(siblingTask.setTaskApiConfigName).not.toHaveBeenCalled()
-				// Let queued view-local persistence settle while the console spies are
-				// still installed, so teardown has no pending writes.
-				await new Promise((resolve) => setTimeout(resolve, 50))
+				// Wait on the serialized view-state write queue that every
+				// viewStates mutation goes through, so queued persistence finishes
+				// while the console spies are still installed and teardown has no
+				// pending writes.
+				await ClineProvider["persistedViewStateWriteQueue"]
 			} finally {
 				await sibling.dispose()
 				await provider.dispose()
@@ -9874,9 +9876,11 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 					apiProvider: providerIdentifiers.anthropic,
 					apiKey: "new-key",
 				})
-				// Let queued view-local persistence settle while the console spies are
-				// still installed, so teardown has no pending writes.
-				await new Promise((resolve) => setTimeout(resolve, 50))
+				// Wait on the serialized view-state write queue that every
+				// viewStates mutation goes through, so queued persistence finishes
+				// while the console spies are still installed and teardown has no
+				// pending writes.
+				await ClineProvider["persistedViewStateWriteQueue"]
 			} finally {
 				await sibling.dispose()
 			}
@@ -9940,9 +9944,11 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				// ...but the task runs under another profile: its handler must not be
 				// switched to the saved profile's settings.
 				expect(siblingTask.updateApiConfiguration).not.toHaveBeenCalled()
-				// Let queued view-local persistence settle while the console spies are
-				// still installed, so teardown has no pending writes.
-				await new Promise((resolve) => setTimeout(resolve, 50))
+				// Wait on the serialized view-state write queue that every
+				// viewStates mutation goes through, so queued persistence finishes
+				// while the console spies are still installed and teardown has no
+				// pending writes.
+				await ClineProvider["persistedViewStateWriteQueue"]
 			} finally {
 				await sibling.dispose()
 			}
