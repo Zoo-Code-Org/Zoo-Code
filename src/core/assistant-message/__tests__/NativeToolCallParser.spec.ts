@@ -3,6 +3,38 @@ import { NativeToolCallParser, type ToolCallStreamEvent } from "../NativeToolCal
 describe("NativeToolCallParser", () => {
 	describe("parseToolCall", () => {
 		describe("read_file tool", () => {
+			it("coerces numeric strings before reader-owned validation", () => {
+				expect(
+					NativeToolCallParser.parseToolCall({
+						id: "numeric_strings",
+						name: "read_file",
+						arguments: JSON.stringify({
+							path: "test.ts",
+							offset: "2",
+							limit: "1",
+							indentation: { anchor_line: "3", max_levels: "0", max_lines: "4" },
+						}),
+					}),
+				).toMatchObject({
+					nativeArgs: {
+						path: "test.ts",
+						offset: 2,
+						limit: 1,
+						indentation: { anchor_line: 3, max_levels: 0, max_lines: 4 },
+					},
+				})
+			})
+
+			it.each([0, -1, 1.5])("retains numeric limit %s for precise execution diagnostics", (limit) => {
+				expect(
+					NativeToolCallParser.parseToolCall({
+						id: "reader_validation",
+						name: "read_file",
+						arguments: JSON.stringify({ path: "test.ts", limit }),
+					}),
+				).toMatchObject({ nativeArgs: { path: "test.ts", limit } })
+			})
+
 			it("should parse minimal single-file read_file args", () => {
 				const toolCall = {
 					id: "toolu_123",

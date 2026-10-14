@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { presentAssistantMessage } from "../presentAssistantMessage"
 import { validateToolUse } from "../../tools/validateToolUse"
-import { readFileTool } from "../../tools/ReadFileTool"
+import { ReadFileTool } from "../../tools/file-reading/ReadFileTool"
 import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
 
 // Mock dependencies
@@ -399,7 +399,7 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 			// longer re-reads provider state before dispatch (issue #1642), so the
 			// dispatch-time throw this test pins is triggered by the dispatched tool
 			// handler itself.
-			const handleSpy = vi.spyOn(readFileTool, "handle").mockRejectedValue(new Error("dispatch failed"))
+			const handleSpy = vi.spyOn(ReadFileTool.prototype, "handle").mockRejectedValue(new Error("dispatch failed"))
 
 			try {
 				await expect(presentAssistantMessage(mockTask, baseSnapshot)).rejects.toThrow("dispatch failed")

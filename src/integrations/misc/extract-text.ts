@@ -8,27 +8,29 @@ import { extractTextFromXLSX } from "./extract-text-from-xlsx"
 import { readWithSlice } from "./indentation-reader"
 import { DEFAULT_LINE_LIMIT } from "../../core/prompts/tools/native-tools/read_file"
 
-async function extractTextFromPDF(source: Buffer): Promise<string> {
+async function extractTextFromPDF(source: Buffer, lineNumbers = true): Promise<string> {
 	const data = await pdf(source)
-	return addLineNumbers(data.text)
+	return lineNumbers ? addLineNumbers(data.text) : data.text
 }
 
-async function extractTextFromDOCX(source: Buffer): Promise<string> {
+async function extractTextFromDOCX(source: Buffer, lineNumbers = true): Promise<string> {
 	const result = await mammoth.extractRawText({ buffer: source })
-	return addLineNumbers(result.value)
+	return lineNumbers ? addLineNumbers(result.value) : result.value
 }
 
-async function extractTextFromIPYNB(source: Buffer): Promise<string> {
+async function extractTextFromIPYNB(source: Buffer, lineNumbers = true): Promise<string> {
 	const notebook = JSON.parse(source.toString("utf8"))
 	let extractedText = ""
+	const rawCells: string[] = []
 
 	for (const cell of notebook.cells) {
 		if ((cell.cell_type === "markdown" || cell.cell_type === "code") && cell.source) {
 			extractedText += cell.source.join("\n") + "\n"
+			rawCells.push(cell.source.join("\n"))
 		}
 	}
 
-	return addLineNumbers(extractedText)
+	return lineNumbers ? addLineNumbers(extractedText) : rawCells.join("\n")
 }
 
 /**
@@ -148,6 +150,39 @@ export async function extractTextFromBuffer(source: Buffer, filePath: string): P
 	}
 
 	return readWithSlice(source.toString("utf8"), 0, DEFAULT_LINE_LIMIT).content
+}
+
+/** Raw document decoding consumes required bytes; paths are format metadata only. */
+export async function extractRawTextFromBuffer(source: Buffer, filePath: string): Promise<string> {
+	const extension = path.extname(filePath).toLowerCase()
+	switch (extension) {
+		case ".pdf":
+			return extractTextFromPDF(source, false)
+		case ".docx":
+			return extractTextFromDOCX(source, false)
+		case ".ipynb":
+			return extractTextFromIPYNB(source, false)
+		case ".xlsx":
+			return extractTextFromXLSX(source)
+		default:
+			throw new Error(`Cannot extract document text for file type: ${extension}`)
+	}
+}
+
+/** Compatibility wrapper; a supplied verified buffer never triggers pathname I/O. */
+export async function extractRawTextFromFile(filePath: string, source?: Buffer): Promise<string> {
+	if (!getSupportedBinaryFormats().includes(path.extname(filePath).toLowerCase())) {
+		throw new Error(`Cannot extract document text for file type: ${path.extname(filePath).toLowerCase()}`)
+	}
+	if (source === undefined) {
+		try {
+			await fs.access(filePath)
+		} catch {
+			throw new Error(`File not found: ${filePath}`)
+		}
+		source = await fs.readFile(filePath)
+	}
+	return extractRawTextFromBuffer(source, filePath)
 }
 
 export function addLineNumbers(content: string, startLine: number = 1): string {

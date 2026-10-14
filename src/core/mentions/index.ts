@@ -11,7 +11,7 @@ import { getCommitInfo, getWorkingState } from "../../utils/git"
 import { openFile } from "../../integrations/misc/open-file"
 import { extractTextFromFileWithMetadata, type ExtractTextResult } from "../../integrations/misc/extract-text"
 import { diagnosticsToProblemsString } from "../../integrations/diagnostics"
-import { DEFAULT_LINE_LIMIT } from "../prompts/tools/native-tools/read_file"
+import { DEFAULT_LINE_LIMIT } from "../tools/file-reading/readFileConstants"
 
 import { FileContextTracker } from "../context-tracking/FileContextTracker"
 

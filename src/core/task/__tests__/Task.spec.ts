@@ -38,7 +38,7 @@ import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-p
 import { asyncStreamFrom } from "../../../test-utils/stream"
 import { McpHub } from "../../../services/mcp/McpHub"
 import { McpServerManager } from "../../../services/mcp/McpServerManager"
-import { readFileTool } from "../../tools/ReadFileTool"
+import { ReadFileTool } from "../../tools/file-reading/ReadFileTool"
 import { writeToFileTool } from "../../tools/WriteToFileTool"
 
 type TaskTestAccess = {
@@ -840,7 +840,7 @@ describe("Cline", () => {
 			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
 			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
 			const readFileHandleSpy = vi
-				.spyOn(readFileTool, "handle")
+				.spyOn(ReadFileTool.prototype, "handle")
 				.mockImplementation(async (_task, block, callbacks) => {
 					if (!block.partial) callbacks.pushToolResult(`File: ${block.params.path}\nfinished`)
 				})
@@ -941,7 +941,7 @@ describe("Cline", () => {
 				handlerPushedResult = resolve
 			})
 			const readFileHandleSpy = vi
-				.spyOn(readFileTool, "handle")
+				.spyOn(ReadFileTool.prototype, "handle")
 				.mockImplementation(async (_task, block, callbacks) => {
 					if (block.partial) return
 					callbacks.pushToolResult("File: README.md\nfinished")
@@ -1004,7 +1004,7 @@ describe("Cline", () => {
 			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
 			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
 			const readFileHandleSpy = vi
-				.spyOn(readFileTool, "handle")
+				.spyOn(ReadFileTool.prototype, "handle")
 				.mockImplementation(async (_task, block, callbacks) => {
 					if (!block.partial) callbacks.pushToolResult("File: README.md\nfinished")
 				})

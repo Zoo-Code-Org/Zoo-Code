@@ -30,6 +30,190 @@ describe("matching on Windows", () => {
 	const matches = (filePath: string, patterns: string[], cwd: string | undefined = WINDOWS_CWD) =>
 		matcher().isFileMatchedByPatterns({ filePath, cwd, patterns, homeDir: WINDOWS_HOME })
 
+	it("keeps share-rooted paths separate from the internal UNC namespace", () => {
+		const cwd = "\\\\server\\share\\project"
+		const rooted = "/UNC/server/share/project/docs/**"
+		expect(matches("docs/private.md", [rooted], cwd)).toBe(false)
+		expect(matches("//server/share/project/docs/private.md", [rooted], cwd)).toBe(false)
+		expect(matches("//server/share/UNC/server/share/project/docs/private.md", [rooted], cwd)).toBe(true)
+		expect(matches("/UNC/server/share/project/docs/private.md", ["docs/**"], cwd)).toBe(false)
+		expect(matches("docs/private.md", ["docs/**", `!${rooted}`], cwd)).toBe(true)
+	})
+
+	it("resolves share-rooted paths against the workspace share", () => {
+		const cwd = "\\\\server\\share\\project"
+		expect(matches("//server/share/docs/private.md", ["/docs/**"], cwd)).toBe(true)
+		expect(matches("/docs/private.md", ["//server/share/docs/**"], cwd)).toBe(true)
+		expect(matches("//other/share/docs/private.md", ["/docs/**"], cwd)).toBe(false)
+	})
+
+	it.each(["C:/", "//server/share", "//server/share/"])("matches relative grants at a volume root: %s", (cwd) => {
+		const absolutePath = `${cwd.replace(/\/$/, "")}/docs/private.md`
+		expect(matches("docs/private.md", ["docs/**"], cwd)).toBe(true)
+		expect(matches(absolutePath, ["docs/**"], cwd)).toBe(true)
+		expect(matches("docs/private.md", ["docs/**", "!docs/private.md"], cwd)).toBe(false)
+		expect(matches(absolutePath, ["docs/**", "!docs/private.md"], cwd)).toBe(false)
+	})
+
+	it.each(["C:", "c:", "C:repo"])("does not anchor relative grants to a drive-relative workspace: %s", (cwd) => {
+		expect(matcher().toMatcherPattern("docs/**", cwd)).toBeUndefined()
+		for (const canonicalCwd of [undefined, "C:/repo"]) {
+			for (const filePath of [
+				"docs/private.md",
+				"../docs/private.md",
+				"C:/docs/private.md",
+				"C:/repo/docs/private.md",
+			]) {
+				expect(matcher().isFileMatchedByPatterns({ filePath, cwd, canonicalCwd, patterns: ["docs/**"] })).toBe(
+					false,
+				)
+			}
+			expect(
+				matcher().isFileMatchedByPatterns({
+					filePath: "C:/docs/notes.md",
+					cwd,
+					canonicalCwd,
+					patterns: ["C:/docs/**"],
+				}),
+			).toBe(true)
+			expect(
+				matcher().isFileMatchedByPatterns({
+					filePath: "C:/docs/private.md",
+					cwd,
+					canonicalCwd,
+					patterns: ["C:/docs/**", "!C:/docs/private.md"],
+				}),
+			).toBe(false)
+			expect(
+				matcher().isFileMatchedByPatterns({
+					filePath: "../docs/notes.md",
+					cwd,
+					canonicalCwd,
+					patterns: ["C:/docs/**"],
+				}),
+			).toBe(false)
+		}
+	})
+
+	it.each(["C:", "C:docs/private.md", "D:docs/private.md"])(
+		"does not guess the location of a drive-relative candidate or pattern: %s",
+		(filePath) => {
+			expect(matches(filePath, ["**"])).toBe(false)
+			expect(matcher().toMatcherPattern(filePath, WINDOWS_CWD)).toBeUndefined()
+		},
+	)
+
+	it("clamps lexical parents at drive and share roots without crossing matcher namespaces", () => {
+		const cwd = "\\\\server\\share\\project"
+		expect(matches("//server/share/docs/private.md", ["../../../docs/**"], cwd)).toBe(true)
+		expect(matches("C:/docs/private.md", ["../../../../C/docs/**"], cwd)).toBe(false)
+		expect(matches("../../../../C/docs/private.md", ["C:/docs/**"], cwd)).toBe(false)
+		expect(matches("C:/docs/private.md", ["../../../docs/**"], "C:/project")).toBe(true)
+		expect(matches("//server/share/docs/private.md", ["../../UNC/server/share/docs/**"], "C:/project")).toBe(false)
+	})
+
+	it.each(["//server/sh[a]re/shared/x.md", "\\\\server\\sh[a]re\\shared\\x.md"])(
+		"keeps UNC share names literal when resolving a lexical-parent grant: %s",
+		(filePath) => {
+			const cwd = "\\\\server\\sh[a]re\\project"
+			const patterns = ["../shared/x.md"]
+			expect(matches(filePath, patterns, cwd)).toBe(true)
+			expect(matches("../shared/x.md", patterns, cwd)).toBe(true)
+			for (const share of ["share", "shaare"]) {
+				expect(matches(`//server/${share}/shared/x.md`, patterns, cwd)).toBe(false)
+			}
+		},
+	)
+
+	it("keeps unknown-volume rooted paths separate from explicit UNC paths", () => {
+		expect(
+			matcher().isFileMatchedByPatterns({
+				filePath: "//server/share/docs/private.md",
+				patterns: ["/UNC/server/share/docs/**"],
+			}),
+		).toBe(false)
+		expect(
+			matcher().isFileMatchedByPatterns({
+				filePath: "/UNC/server/share/docs/private.md",
+				patterns: ["//server/share/docs/**"],
+			}),
+		).toBe(false)
+	})
+
+	it("preserves wildcard exclusions spanning drive and UNC workspace roots", () => {
+		const rootMatch = (filePath: string, patterns: string[]) =>
+			matcher().isFileMatchedByPatterns({
+				filePath,
+				cwd: "C:/Aliases/Project",
+				canonicalCwd: "//server/share/Project",
+				patterns,
+			})
+		for (const filePath of ["docs/private.md", "//server/share/Project/docs/private.md"]) {
+			for (const exclusion of ["!C:/Aliases/**/private.md", "!//server/share/Proj*/docs/private.md"]) {
+				expect(rootMatch(filePath, ["docs/**", exclusion])).toBe(false)
+				expect(rootMatch(filePath, [exclusion, "docs/**"])).toBe(true)
+				expect(rootMatch(filePath, ["docs/**", exclusion, "C:/Aliases/Project/docs/private.md"])).toBe(true)
+			}
+		}
+	})
+
+	it.each(["\\\\server\\share\\project\\docs\\notes.md", "//server/share/project/docs/notes.md"])(
+		"matches an absolute UNC candidate against a relative grant: %s",
+		(filePath) => {
+			expect(matches(filePath, ["docs/**"], "\\\\server\\share\\project")).toBe(true)
+		},
+	)
+
+	it("matches explicit UNC patterns from a local-drive workspace and without a workspace", () => {
+		const filePath = "\\\\server\\share\\project\\docs\\notes.md"
+		const patterns = ["//server/share/project/docs/**"]
+		expect(matches(filePath, patterns)).toBe(true)
+		expect(matcher().isFileMatchedByPatterns({ filePath, patterns, homeDir: WINDOWS_HOME })).toBe(true)
+	})
+
+	it.each([
+		{ cwd: "\\\\alias\\share\\project", canonicalCwd: "\\\\server\\storage\\project" },
+		{ cwd: "C:\\Aliases\\Project", canonicalCwd: "\\\\server\\storage\\project" },
+		{ cwd: "\\\\alias\\share\\project", canonicalCwd: "D:\\Storage\\Project" },
+	])("matches equivalent local and UNC roots ($cwd -> $canonicalCwd)", ({ cwd, canonicalCwd }) => {
+		const filePath = `${canonicalCwd}\\DOCS\\NOTES.md`
+		const rootMatch = (patterns: string[]) =>
+			matcher().isFileMatchedByPatterns({ filePath, cwd, canonicalCwd, patterns, homeDir: WINDOWS_HOME })
+		expect(rootMatch(["docs/**"])).toBe(true)
+		expect(rootMatch([`${cwd}/docs/**`])).toBe(true)
+		expect(rootMatch([`${canonicalCwd}/docs/**`])).toBe(true)
+		expect(rootMatch(["docs/**", `!${cwd}/docs/notes.md`])).toBe(false)
+		expect(rootMatch(["docs/**", `!${canonicalCwd}/docs/notes.md`])).toBe(false)
+		expect(rootMatch(["docs/**", `!${cwd}/docs/notes.md`, `${canonicalCwd}/docs/notes.md`])).toBe(true)
+	})
+
+	it("honors UNC exclusions for both relative and absolute candidates", () => {
+		const cwd = "\\\\server\\share\\project"
+		const patterns = ["docs/**", "!//server/share/project/docs/private.md"]
+		expect(matches("docs/private.md", patterns, cwd)).toBe(false)
+		expect(matches(`${cwd}\\docs\\private.md`, patterns, cwd)).toBe(false)
+		expect(matches(`${cwd}\\docs\\notes.md`, patterns, cwd)).toBe(true)
+		expect(matches("docs/private.md", [...patterns, "//server/share/project/docs/private.md"], cwd)).toBe(true)
+	})
+
+	it("keeps different UNC servers, shares, and similarly prefixed siblings separate", () => {
+		const cwd = "\\\\server\\share\\project"
+		for (const filePath of [
+			"\\\\other-server\\share\\project\\docs\\notes.md",
+			"\\\\server\\other-share\\project\\docs\\notes.md",
+			"\\\\server\\share\\project-other\\docs\\notes.md",
+		]) {
+			expect(matches(filePath, ["docs/**"], cwd)).toBe(false)
+		}
+	})
+
+	it("does not confuse a UNC server named C with the local C drive", () => {
+		expect(matches("C:\\share\\project\\docs\\notes.md", ["docs/**"], "\\\\C\\share\\project")).toBe(false)
+		expect(matches("\\\\C\\share\\project\\docs\\notes.md", ["docs/**"], "C:\\share\\project")).toBe(false)
+		expect(matches("C:\\share\\project\\docs\\notes.md", ["//C/share/project/docs/**"])).toBe(false)
+		expect(matches("\\\\C\\share\\project\\docs\\notes.md", ["C:/share/project/docs/**"])).toBe(false)
+	})
+
 	it("matches a workspace-relative path against a bare pattern", () => {
 		expect(matches("notes.md", ["notes.md"])).toBe(true)
 		expect(matches("docs\\notes.md", ["notes.md"])).toBe(true)
@@ -98,5 +282,35 @@ describe("matching on Windows", () => {
 	it("confines a bare pattern to the workspace", () => {
 		expect(matches("C:/path/to/repo/etc/passwd", ["passwd"])).toBe(true)
 		expect(matches("C:/etc/passwd", ["passwd"])).toBe(false)
+	})
+
+	it("matches equivalent workspace roots across drives with Windows case and ordered exclusions", () => {
+		const rootMatch = (patterns: string[]) =>
+			matcher().isFileMatchedByPatterns({
+				filePath: "d:\\storage\\project\\DOCS\\NOTES.md",
+				cwd: "C:\\Aliases\\Project",
+				canonicalCwd: "D:\\Storage\\Project",
+				patterns,
+			})
+		expect(rootMatch(["docs/**"])).toBe(true)
+		expect(rootMatch(["c:/aliases/PROJECT/docs/**"])).toBe(true)
+		expect(rootMatch(["d:/STORAGE/project/docs/**"])).toBe(true)
+		expect(rootMatch(["docs/**", "!c:/aliases/project/docs/notes.md"])).toBe(false)
+		expect(rootMatch(["docs/**", "!D:/Storage/Project/docs/notes.md"])).toBe(false)
+	})
+
+	it("keeps Windows siblings and lexical-parent outside patterns separate from canonical roots", () => {
+		const rootMatch = (filePath: string, patterns: string[]) =>
+			matcher().isFileMatchedByPatterns({
+				filePath,
+				cwd: "C:\\Aliases\\Project",
+				canonicalCwd: "D:\\Storage\\Project",
+				patterns,
+			})
+		expect(rootMatch("C:/Aliases/shared/file.md", ["../shared/file.md"])).toBe(true)
+		expect(rootMatch("D:/Storage/shared/file.md", ["../shared/file.md"])).toBe(false)
+		expect(rootMatch("D:/Storage/shared/file.md", ["D:/Storage/shared/file.md"])).toBe(true)
+		expect(rootMatch("D:/Storage/Project-other/docs/file.md", ["docs/**"])).toBe(false)
+		expect(rootMatch("D:/Storage/Project-other/docs/file.md", ["C:/Aliases/Project-other/docs/**"])).toBe(false)
 	})
 })

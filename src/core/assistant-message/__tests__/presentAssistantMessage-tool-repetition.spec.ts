@@ -65,10 +65,10 @@ const { readFileHandle, attemptCompletionHandle } = vi.hoisted(() => ({
 	attemptCompletionHandle: vi.fn(async () => {}),
 }))
 
-vi.mock("../../tools/ReadFileTool", () => ({
-	readFileTool: {
-		handle: readFileHandle,
-		getReadFileToolDescription: vi.fn(() => "[read_file]"),
+vi.mock("../../tools/file-reading/ReadFileTool", () => ({
+	ReadFileTool: class {
+		handle = readFileHandle
+		getReadFileToolDescription = vi.fn(() => "[read_file]")
 	},
 }))
 

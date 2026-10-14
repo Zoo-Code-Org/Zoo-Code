@@ -889,11 +889,6 @@
 			"count": 1
 		}
 	},
-	"core/tools/ReadFileTool.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
 	"core/tools/ToolRepetitionDetector.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
@@ -962,11 +957,6 @@
 	"core/tools/__tests__/newTaskTool.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 26
-		}
-	},
-	"core/tools/__tests__/readFileTool.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 96
 		}
 	},
 	"core/tools/__tests__/runSlashCommandTool.spec.ts": {
