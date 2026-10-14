@@ -3,6 +3,8 @@ import * as fs from "fs/promises"
 import { t } from "../../../i18n"
 import prettyBytes from "pretty-bytes"
 
+import type { ReadFileCancellation } from "../file-reading/ReadFileCancellation"
+
 /**
  * Default maximum allowed image file size in bytes (5MB)
  */
@@ -72,8 +74,13 @@ export interface ImageProcessingResult {
 /**
  * Reads an image file and returns both the data URL and buffer
  */
-export async function readImageAsDataUrlWithBuffer(filePath: string): Promise<{ dataUrl: string; buffer: Buffer }> {
-	const fileBuffer = await fs.readFile(filePath)
+export async function readImageAsDataUrlWithBuffer(
+	filePath: string,
+	file?: fs.FileHandle,
+	cancellation?: ReadFileCancellation,
+): Promise<{ dataUrl: string; buffer: Buffer }> {
+	const fileBuffer = file ? await file.readFile() : await fs.readFile(filePath)
+	cancellation?.throwIfCancelled()
 	const base64 = fileBuffer.toString("base64")
 	const ext = path.extname(filePath).toLowerCase()
 
@@ -99,6 +106,7 @@ export async function validateImageForProcessing(
 	maxImageFileSize: number,
 	maxTotalImageSize: number,
 	currentTotalMemoryUsed: number,
+	file?: fs.FileHandle,
 ): Promise<ImageValidationResult> {
 	// Check if model supports images
 	if (!supportsImages) {
@@ -109,7 +117,7 @@ export async function validateImageForProcessing(
 		}
 	}
 
-	const imageStats = await fs.stat(fullPath)
+	const imageStats = file ? await file.stat() : await fs.stat(fullPath)
 	const imageSizeInMB = imageStats.size / (1024 * 1024)
 
 	// Check individual file size limit
@@ -147,9 +155,14 @@ export async function validateImageForProcessing(
 /**
  * Processes an image file and returns the result
  */
-export async function processImageFile(fullPath: string): Promise<ImageProcessingResult> {
-	const imageStats = await fs.stat(fullPath)
-	const { dataUrl, buffer } = await readImageAsDataUrlWithBuffer(fullPath)
+export async function processImageFile(
+	fullPath: string,
+	file?: fs.FileHandle,
+	cancellation?: ReadFileCancellation,
+): Promise<ImageProcessingResult> {
+	const imageStats = file ? await file.stat() : await fs.stat(fullPath)
+	cancellation?.throwIfCancelled()
+	const { dataUrl, buffer } = await readImageAsDataUrlWithBuffer(fullPath, file, cancellation)
 	const imageSizeInKB = Math.round(imageStats.size / 1024)
 	const imageSizeInMB = imageStats.size / (1024 * 1024)
 	const noticeText = t("tools:readFile.imageWithSize", { size: imageSizeInKB })
