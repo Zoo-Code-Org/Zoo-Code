@@ -447,7 +447,7 @@ export function readWithSlice(
 	if (offset < 0) offset = 0
 	if (offset >= totalLines) {
 		return {
-			content: `Error: offset ${offset} is beyond file end (${totalLines} lines)`,
+			content: `Error: offset ${offset + 1} is beyond file end (${totalLines} lines)`,
 			includedRanges: [],
 			totalLines,
 			returnedLines: 0,

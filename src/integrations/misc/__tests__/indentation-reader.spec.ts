@@ -283,7 +283,7 @@ describe("readWithSlice", () => {
 		const result = readWithSlice(SIMPLE_CODE, 1000, 10)
 
 		expect(result.returnedLines).toBe(0)
-		expect(result.content).toContain("Error")
+		expect(result.content).toContain("Error: offset 1001 is beyond file end")
 	})
 
 	it("should handle negative offset", () => {
