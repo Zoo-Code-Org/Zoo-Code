@@ -834,7 +834,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(fresh.viewId).toBe(tempId)
 
 			const originalUpdate = mockContext.globalState.update
-			mockContext.globalState.update = vi.fn().mockImplementation((key: string, value: unknown) => {
+			mockContext.globalState.update = vi.fn().mockImplementation((key: string, _value: unknown) => {
 				if (key === "viewStates") {
 					return Promise.reject(new Error("storage unavailable"))
 				}
