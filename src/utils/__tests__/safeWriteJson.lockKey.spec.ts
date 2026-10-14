@@ -372,14 +372,22 @@ it("does not log a cleanup error when the safety net finds the temp file already
 	mockedRealpath.mockImplementation(async (t) => String(t))
 	mockedLstat.mockImplementation(async (t) => symlinkStat(t))
 
-	const renameSpy = vi.spyOn(fs, "rename").mockRejectedValue(new Error("commit rename failed"))
+	const commitFailure = new Error("commit rename failed")
+	const renameSpy = vi.spyOn(fs, "rename").mockRejectedValue(commitFailure)
 	const unlinkSpy = vi.spyOn(fs, "unlink").mockRejectedValue(enoent)
 	const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
 
 	await expect(safeWriteJson(target, { id: "task-1" })).rejects.toThrow("commit rename failed")
 
-	// Only the original failure is reported.
-	expect(consoleError).toHaveBeenCalledTimes(1)
+	// Only the original failure is reported - and reported AS the original failure:
+	// a regression that logs the ENOENT cleanup error instead of the commit failure
+	// (or drops the commit failure and logs only the cleanup) must not pass on the
+	// call count alone.
+	const reported = consoleError.mock.calls.map((call) => String(call[0]))
+	expect(reported).toHaveLength(1)
+	expect(reported[0]).toContain("[Original Error Caught]")
+	expect(consoleError.mock.calls[0][1]).toBe(commitFailure)
+	expect(reported.some((message) => message.includes("Failed to clean up temporary new file"))).toBe(false)
 
 	renameSpy.mockRestore()
 	unlinkSpy.mockRestore()

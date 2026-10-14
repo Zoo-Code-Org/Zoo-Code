@@ -2750,19 +2750,19 @@ describe("DiffViewProvider", () => {
 	describe("saveChanges method with diagnostic settings", () => {
 		beforeEach(() => {
 			// Setup common mocks for saveChanges tests
-			;(diffViewProvider as any).relPath = "test.ts"
-			;(diffViewProvider as any).newContent = "new content"
-			;(diffViewProvider as any).activeDiffEditor = {
+			diffViewProvider["relPath"] = "test.ts"
+			diffViewProvider["newContent"] = "new content"
+			diffViewProvider["activeDiffEditor"] = {
 				document: {
 					getText: vi.fn().mockReturnValue("new content"),
 					isDirty: false,
 					save: vi.fn().mockResolvedValue(undefined),
 				},
-			}
-			;(diffViewProvider as any).preDiagnostics = []
+			} as unknown as vscode.TextEditor // Structural double: only the members saveChanges reads (documented cast, AGENTS.md).
+			diffViewProvider["preDiagnostics"] = []
 
 			// Mock vscode functions
-			vi.mocked(vscode.window.showTextDocument).mockResolvedValue({} as any)
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue({} as unknown as vscode.TextEditor) // Structural double: identity only (AGENTS.md).
 			vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
 		})
 
@@ -2771,7 +2771,7 @@ describe("DiffViewProvider", () => {
 			mockDelay.mockClear()
 
 			// Mock closeAllDiffViews
-			;(diffViewProvider as any).closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
 
 			const result = await diffViewProvider.saveChanges(true, 3000)
 
@@ -2786,7 +2786,7 @@ describe("DiffViewProvider", () => {
 			mockDelay.mockClear()
 
 			// Mock closeAllDiffViews
-			;(diffViewProvider as any).closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
 
 			const result = await diffViewProvider.saveChanges(false, 2000)
 
@@ -2801,7 +2801,7 @@ describe("DiffViewProvider", () => {
 			mockDelay.mockClear()
 
 			// Mock closeAllDiffViews
-			;(diffViewProvider as any).closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
 
 			const result = await diffViewProvider.saveChanges()
 
@@ -2822,7 +2822,7 @@ describe("DiffViewProvider", () => {
 			mockDelay.mockClear()
 
 			// Mock closeAllDiffViews
-			;(diffViewProvider as any).closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
 
 			await diffViewProvider.saveChanges(true, 5000)
 
@@ -2846,18 +2846,24 @@ describe("DiffViewProvider", () => {
 				visibleRanges: [{ start: { line: 42 } }],
 			}
 
-			vi.mocked(vscode.window).visibleTextEditors = [mockEditor as any]
-			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor as any)
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor as unknown as vscode.TextEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor as unknown as vscode.TextEditor)
 			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
-				setTimeout(() => callback({ uri: { fsPath: `${mockCwd}/scroll.ts`, scheme: "file" } } as any), 0)
+				setTimeout(
+					() =>
+						callback({
+							uri: { fsPath: `${mockCwd}/scroll.ts`, scheme: "file" },
+						} as unknown as vscode.TextDocument),
+					0,
+				)
 				return { dispose: vi.fn() }
 			})
 			vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
-			;(diffViewProvider as any).editType = "modify"
+			diffViewProvider["editType"] = "modify"
 
 			await diffViewProvider.open("scroll.ts")
 
-			expect((diffViewProvider as any).preEditScrollLine).toBe(42)
+			expect(diffViewProvider["preEditScrollLine"]).toBe(42)
 		})
 
 		it("should set preEditScrollLine to undefined when the visible editor has no visibleRanges", async () => {
@@ -2873,37 +2879,45 @@ describe("DiffViewProvider", () => {
 				// No visibleRanges, so the capture in open() yields undefined.
 			}
 
-			vi.mocked(vscode.window).visibleTextEditors = [mockEditorNoRanges as any]
-			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditorNoRanges as any)
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditorNoRanges as unknown as vscode.TextEditor]
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(
+				mockEditorNoRanges as unknown as vscode.TextEditor,
+			)
 			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
-				setTimeout(() => callback({ uri: { fsPath: `${mockCwd}/new.ts`, scheme: "file" } } as any), 0)
+				setTimeout(
+					() =>
+						callback({
+							uri: { fsPath: `${mockCwd}/new.ts`, scheme: "file" },
+						} as unknown as vscode.TextDocument),
+					0,
+				)
 				return { dispose: vi.fn() }
 			})
 			vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
-			;(diffViewProvider as any).editType = "modify"
+			diffViewProvider["editType"] = "modify"
 
 			await diffViewProvider.open("new.ts")
 
-			expect((diffViewProvider as any).preEditScrollLine).toBeUndefined()
+			expect(diffViewProvider["preEditScrollLine"]).toBeUndefined()
 		})
 
 		it("saveChanges() calls revealRange(AtTop) when documentWasOpen and preEditScrollLine is set", async () => {
 			const mockRevealRange = vi.fn()
 			const mockSavedEditor = { revealRange: mockRevealRange }
 
-			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockSavedEditor as any)
-			;(diffViewProvider as any).closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
-			;(diffViewProvider as any).documentWasOpen = true
-			;(diffViewProvider as any).preEditScrollLine = 30
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockSavedEditor as unknown as vscode.TextEditor)
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["documentWasOpen"] = true
+			diffViewProvider["preEditScrollLine"] = 30
 			// saveChanges early-exits without relPath, newContent, activeDiffEditor
-			;(diffViewProvider as any).newContent = "content"
-			;(diffViewProvider as any).activeDiffEditor = {
+			diffViewProvider["newContent"] = "content"
+			diffViewProvider["activeDiffEditor"] = {
 				document: {
 					getText: vi.fn().mockReturnValue("content"),
 					isDirty: false,
 					save: vi.fn().mockResolvedValue(undefined),
 				},
-			}
+			} as unknown as vscode.TextEditor // Structural double: only the members saveChanges reads (documented cast, AGENTS.md).
 
 			await diffViewProvider.saveChanges(false)
 
