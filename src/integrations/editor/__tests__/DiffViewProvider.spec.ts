@@ -2536,7 +2536,6 @@ describe("DiffViewProvider", () => {
 			// write itself fails, this edit created nothing, so a later discard must not unlink a
 			// file it never made - claiming ownership before the write would.
 			const relPath = "unwritten-placeholder.ts"
-			const fsPath = `${mockCwd}/${relPath}`
 			const callOrder: string[] = []
 			vi.mocked(fs.writeFile).mockRejectedValueOnce(new Error("EDQUOT: quota exceeded"))
 			diffViewProvider.editType = "create"
