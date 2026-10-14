@@ -22,7 +22,6 @@ const mockedExistsSync = existsSync as unknown as ReturnType<typeof vi.fn>
 describe("Terminal VS Code terminal profile (#277)", () => {
 	// VS Code's getConfiguration/createTerminal are overloaded, so the precise
 	// spy MockInstance type isn't worth fighting in a test — `any` keeps it simple.
-	let getConfigurationSpy: any
 	let createTerminalSpy: any
 
 	const mockTerminal = () =>
@@ -44,7 +43,7 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 		profilesByPlatform: Record<string, unknown>,
 		workspaceProfilesByPlatform: Record<string, unknown> = {},
 	) => {
-		getConfigurationSpy = vi.spyOn(vscode.workspace, "getConfiguration").mockImplementation((section?: string) => {
+		vi.spyOn(vscode.workspace, "getConfiguration").mockImplementation((section?: string) => {
 			if (section === "terminal.integrated.profiles") {
 				return {
 					inspect: (platformKey: string) => ({
@@ -99,21 +98,19 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 
 	describe("getConfiguredProfiles / getAvailableProfileNames", () => {
 		it("merges default and global profiles while ignoring workspace profiles", () => {
-			getConfigurationSpy = vi
-				.spyOn(vscode.workspace, "getConfiguration")
-				.mockImplementation((section?: string) => {
-					if (section === "terminal.integrated.profiles") {
-						return {
-							inspect: () => ({
-								defaultValue: { bash: { path: "/bin/bash" } },
-								globalValue: { zsh: { path: "/bin/zsh" } },
-								workspaceValue: { malicious: { path: "/workspace/malicious-shell" } },
-							}),
-						} as any
-					}
+			vi.spyOn(vscode.workspace, "getConfiguration").mockImplementation((section?: string) => {
+				if (section === "terminal.integrated.profiles") {
+					return {
+						inspect: () => ({
+							defaultValue: { bash: { path: "/bin/bash" } },
+							globalValue: { zsh: { path: "/bin/zsh" } },
+							workspaceValue: { malicious: { path: "/workspace/malicious-shell" } },
+						}),
+					} as any
+				}
 
-					return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
-				})
+				return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
+			})
 
 			expect(Terminal.getConfiguredProfiles("linux")).toEqual({
 				bash: { path: "/bin/bash" },
@@ -195,49 +192,45 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 			it("returns true when no override and default profile is cmd.exe", () => {
 				Terminal.setTerminalProfile(undefined)
 				stubProfiles({ windows: { "Command Prompt": { path: "C:\\Windows\\System32\\cmd.exe" } } })
-				getConfigurationSpy = vi
-					.spyOn(vscode.workspace, "getConfiguration")
-					.mockImplementation((section?: string) => {
-						if (section === "terminal.integrated.profiles") {
-							return {
-								inspect: (_key: string) => ({
-									defaultValue: { "Command Prompt": { path: "C:\\Windows\\System32\\cmd.exe" } },
-									globalValue: undefined,
-								}),
-							} as any
-						}
-						if (section === "terminal.integrated") {
-							return {
-								inspect: (key: string) =>
-									key === "defaultProfile.windows" ? { defaultValue: "Command Prompt" } : undefined,
-							} as any
-						}
-						return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
-					})
+				vi.spyOn(vscode.workspace, "getConfiguration").mockImplementation((section?: string) => {
+					if (section === "terminal.integrated.profiles") {
+						return {
+							inspect: (_key: string) => ({
+								defaultValue: { "Command Prompt": { path: "C:\\Windows\\System32\\cmd.exe" } },
+								globalValue: undefined,
+							}),
+						} as any
+					}
+					if (section === "terminal.integrated") {
+						return {
+							inspect: (key: string) =>
+								key === "defaultProfile.windows" ? { defaultValue: "Command Prompt" } : undefined,
+						} as any
+					}
+					return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
+				})
 				expect(Terminal.isActiveShellCmdExe("win32")).toBe(true)
 			})
 
 			it("returns false when no override and default profile is PowerShell", () => {
 				Terminal.setTerminalProfile(undefined)
-				getConfigurationSpy = vi
-					.spyOn(vscode.workspace, "getConfiguration")
-					.mockImplementation((section?: string) => {
-						if (section === "terminal.integrated.profiles") {
-							return {
-								inspect: (_key: string) => ({
-									defaultValue: { PowerShell: { path: "C:\\Program Files\\PowerShell\\pwsh.exe" } },
-									globalValue: undefined,
-								}),
-							} as any
-						}
-						if (section === "terminal.integrated") {
-							return {
-								inspect: (key: string) =>
-									key === "defaultProfile.windows" ? { defaultValue: "PowerShell" } : undefined,
-							} as any
-						}
-						return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
-					})
+				vi.spyOn(vscode.workspace, "getConfiguration").mockImplementation((section?: string) => {
+					if (section === "terminal.integrated.profiles") {
+						return {
+							inspect: (_key: string) => ({
+								defaultValue: { PowerShell: { path: "C:\\Program Files\\PowerShell\\pwsh.exe" } },
+								globalValue: undefined,
+							}),
+						} as any
+					}
+					if (section === "terminal.integrated") {
+						return {
+							inspect: (key: string) =>
+								key === "defaultProfile.windows" ? { defaultValue: "PowerShell" } : undefined,
+						} as any
+					}
+					return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
+				})
 				expect(Terminal.isActiveShellCmdExe("win32")).toBe(false)
 			})
 
@@ -249,46 +242,42 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 
 			it("ignores a workspace default-profile override", () => {
 				Terminal.setTerminalProfile(undefined)
-				getConfigurationSpy = vi
-					.spyOn(vscode.workspace, "getConfiguration")
-					.mockImplementation((section?: string) => {
-						if (section === "terminal.integrated.profiles") {
-							return {
-								inspect: () => ({
-									defaultValue: {
-										PowerShell: { path: "C:\\Program Files\\PowerShell\\pwsh.exe" },
-										"Command Prompt": { path: "C:\\Windows\\System32\\cmd.exe" },
-									},
-								}),
-							} as any
-						}
-						if (section === "terminal.integrated") {
-							return {
-								inspect: () => ({
-									defaultValue: "PowerShell",
-									workspaceValue: "Command Prompt",
-								}),
-							} as any
-						}
-						return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
-					})
+				vi.spyOn(vscode.workspace, "getConfiguration").mockImplementation((section?: string) => {
+					if (section === "terminal.integrated.profiles") {
+						return {
+							inspect: () => ({
+								defaultValue: {
+									PowerShell: { path: "C:\\Program Files\\PowerShell\\pwsh.exe" },
+									"Command Prompt": { path: "C:\\Windows\\System32\\cmd.exe" },
+								},
+							}),
+						} as any
+					}
+					if (section === "terminal.integrated") {
+						return {
+							inspect: () => ({
+								defaultValue: "PowerShell",
+								workspaceValue: "Command Prompt",
+							}),
+						} as any
+					}
+					return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
+				})
 
 				expect(Terminal.isActiveShellCmdExe("win32")).toBe(false)
 			})
 
 			it("returns false when the configured default profile entry is missing", () => {
 				Terminal.setTerminalProfile(undefined)
-				getConfigurationSpy = vi
-					.spyOn(vscode.workspace, "getConfiguration")
-					.mockImplementation((section?: string) => {
-						if (section === "terminal.integrated.profiles") {
-							return { inspect: () => ({ defaultValue: {} }) } as any
-						}
-						if (section === "terminal.integrated") {
-							return { inspect: () => ({ defaultValue: "Deleted Profile" }) } as any
-						}
-						return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
-					})
+				vi.spyOn(vscode.workspace, "getConfiguration").mockImplementation((section?: string) => {
+					if (section === "terminal.integrated.profiles") {
+						return { inspect: () => ({ defaultValue: {} }) } as any
+					}
+					if (section === "terminal.integrated") {
+						return { inspect: () => ({ defaultValue: "Deleted Profile" }) } as any
+					}
+					return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
+				})
 
 				expect(Terminal.isActiveShellCmdExe("win32")).toBe(false)
 			})
@@ -318,52 +307,48 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 
 			it("returns true when no override and the default profile resolves to powershell.exe", () => {
 				Terminal.setTerminalProfile(undefined)
-				getConfigurationSpy = vi
-					.spyOn(vscode.workspace, "getConfiguration")
-					.mockImplementation((section?: string) => {
-						if (section === "terminal.integrated.profiles") {
-							return {
-								inspect: (_key: string) => ({
-									defaultValue: {
-										"Custom PS": {
-											path: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-										},
+				vi.spyOn(vscode.workspace, "getConfiguration").mockImplementation((section?: string) => {
+					if (section === "terminal.integrated.profiles") {
+						return {
+							inspect: (_key: string) => ({
+								defaultValue: {
+									"Custom PS": {
+										path: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
 									},
-								}),
-							} as any
-						}
-						if (section === "terminal.integrated") {
-							return {
-								inspect: (key: string) =>
-									key === "defaultProfile.windows" ? { defaultValue: "Custom PS" } : undefined,
-							} as any
-						}
-						return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
-					})
+								},
+							}),
+						} as any
+					}
+					if (section === "terminal.integrated") {
+						return {
+							inspect: (key: string) =>
+								key === "defaultProfile.windows" ? { defaultValue: "Custom PS" } : undefined,
+						} as any
+					}
+					return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
+				})
 
 				expect(Terminal.isActiveShellPowerShell("win32")).toBe(true)
 			})
 
 			it("recognizes source-only PowerShell default profiles", () => {
 				Terminal.setTerminalProfile(undefined)
-				getConfigurationSpy = vi
-					.spyOn(vscode.workspace, "getConfiguration")
-					.mockImplementation((section?: string) => {
-						if (section === "terminal.integrated.profiles") {
-							return {
-								inspect: (_key: string) => ({
-									defaultValue: { PowerShell: { source: "PowerShell" } },
-								}),
-							} as any
-						}
-						if (section === "terminal.integrated") {
-							return {
-								inspect: (key: string) =>
-									key === "defaultProfile.windows" ? { defaultValue: "PowerShell" } : undefined,
-							} as any
-						}
-						return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
-					})
+				vi.spyOn(vscode.workspace, "getConfiguration").mockImplementation((section?: string) => {
+					if (section === "terminal.integrated.profiles") {
+						return {
+							inspect: (_key: string) => ({
+								defaultValue: { PowerShell: { source: "PowerShell" } },
+							}),
+						} as any
+					}
+					if (section === "terminal.integrated") {
+						return {
+							inspect: (key: string) =>
+								key === "defaultProfile.windows" ? { defaultValue: "PowerShell" } : undefined,
+						} as any
+					}
+					return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
+				})
 
 				expect(Terminal.isActiveShellPowerShell("win32")).toBe(true)
 			})
@@ -384,7 +369,7 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 
 			it("returns false when no override and no default profile name is configured", () => {
 				Terminal.setTerminalProfile(undefined)
-				getConfigurationSpy = vi.spyOn(vscode.workspace, "getConfiguration").mockReturnValue({
+				vi.spyOn(vscode.workspace, "getConfiguration").mockReturnValue({
 					get: (_key: string, defaultValue?: unknown) => defaultValue,
 					inspect: () => undefined,
 				} as any)
@@ -393,45 +378,41 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 
 			it("returns false when the default profile entry is null", () => {
 				Terminal.setTerminalProfile(undefined)
-				getConfigurationSpy = vi
-					.spyOn(vscode.workspace, "getConfiguration")
-					.mockImplementation((section?: string) => {
-						if (section === "terminal.integrated.profiles") {
-							return {
-								inspect: (_key: string) => ({ defaultValue: { "Fish Shell": null } }),
-							} as any
-						}
-						if (section === "terminal.integrated") {
-							return {
-								inspect: (key: string) =>
-									key === "defaultProfile.linux" ? { defaultValue: "Fish Shell" } : undefined,
-							} as any
-						}
-						return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
-					})
+				vi.spyOn(vscode.workspace, "getConfiguration").mockImplementation((section?: string) => {
+					if (section === "terminal.integrated.profiles") {
+						return {
+							inspect: (_key: string) => ({ defaultValue: { "Fish Shell": null } }),
+						} as any
+					}
+					if (section === "terminal.integrated") {
+						return {
+							inspect: (key: string) =>
+								key === "defaultProfile.linux" ? { defaultValue: "Fish Shell" } : undefined,
+						} as any
+					}
+					return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
+				})
 				expect(Terminal.isActiveShellFish("linux")).toBe(false)
 			})
 
 			it("returns true when the default profile resolves to fish", () => {
 				Terminal.setTerminalProfile(undefined)
-				getConfigurationSpy = vi
-					.spyOn(vscode.workspace, "getConfiguration")
-					.mockImplementation((section?: string) => {
-						if (section === "terminal.integrated.profiles") {
-							return {
-								inspect: (_key: string) => ({
-									defaultValue: { "Fish Shell": { path: "/usr/local/bin/fish" } },
-								}),
-							} as any
-						}
-						if (section === "terminal.integrated") {
-							return {
-								inspect: (key: string) =>
-									key === "defaultProfile.linux" ? { defaultValue: "Fish Shell" } : undefined,
-							} as any
-						}
-						return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
-					})
+				vi.spyOn(vscode.workspace, "getConfiguration").mockImplementation((section?: string) => {
+					if (section === "terminal.integrated.profiles") {
+						return {
+							inspect: (_key: string) => ({
+								defaultValue: { "Fish Shell": { path: "/usr/local/bin/fish" } },
+							}),
+						} as any
+					}
+					if (section === "terminal.integrated") {
+						return {
+							inspect: (key: string) =>
+								key === "defaultProfile.linux" ? { defaultValue: "Fish Shell" } : undefined,
+						} as any
+					}
+					return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
+				})
 				expect(Terminal.isActiveShellFish("linux")).toBe(true)
 			})
 		})
@@ -589,24 +570,22 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 		})
 
 		it("resolves profiles defined only in user/global settings", () => {
-			getConfigurationSpy = vi
-				.spyOn(vscode.workspace, "getConfiguration")
-				.mockImplementation((section?: string) => {
-					if (section === "terminal.integrated.profiles") {
-						return {
-							inspect: () => ({
-								defaultValue: undefined,
-								globalValue: { "User Bash": { path: "/usr/bin/bash" } },
-								workspaceValue: { "User Bash": { path: "/workspace/bash" } },
-							}),
-						} as any
-					}
-
+			vi.spyOn(vscode.workspace, "getConfiguration").mockImplementation((section?: string) => {
+				if (section === "terminal.integrated.profiles") {
 					return {
-						get: (_key: string, defaultValue?: unknown) => defaultValue,
-						inspect: () => undefined,
+						inspect: () => ({
+							defaultValue: undefined,
+							globalValue: { "User Bash": { path: "/usr/bin/bash" } },
+							workspaceValue: { "User Bash": { path: "/workspace/bash" } },
+						}),
 					} as any
-				})
+				}
+
+				return {
+					get: (_key: string, defaultValue?: unknown) => defaultValue,
+					inspect: () => undefined,
+				} as any
+			})
 
 			Terminal.setTerminalProfile("User Bash")
 

@@ -1,4 +1,3 @@
-import * as vscode from "vscode"
 import { TerminalProcess } from "../TerminalProcess"
 import { Terminal } from "../Terminal"
 

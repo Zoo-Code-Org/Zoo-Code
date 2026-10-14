@@ -390,7 +390,7 @@ export async function executeCommandInTerminal(
 
 	try {
 		await fs.access(workingDir)
-	} catch (error) {
+	} catch {
 		return [false, `Working directory '${workingDir}' does not exist.`]
 	}
 
