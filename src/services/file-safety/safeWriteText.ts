@@ -695,67 +695,83 @@ export async function safeWriteText(
 			if (options?.backup || daclDumpPath !== null) {
 				try {
 					await fs.access(targetPath)
-					backupPath = _tempName(dirPath, "safeWriteText.bak")
-					// Copy, never move. Renaming the target away leaves the canonical path absent for
-					// the whole commit window: readers see a missing file, and a concurrent
-					// writer can create a new target that a later rollback would destroy. A copy
-					// keeps the target present, so the step 4 rename is the only change to the
-					// canonical path. The copy is flushed so the retained content survives a crash.
-					let seedFd: number | undefined
-					let backupFd: number | undefined
-					try {
-						// Create the destination BEFORE any content exists at it, with the mode fixed
-						// at open time. fs.copyFile picks the destination mode itself (the platform
-						// creation mask subject to umask on some platforms, the source's mode - or its
-						// read-only attribute - on others), so letting it create the file would either
-						// leave a restrictive target's bytes briefly readable to others, or leave the
-						// copy unwritable so the fsync open below fails with EACCES. open() ignores its
-						// mode argument for an existing file, so this 0o600 survives the copy on POSIX;
-						// the chmod afterwards is what clears a copied read-only attribute on Windows
-						// and keeps a backup of a permissive file private.
-						seedFd = fsSync.openSync(backupPath, "wx", 0o600)
-						// Owned no longer the moment the close is attempted: a retried close could
-						// release a descriptor somebody else has been handed in the meantime.
-						const seedHandle = seedFd
-						seedFd = undefined
+					// A backup of a publish-over-link target copies the SYMLINK REFERENT's bytes,
+					// not the link: a rollback rename would then replace the link with a regular
+					// file holding the outside content, and a copy left behind would sit beside
+					// the link where no caller looks for it. When the publish target is the link
+					// path itself and is a symbolic link, take no content backup - and then
+					// nothing can be renamed back over the link either.
+					const backupTargetIsLink =
+						options?.publishOverLink === true && (await fs.lstat(targetPath)).isSymbolicLink()
+					if (!backupTargetIsLink) {
+						backupPath = _tempName(dirPath, "safeWriteText.bak")
+						// Copy, never move. Renaming the target away leaves the canonical path absent for
+						// the whole commit window: readers see a missing file, and a concurrent
+						// writer can create a new target that a later rollback would destroy. A copy
+						// keeps the target present, so the step 4 rename is the only change to the
+						// canonical path. The copy is flushed so the retained content survives a crash.
+						let seedFd: number | undefined
+						let backupFd: number | undefined
 						try {
-							fsSync.closeSync(seedHandle)
-						} catch (closeError: unknown) {
-							console.error(`Failed to close the backup seed descriptor for ${backupPath}:`, closeError)
+							// Create the destination BEFORE any content exists at it, with the mode fixed
+							// at open time. fs.copyFile picks the destination mode itself (the platform
+							// creation mask subject to umask on some platforms, the source's mode - or its
+							// read-only attribute - on others), so letting it create the file would either
+							// leave a restrictive target's bytes briefly readable to others, or leave the
+							// copy unwritable so the fsync open below fails with EACCES. open() ignores its
+							// mode argument for an existing file, so this 0o600 survives the copy on POSIX;
+							// the chmod afterwards is what clears a copied read-only attribute on Windows
+							// and keeps a backup of a permissive file private.
+							seedFd = fsSync.openSync(backupPath, "wx", 0o600)
+							// Owned no longer the moment the close is attempted: a retried close could
+							// release a descriptor somebody else has been handed in the meantime.
+							const seedHandle = seedFd
+							seedFd = undefined
+							try {
+								fsSync.closeSync(seedHandle)
+							} catch (closeError: unknown) {
+								console.error(
+									`Failed to close the backup seed descriptor for ${backupPath}:`,
+									closeError,
+								)
+							}
+							await fs.copyFile(targetPath, backupPath)
+							await fs.chmod(backupPath, 0o600)
+							// "r+" not "r": fsync on a read-only handle is EPERM on Windows, and the same
+							// flag the staged temp file uses above.
+							backupFd = fsSync.openSync(backupPath, "r+")
+							_fsyncFile(backupFd)
+							// Same rule for the backup's fsync descriptor.
+							const backupHandle = backupFd
+							backupFd = undefined
+							try {
+								fsSync.closeSync(backupHandle)
+							} catch (closeError: unknown) {
+								console.error(
+									`Failed to close the backup fsync descriptor for ${backupPath}:`,
+									closeError,
+								)
+							}
+						} catch (backupError: unknown) {
+							if (seedFd !== undefined) {
+								// The seed descriptor is still owned here: its close failed, or an error landed
+								// between the open and that close. Retry the release before reporting, and let a
+								// second close failure be logged rather than replace the backup failure this
+								// handler is about to rethrow.
+								_closeDescriptor(seedFd, `backup seed descriptor for ${backupPath}`)
+							}
+							if (backupFd !== undefined) {
+								// Same rule for the fsync descriptor of the backup copy.
+								_closeDescriptor(backupFd, `backup fsync descriptor for ${backupPath}`)
+							}
+							// A partial backup must not outlive this attempt: it is not a complete copy
+							// of anything, and once the write fails nothing else removes it.
+							await fs.unlink(backupPath).catch(() => {})
+							backupPath = null
+							throw backupError
 						}
-						await fs.copyFile(targetPath, backupPath)
-						await fs.chmod(backupPath, 0o600)
-						// "r+" not "r": fsync on a read-only handle is EPERM on Windows, and the same
-						// flag the staged temp file uses above.
-						backupFd = fsSync.openSync(backupPath, "r+")
-						_fsyncFile(backupFd)
-						// Same rule for the backup's fsync descriptor.
-						const backupHandle = backupFd
-						backupFd = undefined
-						try {
-							fsSync.closeSync(backupHandle)
-						} catch (closeError: unknown) {
-							console.error(`Failed to close the backup fsync descriptor for ${backupPath}:`, closeError)
-						}
-					} catch (backupError: unknown) {
-						if (seedFd !== undefined) {
-							// The seed descriptor is still owned here: its close failed, or an error landed
-							// between the open and that close. Retry the release before reporting, and let a
-							// second close failure be logged rather than replace the backup failure this
-							// handler is about to rethrow.
-							_closeDescriptor(seedFd, `backup seed descriptor for ${backupPath}`)
-						}
-						if (backupFd !== undefined) {
-							// Same rule for the fsync descriptor of the backup copy.
-							_closeDescriptor(backupFd, `backup fsync descriptor for ${backupPath}`)
-						}
-						// A partial backup must not outlive this attempt: it is not a complete copy
-						// of anything, and once the write fails nothing else removes it.
-						await fs.unlink(backupPath).catch(() => {})
-						backupPath = null
-						throw backupError
+						releaseBackupOnSuccess = true
 					}
-					releaseBackupOnSuccess = true
 				} catch (err: unknown) {
 					if (errorCode(err) !== "ENOENT") throw err
 				}

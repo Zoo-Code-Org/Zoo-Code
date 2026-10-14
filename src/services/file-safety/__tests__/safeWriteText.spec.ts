@@ -606,16 +606,12 @@ describe("safeWriteText", () => {
 				.mocked(fsSync.closeSync)
 				.mock.calls.filter((call) => Number(call[0]) === seedFd).length
 			expect(seedAttempts).toBe(1)
-			expect(consoleError).toHaveBeenCalledWith(
-				expect.stringContaining("backup seed descriptor for"),
-				expect.anything(),
+			const seedReports = consoleError.mock.calls.filter((call) =>
+				String(call[0]).includes("backup seed descriptor for"),
 			)
-			expect(consoleError).toHaveBeenCalledWith(
-				expect.stringContaining("backup seed descriptor"),
-				expect.anything(),
-			)
+			expect(seedReports).toHaveLength(1)
 			// Every descriptor this write opened was handed to closeSync: no handle outlives the
-			// failed backup.
+			// write.
 			for (const fd of openedFds) {
 				expect(vi.mocked(fsSync.closeSync).mock.calls.some((call) => Number(call[0]) === fd)).toBe(true)
 			}
@@ -649,6 +645,54 @@ describe("safeWriteText", () => {
 
 			// no unlink (no backup to delete; DACL skipped via platform:linux)
 			expect(fs.unlink).not.toHaveBeenCalled()
+		})
+
+		it("publishOverLink over a symbolic link takes no content backup of the referent", async () => {
+			// An unscoped publish keeps the link path as the target. copyFile would
+			// follow the link and back up the referent's bytes, and a rollback rename
+			// would then replace the LINK with a regular file of outside content. The
+			// link itself is what the commit replaces, so no content backup is taken.
+			const targetPath = "/tmp/test-dir/link.json"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fsSync.closeSync).mockReturnValue(undefined)
+
+			await expect(
+				safeWriteText(targetPath, "new data", { backup: true, publishOverLink: true, platform: "linux" }),
+			).resolves.toBeUndefined()
+
+			// No backup was seeded, copied, or fsynced beside the link...
+			expect(fs.copyFile).not.toHaveBeenCalled()
+			// ...and none is left behind or renamed back over the link.
+			expect(vi.mocked(fs.unlink).mock.calls.some((call) => String(call[0]).includes("safeWriteText.bak_"))).toBe(
+				false,
+			)
+			expect(vi.mocked(fs.rename).mock.calls.some((call) => String(call[0]).includes("safeWriteText.bak_"))).toBe(
+				false,
+			)
+			// The commit itself still happened: temp -> link path.
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), path.resolve(targetPath))
+		})
+
+		it("publishOverLink over a regular file still takes the content backup", async () => {
+			// The guard is for links only: a regular publish-over-link target keeps
+			// the durable backup and its cleanup on success.
+			const targetPath = "/tmp/test-dir/regular.json"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fs.lstat).mockResolvedValue(_fileStats(false))
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			vi.mocked(fsSync.closeSync).mockReturnValue(undefined)
+
+			await expect(
+				safeWriteText(targetPath, "new data", { backup: true, publishOverLink: true, platform: "linux" }),
+			).resolves.toBeUndefined()
+
+			expect(fs.copyFile).toHaveBeenCalledWith(
+				path.resolve(targetPath),
+				expect.stringContaining("safeWriteText.bak_"),
+			)
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"))
 		})
 	})
 
