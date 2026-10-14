@@ -2591,16 +2591,15 @@ describe("NativeOllamaHandler", () => {
 			expect(receivedSignal?.aborted).toBe(true)
 			await withDeadline(expect(post).rejects.toMatchObject({ name: "AbortError" }), 500)
 
-			// Let the mocked chat settle so no promise dangles, then observe the
-			// prompt's outcome: aborted mid-discovery it rejects with the contract
-			// AbortError; past discovery it resolves with the late response.
+			// Let the mocked chat settle so no promise dangles. controller.abort()
+			// is synchronous and rejectOnAbort is still awaiting discovery, so the
+			// outcome is ALWAYS the contract AbortError - asserting it
+			// unconditionally pins the rejection and would catch a regression
+			// where completePrompt resolves after the caller aborted.
 			resolveChat?.({ message: { content: "late" } })
 			const outcome = await promptOutcome
-			if (outcome.aborted) {
-				expect(outcome.error).toMatchObject({ name: "AbortError" })
-			} else {
-				expect(outcome.content).toBe("late")
-			}
+			expect(outcome).toMatchObject({ aborted: true, error: { name: "AbortError" } })
+			expect(mockChat).not.toHaveBeenCalled()
 		})
 
 		it("should abort the injected transport when the SDK fetch call carries no init signal", async () => {
