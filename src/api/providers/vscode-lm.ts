@@ -1445,7 +1445,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		return this.getModel().info.contextWindow
 	}
 
-	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
 		try {
 			const client = await this.getClient()
 			const response = await client.sendRequest(

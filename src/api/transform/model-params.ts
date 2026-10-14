@@ -3,11 +3,9 @@ import {
 	type ProviderSettings,
 	type VerbosityLevel,
 	type ReasoningEffortExtended,
-	ANTHROPIC_DEFAULT_MAX_TOKENS,
 } from "@roo-code/types"
 
 import {
-	DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS,
 	DEFAULT_HYBRID_REASONING_MODEL_THINKING_TOKENS,
 	GEMINI_25_PRO_MIN_THINKING_TOKENS,
 	shouldUseReasoningBudget,
@@ -80,7 +78,6 @@ export function getModelParams({
 	defaultTemperature,
 }: GetModelParamsOptions<Format>): ModelParams {
 	const {
-		modelMaxTokens: customMaxTokens,
 		modelMaxThinkingTokens: customMaxThinkingTokens,
 		modelTemperature: customTemperature,
 		reasoningEffort: customReasoningEffort,

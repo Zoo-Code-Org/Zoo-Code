@@ -92,7 +92,6 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		const { info: modelInfo, reasoning } = this.getModel()
 		const modelUrl = this.options.openAiBaseUrl ?? ""
 		const modelId = this.options.openAiModelId ?? ""
-		const enabledR1Format = this.options.openAiR1FormatEnabled ?? false
 		// Stryker disable next-line LogicalOperator: equivalent. An unset option makes `&&`
 		// yield undefined, which the parameter default in convertToolsForOpenAI turns back into
 		// the same strict value as `??`.
@@ -331,7 +330,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		}
 	}
 
-	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
 		try {
 			const isAzureAiInference = this._isAzureAiInference(this.options.openAiBaseUrl)
 			const model = this.getModel()
@@ -552,7 +551,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	protected _getUrlHost(baseUrl?: string): string {
 		try {
 			return new URL(baseUrl ?? "").hostname
-		} catch (error) {
+		} catch {
 			return ""
 		}
 	}
@@ -620,7 +619,7 @@ export async function getOpenAiModels(baseUrl?: string, apiKey?: string, openAiH
 		const response = await axios.get(`${trimmedBaseUrl}/models`, config)
 		const modelsArray = response.data?.data?.map((model: any) => model.id) || []
 		return [...new Set<string>(modelsArray)]
-	} catch (error) {
+	} catch {
 		return []
 	}
 }
