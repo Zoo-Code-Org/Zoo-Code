@@ -1565,9 +1565,11 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		const timeoutMs = options?.timeoutMs
 		if (timeoutMs !== undefined && Number.isFinite(timeoutMs) && timeoutMs > 0) {
 			// Node clamps delays above 2^31-1 ms to 1 ms (and Infinity coerces the
-			// same way), which would cancel almost immediately; cap the delay and
-			// treat non-finite values as "no timeout".
-			timeoutId = setTimeout(() => tokenSource.cancel(), Math.min(timeoutMs, 2_147_483_647))
+			// same way), which would cancel almost immediately, and truncates
+			// fractional delays; round up and cap so the semantics match
+			// mergeAbortSignalAndTimeout, and treat non-finite values as
+			// "no timeout".
+			timeoutId = setTimeout(() => tokenSource.cancel(), Math.min(Math.ceil(timeoutMs), 2_147_483_647))
 		}
 
 		// Bridge the external abort signal: a pre-aborted signal cancels the token

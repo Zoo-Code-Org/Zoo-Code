@@ -4253,6 +4253,32 @@ describe("VsCodeLmHandler", () => {
 			}
 		})
 
+		it("should schedule a fractional timeoutMs cancellation rounded up", async () => {
+			// Node truncates non-integer setTimeout delays (1500.5 fires at
+			// 1500 ms); the guard must round up so the delay matches
+			// mergeAbortSignalAndTimeout's 1501. Pin the delay handed to
+			// setTimeout rather than relying on fake-timer semantics.
+			const setTimeoutSpy = vi.spyOn(global, "setTimeout")
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart("Completed text")
+				})(),
+				text: (async function* () {
+					yield "Completed text"
+				})(),
+			})
+
+			handler["client"] = mockLanguageModelChat
+
+			try {
+				const result = await handler.completePrompt("Test prompt", { timeoutMs: 1500.5 })
+				expect(result).toBe("Completed text")
+				expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 1501)
+			} finally {
+				setTimeoutSpy.mockRestore()
+			}
+		})
+
 		it("should not treat an Infinity timeoutMs as an immediate timeout", async () => {
 			let releaseStream: () => void = () => {}
 			const streamGate = new Promise<void>((resolve) => {
