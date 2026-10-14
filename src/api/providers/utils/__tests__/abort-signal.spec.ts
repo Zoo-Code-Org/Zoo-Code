@@ -275,6 +275,29 @@ describe("abort-signal utilities", () => {
 
 			await vi.waitFor(() => expect(result?.aborted).toBe(true))
 		})
+
+		it("treats a non-finite timeoutMs as no timeout", () => {
+			const controller = new AbortController()
+
+			// Infinity must not reach AbortSignal.timeout(), which throws
+			// ERR_OUT_OF_RANGE for non-integer delays.
+			expect(() => mergeAbortSignalAndTimeout(undefined, Infinity)).not.toThrow()
+			expect(mergeAbortSignalAndTimeout(undefined, Infinity)).toBeUndefined()
+			expect(mergeAbortSignalAndTimeout(controller.signal, Infinity)).toBe(controller.signal)
+		})
+
+		it("caps an overflowing timeoutMs instead of aborting immediately", async () => {
+			// Node clamps AbortSignal.timeout delays above 2^31-1 ms to 1 ms;
+			// the helper caps the delay so an overflowing timeout does not abort
+			// the request within the first millisecond.
+			const result = mergeAbortSignalAndTimeout(undefined, 2_147_483_648)
+
+			expect(result).toBeInstanceOf(AbortSignal)
+			expect(result?.aborted).toBe(false)
+
+			await new Promise((resolve) => setTimeout(resolve, 20))
+			expect(result?.aborted).toBe(false)
+		})
 	})
 
 	describe("mergeAbortSignals", () => {
