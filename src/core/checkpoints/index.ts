@@ -16,7 +16,7 @@ import { DIFF_VIEW_URI_SCHEME } from "../../integrations/editor/DiffViewProvider
 
 import { CheckpointServiceOptions, RepoPerTaskCheckpointService } from "../../services/checkpoints"
 
-import { appendChange, ChangeJournalEntry } from "./changeJournal"
+import { appendChange } from "./changeJournal"
 import { buildChangeCardPayload } from "./changeCard"
 
 const WARNING_THRESHOLD_MS = 5000

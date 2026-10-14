@@ -78,7 +78,7 @@ describe("checkpointSave change-card emission (B3a)", () => {
 
 		const cardCalls = say.mock.calls.filter(([type]) => type === "change_card")
 		expect(cardCalls).toHaveLength(1)
-		const [type, text, images, partial, sayOptions, _progress, options] = cardCalls[0] as unknown as [
+		const [type, text, images, _partial, _sayOptions, _progress, options] = cardCalls[0] as unknown as [
 			string,
 			string,
 			undefined,
