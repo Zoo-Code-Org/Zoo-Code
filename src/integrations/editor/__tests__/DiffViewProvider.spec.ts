@@ -1524,6 +1524,55 @@ describe("DiffViewProvider", () => {
 			expect(mockTask.observationRegistry.has(`${mockCwd}/test.txt`)).toBe(false)
 		})
 
+		it("withdraws the preview observation on a rejected update save once reset runs", async () => {
+			// The full trigger the review row spells out: the model never read the
+			// file, open() records the preview entry (complete: false), and
+			// saveChanges(..., "update") is rejected as only-partially-read. The
+			// discard cleanup reloads the buffer; nothing wrote, so the token is
+			// unchanged and nothing forgets the entry. reset() - reached by every
+			// tool catch and by revertChanges through finalizeSession - must
+			// withdraw it, or a later apply_diff is authorized by a look the model
+			// never made (the edit-path test above covers only the first attempt).
+			mockTask.observationRegistry.clear()
+			await openPreview()
+			expect(mockTask.observationRegistry.has(`${mockCwd}/test.txt`)).toBe(true)
+
+			await expect(diffViewProvider.saveChanges(false, 0, "update")).rejects.toThrow(/only partially read/)
+			// Step 2 of the trigger: the rejected update leaves the preview entry in
+			// place - this is the leftover the fix must catch.
+			expect(mockTask.observationRegistry.has(`${mockCwd}/test.txt`)).toBe(true)
+
+			await diffViewProvider.reset()
+			expect(mockTask.observationRegistry.has(`${mockCwd}/test.txt`)).toBe(false)
+		})
+
+		it("keeps an observation the model earned at the same token after the preview", async () => {
+			// A read_file after the preview records complete: true at the same
+			// version token (nothing wrote in between). The withdrawal must not
+			// touch it: the model did read the file, and its earned authorization
+			// outlives the preview.
+			mockTask.observationRegistry.clear()
+			await openPreview()
+			const previewEntry = mockTask.observationRegistry.get(`${mockCwd}/test.txt`)
+			expect(previewEntry).toBeDefined()
+			mockTask.observationRegistry.observe(`${mockCwd}/test.txt`, previewEntry!.version, true)
+
+			await diffViewProvider.reset()
+			expect(mockTask.observationRegistry.get(`${mockCwd}/test.txt`)?.complete).toBe(true)
+		})
+
+		it("keeps an entry whose token moved on - the preview no longer owns it", async () => {
+			// A landed publish (or a later session) replaced the entry: the version
+			// no longer names the preview's token, so the withdrawal leaves it
+			// alone even though the flag still reads incomplete.
+			mockTask.observationRegistry.clear()
+			await openPreview()
+			mockTask.observationRegistry.observe(`${mockCwd}/test.txt`, "landed-token", false)
+
+			await diffViewProvider.reset()
+			expect(mockTask.observationRegistry.get(`${mockCwd}/test.txt`)?.version).toBe("landed-token")
+		})
+
 		it("still publishes a targeted edit authorized by a pre-preview observation", async () => {
 			// The same preview must not break the legitimate case: the model read the
 			// file (partially) and nothing changed before the preview, so the restored
@@ -1532,7 +1581,6 @@ describe("DiffViewProvider", () => {
 			await openPreview()
 
 			await diffViewProvider.saveChanges(false, 0, "edit")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.txt`, Buffer.from("new content"))
 			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.txt`, Buffer.from("new content"))
 		})
 
@@ -1860,9 +1908,10 @@ describe("DiffViewProvider", () => {
 
 			// The publish is rejected against the peer's token, so the discard cleanup runs.
 			vi.mocked(computeVersionToken).mockResolvedValue("peer-token")
-			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow(
-				/Stale version|not read before this write/,
-			)
+			// Deterministic: open() observed the placeholder token and
+			// computeVersionToken answers the peer's token, so the guard takes the
+			// stale-version branch - pin it, not the unobserved-create alternative.
+			await expect(diffViewProvider.saveChanges(false)).rejects.toThrow(/^Stale version -- the file changed/)
 
 			// One acquisition for the guarded publish, one for the cleanup.
 			expect(lockKeys).toEqual([`${mockCwd}/test.ts`, `${mockCwd}/test.ts`])
