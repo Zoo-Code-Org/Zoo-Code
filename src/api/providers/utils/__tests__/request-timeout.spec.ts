@@ -21,6 +21,14 @@ describe("getRequestTimeoutMs", () => {
 		expect(getRequestTimeoutMs(undefined)).toBeUndefined()
 	})
 
+	it("rounds fractional values up and rejects non-finite values", () => {
+		// AbortSignal.timeout validates its delay as uint32: fractions must
+		// round up (never down to 0), and Infinity must mean "no timeout".
+		expect(getRequestTimeoutMs(1500.5)).toBe(1501)
+		expect(getRequestTimeoutMs(0.5)).toBe(1)
+		expect(getRequestTimeoutMs(Infinity)).toBeUndefined()
+	})
+
 	it("guards against non-number input at the runtime boundary", () => {
 		expect(getRequestTimeoutMs(NaN)).toBeUndefined()
 		// Non-number values can only reach this helper through untyped callers

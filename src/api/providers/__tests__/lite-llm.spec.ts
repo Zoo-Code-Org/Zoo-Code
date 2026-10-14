@@ -1464,6 +1464,42 @@ describe("LiteLLMHandler", () => {
 			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), undefined)
 		})
 
+		it("normalizes fractional, non-finite, and overflowing timeoutMs before signaling", async () => {
+			// AbortSignal.timeout validates its delay as uint32: 1500.5 used to
+			// throw ERR_OUT_OF_RANGE from the deadline signal, Infinity threw
+			// outside the completion try, and an overflowing value clamped to a
+			// 1ms deadline that aborted instantly. All three must now behave.
+			vi.useFakeTimers()
+			try {
+				mockCreate.mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+
+				// Fractional: rounded up and forwarded whole to the SDK.
+				const frac = await handler.completePrompt("test prompt", { timeoutMs: 1500.5 })
+				expect(frac).toBe("response")
+				expect(mockCreate).toHaveBeenLastCalledWith(
+					expect.objectContaining({ model: expect.any(String) }),
+					expect.objectContaining({ timeout: 1501 }),
+				)
+
+				// Infinity: means "no timeout" - no deadline signal, no option.
+				const inf = await handler.completePrompt("test prompt", { timeoutMs: Infinity })
+				expect(inf).toBe("response")
+				expect(mockCreate).toHaveBeenLastCalledWith(
+					expect.objectContaining({ model: expect.any(String) }),
+					undefined,
+				)
+
+				// Overflowing: capped deadline, not an immediate 1ms abort.
+				const big = await handler.completePrompt("test prompt", { timeoutMs: 2_147_483_648 })
+				expect(big).toBe("response")
+				const passed = mockCreate.mock.calls.at(-1)![1] as { timeout?: number; signal?: AbortSignal }
+				expect(passed.timeout).toBe(2_147_483_647)
+				expect(passed.signal?.aborted).toBe(false)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
 		it("bounds the whole SDK retry sequence with the absolute deadline", async () => {
 			// Regression: forwarding only the remaining budget as the SDK's
 			// per-attempt `timeout` left the default two retries enabled, and each

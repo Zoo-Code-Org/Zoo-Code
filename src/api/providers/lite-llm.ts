@@ -505,7 +505,10 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		// its pre-flight `signal.aborted` check, and the rejectOnAbort race
 		// below settles the caller at the deadline even while the SDK is
 		// mid-retry-sleep. Retries stay enabled within the remaining budget.
-		const remainingMs = deadline !== undefined ? Math.max(1, deadline - Date.now()) : undefined
+		const remainingMs =
+			deadline !== undefined && Number.isFinite(deadline)
+				? Math.min(2_147_483_647, Math.max(1, Math.ceil(deadline - Date.now())))
+				: undefined
 		const deadlineSignal = remainingMs !== undefined ? AbortSignal.timeout(remainingMs) : undefined
 
 		try {
