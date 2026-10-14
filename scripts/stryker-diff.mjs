@@ -74,8 +74,7 @@ const VALID_MUTANT_STATUSES = new Set(["Killed", "Timeout", "Survived", "NoCover
 const BLOCKING_MUTANT_STATUSES = new Set(["Survived", "NoCoverage"])
 const SOURCE_EXTENSIONS = new Set([".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"])
 const EXCLUDED_PATH_SEGMENTS = ["/__mocks__/", "/__tests__/", "/fixtures/", "/test-utils/"]
-const DISABLE_DIRECTIVE =
-	/^\s*\/\/\s*Stryker disable next-line ([A-Za-z][A-Za-z0-9]*(?:,[A-Za-z][A-Za-z0-9]*)*)\s*:\s*(\S.*)$/
+const SUPPRESSION_DIRECTIVE = /\/\/\s*Stryker\s+(?:disable|enable)\b/
 
 export function parseNameStatus(output) {
 	const tokens = output.split("\0")
@@ -159,19 +158,17 @@ export function executableChangedLines(source, changedLines, filePath = "source.
 	return executable
 }
 
-export function validateDisableDirectives(source, changedLines, filePath) {
+export function assertNoDisableDirectives(source, lineNumbers, filePath) {
 	const lines = source.split(/\r?\n/)
-	for (const lineNumber of changedLines) {
+	for (const lineNumber of lineNumbers) {
 		const line = lines[lineNumber - 1] ?? ""
-		if (!line.includes("Stryker disable")) continue
+		if (!SUPPRESSION_DIRECTIVE.test(line)) continue
 
-		const match = DISABLE_DIRECTIVE.exec(line)
-		if (!match || match[1].split(",").some((mutator) => mutator.toLowerCase() === "all")) {
-			throw new Error(
-				`${filePath}:${lineNumber}: mutation exclusions must use ` +
-					'"// Stryker disable next-line MutatorName: concrete reason"; broad or unreasoned exclusions are not allowed.',
-			)
-		}
+		throw new Error(
+			`${filePath}:${lineNumber}: Stryker suppression comments are not allowed in this repository. ` +
+				"Kill the mutant with a focused test instead; if the mutant is genuinely equivalent, explain the " +
+				"equivalence in the pull request and a maintainer will decide on a narrow gate-config exclusion.",
+		)
 	}
 }
 
@@ -225,11 +222,7 @@ export function buildManifest(entries, readSource, diffForPath) {
 				? new Set(Array.from({ length: sourceLineCount }, (_, index) => index + 1))
 				: parseChangedLines(diffForPath(entry.path))
 
-		try {
-			validateDisableDirectives(source, new Set(source.split(/\r?\n/).map((_, index) => index + 1)), entry.path)
-		} catch (error) {
-			advisories.push(error.message)
-		}
+		assertNoDisableDirectives(source, new Set(source.split(/\r?\n/).map((_, index) => index + 1)), entry.path)
 		const executableLines = executableChangedLines(source, changedLines, entry.path)
 		if (executableLines.size === 0) continue
 
@@ -608,14 +601,7 @@ export function formatSummary(rows, advisories, manifest = {}) {
 		lines.push(
 			"### Resolve a mutation gap",
 			"",
-			"Add or strengthen a focused test that fails under the mutation. If the mutant is equivalent, request maintainer approval for the narrowest mutator-specific exclusion and explain why it cannot change behavior:",
-			"",
-			"```ts",
-			"// Stryker disable next-line ConditionalExpression: normalized input cannot reach the alternate branch",
-			"const result = condition ? value : fallback",
-			"```",
-			"",
-			"Broad `all` exclusions and exclusions without a concrete reason are reported as advisories.",
+			"Add or strengthen a focused test that fails under the mutation. Stryker suppression comments (`// Stryker disable ...`) are not allowed in this repository: the gate fails any pull request that introduces them. If you believe a mutant is genuinely equivalent, explain why in the pull request and a maintainer will decide on a narrow gate-config exclusion.",
 		)
 	}
 
