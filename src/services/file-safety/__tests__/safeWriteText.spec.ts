@@ -7,6 +7,7 @@ import * as path from "path"
 
 import {
 	DaclCaptureError,
+	DaclPublishRefusedError,
 	DaclRestoreError,
 	PostCommitDurabilityError,
 	resolveLockKey,
@@ -740,6 +741,30 @@ describe("safeWriteText", () => {
 
 			// Nothing was committed, and no restore was attempted from a dump that never saved.
 			expect(fs.rename).not.toHaveBeenCalled()
+			expect(execFile).toHaveBeenCalledTimes(1)
+		})
+
+		it("win32: a captured-DACL publish over a symbolic link is refused before the commit rename", async () => {
+			const targetPath = "/tmp/test-dir/link.json"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// The publish target is the link path itself, and it is a symbolic link.
+			vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
+
+			// The capture itself succeeded (default execFile mock), so this is not a
+			// DaclCaptureError; nothing was committed, so no rollback and no
+			// DaclRestoreError either. The refusal is its own contract.
+			await expect(
+				safeWriteText(targetPath, "data", { backup: true, publishOverLink: true, platform: "win32" }),
+			).rejects.toThrow(DaclPublishRefusedError)
+
+			// No commit rename, and the refusal prevents the post-commit ACL steps:
+			// neither /restore nor the restrictive fallback (drop inheritance + grant) ran.
+			expect(fs.rename).not.toHaveBeenCalled()
+			const aclArgs = vi.mocked(execFile).mock.calls.map((call) => String(call[1]))
+			expect(aclArgs.some((a) => a.includes("/restore"))).toBe(false)
+			expect(aclArgs.some((a) => a.includes("/inheritance"))).toBe(false)
+			// Only the /save capture ran.
 			expect(execFile).toHaveBeenCalledTimes(1)
 		})
 

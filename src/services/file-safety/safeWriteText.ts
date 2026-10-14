@@ -133,6 +133,27 @@ export class DaclRestoreError extends Error {
 	}
 }
 
+/**
+ * Thrown when a captured-DACL publish targets a symbolic link: the saved ACEs describe the
+ * link path, but the commit rename replaces the LINK itself with a regular file, so restoring
+ * the DACL would apply one object's access rights to another. The write is refused before the
+ * commit rename - the target link is unchanged, and neither a restore nor the restrictive
+ * fallback is attempted. DaclCaptureError does not fit (the capture succeeded) and
+ * DaclRestoreError does not fit (nothing was committed, so nothing was rolled back).
+ */
+export class DaclPublishRefusedError extends Error {
+	readonly targetPath: string
+
+	constructor(targetPath: string, cause?: unknown) {
+		super(
+			"Refusing to publish over a symbolic link with a captured DACL: the commit rename would replace the link itself, and the saved access rights would be applied to the wrong object. The target is unchanged; the path is reported here.",
+			{ cause },
+		)
+		this.name = "DaclPublishRefusedError"
+		this.targetPath = targetPath
+	}
+}
+
 // -- helpers ---------------------------------------------------------------
 
 /** Generate a unique temp file name in the given directory. */
@@ -771,6 +792,12 @@ export async function safeWriteText(
 							throw backupError
 						}
 						releaseBackupOnSuccess = true
+					} else if (daclDumpPath !== null) {
+						// The DACL was captured (so DaclCaptureError does not describe this) and
+						// nothing has been committed (so DaclRestoreError, which reports a failed
+						// rollback, would be wrong too). Refuse here - before the step 4 rename -
+						// and the link keeps both its content and its access rights.
+						throw new DaclPublishRefusedError(targetPath)
 					}
 				} catch (err: unknown) {
 					if (errorCode(err) !== "ENOENT") throw err
