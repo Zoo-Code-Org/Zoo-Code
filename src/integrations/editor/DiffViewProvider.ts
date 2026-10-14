@@ -1670,7 +1670,12 @@ export class DiffViewProvider {
 		if (previewRecorded) {
 			const previewTask = this.taskRef.deref()
 			const stillPreview = previewTask?.observationRegistry.get(previewRecorded.path)
-			if (stillPreview && stillPreview.version === previewRecorded.version && !stillPreview.complete) {
+			if (
+				previewTask &&
+				stillPreview &&
+				stillPreview.version === previewRecorded.version &&
+				!stillPreview.complete
+			) {
 				previewTask.observationRegistry.forget(previewRecorded.path)
 			}
 		}
