@@ -4914,7 +4914,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								event.id,
 								nativeToolCallParserScope,
 							)
-							// Stryker disable next-line ConditionalExpression: unreachable defensive region — getStreamingToolCallById can only resolve when the both-miss case above is reachable, which the raw-chunk pipeline cannot produce (see the directive there).
 							if (resolved) {
 								eventName = resolved.name
 								dedupKey = NativeToolCallParser.makeStreamingKey(resolved.id, resolved.name)
