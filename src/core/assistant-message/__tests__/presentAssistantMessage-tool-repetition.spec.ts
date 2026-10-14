@@ -4,7 +4,17 @@ import { providerIdentifiers } from "@roo-code/types"
 
 import type { ToolUse } from "../../../shared/tools"
 import { ToolRepetitionDetector } from "../../tools/ToolRepetitionDetector"
+import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
 import { presentAssistantMessage } from "../presentAssistantMessage"
+
+// The presenter validates against this frozen request snapshot; the mocked
+// validateToolUse never reads policy fields, and the provider-state double in
+// the task mock stays inert.
+const baseSnapshot: RequestPolicySnapshot = {
+	disabledTools: [],
+	customModes: [],
+	experiments: {},
+}
 
 type ToolBlock = {
 	type: string
@@ -194,7 +204,10 @@ describe("presentAssistantMessage - Tool Repetition Detection", () => {
 	}
 
 	async function present() {
-		await presentAssistantMessage(mockTask as unknown as Parameters<typeof presentAssistantMessage>[0])
+		await presentAssistantMessage(
+			mockTask as unknown as Parameters<typeof presentAssistantMessage>[0],
+			baseSnapshot,
+		)
 	}
 
 	/**

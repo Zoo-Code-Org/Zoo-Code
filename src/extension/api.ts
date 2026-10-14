@@ -35,7 +35,6 @@ import type { Task } from "../core/task/Task"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
 import { getCommands } from "../services/command/commands"
-import { getModels } from "../api/providers/fetchers/modelCache"
 
 type TaskAskController = {
 	approveAsk(): void
@@ -153,7 +152,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 									argumentHint: cmd.argumentHint,
 								})),
 							])
-						} catch (error) {
+						} catch {
 							sendResponse(RooCodeEventName.CommandsResponse, [[]])
 						}
 
@@ -162,7 +161,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 						try {
 							const modes = await this.sidebarProvider.getModes()
 							sendResponse(RooCodeEventName.ModesResponse, [modes])
-						} catch (error) {
+						} catch {
 							sendResponse(RooCodeEventName.ModesResponse, [[]])
 						}
 
@@ -170,7 +169,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 					case TaskCommandName.GetModels:
 						try {
 							sendResponse(RooCodeEventName.ModelsResponse, [{}])
-						} catch (error) {
+						} catch {
 							sendResponse(RooCodeEventName.ModelsResponse, [{}])
 						}
 
@@ -730,7 +729,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 					this.outputChannel.appendLine(
 						JSON.stringify(
 							arg,
-							(key, value) => {
+							(_key, value) => {
 								if (typeof value === "bigint") return `BigInt(${value})`
 								if (typeof value === "function") return `Function: ${value.name || "anonymous"}`
 								if (typeof value === "symbol") return value.toString()
@@ -739,7 +738,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 							2,
 						),
 					)
-				} catch (error) {
+				} catch {
 					this.outputChannel.appendLine(`[Non-serializable object: ${Object.prototype.toString.call(arg)}]`)
 				}
 			}

@@ -15,7 +15,6 @@ import delay from "delay"
 import pWaitFor from "p-wait-for"
 import { serializeError } from "serialize-error"
 import { Package } from "../../shared/package"
-import { formatToolInvocation } from "../tools/helpers/toolResultFormatting"
 
 import {
 	type TaskLike,
@@ -76,13 +75,7 @@ import { t } from "../../i18n"
 import { getApiMetrics, hasTokenUsageChanged, hasToolUsageChanged } from "../../shared/getApiMetrics"
 import { ClineAskResponse } from "../../shared/WebviewMessage"
 import { defaultModeSlug, getModeBySlug } from "../../shared/modes"
-import {
-	DiffStrategy,
-	type AutoApprovalContext,
-	type ToolUse,
-	type ToolParamName,
-	toolParamNames,
-} from "../../shared/tools"
+import { DiffStrategy, type AutoApprovalContext, type ToolUse } from "../../shared/tools"
 import { getModelMaxOutputTokens } from "../../shared/api"
 
 // services
@@ -92,7 +85,6 @@ import { RepoPerTaskCheckpointService } from "../../services/checkpoints"
 
 // integrations
 import { DiffViewProvider } from "../../integrations/editor/DiffViewProvider"
-import { findToolName } from "../../integrations/misc/export-markdown"
 import { RooTerminalProcess } from "../../integrations/terminal/types"
 import { TerminalRegistry } from "../../integrations/terminal/TerminalRegistry"
 import { OutputInterceptor } from "../../integrations/terminal/OutputInterceptor"
@@ -115,6 +107,7 @@ import { FileContextTracker } from "../context-tracking/FileContextTracker"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
+import { type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
 import { manageContext, willManageContext } from "../context-management"
 import { ClineProvider } from "../webview/ClineProvider"
@@ -526,6 +519,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private completionPersistenceReadyPromise?: Promise<void>
 
 	/**
+	 * The tool-policy inputs captured for the API request currently being built
+	 * (see `attemptApiRequest`). The streaming presenter reads this field at call
+	 * time and binds it to `presentAssistantMessage`'s required parameter, so
+	 * every tool call of a request validates against the same frozen policy its
+	 * prompt was generated from. Re-assigned per API attempt — including retries,
+	 * whose generator-body re-execution re-captures before any new presentation
+	 * can fire.
+	 */
+	private requestPolicySnapshot?: RequestPolicySnapshot
+
+	/**
 	 * Fire-and-forget wrapper around `presentAssistantMessage` that swallows the
 	 * expected cancellation rejection (the presenter throws when `this.abort` is set)
 	 * and logs any other failure. Keeping it non-blocking preserves the streaming
@@ -533,7 +537,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * from crashing the extension host.
 	 */
 	private presentAssistantMessageSafe(): void {
-		void presentAssistantMessage(this).catch((error) => {
+		void presentAssistantMessage(this, this.requestPolicySnapshot!).catch((error) => {
 			// Discriminate on the error message rather than `this.abort` state,
 			// which can flip between the throw and the catch microtask running:
 			// a real failure followed by an abort flip would otherwise be
@@ -660,7 +664,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		task,
 		images,
 		historyItem,
-		experiments: experimentsConfig,
+		experiments: _experimentsConfig,
 		startTask = true,
 		rootTask,
 		parentTask,
@@ -2658,7 +2662,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			cost,
 			newContextTokens = 0,
 			error,
-			errorDetails,
 			condenseId,
 		} = await summarizeConversation({
 			messages: this.apiConversationHistory,
@@ -3290,26 +3293,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 
 			const newUserContent: Anthropic.Messages.ContentBlockParam[] = [...modifiedOldUserContent]
-
-			const agoText = ((): string => {
-				const timestamp = lastClineMessage?.ts ?? Date.now()
-				const now = Date.now()
-				const diff = now - timestamp
-				const minutes = Math.floor(diff / 60000)
-				const hours = Math.floor(minutes / 60)
-				const days = Math.floor(hours / 24)
-
-				if (days > 0) {
-					return `${days} day${days > 1 ? "s" : ""} ago`
-				}
-				if (hours > 0) {
-					return `${hours} hour${hours > 1 ? "s" : ""} ago`
-				}
-				if (minutes > 0) {
-					return `${minutes} minute${minutes > 1 ? "s" : ""} ago`
-				}
-				return "just now"
-			})()
 
 			if (responseText) {
 				newUserContent.push({
@@ -4071,7 +4054,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// This is especially important for tools and background usage collection
 				this.cachedStreamingModel = this.api.getModel()
 				const streamModelInfo = this.cachedStreamingModel.info
-				const cachedModelId = this.cachedStreamingModel.id
 
 				// Yields only if the first chunk is successful, otherwise will
 				// allow the user to retry the request (most likely due to rate
@@ -4415,7 +4397,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								total?: number
 							},
 							messageIndex: number = apiReqIndex,
-							status: "completed" | "cancelled" = "completed",
+							_status: "completed" | "cancelled" = "completed",
 						) => {
 							if (
 								tokens.input > 0 ||
@@ -5134,7 +5116,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				// If we reach here without continuing, return false (will always be false for now)
 				return false
-			} catch (error) {
+			} catch {
 				// This should never happen since the only thing that can throw an
 				// error is the attemptApiRequest, which is wrapped in a try catch
 				// that sends an ask where if noButtonClicked, will clear current
@@ -5494,7 +5476,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		const {
 			autoApprovalEnabled,
-			requestDelaySeconds,
 			autoCondenseContext = true,
 			autoCondenseContextPercent = 100,
 			profileThresholds = {},
@@ -5532,6 +5513,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// caller threaded a snapshot its options object is forwarded unchanged —
 		// same reference, and never mutated.
 		const retryOptions = options.requestModelInfo === undefined ? { ...options, requestModelInfo } : options
+		// Publish this attempt's tool-policy snapshot from the same `state` read
+		// the prompt is built from: the snapshot's fields are read off that held
+		// local at the store itself, with no await between those reads and the
+		// assignment, and no policy input is re-read from live state across the
+		// awaits above, so the streaming presenter of this request validates
+		// against exactly the policy its prompt advertised. The generator body
+		// re-executes per retry, so each attempt re-captures before its stream
+		// can present anything.
+		this.requestPolicySnapshot = {
+			disabledTools: state?.disabledTools,
+			experiments: state?.experiments,
+			customModes: state?.customModes,
+			modelInfo: requestModelInfo,
+		}
 		const systemPrompt = await this.getSystemPrompt(state, requestModelInfo)
 
 		// A cancellation landing during the rate-limit countdown, the bounded metadata

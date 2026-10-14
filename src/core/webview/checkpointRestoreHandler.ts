@@ -97,7 +97,7 @@ export async function waitForClineInitialization(provider: ClineProvider, timeou
 			timeout: timeoutMs,
 		})
 		return true
-	} catch (error) {
+	} catch {
 		vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
 		return false
 	}

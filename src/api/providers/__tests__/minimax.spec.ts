@@ -13,7 +13,7 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import { type MinimaxModelId, minimaxDefaultModelId, minimaxModels } from "@roo-code/types"
 
 import { MiniMaxHandler } from "../minimax"
-import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { asyncStreamFrom } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 
 vitest.mock("@anthropic-ai/sdk", () => {
