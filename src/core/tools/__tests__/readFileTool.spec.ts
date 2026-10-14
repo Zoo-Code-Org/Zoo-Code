@@ -22,9 +22,7 @@ import type { Task } from "../../task/Task"
 
 import { isBinaryFile } from "isbinaryfile"
 
-
-import { readFileTool, ReadFileTool } from "../ReadFileTool"
-import type { Task } from "../../task/Task"
+import { readFileTool } from "../ReadFileTool"
 import { ObservationRegistry } from "../../task/observationRegistry"
 import { formatResponse } from "../../prompts/responses"
 import { validateImageForProcessing, processImageFile, isSupportedImageFormat } from "../helpers/imageHelpers"
@@ -2060,7 +2058,7 @@ describe("ReadFileTool", () => {
 				)
 
 				expect(observeSpy).toHaveBeenCalledTimes(1)
-				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
+				const [_calledPath, , calledComplete] = observeSpy.mock.calls[0]
 				expect(calledComplete).toBe(false)
 			})
 
@@ -2091,7 +2089,7 @@ describe("ReadFileTool", () => {
 				)
 
 				expect(observeSpy).toHaveBeenCalledTimes(1)
-				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
+				const [_calledPath, , calledComplete] = observeSpy.mock.calls[0]
 				expect(calledComplete).toBe(false)
 			})
 
@@ -2149,7 +2147,7 @@ describe("ReadFileTool", () => {
 				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
 
 				expect(observeSpy).toHaveBeenCalledTimes(1)
-				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
+				const [_calledPath, , calledComplete] = observeSpy.mock.calls[0]
 				expect(calledComplete).toBe(true)
 
 				// Nothing was omitted and nothing was clipped, so no note is added.
@@ -2260,7 +2258,7 @@ describe("ReadFileTool", () => {
 				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
 
 				expect(observeSpy).toHaveBeenCalledTimes(1)
-				const [calledPath, , calledComplete] = observeSpy.mock.calls[0]
+				const [_calledPath, , calledComplete] = observeSpy.mock.calls[0]
 				expect(calledComplete).toBe(false)
 
 				// Lines were omitted here, so the note reports the omitted range rather

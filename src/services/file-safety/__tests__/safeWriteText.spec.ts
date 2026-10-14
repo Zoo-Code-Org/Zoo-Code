@@ -12,7 +12,6 @@ import {
 	resolveLockKey,
 	safeWriteText,
 	StagingPathError,
-	type SafeWriteTextOptions,
 } from "../safeWriteText"
 
 // Full mock for fs/promises — all methods are vi.fn() stubs

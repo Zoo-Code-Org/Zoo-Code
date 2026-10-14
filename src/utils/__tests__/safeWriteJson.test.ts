@@ -14,7 +14,6 @@ vi.mock("child_process", () => ({
 }))
 
 import { ConfinedPathEscapeError, safeWriteJson } from "../safeWriteJson"
-import * as lockfile from "proper-lockfile"
 
 // Capture actual implementations before the vi.mock factory runs,
 // so they are never wrapped by vi.fn() — avoids infinite recursion when

@@ -262,7 +262,6 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			? [linkPathLockKey]
 			: [referentLockKey, linkPathLockKey].sort()
 		: [referentLockKey]
-	const lockKey = lockKeys[lockKeys.length - 1]
 
 	// Confinement, if the caller declared a scope, is checked BEFORE the lock is
 	// taken and before the parent-directory creation below: an out-of-scope target

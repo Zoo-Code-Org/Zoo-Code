@@ -819,7 +819,7 @@ export class DiffViewProvider {
 						this.disposeActiveEditorListener()
 						this.cancelDeferredScroll()
 
-						const ownedTeardown = await this.runTeardown(async () => {
+						await this.runTeardown(async () => {
 							let discardSucceeded = !updatedDocument.isDirty
 							if (updatedDocument.isDirty) {
 								discardSucceeded = await this.revertDocument(updatedDocument)
