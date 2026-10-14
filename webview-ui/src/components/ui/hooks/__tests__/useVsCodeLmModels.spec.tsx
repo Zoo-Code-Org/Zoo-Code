@@ -35,12 +35,18 @@ describe("useVsCodeLmModels", () => {
 	})
 
 	it("does not post a request when disabled", async () => {
+		const addSpy = vi.spyOn(window, "addEventListener")
 		const { Wrapper } = wrapper()
-		renderHook(() => useVsCodeLmModels(false), { wrapper: Wrapper })
+		const { result } = renderHook(() => useVsCodeLmModels(false), { wrapper: Wrapper })
 
-		await waitFor(() => {
-			expect(vscode.postMessage).not.toHaveBeenCalled()
-		})
+		// Give React Query a tick to settle; if the queryFn had been invoked
+		// it would have synchronously posted a message and registered a listener.
+		await waitFor(() => expect(result.current.fetchStatus).toBe("idle"))
+
+		expect(vscode.postMessage).not.toHaveBeenCalled()
+		expect(addSpy).not.toHaveBeenCalledWith("message", expect.any(Function))
+
+		addSpy.mockRestore()
 	})
 
 	it("posts a request when enabled and resolves with the matching response", async () => {

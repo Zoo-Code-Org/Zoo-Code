@@ -62,5 +62,6 @@ export const getVsCodeLmModels = async (signal?: AbortSignal) =>
 export const useVsCodeLmModels = (enabled: boolean) =>
 	useQuery({
 		queryKey: ["vsCodeLmModels"],
-		queryFn: ({ signal }) => (enabled ? getVsCodeLmModels(signal) : []),
+		queryFn: ({ signal }) => getVsCodeLmModels(signal),
+		enabled,
 	})
