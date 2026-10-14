@@ -3,6 +3,7 @@ import { DecorationController } from "../DecorationController"
 import type { Task } from "../../../core/task/Task"
 import type { Mock } from "vitest"
 import * as vscode from "vscode"
+import * as path from "path"
 import delay from "delay"
 import { DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 

@@ -442,7 +442,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			// user saw: a link planted while the write waits on the chain would move the
 			// publish, so the identity comparison rejects it.
 			let targetLookups = 0
-			mockedFsRealpath.mockImplementation(async (p) => {
+			mockedFsRealpath.mockImplementation(async (_p) => {
 				targetLookups++
 				return targetLookups === 1 ? "/real/approved/outside.txt" : "/real/elsewhere/secret.txt"
 			})

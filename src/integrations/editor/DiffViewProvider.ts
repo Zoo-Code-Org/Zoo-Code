@@ -532,9 +532,6 @@ export class DiffViewProvider {
 	async saveChanges(
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
-		// Stryker disable next-line StringLiteral: an empty kind dispatches exactly
-		// like "update" in guardedWrite (only "edit" and "create" branch distinctly),
-		// so the StringLiteral mutant here is equivalent.
 		writeKind: GuardedWriteKind = "update",
 		// The tool layer put this write in front of the user and the user approved it,
 		// for a target outside every workspace root. Only that post-approval path sets
@@ -611,10 +608,6 @@ export class DiffViewProvider {
 			// already published. When a stat-matched read returns the same bytes the
 			// write already happened, so adopt that state instead of failing.
 			if (
-				// Stryker disable next-line LogicalOperator: GuardRejectedError is only thrown
-				// by guardedWrite, and guardedWrite is reached only after the !saveTask check
-				// above has thrown a plain Error. So whenever this operand is evaluated saveTask
-				// is provably non-null: dropping it cannot change which branch is taken.
 				error instanceof GuardRejectedError &&
 				saveTask &&
 				encodedContent &&
