@@ -381,7 +381,7 @@ export async function getLmStudioModels(baseUrl = "http://localhost:1234") {
 		const response = await axios.get(`${baseUrl}/v1/models`)
 		const modelsArray = response.data?.data?.map((model: any) => model.id) || []
 		return [...new Set<string>(modelsArray)]
-	} catch (error) {
+	} catch {
 		return []
 	}
 }

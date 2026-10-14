@@ -570,7 +570,7 @@ describe("LmStudioHandler abort wiring", () => {
 
 		it("falls back to zero output tokens and logs when the output count fails without an abort", async () => {
 			const handler = new LmStudioHandler(options)
-			const countSpy = vitest
+			vitest
 				.spyOn(handler, "countTokens")
 				.mockResolvedValueOnce(1)
 				.mockRejectedValueOnce(new Error("count failed"))

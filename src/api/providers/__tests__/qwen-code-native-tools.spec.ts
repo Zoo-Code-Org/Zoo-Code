@@ -809,7 +809,7 @@ describe("QwenCodeHandler Native Tools", () => {
 				const external = new AbortController()
 				mockCreate
 					.mockRejectedValueOnce(unauthorizedError())
-					.mockImplementationOnce((_params: unknown, opts?: { signal?: AbortSignal }) => {
+					.mockImplementationOnce((_params: unknown, _opts?: { signal?: AbortSignal }) => {
 						external.abort() // Stop pressed while the retried request is in flight
 						return Promise.reject(sdkAbortError())
 					})
@@ -981,7 +981,7 @@ describe("QwenCodeHandler Native Tools", () => {
 				const external = new AbortController()
 				mockCreate
 					.mockRejectedValueOnce(unauthorizedError())
-					.mockImplementationOnce((_params: unknown, opts?: { signal?: AbortSignal }) => {
+					.mockImplementationOnce((_params: unknown, _opts?: { signal?: AbortSignal }) => {
 						external.abort() // Stop pressed while the retried request is in flight
 						return Promise.reject(sdkAbortError())
 					})
