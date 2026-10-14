@@ -316,7 +316,7 @@ export class SkillsManager {
 
 		try {
 			// Use gray-matter to parse frontmatter
-			const { data: frontmatter, content: body } = matter(fileContent)
+			const { data: frontmatter } = matter(fileContent)
 
 			// Validate required fields (only name and description for now)
 			if (!frontmatter.name || typeof frontmatter.name !== "string") {

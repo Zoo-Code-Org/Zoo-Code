@@ -56,7 +56,7 @@ vi.mock("vscode", () => {
 	return {
 		workspace: {
 			getConfiguration: vi.fn(() => ({
-				get: vi.fn((key: string, defaultValue: unknown) => defaultValue),
+				get: vi.fn((_key: string, defaultValue: unknown) => defaultValue),
 			})),
 			onDidChangeConfiguration: vi.fn((_callback) => ({
 				dispose: vi.fn(),
@@ -2455,7 +2455,7 @@ describe("VsCodeLmHandler", () => {
 				(error) =>
 					error instanceof Error &&
 					error.name === "AbortError" &&
-					error.message === "Zoo Code <Language Model API>: Request aborted",
+					error.message === "The VS Code LM request was aborted",
 			)
 
 			// No host request is started for an already-aborted signal.
@@ -2493,7 +2493,7 @@ describe("VsCodeLmHandler", () => {
 				(error) =>
 					error instanceof Error &&
 					error.name === "AbortError" &&
-					error.message === "Zoo Code <Language Model API>: Request aborted",
+					error.message === "The VS Code LM request was aborted",
 			)
 
 			// The abort landed after client initialization, so no host request started
@@ -2543,12 +2543,17 @@ describe("VsCodeLmHandler", () => {
 				(error) =>
 					error instanceof Error &&
 					error.name === "AbortError" &&
-					error.message === "Zoo Code <Language Model API>: Request aborted",
+					error.message === "The VS Code LM request was aborted",
 			)
 
 			// The bridge relayed the abort to the request cancellation token.
 			const tokenSource = tokenSourceInstance()
 			expect(tokenSource.cancel).toHaveBeenCalled()
+
+			// The cancellation must reach the host through the very token handed
+			// to sendRequest: passing a fresh token would leave the host request
+			// live while the local source looks cancelled.
+			expect(mockLanguageModelChat.sendRequest.mock.calls[0]?.[2]).toBe(tokenSource.token)
 		})
 
 		it("should attach and detach the abort bridge listener around the request", async () => {
@@ -2585,9 +2590,9 @@ describe("VsCodeLmHandler", () => {
 
 			// The mock stream yields one chunk and then stays pending, so the host
 			// request is still in flight when the consumer gives up.
-			let releaseStream: () => void = () => {}
+			let _releaseStream: () => void = () => {}
 			const streamGate = new Promise<void>((resolve) => {
-				releaseStream = resolve
+				_releaseStream = resolve
 			})
 			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
 				stream: (async function* () {
@@ -2626,7 +2631,7 @@ describe("VsCodeLmHandler", () => {
 				(error) =>
 					error instanceof Error &&
 					error.name === "AbortError" &&
-					error.message === "Zoo Code <Language Model API>: Request aborted",
+					error.message === "The VS Code LM request was aborted",
 			)
 
 			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(0)
@@ -2651,7 +2656,7 @@ describe("VsCodeLmHandler", () => {
 				(error) =>
 					error instanceof Error &&
 					error.name === "AbortError" &&
-					error.message === "Zoo Code <Language Model API>: Request aborted",
+					error.message === "The VS Code LM request was aborted",
 			)
 
 			// The pre-abort short-circuit runs before getClient(): the host is never contacted.
@@ -2694,7 +2699,7 @@ describe("VsCodeLmHandler", () => {
 				(error) =>
 					error instanceof Error &&
 					error.name === "AbortError" &&
-					error.message === "Zoo Code <Language Model API>: Request aborted",
+					error.message === "The VS Code LM request was aborted",
 			)
 
 			// Bridge + post-init re-check + finally each cancel the request token.
@@ -2735,7 +2740,7 @@ describe("VsCodeLmHandler", () => {
 				(error) =>
 					error instanceof Error &&
 					error.name === "AbortError" &&
-					error.message === "Zoo Code <Language Model API>: Request aborted",
+					error.message === "The VS Code LM request was aborted",
 			)
 		})
 
@@ -2920,12 +2925,62 @@ describe("VsCodeLmHandler", () => {
 				(error) =>
 					error instanceof Error &&
 					error.name === "AbortError" &&
-					error.message === "Zoo Code <Language Model API>: Request aborted",
+					error.message === "The VS Code LM request was aborted",
 			)
 
 			await streamB.return(undefined)
 			expect(handler["currentRequestCancellation"]).toBeNull()
 			consoleErrorSpy.mockRestore()
+		})
+
+		it("should reject with an AbortError when a newer request supersedes during input token counting", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			// Request A carries no external signal: only the request-local token can
+			// observe the supersession, so this pins the post-count token check.
+			const releases: Array<() => void> = []
+			mockLanguageModelChat.countTokens.mockImplementation(async () => {
+				await new Promise<void>((resolve) => {
+					releases.push(resolve)
+				})
+				return 0
+			})
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart("B1")
+				})(),
+				text: (async function* () {
+					yield "B1"
+				})(),
+			})
+
+			const streamA = handler.createMessage(systemPrompt, messages)
+			const firstA = streamA.next()
+			await vi.waitFor(() => expect(mockLanguageModelChat.countTokens).toHaveBeenCalled())
+
+			// A newer request supersedes A: its ensureCleanState() cancels A's token
+			// while A is parked inside countTokens.
+			const streamB = handler.createMessage(systemPrompt, messages)
+			const firstB = streamB.next()
+			await vi.waitFor(() => expect(tokenSourceInstance(0).token.isCancellationRequested).toBe(true))
+
+			for (const release of releases) {
+				release()
+			}
+
+			// A must bail at the post-count check: it never reaches the host call,
+			// so the only sendRequest is B's.
+			await expect(firstA).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "The VS Code LM request was aborted",
+			)
+			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(1)
+
+			await streamB.return(undefined)
+			await firstB
 		})
 
 		it("should reject with an AbortError when the external signal aborts before a quiet stream end", async () => {
@@ -2968,7 +3023,69 @@ describe("VsCodeLmHandler", () => {
 				(error) =>
 					error instanceof Error &&
 					error.name === "AbortError" &&
-					error.message === "Zoo Code <Language Model API>: Request aborted",
+					error.message === "The VS Code LM request was aborted",
+			)
+		})
+
+		it("should reject with the canonical abort instead of flushing pending salvage after a quiet post-abort stream end", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			const controller = new AbortController()
+			let releaseStream: () => void = () => {}
+			const streamGate = new Promise<void>((resolve) => {
+				releaseStream = resolve
+			})
+			const leaked =
+				'<function_calls><invoke name="calculator"><parameter name="operation">add</parameter></invoke></function_calls>'
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					// A complete leaked tool-call block: the salvage path buffers it
+					// whole, so nothing is yielded while it is held.
+					yield new vscode.LanguageModelTextPart(leaked)
+					await streamGate
+					return // Quiet end: no chunk and no throw after the abort.
+				})(),
+				text: (async function* () {
+					yield leaked
+					await streamGate
+					return
+				})(),
+			})
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				messages,
+				makeCreateMessageMetadata({
+					abortSignal: controller.signal,
+					tools: [
+						{
+							type: "function",
+							function: {
+								name: "calculator",
+								description: "A simple calculator",
+								parameters: { type: "object", properties: { operation: { type: "string" } } },
+							},
+						},
+					],
+				}),
+			)
+			const firstChunk = stream.next()
+			await vi.waitFor(() => expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(1))
+
+			// The caller aborts while the salvage buffer is still pending; the host
+			// then ends the stream quietly.
+			controller.abort()
+			releaseStream()
+
+			// The post-loop guard must reject before flushSalvage can emit the
+			// buffered tool call: if the guard and the flush swapped places,
+			// firstChunk would resolve with a tool_call chunk instead of rejecting.
+			await expect(firstChunk).rejects.toSatisfy(
+				(error) =>
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "The VS Code LM request was aborted",
 			)
 		})
 
@@ -3023,7 +3140,7 @@ describe("VsCodeLmHandler", () => {
 				(error) =>
 					error instanceof Error &&
 					error.name === "AbortError" &&
-					error.message === "Zoo Code <Language Model API>: Request aborted",
+					error.message === "The VS Code LM request was aborted",
 			)
 
 			await streamB.return(undefined)
@@ -3051,7 +3168,7 @@ describe("VsCodeLmHandler", () => {
 				(error) =>
 					error instanceof Error &&
 					error.name === "AbortError" &&
-					error.message === "Zoo Code <Language Model API>: Request aborted",
+					error.message === "The VS Code LM request was aborted",
 			)
 
 			// The post-counting check must stop the request before the host is invoked.
@@ -3117,7 +3234,7 @@ describe("VsCodeLmHandler", () => {
 				(error) =>
 					error instanceof Error &&
 					error.name === "AbortError" &&
-					error.message === "Zoo Code <Language Model API>: Request aborted",
+					error.message === "The VS Code LM request was aborted",
 			)
 
 			// Supersession must stop A before any host work: A never counted tokens or
@@ -3190,7 +3307,7 @@ describe("VsCodeLmHandler", () => {
 				(error) =>
 					error instanceof Error &&
 					error.name === "AbortError" &&
-					error.message === "Zoo Code <Language Model API>: Request aborted",
+					error.message === "The VS Code LM request was aborted",
 			)
 
 			// Release B so it runs to completion on clientB (empty stream), draining
@@ -3859,7 +3976,7 @@ describe("VsCodeLmHandler", () => {
 				(error) =>
 					error instanceof Error &&
 					error.name === "AbortError" &&
-					error.message === "VSCode LM completion aborted",
+					error.message === "The VS Code LM request was aborted",
 			)
 
 			// Fails fast before invoking the host: the pre-aborted signal cancels the token.
@@ -3904,7 +4021,7 @@ describe("VsCodeLmHandler", () => {
 				(error) =>
 					error instanceof Error &&
 					error.name === "AbortError" &&
-					error.message === "VSCode LM completion aborted",
+					error.message === "The VS Code LM request was aborted",
 			)
 		})
 
@@ -3940,7 +4057,7 @@ describe("VsCodeLmHandler", () => {
 				(error) =>
 					error instanceof Error &&
 					error.name === "AbortError" &&
-					error.message === "VSCode LM completion aborted",
+					error.message === "The VS Code LM request was aborted",
 			)
 			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(0)
 
@@ -3986,7 +4103,7 @@ describe("VsCodeLmHandler", () => {
 					(error) =>
 						error instanceof Error &&
 						error.name === "AbortError" &&
-						error.message === "VSCode LM completion aborted",
+						error.message === "The VS Code LM request was aborted",
 				)
 			} finally {
 				vi.useRealTimers()
@@ -4021,7 +4138,7 @@ describe("VsCodeLmHandler", () => {
 					(error) =>
 						error instanceof Error &&
 						error.name === "AbortError" &&
-						error.message === "VSCode LM completion aborted",
+						error.message === "The VS Code LM request was aborted",
 				)
 				expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(0)
 			} finally {
@@ -4177,7 +4294,7 @@ describe("VsCodeLmHandler", () => {
 				(error) =>
 					error instanceof Error &&
 					error.name === "AbortError" &&
-					error.message === "VSCode LM completion aborted",
+					error.message === "The VS Code LM request was aborted",
 			)
 
 			// The pre-abort short-circuit runs before getClient(): the host is never contacted.
@@ -4216,7 +4333,7 @@ describe("VsCodeLmHandler", () => {
 				(error) =>
 					error instanceof Error &&
 					error.name === "AbortError" &&
-					error.message === "VSCode LM completion aborted",
+					error.message === "The VS Code LM request was aborted",
 			)
 		})
 	})

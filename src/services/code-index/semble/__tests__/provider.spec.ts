@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import * as path from "path"
 import { SembleProvider } from "../provider"
-import { SembleCLI } from "../semble-cli"
 import { SEMBLE_DEFAULTS } from "../types"
 
 import { clearAllMocks } from "../../../../test-utils/reset"
