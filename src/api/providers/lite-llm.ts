@@ -173,7 +173,6 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		let model: Awaited<ReturnType<LiteLLMHandler["fetchModel"]>>
 		try {
 			if (metadata?.abortSignal) {
-				// Stryker disable next-line StringLiteral: the race's providerName is unobservable — every error escaping the race passes through the catch below, which re-normalizes abort errors via createAbortError("LiteLLM"), so no observable outcome can depend on the parameter value.
 				model = await rejectOnAbort(this.fetchModel(), metadata.abortSignal, "LiteLLM")
 			} else {
 				model = await this.fetchModel()
@@ -339,7 +338,6 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 				// Stop consuming buffered chunks once the request is aborted (the
 				// OpenAI SDK iterator may keep delivering buffered content after
 				// abort, and swallows the mid-stream AbortError).
-				// Stryker disable next-line OptionalChaining: requestSignal is always set by the addMergedSignal call above (a request-local controller signal exists even without an external signal), so the optional chain cannot observe a nullish value
 				if (requestSignal?.aborted) {
 					break
 				}
@@ -469,7 +467,6 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		let model: Awaited<ReturnType<LiteLLMHandler["fetchModel"]>>
 		try {
 			if (discoverySignal) {
-				// Stryker disable next-line StringLiteral: the race's providerName is unobservable — every error escaping the race passes through the catch below, which re-normalizes via createAbortError("LiteLLM") or createTimeoutError("LiteLLM", ...), so no observable outcome can depend on the parameter value.
 				model = await rejectOnAbort(this.fetchModel(), discoverySignal, "LiteLLM")
 			} else {
 				model = await this.fetchModel()
@@ -554,7 +551,6 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 				requestOptions,
 				Object.keys(createOptions).length > 0 ? createOptions : undefined,
 			)
-			// Stryker disable next-line StringLiteral: the race's providerName is unobservable — its rejection is reclassified by the catch below into createTimeoutError/createAbortError, so no observable outcome can depend on the parameter value.
 			const response = deadlineSignal ? await rejectOnAbort(request, deadlineSignal, "LiteLLM") : await request
 			return response.choices[0]?.message.content || ""
 		} catch (error) {

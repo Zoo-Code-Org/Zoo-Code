@@ -122,7 +122,6 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 			for await (const event of response) {
 				// Stop consuming buffered events once the request is aborted (the
 				// SDK iterator may keep delivering buffered content after abort).
-				// Stryker disable next-line OptionalChaining: requestSignal is always set by the addMergedSignal call above (a request-local controller signal exists even without an external signal), so the optional chain cannot observe a nullish value
 				if (requestSignal?.aborted) {
 					break
 				}

@@ -380,7 +380,6 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			for await (const chunk of result) {
 				// Stop consuming buffered chunks once the request is aborted (the
 				// SDK iterator may keep delivering buffered content after abort).
-				// Stryker disable next-line OptionalChaining: requestSignal is always set by the addMergedSignal call above (a request-local controller signal exists even without an external signal), so the optional chain cannot observe a nullish value
 				if (requestSignal?.aborted) {
 					break
 				}
