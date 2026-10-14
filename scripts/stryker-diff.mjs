@@ -159,16 +159,26 @@ export function executableChangedLines(source, changedLines, filePath = "source.
 }
 
 export function assertNoDisableDirectives(source, lineNumbers, filePath) {
-	const lines = source.split(/\r?\n/)
-	for (const lineNumber of lineNumbers) {
-		const line = lines[lineNumber - 1] ?? ""
-		if (!SUPPRESSION_DIRECTIVE.test(line)) continue
-
-		throw new Error(
-			`${filePath}:${lineNumber}: Stryker suppression comments are not allowed in this repository. ` +
-				"Kill the mutant with a focused test instead; if the mutant is genuinely equivalent, explain the " +
-				"equivalence in the pull request and a maintainer will decide on a narrow gate-config exclusion.",
-		)
+	// Scan comment trivia only: a string literal such as "// Stryker disable all" documents the
+	// directive syntax without suppressing anything, so it must not fail the gate.
+	const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, source)
+	let token = scanner.scan()
+	while (token !== ts.SyntaxKind.EndOfFileToken) {
+		if (token === ts.SyntaxKind.SingleLineCommentTrivia || token === ts.SyntaxKind.MultiLineCommentTrivia) {
+			const position = scanner.getTokenPos()
+			const comment = source.slice(position, scanner.getTextPos())
+			if (SUPPRESSION_DIRECTIVE.test(comment)) {
+				const lineNumber = (source.slice(0, position).match(/\n/g)?.length ?? 0) + 1
+				if (lineNumbers.has(lineNumber)) {
+					throw new Error(
+						`${filePath}:${lineNumber}: Stryker suppression comments are not allowed in this repository. ` +
+							"Kill the mutant with a focused test instead; if the mutant is genuinely equivalent, explain the " +
+							"equivalence in the pull request and a maintainer will decide on a narrow gate-config exclusion.",
+					)
+				}
+			}
+		}
+		token = scanner.scan()
 	}
 }
 

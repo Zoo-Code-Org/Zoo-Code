@@ -119,7 +119,7 @@ pnpm install
 - Follow the ESLint and TypeScript best practices.
 - Write clear, descriptive commits that reference issues (for example, `Fixes #123`). Follow the [Writing Style](#writing-style).
 - Test your change fully (`npm test`).
-- Do not add Stryker suppression comments (`// Stryker disable ...`). The mutation-testing CI check rejects them. Kill surviving mutants with focused tests instead.
+- Do not add Stryker suppression comments (`// Stryker disable ...` or `// Stryker enable ...`). The mutation-testing CI check rejects them in any touched mutation-tested file, including directives left by earlier revisions. Remove existing directives when you touch the file. Kill surviving mutants with focused tests instead.
 - Rebase onto the latest `main` branch before you submit.
 
 ### Submitting a Pull Request
