@@ -4424,7 +4424,7 @@ describe("ClineProvider", () => {
 
 			// An entry written under this view's counter key by another window (or an earlier
 			// session) must stay put instead of being re-keyed onto this window's stable id.
-			mockContext.globalState.update("viewStates", {
+			await mockContext.globalState.update("viewStates", {
 				[provider.viewId]: { mode: "architect", updatedAt: 1 },
 			})
 
