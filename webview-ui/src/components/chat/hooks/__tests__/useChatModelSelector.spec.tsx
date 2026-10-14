@@ -82,6 +82,7 @@ describe("useChatModelSelector", () => {
 		expect(result.current.modelIdKey).toBe("openRouterModelId")
 		expect(result.current.models).toHaveProperty("model-a")
 		expect(result.current.isLoading).toBe(false)
+		expect(mockUseVsCodeLmModels).toHaveBeenCalledWith(false)
 	})
 
 	it("resolves ollama models for ollama provider", () => {
@@ -99,6 +100,7 @@ describe("useChatModelSelector", () => {
 		expect(result.current.modelIdKey).toBe("ollamaModelId")
 		expect(result.current.models).toHaveProperty("llama3:latest")
 		expect(result.current.isLoading).toBe(false)
+		expect(mockUseVsCodeLmModels).toHaveBeenCalledWith(false)
 	})
 
 	it("resolves lmstudio models for lmstudio provider", () => {
@@ -121,6 +123,7 @@ describe("useChatModelSelector", () => {
 		expect(result.current.modelIdKey).toBe("lmStudioModelId")
 		expect(result.current.models).toHaveProperty("qwen2.5-coder")
 		expect(result.current.isLoading).toBe(true)
+		expect(mockUseVsCodeLmModels).toHaveBeenCalledWith(false)
 	})
 
 	it("composes vsCodeLm models with vendor/family transforms", () => {
@@ -144,6 +147,7 @@ describe("useChatModelSelector", () => {
 		expect(result.current.displayTransform?.({ vendor: "copilot", family: "gpt-4o" })).toBe("copilot/gpt-4o")
 		// displayTransform: empty value -> ""
 		expect(result.current.displayTransform?.(null)).toBe("")
+		expect(mockUseVsCodeLmModels).toHaveBeenCalledWith(true)
 	})
 
 	it("resolves static models for anthropic provider", () => {
@@ -154,6 +158,7 @@ describe("useChatModelSelector", () => {
 		expect(result.current.modelIdKey).toBe("apiModelId")
 		expect(result.current.models).not.toBeNull()
 		expect(Object.keys(result.current.models as object).length).toBeGreaterThan(0)
+		expect(mockUseVsCodeLmModels).toHaveBeenCalledWith(false)
 	})
 
 	it("defaults to openrouter when apiConfiguration is empty", () => {
@@ -162,6 +167,7 @@ describe("useChatModelSelector", () => {
 
 		expect(result.current.provider).toBe(providerIdentifiers.openrouter)
 		expect(result.current.modelIdKey).toBe("openRouterModelId")
+		expect(mockUseVsCodeLmModels).toHaveBeenCalledWith(false)
 	})
 
 	it("returns undefined for retired providers", () => {
@@ -172,5 +178,6 @@ describe("useChatModelSelector", () => {
 		expect(result.current.models).toBeNull()
 		expect(result.current.modelIdKey).toBeUndefined()
 		expect(result.current.isLoading).toBe(false)
+		expect(mockUseVsCodeLmModels).toHaveBeenCalledWith(false)
 	})
 })

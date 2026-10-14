@@ -141,10 +141,7 @@ describe("useVsCodeLmModels", () => {
 	})
 
 	it("rejects with a timeout error if no response arrives within 10 seconds", async () => {
-		const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-		const Wrapper = ({ children }: { children: React.ReactNode }) => (
-			<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-		)
+		const { Wrapper } = wrapper()
 		const addSpy = vi.spyOn(window, "addEventListener")
 		const removeSpy = vi.spyOn(window, "removeEventListener")
 
@@ -155,7 +152,7 @@ describe("useVsCodeLmModels", () => {
 			const registeredHandler = addSpy.mock.calls.find(([eventName]) => eventName === "message")?.[1]
 			expect(registeredHandler).toBeDefined()
 
-			// Advance the real wall clock that the hook's internal setTimeout depends
+			// Advance the fake clock that the hook's internal setTimeout depends
 			// on. React Query schedules its own timers on the same clock, so we let
 			// them fire as well; after 10s the request promise must be rejected with
 			// the timeout error and the message listener removed.
@@ -182,22 +179,30 @@ describe("useVsCodeLmModels", () => {
 		// React Query hands us a cancelled signal.
 		const addSpy = vi.spyOn(window, "addEventListener")
 		const removeSpy = vi.spyOn(window, "removeEventListener")
+		const timeoutSpy = vi.spyOn(globalThis, "setTimeout")
+		const addEventListenerSpy = vi.spyOn(AbortSignal.prototype, "addEventListener")
 
-		const controller = new AbortController()
-		controller.abort()
+		try {
+			const controller = new AbortController()
+			controller.abort()
 
-		const aborted = await getVsCodeLmModels(controller.signal).then(
-			() => undefined,
-			(err: unknown) => err,
-		)
-		expect(aborted).toBeInstanceOf(DOMException)
-		expect((aborted as DOMException).name).toBe("AbortError")
+			const aborted = await getVsCodeLmModels(controller.signal).then(
+				() => undefined,
+				(err: unknown) => err,
+			)
+			expect(aborted).toBeInstanceOf(DOMException)
+			expect((aborted as DOMException).name).toBe("AbortError")
 
-		expect(addSpy).not.toHaveBeenCalledWith("message", expect.any(Function))
-		expect(removeSpy).not.toHaveBeenCalledWith("message", expect.any(Function))
-		expect(vscode.postMessage).not.toHaveBeenCalled()
-
-		addSpy.mockRestore()
-		removeSpy.mockRestore()
+			expect(addSpy).not.toHaveBeenCalledWith("message", expect.any(Function))
+			expect(removeSpy).not.toHaveBeenCalledWith("message", expect.any(Function))
+			expect(vscode.postMessage).not.toHaveBeenCalled()
+			expect(timeoutSpy).not.toHaveBeenCalled()
+			expect(addEventListenerSpy).not.toHaveBeenCalled()
+		} finally {
+			addSpy.mockRestore()
+			removeSpy.mockRestore()
+			timeoutSpy.mockRestore()
+			addEventListenerSpy.mockRestore()
+		}
 	})
 })
