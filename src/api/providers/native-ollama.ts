@@ -679,11 +679,18 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		try {
 			// Handle timeoutMs if provided (client already exists above, so the
 			// timer can abort both the per-request transport and the client)
-			if (options?.timeoutMs !== undefined && options.timeoutMs > 0) {
-				timeoutId = setTimeout(() => {
-					requestController.abort()
-					client.abort()
-				}, options.timeoutMs)
+			const timeoutMs = options?.timeoutMs
+			if (timeoutMs !== undefined && Number.isFinite(timeoutMs) && timeoutMs > 0) {
+				// Node clamps delays above 2^31-1 ms to 1 ms (and coerces
+				// Infinity the same way), which would abort almost immediately;
+				// cap the delay and treat non-finite values as "no timeout".
+				timeoutId = setTimeout(
+					() => {
+						requestController.abort()
+						client.abort()
+					},
+					Math.min(timeoutMs, 2_147_483_647),
+				)
 			}
 
 			// Propagate abortSignal into the per-request client via client.abort()

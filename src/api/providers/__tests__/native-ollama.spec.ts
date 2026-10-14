@@ -1035,6 +1035,33 @@ describe("NativeOllamaHandler", () => {
 			expect(OllamaMock).toHaveBeenCalledWith(expect.objectContaining({ host: "http://localhost:11434" }))
 		})
 
+		it("should not start a timeout timer for a non-finite timeoutMs", async () => {
+			const setTimeoutSpy = vitest.spyOn(global, "setTimeout")
+			mockChat.mockResolvedValue({
+				message: { content: "Response" },
+			})
+
+			await handler.completePrompt("Test prompt", { timeoutMs: Infinity })
+
+			// Infinity must mean "no timeout": Node would coerce a non-finite
+			// delay to 1ms and abort the request almost immediately.
+			expect(setTimeoutSpy).not.toHaveBeenCalled()
+			expect(OllamaMock).toHaveBeenCalledTimes(1)
+		})
+
+		it("should cap an overflowing timeoutMs instead of scheduling a 1ms timer", async () => {
+			const setTimeoutSpy = vitest.spyOn(global, "setTimeout")
+			mockChat.mockResolvedValue({
+				message: { content: "Response" },
+			})
+
+			await handler.completePrompt("Test prompt", { timeoutMs: 2_147_483_648 })
+
+			// 2^31 ms overflows Node's timer clamp to 1ms; the guard caps the
+			// delay at 2^31-1 so the request is not aborted within a millisecond.
+			expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 2_147_483_647)
+		})
+
 		it("should reject with AbortError and remove the abort listener when abortSignal fires", async () => {
 			const controller = new AbortController()
 			// The timer id is only compared by identity here (clearTimeout is spied),
