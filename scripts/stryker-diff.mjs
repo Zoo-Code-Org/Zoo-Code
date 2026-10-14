@@ -159,27 +159,38 @@ export function executableChangedLines(source, changedLines, filePath = "source.
 }
 
 export function assertNoDisableDirectives(source, lineNumbers, filePath) {
-	// Scan comment trivia only: a string literal such as "// Stryker disable all" documents the
-	// directive syntax without suppressing anything, so it must not fail the gate.
-	const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, source)
-	let token = scanner.scan()
-	while (token !== ts.SyntaxKind.EndOfFileToken) {
-		if (token === ts.SyntaxKind.SingleLineCommentTrivia || token === ts.SyntaxKind.MultiLineCommentTrivia) {
-			const position = scanner.getTokenPos()
-			const comment = source.slice(position, scanner.getTextPos())
-			if (SUPPRESSION_DIRECTIVE.test(comment)) {
-				const lineNumber = (source.slice(0, position).match(/\n/g)?.length ?? 0) + 1
-				if (lineNumbers.has(lineNumber)) {
-					throw new Error(
-						`${filePath}:${lineNumber}: Stryker suppression comments are not allowed in this repository. ` +
-							"Kill the mutant with a focused test instead; if the mutant is genuinely equivalent, explain the " +
-							"equivalence in the pull request and a maintainer will decide on a narrow gate-config exclusion.",
-					)
-				}
+	// Comment ranges come from the parsed source: string literals and template text that mention
+	// the directive syntax must not fail the gate, and a raw scanner misclassifies text after a
+	// template interpolation because it never resumes the template lexical goal.
+	const scriptKind = filePath.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+	const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, scriptKind)
+	const seen = new Set()
+	function checkRanges(ranges) {
+		for (const range of ranges ?? []) {
+			if (seen.has(range.pos)) continue
+			seen.add(range.pos)
+			if (!SUPPRESSION_DIRECTIVE.test(source.slice(range.pos, range.end))) continue
+			const lineNumber = (source.slice(0, range.pos).match(/\n/g)?.length ?? 0) + 1
+			if (lineNumbers.has(lineNumber)) {
+				throw new Error(
+					`${filePath}:${lineNumber}: Stryker suppression comments are not allowed in this repository. ` +
+						"Kill the mutant with a focused test instead; if the mutant is genuinely equivalent, explain the " +
+						"equivalence in the pull request and a maintainer will decide on a narrow gate-config exclusion.",
+				)
 			}
 		}
-		token = scanner.scan()
 	}
+	function visitTokens(node) {
+		for (const child of node.getChildren(sourceFile)) {
+			if (ts.isToken(child)) {
+				checkRanges(ts.getLeadingCommentRanges(source, child.pos))
+				checkRanges(ts.getTrailingCommentRanges(source, child.end))
+			} else {
+				visitTokens(child)
+			}
+		}
+	}
+	visitTokens(sourceFile)
 }
 
 export function toRanges(lines) {

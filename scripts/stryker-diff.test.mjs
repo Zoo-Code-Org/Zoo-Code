@@ -603,7 +603,7 @@ describe("Stryker suppression directive prohibition", () => {
 		}
 	})
 
-	it("matches comment tokens only, never string literals", () => {
+	it("matches comment tokens only, never string literals or template text", () => {
 		assert.doesNotThrow(() =>
 			assertNoDisableDirectives(
 				'export const guidance = "// Stryker disable all"\nreturn value\n',
@@ -617,6 +617,31 @@ describe("Stryker suppression directive prohibition", () => {
 				new Set([1, 2]),
 				"source.ts",
 			),
+		)
+		assert.doesNotThrow(() =>
+			assertNoDisableDirectives(
+				"const text = `${value} // Stryker disable all`\nreturn value\n",
+				new Set([1, 2]),
+				"source.ts",
+			),
+		)
+		assert.throws(
+			() =>
+				assertNoDisableDirectives(
+					"const text = `${value}`\n// Stryker disable next-line all: reason\nreturn value\n",
+					new Set([1, 2, 3]),
+					"source.ts",
+				),
+			/Stryker suppression comments are not allowed/,
+		)
+		assert.throws(
+			() =>
+				assertNoDisableDirectives(
+					"const a = `x${`y${z}`} tail` // Stryker disable all: reason\nreturn value\n",
+					new Set([1, 2]),
+					"source.ts",
+				),
+			/Stryker suppression comments are not allowed/,
 		)
 		assert.throws(
 			() =>
