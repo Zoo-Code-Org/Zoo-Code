@@ -61,7 +61,9 @@ describe("mutation testing workflow", () => {
 		assert.ok(!workflow.includes("github.event.pull_request.base.sha"))
 		assert.ok(workflow.includes("steps.mutation_report.outputs.artifact-url"))
 		assert.ok(workflow.includes("open the package's mutation.html file"))
-		assert.ok(workflow.includes("Enforce executable-line scope and directive policy, run advisory mutation testing"))
+		assert.ok(
+			workflow.includes("Enforce executable-line scope and directive policy, run advisory mutation testing"),
+		)
 		assert.equal(workflow.match(/continue-on-error: true/g)?.length, 1)
 		assert.equal(workflow.match(/Could not write the job summary/g)?.length, 2)
 		const script = fs.readFileSync(path.join(repositoryRoot, "scripts/stryker-diff.mjs"), "utf8")
@@ -305,7 +307,7 @@ describe("buildManifest", () => {
 					() => "// Stryker disable next-line all: noisy\nexport const value = true\n",
 					() => "",
 				),
-			/Stryker suppression comments are not allowed/
+			/Stryker suppression comments are not allowed/,
 		)
 	})
 })
@@ -603,7 +605,9 @@ describe("Stryker suppression directive prohibition", () => {
 
 	it("accepts sources without suppression comments", () => {
 		assert.doesNotThrow(() => assertNoDisableDirectives("return value <= limit\n", new Set([1]), "source.ts"))
-		assert.doesNotThrow(() => assertNoDisableDirectives("// not a stryker comment\nreturn value\n", new Set([1]), "source.ts"))
+		assert.doesNotThrow(() =>
+			assertNoDisableDirectives("// not a stryker comment\nreturn value\n", new Set([1]), "source.ts"),
+		)
 	})
 })
 
