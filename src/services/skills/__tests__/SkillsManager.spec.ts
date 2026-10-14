@@ -2590,7 +2590,6 @@ Instructions`)
 			const sourceDir = p(sourceSkillsDir, "test-skill")
 			const testSkillMd = p(sourceDir, "SKILL.md")
 			const destDir = p(GLOBAL_ROO_DIR, "skills-architect", "test-skill")
-			const destSkillsDir = p(GLOBAL_ROO_DIR, "skills-architect")
 
 			// Setup: skill exists in code mode directory
 			mockDirectoryExists.mockImplementation(async (dir: string) => {
@@ -2653,7 +2652,6 @@ Instructions`)
 			const sourceDir = p(sourceSkillsDir, "test-skill")
 			const testSkillMd = p(sourceDir, "SKILL.md")
 			const destDir = p(GLOBAL_ROO_DIR, "skills-architect", "test-skill")
-			const destSkillsDir = p(GLOBAL_ROO_DIR, "skills-architect")
 
 			// Setup: skill exists in code mode directory along with another skill
 			mockDirectoryExists.mockImplementation(async (dir: string) => {

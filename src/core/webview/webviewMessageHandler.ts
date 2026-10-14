@@ -11,7 +11,6 @@ import {
 	type GlobalState,
 	type ClineMessage,
 	type TelemetrySetting,
-	type UserSettingsConfig,
 	type ModelRecord,
 	type ProviderSettings,
 	type Command as SlashCommand,
@@ -1757,14 +1756,14 @@ export const webviewMessageHandler = async (
 
 				try {
 					await pWaitFor(() => provider.getCurrentTask()?.isInitialized === true, { timeout: 3_000 })
-				} catch (error) {
+				} catch {
 					vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
 					return
 				}
 
 				try {
 					await provider.getCurrentTask()?.checkpointRestore(result.data)
-				} catch (error) {
+				} catch {
 					vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
 				}
 			}
@@ -1795,7 +1794,7 @@ export const webviewMessageHandler = async (
 
 				try {
 					await pWaitFor(() => provider.getCurrentTask()?.isInitialized === true, { timeout: 3_000 })
-				} catch (error) {
+				} catch {
 					vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
 					return
 				}
@@ -2600,7 +2599,7 @@ export const webviewMessageHandler = async (
 							}
 						}
 					}
-				} catch (error) {
+				} catch {
 					// Error already shown to user by updateCustomMode
 					// Just prevent unhandled rejection and skip state updates
 				}
