@@ -102,7 +102,7 @@ export function convertGitUrlToHttps(url: string): string {
 
 		// Handle SSH with protocol: ssh://git@github.com/user/repo.git -> https://github.com/user/repo.git
 		if (url.startsWith("ssh://")) {
-			const match = url.match(/ssh:\/\/(?:git@)?([^\/]+)\/(.+)/)
+			const match = url.match(/ssh:\/\/(?:git@)?([^/]+)\/(.+)/)
 			if (match && match.length === 3) {
 				const [, host, path] = match
 				return `https://${host}/${path}`
@@ -156,11 +156,11 @@ export function extractRepositoryName(url: string): string {
 		// Handle different URL formats
 		const patterns = [
 			// HTTPS: https://github.com/user/repo.git -> user/repo
-			/https:\/\/[^\/]+\/([^\/]+\/[^\/]+?)(?:\.git)?$/,
+			/https:\/\/[^/]+\/([^/]+\/[^/]+?)(?:\.git)?$/,
 			// SSH: git@github.com:user/repo.git -> user/repo
-			/git@[^:]+:([^\/]+\/[^\/]+?)(?:\.git)?$/,
+			/git@[^:]+:([^/]+\/[^/]+?)(?:\.git)?$/,
 			// SSH with user: ssh://git@github.com/user/repo.git -> user/repo
-			/ssh:\/\/[^\/]+\/([^\/]+\/[^\/]+?)(?:\.git)?$/,
+			/ssh:\/\/[^/]+\/([^/]+\/[^/]+?)(?:\.git)?$/,
 		]
 
 		for (const pattern of patterns) {

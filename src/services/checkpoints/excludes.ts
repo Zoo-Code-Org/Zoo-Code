@@ -193,7 +193,9 @@ const getLfsPatterns = async (workspacePath: string) => {
 				.filter((line) => line.includes("filter=lfs"))
 				.map((line) => line.split(" ")[0].trim())
 		}
-	} catch {}
+	} catch {
+		// No readable attributes file. Fall through to no LFS patterns.
+	}
 
 	return []
 }

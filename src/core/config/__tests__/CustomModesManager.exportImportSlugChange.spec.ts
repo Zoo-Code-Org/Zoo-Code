@@ -130,7 +130,7 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 
 			// Check that no path starts with rules-test-mode
 			rulesFiles.forEach((file: any) => {
-				expect(file.relativePath).not.toMatch(/^rules-test-mode[\/\\]/)
+				expect(file.relativePath).not.toMatch(/^rules-test-mode[/\\]/)
 			})
 
 			// Verify the actual paths are just the file names (without rules folder)

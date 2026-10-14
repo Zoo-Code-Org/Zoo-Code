@@ -179,9 +179,9 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 		// Known patterns for major providers
 		const patterns = [
 			// Azure OpenAI: /deployments/{deployment-name}/embeddings
-			/\/deployments\/[^\/]+\/embeddings(\?|$)/,
+			/\/deployments\/[^/]+\/embeddings(\?|$)/,
 			// Azure Databricks: /serving-endpoints/{endpoint-name}/invocations
-			/\/serving-endpoints\/[^\/]+\/invocations(\?|$)/,
+			/\/serving-endpoints\/[^/]+\/invocations(\?|$)/,
 			// Direct endpoints: ends with /embeddings (before query params)
 			/\/embeddings(\?|$)/,
 			// Some providers use /embed instead of /embeddings
