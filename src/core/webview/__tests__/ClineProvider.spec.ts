@@ -952,6 +952,13 @@ describe("ClineProvider", () => {
 	})
 
 	test("loads full model details when preparing an LM Studio task", async () => {
+		// buildApiHandler is a module-level mock shared across describes; pin its return value
+		// so this test always passes a handler double to forceFullModelDetailsLoad.
+		const { buildApiHandler } = await import("../../../api")
+		vi.mocked(buildApiHandler).mockReturnValue({
+			getModel: vi.fn().mockReturnValue({ id: "claude-3-sonnet" }),
+		} as unknown as ReturnType<typeof buildApiHandler>)
+
 		await provider.performPreparationTasks({
 			apiConfiguration: {
 				apiProvider: providerIdentifiers.lmstudio,
@@ -960,7 +967,7 @@ describe("ClineProvider", () => {
 			},
 		} as Task)
 
-		expect(forceFullModelDetailsLoad).toHaveBeenCalledWith("http://localhost:1234", "test-model")
+		expect(forceFullModelDetailsLoad).toHaveBeenCalledWith("http://localhost:1234", "test-model", expect.anything())
 	})
 
 	test("does not reload full model details when the LM Studio model is already loaded", async () => {
@@ -1209,6 +1216,60 @@ describe("ClineProvider", () => {
 
 		// Should not throw
 		await expect(provider.postMessageToWebview(message)).resolves.toBeUndefined()
+	})
+
+	test("postMessageToWebview leaves originalContent of file-edit tool messages out of the state it posts", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const originalFile = "line of the original file\n".repeat(500)
+		const toolText = JSON.stringify({
+			tool: "appliedDiff",
+			path: "a.ts",
+			diff: "@@ d",
+			originalContent: originalFile,
+		})
+		// Only the field under test is populated; the rest of ExtensionState is irrelevant here.
+		const message = {
+			type: "state",
+			state: { clineMessages: [{ ts: 1, type: "ask", ask: "tool", text: toolText }] },
+		} as unknown as ExtensionMessage
+
+		await provider.postMessageToWebview(message)
+
+		const posted = mockPostMessage.mock.calls.at(-1)![0] as ExtensionMessage
+		const postedText = posted.state!.clineMessages![0]!.text!
+
+		expect(JSON.parse(postedText)).toEqual({
+			tool: "appliedDiff",
+			path: "a.ts",
+			diff: "@@ d",
+			originalContentLength: originalFile.length,
+		})
+		// the extension's own message (and so the persisted task) keeps the full content
+		expect(message.state!.clineMessages![0]!.text).toBe(toolText)
+	})
+
+	test("postMessageToWebview leaves originalContent out of messageUpdated", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const toolText = JSON.stringify({
+			tool: "appliedDiff",
+			path: "a.ts",
+			originalContent: "original file\n".repeat(100),
+		})
+
+		await provider.postMessageToWebview({
+			type: "messageUpdated",
+			clineMessage: { ts: 2, type: "ask", ask: "tool", text: toolText },
+		})
+
+		const posted = mockPostMessage.mock.calls.at(-1)![0] as ExtensionMessage
+
+		expect(JSON.parse(posted.clineMessage!.text!)).toEqual({
+			tool: "appliedDiff",
+			path: "a.ts",
+			originalContentLength: "original file\n".length * 100,
+		})
 	})
 
 	describe("theme fixture probes", () => {
@@ -4306,9 +4367,40 @@ describe("ClineProvider - Router Models", () => {
 	let mockOutputChannel: vscode.OutputChannel
 	let mockWebviewView: any
 	let mockPostMessage: any
+	// One distinct handler double per provider, so assertions can prove that each getModels
+	// call receives the handler built for its own provider rather than just any handler.
+	let handlersByProvider: Map<string | undefined, object>
 
-	beforeEach(() => {
+	const handlerForProvider = (providerName: string) => {
+		const handler = handlersByProvider.get(providerName)
+		if (!handler) {
+			throw new Error(`buildApiHandler was never called for provider "${providerName}"`)
+		}
+		return handler
+	}
+
+	beforeEach(async () => {
 		vi.clearAllMocks()
+
+		// An earlier test leaves a one-shot throwing implementation on buildApiHandler that
+		// vi.clearAllMocks() does not remove. Reset it so the router-model fetches receive a
+		// real handler double instead of throwing on the first provider. The double assertion
+		// is required because the mock only needs the getModel member the tests exercise.
+		const { buildApiHandler } = await import("../../../api")
+		handlersByProvider = new Map()
+		vi.mocked(buildApiHandler).mockReset()
+		vi.mocked(buildApiHandler).mockImplementation((configuration) => {
+			const providerName = configuration.apiProvider
+			let handler = handlersByProvider.get(providerName)
+			if (!handler) {
+				handler = {
+					providerName,
+					getModel: vi.fn().mockReturnValue({ id: "claude-3-sonnet" }),
+				}
+				handlersByProvider.set(providerName, handler)
+			}
+			return handler as unknown as ReturnType<typeof buildApiHandler>
+		})
 
 		const globalState: Record<string, string | undefined> = {}
 		const secrets: Record<string, string | undefined> = {}
@@ -4424,22 +4516,50 @@ describe("ClineProvider - Router Models", () => {
 
 		await messageHandler({ type: "requestRouterModels" })
 
-		// Verify getModels was called for each provider with correct options
-		expect(getModels).toHaveBeenCalledWith({ provider: providerIdentifiers.openrouter })
-		expect(getModels).toHaveBeenCalledWith({ provider: providerIdentifiers.requesty, apiKey: "requesty-key" })
-		expect(getModels).toHaveBeenCalledWith({ provider: providerIdentifiers.unbound })
-		expect(getModels).toHaveBeenCalledWith({ provider: providerIdentifiers.vercelAiGateway })
-		expect(getModels).toHaveBeenCalledWith({
-			provider: providerIdentifiers.litellm,
-			apiKey: "litellm-key",
-			baseUrl: "http://localhost:4000",
-		})
+		// Verify getModels was called for each provider with correct options and that provider's handler.
+		expect(getModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.openrouter },
+			handlerForProvider(providerIdentifiers.openrouter),
+		)
+		expect(getModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.requesty, apiKey: "requesty-key" },
+			handlerForProvider(providerIdentifiers.requesty),
+		)
+		expect(getModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.unbound },
+			handlerForProvider(providerIdentifiers.unbound),
+		)
+		expect(getModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.vercelAiGateway },
+			handlerForProvider(providerIdentifiers.vercelAiGateway),
+		)
+		expect(getModels).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.litellm,
+				apiKey: "litellm-key",
+				baseUrl: "http://localhost:4000",
+			},
+			handlerForProvider(providerIdentifiers.litellm),
+		)
 		// Opencode Go's /models endpoint is public, so it is fetched like the other no-auth routers.
-		expect(getModels).toHaveBeenCalledWith(expect.objectContaining({ provider: providerIdentifiers.opencodeGo }))
+		expect(getModels).toHaveBeenCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.opencodeGo }),
+			handlerForProvider(providerIdentifiers.opencodeGo),
+		)
 		// Kenari's /models endpoint is public, so it is fetched like the other no-auth routers.
-		expect(getModels).toHaveBeenCalledWith(expect.objectContaining({ provider: providerIdentifiers.kenari }))
+		expect(getModels).toHaveBeenCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.kenari }),
+			handlerForProvider(providerIdentifiers.kenari),
+		)
 		// NanoGPT's detailed catalog is public and may be scoped by an optional key.
-		expect(getModels).toHaveBeenCalledWith({ provider: providerIdentifiers.nanogpt, apiKey: undefined })
+		expect(getModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.nanogpt, apiKey: undefined },
+			handlerForProvider(providerIdentifiers.nanogpt),
+		)
+		// Every getModels call must receive the handler built for the provider it fetches.
+		for (const [options, handler] of vi.mocked(getModels).mock.calls) {
+			expect(handler).toBe(handlerForProvider(options.provider))
+		}
 
 		// Verify response was sent
 		expect(mockPostMessage).toHaveBeenCalledWith({
@@ -4564,11 +4684,14 @@ describe("ClineProvider - Router Models", () => {
 		})
 
 		// Verify LiteLLM was called with values from message
-		expect(getModels).toHaveBeenCalledWith({
-			provider: providerIdentifiers.litellm,
-			apiKey: "message-litellm-key",
-			baseUrl: "http://message-url:4000",
-		})
+		expect(getModels).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.litellm,
+				apiKey: "message-litellm-key",
+				baseUrl: "http://message-url:4000",
+			},
+			handlerForProvider(providerIdentifiers.litellm),
+		)
 	})
 
 	test("skips LiteLLM when neither config nor message values are provided", async () => {
@@ -4596,6 +4719,7 @@ describe("ClineProvider - Router Models", () => {
 			expect.objectContaining({
 				provider: providerIdentifiers.litellm,
 			}),
+			expect.anything(),
 		)
 
 		// Verify response includes empty object for LiteLLM
@@ -4643,10 +4767,13 @@ describe("ClineProvider - Router Models", () => {
 			type: "requestLmStudioModels",
 		})
 
-		expect(getModels).toHaveBeenCalledWith({
-			provider: providerIdentifiers.lmstudio,
-			baseUrl: "http://localhost:1234",
-		})
+		expect(getModels).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.lmstudio,
+				baseUrl: "http://localhost:1234",
+			},
+			handlerForProvider(providerIdentifiers.lmstudio),
+		)
 	})
 })
 

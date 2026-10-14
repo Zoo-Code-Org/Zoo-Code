@@ -14,17 +14,15 @@
 
 import path from "path"
 
+import type { ToolUse } from "../../../shared/tools"
+import type { Task } from "../../task/Task"
+
 import { isBinaryFile } from "isbinaryfile"
 
-import { readFileTool, ReadFileTool } from "../ReadFileTool"
+import { readFileTool } from "../ReadFileTool"
 import { formatResponse } from "../../prompts/responses"
-import {
-	validateImageForProcessing,
-	processImageFile,
-	isSupportedImageFormat,
-	ImageMemoryTracker,
-} from "../helpers/imageHelpers"
-import { extractTextFromFile, addLineNumbers, getSupportedBinaryFormats } from "../../../integrations/misc/extract-text"
+import { validateImageForProcessing, processImageFile, isSupportedImageFormat } from "../helpers/imageHelpers"
+import { extractTextFromFile, getSupportedBinaryFormats } from "../../../integrations/misc/extract-text"
 import { readWithIndentation, readWithSlice } from "../../../integrations/misc/indentation-reader"
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -987,19 +985,82 @@ describe("ReadFileTool", () => {
 	})
 
 	describe("handlePartial", () => {
-		it("should handle partial display for new format", async () => {
-			const mockTask = createMockTask()
-			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+		it.each([{}, { path: "" }, undefined])(
+			"renders streamed native arguments before their path arrives: %j",
+			async (nativeArgs) => {
+				const mockTask = createMockTask()
+				mockTask.cwd = path.resolve(mockTask.cwd)
+				const streamedBlock = {
+					type: "tool_use",
+					name: "read_file",
+					params: {},
+					nativeArgs,
+					partial: true,
+				}
 
-			const block = {
-				nativeArgs: { path: "src/app.ts" },
+				// Streaming JSON is incomplete even though finalized native arguments require a path.
+				await Reflect.apply(readFileTool.handlePartial, readFileTool, [mockTask, streamedBlock])
+
+				expect(mockTask.ask).toHaveBeenCalledExactlyOnceWith(
+					"tool",
+					JSON.stringify({ tool: "readFile", path: "", isOutsideWorkspace: false }),
+					true,
+				)
+				expect(mockedFsReadFile).not.toHaveBeenCalled()
+				expect(mockedFsStat).not.toHaveBeenCalled()
+				expect(mockedExtractTextFromFile).not.toHaveBeenCalled()
+			},
+		)
+
+		it("renders incomplete legacy arguments without a file entry or outside-workspace warning", async () => {
+			const mockTask = createMockTask()
+			mockTask.cwd = path.resolve(mockTask.cwd)
+			const block: ToolUse<"read_file"> = {
+				type: "tool_use",
+				name: "read_file",
+				params: {},
+				nativeArgs: { files: [], _legacyFormat: true },
 				partial: true,
 			}
 
-			await readFileTool.handlePartial(mockTask as any, block as any)
+			// This reader-boundary double omits Task fields unrelated to file reading.
+			await readFileTool.handlePartial(mockTask as unknown as Task, block)
 
-			expect(mockTask.ask).toHaveBeenCalledWith("tool", expect.stringContaining("readFile"), true)
+			expect(mockTask.ask).toHaveBeenCalledExactlyOnceWith(
+				"tool",
+				JSON.stringify({ tool: "readFile", path: "", isOutsideWorkspace: false }),
+				true,
+			)
+			expect(mockedFsReadFile).not.toHaveBeenCalled()
+			expect(mockedFsStat).not.toHaveBeenCalled()
+			expect(mockedExtractTextFromFile).not.toHaveBeenCalled()
 		})
+
+		it.each(["src/app.ts", "src/файл.ts", "src/e\u0301-📚.ts"])(
+			"should preserve partial display for %s",
+			async (filePath) => {
+				const mockTask = createMockTask()
+				mockTask.cwd = path.resolve(mockTask.cwd)
+				mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+
+				const block: ToolUse<"read_file"> = {
+					type: "tool_use",
+					name: "read_file",
+					params: {},
+					nativeArgs: { path: filePath },
+					partial: true,
+				}
+
+				// This reader-boundary double omits Task fields unrelated to file reading.
+				await readFileTool.handlePartial(mockTask as unknown as Task, block)
+
+				expect(mockTask.ask).toHaveBeenCalledExactlyOnceWith(
+					"tool",
+					JSON.stringify({ tool: "readFile", path: filePath, isOutsideWorkspace: true }),
+					true,
+				)
+			},
+		)
 
 		it("should handle partial display for legacy format", async () => {
 			const mockTask = createMockTask()
@@ -1043,9 +1104,9 @@ describe("ReadFileTool", () => {
 			expect(mockTask.ask).toHaveBeenCalled()
 		})
 
-		it("should gracefully handle ask rejection in partial", async () => {
+		it.each(["Cancelled", "superseded"])("should gracefully handle %s ask rejection in partial", async (reason) => {
 			const mockTask = createMockTask()
-			mockTask.ask.mockRejectedValue(new Error("Cancelled"))
+			mockTask.ask.mockRejectedValue(new Error(reason))
 
 			const block = {
 				nativeArgs: { path: "test.ts" },
