@@ -58,7 +58,7 @@ type VercelAiGatewayModelsResponse = z.infer<typeof vercelAiGatewayModelsRespons
  */
 
 export async function getVercelAiGatewayModels(
-	options?: ApiHandlerOptions,
+	_options?: ApiHandlerOptions,
 	opts?: { signal?: AbortSignal },
 ): Promise<Record<string, ModelInfo>> {
 	const models: Record<string, ModelInfo> = {}

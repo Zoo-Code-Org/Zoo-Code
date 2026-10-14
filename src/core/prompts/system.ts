@@ -18,7 +18,6 @@ import { CodeIndexManagerRegistry } from "../../services/code-index/code-index-m
 import { SkillsManager } from "../../services/skills/SkillsManager"
 
 import type { SystemPromptSettings } from "./types"
-import type { EffectiveToolPolicy } from "./tools/effective-tool-policy"
 import { resolveEffectiveToolPolicy } from "./tools/effective-tool-policy"
 import {
 	getRulesSection,
@@ -49,10 +48,10 @@ export function getPromptComponent(
 async function generatePrompt(
 	context: vscode.ExtensionContext,
 	cwd: string,
-	supportsComputerUse: boolean,
+	_supportsComputerUse: boolean,
 	mode: Mode,
 	mcpHub?: McpHub,
-	diffStrategy?: DiffStrategy,
+	_diffStrategy?: DiffStrategy,
 	promptComponent?: PromptComponent,
 	customModeConfigs?: ModeConfig[],
 	globalCustomInstructions?: string,
@@ -60,8 +59,8 @@ async function generatePrompt(
 	language?: string,
 	rooIgnoreInstructions?: string,
 	settings?: SystemPromptSettings,
-	todoList?: TodoItem[],
-	modelId?: string,
+	_todoList?: TodoItem[],
+	_modelId?: string,
 	skillsManager?: SkillsManager,
 	disabledTools?: string[],
 	modelInfo?: ModelInfo,
@@ -70,8 +69,6 @@ async function generatePrompt(
 		throw new Error("Extension context is required for generating system prompt")
 	}
 
-	// Get the full mode config to ensure we have the role definition (used for groups, etc.)
-	const modeConfig = getModeBySlug(mode, customModeConfigs) || modes.find((m) => m.slug === mode) || modes[0]
 	const { roleDefinition, baseInstructions } = getModeSelection(mode, promptComponent, customModeConfigs)
 
 	const codeIndexManager = CodeIndexManagerRegistry.getOrCreate(context, cwd)
@@ -90,9 +87,6 @@ async function generatePrompt(
 		todoListEnabled: settings?.todoListEnabled,
 		codeIndexManager,
 	})
-
-	// Tool calling is native-only.
-	const effectiveProtocol = "native"
 
 	const [modesSection, skillsSection] = await Promise.all([
 		getModesSection(context),
