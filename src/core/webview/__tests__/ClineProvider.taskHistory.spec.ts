@@ -3,7 +3,7 @@ import { WebviewFocusTracker } from "../WebviewFocusTracker"
 
 import * as vscode from "vscode"
 import { makeCompositeDisposable } from "../../../test-utils/vscode"
-import type { HistoryItem, ExtensionMessage } from "@roo-code/types"
+import type { HistoryItem } from "@roo-code/types"
 import { providerIdentifiers, RooCodeEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 

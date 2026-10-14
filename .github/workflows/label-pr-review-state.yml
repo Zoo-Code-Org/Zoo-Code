@@ -848,11 +848,26 @@ jobs:
 
                           // While CI is running or has failed, remove state labels and move on.
                           // CI failure is its own signal; the label would add noise, not clarity.
+                          // Exception (issue #2025): while GitHub is still computing
+                          // mergeability, a missing required check can simply mean a
+                          // conflicting PR got no merge-ref CI run — not that its
+                          // conflicts went away. Keep an existing has-conflicts label
+                          // through this branch instead of stripping it with the other
+                          // state labels. Known-clean mergeability keeps the strip, and
+                          // known-dirty never reaches here (the conflict check above
+                          // handles it first).
                           if (ciPending || ciFailed) {
-                            core.info(`PR #${pr.number}: CI ${ciPending ? 'pending' : 'failed'} — stripping state labels`);
+                            const mergeabilityUnknown =
+                              prDetail.mergeable === null || prDetail.mergeable_state === 'unknown';
+                            const keepHasConflicts = mergeabilityUnknown &&
+                              pr.labels.some(label => label.name === 'has-conflicts');
+                            core.info(
+                              `PR #${pr.number}: CI ${ciPending ? 'pending' : 'failed'} — stripping state labels` +
+                              (keepHasConflicts ? ' (keeping has-conflicts while mergeability is unknown)' : '')
+                            );
                             await updateReviewGate(pr, ciPending ? 'ci-pending' : 'ci-failed', false);
                             await setCodeRabbitReviewActive(pr, false);
-                            await reconcileLabels(pr, null);
+                            await reconcileLabels(pr, keepHasConflicts ? 'has-conflicts' : null);
                             await reconcileCommunityApproval(pr, 'remove');
                             await updateReviewGuide(
                               pr,
@@ -890,11 +905,9 @@ jobs:
                           // CHANGES_REQUESTED stays binding across author pushes, base-branch
                           // merges, CI runs, and CodeRabbit reviews until that same
                           // maintainer's blocker is cleared by one of:
-                          //   1. the PR author explicitly re-requesting review from them,
-                          //   2. the blocking maintainer re-requesting review from themselves
-                          //      (signaling intent to re-review),
-                          //   3. a newer review from that maintainer (its state decides), or
-                          //   4. GitHub dismissing the blocking review.
+                          //   1. anyone re-requesting review from them (issue #2026),
+                          //   2. a newer review from that maintainer (its state decides), or
+                          //   3. GitHub dismissing the blocking review.
                           // Latest state per reviewer is keyed by review id (monotonically
                           // increasing) so reordered or duplicate history cannot change the
                           // result. COMMENTED reviews are neutral and never clear a blocker;
@@ -924,9 +937,9 @@ jobs:
 
                           // Clear blockers that were explicitly re-requested. A
                           // review_requested timeline event clears that maintainer's
-                          // blocker when the actor is the PR author re-requesting the
-                          // blocking maintainer, or the blocking maintainer re-requesting
-                          // themselves (signaling intent to re-review). Team requests
+                          // blocker no matter who made the request (issue #2026) — the
+                          // re-request itself signals the blocker should take another
+                          // look. Team requests
                           // carry no requested_reviewer and never clear an individual
                           // blocker; review_request_removed events only trigger
                           // reconciliation and are not clearing evidence.
@@ -945,16 +958,10 @@ jobs:
                               );
                             }
                             if (timelineEvents) {
-                              const authorLogin = pr.user?.login?.toLowerCase();
                               for (const event of timelineEvents) {
                                 if (event.event !== 'review_requested') continue;
-                                const actorLogin = event.actor?.login?.toLowerCase();
                                 const requested = event.requested_reviewer?.login?.toLowerCase();
                                 if (!requested) continue;
-                                // Clear if the PR author re-requested this maintainer, OR if the
-                                // blocking maintainer re-requested themselves (signaling intent
-                                // to re-review).
-                                if (actorLogin !== authorLogin && actorLogin !== requested) continue;
                                 const blocker = maintainerBlockers.get(requested);
                                 if (!blocker) continue;
                                 const requestedAt = Date.parse(event.created_at ?? '');

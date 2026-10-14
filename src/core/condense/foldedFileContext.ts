@@ -144,7 +144,7 @@ ${truncatedDefinitions}
 			foldedSections.push(sectionContent)
 			currentCharCount += sectionContent.length
 			result.filesProcessed++
-		} catch (error) {
+		} catch {
 			// Collect failed files for batch logging to reduce noise
 			failedFiles.push(filePath)
 			result.filesSkipped++

@@ -11,7 +11,7 @@ vi.mock("@roo-code/telemetry", () => ({
 // Mock Mistral client - must come before other imports
 const mockCreate = vi.fn()
 const mockComplete = vi.fn()
-import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { asyncStreamFrom } from "../../../test-utils/stream"
 vi.mock("@mistralai/mistralai", () => {
 	return {
 		Mistral: vi.fn().mockImplementation(function () {
