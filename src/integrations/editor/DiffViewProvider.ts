@@ -1078,9 +1078,14 @@ export class DiffViewProvider {
 			// tabGroups.close()'s second argument is preserveFocus, not a force-discard flag: a
 			// dirty tab prompts or is refused, which is how unapproved streamed content survived a
 			// "forced" close. Restore the buffer to its pre-stream content and save it clean first,
-			// so close() never sees a dirty tab and nothing unapproved reaches disk.
-			await this.restorePreStreamBuffer(absolutePath)
-			await this.saveBufferClean(absolutePath)
+			// so close() never sees a dirty tab and nothing unapproved reaches disk. When the
+			// restore itself is refused the save is skipped: the buffer still holds the streamed
+			// content, and saving it would write to disk exactly what this rollback exists to
+			// discard (same guard as discardUnapprovedStream()).
+			const restored = await this.restorePreStreamBuffer(absolutePath)
+			if (restored) {
+				await this.saveBufferClean(absolutePath)
+			}
 
 			let closed: boolean
 			let closeError: Error | undefined
@@ -1092,7 +1097,9 @@ export class DiffViewProvider {
 			}
 			if (!closed) {
 				throw new Error(
-					`Rollback could not close the restored buffer for ${absolutePath}; its content was put back to the pre-stream state but the tab is still open.`,
+					restored
+						? `Rollback could not close the restored buffer for ${absolutePath}; its content was put back to the pre-stream state but the tab is still open.`
+						: `Rollback could not restore or close the buffer for ${absolutePath}; it may still hold unapproved content.`,
 					{ cause: closeError },
 				)
 			}
@@ -1102,24 +1109,29 @@ export class DiffViewProvider {
 	/**
 	 * Replace an open buffer's content with what it held before streaming started, so a buffer
 	 * that could not be closed never keeps unapproved content available to save.
+	 *
+	 * Returns false when VS Code refuses the edit: the buffer still holds the streamed content
+	 * and the caller must not save it (see the guard in discardFileTab()). Returns true when no
+	 * open buffer needed restoring or the restore applied.
 	 */
-	private async restorePreStreamBuffer(absolutePath: string): Promise<void> {
+	private async restorePreStreamBuffer(absolutePath: string): Promise<boolean> {
 		const document = vscode.workspace.textDocuments.find(
 			(document) => document.uri.scheme === "file" && arePathsEqual(document.uri.fsPath, absolutePath),
 		)
 		if (!document) {
-			return
+			return true
 		}
 		const edit = new vscode.WorkspaceEdit()
 		const range = new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length))
 		edit.replace(document.uri, range, this.originalContent ?? "")
-		await vscode.workspace.applyEdit(edit)
+		return vscode.workspace.applyEdit(edit)
 	}
 
 	/**
 	 * Persist a restored buffer so the tab is clean before it is closed: close() refuses or prompts
 	 * on a dirty tab, and a refused close is how unapproved content outlived a "forced" rollback.
-	 * The content being saved here is the pre-stream content, never the streamed partial.
+	 * Only reached after discardFileTab()'s restore applied, so what lands here is the pre-stream
+	 * content, never the streamed partial.
 	 */
 	private async saveBufferClean(absolutePath: string): Promise<void> {
 		const document = vscode.workspace.textDocuments.find(
