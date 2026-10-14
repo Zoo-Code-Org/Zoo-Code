@@ -680,6 +680,28 @@ describe("ZAiHandler", () => {
 			expect(result.message.endsWith("aborted")).toBe(true)
 		})
 
+		it("createMessage should normalize a rejected-Promise APIUserAbortError on the thinking path", async () => {
+			const thinkingHandler = new ZAiHandler({
+				apiModelId: "glm-4.7",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			// The awaited request creation rejects (the SDK's pre-abort shape);
+			// normalization must catch it, not only synchronous throws.
+			mockCreate.mockRejectedValueOnce(new APIUserAbortError())
+
+			const result = await captureError(
+				(async () => {
+					for await (const _ of thinkingHandler.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("Z.ai request aborted")
+		})
+
 		it("createMessage should normalize an abort error raised during stream iteration on the thinking path", async () => {
 			const thinkingHandler = new ZAiHandler({
 				apiModelId: "glm-4.7",

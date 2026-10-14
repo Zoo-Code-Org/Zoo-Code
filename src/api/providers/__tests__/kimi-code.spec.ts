@@ -7,10 +7,11 @@ import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import OpenAI from "openai"
 import { Stream } from "openai/streaming"
 
-const { mockGetAccessToken, mockForceRefreshAccessToken, mockGetModels } = vi.hoisted(() => ({
+const { mockGetAccessToken, mockForceRefreshAccessToken, mockGetModels, mockGetKimiCodeModels } = vi.hoisted(() => ({
 	mockGetAccessToken: vi.fn(),
 	mockForceRefreshAccessToken: vi.fn(),
 	mockGetModels: vi.fn(),
+	mockGetKimiCodeModels: vi.fn(),
 }))
 
 vi.mock("../../../integrations/kimi-code/oauth", () => ({
@@ -23,6 +24,10 @@ vi.mock("../../../integrations/kimi-code/oauth", () => ({
 vi.mock("../fetchers/modelCache", () => ({
 	getModels: mockGetModels,
 	refreshModels: mockGetModels,
+}))
+
+vi.mock("../fetchers/kimi-code", () => ({
+	getKimiCodeModels: mockGetKimiCodeModels,
 }))
 
 /**
@@ -44,6 +49,7 @@ describe("KimiCodeHandler", () => {
 		mockGetAccessToken.mockResolvedValue("oauth-token")
 		mockForceRefreshAccessToken.mockResolvedValue("refreshed-token")
 		mockGetModels.mockRejectedValue(new Error("offline"))
+		mockGetKimiCodeModels.mockResolvedValue({})
 	})
 
 	it("is dispatched separately from Moonshot and preserves an unknown selected model", () => {
@@ -352,6 +358,31 @@ describe("KimiCodeHandler", () => {
 		expect(createCompletion).not.toHaveBeenCalled()
 	})
 
+	it("forwards the discovery cancellation signal to the Kimi catalog fetcher", async () => {
+		// Issue #404: a cancellation during handler-driven discovery must reach
+		// the discovery HTTP request itself, not just stop the caller waiting.
+		mockGetKimiCodeModels.mockResolvedValueOnce({ "test-model": { maxTokens: 1000 } })
+		const controller = new AbortController()
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })
+
+		await handler.fetchModels({ provider: providerIdentifiers.kimiCode, apiKey: "key", signal: controller.signal })
+
+		expect(mockGetKimiCodeModels).toHaveBeenCalledWith("key", { signal: controller.signal })
+	})
+
+	it("prefers the explicit model-cache signal over options.signal", async () => {
+		mockGetKimiCodeModels.mockResolvedValueOnce({})
+		const cacheSignal = new AbortController().signal
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })
+
+		await handler.fetchModels(
+			{ provider: providerIdentifiers.kimiCode, apiKey: "key", signal: new AbortController().signal },
+			cacheSignal,
+		)
+
+		expect(mockGetKimiCodeModels).toHaveBeenCalledWith("key", { signal: cacheSignal })
+	})
+
 	it("retries model discovery on a later request when the caller aborts during discovery", async () => {
 		// The SDK client binds globalThis.fetch at construction, so the completion
 		// stub must be installed before the handler is created.
@@ -376,6 +407,13 @@ describe("KimiCodeHandler", () => {
 			}
 		}).rejects.toMatchObject({ name: "AbortError" })
 		expect(mockGetModels).toHaveBeenCalledTimes(1)
+		// The handler must hand the caller's signal to the discovery path so the
+		// in-flight discovery request is cancellable (Issue #404), not merely
+		// observed after the fact.
+		expect(mockGetModels).toHaveBeenCalledWith(
+			expect.objectContaining({ signal: controller.signal }),
+			expect.anything(),
+		)
 
 		// A later request on the same handler must retry discovery rather than
 		// keep the fallback metadata.

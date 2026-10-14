@@ -424,6 +424,25 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			expect(result.message.endsWith("aborted")).toBe(true)
 		})
 
+		it("should normalize a rejected-Promise APIUserAbortError from request creation", async () => {
+			// The provider awaits request creation so a REJECTED promise (the
+			// shape the SDK actually returns when the request is aborted before
+			// the response) reaches the abort normalization; the sync-throw test
+			// above would pass even if the await were removed.
+			mockCreate.mockRejectedValueOnce(new APIUserAbortError())
+
+			const result = await captureError(
+				(async () => {
+					for await (const _ of handler.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("TestProvider request aborted")
+		})
+
 		it("should normalize an abort error raised during stream iteration into the abort contract", async () => {
 			mockCreate.mockImplementationOnce(() =>
 				(async function* () {

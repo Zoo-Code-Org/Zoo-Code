@@ -56,8 +56,14 @@ export class KimiCodeHandler extends OpenAiHandler {
 		return { urlScoped: false, keyScoped: true, authScoped: true }
 	}
 
-	async fetchModels(options: GetModelsOptions): Promise<ModelRecord> {
-		return getKimiCodeModels(options.apiKey)
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		// Forward cancellation (explicit model-cache signal, else the caller
+		// signal carried on options) so a cancellation during discovery aborts
+		// the in-flight discovery HTTP request, not just the caller's wait.
+		const cancellation = signal ?? options.signal
+		return cancellation
+			? getKimiCodeModels(options.apiKey, { signal: cancellation })
+			: getKimiCodeModels(options.apiKey)
 	}
 
 	private async resolveAccessToken(forceRefresh = false): Promise<string> {
