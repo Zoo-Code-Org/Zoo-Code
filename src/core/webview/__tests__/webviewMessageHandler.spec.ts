@@ -267,7 +267,6 @@ import { getWorkspacePath } from "../../../utils/path"
 import { ensureSettingsDirectoryExists } from "../../../utils/globalContext"
 import { generateErrorDiagnostics } from "../diagnosticsHandler"
 import type { ModeConfig } from "@roo-code/types"
-import { defaultModeSlug } from "../../../shared/modes"
 
 vi.mock("../../../utils/fs")
 vi.mock("../../../utils/path")

@@ -949,7 +949,7 @@ describe("ClineProvider - Sticky Mode", () => {
 				totalCost: 0,
 			}
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
-			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 			await provider.saveViewState("mode", "code")
 			await provider.contextProxy.setValue("mode", "code")
 			const emitSpy = vi.spyOn(provider, "emit")
@@ -1050,7 +1050,7 @@ describe("ClineProvider - Sticky Mode", () => {
 				totalCost: 0,
 			}
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
-			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 			await provider.saveViewState("mode", "code")
 			await provider.contextProxy.setValue("mode", "code")
 
@@ -1234,7 +1234,7 @@ describe("ClineProvider - Sticky Mode", () => {
 				totalCost: 0,
 			}
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
-			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 			await provider.saveViewState("mode", "code")
 			await provider.contextProxy.setValue("mode", "code")
 
@@ -1296,7 +1296,7 @@ describe("ClineProvider - Sticky Mode", () => {
 				totalCost: 0,
 			}
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
-			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 			await provider.saveViewState("mode", "code")
 			await provider.contextProxy.setValue("mode", "code")
 
@@ -2461,7 +2461,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(fresh.viewId).toBe(tempId)
 
 			const originalUpdate = mockContext.globalState.update
-			mockContext.globalState.update = vi.fn().mockImplementation((key: string, value: unknown) => {
+			mockContext.globalState.update = vi.fn().mockImplementation((key: string, _value: unknown) => {
 				if (key === "viewStates") {
 					return Promise.reject(new Error("storage unavailable"))
 				}
