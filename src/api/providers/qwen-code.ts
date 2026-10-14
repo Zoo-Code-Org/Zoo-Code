@@ -297,7 +297,6 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 			// request-local signal so the caller settles promptly instead of
 			// waiting for credential I/O. The shared refresh keeps running —
 			// only this wait is cut.
-			// Stryker disable next-line StringLiteral: the rejection from this wait is always re-normalized by the outer catch's createAbortError("Qwen Code") (name "AbortError" always matches isRequestAborted), so this provider-name literal is unobservable
 			await settleOnAbort(this.ensureAuthenticated(), requestController.signal, "Qwen Code")
 			const client = this.ensureClient()
 			const model = this.getModel()
@@ -353,11 +352,9 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 
 					if (newText) {
 						// Check for thinking blocks
-						// Stryker disable next-line ConditionalExpression,StringLiteral: for tag-free content split(/<\/?think>/g) yields a single even-indexed part producing the identical text chunk as the else branch, and think-tagged content already takes this branch
 						if (newText.includes("<think>") || newText.includes("</think>")) {
 							// Simple parsing for thinking blocks
 							const parts = newText.split(/<\/?think>/g)
-							// Stryker disable next-line EqualityOperator: the extra i === parts.length iteration reads undefined, which the existing parts[i] guard on the next line skips
 							for (let i = 0; i < parts.length; i++) {
 								if (parts[i]) {
 									if (i % 2 === 0) {
@@ -387,9 +384,7 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 				// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
 				if (delta.tool_calls) {
 					for (const toolCall of delta.tool_calls) {
-						// Stryker disable next-line ConditionalExpression: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
 						if (toolCall.id) {
-							// Stryker disable next-line CallExpression: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
 							activeToolCallIds.add(toolCall.id)
 						}
 						yield {
@@ -403,13 +398,10 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 				}
 
 				// Process finish_reason to emit tool_call_end events
-				// Stryker disable next-line ConditionalExpression,EqualityOperator,StringLiteral: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
 				if (finishReason === "tool_calls") {
 					for (const id of activeToolCallIds) {
-						// Stryker disable next-line ObjectLiteral,StringLiteral: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
 						yield { type: "tool_call_end", id }
 					}
-					// Stryker disable next-line CallExpression: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
 					activeToolCallIds.clear()
 				}
 

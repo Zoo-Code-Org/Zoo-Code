@@ -120,9 +120,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 			// fires, so bridge the aborted state into the request-local
 			// controller (this also covers an abort landing while a token
 			// count below is still pending).
-			// Stryker disable next-line ConditionalExpression: externalSignal.aborted can never be true here - a pre-aborted signal is already rejected by the entry throwIfAborted fast-fail above, and no await sits between that check and this bridge, so the guard is unreachable
 			if (externalSignal.aborted) {
-				// Stryker disable next-line CallExpression: unreachable branch body - a pre-aborted external signal is rejected by the entry throwIfAborted fast-fail before this bridge registers
 				requestController.abort()
 			}
 		}
@@ -179,7 +177,6 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				results = await this.client.chat.completions.create(params, createOptions)
 			} catch (error) {
 				if (isRequestAborted(error, externalSignal)) {
-					// Stryker disable next-line StringLiteral: inner abort throw is re-normalized by the outer catch's createAbortError (name "AbortError" always matches isRequestAborted), so this literal is unobservable
 					throw createAbortError("LM Studio")
 				}
 				throw handleOpenAIError(error, this.providerName)
@@ -218,9 +215,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
 				if (delta?.tool_calls) {
 					for (const toolCall of delta.tool_calls) {
-						// Stryker disable next-line ConditionalExpression: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
 						if (toolCall.id) {
-							// Stryker disable next-line CallExpression: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
 							activeToolCallIds.add(toolCall.id)
 						}
 						yield {
@@ -234,13 +229,10 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				}
 
 				// Process finish_reason to emit tool_call_end events
-				// Stryker disable next-line ConditionalExpression,EqualityOperator,StringLiteral: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
 				if (finishReason === "tool_calls") {
 					for (const id of activeToolCallIds) {
-						// Stryker disable next-line ObjectLiteral,StringLiteral: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
 						yield { type: "tool_call_end", id }
 					}
-					// Stryker disable next-line CallExpression: vi.mock() prevents coverage instrumentation from crossing module boundaries in this spec file.
 					activeToolCallIds.clear()
 				}
 			}
@@ -355,7 +347,6 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				response = await this.client.chat.completions.create(params, createOptions)
 			} catch (error) {
 				if (isRequestAborted(error, requestSignal)) {
-					// Stryker disable next-line StringLiteral: inner abort throw is re-normalized by the outer catch's createAbortError (name "AbortError" always matches isRequestAborted), so this literal is unobservable
 					throw createAbortError("LM Studio")
 				}
 				throw handleOpenAIError(error, this.providerName)
