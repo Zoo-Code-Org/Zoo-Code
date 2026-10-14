@@ -1,0 +1,87 @@
+import { MultiSearchReplaceDiffStrategy } from "../multi-search-replace"
+
+// Guards the POST-FAILURE "LIKELY CAUSE" hint for mistyped start-line markers.
+// The heuristic must never act as an upfront rejection gate.
+describe("MultiSearchReplaceDiffStrategy malformed start-line marker hint", () => {
+	let strategy: MultiSearchReplaceDiffStrategy
+
+	beforeEach(() => {
+		strategy = new MultiSearchReplaceDiffStrategy()
+	})
+
+	const nonMatchingFile = ["alpha", "beta", "gamma", "delta", "epsilon"].join("\n")
+
+	function buildDiff(searchBody: string, replaceBody: string): string {
+		return `<<<<<<< SEARCH\n${searchBody}\n=======\n${replaceBody}\n>>>>>>> REPLACE`
+	}
+
+	function firstFailureError(result: Awaited<ReturnType<MultiSearchReplaceDiffStrategy["applyDiff"]>>): string {
+		expect(result.success).toBe(false)
+		const failures = result.failParts ?? []
+		expect(failures.length).toBeGreaterThan(0)
+		const failure = failures[0]
+		if (failure.success || !failure.error) {
+			throw new Error("Expected a failed block with error details")
+		}
+		return failure.error
+	}
+
+	it("adds LIKELY CAUSE when the first search line is a bare ':3' marker and the block fails", async () => {
+		const diffContent = buildDiff(":3\nnot-in-the-file", "replacement")
+		const result = await strategy.applyDiff(nonMatchingFile, diffContent)
+
+		const errorText = firstFailureError(result)
+		expect(errorText).toContain("LIKELY CAUSE")
+		expect(errorText).toContain(":start_line:")
+	})
+
+	const markerVariants = ["start_line:3", ":start-line 3", ": start_line : 3", ":START_LINE:3", "Start_Line: 3"]
+
+	it.each(markerVariants)("adds LIKELY CAUSE for the malformed marker variant %j", async (markerVariant) => {
+		const diffContent = buildDiff(`${markerVariant}\nnot-in-the-file`, "replacement")
+		const result = await strategy.applyDiff(nonMatchingFile, diffContent)
+
+		expect(firstFailureError(result)).toContain("LIKELY CAUSE")
+	})
+
+	it("still applies cleanly when the file genuinely contains a ':3' line (hint is not a gate)", async () => {
+		const fileWithMarkerLikeLine = ["alpha", ":3", "beta", "gamma"].join("\n")
+		const diffContent = buildDiff(":3\nbeta", ":3\nBETA")
+
+		const result = await strategy.applyDiff(fileWithMarkerLikeLine, diffContent)
+
+		expect(result.success).toBe(true)
+		if (!result.success) {
+			throw new Error("Expected marker-like file content to match")
+		}
+		expect(result.content).toContain("BETA")
+		expect(result.content).not.toContain("LIKELY CAUSE")
+		expect(result.failParts ?? []).toHaveLength(0)
+	})
+
+	it("omits the hint for ordinary non-matching content but keeps the file-changed tip", async () => {
+		const diffContent = buildDiff("completely unrelated content\nsecond line", "replacement")
+		const result = await strategy.applyDiff(nonMatchingFile, diffContent)
+
+		const errorText = firstFailureError(result)
+		expect(errorText).not.toContain("LIKELY CAUSE")
+		expect(errorText).toContain("the file content may have changed")
+	})
+
+	it("does not flag the correct ':start_line:3' marker form", async () => {
+		const diffContent = `<<<<<<< SEARCH\n:start_line:3\n-------\nnot-in-the-file\n=======\nreplacement\n>>>>>>> REPLACE`
+		const result = await strategy.applyDiff(nonMatchingFile, diffContent)
+
+		expect(firstFailureError(result)).not.toContain("LIKELY CAUSE")
+	})
+
+	it("adds LIKELY CAUSE when a well-formed ':start_line:N' line goes unparsed and swallows its separator", async () => {
+		// Indenting the marker makes the parser miss it, so both it and the "-------" become search text.
+		const diffContent = buildDiff("  :start_line:3\n-------\nnot-in-the-file", "replacement")
+		const result = await strategy.applyDiff(nonMatchingFile, diffContent)
+
+		const errorText = firstFailureError(result)
+		expect(errorText).toContain("LIKELY CAUSE")
+		expect(errorText).toContain('together with the "-------" line after it')
+	})
+})
