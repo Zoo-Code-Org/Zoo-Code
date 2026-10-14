@@ -816,20 +816,6 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 				updateApiConfiguration: vi.fn(),
 			}
 
-			// Create task 2 with profile B
-			const task2 = {
-				taskId: "task-2",
-				_taskApiConfigName: "profile-b",
-				setTaskApiConfigName: vi.fn().mockImplementation(function (this: any, name: string) {
-					this._taskApiConfigName = name
-				}),
-				emit: vi.fn(),
-				saveClineMessages: vi.fn(),
-				clineMessages: [],
-				apiConversationHistory: [],
-				updateApiConfiguration: vi.fn(),
-			}
-
 			// Add task 1 to stack
 			await provider.addClineToStack(task1 as any)
 
