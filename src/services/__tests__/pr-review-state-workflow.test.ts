@@ -980,6 +980,24 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
 	})
 
+	it("keeps has-conflicts while mergeability is unknown and required CI passes (#2045)", async () => {
+		// Regression: GitHub transiently reports mergeable: null / "unknown" after
+		// each push while it recomputes mergeability. With CI passing, the final
+		// reconcile must keep an existing has-conflicts label instead of stripping
+		// it with the other state labels — the label previously flapped off until
+		// a later run restored it.
+		const result = await runWorkflow({
+			mergeable: null,
+			mergeableState: "unknown",
+			labels: ["has-conflicts"],
+		})
+
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+		expect(result.info).toHaveBeenCalledWith(expect.stringContaining("mergeable=null"))
+		expect(result.info).toHaveBeenCalledWith(expect.stringContaining("mergeable_state=unknown"))
+	})
+
 	it("keeps has-conflicts while mergeability is unknown and required CI is missing (#2025)", async () => {
 		// A conflicting PR gets no merge-ref CI run, so its required checks are
 		// missing. Unknown mergeability must not read that as a reason to strip
