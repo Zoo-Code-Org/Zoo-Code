@@ -93,12 +93,7 @@ export class OrphanedBackupError extends Error {
 	}
 }
 
-function _orphanedBackupMessage(
-	targetPath: string,
-	backupPath: string,
-	cause: unknown,
-	cleanupError: unknown,
-): string {
+function _orphanedBackupMessage(targetPath: string, backupPath: string, cause: unknown, cleanupError: unknown): string {
 	const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 	return (
 		`safeWriteText: could not create the backup of ${targetPath} (${reason(cause)}), and the ` +
@@ -709,7 +704,6 @@ export async function safeWriteText(
 					// non-fatal — orphaned backup is acceptable
 				}
 			}
-
 		} finally {
 			// Unlink DACL dump regardless of success/failure in this span.
 			if (daclDumpPath !== null) {
@@ -754,7 +748,6 @@ export async function safeWriteText(
 		if (daclDumpPath !== null) {
 			await fs.unlink(daclDumpPath).catch(() => {})
 		}
-
 
 		throw originalError
 	}

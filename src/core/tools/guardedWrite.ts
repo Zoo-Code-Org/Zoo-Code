@@ -334,9 +334,7 @@ function resolveAbsolutePath(task: Task, relPathOrAbsolute: string): string {
  */
 function isInside(root: string, target: string): boolean {
 	const relative = path.relative(root, target)
-	return !(
-		relative === "" || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)
-	)
+	return !(relative === "" || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative))
 }
 
 function assertInsideWorkspace(task: Task, absolutePath: string, displayPath: string): void {
@@ -614,10 +612,22 @@ export async function guardedWrite(
 
 			if (obs === undefined) {
 				// Never read: only an absent target may be created.
-				publishedToken = await createIfAbsent(absolutePath, content, displayPath, () => task.abort || task.cancellationGeneration !== cancellationGeneration, verifyTarget)
+				publishedToken = await createIfAbsent(
+					absolutePath,
+					content,
+					displayPath,
+					() => task.abort || task.cancellationGeneration !== cancellationGeneration,
+					verifyTarget,
+				)
 			} else if (absent) {
 				// A "create" on a file that vanished after the read recreates it.
-				publishedToken = await createIfAbsent(absolutePath, content, displayPath, () => task.abort || task.cancellationGeneration !== cancellationGeneration, verifyTarget)
+				publishedToken = await createIfAbsent(
+					absolutePath,
+					content,
+					displayPath,
+					() => task.abort || task.cancellationGeneration !== cancellationGeneration,
+					verifyTarget,
+				)
 			} else {
 				// The version recorded at read time must still match the on-disk
 				// token.

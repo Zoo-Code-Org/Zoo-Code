@@ -50,12 +50,13 @@ afterEach(async () => {
 // Only isSymbolicLink() is consulted by the guard, so the double carries just
 // that method. The mocks reject asynchronously: a synchronous throw would bypass
 // resolvePublishTarget's catch and skip the ENOENT/symlink branch under test.
-const symlinkStat = (target: unknown) => ({
-	isSymbolicLink: () => target === currentLink,
-	// The staging-path check in safeWriteText also asks whether the path is a
-	// regular file, so the double carries that predicate as well.
-	isFile: () => target !== currentLink,
-}) as unknown as BigIntStats
+const symlinkStat = (target: unknown) =>
+	({
+		isSymbolicLink: () => target === currentLink,
+		// The staging-path check in safeWriteText also asks whether the path is a
+		// regular file, so the double carries that predicate as well.
+		isFile: () => target !== currentLink,
+	}) as unknown as BigIntStats
 let currentLink = ""
 
 describe("safeWriteJson lock key under a peer commit", () => {
@@ -152,7 +153,9 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			if (target === file) throw enoent
 			return canonicalDir
 		})
-		mockedLstat.mockImplementation(async () => ({ isSymbolicLink: () => false, isFile: () => true }) as unknown as BigIntStats)
+		mockedLstat.mockImplementation(
+			async () => ({ isSymbolicLink: () => false, isFile: () => true }) as unknown as BigIntStats,
+		)
 
 		expect(await resolveLockKey(file)).toBe(path.join(canonicalDir, "history_item.json"))
 	})

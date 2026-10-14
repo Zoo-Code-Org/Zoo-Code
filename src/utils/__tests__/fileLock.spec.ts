@@ -75,12 +75,9 @@ describe("fileLock - canonical lock keys", () => {
 		// The file and its parent are absent, so realpath reports ENOENT for them; the deepest
 		// existing ancestor is resolved and the missing components are re-appended.
 		const seen: string[] = []
-		await withFileLock(
-			path.join(STORE, "aliasDir", "missing", "new.json"),
-			async (absoluteFilePath) => {
-				seen.push(absoluteFilePath)
-			},
-		)
+		await withFileLock(path.join(STORE, "aliasDir", "missing", "new.json"), async (absoluteFilePath) => {
+			seen.push(absoluteFilePath)
+		})
 
 		expect(seen).toEqual([path.join(STORE, "aliasDir", "missing", "new.json")])
 		expect(lockfile.lock).toHaveBeenCalledWith(
@@ -90,21 +87,21 @@ describe("fileLock - canonical lock keys", () => {
 	})
 })
 
-	test("locks the referent of a file symlink whose target is temporarily absent", async () => {
-		// A backup-mode commit renames the referent away and back. During that window the
-		// link is dangling, realpath fails, and a naive fallback re-appends the LINK's
-		// basename onto the canonical parent - a different key from the one safeWriteJson
-		// holds through resolveLockKey, so the two writers stop excluding each other.
-		const linkPath = path.join(STORE, "link.json")
-		const referent = path.join(STORE, "referent.json")
-		vi.mocked(fsPromises.readlink).mockImplementation(async (p: unknown) => {
-			if (String(p) === linkPath) return referent
-			throw Object.assign(new Error("EINVAL"), { code: "EINVAL" })
-		})
-
-		const releaseLock = await acquireFileLock(linkPath)
-
-		expect(lockfile.lock).toHaveBeenCalledWith(referent, expect.objectContaining({ realpath: false }))
-
-		await releaseLock()
+test("locks the referent of a file symlink whose target is temporarily absent", async () => {
+	// A backup-mode commit renames the referent away and back. During that window the
+	// link is dangling, realpath fails, and a naive fallback re-appends the LINK's
+	// basename onto the canonical parent - a different key from the one safeWriteJson
+	// holds through resolveLockKey, so the two writers stop excluding each other.
+	const linkPath = path.join(STORE, "link.json")
+	const referent = path.join(STORE, "referent.json")
+	vi.mocked(fsPromises.readlink).mockImplementation(async (p: unknown) => {
+		if (String(p) === linkPath) return referent
+		throw Object.assign(new Error("EINVAL"), { code: "EINVAL" })
 	})
+
+	const releaseLock = await acquireFileLock(linkPath)
+
+	expect(lockfile.lock).toHaveBeenCalledWith(referent, expect.objectContaining({ realpath: false }))
+
+	await releaseLock()
+})
