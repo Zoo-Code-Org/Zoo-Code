@@ -301,16 +301,29 @@ describe("abort-signal utilities", () => {
 
 		it("rounds a fractional timeoutMs up before scheduling", async () => {
 			// Node validates AbortSignal.timeout delays as uint32: 1.5 or 0.5
-			// would throw ERR_OUT_OF_RANGE. The helper rounds up, so a positive
-			// fraction never becomes 0 ms either.
+			// would throw ERR_OUT_OF_RANGE. Pin the rounded delay that actually
+			// reaches AbortSignal.timeout (1.5 -> 2, 0.5 -> 1, never 0) so a
+			// round-down mutation reddens this test instead of still aborting
+			// eventually.
+			const timeoutSpy = vi.spyOn(AbortSignal, "timeout")
 			let result: AbortSignal | undefined
-			expect(() => {
-				result = mergeAbortSignalAndTimeout(undefined, 1.5)
-			}).not.toThrow()
+			let tiny: AbortSignal | undefined
+			try {
+				expect(() => {
+					result = mergeAbortSignalAndTimeout(undefined, 1.5)
+				}).not.toThrow()
+				expect(timeoutSpy).toHaveBeenCalledWith(2)
+				expect(() => {
+					tiny = mergeAbortSignalAndTimeout(undefined, 0.5)
+				}).not.toThrow()
+				expect(timeoutSpy).toHaveBeenCalledWith(1)
+			} finally {
+				timeoutSpy.mockRestore()
+			}
 			expect(result).toBeInstanceOf(AbortSignal)
 			expect(result?.aborted).toBe(false)
+			expect(tiny).toBeInstanceOf(AbortSignal)
 			await vi.waitFor(() => expect(result?.aborted).toBe(true))
-			expect(() => mergeAbortSignalAndTimeout(undefined, 0.5)).not.toThrow()
 		})
 	})
 
