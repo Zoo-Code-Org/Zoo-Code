@@ -2210,7 +2210,9 @@ describe("NativeOllamaHandler", () => {
 			const handler = new NativeOllamaHandler({
 				apiModelId: "llama2",
 				ollamaModelId: "llama2",
-				ollamaBaseUrl: "http://ollama.example.com:11434",
+				// Credentials and a sensitive query value ride along: the warning
+				// must echo only the origin, never these.
+				ollamaBaseUrl: "http://user:secret@ollama.example.com:11434/v1?token=***",
 				ollamaApiKey: "test-api-key-123",
 			})
 
@@ -2221,9 +2223,15 @@ describe("NativeOllamaHandler", () => {
 			const callArgs = OllamaMock.mock.calls[0][0]
 			expect(callArgs.headers).toBeUndefined()
 			// The silent drop is a diagnosis trap (bare 401 behind an auth
-			// proxy), so the gate warns - without echoing the key itself.
+			// proxy), so the gate warns - without echoing the key or any URL
+			// credential/query material, only the protocol/host:port origin.
+			const warned = warnSpy.mock.calls.flat().join(" ")
 			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("ollamaApiKey"))
-			expect(warnSpy.mock.calls.flat().join(" ")).not.toContain("test-api-key-123")
+			expect(warned).not.toContain("test-api-key-123")
+			expect(warned).toContain("ollama.example.com:11434")
+			expect(warned).not.toContain("secret")
+			expect(warned).not.toContain("abc123")
+			expect(warned).not.toContain("token")
 		})
 
 		it("should not warn when the API key is attached to a secure endpoint", async () => {
@@ -2235,12 +2243,16 @@ describe("NativeOllamaHandler", () => {
 			const handler = new NativeOllamaHandler({
 				apiModelId: "llama2",
 				ollamaModelId: "llama2",
-				ollamaBaseUrl: "https://ollama.example.com:11434",
+				// Credentials on a secure endpoint must not trigger the drop
+				// warning either.
+				ollamaBaseUrl: "https://user:secret@ollama.example.com:11434",
 				ollamaApiKey: "test-api-key-123",
 			})
 
 			await handler.completePrompt("Test prompt")
 
+			const callArgs = OllamaMock.mock.calls[0][0]
+			expect(callArgs.headers).toEqual({ Authorization: "Bearer test-api-key-123" })
 			expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("ollamaApiKey"))
 		})
 

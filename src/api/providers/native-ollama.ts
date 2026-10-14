@@ -271,9 +271,20 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			} else {
 				// The credential is dropped to avoid leaking it over plaintext
 				// HTTP (CWE-319); surface the drop so a bare 401 from an auth
-				// proxy is diagnosable. The key itself is never logged.
+				// proxy is diagnosable. Neither the key nor the raw URL is
+				// logged: a base URL can embed credentials or sensitive query
+				// values, so only the WHATWG origin (protocol/host:port) is
+				// echoed, and an unparseable host falls back to a fixed phrase.
+				let endpointOrigin = "the configured endpoint"
+				try {
+					const parsed = new URL(clientOptions.host)
+					endpointOrigin = `${parsed.protocol}//${parsed.host}`
+				} catch {
+					// Unparseable host: keep the fixed phrase rather than echo
+					// a raw value that could carry credentials.
+				}
 				console.warn(
-					`[NativeOllama] ollamaApiKey is set but the endpoint "${clientOptions.host}" is not https or loopback; the Authorization header is not sent (the credential would leak over plaintext). Use an https:// or loopback endpoint to authenticate.`,
+					`[NativeOllama] ollamaApiKey is set but the endpoint "${endpointOrigin}" is not https or loopback; the Authorization header is not sent (the credential would leak over plaintext). Use an https:// or loopback endpoint to authenticate.`,
 				)
 			}
 		}
