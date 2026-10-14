@@ -7,7 +7,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { ClineProvider } from "../ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
 import { Task } from "../../task/Task"
-import type { HistoryItem, ProviderName } from "@roo-code/types"
+import type { HistoryItem } from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 vi.mock("vscode", () => ({
@@ -1163,7 +1163,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			])
 
 			// Mock updateTaskHistory
-			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
 				return Promise.resolve([])
 			})
 

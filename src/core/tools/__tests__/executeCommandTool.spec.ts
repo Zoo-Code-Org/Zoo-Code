@@ -131,7 +131,7 @@ describe("executeCommandTool", () => {
 
 		// Setup vscode config mock
 		const mockConfig = {
-			get: vitest.fn().mockImplementation((key: string, defaultValue: any) => {
+			get: vitest.fn().mockImplementation((_key: string, defaultValue: any) => {
 				return defaultValue
 			}),
 		}
