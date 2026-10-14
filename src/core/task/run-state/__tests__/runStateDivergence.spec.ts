@@ -240,6 +240,15 @@ describe("divergenceKey event payload", () => {
 	it("is the same for a repeated identical event", () => {
 		expect(divergenceKey(rejectedAsk(1))).toBe(divergenceKey(rejectedAsk(1)))
 	})
+
+	it("is the same when the event properties are built in a different order", () => {
+		const reordered = {
+			...rejectedAsk(1),
+			event: { ask: { askTs: 1, tag: "approval" }, tag: "askStarted" } as const,
+		}
+
+		expect(divergenceKey(reordered)).toBe(divergenceKey(rejectedAsk(1)))
+	})
 })
 
 describe("isDivergenceCheckEnabled", () => {
@@ -303,6 +312,15 @@ describe("reportDivergence", () => {
 			streamTag: "none",
 			abort: false,
 		})
+	})
+
+	it("still logs when telemetry is not created", () => {
+		vi.spyOn(TelemetryService, "hasInstance").mockReturnValue(false)
+
+		reportDivergence("task-1", mismatch)
+
+		expect(warn).toHaveBeenCalledTimes(1)
+		expect(captureEvent).not.toHaveBeenCalled()
 	})
 
 	it("counts a tagged divergence on the known-race metric with its race ID", () => {

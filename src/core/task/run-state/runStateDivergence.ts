@@ -35,8 +35,13 @@ export function isDivergenceCheckEnabled(releaseChannel: string, extensionMode: 
 	)
 }
 
+const sortKeys = (_key: string, value: unknown): unknown =>
+	value && typeof value === "object" && !Array.isArray(value)
+		? Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : 1)))
+		: value
+
 export const divergenceKey = (d: Divergence): string =>
-	`${d.kind}:${JSON.stringify(d.event)}:${d.mismatched.join(",")}:${d.state.phase}:${d.state.latches.abort}`
+	`${d.kind}:${JSON.stringify(d.event, sortKeys)}:${d.mismatched.join(",")}:${d.state.phase}:${d.state.latches.abort}`
 
 export function findDivergences(input: {
 	event: RunEvent
