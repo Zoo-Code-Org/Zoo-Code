@@ -9,15 +9,16 @@
 export function mergeAbortSignalAndTimeout(externalSignal?: AbortSignal, timeoutMs?: number): AbortSignal | undefined {
 	// Node's AbortSignal.timeout() throws ERR_OUT_OF_RANGE for non-integer
 	// delays (Infinity) and clamps delays above 2^31-1 ms to 1 ms, which would
-	// abort almost immediately; treat non-finite values as "no timeout" and
-	// cap the rest.
+	// abort almost immediately; treat non-finite values as "no timeout",
+	// round fractional delays up to whole milliseconds (uint32 validation
+	// throws for 1500.5), and cap the rest.
 	const hasTimeout = typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
 
 	if (!hasTimeout) {
 		return externalSignal
 	}
 
-	const timeoutSignal = AbortSignal.timeout(Math.min(timeoutMs, 2_147_483_647))
+	const timeoutSignal = AbortSignal.timeout(Math.min(Math.max(1, Math.ceil(timeoutMs)), 2_147_483_647))
 
 	if (!externalSignal) {
 		return timeoutSignal
