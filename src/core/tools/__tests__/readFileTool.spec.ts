@@ -22,7 +22,6 @@ import type { Task } from "../../task/Task"
 
 import { isBinaryFile } from "isbinaryfile"
 
-
 import { readFileTool, ReadFileTool } from "../ReadFileTool"
 import { ObservationRegistry } from "../../task/observationRegistry"
 import { formatResponse } from "../../prompts/responses"
