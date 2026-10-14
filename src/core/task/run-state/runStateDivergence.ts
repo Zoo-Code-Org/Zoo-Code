@@ -36,7 +36,7 @@ export function isDivergenceCheckEnabled(releaseChannel: string, extensionMode: 
 }
 
 export const divergenceKey = (d: Divergence): string =>
-	`${d.kind}:${d.event.tag}:${d.mismatched.join(",")}:${d.state.phase}:${d.state.latches.abort}`
+	`${d.kind}:${JSON.stringify(d.event)}:${d.mismatched.join(",")}:${d.state.phase}:${d.state.latches.abort}`
 
 export function findDivergences(input: {
 	event: RunEvent

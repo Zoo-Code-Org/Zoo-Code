@@ -223,6 +223,25 @@ describe("divergenceKey rejections", () => {
 	})
 })
 
+describe("divergenceKey event payload", () => {
+	const state = drive([{ tag: "initialized" }, { tag: "abortRequested", abandoned: false }])
+	const rejectedAsk = (askTs: number) => ({
+		kind: "rejection" as const,
+		event: { tag: "askStarted", ask: { tag: "approval", askTs } } as const,
+		state,
+		fields: idle,
+		mismatched: [],
+	})
+
+	it("differs for rejected events with different payloads", () => {
+		expect(divergenceKey(rejectedAsk(1))).not.toBe(divergenceKey(rejectedAsk(2)))
+	})
+
+	it("is the same for a repeated identical event", () => {
+		expect(divergenceKey(rejectedAsk(1))).toBe(divergenceKey(rejectedAsk(1)))
+	})
+})
+
 describe("isDivergenceCheckEnabled", () => {
 	it.each([
 		["stable", 1, false],
