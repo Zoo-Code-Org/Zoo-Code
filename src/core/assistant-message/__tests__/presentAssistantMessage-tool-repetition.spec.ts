@@ -4,7 +4,17 @@ import { providerIdentifiers } from "@roo-code/types"
 
 import type { ToolUse } from "../../../shared/tools"
 import { ToolRepetitionDetector } from "../../tools/ToolRepetitionDetector"
+import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
 import { presentAssistantMessage } from "../presentAssistantMessage"
+
+// The presenter validates against this frozen request snapshot; the mocked
+// validateToolUse never reads policy fields, and the provider-state double in
+// the task mock stays inert.
+const baseSnapshot: RequestPolicySnapshot = {
+	disabledTools: [],
+	customModes: [],
+	experiments: {},
+}
 
 type ToolBlock = {
 	type: string
@@ -194,7 +204,10 @@ describe("presentAssistantMessage - Tool Repetition Detection", () => {
 	}
 
 	async function present() {
-		await presentAssistantMessage(mockTask as unknown as Parameters<typeof presentAssistantMessage>[0])
+		await presentAssistantMessage(
+			mockTask as unknown as Parameters<typeof presentAssistantMessage>[0],
+			baseSnapshot,
+		)
 	}
 
 	/**
@@ -297,7 +310,12 @@ describe("presentAssistantMessage - Tool Repetition Detection", () => {
 			expect.stringContaining("tools:toolRepetitionLimitReached"),
 		)
 		expect(readFileHandle).not.toHaveBeenCalled()
-		expect(captureConsecutiveMistakeError).toHaveBeenCalledWith("test-task-id")
+		expect(captureConsecutiveMistakeError).toHaveBeenCalledWith(
+			"test-task-id",
+			"tool_repetition",
+			HARD_LIMIT,
+			HARD_LIMIT,
+		)
 		expect(findToolResult(nextToolCallId)).toBeDefined()
 	})
 
@@ -361,8 +379,14 @@ describe("presentAssistantMessage - Tool Repetition Detection", () => {
 		expect(readFileHandle).not.toHaveBeenCalled()
 
 		// Telemetry escalation should have fired for a hard block.
-		expect(captureConsecutiveMistakeError).toHaveBeenCalledWith("test-task-id")
-		expect(captureException).toHaveBeenCalled()
+		expect(captureConsecutiveMistakeError).toHaveBeenCalledWith(
+			"test-task-id",
+			"tool_repetition",
+			HARD_LIMIT,
+			HARD_LIMIT,
+		)
+		// The named event is the single capture: no duplicate exception.
+		expect(captureException).not.toHaveBeenCalled()
 
 		// A tool_result describing the repetition limit should have been pushed.
 		const toolResult = findToolResult(toolCallId)

@@ -4,12 +4,13 @@ import axios from "axios"
 
 import {
 	type ModelInfo,
+	type ModelRecord,
 	openAiModelInfoSaneDefaults,
 	LMSTUDIO_DEFAULT_TEMPERATURE,
 	providerIdentifiers,
 } from "@roo-code/types"
 
-import type { ApiHandlerOptions } from "../../shared/api"
+import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import { TagMatcher } from "../../utils/tag-matcher"
 
@@ -17,8 +18,14 @@ import { convertToOpenAiMessages } from "../transform/openai-format"
 import { ApiStream } from "../transform/stream"
 
 import { BaseProvider } from "./base-provider"
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import type {
+	SingleCompletionHandler,
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+} from "../index"
 import { getModelsFromCache } from "./fetchers/modelCache"
+import { getLMStudioModels } from "./fetchers/lmstudio"
 import { handleOpenAIError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
@@ -39,6 +46,15 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 			apiKey: apiKey,
 			timeout: this.timeoutMs,
 		})
+	}
+
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: true, keyScoped: false, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getLMStudioModels(options.baseUrl, ...fetchOpts)
 	}
 
 	override async *createMessage(
@@ -188,7 +204,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				inputTokens,
 				outputTokens,
 			} as const
-		} catch (error) {
+		} catch {
 			throw new Error(
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
 			)
@@ -196,10 +212,13 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 	}
 
 	override getModel(): { id: string; info: ModelInfo } {
-		const models = getModelsFromCache({
-			provider: providerIdentifiers.lmstudio,
-			baseUrl: this.options.lmStudioBaseUrl,
-		})
+		const models = getModelsFromCache(
+			{
+				provider: providerIdentifiers.lmstudio,
+				baseUrl: this.options.lmStudioBaseUrl,
+			},
+			this,
+		)
 		if (models && this.options.lmStudioModelId && models[this.options.lmStudioModelId]) {
 			return {
 				id: this.options.lmStudioModelId,
@@ -213,7 +232,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		}
 	}
 
-	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
 		try {
 			// Create params object with optional draft model
 			const params: any = {
@@ -235,7 +254,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				throw handleOpenAIError(error, this.providerName)
 			}
 			return response.choices[0]?.message.content || ""
-		} catch (error) {
+		} catch {
 			throw new Error(
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
 			)
@@ -252,7 +271,7 @@ export async function getLmStudioModels(baseUrl = "http://localhost:1234") {
 		const response = await axios.get(`${baseUrl}/v1/models`)
 		const modelsArray = response.data?.data?.map((model: any) => model.id) || []
 		return [...new Set<string>(modelsArray)]
-	} catch (error) {
+	} catch {
 		return []
 	}
 }

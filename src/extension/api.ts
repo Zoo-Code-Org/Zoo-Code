@@ -31,7 +31,6 @@ import type { ClineProviderFactory } from "../core/webview/ClineProviderFactory"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
 import { getCommands } from "../services/command/commands"
-import { getModels } from "../api/providers/fetchers/modelCache"
 
 export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	private readonly outputChannel: vscode.OutputChannel
@@ -124,7 +123,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 									argumentHint: cmd.argumentHint,
 								})),
 							])
-						} catch (error) {
+						} catch {
 							sendResponse(RooCodeEventName.CommandsResponse, [[]])
 						}
 
@@ -133,7 +132,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 						try {
 							const modes = await this.sidebarProvider.getModes()
 							sendResponse(RooCodeEventName.ModesResponse, [modes])
-						} catch (error) {
+						} catch {
 							sendResponse(RooCodeEventName.ModesResponse, [[]])
 						}
 
@@ -141,7 +140,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 					case TaskCommandName.GetModels:
 						try {
 							sendResponse(RooCodeEventName.ModelsResponse, [{}])
-						} catch (error) {
+						} catch {
 							sendResponse(RooCodeEventName.ModelsResponse, [{}])
 						}
 
@@ -532,7 +531,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 					this.outputChannel.appendLine(
 						JSON.stringify(
 							arg,
-							(key, value) => {
+							(_key, value) => {
 								if (typeof value === "bigint") return `BigInt(${value})`
 								if (typeof value === "function") return `Function: ${value.name || "anonymous"}`
 								if (typeof value === "symbol") return value.toString()
@@ -541,7 +540,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 							2,
 						),
 					)
-				} catch (error) {
+				} catch {
 					this.outputChannel.appendLine(`[Non-serializable object: ${Object.prototype.toString.call(arg)}]`)
 				}
 			}

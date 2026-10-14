@@ -980,6 +980,71 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
 	})
 
+	it("keeps has-conflicts while mergeability is unknown and required CI is missing (#2025)", async () => {
+		// A conflicting PR gets no merge-ref CI run, so its required checks are
+		// missing. Unknown mergeability must not read that as a reason to strip
+		// an existing has-conflicts label; the other state labels still clear.
+		const result = await runWorkflow({
+			eventName: "push",
+			mergeable: null,
+			mergeableState: "unknown",
+			labels: ["has-conflicts", "awaiting-author"],
+			omitRequiredRuns: true,
+		})
+
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-author" }))
+		expect(latestGateStatus(result)?.description).toContain("required CI checks")
+	})
+
+	it("keeps has-conflicts while mergeability is unknown and required CI has failed (#2025)", async () => {
+		const result = await runWorkflow({
+			mergeable: null,
+			mergeableState: "unknown",
+			labels: ["has-conflicts", "awaiting-author"],
+			requiredConclusion: "failure",
+		})
+
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-author" }))
+		expect(latestGateStatus(result)?.description).toContain("failing required CI checks")
+	})
+
+	it("does not add has-conflicts while mergeability is unknown and required CI is missing (#2025)", async () => {
+		const result = await runWorkflow({
+			mergeable: null,
+			mergeableState: "unknown",
+			labels: ["awaiting-author"],
+			omitRequiredRuns: true,
+		})
+
+		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-author" }))
+		expect(latestGateStatus(result)?.description).toContain("required CI checks")
+	})
+
+	it("strips has-conflicts when mergeability is known clean and required CI is missing (#2025)", async () => {
+		const result = await runWorkflow({
+			labels: ["has-conflicts"],
+			omitRequiredRuns: true,
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+		expect(latestGateStatus(result)?.description).toContain("required CI checks")
+	})
+
+	it("labels has-conflicts when mergeability is known dirty even with required CI missing (#2025)", async () => {
+		const result = await runWorkflow({
+			conflict: true,
+			omitRequiredRuns: true,
+		})
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+		expect(latestGateStatus(result)?.description).toContain("merge conflicts")
+	})
+
 	it("uses a legacy commit status for an unpinned required context", async () => {
 		const result = await runWorkflow({
 			requiredIntegrationId: null,
@@ -2407,14 +2472,14 @@ describe("PR review-state workflow", () => {
 			expect(result.setFailed).not.toHaveBeenCalled()
 		})
 
-		it("does not clear an individual blocker for a team review request", async () => {
+		it("does not clear an individual blocker for a team review request, even from a third party", async () => {
 			const result = await runWorkflow({
-				permissions: { maintainer: "write" },
+				permissions: { maintainer: "write", "other-maintainer": "write" },
 				reviews: [coderabbitApproval, staleMaintainerChangeRequest],
 				timelineEvents: [
 					{
 						event: "review_requested",
-						actor: "contributor",
+						actor: "other-maintainer",
 						requestedTeam: "maintainers",
 						createdAt: REVIEWED_AT + 2_000,
 					},
@@ -2424,8 +2489,9 @@ describe("PR review-state workflow", () => {
 			expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
 		})
 
-		it("does not clear the blocker when a non-author re-requests review", async () => {
+		it("clears the blocker when a third party re-requests review (#2026)", async () => {
 			const result = await runWorkflow({
+				labels: ["awaiting-author"],
 				permissions: { maintainer: "write", "other-maintainer": "write" },
 				reviews: [coderabbitApproval, staleMaintainerChangeRequest],
 				timelineEvents: [
@@ -2438,17 +2504,44 @@ describe("PR review-state workflow", () => {
 				],
 			})
 
-			expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
+			expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-author" }))
+			expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
+			expect(latestGateStatus(result)?.state).toBe("success")
 		})
 
-		it("does not clear the blocker for a re-request that predates the blocking review", async () => {
+		it("adds the CodeRabbit labels after a third-party re-request clears the block (#2026)", async () => {
 			const result = await runWorkflow({
-				permissions: { maintainer: "write" },
+				labels: ["awaiting-author"],
+				permissions: { maintainer: "write", "other-maintainer": "write" },
+				reviews: [staleMaintainerChangeRequest],
+				timelineEvents: [
+					{
+						event: "review_requested",
+						actor: "other-maintainer",
+						requestedReviewer: "maintainer",
+						createdAt: REVIEWED_AT + 2_000,
+					},
+				],
+			})
+
+			expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-author" }))
+			expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
+			expect(result.addLabels).toHaveBeenCalledWith(
+				expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+			)
+			expect(result.addLabels).not.toHaveBeenCalledWith(
+				expect.objectContaining({ labels: ["awaiting-maintainer"] }),
+			)
+		})
+
+		it("does not clear the blocker for a re-request that predates the blocking review, even from a third party", async () => {
+			const result = await runWorkflow({
+				permissions: { maintainer: "write", "other-maintainer": "write" },
 				reviews: [coderabbitApproval, staleMaintainerChangeRequest],
 				timelineEvents: [
 					{
 						event: "review_requested",
-						actor: "contributor",
+						actor: "other-maintainer",
 						requestedReviewer: "maintainer",
 						createdAt: REVIEWED_AT + 500,
 					},

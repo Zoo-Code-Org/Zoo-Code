@@ -1,14 +1,16 @@
 import OpenAI from "openai"
 
-import { moonshotModels, moonshotDefaultModelId, type ModelInfo } from "@roo-code/types"
+import { moonshotModels, moonshotDefaultModelId, type ModelInfo, type ModelRecord } from "@roo-code/types"
 
-import type { ApiHandlerOptions } from "../../shared/api"
+import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import type { ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 
+import type { ModelCacheScope } from "../index"
 import { OpenAiHandler } from "./openai"
 import { NOT_PROVIDED } from "./constants"
+import { getMoonshotModels } from "./fetchers/moonshot"
 
 export class MoonshotHandler extends OpenAiHandler {
 	constructor(options: ApiHandlerOptions) {
@@ -21,6 +23,15 @@ export class MoonshotHandler extends OpenAiHandler {
 			openAiModelId: options.apiModelId ?? moonshotDefaultModelId,
 			openAiBaseUrl: options.moonshotBaseUrl || "https://api.moonshot.ai/v1",
 		})
+	}
+
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: true, keyScoped: true, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getMoonshotModels(options.baseUrl, options.apiKey, ...fetchOpts)
 	}
 
 	/**
