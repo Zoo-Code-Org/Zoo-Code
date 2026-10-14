@@ -1964,7 +1964,7 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			// A string in storage is corrupt: the fresh-read guard must not spread it.
-			mockContext.globalState.update("viewStates", "corrupted-storage-value")
+			await mockContext.globalState.update("viewStates", "corrupted-storage-value")
 			expect(provider["getPersistedViewStates"]({ fresh: true })).toEqual({})
 			await provider.dispose()
 		})
@@ -2064,7 +2064,7 @@ describe("ClineProvider", () => {
 			await provider["setViewStateId"]("stable-sidebar-view")
 			// The cache only knows this view's entry; storage gains an extra view directly.
 			await provider.contextProxy.setValue("viewStates", { "stable-sidebar-view": { mode: "architect" } })
-			mockContext.globalState.update("viewStates", {
+			await mockContext.globalState.update("viewStates", {
 				"stable-sidebar-view": { mode: "architect" },
 				"stable-editor-view": { mode: "code" },
 			})
@@ -3021,9 +3021,11 @@ describe("ClineProvider", () => {
 				// nor the sticky-name rewrite may touch it.
 				expect(siblingTask.updateApiConfiguration).not.toHaveBeenCalled()
 				expect(siblingTask.setTaskApiConfigName).not.toHaveBeenCalled()
-				// Let queued view-local persistence settle while the console spies are
-				// still installed, so teardown has no pending writes.
-				await new Promise((resolve) => setTimeout(resolve, 50))
+				// Wait on the serialized view-state write queue that every
+				// viewStates mutation goes through, so queued persistence finishes
+				// while the console spies are still installed and teardown has no
+				// pending writes.
+				await ClineProvider["persistedViewStateWriteQueue"]
 			} finally {
 				await sibling.dispose()
 				await provider.dispose()
@@ -8540,9 +8542,11 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				// ...but the task runs under another profile: its handler must not be
 				// switched to the saved profile's settings.
 				expect(siblingTask.updateApiConfiguration).not.toHaveBeenCalled()
-				// Let queued view-local persistence settle while the console spies are
-				// still installed, so teardown has no pending writes.
-				await new Promise((resolve) => setTimeout(resolve, 50))
+				// Wait on the serialized view-state write queue that every
+				// viewStates mutation goes through, so queued persistence finishes
+				// while the console spies are still installed and teardown has no
+				// pending writes.
+				await ClineProvider["persistedViewStateWriteQueue"]
 			} finally {
 				await sibling.dispose()
 			}
@@ -8606,6 +8610,66 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			expect(state.apiConfiguration.apiKey).toBe("k")
 			expect(state.apiConfiguration.apiModelId).toBeUndefined()
 			expect(state.apiConfiguration.awsRegion).toBeUndefined()
+		})
+
+		it("keeps a pinned view's served settings aligned with its pin when another view activates a different profile", async () => {
+			// Defensive: the doubles in this suite can leave console writes pending
+			// at worker teardown.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				// This view is pinned to profile A with no overlay: its served
+				// settings come from the shared store, which the sibling's activation
+				// is about to overwrite with profile B's settings.
+				provider["viewLocalState"].currentApiConfigName = "pinned-a"
+				provider["viewLocalState"].apiConfiguration = undefined
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+				const profileA = { apiProvider: providerIdentifiers.anthropic, apiKey: "a-key" }
+				const managerDouble = {
+					activateProfile: vi.fn().mockResolvedValue({
+						name: "profile-b",
+						id: "id-b",
+						apiProvider: providerIdentifiers.bedrock,
+						apiKey: "b-key",
+					}),
+					listConfig: vi.fn().mockResolvedValue([]),
+					setModeConfig: vi.fn(),
+					getProfile: vi
+						.fn()
+						.mockImplementation(async ({ name }: { name: string }) =>
+							name === "pinned-a"
+								? { name: "pinned-a", ...profileA }
+								: { name, apiProvider: providerIdentifiers.bedrock },
+						),
+				}
+				// @ts-ignore - Replace providerSettingsManager with a test double.
+				provider.providerSettingsManager = managerDouble
+				// @ts-ignore - The sibling resolves the pin through its own manager.
+				sibling.providerSettingsManager = managerDouble
+				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+
+				await sibling.activateProviderProfile({ name: "profile-b" })
+
+				// The activation snapshotted profile A's settings into this view's
+				// overlay before replacing the shared store, so getState() still
+				// serves the pinned profile's configuration.
+				const state = await provider.getState()
+				expect(state.currentApiConfigName).toBe("pinned-a")
+				expect(state.apiConfiguration.apiProvider).toBe(providerIdentifiers.anthropic)
+				expect(state.apiConfiguration.apiKey).toBe("a-key")
+			} finally {
+				await sibling.dispose()
+			}
 		})
 	})
 })
