@@ -627,7 +627,7 @@ describe("VertexHandler", () => {
 				vertexRegion: "us-central1",
 			})
 
-			const mockCreate = vitest.fn().mockImplementation(async (options) =>
+			const mockCreate = vitest.fn().mockImplementation(async (_options) =>
 				asyncStreamFrom([
 					{
 						type: "message_start",
@@ -676,7 +676,7 @@ describe("VertexHandler", () => {
 			]
 
 			const stream = handler.createMessage(systemPrompt, messagesWithReasoning)
-			const chunks = await collectStream(stream)
+			await collectStream(stream)
 
 			// Verify the API was called with filtered messages (no reasoning blocks)
 			const calledMessages = mockCreate.mock.calls[0][0].messages
@@ -703,7 +703,7 @@ describe("VertexHandler", () => {
 				vertexRegion: "us-central1",
 			})
 
-			const mockCreate = vitest.fn().mockImplementation(async (options) =>
+			const mockCreate = vitest.fn().mockImplementation(async (_options) =>
 				asyncStreamFrom([
 					{
 						type: "message_start",
@@ -740,7 +740,7 @@ describe("VertexHandler", () => {
 			]
 
 			const stream = handler.createMessage(systemPrompt, messagesWithOnlyReasoning)
-			const chunks = await collectStream(stream)
+			await collectStream(stream)
 
 			// Verify empty message was filtered out
 			const calledMessages = mockCreate.mock.calls[0][0].messages
@@ -752,7 +752,7 @@ describe("VertexHandler", () => {
 			const abortedController = new AbortController()
 			abortedController.abort()
 
-			const mockCreate = vitest
+			vitest
 				.spyOn(handler["client"].messages, "create")
 				.mockImplementation((_params: unknown, options?: { signal?: AbortSignal | null }) => {
 					if (options?.signal?.aborted) {
@@ -775,7 +775,7 @@ describe("VertexHandler", () => {
 		it("should abort the request when the external signal aborts mid-flight", async () => {
 			const controller = new AbortController()
 
-			const mockCreate = vitest.spyOn(handler["client"].messages, "create").mockImplementation(
+			vitest.spyOn(handler["client"].messages, "create").mockImplementation(
 				(_params: unknown, options?: { signal?: AbortSignal | null }) =>
 					new Promise<void>((_resolve, reject) => {
 						const signal = options?.signal

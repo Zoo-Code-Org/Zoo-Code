@@ -881,13 +881,6 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		try {
 			const modelConfig = this.getModel()
 
-			// For completePrompt, thinking is typically not used, but we should still check
-			// if thinking was somehow enabled in the model config
-			const thinkingEnabled =
-				shouldUseReasoningBudget({ model: modelConfig.info, settings: this.options }) &&
-				modelConfig.reasoning &&
-				modelConfig.reasoningBudget
-
 			const inferenceConfig: BedrockInferenceConfig = {
 				maxTokens: modelConfig.maxTokens || (modelConfig.info.maxTokens as number),
 				// Claude 4.7+ (including 4.8) removed sampling parameters entirely —
@@ -1088,7 +1081,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		 * match[4] - The resource ID (e.g., "anthropic.claude-3-sonnet-20240229-v1:0")
 		 */
 
-		const arnRegex = /^arn:[^:]+:(?:bedrock|sagemaker):([^:]+):([^:]*):(?:([^\/]+)\/([\w\.\-:]+)|([^\/]+))$/
+		const arnRegex = /^arn:[^:]+:(?:bedrock|sagemaker):([^:]+):([^:]*):(?:([^/]+)\/([\w.\-:]+)|([^/]+))$/
 		const match = arn.match(arnRegex)
 
 		if (match && match[1] && match[3] && match[4]) {
@@ -1367,21 +1360,6 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			(modelConfig?.info as any)?.cachableFields &&
 			(modelConfig?.info as any)?.cachableFields?.length > 0
 		)
-	}
-
-	/**
-	 * Removes any existing cachePoint nodes from content blocks
-	 */
-	private removeCachePoints(content: any): any {
-		if (Array.isArray(content)) {
-			return content.map((block) => {
-				// Use destructuring to remove cachePoint property
-				const { cachePoint: _, ...rest } = block
-				return rest
-			})
-		}
-
-		return content
 	}
 
 	/************************************************************************************

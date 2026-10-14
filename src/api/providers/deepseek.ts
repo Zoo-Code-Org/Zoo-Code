@@ -6,7 +6,6 @@ import {
 	deepSeekDefaultModelId,
 	DEEP_SEEK_DEFAULT_TEMPERATURE,
 	OPENAI_AZURE_AI_INFERENCE_PATH,
-	type ModelInfo,
 	type ModelRecord,
 	DeepSeekModelId,
 } from "@roo-code/types"

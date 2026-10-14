@@ -2,7 +2,6 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import { Stream as AnthropicStream } from "@anthropic-ai/sdk/streaming"
 import { CacheControlEphemeral } from "@anthropic-ai/sdk/resources"
 import { withFinallyCleanup } from "./stream-cleanup"
-import OpenAI from "openai"
 
 import {
 	type ModelInfo,
@@ -20,7 +19,6 @@ import { ApiStream } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 import { filterNonAnthropicBlocks } from "../transform/anthropic-filter"
 import { getAnthropicProviderReasoning } from "../transform/reasoning"
-import { handleProviderError } from "./utils/error-handler"
 
 import { BaseProvider } from "./base-provider"
 import { bridgeExternalAbortSignal } from "./utils/abort-signal"
