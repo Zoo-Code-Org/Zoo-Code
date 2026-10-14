@@ -1,0 +1,12 @@
+fix(u4): align the unit with main's unused-vars re-enable
+
+#2038 turned @typescript-eslint/no-unused-vars back on in src and removed
+the tree's dead bindings. Replaying this unit onto that main exposed the
+bindings this unit's own code left unused once main's deletions landed:
+drop the ReadFileTool/SafeWriteTextOptions/lockfile imports and the
+never-read committed flag, prefix the four write-path destructurings whose
+value no assertion reads, and restore the safeWriteJson import main pruned
+(main had no reader; this unit's McpHub tests do).
+
+No behavior change: 357 tests green across the unit's specs, eslint clean,
+tsc adds no new errors beyond the pre-existing local donor-package drift.

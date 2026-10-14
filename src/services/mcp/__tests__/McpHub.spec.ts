@@ -33,6 +33,7 @@ vi.mock("fs/promises", () => {
 })
 
 // Import safeWriteJson to use in mocks
+import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 // Mock safeWriteJson
 vi.mock("../../../utils/safeWriteJson", () => ({
