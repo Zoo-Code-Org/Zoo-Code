@@ -2,17 +2,8 @@
 
 import * as vscode from "vscode"
 
-import {
-	type ExtensionMessage,
-	type ExtensionState,
-	type ProviderSettingsEntry,
-	type ProviderSettingsWithId,
-	type RooCodeSettings,
-	RooCodeEventName,
-	providerIdentifiers,
-} from "@roo-code/types"
+import { type ProviderSettingsWithId, type RooCodeSettings, providerIdentifiers } from "@roo-code/types"
 
-import { defaultModeSlug } from "../../../shared/modes"
 import { ContextProxy } from "../../config/ContextProxy"
 import { McpServerManager } from "../../../services/mcp/McpServerManager"
 import { ClineProvider } from "../ClineProvider"
@@ -660,21 +651,6 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			dispose: vi.fn(),
 		})
 	})
-
-	const createMockWebviewView = (postMessage = vi.fn()) =>
-		Object.assign({} as vscode.WebviewView, {
-			webview: {
-				postMessage,
-				html: "",
-				options: {},
-				onDidReceiveMessage: vi.fn(),
-				asWebviewUri: vi.fn(),
-				cspSource: "vscode-webview://test-csp-source",
-			},
-			visible: true,
-			onDidChangeVisibility: vi.fn(() => ({ dispose: vi.fn() })),
-			onDidDispose: vi.fn(() => ({ dispose: vi.fn() })),
-		})
 
 	describe("persisted view state pruning edge cases", () => {
 		it("should drop the entry without updatedAt first when the cap is exceeded", async () => {
