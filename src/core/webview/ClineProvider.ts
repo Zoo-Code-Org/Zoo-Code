@@ -2657,9 +2657,6 @@ export class ClineProvider
 				} else {
 					const listApiConfigMeta = await this.providerSettingsManager.listConfig()
 					await this.updateGlobalState("listApiConfigMeta", listApiConfigMeta)
-					// Stryker disable next-line CallExpression,ObjectLiteral: _updateViewLocalStateFromMutation
-					// applies only mode, currentApiConfigName, apiConfiguration and provider-settings keys, so a
-					// listApiConfigMeta-only payload (deleted call or empty object) is a behavior-preserving no-op.
 					this._updateViewLocalStateFromMutation({ listApiConfigMeta })
 
 					// A save that does not activate still changes the profile's settings, and
@@ -2869,7 +2866,6 @@ export class ClineProvider
 		const affected = ClineProvider.getAllInstances().filter(
 			(instance) =>
 				instance !== this &&
-				// Stryker disable next-line ConditionalExpression: dropping this term admits only undefined-pin instances, which the callback's pin guard absorbs (returns before any write); the filter-to-guard chain is synchronous (equivalent mutant)
 				instance.pinnedProfileName !== undefined &&
 				instance.pinnedProfileName !== activatedProfileName &&
 				instance.viewLocalState.apiConfiguration === undefined,
@@ -2881,7 +2877,6 @@ export class ClineProvider
 				// The guard below is a safety net only: the filter predicate above guarantees a
 				// defined pin for every instance reaching this callback, and the filter-to-guard
 				// chain is synchronous (no await), so no reachable state trips it.
-				// Stryker disable next-line ConditionalExpression,BlockStatement: guard body unreachable - the filter predicate guarantees a defined pin and the filter-to-guard chain is synchronous (equivalent mutant)
 				if (pinName === undefined) {
 					return
 				}
