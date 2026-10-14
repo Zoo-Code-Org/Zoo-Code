@@ -8,8 +8,6 @@ import * as fs from "fs/promises"
 import * as yaml from "yaml"
 import * as vscode from "vscode"
 
-import type { ModeConfig } from "@roo-code/types"
-
 import { fileExistsAtPath } from "../../../utils/fs"
 import { getWorkspacePath } from "../../../utils/path"
 import { GlobalFileNames } from "../../../shared/globalFileNames"
@@ -132,7 +130,7 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 
 			// Check that no path starts with rules-test-mode
 			rulesFiles.forEach((file: any) => {
-				expect(file.relativePath).not.toMatch(/^rules-test-mode[\/\\]/)
+				expect(file.relativePath).not.toMatch(/^rules-test-mode[/\\]/)
 			})
 
 			// Verify the actual paths are just the file names (without rules folder)
