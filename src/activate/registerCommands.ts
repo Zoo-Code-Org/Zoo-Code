@@ -491,14 +491,16 @@ export const createClineTabPanel = async ({
 		await tabProvider.resolveWebviewView(newPanel)
 	} catch (error) {
 		// Initialization failed: drop the half-registered panel from the live
-		// registry and the tracked ref (if this panel is still the tracked one),
-		// and dispose the provider so the failed surface leaves no listeners or
-		// state behind. The panel's own disposal listener (installed above) has
-		// already handled a user close that landed during initialization.
+		// registry and dispose the provider so the failed surface leaves no
+		// listeners or state behind. Disposing the provider disposes the panel
+		// (resolveWebviewView assigns this.view before its first await), whose
+		// disposal listener (installed above) then re-points the tracked ref at
+		// the best remaining live panel - or clears it when none remains.
+		// Clearing the ref here first would make that handler skip the
+		// re-pointing and leave getTabProvider() undefined while another tab
+		// panel is still open. A user close that landed during initialization
+		// already ran that handler.
 		liveTabPanels.delete(newPanel)
-		if (tabPanel === newPanel) {
-			setPanel(undefined, "tab")
-		}
 		await tabProvider.dispose()
 		throw error
 	}
