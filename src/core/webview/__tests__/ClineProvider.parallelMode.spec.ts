@@ -3,17 +3,13 @@
 import * as vscode from "vscode"
 
 import {
-	type ExtensionMessage,
-	type ExtensionState,
 	type ProviderSettingsEntry,
 	type ProviderSettingsWithId,
-	type RooCodeSettings,
 	PROVIDER_SETTINGS_KEYS,
 	RooCodeEventName,
 	providerIdentifiers,
 } from "@roo-code/types"
 
-import { defaultModeSlug } from "../../../shared/modes"
 import { ContextProxy } from "../../config/ContextProxy"
 import { WebviewFocusTracker } from "../WebviewFocusTracker"
 import { ClineProvider } from "../ClineProvider"
