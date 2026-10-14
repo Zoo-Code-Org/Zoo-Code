@@ -672,10 +672,16 @@ export const webviewMessageHandler = async (
 								// Skip both persistence steps: this is a launch-time repair of this
 								// view's own selection, and persisting would silently rewrite the
 								// current mode's saved profile (setModeConfig) and the task's sticky
-								// profile, which every other view reads.
+								// profile, which every other view reads. Also leave a current task that follows
+								// a different sticky profile alone: this repair must not swap that task's API
+								// handler (preserveForeignTask).
 								await provider.activateProviderProfile(
 									{ name: globalConfigName },
-									{ persistModeConfig: false, persistTaskHistory: false },
+									{
+										persistModeConfig: false,
+										persistTaskHistory: false,
+										preserveForeignTask: true,
+									},
 								)
 								// Fall through: refresh listApiConfigMeta and post listApiConfig
 								// to this webview below.

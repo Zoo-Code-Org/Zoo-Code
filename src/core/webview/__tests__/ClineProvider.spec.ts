@@ -2257,7 +2257,7 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			// A string in storage is corrupt: the fresh-read guard must not spread it.
-			mockContext.globalState.update("viewStates", "corrupted-storage-value")
+			await mockContext.globalState.update("viewStates", "corrupted-storage-value")
 			expect(provider["getPersistedViewStates"]({ fresh: true })).toEqual({})
 			await provider.dispose()
 		})
@@ -2357,7 +2357,7 @@ describe("ClineProvider", () => {
 			await provider["setViewStateId"]("stable-sidebar-view")
 			// The cache only knows this view's entry; storage gains an extra view directly.
 			await provider.contextProxy.setValue("viewStates", { "stable-sidebar-view": { mode: "architect" } })
-			mockContext.globalState.update("viewStates", {
+			await mockContext.globalState.update("viewStates", {
 				"stable-sidebar-view": { mode: "architect" },
 				"stable-editor-view": { mode: "code" },
 			})
@@ -3549,9 +3549,11 @@ describe("ClineProvider", () => {
 				// nor the sticky-name rewrite may touch it.
 				expect(siblingTask.updateApiConfiguration).not.toHaveBeenCalled()
 				expect(siblingTask.setTaskApiConfigName).not.toHaveBeenCalled()
-				// Let queued view-local persistence settle while the console spies are
-				// still installed, so teardown has no pending writes.
-				await new Promise((resolve) => setTimeout(resolve, 50))
+				// Wait on the serialized view-state write queue that every
+				// viewStates mutation goes through, so queued persistence finishes
+				// while the console spies are still installed and teardown has no
+				// pending writes.
+				await ClineProvider["persistedViewStateWriteQueue"]
 			} finally {
 				await sibling.dispose()
 				await provider.dispose()
@@ -9186,9 +9188,11 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 					apiProvider: providerIdentifiers.anthropic,
 					apiKey: "new-key",
 				})
-				// Let queued view-local persistence settle while the console spies are
-				// still installed, so teardown has no pending writes.
-				await new Promise((resolve) => setTimeout(resolve, 50))
+				// Wait on the serialized view-state write queue that every
+				// viewStates mutation goes through, so queued persistence finishes
+				// while the console spies are still installed and teardown has no
+				// pending writes.
+				await ClineProvider["persistedViewStateWriteQueue"]
 			} finally {
 				await sibling.dispose()
 			}
@@ -9248,9 +9252,11 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				// ...but the task runs under another profile: its handler must not be
 				// switched to the saved profile's settings.
 				expect(siblingTask.updateApiConfiguration).not.toHaveBeenCalled()
-				// Let queued view-local persistence settle while the console spies are
-				// still installed, so teardown has no pending writes.
-				await new Promise((resolve) => setTimeout(resolve, 50))
+				// Wait on the serialized view-state write queue that every
+				// viewStates mutation goes through, so queued persistence finishes
+				// while the console spies are still installed and teardown has no
+				// pending writes.
+				await ClineProvider["persistedViewStateWriteQueue"]
 			} finally {
 				await sibling.dispose()
 			}
@@ -9318,6 +9324,57 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 
 			// Let any deferred logging settle while the spies are installed.
 			await new Promise((resolve) => setTimeout(resolve, 50))
+		})
+		it("leaves a task following another sticky profile untouched when an activation preserves foreign tasks", async () => {
+			// Defensive: the doubles in this suite can leave console writes pending
+			// at worker teardown.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+
+			// The current task follows a different sticky profile than the one the
+			// launch-time repair activates.
+			const task = {
+				apiConfiguration: { apiProvider: providerIdentifiers.openai, apiKey: "task-key" },
+				taskApiConfigName: "task-profile",
+				updateApiConfiguration: vi.fn(),
+			}
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(
+				task as unknown as ReturnType<typeof provider.getCurrentTask>,
+			)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				activateProfile: vi.fn().mockResolvedValue({
+					name: "shared-profile",
+					id: "id-shared",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "shared-key",
+				}),
+				listConfig: vi.fn().mockResolvedValue([]),
+				setModeConfig: vi.fn(),
+			}
+
+			await provider.activateProviderProfile(
+				{ name: "shared-profile" },
+				{ persistModeConfig: false, persistTaskHistory: false, preserveForeignTask: true },
+			)
+
+			// The repair wrote the shared selection through the activation path but
+			// left the foreign task's handler and captured settings alone.
+			expect(task.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(task.apiConfiguration.apiProvider).toBe(providerIdentifiers.openai)
+
+			// Control: the same activation without preserveForeignTask does switch
+			// the task, so the skip above is attributable to the flag.
+			await provider.activateProviderProfile(
+				{ name: "shared-profile" },
+				{ persistModeConfig: false, persistTaskHistory: false },
+			)
+			expect(task.updateApiConfiguration).toHaveBeenCalledWith({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "shared-key",
+			})
 		})
 	})
 })

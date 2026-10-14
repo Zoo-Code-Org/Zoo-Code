@@ -297,7 +297,11 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		}
 		activateProviderProfile: (
 			options: { name: string },
-			activateOptions?: { persistModeConfig?: boolean; persistTaskHistory?: boolean },
+			activateOptions?: {
+				persistModeConfig?: boolean
+				persistTaskHistory?: boolean
+				preserveForeignTask?: boolean
+			},
 		) => Promise<void>
 		getMcpHub: () => unknown
 		getStateToPostToWebview: () => Promise<{ telemetrySetting: string }>
@@ -399,7 +403,7 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledTimes(1)
 		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledWith(
 			{ name: "shared-profile" },
-			{ persistModeConfig: false, persistTaskHistory: false },
+			{ persistModeConfig: false, persistTaskHistory: false, preserveForeignTask: true },
 		)
 		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith(
 			"currentApiConfigName",
@@ -423,7 +427,7 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledTimes(1)
 		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledWith(
 			{ name: "shared-profile" },
-			{ persistModeConfig: false, persistTaskHistory: false },
+			{ persistModeConfig: false, persistTaskHistory: false, preserveForeignTask: true },
 		)
 		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalledWith({ name: "first-listed" })
 		expect(mockClineProvider.saveViewState).not.toHaveBeenCalled()
@@ -445,7 +449,7 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledTimes(1)
 		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledWith(
 			{ name: "shared-profile" },
-			{ persistModeConfig: false, persistTaskHistory: false },
+			{ persistModeConfig: false, persistTaskHistory: false, preserveForeignTask: true },
 		)
 		// The repair branch would have cleared the selection with undefined.
 		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith("currentApiConfigName", undefined)
