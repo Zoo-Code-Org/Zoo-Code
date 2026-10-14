@@ -100,7 +100,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 							? `${failedParts.length} diff blocks failed to apply. Fix the failures below before retrying.\n\n`
 							: ""
 
-					formattedError = `<error_details>\n${summary}${this.formatFailedParts(failedParts)}\n</error_details>`
+					formattedError = `Unable to apply diff to file: ${absolutePath}\n\n<error_details>\n${summary}${this.formatFailedParts(failedParts)}\n</error_details>`
 				} else {
 					const errorDetails = diffResult.details ? JSON.stringify(diffResult.details, null, 2) : ""
 

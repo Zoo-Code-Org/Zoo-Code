@@ -1,4 +1,5 @@
 import fs from "fs/promises"
+import path from "path"
 
 import type { DiffResult, ToolResponse } from "../../../shared/tools"
 import type { Task } from "../../task/Task"
@@ -150,6 +151,13 @@ describe("ApplyDiffTool failure reporting", () => {
 			expect(output).toContain("FAILURE-MARKER-2")
 			expect(output).toContain("--- Diff block 1 of 2 ---")
 			expect(output).toContain("--- Diff block 2 of 2 ---")
+		})
+
+		it("names the target file before the multi-block failure details", async () => {
+			const output = await runApplyDiff({ success: false, failParts: makeFailureSet(2) }, 2)
+
+			const expectedPrefix = `Unable to apply diff to file: ${path.resolve("/workspace", testFilePath)}\n\n<error_details>\n`
+			expect(output.startsWith(expectedPrefix)).toBe(true)
 		})
 
 		it("records every failure and shows the same details on the second consecutive error", async () => {
