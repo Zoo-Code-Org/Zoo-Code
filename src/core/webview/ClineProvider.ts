@@ -4703,6 +4703,48 @@ export class ClineProvider
 		this.viewLocalState = {}
 	}
 
+	/**
+	 * Broadcast a reset/import invalidation to all live ClineProvider instances, clearing
+	 * both in-memory view-local caches and durable per-view selections so stale view state
+	 * cannot mask imported/reset shared state after reload.
+	 */
+	async broadcastResetToAllInstances(): Promise<void> {
+		const allInstances = ClineProvider.getAllInstances()
+
+		// The durable per-view selections live in one shared global-state slot, so
+		// the reset needs exactly one durable clear. Route it through the persisted
+		// write queue (and run it before the in-memory clears): a per-instance clear
+		// outside the queue could interleave with a queued view-state write and
+		// either clobber that write or leave a re-created entry behind.
+		const clearWrite = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			await this.contextProxy.setValue("viewStates", undefined)
+		})
+		ClineProvider.persistedViewStateWriteQueue = clearWrite.catch(() => {})
+		await clearWrite
+
+		for (const instance of allInstances) {
+			instance._clearViewLocalState()
+
+			if (instance !== this) {
+				// A sibling's post can throw mid-reset (state generation reaches the
+				// settings file through customModesManager.getCustomModes): the failure
+				// must not stop the reset from reaching the remaining instances, whose
+				// buffers are already cleared above. The originator is deliberately not
+				// posted here: resetState posts its own state immediately after the
+				// broadcast, and a second post would refresh its webview twice.
+				try {
+					await instance.postStateToWebview()
+				} catch (error) {
+					this.log(
+						`[broadcastResetToAllInstances] failed to post reset state to a sibling view: ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+					)
+				}
+			}
+		}
+	}
+
 	// dev
 
 	async resetState() {
@@ -4740,6 +4782,10 @@ export class ClineProvider
 		await this.providerSettingsManager.resetAllConfigs()
 		await this.customModesManager.resetCustomModes()
 		await this.removeClineFromStack()
+
+		// Clear durable and in-memory per-view state across live instances so parallel tabs don't keep stale state.
+		await this.broadcastResetToAllInstances()
+
 		await this.postStateToWebview()
 		await this.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
 	}
