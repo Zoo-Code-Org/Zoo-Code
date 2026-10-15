@@ -548,6 +548,10 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
 			})
+
+			expect(mockHandleError).not.toHaveBeenCalled()
+			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask as Task, false, true)
 		})
 
 		it("records exactly one checkpoint for a multi-file patch", async () => {
