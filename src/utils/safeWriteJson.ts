@@ -289,6 +289,26 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		await safeWriteText(resolvedTargetPath, "", textOptions)
 
+		// Fail-closed confinement re-check. The check above decides the target as it
+		// resolves at check time; publication takes a path and re-resolves the tree
+		// at commit time, so an ancestor directory replaced by a link inside that
+		// window would publish outside the declared scope. Re-resolve after the
+		// commit: if the bytes landed outside, undo by removing exactly the file
+		// this write published at the escaped location and report the escape. The
+		// peer's swap itself is left as the peer made it. (A swapped-in directory
+		// that already carried a target file is stopped earlier, by the staging
+		// identity guard inside safeWriteText, so this undo never races a backup.)
+		if (confinementRoot !== undefined) {
+			const publishedPath = await _resolveScopeRoot(resolvedTargetPath)
+			const scopeRoot = await _resolveScopeRoot(confinementRoot)
+			try {
+				_assertWithinScope(absoluteFilePath, publishedPath, scopeRoot)
+			} catch (escapeError) {
+				await fs.unlink(publishedPath).catch(() => {})
+				throw escapeError
+			}
+		}
+
 		// If we reach here, the new file is successfully in place and any
 		// backup has already been handled by safeWriteText.
 		actualTempNewFilePath = null

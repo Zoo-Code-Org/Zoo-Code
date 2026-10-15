@@ -878,11 +878,11 @@ describe("safeWriteJson", () => {
 	})
 
 	// The confinement option decides from the resolved publish target and stops at its final
-	// component. What it does NOT cover is an ancestor DIRECTORY replaced by a link in the
-	// window between that decision and the commit rename, because publication takes a path
-	// and re-resolves the tree at rename time. These two tests are that limit as an
-	// executable contract - one per outcome of the window - so the documented narrowing
-	// cannot drift back into an unearned guarantee. The swap is driven from the merge
+	// component. An ancestor DIRECTORY replaced by a link in the window between that
+	// decision and the commit rename is caught fail-closed: publication takes a path and
+	// re-resolves the tree at rename time, so the confinement option re-resolves the
+	// published path after the commit and undoes an escaped write. These two tests are
+	// that contract as an executable pair - one per outcome of the window. The swap is driven from the merge
 	// callback, which safeWriteJson invokes after the in-lock confinement check and before
 	// anything is staged, so the ancestor moves inside the window rather than hopefully so.
 	// A directory link needs no privilege on win32 as a junction; "dir" is the POSIX
@@ -894,36 +894,39 @@ describe("safeWriteJson", () => {
 		fsSyncActual.symlinkSync(pointsAt, ancestor, ancestorLinkKind)
 	}
 
-	test("publishes outside the declared scope when an ancestor is swapped after the final confinement check", async () => {
+	test("refuses and undoes the publish when an ancestor is swapped after the final check", async () => {
 		const projectDir = path.join(tempDir, "swap-project")
 		const ancestor = path.join(projectDir, "settings")
 		await fs.mkdir(ancestor, { recursive: true })
 		const target = path.join(ancestor, "mcp.json")
 		await fs.writeFile(target, JSON.stringify({ inside: true }))
 		// The swapped-in directory has no file at the target name yet: this is the half of the
-		// window in which nothing stops the publish.
+		// window in which the commit itself succeeds and only the post-commit re-check sees
+		// the escape.
 		const swappedIn = path.join(tempDir, "elsewhere", "settings")
 		await fs.mkdir(swappedIn, { recursive: true })
 
-		await safeWriteJson(
-			target,
-			{ written: "payload" },
-			{
-				confineTo: projectDir,
-				merge: () => {
-					swapAncestorAfterTheCheck(ancestor, swappedIn)
-					return { written: "payload" }
+		// The confinement option now fails closed on the swapped ancestor: the
+		// post-commit re-check re-resolves the published path, sees it outside the
+		// declared scope, removes the escaped file, and reports the escape.
+		await expect(
+			safeWriteJson(
+				target,
+				{ written: "payload" },
+				{
+					confineTo: projectDir,
+					merge: () => {
+						swapAncestorAfterTheCheck(ancestor, swappedIn)
+						return { written: "payload" }
+					},
 				},
-			},
-		)
+			),
+		).rejects.toBeInstanceOf(ConfinedPathEscapeError)
 
-		// The bytes landed OUTSIDE the declared scope: the option confines the target it
-		// resolved, not the directory tree above it.
-		expect(JSON.parse(fsSyncActual.readFileSync(path.join(swappedIn, "mcp.json"), "utf8"))).toEqual({
-			written: "payload",
-		})
-		// The file that was inside the scope keeps its pre-write bytes - the publish did not
-		// reach it under the moved-aside name either.
+		// The escaped publication was undone: nothing remains outside the scope...
+		expect(fsSyncActual.existsSync(path.join(swappedIn, "mcp.json"))).toBe(false)
+		// ...and the file that was inside the scope keeps its pre-write bytes - the
+		// publish did not reach it under the moved-aside name either.
 		expect(JSON.parse(fsSyncActual.readFileSync(path.join(ancestor + "-moved-aside", "mcp.json"), "utf8"))).toEqual(
 			{ inside: true },
 		)
