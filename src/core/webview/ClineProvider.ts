@@ -4214,9 +4214,15 @@ export class ClineProvider
 		if (sanitizedValues.mode !== undefined) {
 			// An unknown or non-string mode (e.g. from an API payload) must not be persisted:
 			// a new Task would read it from getState() and persist it into task history.
+			// A payload that carries its own customModes (createTask and setConfiguration
+			// call setValues before registering them) validates against those too, so a
+			// brand-new custom mode in the same payload is not silently dropped.
 			if (
 				typeof sanitizedValues.mode !== "string" ||
-				!getModeBySlug(sanitizedValues.mode, await this.customModesManager.getCustomModes())
+				!getModeBySlug(sanitizedValues.mode, [
+					...(await this.customModesManager.getCustomModes()),
+					...(sanitizedValues.customModes ?? []),
+				])
 			) {
 				this.log(`[ClineProvider#setValues] Ignoring invalid mode "${String(sanitizedValues.mode)}"`)
 				delete sanitizedValues.mode
