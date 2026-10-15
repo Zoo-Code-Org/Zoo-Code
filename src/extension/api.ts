@@ -770,9 +770,16 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		// store - getState() resolves it the same way. Drop the shared flat
 		// provider-settings keys before flattening, or a key the view's profile
 		// never defined (e.g. another profile's apiModelId or base URL) leaks in
-		// from whichever profile owns the shared store.
+		// from whichever profile owns the shared store. The shared apiProvider is
+		// the one exception: getState() falls back to it when a pinned profile
+		// carries no provider of its own, so keep that single key as a base the
+		// profile's own apiProvider (when present) still overrides.
 		const shared = apiConfiguration
-			? Object.fromEntries(Object.entries(rest).filter(([key]) => !PROVIDER_SETTINGS_KEYS.some((k) => k === key)))
+			? Object.fromEntries(
+					Object.entries(rest).filter(
+						([key]) => key === "apiProvider" || !PROVIDER_SETTINGS_KEYS.some((k) => k === key),
+					),
+				)
 			: rest
 		return Object.fromEntries(
 			Object.entries({ ...shared, ...apiConfiguration }).filter(([key]) => !isSecretStateKey(key)),

@@ -1375,22 +1375,29 @@ export class ClineProvider
 			}
 		}
 
-		this._workspaceTracker?.dispose()
-		this._workspaceTracker = undefined
-		await this.mcpHub?.unregisterClient()
-		this.mcpHub = undefined
-		await this.skillsManager?.dispose()
-		this.skillsManager = undefined
-		await this.marketplaceManager?.cleanup()
-		this.customModesManager?.dispose()
-		this.taskHistoryStore.dispose()
-		this.log("Disposed all disposables")
-		ClineProvider.activeInstances.delete(this)
+		try {
+			this._workspaceTracker?.dispose()
+			this._workspaceTracker = undefined
+			await this.mcpHub?.unregisterClient()
+			this.mcpHub = undefined
+			await this.skillsManager?.dispose()
+			this.skillsManager = undefined
+			await this.marketplaceManager?.cleanup()
+			this.customModesManager?.dispose()
+			this.taskHistoryStore.dispose()
+			this.log("Disposed all disposables")
+		} finally {
+			// Deregistration must not depend on the cleanup above completing: a
+			// throwing disposable (e.g. an MCP client whose disposal rejects)
+			// would otherwise leave this provider registered while _disposed is
+			// already set, so no later retry could repair the registration.
+			ClineProvider.activeInstances.delete(this)
 
-		// Clean up any event listeners attached to this provider
-		this.removeAllListeners()
+			// Clean up any event listeners attached to this provider
+			this.removeAllListeners()
 
-		McpServerManager.unregisterProvider(this)
+			McpServerManager.unregisterProvider(this)
+		}
 	}
 
 	public get isViewVisible(): boolean {

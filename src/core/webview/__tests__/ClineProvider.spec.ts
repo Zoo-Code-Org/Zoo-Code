@@ -3959,6 +3959,29 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("deregisters the provider even when MCP cleanup rejects during dispose", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			// An MCP client whose disposal rejects used to abort dispose() before
+			// the registry cleanup below it: the provider stayed in activeInstances
+			// while _disposed was already set, so no later retry could repair the
+			// registration. Deregistration now runs in a finally path.
+			provider["mcpHub"] = {
+				unregisterClient: vi.fn().mockRejectedValue(new Error("mcp disposal down")),
+			} as unknown as ClineProvider["mcpHub"]
+			expect(ClineProvider.getAllInstances()).toContain(provider)
+
+			await expect(provider.dispose()).rejects.toThrow("mcp disposal down")
+
+			expect(ClineProvider.getAllInstances()).not.toContain(provider)
+		})
+
 		it("should sanitize raw viewStateId before using it as persisted viewStates key", async () => {
 			const provider = new ClineProvider(
 				mockContext,
