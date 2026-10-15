@@ -63,6 +63,11 @@ export interface SafeWriteTextOptions {
 	 * link. Node has no descriptor-relative rename, so a swap that lands after this check
 	 * and before the rename is not eliminable here - it narrows the window to the commit
 	 * itself rather than the whole guard.
+	 * The identity check is paired with a realpath comparison: moving a directory
+	 * preserves (dev, ino), and replacing its old name with a symlink to the moved
+	 * location keeps stat() matching while sending the commit to the new location.
+	 * The name must still resolve to the authorized location, not merely to the
+	 * same inode.
 	 */
 	expectedAncestorIdentities?: DirectoryIdentity[]
 }
@@ -549,6 +554,16 @@ export async function safeWriteText(
 					if (current.dev !== expected.dev || current.ino !== expected.ino) {
 						throw new AncestorReplacedError(expected.dir, "is no longer the directory that was authorized")
 					}
+					// A move preserves dev+ino, so the identity check above passes for a
+					// directory that was relocated and whose old name was replaced by a
+					// symlink to the moved location - stat follows that link. The commit
+					// below takes path strings and would follow it too, publishing at the
+					// moved location outside the chain the caller walked. Require that the
+					// authorized name still resolves to the very location it named.
+					const resolvedDir = await fs.realpath(expected.dir).catch(() => undefined)
+					if (resolvedDir === undefined || path.resolve(resolvedDir) !== path.resolve(expected.dir)) {
+						throw new AncestorReplacedError(expected.dir, "no longer resolves to the authorized location")
+					}
 				}
 			}
 
@@ -652,6 +667,14 @@ export async function safeWriteText(
 						if (errorCode(copyError) === "EEXIST") {
 							throw new TargetExistsError(targetPath)
 						}
+						// The copy writes directly to the final name: a mid-copy failure
+						// (EIO, ENOSPC) leaves a partial file at the target that readers
+						// would observe as content, and a retry would then get the
+						// 'already exists' verdict on damaged bytes. COPYFILE_EXCL
+						// guarantees this write created the name, so removing it restores
+						// the pre-write absence; the staged copy is removed by the outer
+						// cleanup.
+						await fs.unlink(targetPath).catch(() => undefined)
 						throw copyError
 					}
 					// The copy created a NEW inode at the target: the staged inode was

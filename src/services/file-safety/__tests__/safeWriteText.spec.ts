@@ -1219,6 +1219,25 @@ describe("safeWriteText", () => {
 		)
 	})
 
+	it("removes the partially copied target when the exclusive copy fails mid-copy", async () => {
+		// The copy writes directly to the final name: an EIO/ENOSPC mid-copy leaves a
+		// partial file that readers would observe as content and a retry would report
+		// as 'already exists' on damaged bytes. COPYFILE_EXCL guarantees this write
+		// created the name, so the failure path must remove it.
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		vi.mocked(fs.link).mockRejectedValue(Object.assign(new Error("ENOTSUP"), { code: "ENOTSUP" }))
+		vi.mocked(fs.copyFile).mockRejectedValue(Object.assign(new Error("EIO"), { code: "EIO" }))
+		vi.mocked(fs.unlink).mockClear()
+
+		await expect(
+			safeWriteText(targetPath, "new data", { failIfExist: true, platform: "linux" }),
+		).rejects.toMatchObject({ code: "EIO" })
+
+		// The partial target was removed - the name is absent again for the retry.
+		expect(vi.mocked(fs.unlink).mock.calls.some((call) => String(call[0]) === targetPath)).toBe(true)
+	})
+
 	it("refuses the write when the exclusive copy finds an existing target", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
@@ -1298,12 +1317,43 @@ describe("safeWriteText", () => {
 		expect(vi.mocked(fs.unlink).mock.calls.some((call) => String(call[0]).includes("safeWriteText"))).toBe(true)
 	})
 
+	it("refuses to publish when an authorized ancestor name was moved and replaced by a link", async () => {
+		// Moving a directory preserves (dev, ino), and replacing the old name with a
+		// symlink to the moved location keeps the identity check matching - stat
+		// follows the link. The commit takes path strings and would follow it too,
+		// publishing at the moved location outside the chain the caller walked, so
+		// the authorized name must still RESOLVE to the authorized location.
+		const dir = path.resolve("/tmp/test-dir")
+		const movedDir = path.resolve("/outside/workspace")
+		const targetPath = path.join(dir, "target.txt")
+		vi.mocked(fs.realpath).mockImplementation(async (p) =>
+			path.resolve(String(p)) === dir ? movedDir : targetPath,
+		)
+		vi.mocked(fs.rename).mockClear()
+		vi.mocked(fs.link).mockClear()
+		vi.mocked(fs.stat).mockResolvedValue(_dirIdentity(100n)) // SAME identity as authorized
+
+		const error = await safeWriteText(targetPath, "new data", {
+			expectedResolvedPath: targetPath,
+			expectedAncestorIdentities: [{ dir, dev: 1n, ino: 100n }],
+			platform: "linux",
+		}).catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(AncestorReplacedError)
+		expect((error as AncestorReplacedError).message).toContain("no longer resolves to the authorized location")
+		// Nothing was published at either location.
+		expect(fs.rename).not.toHaveBeenCalled()
+		expect(fs.link).not.toHaveBeenCalled()
+	})
+
 	it("publishes when the recorded ancestor identities are unchanged", async () => {
 		// The pin must not turn every guarded write into a false rejection: an unchanged
 		// directory chain publishes normally.
 		const dir = path.resolve("/tmp/test-dir")
 		const targetPath = path.join(dir, "target.txt")
-		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		// The unchanged chain resolves where it names: the ancestor realpath check
+		// sees the authorized directory itself, not a moved location.
+		vi.mocked(fs.realpath).mockImplementation(async (p) => (path.resolve(String(p)) === dir ? dir : targetPath))
 		vi.mocked(fs.stat).mockResolvedValue(_dirIdentity(100n))
 
 		await safeWriteText(targetPath, "new data", {
