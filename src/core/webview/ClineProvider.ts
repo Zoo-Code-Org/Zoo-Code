@@ -514,24 +514,10 @@ export class ClineProvider
 	}
 
 	/**
-	 * Initialize cloud profile synchronization
-	 */
-	private async initializeCloudProfileSync() {
-		this.log("Cloud profile synchronization is disabled in compatibility mode")
-	}
-
-	/**
 	 * Handle cloud settings updates
 	 */
 	private handleCloudSettingsUpdate = async () => {
 		this.log("Ignoring cloud settings update because cloud profile synchronization is disabled")
-	}
-
-	/**
-	 * Synchronize cloud profiles with local profiles.
-	 */
-	private async syncCloudProfiles() {
-		this.log("Skipping cloud profile synchronization because it is disabled")
 	}
 
 	/**
@@ -1335,15 +1321,8 @@ export class ClineProvider
 			)
 		}
 
-		const {
-			apiConfiguration,
-			enableCheckpoints,
-			checkpointTimeout,
-			experiments,
-			cloudUserInfo,
-			taskSyncEnabled,
-			diffFuzzyThreshold,
-		} = await this.getState()
+		const { apiConfiguration, enableCheckpoints, checkpointTimeout, experiments, diffFuzzyThreshold } =
+			await this.getState()
 		const task = new Task({
 			provider: this,
 			apiConfiguration,
@@ -1538,7 +1517,7 @@ export class ClineProvider
 		// Check if local dev server is running.
 		try {
 			await axios.get(`http://${localServerUrl}`)
-		} catch (error) {
+		} catch {
 			vscode.window.showErrorMessage(t("common:errors.hmr_not_running"))
 			return this.getHtmlContent(webview)
 		}
@@ -1549,7 +1528,7 @@ export class ClineProvider
 		const { apiConfiguration } = await this.getState()
 		const openRouterBaseUrl = apiConfiguration.openRouterBaseUrl || "https://openrouter.ai"
 		// Extract the domain for CSP
-		const openRouterDomain = openRouterBaseUrl.match(/^(https?:\/\/[^\/]+)/)?.[1] || "https://openrouter.ai"
+		const openRouterDomain = openRouterBaseUrl.match(/^(https?:\/\/[^/]+)/)?.[1] || "https://openrouter.ai"
 
 		const stylesUri = getUri(webview, this.contextProxy.extensionUri, [
 			"webview-ui",
@@ -1665,7 +1644,7 @@ export class ClineProvider
 		const { apiConfiguration } = await this.getState()
 		const openRouterBaseUrl = apiConfiguration.openRouterBaseUrl || "https://openrouter.ai"
 		// Extract the domain for CSP
-		const openRouterDomain = openRouterBaseUrl.match(/^(https?:\/\/[^\/]+)/)?.[1] || "https://openrouter.ai"
+		const openRouterDomain = openRouterBaseUrl.match(/^(https?:\/\/[^/]+)/)?.[1] || "https://openrouter.ai"
 
 		// Tip: Install the es6-string-html VS Code extension to enable code highlighting below
 		return /*html*/ `
@@ -2073,7 +2052,7 @@ export class ClineProvider
 
 		try {
 			await fs.mkdir(mcpServersDir, { recursive: true })
-		} catch (error) {
+		} catch {
 			// Fallback to a relative path if directory creation fails
 			return path.join(os.homedir(), ".roo-code", "mcp")
 		}
@@ -2096,7 +2075,7 @@ export class ClineProvider
 		try {
 			const baseUrl = apiConfiguration.openRouterBaseUrl || "https://openrouter.ai/api/v1"
 			// Extract the base domain for the auth endpoint.
-			const baseUrlDomain = baseUrl.match(/^(https?:\/\/[^\/]+)/)?.[1] || "https://openrouter.ai"
+			const baseUrlDomain = baseUrl.match(/^(https?:\/\/[^/]+)/)?.[1] || "https://openrouter.ai"
 			const response = await axios.post(`${baseUrlDomain}/api/v1/auth/keys`, { code })
 
 			if (response.data && response.data.key) {
@@ -2315,7 +2294,7 @@ export class ClineProvider
 			useWorkspace: false,
 			fallbackDir: path.join(os.homedir(), "Downloads"),
 		})
-		const saveUri = await downloadTask(historyItem.ts, apiConversationHistory, defaultUri)
+		const saveUri = await downloadTask(apiConversationHistory, defaultUri)
 
 		if (saveUri) {
 			await saveLastExportPath(this.contextProxy, "lastTaskExportPath", saveUri)
@@ -2336,8 +2315,7 @@ export class ClineProvider
 	// If the task has subtasks (childIds), they will also be deleted recursively
 	async deleteTaskWithId(id: string, cascadeSubtasks: boolean = true) {
 		try {
-			// get the task directory full path and history item
-			const { taskDirPath, historyItem } = await this.getTaskWithId(id)
+			await this.getTaskWithId(id)
 
 			// Collect all task IDs to delete (parent + all subtasks)
 			const allIdsToDelete: string[] = [id]
@@ -2353,7 +2331,7 @@ export class ClineProvider
 								await collectChildIds(childId)
 							}
 						}
-					} catch (error) {
+					} catch {
 						// Child task may already be deleted or not found, continue
 						console.log(`[deleteTaskWithId] child task ${taskId} not found, skipping`)
 					}
@@ -2702,7 +2680,7 @@ export class ClineProvider
 					this.cloudOrganizationsCacheTimestamp = now
 				}
 			}
-		} catch (error) {
+		} catch {
 			// Ignore this error.
 		}
 
@@ -3633,7 +3611,7 @@ export class ClineProvider
 		try {
 			const customModes = await this.customModesManager.getCustomModes()
 			return [...DEFAULT_MODES, ...customModes].map(({ slug, name }) => ({ slug, name }))
-		} catch (error) {
+		} catch {
 			return DEFAULT_MODES.map(({ slug, name }) => ({ slug, name }))
 		}
 	}

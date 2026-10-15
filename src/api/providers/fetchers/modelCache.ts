@@ -1,5 +1,4 @@
 import * as path from "path"
-import fs from "fs/promises"
 import * as fsSync from "fs"
 import { pbkdf2Sync } from "crypto"
 
@@ -15,7 +14,6 @@ import { safeWriteJson } from "../../../utils/safeWriteJson"
 import { ContextProxy } from "../../../core/config/ContextProxy"
 import { getCacheDirectoryPath } from "../../../utils/storage"
 import type { RouterName } from "../../../shared/api"
-import { fileExistsAtPath } from "../../../utils/fs"
 
 import { mergeAbortSignals, throwIfAborted } from "../utils/abort-signal"
 
@@ -169,14 +167,6 @@ async function writeModels(cacheKey: string, data: ModelRecord) {
 	const filename = `${cacheKeyToFilename(cacheKey)}_models.json`
 	const cacheDir = await getCacheDirectoryPath(ContextProxy.instance.globalStorageUri.fsPath)
 	await safeWriteJson(path.join(cacheDir, filename), data)
-}
-
-async function readModels(cacheKey: string): Promise<ModelRecord | undefined> {
-	const filename = `${cacheKeyToFilename(cacheKey)}_models.json`
-	const cacheDir = await getCacheDirectoryPath(ContextProxy.instance.globalStorageUri.fsPath)
-	const filePath = path.join(cacheDir, filename)
-	const exists = await fileExistsAtPath(filePath)
-	return exists ? JSON.parse(await fs.readFile(filePath, "utf8")) : undefined
 }
 
 /**

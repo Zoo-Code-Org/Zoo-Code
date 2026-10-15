@@ -64,7 +64,7 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 		return { urlScoped: false, keyScoped: false, authScoped: false }
 	}
 
-	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+	async fetchModels(_options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
 		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
 		return getVercelAiGatewayModels(undefined, ...fetchOpts)
 	}
@@ -154,7 +154,7 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 		}
 	}
 
-	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
 		const { id: modelId, info } = await this.fetchModel()
 
 		try {

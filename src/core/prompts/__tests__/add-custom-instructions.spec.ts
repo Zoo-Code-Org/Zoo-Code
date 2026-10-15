@@ -41,14 +41,11 @@ vi.mock("fs/promises")
 
 import * as vscode from "vscode"
 
-import { ModeConfig } from "@roo-code/types"
-
 import { SYSTEM_PROMPT } from "../system"
 import { McpHub } from "../../../services/mcp/McpHub"
-import { defaultModeSlug, modes, Mode } from "../../../shared/modes"
+import { defaultModeSlug, modes } from "../../../shared/modes"
 import "../../../utils/path"
 import { addCustomInstructions } from "../sections/custom-instructions"
-import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
 
 // Mock the sections
 vi.mock("../sections/modes", () => ({
@@ -73,7 +70,7 @@ __setMockImplementation(
 	async (
 		modeCustomInstructions: string,
 		globalCustomInstructions: string,
-		cwd: string,
+		_cwd: string,
 		mode: string,
 		options?: { language?: string },
 	) => {

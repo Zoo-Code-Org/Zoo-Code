@@ -15,7 +15,6 @@ import delay from "delay"
 import pWaitFor from "p-wait-for"
 import { serializeError } from "serialize-error"
 import { Package } from "../../shared/package"
-import { formatToolInvocation } from "../tools/helpers/toolResultFormatting"
 
 import {
 	type TaskLike,
@@ -76,13 +75,7 @@ import { t } from "../../i18n"
 import { getApiMetrics, hasTokenUsageChanged, hasToolUsageChanged } from "../../shared/getApiMetrics"
 import { ClineAskResponse } from "../../shared/WebviewMessage"
 import { defaultModeSlug, getModeBySlug } from "../../shared/modes"
-import {
-	DiffStrategy,
-	type AutoApprovalContext,
-	type ToolUse,
-	type ToolParamName,
-	toolParamNames,
-} from "../../shared/tools"
+import { DiffStrategy, type AutoApprovalContext, type ToolUse } from "../../shared/tools"
 import { getModelMaxOutputTokens } from "../../shared/api"
 
 // services
@@ -92,7 +85,6 @@ import { RepoPerTaskCheckpointService } from "../../services/checkpoints"
 
 // integrations
 import { DiffViewProvider } from "../../integrations/editor/DiffViewProvider"
-import { findToolName } from "../../integrations/misc/export-markdown"
 import { RooTerminalProcess } from "../../integrations/terminal/types"
 import { TerminalRegistry } from "../../integrations/terminal/TerminalRegistry"
 import { OutputInterceptor } from "../../integrations/terminal/OutputInterceptor"
@@ -106,6 +98,7 @@ import { getTaskDirectoryPath } from "../../utils/storage"
 // prompts
 import { formatResponse } from "../prompts/responses"
 import { SYSTEM_PROMPT } from "../prompts/system"
+import { partitionDisabledToolsForProtocol } from "../prompts/tools/effective-tool-policy"
 import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
 
 // core modules
@@ -240,6 +233,11 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
+
+export interface ToolExecutionContext {
+	toolCallId: string
+	didReject: boolean
+}
 
 export interface TaskOptions extends CreateTaskOptions {
 	provider: ClineProvider
@@ -420,7 +418,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	rooIgnoreController?: RooIgnoreController
 	rooProtectedController?: RooProtectedController
 	fileContextTracker: FileContextTracker
-	terminalProcess?: RooTerminalProcess
+	terminalProcesses = new Map<string, RooTerminalProcess>()
+	activeToolContexts = new Map<string, ToolExecutionContext>()
 
 	// Editing
 	diffViewProvider: DiffViewProvider
@@ -672,7 +671,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		task,
 		images,
 		historyItem,
-		experiments: experimentsConfig,
+		experiments: _experimentsConfig,
 		startTask = true,
 		rootTask,
 		parentTask,
@@ -2535,9 +2534,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	async handleTerminalOperation(terminalOperation: "continue" | "abort") {
 		if (terminalOperation === "continue") {
-			this.terminalProcess?.continue()
+			for (const process of this.terminalProcesses.values()) process.continue()
 		} else if (terminalOperation === "abort") {
-			this.terminalProcess?.abort()
+			for (const process of this.terminalProcesses.values()) process.abort()
 		}
 	}
 
@@ -2635,7 +2634,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			cost,
 			newContextTokens = 0,
 			error,
-			errorDetails,
 			condenseId,
 		} = await summarizeConversation({
 			messages: this.apiConversationHistory,
@@ -2998,6 +2996,33 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					{ isNonInteractive: true },
 				)
 			}
+
+			// Surface once per new task which `disabledTools` entries carry no
+			// disabling weight (protocol tools are exempt from user disabling).
+			// Detection reads the raw list, so the notice also fires when a
+			// model-profile `excludedTools` entry suppresses the tool through a
+			// separate route. `startTask` runs exactly once per new task, which
+			// is what bounds this to a single notice. The block is guarded like
+			// `getEnabledMcpToolsCount` above: this is a telemetry-class notice,
+			// so a rejection from the state read or the say must never keep the
+			// task loop from starting.
+			try {
+				const disabledToolsState = await this.providerRef.deref()?.getState()
+				const { ignored } = partitionDisabledToolsForProtocol(disabledToolsState?.disabledTools)
+				if (ignored.length > 0) {
+					await this.say(
+						"ignored_disabled_tools_warning",
+						JSON.stringify({ ignoredTools: ignored }),
+						undefined,
+						undefined,
+						undefined,
+						undefined,
+						{ isNonInteractive: true },
+					)
+				}
+			} catch (error) {
+				console.error("[Task#startTask] ignored-disabled-tools notice failed:", error)
+			}
 			this.isInitialized = true
 
 			const imageBlocks: Anthropic.ImageBlockParam[] = formatResponse.imageBlocks(images)
@@ -3267,26 +3292,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 
 			const newUserContent: Anthropic.Messages.ContentBlockParam[] = [...modifiedOldUserContent]
-
-			const agoText = ((): string => {
-				const timestamp = lastClineMessage?.ts ?? Date.now()
-				const now = Date.now()
-				const diff = now - timestamp
-				const minutes = Math.floor(diff / 60000)
-				const hours = Math.floor(minutes / 60)
-				const days = Math.floor(hours / 24)
-
-				if (days > 0) {
-					return `${days} day${days > 1 ? "s" : ""} ago`
-				}
-				if (hours > 0) {
-					return `${hours} hour${hours > 1 ? "s" : ""} ago`
-				}
-				if (minutes > 0) {
-					return `${minutes} minute${minutes > 1 ? "s" : ""} ago`
-				}
-				return "just now"
-			})()
 
 			if (responseText) {
 				newUserContent.push({
@@ -4021,6 +4026,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.didCompleteReadingStream = false
 				this.userMessageContent = []
 				this.userMessageContentReady = false
+				this.activeToolContexts.clear()
 				this.didRejectTool = false
 				this.didAlreadyUseTool = false
 				this.assistantMessageSavedToHistory = false
@@ -4048,7 +4054,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// This is especially important for tools and background usage collection
 				this.cachedStreamingModel = this.api.getModel()
 				const streamModelInfo = this.cachedStreamingModel.info
-				const cachedModelId = this.cachedStreamingModel.id
 
 				// Yields only if the first chunk is successful, otherwise will
 				// allow the user to retry the request (most likely due to rate
@@ -4392,7 +4397,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								total?: number
 							},
 							messageIndex: number = apiReqIndex,
-							status: "completed" | "cancelled" = "completed",
+							_status: "completed" | "cancelled" = "completed",
 						) => {
 							if (
 								tokens.input > 0 ||
@@ -5111,7 +5116,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				// If we reach here without continuing, return false (will always be false for now)
 				return false
-			} catch (error) {
+			} catch {
 				// This should never happen since the only thing that can throw an
 				// error is the attemptApiRequest, which is wrapped in a try catch
 				// that sends an ask where if noButtonClicked, will clear current
@@ -5471,7 +5476,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		const {
 			autoApprovalEnabled,
-			requestDelaySeconds,
 			autoCondenseContext = true,
 			autoCondenseContextPercent = 100,
 			profileThresholds = {},

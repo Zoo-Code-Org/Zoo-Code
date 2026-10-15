@@ -12,7 +12,7 @@ import {
 import { clearAllMocks } from "../../../test-utils/reset"
 import { makeExtensionContext } from "../../../test-utils/vscode"
 
-import { ProviderSettingsManager, ProviderProfiles, SyncCloudProfilesResult } from "../ProviderSettingsManager"
+import { ProviderSettingsManager, ProviderProfiles } from "../ProviderSettingsManager"
 
 // `export()` builds an API handler per profile to read model capabilities. Mock
 // buildApiHandler with the real @roo-code/types model definitions so the token-field
