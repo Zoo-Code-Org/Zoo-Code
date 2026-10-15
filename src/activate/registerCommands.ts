@@ -415,8 +415,10 @@ const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTrac
 		dark: vscode.Uri.joinPath(context.extensionUri, "assets", "icons", "panel_dark.png"),
 	}
 
-	await tabProvider.resolveWebviewView(newPanel)
-
+	// Register the cleanup listeners before the first initialization await: a
+	// close that lands while resolveWebviewView is still running must be able
+	// to find the tracked-ref re-pointing already installed, or the panel
+	// would stay tracked (and the provider registered) after disposal.
 	// Add listener for visibility changes to notify webview
 	newPanel.onDidChangeViewState(
 		(e) => {
@@ -460,6 +462,24 @@ const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTrac
 		null,
 		context.subscriptions, // Also register dispose listener
 	)
+
+	try {
+		await tabProvider.resolveWebviewView(newPanel)
+	} catch (error) {
+		// Initialization failed: drop the half-registered panel from the live
+		// registry and dispose the provider so the failed surface leaves no
+		// listeners or state behind. Disposing the provider disposes the panel
+		// (resolveWebviewView assigns this.view before its first await), whose
+		// disposal listener (installed above) then re-points the tracked ref at
+		// the best remaining live panel - or clears it when none remains.
+		// Clearing the ref here first would make that handler skip the
+		// re-pointing and leave getTabProvider() undefined while another tab
+		// panel is still open. A user close that landed during initialization
+		// already ran that handler.
+		liveTabPanels.delete(newPanel)
+		await tabProvider.dispose()
+		throw error
+	}
 
 	// Lock the editor group so clicking on files doesn't open them over the panel.
 	await delay(100)

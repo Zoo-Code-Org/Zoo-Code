@@ -9,6 +9,7 @@ import { ClineProvider } from "../../core/webview/ClineProvider"
 import { MdmService } from "../../services/mdm/MdmService"
 
 import {
+	__getLiveTabPanelCountForTests,
 	__resetLiveTabPanelsForTests,
 	getPanel,
 	getVisibleProviderOrLog,
@@ -977,6 +978,111 @@ describe("openClineInNewTab", () => {
 		expect(getPanel()).toBe(panelH1)
 	})
 
+	it("cleans up the tracked refs and disposes the provider when initialization fails", async () => {
+		const resolveSpy = vi
+			.spyOn(ClineProvider.prototype, "resolveWebviewView")
+			.mockRejectedValue(new Error("init failed"))
+		// The real provider dispose disposes the panel, which fires the disposal
+		// handler installed by createClineTabPanel; the double mirrors that
+		// contract so the tracked-ref cleanup runs the production path.
+		let disposeHandler: (() => void) | undefined
+		const failingPanel = Object.assign({} as vscode.WebviewPanel, {
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn((handler: () => void) => {
+				disposeHandler = handler
+			}),
+			dispose: vi.fn(() => disposeHandler?.()),
+		})
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValue(failingPanel)
+		const disposeSpy = vi.spyOn(ClineProvider.prototype, "dispose").mockImplementation(async () => {
+			failingPanel.dispose()
+		})
+
+		await expect(
+			openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			}),
+		).rejects.toThrow("init failed")
+
+		// The half-registered panel must not stay tracked: the live registry
+		// drops it and the provider is disposed - disposing the provider
+		// disposes the panel, whose disposal handler then clears the tracked
+		// ref (no other live panel remains here).
+		expect(__getLiveTabPanelCountForTests()).toBe(0)
+		expect(getPanel()).toBeUndefined()
+		expect(disposeSpy).toHaveBeenCalledTimes(1)
+
+		resolveSpy.mockRestore()
+		disposeSpy.mockRestore()
+	})
+
+	it("re-points the tracked tab at the surviving panel when a new panel's initialization fails", async () => {
+		// clearAllMocks() keeps mock implementations: reset the instance-lookup
+		// return value so a preceding test's tab double cannot leak into the
+		// creation path below.
+		;(ClineProvider.getInstanceForView as Mock).mockReturnValue(undefined)
+		// Panel A opens fully and becomes the tracked tab.
+		const panelA = Object.assign({} as vscode.WebviewPanel, {
+			marker: "panel-A",
+			active: true,
+			visible: true,
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn(),
+		})
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValueOnce(panelA)
+		await openClineInNewTab({
+			context: mockContext,
+			outputChannel: mockOutputChannel,
+			webviewFocusTracker: new WebviewFocusTracker(),
+		})
+		expect(getPanel()).toBe(panelA)
+
+		// Panel B's initialization fails. Its provider dispose mirrors the real
+		// contract: disposing the provider disposes the panel, which fires the
+		// disposal handler installed by createClineTabPanel.
+		let disposeHandlerB: (() => void) | undefined
+		const panelB = Object.assign({} as vscode.WebviewPanel, {
+			marker: "panel-B",
+			active: true,
+			visible: true,
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn((handler: () => void) => {
+				disposeHandlerB = handler
+			}),
+			dispose: vi.fn(() => disposeHandlerB?.()),
+		})
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValueOnce(panelB)
+		const resolveSpy = vi
+			.spyOn(ClineProvider.prototype, "resolveWebviewView")
+			.mockRejectedValueOnce(new Error("init failed"))
+		const disposeSpy = vi.spyOn(ClineProvider.prototype, "dispose").mockImplementation(async () => {
+			panelB.dispose()
+		})
+
+		await expect(
+			openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			}),
+		).rejects.toThrow("init failed")
+
+		// The failed panel leaves the live registry, and the tracked ref follows
+		// the disposal handler to the surviving panel A instead of being cleared
+		// up front - clearing it first would make the handler skip the re-point
+		// and leave the tab surface without a provider.
+		expect(__getLiveTabPanelCountForTests()).toBe(1)
+		expect(getPanel()).toBe(panelA)
+		expect(disposeSpy).toHaveBeenCalledTimes(1)
+
+		resolveSpy.mockRestore()
+		disposeSpy.mockRestore()
+	})
 	it("falls back to an undefined MdmService when MdmService.getInstance throws", async () => {
 		;(MdmService.getInstance as Mock).mockImplementation(() => {
 			throw new Error("MDM service not initialized")
