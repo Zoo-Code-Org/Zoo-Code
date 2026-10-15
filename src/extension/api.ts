@@ -22,6 +22,7 @@ import {
 	RooCodeEventName,
 	TaskCommandName,
 	isSecretStateKey,
+	isSensitiveProviderConfigKey,
 	PROVIDER_SETTINGS_KEYS,
 	IpcOrigin,
 	IpcMessageType,
@@ -787,8 +788,14 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 					),
 				)
 			: rest
+		// Secrets never leave the flattened surface: SECRET_STATE_KEYS covers the
+		// *ApiKey shapes, and SENSITIVE_PROVIDER_CONFIG_KEYS covers credential
+		// values that use other name shapes (header maps, session tokens,
+		// service-account JSON, credential-file paths).
 		const configuration = Object.fromEntries(
-			Object.entries({ ...shared, ...apiConfiguration }).filter(([key]) => !isSecretStateKey(key)),
+			Object.entries({ ...shared, ...apiConfiguration }).filter(
+				([key]) => !isSecretStateKey(key) && !isSensitiveProviderConfigKey(key),
+			),
 		)
 		// An explicit apiProvider: undefined inside the nested profile clobbers the
 		// retained shared fallback through the spread above; restore it the same way

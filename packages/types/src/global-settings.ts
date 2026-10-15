@@ -390,6 +390,24 @@ export const isSecretStateKey = (key: string): key is Keys<SecretState> =>
 	SECRET_STATE_KEYS.includes(key as ProviderSecretKey) || GLOBAL_SECRET_KEYS.includes(key as GlobalSecretKey)
 
 /**
+ * Credential-bearing provider settings that do not use an *ApiKey name shape:
+ * header maps that can carry Authorization values, session tokens, service
+ * account JSON, and credential-file paths. They must be excluded from every
+ * flattened configuration surface alongside SECRET_STATE_KEYS.
+ */
+export const SENSITIVE_PROVIDER_CONFIG_KEYS = [
+	"openAiHeaders",
+	"vertexKeyFile",
+	"vertexJsonCredentials",
+	"zooSessionToken",
+	"mimoApiKey",
+	"poeApiKey",
+] as const
+
+export const isSensitiveProviderConfigKey = (key: string): boolean =>
+	(SENSITIVE_PROVIDER_CONFIG_KEYS as readonly string[]).includes(key)
+
+/**
  * GlobalState
  */
 
