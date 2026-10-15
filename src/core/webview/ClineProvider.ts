@@ -4368,7 +4368,22 @@ export class ClineProvider
 			await this.contextProxy.setValue("viewStates", undefined)
 		})
 		ClineProvider.persistedViewStateWriteQueue = clearWrite.catch(() => {})
-		await clearWrite
+		// Durable invalidation must not gate live invalidation: when the durable
+		// clear rejects, every live buffer still has to be cleared and every
+		// sibling still has to be posted, or the reset leaves views serving stale
+		// selections behind a failed shared slot. The error is re-thrown after the
+		// loop so callers still see the durable failure.
+		let durableClearError: unknown
+		try {
+			await clearWrite
+		} catch (error) {
+			durableClearError = error
+			this.log(
+				`[broadcastResetToAllInstances] durable viewStates clear failed; live state is still invalidated: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
 
 		for (const instance of allInstances) {
 			instance._clearViewLocalState()
@@ -4390,6 +4405,10 @@ export class ClineProvider
 					)
 				}
 			}
+		}
+
+		if (durableClearError) {
+			throw durableClearError
 		}
 	}
 

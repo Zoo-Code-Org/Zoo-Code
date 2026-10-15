@@ -1884,6 +1884,47 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	describe("broadcastResetToAllInstances durable failure", () => {
+		it("clears every live buffer and posts siblings even when the durable clear fails", async () => {
+			const contextProxy = new ContextProxy(mockContext)
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				contextProxy,
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"tab-2",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// Live selections that a failed durable clear must not strand.
+			provider["viewLocalState"] = { mode: "architect" }
+			sibling["viewLocalState"] = { mode: "architect" }
+			const siblingPost = vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+			// The first proxy write is the queued durable clear of the shared slot.
+			const setValueSpy = vi
+				.spyOn(contextProxy, "setValue")
+				.mockRejectedValueOnce(new Error("durable clear failed"))
+
+			await expect(provider.broadcastResetToAllInstances()).rejects.toThrow("durable clear failed")
+
+			// Live invalidation ran despite the durable failure, and the caller still
+			// sees the durable error after the loop completed.
+			expect(provider["viewLocalState"]).toEqual({})
+			expect(sibling["viewLocalState"]).toEqual({})
+			expect(siblingPost).toHaveBeenCalledTimes(1)
+			expect(setValueSpy).toHaveBeenCalledWith("viewStates", undefined)
+
+			setValueSpy.mockRestore()
+			await provider.dispose()
+			await sibling.dispose()
+		})
+	})
+
 	describe("setViewStateId", () => {
 		it('should ignore "__proto__" and keep the temporary viewId', async () => {
 			const provider = new ClineProvider(
