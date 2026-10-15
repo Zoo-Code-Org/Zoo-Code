@@ -1074,7 +1074,12 @@ export class ClineProvider
 			}
 
 			const states = this.getPersistedViewStates({ fresh: true })
-			const previous = states[previousViewStateId]
+			// Own-property checks only: the map is a plain object, and an inherited
+			// Object.prototype member must never look like a persisted entry (a map
+			// written by an older build can still carry a "constructor"-style key).
+			const previous = Object.prototype.hasOwnProperty.call(states, previousViewStateId)
+				? states[previousViewStateId]
+				: undefined
 
 			if (!previous) {
 				return
@@ -1083,7 +1088,7 @@ export class ClineProvider
 			delete states[previousViewStateId]
 			ClineProvider.clearedViewStateIds.add(previousViewStateId)
 
-			if (!states[nextViewStateId]) {
+			if (!Object.prototype.hasOwnProperty.call(states, nextViewStateId)) {
 				states[nextViewStateId] = previous
 				ClineProvider.clearedViewStateIds.delete(nextViewStateId)
 			}
