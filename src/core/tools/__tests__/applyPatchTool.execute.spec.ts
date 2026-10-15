@@ -152,6 +152,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("Successfully deleted"))
@@ -174,6 +175,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("Successfully deleted"))
@@ -191,6 +193,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockTask.recordToolError).toHaveBeenCalledWith("apply_patch")
@@ -220,6 +223,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			// The checkpoint fully completes before queued messages are
@@ -267,6 +271,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalledWith("Delete operation was rejected by the user.")
@@ -280,6 +285,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("File not found"))
@@ -293,6 +299,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("Failed to delete file"))
@@ -306,6 +313,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("File already exists"))
@@ -320,6 +328,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalledWith("Changes were rejected by the user.")
@@ -333,6 +342,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalledWith("File saved successfully")
@@ -346,6 +356,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("File not found"))
@@ -359,6 +370,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("No changes needed"))
@@ -372,6 +384,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalledWith("Changes were rejected by the user.")
@@ -390,6 +403,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockTask.say).toHaveBeenCalledWith("rooignore_error", "src/moved.ts")
@@ -422,6 +436,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockTask.say).toHaveBeenCalledWith("rooignore_error", "src/denied.ts")
@@ -445,6 +460,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalledWith(
@@ -462,6 +478,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalledWith(
@@ -483,6 +500,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			// The failed operation incremented the counter; the end-of-loop reset
@@ -497,6 +515,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockTask.consecutiveMistakeCount).toBe(0)
@@ -507,6 +526,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			// path is platform-dependent (Windows resolves cwd to a drive path);
@@ -529,6 +549,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			// execute must not settle while the checkpoint is still in flight:
@@ -549,6 +570,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockPushToolResult).toHaveBeenCalledWith("File saved successfully")
@@ -575,6 +597,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
@@ -615,6 +638,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask as Task, false, true, [
@@ -629,6 +653,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask as Task, false, true, [
@@ -657,6 +682,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			// The no-op update is reported to the model...
@@ -694,6 +720,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			// The failed operation is reported to the model...
@@ -726,6 +753,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 			})
 
 			// The copy succeeded but the source still exists, so the move is
