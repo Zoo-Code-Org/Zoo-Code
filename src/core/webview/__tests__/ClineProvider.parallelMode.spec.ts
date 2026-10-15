@@ -573,6 +573,74 @@ afterAll(() => {
 	vi.restoreAllMocks()
 })
 
+// Fresh extension-context + output-channel doubles. The parent beforeEach
+// installs a new pair per test, and the sibling-consistency block's beforeAll
+// needs its own: a block-only run (`vitest -t`) reaches that beforeAll before
+// any beforeEach has assigned mockContext.
+function createMockExtensionContext(): vscode.ExtensionContext {
+	const globalState: Record<string, unknown> = {
+		mode: "code",
+		currentApiConfigName: "default",
+		apiConfiguration: {},
+		customModePrompts: {},
+		modeApiConfigs: {},
+		listApiConfigMeta: [],
+		pinnedApiConfigs: {},
+	}
+
+	const secrets: Record<string, string | undefined> = {}
+
+	return Object.assign({} as vscode.ExtensionContext, {
+		extensionPath: "/test/path",
+		extensionUri: { fsPath: "/test/path" } as vscode.Uri,
+		globalState: {
+			get: vi.fn().mockImplementation((key: string) => {
+				return globalState[key]
+			}),
+			update: vi.fn().mockImplementation((key: string, value: unknown) => {
+				globalState[key] = value
+				return Promise.resolve()
+			}),
+			keys: vi.fn().mockImplementation(() => {
+				return Object.keys(globalState)
+			}),
+		},
+		secrets: {
+			get: vi.fn().mockImplementation((key: string) => {
+				return secrets[key]
+			}),
+			store: vi.fn().mockImplementation((key: string, value: string) => {
+				secrets[key] = value
+				return Promise.resolve()
+			}),
+			delete: vi.fn().mockImplementation((key: string) => {
+				delete secrets[key]
+				return Promise.resolve()
+			}),
+		},
+		workspaceState: {
+			get: vi.fn().mockReturnValue(undefined),
+			update: vi.fn().mockResolvedValue(undefined),
+			keys: vi.fn().mockReturnValue([]),
+		},
+		subscriptions: [],
+		extension: {
+			packageJSON: { version: "1.0.0" },
+		},
+		globalStorageUri: {
+			fsPath: "/test/storage/path",
+		} as vscode.Uri,
+	})
+}
+
+function createMockOutputChannel(): vscode.OutputChannel {
+	return Object.assign({} as vscode.OutputChannel, {
+		appendLine: vi.fn(),
+		clear: vi.fn(),
+		dispose: vi.fn(),
+	})
+}
+
 /**
  * ClineProvider - Parallel Mode Support Tests
  *
@@ -591,65 +659,8 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			TelemetryService.createInstance([])
 		}
 
-		const globalState: Record<string, unknown> = {
-			mode: "code",
-			currentApiConfigName: "default",
-			apiConfiguration: {},
-			customModePrompts: {},
-			modeApiConfigs: {},
-			listApiConfigMeta: [],
-			pinnedApiConfigs: {},
-		}
-
-		const secrets: Record<string, string | undefined> = {}
-
-		mockContext = Object.assign({} as vscode.ExtensionContext, {
-			extensionPath: "/test/path",
-			extensionUri: { fsPath: "/test/path" } as vscode.Uri,
-			globalState: {
-				get: vi.fn().mockImplementation((key: string) => {
-					return globalState[key]
-				}),
-				update: vi.fn().mockImplementation((key: string, value: unknown) => {
-					globalState[key] = value
-					return Promise.resolve()
-				}),
-				keys: vi.fn().mockImplementation(() => {
-					return Object.keys(globalState)
-				}),
-			},
-			secrets: {
-				get: vi.fn().mockImplementation((key: string) => {
-					return secrets[key]
-				}),
-				store: vi.fn().mockImplementation((key: string, value: string) => {
-					secrets[key] = value
-					return Promise.resolve()
-				}),
-				delete: vi.fn().mockImplementation((key: string) => {
-					delete secrets[key]
-					return Promise.resolve()
-				}),
-			},
-			workspaceState: {
-				get: vi.fn().mockReturnValue(undefined),
-				update: vi.fn().mockResolvedValue(undefined),
-				keys: vi.fn().mockReturnValue([]),
-			},
-			subscriptions: [],
-			extension: {
-				packageJSON: { version: "1.0.0" },
-			},
-			globalStorageUri: {
-				fsPath: "/test/storage/path",
-			} as vscode.Uri,
-		})
-
-		mockOutputChannel = Object.assign({} as vscode.OutputChannel, {
-			appendLine: vi.fn(),
-			clear: vi.fn(),
-			dispose: vi.fn(),
-		})
+		mockContext = createMockExtensionContext()
+		mockOutputChannel = createMockOutputChannel()
 	})
 
 	describe("persisted view state pruning edge cases", () => {
@@ -731,6 +742,15 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 		beforeAll(() => {
 			consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+			// A block-only run (`vitest -t "sibling view consistency"`) reaches this
+			// beforeAll before the parent beforeEach has assigned mockContext, so
+			// build the doubles these providers capture instead of relying on a
+			// leftover object from an earlier test.
+			mockContext = createMockExtensionContext()
+			mockOutputChannel = createMockOutputChannel()
+			if (!TelemetryService.hasInstance()) {
+				TelemetryService.createInstance([])
+			}
 			viewA = makeProvider()
 			viewB = makeProvider()
 		})
