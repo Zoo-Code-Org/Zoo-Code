@@ -1418,7 +1418,7 @@ describe("DiffViewProvider", () => {
 				getText: vi.fn().mockReturnValue("streamed content"),
 				isDirty: true,
 				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
-				save: vi.fn().mockResolvedValue(undefined),
+				save: vi.fn().mockResolvedValue(true),
 			}
 			const dirtyTab = {
 				input: Object.assign(new vscode.TabInputText(makeUri(mockTargetPath)), {
@@ -1474,10 +1474,11 @@ describe("DiffViewProvider", () => {
 			)
 		})
 
-		it("revertChanges() skips the clean save when the buffer restore is refused", async () => {
-			// applyEdit resolving false leaves the streamed content in the buffer. Saving then would
-			// persist exactly what this rollback exists to discard, so the save must be skipped when
-			// the restore is refused (same guard discardUnapprovedStream() applies).
+		it("revertChanges() stops the rollback without closing when the buffer restore is refused", async () => {
+			// applyEdit resolving false leaves the streamed content in the buffer. Saving it would
+			// persist exactly what this rollback exists to discard, and closing the dirty tab would
+			// trade the rollback report for a save-confirmation prompt over unapproved content, so
+			// the rollback stops and reports instead.
 			const editor = buildActiveDiffEditor()
 			editor.document.isDirty = true
 			const streamedBuffer = {
@@ -1514,7 +1515,7 @@ describe("DiffViewProvider", () => {
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValueOnce(false)
 
 			try {
-				await diffViewProvider.revertChanges()
+				await expect(diffViewProvider.revertChanges()).rejects.toThrow(/could not restore the buffer/i)
 			} finally {
 				if (originalTabs) {
 					Object.defineProperty(vscode.window.tabGroups, "all", originalTabs)
@@ -1525,11 +1526,69 @@ describe("DiffViewProvider", () => {
 			}
 
 			// The restore was attempted and refused; the save that would have written the unapproved
-			// streamed content to disk never ran.
+			// streamed content to disk never ran, and the dirty tab was NOT closed - closing it
+			// would trade a safe rollback report for a save-confirmation prompt over unapproved
+			// content. The rollback stops here and reports.
 			expect(vscode.workspace.applyEdit).toHaveBeenCalled()
 			expect(streamedBuffer.save).not.toHaveBeenCalled()
-			// The filesystem rollback still runs: the denied create's placeholder must go.
-			expect(fs.unlink).toHaveBeenCalledWith(mockTargetPath)
+			expect(vscode.window.tabGroups.close).not.toHaveBeenCalled()
+		})
+
+		it("revertChanges() stops the rollback without closing when the clean save is not confirmed", async () => {
+			// document.save() resolving false leaves the buffer's clean state unconfirmed. Closing
+			// then would prompt the user over a possibly-dirty tab, and answering yes can write
+			// content the rollback never confirmed clean, so the close is skipped and the failure
+			// is reported.
+			const editor = buildActiveDiffEditor()
+			editor.document.isDirty = true
+			const streamedBuffer = {
+				uri: makeUri(mockTargetPath),
+				getText: vi.fn().mockReturnValue("streamed content"),
+				isDirty: true,
+				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
+				save: vi.fn().mockResolvedValue(false),
+			}
+			const dirtyTab = {
+				input: Object.assign(new vscode.TabInputText(makeUri(mockTargetPath)), {
+					uri: makeUri(mockTargetPath),
+				}),
+				isDirty: true,
+				label: "mock-target-file.ts",
+			}
+			const originalTabs = Object.getOwnPropertyDescriptor(vscode.window.tabGroups, "all")
+			const originalDocuments = Object.getOwnPropertyDescriptor(vscode.workspace, "textDocuments")
+			Object.defineProperty(vscode.window.tabGroups, "all", {
+				get: () => [{ tabs: [dirtyTab] }],
+				configurable: true,
+			})
+			Object.defineProperty(vscode.workspace, "textDocuments", {
+				value: [streamedBuffer],
+				configurable: true,
+			})
+			Object.assign(diffViewProvider, {
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: editor,
+				editType: "create",
+				createdDirs: [],
+				originalContent: "",
+			})
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValueOnce(true)
+
+			try {
+				await expect(diffViewProvider.revertChanges()).rejects.toThrow(/could not save the restored buffer/i)
+			} finally {
+				if (originalTabs) {
+					Object.defineProperty(vscode.window.tabGroups, "all", originalTabs)
+				}
+				if (originalDocuments) {
+					Object.defineProperty(vscode.workspace, "textDocuments", originalDocuments)
+				}
+			}
+
+			// The restore applied and the save was attempted, but the unconfirmed save stops the
+			// rollback before the close.
+			expect(streamedBuffer.save).toHaveBeenCalledTimes(1)
+			expect(vscode.window.tabGroups.close).not.toHaveBeenCalled()
 		})
 
 		it("revertChanges() closes the file tab when the file was not open and untouched", async () => {
