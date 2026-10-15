@@ -576,6 +576,54 @@ describe("OpenAiHandler", () => {
 			expect(callArgs.reasoning_effort).toBe("max")
 		})
 
+		it("should send reasoning_effort none with function tools for OpenAI-compatible reasoning models", async () => {
+			const reasoningHandler = new OpenAiHandler({
+				...mockOptions,
+				enableReasoningEffort: true,
+				openAiCustomModelInfo: {
+					...openAiModelInfoSaneDefaults,
+					supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+					reasoningEffort: "none",
+				},
+			})
+
+			await collectStream(
+				reasoningHandler.createMessage(
+					systemPrompt,
+					messages,
+					makeCreateMessageMetadata({
+						tools: [
+							{
+								type: "function",
+								function: {
+									name: "read_file",
+									description: "Read a file",
+									parameters: {
+										type: "object",
+										properties: { path: { type: "string" } },
+										required: ["path"],
+									},
+								},
+							},
+						],
+					}),
+				),
+			)
+
+			expect(mockCreate).toHaveBeenCalledOnce()
+			expect(mockCreate.mock.calls[0][0]).toEqual(
+				expect.objectContaining({
+					reasoning_effort: "none",
+					tools: [
+						expect.objectContaining({
+							type: "function",
+							function: expect.objectContaining({ name: "read_file" }),
+						}),
+					],
+				}),
+			)
+		})
+
 		it("should not include reasoning_effort when reasoning effort is disabled", async () => {
 			const noReasoningOptions: ApiHandlerOptions = {
 				...mockOptions,
