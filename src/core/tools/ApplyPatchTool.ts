@@ -55,7 +55,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 	async execute(params: ApplyPatchParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
 		const { patch } = params
-		const { askApproval, handleError, pushToolResult } = callbacks
+		const { handleError, pushToolResult } = callbacks
 
 		// The queued-message handoff is deferred to the finally block below, after
 		// the whole-patch checkpoint attempt: a handler that hands off early lets a

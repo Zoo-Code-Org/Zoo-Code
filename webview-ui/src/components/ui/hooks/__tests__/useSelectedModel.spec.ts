@@ -27,6 +27,12 @@ import {
 	minimaxModels,
 	friendliDefaultModelId,
 	friendliModels,
+	fireworksDefaultModelId,
+	fireworksModels,
+	basetenDefaultModelId,
+	basetenModels,
+	sambaNovaDefaultModelId,
+	sambaNovaModels,
 	deepSeekDefaultModelId,
 	deepSeekModels,
 	openRouterDefaultModelId,
@@ -1416,24 +1422,25 @@ describe("useSelectedModel", () => {
 			expect(result.current.info?.supportsImages).toBe(false)
 		})
 
-		it("pins a divergent family's contextWindow to maxInputTokens, not its advertised window", () => {
-			// claude-opus-4.8 is the row where contextWindow and maxInputTokens differ; a field swap to
-			// the advertised window would be caught here.
-			const family = "claude-opus-4.8"
-			const apiConfiguration: ProviderSettings = {
-				apiProvider: providerIdentifiers.vscodeLm,
-				vsCodeLmModelSelector: { vendor: "copilot", family },
-			}
+		it.each(["claude-opus-4.8", "claude-opus-5", "gemini-3.6-flash"] as const)(
+			"pins %s to the 197897 input ceiling, not its advertised window",
+			(family) => {
+				const apiConfiguration: ProviderSettings = {
+					apiProvider: providerIdentifiers.vscodeLm,
+					vsCodeLmModelSelector: { vendor: "copilot", family },
+				}
 
-			const wrapper = createWrapper()
-			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+				const wrapper = createWrapper()
+				const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			expect(result.current.provider).toBe(providerIdentifiers.vscodeLm)
-			expect(result.current.id).toBe(`copilot/${family}`)
-			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[family].maxInputTokens) // 197897
-			expect(result.current.info?.contextWindow).not.toBe(vscodeLlmModels[family].contextWindow) // NOT 679560
-			expect(result.current.info?.supportsImages).toBe(false)
-		})
+				expect(result.current.provider).toBe(providerIdentifiers.vscodeLm)
+				expect(result.current.id).toBe(`copilot/${family}`)
+				expect(result.current.info?.contextWindow).toBe(197897)
+				expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[family].maxInputTokens)
+				expect(result.current.info?.contextWindow).not.toBe(vscodeLlmModels[family].contextWindow)
+				expect(result.current.info?.supportsImages).toBe(false)
+			},
+		)
 
 		it("falls back to the default model's window for an unlisted family (NOT 128000)", () => {
 			const apiConfiguration: ProviderSettings = {
@@ -1488,6 +1495,107 @@ describe("useSelectedModel", () => {
 			expect(result.current.id).toBe("zai-org/GLM-5.1")
 			expect(result.current.info).toEqual(friendliModels["zai-org/GLM-5.1"])
 		})
+	})
+
+	describe("OpenAI-compatible static catalog providers (fireworks, baseten, sambanova)", () => {
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+		})
+
+		const staticCatalogCases = [
+			{
+				apiProvider: providerIdentifiers.fireworks,
+				defaultId: fireworksDefaultModelId,
+				models: fireworksModels as Record<string, ModelInfo>,
+				knownId: "accounts/fireworks/models/kimi-k2-instruct",
+			},
+			{
+				apiProvider: providerIdentifiers.baseten,
+				defaultId: basetenDefaultModelId,
+				models: basetenModels as Record<string, ModelInfo>,
+				knownId: Object.keys(basetenModels).find((id) => id !== basetenDefaultModelId)!,
+			},
+			{
+				apiProvider: providerIdentifiers.sambanova,
+				defaultId: sambaNovaDefaultModelId,
+				models: sambaNovaModels as Record<string, ModelInfo>,
+				knownId: Object.keys(sambaNovaModels).find((id) => id !== sambaNovaDefaultModelId)!,
+			},
+		]
+
+		it.each(staticCatalogCases)(
+			"returns the default $apiProvider model when no model is configured",
+			({ apiProvider, defaultId, models }) => {
+				const { result } = renderHook(() => useSelectedModel({ apiProvider }), { wrapper: createWrapper() })
+
+				expect(result.current.provider).toBe(apiProvider)
+				expect(result.current.id).toBe(defaultId)
+				expect(result.current.info).toEqual(models[defaultId])
+				expect(result.current.info).toBeDefined()
+			},
+		)
+
+		it.each(staticCatalogCases)(
+			"falls back to the default $apiProvider model when apiModelId is an empty string",
+			({ apiProvider, defaultId, models }) => {
+				const { result } = renderHook(() => useSelectedModel({ apiProvider, apiModelId: "" }), {
+					wrapper: createWrapper(),
+				})
+
+				expect(result.current.id).toBe(defaultId)
+				expect(result.current.info).toEqual(models[defaultId])
+				expect(result.current.info).toBeDefined()
+			},
+		)
+
+		it.each(staticCatalogCases)(
+			"returns known $apiProvider catalog metadata",
+			({ apiProvider, models, knownId }) => {
+				expect(knownId).toBeDefined()
+				const { result } = renderHook(() => useSelectedModel({ apiProvider, apiModelId: knownId }), {
+					wrapper: createWrapper(),
+				})
+
+				expect(result.current.provider).toBe(apiProvider)
+				expect(result.current.id).toBe(knownId)
+				expect(result.current.info).toEqual(models[knownId])
+			},
+		)
+
+		it.each([providerIdentifiers.fireworks, providerIdentifiers.baseten, providerIdentifiers.sambanova])(
+			"honors a custom %s model ID with sane default metadata (not undefined info)",
+			(apiProvider) => {
+				// Regression: custom models had undefined info, so the task header fell back to a
+				// context window of 1. The backend uses openAiModelInfoSaneDefaults, so the UI must too.
+				const { result } = renderHook(
+					() => useSelectedModel({ apiProvider, apiModelId: "some/custom-model-not-in-list" }),
+					{ wrapper: createWrapper() },
+				)
+
+				expect(result.current.id).toBe("some/custom-model-not-in-list")
+				expect(result.current.info).toEqual(openAiModelInfoSaneDefaults)
+				expect(result.current.info?.contextWindow).toBeGreaterThan(1)
+			},
+		)
+
+		describe.each([providerIdentifiers.fireworks, providerIdentifiers.baseten, providerIdentifiers.sambanova])(
+			"%s inherited Object.prototype keys",
+			(apiProvider) => {
+				// An `in` check would match these keys on the prototype chain and return a function as `info`.
+				it.each(["constructor", "toString", "__proto__", "hasOwnProperty"])(
+					"treats %s as a custom model ID with sane default metadata",
+					(apiModelId) => {
+						const { result } = renderHook(() => useSelectedModel({ apiProvider, apiModelId }), {
+							wrapper: createWrapper(),
+						})
+
+						expect(result.current.id).toBe(apiModelId)
+						expect(result.current.info).toEqual(openAiModelInfoSaneDefaults)
+					},
+				)
+			},
+		)
 	})
 
 	describe("Z AI provider", () => {

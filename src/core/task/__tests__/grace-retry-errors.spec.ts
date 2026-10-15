@@ -97,7 +97,7 @@ vi.mock("vscode", () => {
 				stat: vi.fn().mockResolvedValue({ type: 1 }),
 			},
 			onDidSaveTextDocument: vi.fn(() => mockDisposable),
-			getConfiguration: vi.fn(() => ({ get: (key: string, defaultValue: any) => defaultValue })),
+			getConfiguration: vi.fn(() => ({ get: (_key: string, defaultValue: any) => defaultValue })),
 		},
 		env: {
 			uriScheme: "vscode",

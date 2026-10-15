@@ -11,8 +11,8 @@ import {
 	type GlobalState,
 	type ClineMessage,
 	type TelemetrySetting,
-	type UserSettingsConfig,
 	type ModelRecord,
+	type ProviderSettings,
 	type Command as SlashCommand,
 	type WebviewMessage,
 	type EditQueuedMessagePayload,
@@ -86,6 +86,7 @@ import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { getWorkspacePath } from "../../utils/path"
 import { isPathOutsideWorkspace, decodeUntrustedPathToStable, isRealPathOutsideWorkspace } from "../../utils/pathUtils"
 import { Mode, defaultModeSlug } from "../../shared/modes"
+import { buildApiHandler, type ApiHandler } from "../../api"
 import { getModels, flushModels } from "../../api/providers/fetchers/modelCache"
 import { GetModelsOptions } from "../../shared/api"
 import { generateSystemPrompt } from "./generateSystemPrompt"
@@ -118,6 +119,9 @@ import {
 	handleCreateWorktreeInclude,
 	handleCheckoutBranch,
 } from "./worktree"
+
+const handlerFor = (apiConfiguration: ProviderSettings, provider: RouterName): ApiHandler =>
+	buildApiHandler({ ...apiConfiguration, apiProvider: provider })
 
 export const webviewMessageHandler = async (
 	provider: ClineProvider,
@@ -1101,12 +1105,18 @@ export const webviewMessageHandler = async (
 		case "resetState":
 			await provider.resetState()
 			break
-		case RouterModelsMessageType.flushRouterModels:
+		case RouterModelsMessageType.flushRouterModels: {
+			const { apiConfiguration } = await provider.getState()
 			const routerNameFlush: RouterName = toRouterName(message.text)
 			// Note: flushRouterModels is a generic flush without credentials
 			// For providers that need credentials, use their specific handlers
-			await flushModels({ provider: routerNameFlush } as GetModelsOptions, true)
+			await flushModels(
+				{ provider: routerNameFlush } as GetModelsOptions,
+				handlerFor(apiConfiguration, routerNameFlush),
+				true,
+			)
 			break
+		}
 		case RouterModelsMessageType.requestRouterModels: {
 			const { apiConfiguration } = await provider.getState()
 
@@ -1137,9 +1147,9 @@ export const webviewMessageHandler = async (
 						[providerIdentifiers.kimiCode]: {},
 					}
 
-			const safeGetModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
+			const safeGetModels = async (options: GetModelsOptions, handler: ApiHandler): Promise<ModelRecord> => {
 				try {
-					return await getModels(options)
+					return await getModels(options, handler)
 				} catch (error) {
 					console.error(
 						`Failed to fetch models in webviewMessageHandler requestRouterModels for ${options.provider}:`,
@@ -1197,6 +1207,7 @@ export const webviewMessageHandler = async (
 				if (message?.values?.litellmApiKey || message?.values?.litellmBaseUrl) {
 					await flushModels(
 						{ provider: providerIdentifiers.litellm, apiKey: litellmApiKey, baseUrl: litellmBaseUrl },
+						handlerFor(apiConfiguration, providerIdentifiers.litellm),
 						true,
 					)
 				}
@@ -1215,6 +1226,7 @@ export const webviewMessageHandler = async (
 				if (message?.values?.poeApiKey || message?.values?.poeBaseUrl) {
 					await flushModels(
 						{ provider: providerIdentifiers.poe, apiKey: poeApiKey, baseUrl: poeBaseUrl },
+						handlerFor(apiConfiguration, providerIdentifiers.poe),
 						true,
 					)
 				}
@@ -1233,6 +1245,7 @@ export const webviewMessageHandler = async (
 				if (message?.values?.deepSeekApiKey || message?.values?.deepSeekBaseUrl) {
 					await flushModels(
 						{ provider: providerIdentifiers.deepseek, apiKey: deepSeekApiKey, baseUrl: deepSeekBaseUrl },
+						handlerFor(apiConfiguration, providerIdentifiers.deepseek),
 						true,
 					)
 				}
@@ -1255,6 +1268,7 @@ export const webviewMessageHandler = async (
 				if (message?.values?.moonshotApiKey || message?.values?.moonshotBaseUrl) {
 					await flushModels(
 						{ provider: providerIdentifiers.moonshot, apiKey: moonshotApiKey, baseUrl: moonshotBaseUrl },
+						handlerFor(apiConfiguration, providerIdentifiers.moonshot),
 						true,
 					)
 				}
@@ -1278,7 +1292,11 @@ export const webviewMessageHandler = async (
 
 			// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
 			if (message?.values?.opencodeGoApiKey) {
-				await flushModels({ provider: providerIdentifiers.opencodeGo, apiKey: opencodeGoApiKey }, true)
+				await flushModels(
+					{ provider: providerIdentifiers.opencodeGo, apiKey: opencodeGoApiKey },
+					handlerFor(apiConfiguration, providerIdentifiers.opencodeGo),
+					true,
+				)
 			}
 
 			candidates.push({
@@ -1295,7 +1313,11 @@ export const webviewMessageHandler = async (
 
 			// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
 			if (message?.values?.kenariApiKey) {
-				await flushModels({ provider: providerIdentifiers.kenari, apiKey: kenariApiKey }, true)
+				await flushModels(
+					{ provider: providerIdentifiers.kenari, apiKey: kenariApiKey },
+					handlerFor(apiConfiguration, providerIdentifiers.kenari),
+					true,
+				)
 			}
 
 			candidates.push({
@@ -1308,7 +1330,11 @@ export const webviewMessageHandler = async (
 			// same key-scoped options for refresh and retrieval.
 			const nanoGptApiKey = message?.values?.nanoGptApiKey ?? apiConfiguration.nanoGptApiKey
 			if (message?.values?.nanoGptApiKey !== undefined) {
-				await flushModels({ provider: providerIdentifiers.nanogpt, apiKey: nanoGptApiKey }, true)
+				await flushModels(
+					{ provider: providerIdentifiers.nanogpt, apiKey: nanoGptApiKey },
+					handlerFor(apiConfiguration, providerIdentifiers.nanogpt),
+					true,
+				)
 			}
 
 			candidates.push({
@@ -1340,12 +1366,12 @@ export const webviewMessageHandler = async (
 			// If refresh flag is set and we have a specific provider, flush its cache first
 			if (shouldRefresh && providerFilter && modelFetchPromises.length > 0) {
 				const targetCandidate = modelFetchPromises[0]
-				await flushModels(targetCandidate.options, true)
+				await flushModels(targetCandidate.options, handlerFor(apiConfiguration, targetCandidate.key), true)
 			}
 
 			const results = await Promise.allSettled(
 				modelFetchPromises.map(async ({ key, options }) => {
-					const models = await safeGetModels(options)
+					const models = await safeGetModels(options, handlerFor(apiConfiguration, key))
 					return { key, models } // The key is `ProviderName` here.
 				}),
 			)
@@ -1395,11 +1421,12 @@ export const webviewMessageHandler = async (
 				baseUrl,
 				apiKey,
 			}
+			const handler = handlerFor(ollamaApiConfig, providerIdentifiers.ollama)
 			try {
 				// Refresh the cache before reading the models. Keep this error
 				// separate from the read below so diagnostics identify which
 				// cache operation failed.
-				await flushModels(ollamaOptions, true)
+				await flushModels(ollamaOptions, handler, true)
 			} catch (error) {
 				const errorMsg = error instanceof Error ? error.message : String(error)
 				provider.log(`[requestOllamaModels] Failed to refresh model cache for ${logBaseUrl}: ${errorMsg}`)
@@ -1412,7 +1439,7 @@ export const webviewMessageHandler = async (
 			}
 
 			try {
-				const ollamaModels = await getModels(ollamaOptions)
+				const ollamaModels = await getModels(ollamaOptions, handler)
 
 				// Always post a response so the webview refresh status can
 				// transition out of "loading" — even when no models are found.
@@ -1442,9 +1469,10 @@ export const webviewMessageHandler = async (
 						provider: providerIdentifiers.lmstudio,
 						baseUrl: lmStudioApiConfig.lmStudioBaseUrl,
 					}
+					const handler = handlerFor(lmStudioApiConfig, providerIdentifiers.lmstudio)
 					// Flush cache and refresh to ensure fresh models.
-					await flushModels(lmStudioOptions, true)
-					lmStudioModels = await getModels(lmStudioOptions)
+					await flushModels(lmStudioOptions, handler, true)
+					lmStudioModels = await getModels(lmStudioOptions, handler)
 				}
 
 				if (Object.keys(lmStudioModels).length > 0) {
@@ -1665,14 +1693,14 @@ export const webviewMessageHandler = async (
 
 				try {
 					await pWaitFor(() => provider.getCurrentTask()?.isInitialized === true, { timeout: 3_000 })
-				} catch (error) {
+				} catch {
 					vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
 					return
 				}
 
 				try {
 					await provider.getCurrentTask()?.checkpointRestore(result.data)
-				} catch (error) {
+				} catch {
 					vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
 				}
 			}
@@ -1703,7 +1731,7 @@ export const webviewMessageHandler = async (
 
 				try {
 					await pWaitFor(() => provider.getCurrentTask()?.isInitialized === true, { timeout: 3_000 })
-				} catch (error) {
+				} catch {
 					vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
 					return
 				}
@@ -2489,7 +2517,7 @@ export const webviewMessageHandler = async (
 							}
 						}
 					}
-				} catch (error) {
+				} catch {
 					// Error already shown to user by updateCustomMode
 					// Just prevent unhandled rejection and skip state updates
 				}
