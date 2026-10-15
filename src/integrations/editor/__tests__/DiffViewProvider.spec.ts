@@ -1188,6 +1188,8 @@ describe("DiffViewProvider", () => {
 				activeDiffEditor: undefined,
 				editType: "create",
 				createdDirs,
+				// open() claimed the placeholder before its editor open rejected.
+				placeholderPath: `${mockCwd}/mock-target-file.ts`,
 			})
 
 			await diffViewProvider.revertChanges()
@@ -1205,6 +1207,9 @@ describe("DiffViewProvider", () => {
 				activeDiffEditor: undefined,
 				editType: "create",
 				createdDirs: [],
+				// Ownership was claimed (open()'s write succeeded); the file vanished externally
+				// before the rollback ran.
+				placeholderPath: `${mockCwd}/mock-target-file.ts`,
 			})
 			vi.mocked(fs.unlink).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
 
@@ -1285,6 +1290,42 @@ describe("DiffViewProvider", () => {
 			expect(diffViewProvider["relPath"]).toBeUndefined()
 			expect(fs.unlink).not.toHaveBeenCalled()
 		})
+		it("revertChanges() after a FAILED reset does not delete the previously approved file", async () => {
+			// An approved new-file write landed and reset() then rejected on the tab close.
+			// Without the finally, relPath/editType/isEditing and the placeholder ownership
+			// survived the failure: the next execution skipped open(), reused the stale create
+			// session, and a later denial's rollback unlinked the file the user had approved.
+			Object.assign(diffViewProvider, {
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "create",
+				isEditing: true,
+				createdDirs: [],
+				placeholderPath: mockTargetPath,
+			})
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockRejectedValue(new Error("close failed"))
+
+			await expect(diffViewProvider.reset()).rejects.toThrow("close failed")
+
+			// The failed reset still released the session and the placeholder ownership.
+			expect(diffViewProvider["relPath"]).toBeUndefined()
+			expect(diffViewProvider["editType"]).toBeUndefined()
+			expect(diffViewProvider["isEditing"]).toBe(false)
+			expect(diffViewProvider["placeholderPath"]).toBeUndefined()
+
+			// The next edit's denial rolls back owning no placeholder: the previously approved
+			// file must survive even though a relPath is set again. The tab close succeeds this
+			// time - only the rollback's delete authority is under test.
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			Object.assign(diffViewProvider, {
+				relPath: "follow-up-denied.ts",
+				activeDiffEditor: undefined,
+				editType: "create",
+				createdDirs: [],
+			})
+			await diffViewProvider.revertChanges()
+			expect(fs.unlink).not.toHaveBeenCalled()
+		})
 
 		it("saveChanges() signals its commit point at the document save, not on return", async () => {
 			// Everything after the save - closing the diff views, tab bookkeeping, diagnostics - can
@@ -1355,6 +1396,7 @@ describe("DiffViewProvider", () => {
 				activeDiffEditor: undefined,
 				editType: "create",
 				createdDirs: [],
+				placeholderPath: mockTargetPath,
 			})
 			vi.mocked(fs.unlink).mockRejectedValueOnce(
 				Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }),
@@ -1387,6 +1429,7 @@ describe("DiffViewProvider", () => {
 				editType: "create",
 				createdDirs: [],
 				originalContent: "",
+				placeholderPath: mockTargetPath,
 			})
 
 			try {

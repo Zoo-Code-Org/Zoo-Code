@@ -704,6 +704,13 @@ export class DiffViewProvider {
 
 		const fileExists = this.editType === "modify"
 		const absolutePath = path.resolve(this.cwd, this.relPath)
+		// Only the placeholder THIS edit owns may be deleted. A stale session (a prior reset()
+		// whose close failed) can carry relPath onto the next call, and the path derived from
+		// it may name a file this edit never created - e.g. the previously approved write.
+		// Snapshot the ownership and clear the field before any await, so a mid-flight
+		// rejection cannot leave it for a later discard to act on twice.
+		const placeholderPath = this.placeholderPath
+		this.placeholderPath = undefined
 
 		// Stop tracking touches and cancel any pending scroll-to-diff before any
 		// programmatic editor activation below.
@@ -734,10 +741,9 @@ export class DiffViewProvider {
 				}
 			}
 
-			await this.removeCreatedFile(absolutePath)
-			// The placeholder this edit owned is gone; a later discard must not delete whatever
-			// occupies the path now.
-			this.placeholderPath = undefined
+			if (placeholderPath) {
+				await this.removeCreatedFile(placeholderPath)
+			}
 
 			// Remove only the directories we created, in reverse order.
 			for (let i = this.createdDirs.length - 1; i >= 0; i--) {
@@ -1413,31 +1419,39 @@ export class DiffViewProvider {
 		this.disposeActiveEditorListener()
 		this.cancelDeferredScroll()
 
-		await this.closeAllDiffViews()
-		this.editType = undefined
-		this.isEditing = false
-		// A session's path must not outlive the session: revertChanges() reads relPath to decide
-		// what to roll back, and a stale relPath with editType cleared points the next rollback at
-		// whatever file this provider last touched - a file the current edit never created.
-		this.relPath = undefined
-		this.newContent = undefined
-		this.originalContent = undefined
-		this.createdDirs = []
-		this.placeholderPath = undefined
-		this.documentWasOpen = false
-		this.documentWasPinned = false
-		this.activeDiffEditor = undefined
-		this.fadedOverlayController = undefined
-		this.activeLineController = undefined
-		this.streamedLines = []
-		this.preDiagnostics = []
-		this.preEditScrollLine = undefined
-		this.diffScrollLine = undefined
-		this.targetFileScrollLine = undefined
-		this.lastScrolledSource = undefined
-		this.userTouchedDocument = false
-		this.userTouchedDiffEditor = false
-		this.snapshotPreviewTabs = []
+		try {
+			await this.closeAllDiffViews()
+		} finally {
+			// Clear the session even when the close rejected: a stale relPath/editType/isEditing
+			// surviving a failed reset is what turned one bad tab-close into loss of approved
+			// content - the next execution skips open(), reuses the stale create session, and a
+			// later denial's rollback deletes the file the previous write approved. The close
+			// failure still propagates to the caller.
+			this.editType = undefined
+			this.isEditing = false
+			// A session's path must not outlive the session: revertChanges() reads relPath to decide
+			// what to roll back, and a stale relPath with editType cleared points the next rollback at
+			// whatever file this provider last touched - a file the current edit never created.
+			this.relPath = undefined
+			this.newContent = undefined
+			this.originalContent = undefined
+			this.createdDirs = []
+			this.placeholderPath = undefined
+			this.documentWasOpen = false
+			this.documentWasPinned = false
+			this.activeDiffEditor = undefined
+			this.fadedOverlayController = undefined
+			this.activeLineController = undefined
+			this.streamedLines = []
+			this.preDiagnostics = []
+			this.preEditScrollLine = undefined
+			this.diffScrollLine = undefined
+			this.targetFileScrollLine = undefined
+			this.lastScrolledSource = undefined
+			this.userTouchedDocument = false
+			this.userTouchedDiffEditor = false
+			this.snapshotPreviewTabs = []
+		}
 	}
 
 	/**
