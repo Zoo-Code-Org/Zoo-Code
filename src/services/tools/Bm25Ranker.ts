@@ -86,7 +86,10 @@ export class Bm25Ranker implements Ranker {
 }
 
 function tokenize(value: string): string[] {
-	return value.toLowerCase().split(/\W+/).filter(Boolean)
+	return value
+		.toLowerCase()
+		.split(/[\W_]+/)
+		.filter(Boolean)
 }
 
 function countTerms(item: ToolDoc): Map<string, number> {

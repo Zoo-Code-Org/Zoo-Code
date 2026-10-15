@@ -52,6 +52,13 @@ describe("Bm25Ranker", () => {
 		expect(new Bm25Ranker().rank("SLACK post message", [nonMatching, matching], 10)).toEqual([matching])
 	})
 
+	it("splits underscore-separated tool names into separate terms", () => {
+		const matching = tool("github", "create_issue", "Open a ticket")
+		const nonMatching = tool("calendar", "list_events", "Show upcoming events")
+
+		expect(new Bm25Ranker().rank("create issue", [nonMatching, matching], 10)).toEqual([matching])
+	})
+
 	it("handles tools with empty descriptions", () => {
 		const item = tool("GitHub", "listRepos", "")
 
