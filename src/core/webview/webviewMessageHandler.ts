@@ -784,6 +784,14 @@ export const webviewMessageHandler = async (
 				}
 
 				for (const [key, value] of Object.entries(message.updatedSettings)) {
+					// viewStates is server-owned per-view persistence (identity pins and
+					// loaded-profile overlays). The settings UI never puts it into
+					// updatedSettings, so a crafted renderer payload must not be able to
+					// rewrite the whole map through the generic loop below.
+					if (key === "viewStates") {
+						continue
+					}
+
 					let newValue = value
 
 					if (key === "language") {

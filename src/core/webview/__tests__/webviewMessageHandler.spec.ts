@@ -1556,6 +1556,23 @@ describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
 	})
+
+	// viewStates is server-owned: a crafted updatedSettings payload that echoes the
+	// whole map back must not rewrite (or clobber) the persisted per-view state,
+	// while sibling keys in the same payload still persist normally.
+	it("does not let updateSettings rewrite the server-owned viewStates map", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: {
+				viewStates: { injected: { mode: "architect" } },
+				alwaysDenyUnapprovedCommands: true,
+			},
+		})
+
+		expect(mockClineProvider.setValue).not.toHaveBeenCalledWith("viewStates", expect.anything())
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith("viewStates", expect.anything())
+		expect(mockClineProvider.setValue).toHaveBeenCalledWith("alwaysDenyUnapprovedCommands", true)
+	})
 })
 
 // A plain boolean needs no normalization branch in the updateSettings loop,

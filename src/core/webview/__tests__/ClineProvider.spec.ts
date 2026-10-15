@@ -3248,6 +3248,46 @@ describe("ClineProvider", () => {
 			expect(state.apiConfiguration.apiProvider).toBe(providerIdentifiers.anthropic)
 			await provider.dispose()
 		})
+		it("rolls back the profile activation writes when one concurrent write fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// Seed the prior shared selection so the rollback restores a real state.
+			await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				{ name: "old-profile", id: "old-id", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("new-id")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "new-profile", id: "new-id", apiProvider: providerIdentifiers.openai },
+			])
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("old-mode-id")
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockRejectedValue(
+				new Error("mode write failed"),
+			)
+			const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			// The outer upsert catch converts the failure into an undefined id (the
+			// user sees the error toast); the compensation must still have run.
+			await expect(
+				provider.upsertProviderProfile("new-profile", { apiProvider: providerIdentifiers.openai }, true),
+			).resolves.toBeUndefined()
+
+			// Every write that landed is compensated: the mode mapping returns to its
+			// prior id, and the selection, list, and shared settings are restored.
+			expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("code", "old-mode-id")
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("old-profile")
+			expect((provider.contextProxy.getValue("listApiConfigMeta") ?? []).map((entry) => entry.name)).toEqual([
+				"old-profile",
+			])
+			expect(setProviderSettingsSpy).toHaveBeenCalledTimes(2)
+			await provider.dispose()
+		})
 
 		it("refreshes this view's buffer when a pinned profile is saved without activation", async () => {
 			const provider = new ClineProvider(
