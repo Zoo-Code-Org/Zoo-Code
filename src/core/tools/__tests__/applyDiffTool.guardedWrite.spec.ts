@@ -157,6 +157,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockSaveDirectly).toHaveBeenCalledWith(
@@ -180,6 +181,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockHandleError).toHaveBeenCalledWith("applying diff", guardError)
@@ -208,6 +210,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockSaveChanges).toHaveBeenCalledWith(true, 1000, "edit")
@@ -225,6 +228,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		const observation = mockTask.observationRegistry.get(path.resolve(mockTask.cwd, "src/thing.ts"))
@@ -255,6 +259,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockTask.observationRegistry.get(path.resolve(mockTask.cwd, "src/thing.ts"))).toBeUndefined()
@@ -272,6 +277,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		const observation = mockTask.observationRegistry.get(key)
@@ -290,6 +296,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		const observation = mockTask.observationRegistry.get(key)
@@ -308,6 +315,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockTask.observationRegistry.get(path.resolve(mockTask.cwd, "src/thing.ts"))).toBeUndefined()
@@ -347,6 +355,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockTask.observationRegistry.get(path.resolve(mockTask.cwd, "src/thing.ts"))).toBeUndefined()
