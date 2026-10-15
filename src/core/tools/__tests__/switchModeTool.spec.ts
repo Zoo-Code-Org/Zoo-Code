@@ -383,6 +383,7 @@ describe("SwitchModeTool", () => {
 			askApproval: vi.fn().mockResolvedValue(true),
 			handleError: vi.fn(),
 			pushToolResult: vi.fn(),
+			toolCallId: "test-call-id",
 		}
 		const block = {
 			type: "tool_use" as const,
