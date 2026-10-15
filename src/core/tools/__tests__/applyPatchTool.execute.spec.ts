@@ -599,8 +599,8 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 	describe("change-card threading (B3a)", () => {
 		const mockedCheckpointSave = checkpointSave as MockedFunction<typeof checkpointSave>
 		const deletePatch = `*** Begin Patch
-		*** Delete File: src/obsolete.ts
-		*** End Patch`
+*** Delete File: src/obsolete.ts
+*** End Patch`
 
 		it("threads autoApproved into the checkpoint writes for auto-approved steps", async () => {
 			// B3a: auto-approved steps carry autoApproved on every write so
