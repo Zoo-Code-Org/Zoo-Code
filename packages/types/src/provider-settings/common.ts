@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { reasoningEffortSettingSchema, verbosityLevelsSchema } from "../model.js"
+import { customModelInfoSchema, reasoningEffortSettingSchema, verbosityLevelsSchema } from "../model.js"
 import type { ProviderIdentifier } from "../provider-identifiers.js"
 
 export const API_PROVIDER_FIELD = "apiProvider"
@@ -35,6 +35,7 @@ export const baseProviderSettingsShape = {
 	modelMaxTokens: z.number().optional(),
 	modelMaxThinkingTokens: z.number().optional(),
 	verbosity: verbosityLevelsSchema.optional(),
+	customModelInfo: customModelInfoSchema.nullish(),
 }
 
 export const apiModelIdProviderModelShape = {

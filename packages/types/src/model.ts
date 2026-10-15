@@ -185,6 +185,95 @@ export const modelInfoSchema = z.object({
 
 export type ModelInfo = z.infer<typeof modelInfoSchema>
 
+/**
+ * User-supplied model metadata for a model whose discovered metadata is
+ * incomplete or unavailable.
+ *
+ * This mirrors the long-standing `openAiCustomModelInfo` contract: the stored
+ * value is a complete snapshot that the settings UI prefills from the
+ * discovered catalog entry. Resolution therefore stays a single expression at
+ * every call site and a configured override can never resolve to `undefined`.
+ *
+ * Pricing is deliberately excluded. Router catalogs own prices and refresh
+ * them, so a user-held price snapshot would go stale and silently corrupt cost
+ * reporting.
+ */
+export const customModelInfoSchema = modelInfoSchema
+	.omit({
+		inputPrice: true,
+		outputPrice: true,
+		cacheWritesPrice: true,
+		cacheReadsPrice: true,
+		longContextPricing: true,
+		tiers: true,
+	})
+	.extend({
+		// `modelInfoSchema` accepts any number because a provider catalog is not
+		// ours to validate. User input is, and these two values drive token
+		// accounting and the outgoing max_completion_tokens, so reject the values
+		// that would produce NaN percentages or a request the gateway rejects.
+		contextWindow: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+		maxTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullish(),
+	})
+	// `strict()` is what actually rejects a pricing field: omitting a key only
+	// drops it from the shape, it does not make the value invalid.
+	.strict()
+
+export type CustomModelInfo = z.infer<typeof customModelInfoSchema>
+
+export type CustomModelInfoSettings = {
+	customModelInfo?: CustomModelInfo | null
+}
+
+/**
+ * Strips provider-owned pricing so the settings UI can prefill the editor from
+ * a discovered catalog entry.
+ */
+export const toCustomModelInfo = (info: ModelInfo): CustomModelInfo => {
+	const {
+		inputPrice: _inputPrice,
+		outputPrice: _outputPrice,
+		cacheWritesPrice: _cacheWritesPrice,
+		cacheReadsPrice: _cacheReadsPrice,
+		longContextPricing: _longContextPricing,
+		tiers: _tiers,
+		...rest
+	} = info
+
+	return rest
+}
+
+/**
+ * Resolves the effective model metadata for providers that expose the custom
+ * model info editor.
+ *
+ * A configured override replaces the discovered metadata wholesale; pricing is
+ * always read back from the catalog entry. Without an override the discovered
+ * metadata passes through untouched.
+ */
+export const applyCustomModelInfo = (
+	info: ModelInfo | undefined,
+	settings: CustomModelInfoSettings | undefined,
+): ModelInfo | undefined => {
+	const override = settings?.customModelInfo
+
+	if (!override) {
+		return info
+	}
+
+	// Copy only the price keys the catalog actually carries, so the result never
+	// gains explicit `undefined` pricing fields.
+	return {
+		...override,
+		...(info?.inputPrice !== undefined && { inputPrice: info.inputPrice }),
+		...(info?.outputPrice !== undefined && { outputPrice: info.outputPrice }),
+		...(info?.cacheWritesPrice !== undefined && { cacheWritesPrice: info.cacheWritesPrice }),
+		...(info?.cacheReadsPrice !== undefined && { cacheReadsPrice: info.cacheReadsPrice }),
+		...(info?.longContextPricing !== undefined && { longContextPricing: info.longContextPricing }),
+		...(info?.tiers !== undefined && { tiers: info.tiers }),
+	}
+}
+
 export type ModelRecord = Record<string, ModelInfo>
 
 export type RouterModels = Record<DynamicProvider | LocalProvider, ModelRecord>
