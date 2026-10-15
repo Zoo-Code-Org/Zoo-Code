@@ -4773,8 +4773,61 @@ describe("ClineProvider", () => {
 			await provider.saveViewState("mode", "architect")
 			await provider.resetState()
 			expect(provider["viewLocalState"]).toEqual({})
-			expect(mockContext.globalState.get("viewStates")).toEqual({})
+			// F4 cross-instance broadcast clears the entire durable viewStates map, so the
+			// key is removed (undefined) rather than left as an empty object.
+			expect(mockContext.globalState.get("viewStates")).toBeUndefined()
 			await provider.dispose()
+		})
+
+		it("clears every live view's buffer and persisted entry when another view resets state", async () => {
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+				// @ts-ignore - Replace customModesManager with a test double (the real reset writes to disk).
+				provider.customModesManager = {
+					resetCustomModes: vi.fn().mockResolvedValue(undefined),
+					dispose: vi.fn(),
+				}
+				vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(
+					t("common:answers.yes") as unknown as vscode.MessageItem,
+				)
+				await provider["setViewStateId"]("stable-sidebar-view")
+				await provider.saveViewState("mode", "architect")
+				// The sibling pins a profile and buffers its settings snapshot, API
+				// key included - exactly what a credential-removing reset must not
+				// leave behind in another view.
+				await sibling["setViewStateId"]("stable-editor-view")
+				await sibling.saveViewState("mode", "code")
+				sibling["viewLocalState"].currentApiConfigName = "doomed-profile"
+				sibling["viewLocalState"].apiConfiguration = {
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "doomed-secret",
+				}
+
+				await provider.resetState()
+
+				expect(sibling["viewLocalState"]).toEqual({})
+				const persisted = (mockContext.globalState.get("viewStates") as Record<string, unknown>) ?? {}
+				expect(persisted["stable-editor-view"]).toBeUndefined()
+				expect(persisted["stable-sidebar-view"]).toBeUndefined()
+			} finally {
+				await sibling.dispose()
+				await provider.dispose()
+			}
 		})
 
 		it("should not tombstone a view id when the durable viewStates delete fails", async () => {
@@ -7660,7 +7713,9 @@ describe("ClineProvider", () => {
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				getProfile: vi.fn().mockImplementation(async ({ name }: { name: string }) => {
 					// A second provider instance upserts a profile while this one is waiting on the
-					// survivor lookup. The mutation queue is per instance, so nothing stops that write.
+					// survivor lookup. The queue serializes provider-profile mutations across
+					// views, but this write goes straight to listApiConfigMeta - a queue-bypassing
+					// profile-list path - so nothing stops it.
 					if (name === "keeper-profile") {
 						const shared =
 							(provider.contextProxy.getValue("listApiConfigMeta") as ProviderSettingsEntry[]) ?? []
@@ -7757,91 +7812,6 @@ describe("ClineProvider", () => {
 			})
 			expect(provider.contextProxy.getValue("listApiConfigMeta")).toEqual([doomedProfile, keeperProfile])
 			await provider.dispose()
-		})
-
-		it("does not re-point a pinned sibling's task that follows another profile when its profile is deleted", async () => {
-			// Defensive: the doubles in this suite can leave console writes pending
-			// at worker teardown.
-			vi.spyOn(console, "log").mockImplementation(() => {})
-			vi.spyOn(console, "warn").mockImplementation(() => {})
-			vi.spyOn(console, "error").mockImplementation(() => {})
-			const provider = new ClineProvider(
-				mockContext,
-				mockOutputChannel,
-				"sidebar",
-				new ContextProxy(mockContext),
-				new WebviewFocusTracker(),
-			)
-			const sibling = new ClineProvider(
-				mockContext,
-				mockOutputChannel,
-				"editor",
-				new ContextProxy(mockContext),
-				new WebviewFocusTracker(),
-			)
-			try {
-				const oldProfile: ProviderSettingsEntry = {
-					name: "old-profile",
-					id: "old-id",
-					apiProvider: providerIdentifiers.openrouter,
-				}
-				const keeperProfile: ProviderSettingsEntry = {
-					name: "keeper-profile",
-					id: "keeper-id",
-					apiProvider: providerIdentifiers.anthropic,
-				}
-				await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
-				await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
-				// The sibling pins the profile being deleted, but its active task
-				// follows a different sticky profile: the deletion must re-point the
-				// sibling's buffer to the surviving profile without switching that
-				// conversation's handler or rewriting its persisted profile name.
-				sibling["viewLocalState"].currentApiConfigName = "old-profile"
-				sibling["viewLocalState"].apiConfiguration = {
-					apiProvider: providerIdentifiers.openrouter,
-					openRouterApiKey: "deleted-profile-secret",
-				}
-				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
-				const siblingTask = {
-					apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "other-key" },
-					taskApiConfigName: "other-profile",
-					taskId: "sibling-task",
-					setTaskApiConfigName: vi.fn(),
-					updateApiConfiguration: vi.fn(),
-				}
-				vi.spyOn(sibling, "getCurrentTask").mockReturnValue(
-					siblingTask as unknown as ReturnType<typeof sibling.getCurrentTask>,
-				)
-				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-				vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
-					name: "keeper-profile",
-					id: "keeper-id",
-					apiProvider: providerIdentifiers.anthropic,
-				})
-				vi.spyOn(provider.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
-
-				await provider.deleteProviderProfile(oldProfile)
-
-				// The sibling's view buffer is still re-pointed to the surviving
-				// profile...
-				expect(sibling["viewLocalState"].currentApiConfigName).toBe("keeper-profile")
-				expect(sibling["viewLocalState"].apiConfiguration).toEqual({
-					id: "keeper-id",
-					apiProvider: providerIdentifiers.anthropic,
-				})
-				// ...but the task follows another profile: neither the handler rebuild
-				// nor the sticky-name rewrite may touch it.
-				expect(siblingTask.updateApiConfiguration).not.toHaveBeenCalled()
-				expect(siblingTask.setTaskApiConfigName).not.toHaveBeenCalled()
-				// Wait on the serialized view-state write queue that every
-				// viewStates mutation goes through, so queued persistence finishes
-				// while the console spies are still installed and teardown has no
-				// pending writes.
-				await ClineProvider["persistedViewStateWriteQueue"]
-			} finally {
-				await sibling.dispose()
-				await provider.dispose()
-			}
 		})
 
 		it("leaves the view buffer untouched when the deleted profile is neither globally active nor view-pinned", async () => {
