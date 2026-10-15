@@ -10,6 +10,8 @@ import type { Task } from "../../task/Task"
 import { ObservationRegistry } from "../../task/observationRegistry"
 import { guardedWrite } from "../guardedWrite"
 import { ApplyPatchTool } from "../ApplyPatchTool"
+import { PartialMoveError } from "../ApplyPatchTool"
+import { PostCommitDurabilityError } from "../../../services/file-safety/safeWriteText"
 
 // The vi.mock factory exposes the fs/promises functions under a `default`
 // property (matching the SUT's default import), which the static module type
@@ -471,6 +473,44 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			"create",
 			false,
 		)
+	})
+
+	it("move: removes the source when the destination landed but durability failed, and reports the failure", async () => {
+		// A PostCommitDurabilityError means the commit rename ALREADY placed the
+		// bytes at the destination: the move is half-applied while the source
+		// survives. Swallowing the error left the content at both paths; the
+		// source removal must still run and the failure must still surface.
+		mockSaveDirectly.mockRejectedValue(
+			new PostCommitDurabilityError(path.resolve("/workspace/project", "src/new.ts"), new Error("fsync failed")),
+		)
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		// The observable half of the move completed: the source is gone.
+		expect(mockedFsPromises.default.unlink).toHaveBeenCalledWith(path.resolve("/workspace/project", "src/old.ts"))
+		// And the durability failure is reported - not a completed move.
+		expect(mockHandleError).toHaveBeenCalledWith("apply patch", expect.any(PostCommitDurabilityError))
+	})
+
+	it("move: reports a source-unlink failure as a partial move instead of a success", async () => {
+		// The destination is published but the source survives: the content now
+		// exists at BOTH paths. Logging the unlink failure and continuing reported
+		// a completed move; the dedicated failure class must surface instead, and
+		// edit tracking must not claim the moved file.
+		mockedFsPromises.default.unlink.mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }))
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockHandleError).toHaveBeenCalledWith("apply patch", expect.any(PartialMoveError))
+		expect(mockTask.fileContextTracker.trackFileContext).not.toHaveBeenCalledWith("src/new.ts", "roo_edited")
 	})
 
 	it("move: rejects a partial source onto an observed destination before changing any state", async () => {

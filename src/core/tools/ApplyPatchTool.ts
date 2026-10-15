@@ -13,9 +13,30 @@ import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { sanitizeUnifiedDiff, computeDiffStats } from "../diff/stats"
 import { versionTokenOfStat } from "../../utils/versionToken"
 import { GuardRejectedError, errorCode } from "./guardedWrite"
+import { PostCommitDurabilityError } from "../../services/file-safety/safeWriteText"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import type { ToolUse } from "../../shared/tools"
 import { parsePatch, ParseError, processAllHunks } from "./apply-patch"
+/**
+ * A move published its destination but could not remove the source: the content
+ * now exists at BOTH paths. Reporting that as a plain success lets the model
+ * keep working from a file that exists twice, so the half-applied move is
+ * reported as its own failure class.
+ */
+export class PartialMoveError extends Error {
+	readonly sourcePath: string
+	readonly movePath: string
+	constructor(sourcePath: string, movePath: string, cause: unknown) {
+		super(
+			`Move to ${movePath} is half-applied: the destination was published but the source ${sourcePath} could not be removed (${String(cause)}).`,
+			{ cause },
+		)
+		this.name = "PartialMoveError"
+		this.sourcePath = sourcePath
+		this.movePath = movePath
+	}
+}
+
 import type { ApplyPatchFileChange } from "./apply-patch"
 
 interface ApplyPatchParams {
@@ -491,15 +512,34 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						task.observationRegistry.observe(moveAbsolutePath, destObs.version, false)
 					}
 				}
-				await task.diffViewProvider.saveDirectly(
-					change.movePath,
-					newContent,
-					false,
-					diagnosticsEnabled,
-					writeDelayMs,
-					"create",
-					sourceComplete,
-				)
+				try {
+					await task.diffViewProvider.saveDirectly(
+						change.movePath,
+						newContent,
+						false,
+						diagnosticsEnabled,
+						writeDelayMs,
+						"create",
+						sourceComplete,
+					)
+				} catch (error: unknown) {
+					if (
+						error instanceof PostCommitDurabilityError &&
+						path.resolve(error.targetPath) === moveAbsolutePath
+					) {
+						// The commit rename landed: the destination carries the moved
+						// content even though durability failed. Finish the observable
+						// half of the move - remove the source - so the content is not
+						// left at both paths, then rethrow: a durability failure is not
+						// a completed move.
+						await fs.unlink(absolutePath).catch((unlinkError: unknown) => {
+							console.error(
+								`Move to ${change.movePath} is half-applied: the destination was published but the source could not be removed (${String(unlinkError)}).`,
+							)
+						})
+					}
+					throw error
+				}
 			} else {
 				// Write to new path and delete old file
 				const parentDir = path.dirname(moveAbsolutePath)
@@ -507,11 +547,15 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await fs.writeFile(moveAbsolutePath, newContent, "utf8")
 			}
 
-			// Delete the original file
+			// Delete the original file. A failure here leaves the content at BOTH
+			// paths - a half-applied move - which is not a success the model may
+			// keep working from: report it as its own failure class instead of
+			// logging it and continuing, so edit tracking and the tool result do
+			// not claim a completed move.
 			try {
 				await fs.unlink(absolutePath)
-			} catch (error) {
-				console.error(`Failed to delete original file after move: ${error}`)
+			} catch (error: unknown) {
+				throw new PartialMoveError(change.path, change.movePath, error)
 			}
 
 			await task.fileContextTracker.trackFileContext(change.movePath, "roo_edited" as RecordSource)
