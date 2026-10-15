@@ -2,7 +2,7 @@ import fs from "fs/promises"
 import os from "os"
 import path from "path"
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { appendChange, journalPath, loadChanges, type ChangeJournalEntry } from "../changeJournal"
 
@@ -70,6 +70,59 @@ describe("changeJournal", () => {
 			const raw = await fs.readFile(journalPath(tmpRoot, taskId), "utf8")
 			expect(raw).not.toContain("\n\n")
 			expect(raw.split("\n").filter((line) => line !== "")).toHaveLength(2)
+		})
+
+		it("propagates a non-ENOENT tail-inspection failure instead of appending blind", async () => {
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "good" }))
+			const filePath = journalPath(tmpRoot, taskId)
+			const raw = await fs.readFile(filePath, "utf8")
+			await fs.writeFile(filePath, raw + '{"path":"src/half.ts","operation":"upd')
+			// The tail cannot be inspected (I/O error): appending would merge the
+			// new entry into the fragment, so appendChange must fail loudly.
+			const statSpy = vi
+				.spyOn(fs, "stat")
+				.mockRejectedValueOnce(Object.assign(new Error("simulated I/O error"), { code: "EIO" }))
+			try {
+				await expect(appendChange(tmpRoot, taskId, entry({ checkpointId: "after" }))).rejects.toMatchObject({
+					code: "EIO",
+				})
+			} finally {
+				statSpy.mockRestore()
+			}
+			// The failed append wrote nothing: the next append still repairs and loads.
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "after" }))
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual(["good", "after"])
+		})
+
+		it("writes the full record when the underlying write completes partially", async () => {
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
+			const realOpen = fs.open
+			const openSpy = vi.spyOn(fs, "open").mockImplementation(async (pathish, flags) => {
+				const openAs = realOpen as (p: string | URL, f?: string) => Promise<fs.FileHandle>
+				const handle = await openAs(pathish as string | URL, flags as string | undefined)
+				if (flags === "a") {
+					const realWrite = handle.write.bind(handle)
+					let first = true
+					handle.write = (async (buf: Uint8Array, off?: number, len?: number) => {
+						const length = len ?? buf.length
+						if (first && length > 1) {
+							first = false
+							await realWrite(buf, off, 1)
+							return { bytesWritten: 1, buffer: Buffer.from(buf) }
+						}
+						return realWrite(buf, off, length)
+					}) as typeof handle.write
+				}
+				return handle
+			})
+			try {
+				await appendChange(tmpRoot, taskId, entry({ checkpointId: "second" }))
+			} finally {
+				openSpy.mockRestore()
+			}
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual(["first", "second"])
 		})
 	})
 
