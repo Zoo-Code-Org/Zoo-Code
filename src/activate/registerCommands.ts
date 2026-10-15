@@ -30,6 +30,30 @@ export function getVisibleProviderOrLog(outputChannel: vscode.OutputChannel): Cl
 let sidebarPanel: vscode.WebviewView | undefined = undefined
 let tabPanel: vscode.WebviewPanel | undefined = undefined
 
+// Tab panels that are still open. When the tracked panel closes, its dispose
+// handler re-points the tracked ref at one of these: the remaining panel may
+// not emit onDidChangeViewState (its own visibility did not change), so
+// without this the tab-scoped title-bar commands and focusInput would be left
+// without a target.
+const liveTabPanels = new Set<vscode.WebviewPanel>()
+
+/**
+ * Test-only: clears the module-level registry so tab panels created by one
+ * spec cannot leak into another's tracked-panel re-pointing.
+ */
+export function __resetLiveTabPanelsForTests(): void {
+	liveTabPanels.clear()
+}
+
+/**
+ * Test-only: the number of tab panels currently in the live registry, so a
+ * spec can assert the cleanup of a failed or closed panel without probing
+ * through a close of a live panel.
+ */
+export function __getLiveTabPanelCountForTests(): number {
+	return liveTabPanels.size
+}
+
 // In-flight "open in editor" creation shared by overlapping calls: a
 // double-click starts before the first call tracks its new panel, so
 // concurrent callers must share one creation instead of racing to create
@@ -382,6 +406,7 @@ const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTrac
 
 	// Save as tab type panel.
 	setPanel(newPanel, "tab")
+	liveTabPanels.add(newPanel)
 
 	// TODO: Use better svg icon with light and dark variants (see
 	// https://stackoverflow.com/questions/58365687/vscode-extension-iconpath).
@@ -416,8 +441,20 @@ const createTabPanelUnlocked = async ({ context, outputChannel, webviewFocusTrac
 	// panel cannot clobber the replacement's ref.
 	newPanel.onDidDispose(
 		() => {
+			liveTabPanels.delete(newPanel)
 			if (tabPanel === newPanel) {
-				setPanel(undefined, "tab")
+				// Re-point the tracked ref at the best remaining live tab: an active
+				// panel first, then a visible one, then any remaining panel — a panel
+				// can be open but hidden behind another editor group (neither active
+				// nor visible), and clearing the tracked ref here would let the next
+				// open create a second panel instead of revealing the one already
+				// serving a task. The identity guard above keeps a late disposal of an
+				// already-replaced panel from clobbering the replacement's ref.
+				const remaining =
+					[...liveTabPanels].find((panel) => panel.active) ||
+					[...liveTabPanels].find((panel) => panel.visible) ||
+					[...liveTabPanels][0]
+				setPanel(remaining, "tab")
 			}
 		},
 		null,

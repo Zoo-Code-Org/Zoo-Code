@@ -144,6 +144,31 @@ const mockClineProvider = {
 	cwd: "/mock/workspace",
 } as unknown as ClineProvider
 
+// The webviewDidLaunch suite replaces these mockClineProvider members with
+// per-test doubles. Snapshot the module-level originals at collection time and
+// restore them in that suite's own afterEach, so the launch stubs never leak
+// into the suites that run after it (vitest runs suites in file order).
+// Single structural cast: the class types these members as methods / readonly
+// properties, which cannot be re-assigned to swap in a per-test double.
+const launchSuiteSnapshot = (() => {
+	const view = mockClineProvider as {
+		setViewStateId: unknown
+		workspaceTracker: unknown
+		providerSettingsManager: unknown
+		activateProviderProfile: unknown
+		getMcpHub: unknown
+		getStateToPostToWebview: unknown
+	}
+	return {
+		setViewStateId: view.setViewStateId,
+		workspaceTracker: view.workspaceTracker,
+		providerSettingsManager: view.providerSettingsManager,
+		activateProviderProfile: view.activateProviderProfile,
+		getMcpHub: view.getMcpHub,
+		getStateToPostToWebview: view.getStateToPostToWebview,
+	}
+})()
+
 describe("webviewMessageHandler - theme fixture probes", () => {
 	const originalProbeSetting = process.env.ROO_CODE_THEME_FIXTURE_PROBE
 	const themeFixture = {
@@ -397,6 +422,23 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
 		// ... and marks the view as launched.
 		expect(mockClineProvider.isViewLaunched).toBe(true)
+	})
+
+	afterEach(() => {
+		const view = mockClineProvider as {
+			setViewStateId: unknown
+			workspaceTracker: unknown
+			providerSettingsManager: unknown
+			activateProviderProfile: unknown
+			getMcpHub: unknown
+			getStateToPostToWebview: unknown
+		}
+		view.setViewStateId = launchSuiteSnapshot.setViewStateId
+		view.workspaceTracker = launchSuiteSnapshot.workspaceTracker
+		view.providerSettingsManager = launchSuiteSnapshot.providerSettingsManager
+		view.activateProviderProfile = launchSuiteSnapshot.activateProviderProfile
+		view.getMcpHub = launchSuiteSnapshot.getMcpHub
+		view.getStateToPostToWebview = launchSuiteSnapshot.getStateToPostToWebview
 	})
 })
 
@@ -2344,25 +2386,6 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		expect(calls.at(-1)).toEqual([true])
 	})
 
-	// The webviewDidLaunch tests below replace these mockClineProvider members with
-	// per-test doubles. Snapshot the module-level originals at collection time and
-	// restore them in the afterEach below so the launch stubs never leak into other
-	// tests of this file.
-	// Single structural cast: the class types these members as a method / a
-	// readonly property, which cannot be re-assigned to swap in a per-test double.
-	const launchSuiteSnapshot = (() => {
-		const view = mockClineProvider as {
-			getMcpHub: unknown
-			providerSettingsManager: unknown
-			getStateToPostToWebview: unknown
-		}
-		return {
-			getMcpHub: view.getMcpHub,
-			providerSettingsManager: view.providerSettingsManager,
-			getStateToPostToWebview: view.getStateToPostToWebview,
-		}
-	})()
-
 	// CodeRabbit follow-up on the finding #12 fix: webviewDidLaunch's telemetry init read state
 	// via an async provider.getStateToPostToWebview().then(...) continuation, outside
 	// telemetrySettingQueue -- so it could resolve after a concurrent "telemetrySetting" message
@@ -2530,16 +2553,5 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		await Promise.resolve()
 
 		expect(TelemetryService.instance.updateTelemetryState).not.toHaveBeenCalled()
-	})
-
-	afterEach(() => {
-		const view = mockClineProvider as {
-			getMcpHub: unknown
-			providerSettingsManager: unknown
-			getStateToPostToWebview: unknown
-		}
-		view.getMcpHub = launchSuiteSnapshot.getMcpHub
-		view.providerSettingsManager = launchSuiteSnapshot.providerSettingsManager
-		view.getStateToPostToWebview = launchSuiteSnapshot.getStateToPostToWebview
 	})
 })

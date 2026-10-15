@@ -2457,8 +2457,7 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
-			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
-			provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
+			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
 			await provider.saveViewState("mode", "code")
 			await provider.saveViewState("currentApiConfigName", "cfg-a")
 			const load = provider["setViewStateId"]("stable-sidebar-view")
@@ -2487,8 +2486,7 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			const logSpy = vi.spyOn(provider, "log")
-			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
-			provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
+			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
 			// The file-level modes mock resolves every slug to a mode; narrow it to the slugs under test.
 			const modesModule = vi.mocked(await import("../../../shared/modes"))
 			const originalMode = modesModule.getModeBySlug("code")
@@ -4176,15 +4174,16 @@ describe("ClineProvider", () => {
 			new ContextProxy(mockContext),
 			new WebviewFocusTracker(),
 		)
-		// @ts-ignore - Replace providerSettingsManager with a test double: the view's pinned config no
-		// longer exists, the shared global selection is still valid, and the only listed profile is a
-		// legacy entry without a name.
-		provider.providerSettingsManager = {
-			hasConfig: vi.fn(async (name: string) => name === "global-valid"),
-			listConfig: vi.fn(async () => [{ id: "legacy-id", apiProvider: providerIdentifiers.openai }]),
-			saveConfig: vi.fn(async () => "legacy-id"),
-			dispose: vi.fn(),
-		}
+		// The view's pinned config no longer exists, the shared global selection is
+		// still valid, and the only listed profile is a legacy entry without a name
+		// (the cast keeps that intentionally missing field from widening the double).
+		vi.spyOn(provider.providerSettingsManager, "hasConfig").mockImplementation(
+			async (name: string) => name === "global-valid",
+		)
+		vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+			{ id: "legacy-id", apiProvider: providerIdentifiers.openai },
+		] as ProviderSettingsEntry[])
+		vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("legacy-id")
 		vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
 		// The view's own pin points at a deleted profile; the shared global selection is still valid.
 		await provider.saveViewState("currentApiConfigName", "gone-pin")
@@ -8472,16 +8471,15 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 					siblingTask as unknown as ReturnType<typeof sibling.getCurrentTask>,
 				)
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-				// @ts-ignore - Replace providerSettingsManager with a test double.
-				provider.providerSettingsManager = {
-					saveConfig: vi.fn().mockResolvedValue("saved-id"),
-					listConfig: vi.fn().mockResolvedValue([]),
-					setModeConfig: vi.fn(),
-					getProfile: vi
-						.fn()
-						.mockResolvedValue({ name: "saved-profile", apiProvider: providerIdentifiers.anthropic }),
-					getModeConfigId: vi.fn().mockResolvedValue(undefined),
-				}
+				vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("saved-id")
+				vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+				vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+					id: "saved-id",
+					name: "saved-profile",
+					apiProvider: providerIdentifiers.anthropic,
+				})
+				vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
 
 				await provider.upsertProviderProfile(
 					"saved-profile",
@@ -8545,12 +8543,9 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 					siblingTask as unknown as ReturnType<typeof sibling.getCurrentTask>,
 				)
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
-				// @ts-ignore - Replace providerSettingsManager with a test double.
-				provider.providerSettingsManager = {
-					saveConfig: vi.fn().mockResolvedValue("saved-id"),
-					listConfig: vi.fn().mockResolvedValue([]),
-					setModeConfig: vi.fn(),
-				}
+				vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("saved-id")
+				vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+				vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
 
 				await provider.upsertProviderProfile(
 					"saved-profile",
@@ -8590,12 +8585,9 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			)
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			provider["viewLocalState"].currentApiConfigName = "saved-profile"
-			// @ts-ignore - Replace providerSettingsManager with a test double.
-			provider.providerSettingsManager = {
-				saveConfig: vi.fn().mockResolvedValue("saved-id"),
-				listConfig: vi.fn().mockResolvedValue([]),
-				setModeConfig: vi.fn(),
-			}
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("saved-id")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
 
 			await provider.upsertProviderProfile(
 				"saved-profile",
