@@ -233,7 +233,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 		})
 	})
 
-	describe("checkpoint only for fully successful patches (B1)", () => {
+	describe("checkpoint only for patches that wrote at least one file (B1/B2)", () => {
 		const mockedCheckpointSave = checkpointSave as MockedFunction<typeof checkpointSave>
 		const deletePatch = `*** Begin Patch
 *** Delete File: src/obsolete.ts

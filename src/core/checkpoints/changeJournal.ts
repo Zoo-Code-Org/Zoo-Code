@@ -6,10 +6,11 @@ import * as path from "path"
  *
  * One line is appended for every successful file write that goes through a
  * B1 per-write checkpoint hook.  WriteToFileTool and EditFileTool emit one
- * entry per write; ApplyPatchTool emits one entry per file change of a fully
- * successful patch — those entries all reference the single B1 checkpoint
- * that the patch's post-loop hook saves for the whole patch.  The task-start
- * baseline never produces an entry (it is not a file write).
+ * entry per write; ApplyPatchTool emits one entry per file actually written
+ * by the patch (including the written subset of a partially failed patch) —
+ * those entries all reference the single B1 checkpoint that the patch's
+ * post-loop hook saves.  The task-start baseline never produces an entry
+ * (it is not a file write).
  */
 export interface ChangeJournalEntry {
 	/** The file path as the tool knows it (relative to task cwd). */
