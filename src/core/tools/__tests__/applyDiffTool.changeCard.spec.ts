@@ -145,7 +145,7 @@ describe("ApplyDiffTool.execute - per-write checkpoint and change card (B3a, epi
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
-		toolCallId: "test-tool-call-id",
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockCheckpointSave).toHaveBeenCalledTimes(1)
@@ -164,7 +164,7 @@ describe("ApplyDiffTool.execute - per-write checkpoint and change card (B3a, epi
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
-		toolCallId: "test-tool-call-id",
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockCheckpointSave).toHaveBeenCalledTimes(1)
@@ -183,7 +183,7 @@ describe("ApplyDiffTool.execute - per-write checkpoint and change card (B3a, epi
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
-		toolCallId: "test-tool-call-id",
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockCheckpointSave).not.toHaveBeenCalled()
@@ -200,7 +200,7 @@ describe("ApplyDiffTool.execute - per-write checkpoint and change card (B3a, epi
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
-		toolCallId: "test-tool-call-id",
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockCheckpointSave).not.toHaveBeenCalled()

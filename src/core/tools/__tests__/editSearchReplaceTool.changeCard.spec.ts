@@ -162,7 +162,7 @@ function cardTests(getTool: () => EditLikeTool) {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
-			toolCallId: "test-tool-call-id",
+				toolCallId: "test-tool-call-id",
 			},
 		)
 
@@ -185,7 +185,7 @@ function cardTests(getTool: () => EditLikeTool) {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
-			toolCallId: "test-tool-call-id",
+				toolCallId: "test-tool-call-id",
 			},
 		)
 
@@ -208,7 +208,7 @@ function cardTests(getTool: () => EditLikeTool) {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
-			toolCallId: "test-tool-call-id",
+				toolCallId: "test-tool-call-id",
 			},
 		)
 
@@ -229,7 +229,7 @@ function cardTests(getTool: () => EditLikeTool) {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
-			toolCallId: "test-tool-call-id",
+				toolCallId: "test-tool-call-id",
 			},
 		)
 
