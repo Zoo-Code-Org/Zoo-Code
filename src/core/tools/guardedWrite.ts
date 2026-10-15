@@ -28,6 +28,7 @@ import { PostCommitDurabilityError, safeWriteText } from "../../services/file-sa
 import { computeVersionToken } from "../../utils/versionToken"
 import { withFileLock } from "../../utils/fileLock"
 import { resolveLockKey } from "../../services/file-safety/safeWriteText"
+import { resolvePublishTarget } from "../../services/file-safety/safeWriteText"
 import type { Task } from "../task/Task"
 
 // -- Types ------------------------------------------------------------------
@@ -173,6 +174,23 @@ function landedPublishToken(error: unknown): string | undefined {
  * write was issued for a file that was never read, so the caller must read
  * the file first, then retry.
  */
+/**
+ * Resolve and retain the publish target inside the guard lock. The version
+ * comparison and the publish must act on ONE fixed target: re-resolving the
+ * caller's alias at publish time lets a symlink retargeted after the caller's
+ * allowlist check send the write to a file that check never covered. A dangling
+ * link falls back to the given path, so the existence/version checks below
+ * produce the guard's normalized verdicts rather than a raw errno.
+ */
+async function fixedPublishTarget(absolutePath: string): Promise<string> {
+	return resolvePublishTarget(absolutePath).catch((error: unknown) => {
+		if (error && typeof error === "object" && "code" in error && (error as { code: string }).code === "ENOENT") {
+			return absolutePath
+		}
+		throw error
+	})
+}
+
 export async function createIfAbsent(
 	absolutePath: string,
 	content: string | Uint8Array,
@@ -185,8 +203,9 @@ export async function createIfAbsent(
 	// target, so a symlink alias and its referent share one lock.
 	return withFileLock(await resolveLockKey(absolutePath), async () => {
 		cancelledBeforePublish(absolutePath, displayPath, isCancelled)
+		const publishTarget = await fixedPublishTarget(absolutePath)
 		try {
-			await fs.access(absolutePath)
+			await fs.access(publishTarget)
 		} catch (error: unknown) {
 			if (errorCode(error) !== "ENOENT") {
 				// A real I/O failure (EACCES, EIO, ...) -- not a guard verdict.
@@ -195,17 +214,17 @@ export async function createIfAbsent(
 			// Immediately before publication starts.
 			cancelledBeforePublish(absolutePath, displayPath, isCancelled)
 			try {
-				await safeWriteText(absolutePath, content)
+				await safeWriteText(publishTarget, content)
 			} catch (error: unknown) {
 				// A rename that landed before the durability check failed still placed the
 				// bytes at the target: hand the token up before the error leaves the lock.
-				await recordLandedPublish(absolutePath, error)
+				await recordLandedPublish(publishTarget, error)
 				throw error
 			}
 			// Read the new token under the same lock, otherwise a peer lock-using
 			// writer can publish in the gap and the caller records that writer's
 			// token as its own observation.
-			return tokenAfterPublish(absolutePath)
+			return tokenAfterPublish(publishTarget)
 		}
 
 		throw new GuardRejectedError(
@@ -249,9 +268,14 @@ export async function replaceIfVersion(
 	// target, so a symlink alias and its referent share one lock.
 	return withFileLock(await resolveLockKey(absolutePath), async () => {
 		cancelledBeforePublish(absolutePath, displayPath, isCancelled)
+		// Resolve and retain the publish target inside the lock: the version
+		// comparison and the publish below both act on this fixed target, so a
+		// symlink retargeted after the caller's allowlist check cannot send the
+		// write to a file the version check never covered.
+		const publishTarget = await fixedPublishTarget(absolutePath)
 		let currentVersion: string
 		try {
-			currentVersion = await computeVersionToken(absolutePath)
+			currentVersion = await computeVersionToken(publishTarget)
 		} catch (error: unknown) {
 			if (errorCode(error) === "ENOENT") {
 				// The observed file was deleted after the read: the version recorded
@@ -278,17 +302,17 @@ export async function replaceIfVersion(
 			// Immediately before publication starts.
 			cancelledBeforePublish(absolutePath, displayPath, isCancelled)
 			try {
-				await safeWriteText(absolutePath, content)
+				await safeWriteText(publishTarget, content)
 			} catch (error: unknown) {
 				// A rename that landed before the durability check failed still placed the
 				// bytes at the target: hand the token up before the error leaves the lock.
-				await recordLandedPublish(absolutePath, error)
+				await recordLandedPublish(publishTarget, error)
 				throw error
 			}
 			// Read the new token under the same lock, otherwise a peer lock-using
 			// writer can publish in the gap and the caller records that writer's
 			// token as its own observation.
-			return tokenAfterPublish(absolutePath)
+			return tokenAfterPublish(publishTarget)
 		}
 
 		throw new GuardRejectedError(

@@ -30,6 +30,27 @@ export const DIFF_VIEW_URI_SCHEME = "cline-diff"
 export const DIFF_VIEW_LABEL_CHANGES = "Original ↔ Zoo's Changes"
 
 // TODO: https://github.com/cline/cline/pull/3354
+/**
+ * The rollback of a cancelled edit found content on disk that this session did
+ * not write: a peer published after the session's last write settled. The
+ * rollback preserved the peer's bytes instead of restoring or deleting them;
+ * the caller must surface that the revert did not happen.
+ */
+export class RollbackConflictError extends Error {
+	readonly absolutePath: string
+	readonly oursToken: string
+	readonly diskToken: string
+	constructor(absolutePath: string, oursToken: string, diskToken: string) {
+		super(
+			`The cancelled edit's rollback found a newer write at ${absolutePath} (this session left ${oursToken}, disk carries ${diskToken}) -- the newer content was preserved and the revert did not run.`,
+		)
+		this.name = "RollbackConflictError"
+		this.absolutePath = absolutePath
+		this.oursToken = oursToken
+		this.diskToken = diskToken
+	}
+}
+
 export class DiffViewProvider {
 	// Properties to store the results of saveChanges
 	newProblemsMessage?: string
@@ -77,6 +98,17 @@ export class DiffViewProvider {
 	 * originalContent, because that write is the exact loss the cleanup exists to prevent.
 	 */
 	private rejectedSaveCleanupHandled = false
+	/**
+	 * The version token the bytes THIS session last wrote carry on disk: set when a
+	 * guarded publish lands (or its bytes are adopted) and never by a peer's write.
+	 * The rollback compares the disk token against it under the file lock: a
+	 * different token means a peer published after this session's last write, and
+	 * restoring or unlinking then would discard content this session never wrote.
+	 * Undefined while this session has written nothing - there is then no baseline
+	 * to compare against and the rollback proceeds.
+	 */
+	private lastWrittenToken: string | undefined
+
 	/**
 	 * Whether this edit session has been closed (its reset has been claimed). A caller that
 	 * waited for someone else's teardown cannot decide this by reading provider state: isEditing
@@ -379,6 +411,7 @@ export class DiffViewProvider {
 			this.isEditing = false
 			this.createdDirs = []
 			this.placeholderVersion = undefined
+			this.lastWrittenToken = undefined
 			this.placeholderIdentity = undefined
 			throw error
 		}
@@ -664,6 +697,7 @@ export class DiffViewProvider {
 		}
 		const observation = task.observationRegistry.get(absolutePath)
 		task.observationRegistry.observe(absolutePath, versionTokenOfStat(after), observation?.complete ?? false)
+		this.lastWrittenToken = versionTokenOfStat(after)
 		return true
 	}
 	/**
@@ -1184,54 +1218,76 @@ export class DiffViewProvider {
 		this.cancelDeferredScroll()
 
 		const ownedTeardown = await this.runTeardown(async () => {
-			if (!fileExists) {
-				if (updatedDocument.isDirty) {
+			// Run the rollback under the same per-file advisory lock every other writer
+			// to this path takes. The publish gate above orders this rollback against
+			// THIS session's publish only; after that settled, a peer writer can land
+			// before the rollback acts, and an unguarded restore or unlink would
+			// clobber or delete bytes this session never wrote.
+			await withFileLock(await resolveLockKey(absolutePath), async () => {
+				// Decide against the disk state under the lock: the rollback may overwrite
+				// or remove the file only while it still carries the token this session
+				// last wrote (the post-publish observation for a modify, the placeholder
+				// token for a create). A different token means a peer published in the
+				// settled window: preserve the peer's bytes, close this session's views,
+				// and report the conflict explicitly.
+				// The same token source the publish and adoption paths use, so the
+				// comparison is apples to apples with what this session recorded.
+				const diskStat = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+				const diskToken = diskStat === undefined ? undefined : versionTokenOfStat(diskStat)
+				const oursToken = fileExists ? this.lastWrittenToken : this.placeholderVersion
+				if (diskToken !== undefined && oursToken !== undefined && diskToken !== oursToken) {
+					await this.closeAllDiffViews()
+					throw new RollbackConflictError(absolutePath, oursToken, diskToken)
+				}
+				if (!fileExists) {
+					if (updatedDocument.isDirty) {
+						await updatedDocument.save()
+					}
+
+					await this.closeAllDiffViews()
+					// The file was newly created for this edit; close its transiently
+					// opened tab before deleting it from disk.
+					await this.closeFileTab(absolutePath)
+					await fs.unlink(absolutePath)
+
+					// Remove only the directories we created, in reverse order.
+					for (let i = this.createdDirs.length - 1; i >= 0; i--) {
+						await fs.rmdir(this.createdDirs[i])
+					}
+				} else {
+					// Revert document.
+					const edit = new vscode.WorkspaceEdit()
+
+					const fullRange = new vscode.Range(
+						updatedDocument.positionAt(0),
+						updatedDocument.positionAt(updatedDocument.getText().length),
+					)
+
+					edit.replace(updatedDocument.uri, fullRange, this.stripAllBOMs(this.originalContent ?? ""))
+
+					// Apply the edit and save, since contents shouldn't have changed
+					// this won't show in local history unless of course the user made
+					// changes and saved during the edit.
+					await vscode.workspace.applyEdit(edit)
 					await updatedDocument.save()
+
+					await this.closeAllDiffViews()
+
+					// Read auto-close preferences from state; fall back to defaults that
+					// preserve the existing behavior when unset.
+					const revertTask = this.taskRef.deref()
+					const revertState = await revertTask?.providerRef.deref()?.getState()
+
+					await this.keepOrCloseEditedFile(
+						absolutePath,
+						false,
+						revertState?.autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
+						revertState?.autoCloseZooOpenedFilesAfterUserEdited ??
+							DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
+						revertState?.autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
+					)
 				}
-
-				await this.closeAllDiffViews()
-				// The file was newly created for this edit; close its transiently
-				// opened tab before deleting it from disk.
-				await this.closeFileTab(absolutePath)
-				await fs.unlink(absolutePath)
-
-				// Remove only the directories we created, in reverse order.
-				for (let i = this.createdDirs.length - 1; i >= 0; i--) {
-					await fs.rmdir(this.createdDirs[i])
-				}
-			} else {
-				// Revert document.
-				const edit = new vscode.WorkspaceEdit()
-
-				const fullRange = new vscode.Range(
-					updatedDocument.positionAt(0),
-					updatedDocument.positionAt(updatedDocument.getText().length),
-				)
-
-				edit.replace(updatedDocument.uri, fullRange, this.stripAllBOMs(this.originalContent ?? ""))
-
-				// Apply the edit and save, since contents shouldn't have changed
-				// this won't show in local history unless of course the user made
-				// changes and saved during the edit.
-				await vscode.workspace.applyEdit(edit)
-				await updatedDocument.save()
-
-				await this.closeAllDiffViews()
-
-				// Read auto-close preferences from state; fall back to defaults that
-				// preserve the existing behavior when unset.
-				const revertTask = this.taskRef.deref()
-				const revertState = await revertTask?.providerRef.deref()?.getState()
-
-				await this.keepOrCloseEditedFile(
-					absolutePath,
-					false,
-					revertState?.autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
-					revertState?.autoCloseZooOpenedFilesAfterUserEdited ??
-						DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
-					revertState?.autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
-				)
-			}
+			})
 		})
 
 		if (!ownedTeardown) {
@@ -1981,7 +2037,12 @@ export class DiffViewProvider {
 			throw new Error("Cannot guard the write: the owning task is no longer available")
 		}
 		await createDirectoriesForFile(absolutePath)
-		await guardedWrite(task, relPath, content, writeKind, completeOverride)
+		const landedToken = await guardedWrite(task, relPath, content, writeKind, completeOverride)
+		if (landedToken !== undefined) {
+			// The guard read this token back under its own lock: the bytes at the
+			// target are this publish's and carry this token.
+			this.lastWrittenToken = landedToken
+		}
 
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory

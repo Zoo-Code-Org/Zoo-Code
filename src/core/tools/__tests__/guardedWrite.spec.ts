@@ -18,7 +18,7 @@ import { createIfAbsent, guardedWrite, replaceIfVersion, resetChain, GuardReject
 import { PostCommitDurabilityError, safeWriteText } from "../../../services/file-safety/safeWriteText"
 import { computeVersionToken } from "../../../utils/versionToken"
 import { withFileLock } from "../../../utils/fileLock"
-import { resolveLockKey } from "../../../services/file-safety/safeWriteText"
+import { resolveLockKey, resolvePublishTarget } from "../../../services/file-safety/safeWriteText"
 import { ObservationRegistry } from "../../task/observationRegistry"
 import type { Task } from "../../task/Task"
 
@@ -36,6 +36,9 @@ vi.mock("../../../utils/versionToken", () => ({
 vi.mock("../../../services/file-safety/safeWriteText", () => ({
 	safeWriteText: vi.fn(),
 	resolveLockKey: vi.fn(async (p: string) => p),
+	// The guard fixes the publish target inside the lock through this helper;
+	// the default identity keeps every other test's path unchanged.
+	resolvePublishTarget: vi.fn(async (p: string) => p),
 	// The guard only needs the error's identity to recognise a publish whose commit
 	// rename landed, and this spec replaces the whole module anyway, so the class is
 	// restated here with the real constructor shape rather than imported.
@@ -56,6 +59,7 @@ vi.mock("../../../utils/fileLock", () => ({
 
 const mockedWithFileLock = vi.mocked(withFileLock)
 const mockedResolveLockKey = vi.mocked(resolveLockKey)
+const mockedResolvePublishTarget = vi.mocked(resolvePublishTarget)
 const mockedFsAccess = vi.mocked(fs.access)
 const mockedComputeVersionToken = vi.mocked(computeVersionToken)
 const mockedSafeWriteText = vi.mocked(safeWriteText)
@@ -118,6 +122,24 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			await guardedWrite(task, "bytes.txt", Buffer.from([0x00, 0x68]), "create")
 
 			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("bytes.txt"), Buffer.from([0x00, 0x68]))
+		})
+
+		it("publishes to the target fixed inside the lock, not to a retargeted alias", async () => {
+			// The allowlist decision covered the referent as it resolved when the
+			// guard ran. The alias can be retargeted afterwards - re-resolving it at
+			// publish time would follow the new referent to a file the version check
+			// never covered - so the version comparison and the publish must both
+			// act on the target fixed inside the lock.
+			const alias = path.resolve("/ws/foo.ts")
+			const referent = path.resolve("/ws/real/foo.ts")
+			mockedResolveLockKey.mockResolvedValue(referent)
+			mockedResolvePublishTarget.mockResolvedValue(referent)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+
+			await replaceIfVersion(alias, "v1", "bytes", "foo.ts")
+
+			expect(mockedComputeVersionToken).toHaveBeenCalledWith(referent)
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(referent, "bytes")
 		})
 
 		it("records an unobserved create as complete so a later full-file update is allowed", async () => {

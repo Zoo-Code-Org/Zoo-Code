@@ -1,4 +1,9 @@
-import { DiffViewProvider, DIFF_VIEW_URI_SCHEME, DIFF_VIEW_LABEL_CHANGES } from "../DiffViewProvider"
+import {
+	DiffViewProvider,
+	DIFF_VIEW_URI_SCHEME,
+	DIFF_VIEW_LABEL_CHANGES,
+	RollbackConflictError,
+} from "../DiffViewProvider"
 import * as vscode from "vscode"
 import * as path from "path"
 import delay from "delay"
@@ -39,6 +44,9 @@ vi.mock("fs/promises", () => ({
 vi.mock("../../../services/file-safety/safeWriteText", () => ({
 	safeWriteText: vi.fn().mockResolvedValue(undefined),
 	resolveLockKey: vi.fn(async (p: string) => p),
+	// The guard fixes the publish target inside the lock through this helper;
+	// the identity default keeps every path in this file unchanged.
+	resolvePublishTarget: vi.fn(async (p: string) => p),
 	// The guarded write recognises a landed-but-not-durable publish by this error's
 	// identity, and this spec replaces the whole module, so the class is restated
 	// here with the real constructor shape rather than imported.
@@ -3281,6 +3289,79 @@ describe("DiffViewProvider", () => {
 			expect(rollbackWritesAfterProbe).toEqual([true, true])
 			// One pass over the tabs: the save added no cleanup of its own.
 			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalledTimes(1)
+		})
+
+		it("preserves a peer publish that landed after this session's write during rollback", async () => {
+			// The guarded publish settled, a peer published before the rollback
+			// claimed the file lock, and the unguarded restore clobbered the peer's
+			// bytes. Under the lock the disk token no longer carries this session's
+			// write: the peer's content is preserved and the conflict is reported
+			// instead of a silent overwrite.
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor // Structural double: the rollback only reads document/tab surface.
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider["relPath"] = "test.ts"
+			diffViewProvider.editType = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["lastWrittenToken"] = "our-token"
+			// The peer's stat: a different token than the one this session left.
+			vi.mocked(fs.stat).mockResolvedValue({
+				...previewStats,
+				size: 999n,
+				mtimeNs: 7n,
+				ctimeNs: 8n,
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>)
+
+			await expect(diffViewProvider.revertChanges()).rejects.toBeInstanceOf(RollbackConflictError)
+
+			// The restore never ran: the peer's bytes stay on disk.
+			expect(vscode.workspace.applyEdit).not.toHaveBeenCalled()
+		})
+
+		it("keeps a peer's file when the create placeholder was replaced before the rollback", async () => {
+			// The unlink must run only while the path still carries THIS session's
+			// placeholder: a peer that published after the placeholder owns the
+			// file, and deleting it would discard content this session never wrote.
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("placeholder"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor // Structural double: the rollback only reads document/tab surface.
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider["relPath"] = "test.ts"
+			diffViewProvider.editType = "create"
+			diffViewProvider["placeholderVersion"] = "placeholder-token"
+			vi.mocked(fs.stat).mockResolvedValue({
+				...previewStats,
+				size: 999n,
+				mtimeNs: 7n,
+				ctimeNs: 8n,
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>)
+
+			await expect(diffViewProvider.revertChanges()).rejects.toBeInstanceOf(RollbackConflictError)
+
+			expect(fs.unlink).not.toHaveBeenCalled()
 		})
 
 		it("a cancellation that lands after the rejected-save cleanup skips the rollback and finalizes", async () => {
