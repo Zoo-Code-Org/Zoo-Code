@@ -193,6 +193,19 @@ describe("checkpointSave change-card emission (B3a)", () => {
 		expect(cardCalls).toHaveLength(0)
 	})
 
+	it("emits no change card for a no-op checkpoint with an empty writes array but still saves", async () => {
+		const { task, say, saveCheckpoint } = makeTask({})
+
+		// A no-op patch still reaches checkpointSave with [] write metadata; the
+		// commit may cover unrelated workspace changes, but a zero-file card must
+		// not be emitted.
+		await checkpointSave(task, false, true, [])
+
+		expect(saveCheckpoint).toHaveBeenCalled()
+		const cardCalls = say.mock.calls.filter(([type]) => type === "change_card")
+		expect(cardCalls).toHaveLength(0)
+	})
+
 	it("emits no change card when checkpoints are disabled for the task", async () => {
 		const { task, say } = makeTask({ enableCheckpoints: false })
 

@@ -375,6 +375,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 
 			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("No changes needed"))
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask as Task, false, true, [])
 		})
 
 		it("does not record a checkpoint when the user rejects the update", async () => {
