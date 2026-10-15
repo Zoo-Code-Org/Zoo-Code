@@ -44,6 +44,56 @@ describe("MultiSearchReplaceDiffStrategy malformed start-line marker hint", () =
 		expect(firstFailureError(result)).toContain("LIKELY CAUSE")
 	})
 
+	it.each([": 3", ":42", "startline:3", "start_line:42"])(
+		"adds LIKELY CAUSE for the spacing, multi-digit or separator-less marker %j",
+		async (markerVariant) => {
+			const diffContent = buildDiff(`${markerVariant}\nnot-in-the-file`, "replacement")
+			const result = await strategy.applyDiff(nonMatchingFile, diffContent)
+
+			expect(firstFailureError(result)).toContain(`first line of your search content is "${markerVariant}"`)
+		},
+	)
+
+	it.each(["value:3", ":3 trailing", "x start_line:3"])(
+		"omits LIKELY CAUSE when %j only contains a marker-like fragment",
+		async (firstLine) => {
+			const diffContent = buildDiff(`${firstLine}\nnot-in-the-file`, "replacement")
+			const result = await strategy.applyDiff(nonMatchingFile, diffContent)
+
+			expect(firstFailureError(result)).not.toContain("LIKELY CAUSE")
+		},
+	)
+
+	it("does not claim a separator was swallowed when none follows the marker", async () => {
+		const diffContent = buildDiff(":3\nnot-in-the-file", "replacement")
+		const result = await strategy.applyDiff(nonMatchingFile, diffContent)
+
+		const errorText = firstFailureError(result)
+		expect(errorText).toContain(
+			"looks like a malformed start-line marker and was therefore searched for as literal file text. The only recognized form",
+		)
+		expect(errorText).not.toContain("together with")
+	})
+
+	it("detects a swallowed separator even when it is indented", async () => {
+		const diffContent = buildDiff("  :start_line:3\n  -------\nnot-in-the-file", "replacement")
+		const result = await strategy.applyDiff(nonMatchingFile, diffContent)
+
+		expect(firstFailureError(result)).toContain('together with the "-------" line after it')
+	})
+
+	it("reports the real similarity, threshold and distance for a near miss", async () => {
+		const diffContent = buildDiff("alpha\nbetx", "replacement")
+		const result = await strategy.applyDiff(nonMatchingFile, diffContent)
+
+		const errorText = firstFailureError(result)
+		const similarity = /\((\d+)% similar, needs 100%\)\n\nDebug Info:\n- Similarity Score: (\d+)%\n/.exec(errorText)
+		expect(similarity).not.toBeNull()
+		expect(Number(similarity?.[1])).toBeGreaterThan(50)
+		expect(similarity?.[2]).toBe(similarity?.[1])
+		expect(errorText).toMatch(/- Levenshtein Distance: [1-9]\d* characters\n/)
+	})
+
 	it("still applies cleanly when the file genuinely contains a ':3' line (hint is not a gate)", async () => {
 		const fileWithMarkerLikeLine = ["alpha", ":3", "beta", "gamma"].join("\n")
 		const diffContent = buildDiff(":3\nbeta", ":3\nBETA")
@@ -65,7 +115,11 @@ describe("MultiSearchReplaceDiffStrategy malformed start-line marker hint", () =
 
 		const errorText = firstFailureError(result)
 		expect(errorText).not.toContain("LIKELY CAUSE")
-		expect(errorText).toContain("the file content may have changed")
+		expect(errorText).toContain(
+			"- Tried both standard and aggressive line number stripping\n" +
+				"- Tip: Use the read_file tool to get the latest content of the file before attempting " +
+				"to use the apply_diff tool again, as the file content may have changed\n\n",
+		)
 	})
 
 	it("does not flag the correct ':start_line:3' marker form", async () => {
