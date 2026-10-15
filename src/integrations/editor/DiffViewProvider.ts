@@ -18,6 +18,7 @@ import { arePathsEqual, getReadablePath } from "../../utils/path"
 import { formatResponse } from "../../core/prompts/responses"
 import { diagnosticsToProblemsString, getNewDiagnostics } from "../diagnostics"
 import { Task } from "../../core/task/Task"
+import type { FileObservation } from "../../core/task/observationRegistry"
 import { versionTokenOfStat } from "../../utils/versionToken"
 import { withFileLock } from "../../utils/fileLock"
 import { resolveLockKey } from "../../services/file-safety/safeWriteText"
@@ -160,13 +161,15 @@ export class DiffViewProvider {
 	 * caller never read, publishing stale content over the intervening change.
 	 */
 	private preOpenObservation: { version: string; complete: boolean } | null | undefined = undefined
-	// The observation this session's preview recorded (path + token), if any.
-	// performFinalReset() withdraws it while the entry still holds that token: the
-	// preview is the tool's own look, not a read the model made, and on the exit
-	// paths that never reach saveChanges' restore (rejected update saves, cancelled
+	// The entry object this session's preview wrote (path + the exact stored
+	// object), if any. performFinalReset() withdraws only that object: the preview
+	// is the tool's own look, not a read the model made, and on the exit paths
+	// that never reach saveChanges' restore (rejected update saves, cancelled
 	// tools, reverts) a leftover entry would authorize a later targeted edit for a
-	// file the model never read.
-	private previewRecordedObservation: { path: string; version: string } | undefined = undefined
+	// file the model never read. Identity, not version/completeness: a model
+	// partial read while the diff is open replaces the entry with a fresh object
+	// at the same token and flag, and that read earned its own authorization.
+	private previewRecordedObservation: { path: string; entry: FileObservation } | undefined = undefined
 	// The on-disk version open() stat-matched, kept so accept-time adoption can
 	// verify the save was authorized against that exact version.
 	private openToken: string | undefined = undefined
@@ -266,7 +269,10 @@ export class DiffViewProvider {
 				this.openToken = versionTokenOfStat(preStats)
 				if (displayTask && !displayTask.observationRegistry.has(absolutePath)) {
 					displayTask.observationRegistry.observe(absolutePath, this.openToken, false)
-					this.previewRecordedObservation = { path: absolutePath, version: this.openToken }
+					const recorded = displayTask.observationRegistry.get(absolutePath)
+					if (recorded) {
+						this.previewRecordedObservation = { path: absolutePath, entry: recorded }
+					}
 				}
 			}
 		} else {
@@ -1874,20 +1880,17 @@ export class DiffViewProvider {
 		// reaches finalization - tool catch blocks call reset(), and revertChanges
 		// arrives through finalizeSession - so this single hook covers the exits
 		// that never touch saveChanges' restore. The entry is dropped only while it
-		// still holds the preview's token AND the preview's incomplete flag: a
-		// successful publish replaces the token first, and a model read_file records
-		// complete: true, so earned observations survive.
+		// still holds the exact entry object it wrote: any later observe() - a
+		// successful publish, a model read (even a partial one at the same token
+		// and flag) - replaces the entry with a fresh object, so earned
+		// observations survive.
 		const previewRecorded = this.previewRecordedObservation
 		this.previewRecordedObservation = undefined
 		if (previewRecorded) {
 			const previewTask = this.taskRef.deref()
-			const stillPreview = previewTask?.observationRegistry.get(previewRecorded.path)
-			if (
-				previewTask &&
-				stillPreview &&
-				stillPreview.version === previewRecorded.version &&
-				!stillPreview.complete
-			) {
+			// Ownership by object identity: the stored object still being the one
+			// this preview wrote means no read has claimed the entry since.
+			if (previewTask && previewTask.observationRegistry.get(previewRecorded.path) === previewRecorded.entry) {
 				previewTask.observationRegistry.forget(previewRecorded.path)
 			}
 		}

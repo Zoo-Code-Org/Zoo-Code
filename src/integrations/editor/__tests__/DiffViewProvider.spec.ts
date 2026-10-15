@@ -1564,6 +1564,23 @@ describe("DiffViewProvider", () => {
 			expect(mockTask.observationRegistry.get(`${mockCwd}/test.txt`)?.complete).toBe(true)
 		})
 
+		it("keeps a model partial read that replaced the preview entry at the same token", async () => {
+			// A partial read_file while the diff is open replaces the preview
+			// observation with a fresh entry at the SAME token and the SAME
+			// incomplete flag - indistinguishable by content, but a different
+			// owner. The withdrawal is by entry identity, so the model's earned
+			// partial authorization survives the reset and a later targeted edit
+			// stays authorized.
+			mockTask.observationRegistry.clear()
+			await openPreview()
+			const previewEntry = mockTask.observationRegistry.get(`${mockCwd}/test.txt`)
+			expect(previewEntry).toBeDefined()
+			mockTask.observationRegistry.observe(`${mockCwd}/test.txt`, previewEntry!.version, false)
+
+			await diffViewProvider.reset()
+			expect(mockTask.observationRegistry.get(`${mockCwd}/test.txt`)).toBeDefined()
+		})
+
 		it("keeps an entry whose token moved on - the preview no longer owns it", async () => {
 			// A landed publish (or a later session) replaced the entry: the version
 			// no longer names the preview's token, so the withdrawal leaves it
