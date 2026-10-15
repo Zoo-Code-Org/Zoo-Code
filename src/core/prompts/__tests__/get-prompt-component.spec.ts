@@ -41,7 +41,7 @@ describe("getPromptComponent", () => {
 		["customInstructions", { customInstructions: "Test instructions" }],
 		["whenToUse", { whenToUse: "Test when to use" }],
 		["description", { description: "Test description" }],
-	])("should return the component when it has %s", (property, component) => {
+	])("should return the component when it has %s", (_property, component) => {
 		const customModePrompts: CustomModePrompts = {
 			architect: component,
 		}

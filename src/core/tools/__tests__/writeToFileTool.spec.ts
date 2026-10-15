@@ -182,7 +182,7 @@ describe("writeToFileTool", () => {
 			pushToolWriteResult: vi.fn().mockImplementation(async function (
 				this: any,
 				task: any,
-				cwd: string,
+				_cwd: string,
 				isNewFile: boolean,
 			) {
 				// Simulate the behavior of pushToolWriteResult
@@ -266,6 +266,7 @@ describe("writeToFileTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		return toolResult
@@ -793,6 +794,7 @@ describe("writeToFileTool", () => {
 					askApproval: mockAskApproval,
 					handleError: mockHandleError,
 					pushToolResult: vi.fn(),
+					toolCallId: "test-tool-call-id",
 				})
 
 				expect(mockHandleError).toHaveBeenCalledTimes(1)
@@ -859,6 +861,7 @@ describe("writeToFileTool", () => {
 					askApproval: mockAskApproval,
 					handleError: mockHandleError,
 					pushToolResult: vi.fn(),
+					toolCallId: "test-tool-call-id",
 				})
 
 				// No streaming error was captured: the generic parse error is reported.
@@ -971,6 +974,7 @@ describe("writeToFileTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
@@ -1004,6 +1008,7 @@ describe("writeToFileTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockCline.sayAndCreateMissingParamError).toHaveBeenCalledWith("write_to_file", "content")
@@ -1213,6 +1218,7 @@ describe("writeToFileTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// The parse error is still reported, and the open partial ask is finalized first.
@@ -1247,6 +1253,7 @@ describe("writeToFileTool", () => {
 					askApproval: mockAskApproval,
 					handleError: mockHandleError,
 					pushToolResult: vi.fn(),
+					toolCallId: "test-tool-call-id",
 				})
 
 				// Same no-argument contract as the sibling test above: the finalize call in

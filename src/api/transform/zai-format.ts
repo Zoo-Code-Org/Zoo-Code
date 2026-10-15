@@ -5,7 +5,6 @@ type ContentPartText = OpenAI.Chat.ChatCompletionContentPartText
 type ContentPartImage = OpenAI.Chat.ChatCompletionContentPartImage
 type UserMessage = OpenAI.Chat.ChatCompletionUserMessageParam
 type AssistantMessage = OpenAI.Chat.ChatCompletionAssistantMessageParam
-type SystemMessage = OpenAI.Chat.ChatCompletionSystemMessageParam
 type ToolMessage = OpenAI.Chat.ChatCompletionToolMessageParam
 type Message = OpenAI.Chat.ChatCompletionMessageParam
 type AnthropicMessage = Anthropic.Messages.MessageParam

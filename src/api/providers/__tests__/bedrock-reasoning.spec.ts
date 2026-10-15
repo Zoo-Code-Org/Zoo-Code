@@ -173,7 +173,7 @@ describe("AwsBedrockHandler - Extended Thinking", () => {
 			const messages = [{ role: "user" as const, content: "Test" }]
 			const stream = handler.createMessage("System prompt", messages)
 
-			for await (const chunk of stream) {
+			for await (const _chunk of stream) {
 				// consume stream
 			}
 

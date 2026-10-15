@@ -4,6 +4,7 @@ import OpenAI from "openai"
 
 import {
 	type ModelInfo,
+	type ModelRecord,
 	type ReasoningEffortExtended,
 	opencodeGoDefaultModelId,
 	opencodeGoDefaultModelInfo,
@@ -13,7 +14,7 @@ import {
 	providerIdentifiers,
 } from "@roo-code/types"
 
-import { ApiHandlerOptions } from "../../shared/api"
+import { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import { ApiStream, type ApiStreamUsageChunk } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
@@ -23,8 +24,14 @@ import { getModelParams } from "../transform/model-params"
 import { convertToResponsesApiInput } from "../transform/responses-api-input"
 import { processResponsesApiStream } from "../transform/responses-api-stream"
 
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import type {
+	SingleCompletionHandler,
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+} from "../index"
 import { RouterProvider } from "./router-provider"
+import { getOpencodeGoModels } from "./fetchers/opencode-go"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 import { DEFAULT_HEADERS } from "./constants"
 import { calculateApiCostAnthropic, calculateApiCostOpenAI } from "../../shared/cost"
@@ -71,9 +78,9 @@ type OpencodeGoFormat = "anthropic" | "openai" | "responses"
  *   - Anthropic Messages (`/v1/messages`) — used by Qwen (qwen3.8-max,
  *     qwen3.7-max, qwen3.7-plus, qwen3.6-plus) and MiniMax (minimax-m3,
  *     minimax-m2.7, minimax-m2.5) models.
- *   - OpenAI Responses (`/v1/responses`) — used by gpt-5.6-luna, whose
- *     chat-completions adapter fails with an opaque HTTP 500
- *     (Zoo-Code-Org/Zoo-Code#1431).
+ *   - OpenAI Responses (`/v1/responses`) — used by `gpt-5.6-luna` and
+ *     `gpt-6-luna`, whose chat-completions adapters are not supported by the
+ *     Go gateway.
  *
  * Sending an Anthropic-format model to the chat completions endpoint is
  * rejected with `401 Model <id> is not supported for format oa-compat`, so this
@@ -118,6 +125,15 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 				...(options.openAiHeaders || {}),
 			},
 		})
+	}
+
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: false, keyScoped: false, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getOpencodeGoModels(options.apiKey, ...fetchOpts)
 	}
 
 	/**
@@ -183,7 +199,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	 *
 	 * Anthropic-format models (Qwen/MiniMax) are streamed via
 	 * {@link streamAnthropicMessage} against `/v1/messages`; Responses-format
-	 * models (gpt-5.6-luna) are streamed via {@link streamResponsesMessage}
+	 * models (`gpt-5.6-luna` and `gpt-6-luna`) are streamed via {@link streamResponsesMessage}
 	 * against `/v1/responses`; all other models use the OpenAI-compatible chat
 	 * completions endpoint.
 	 *
@@ -292,7 +308,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 
 	/**
 	 * Streams an OpenAI Responses-format completion for Go models that only
-	 * accept the `/v1/responses` endpoint (currently gpt-5.6-luna).
+	 * accept the `/v1/responses` endpoint (`gpt-5.6-luna` and `gpt-6-luna`).
 	 *
 	 * Follows the focused xAI handler pattern: the conversation is converted
 	 * with the shared {@link convertToResponsesApiInput} transform, the system
@@ -310,7 +326,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	private async *streamResponsesMessage(
 		modelId: string,
 		info: ModelInfo,
-		temperature: number | undefined,
+		_temperature: number | undefined,
 		maxTokens: number | undefined,
 		reasoningEffort: ReasoningEffortExtended | undefined,
 		systemPrompt: string,

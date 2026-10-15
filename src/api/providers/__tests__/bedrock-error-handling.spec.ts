@@ -328,7 +328,7 @@ describe("AwsBedrockHandler Error Handling", () => {
 				for await (const chunk of generator) {
 					chunks.push(chunk)
 				}
-			} catch (error) {
+			} catch {
 				// Expected to throw after yielding chunks
 			}
 
