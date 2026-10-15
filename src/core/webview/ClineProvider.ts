@@ -4571,10 +4571,13 @@ export class ClineProvider
 		configuration: RooCodeSettings = {},
 	): Promise<Task> {
 		if (configuration) {
-			// Capture the selection a registration failure must roll back to:
-			// setValues below persists the payload's mode to shared and per-view
-			// state while the payload's custom modes are still unregistered.
+			// Capture both selection layers a registration failure must roll back to:
+			// setValues below persists the payload's mode to the shared store AND the
+			// per-view record while the payload's custom modes are still unregistered.
+			// The pin is read defensively because createTask is also driven through
+			// structural provider doubles that carry no view-local buffer.
 			const previousMode = this.contextProxy.getValue("mode")
+			const previousViewMode = this.viewLocalState?.mode
 			await this.setValues(configuration)
 
 			if (configuration.allowedCommands) {
@@ -4613,16 +4616,24 @@ export class ClineProvider
 						await this.customModesManager.updateCustomMode(mode.slug, mode)
 					}
 				} catch (error) {
-					// setValues already persisted the payload's mode selection to shared
-					// and per-view state; if registration fails the mode is not actually
-					// usable, so restore the previous selection before surfacing the
-					// failure. A failed restore is logged; the original failure is what
+					// setValues already persisted the payload's mode to shared and per-view
+					// state; if registration fails the mode is not actually usable, so each
+					// layer rolls back to its own prior value (an unset pin stays unset)
+					// before the failure surfaces. Each restore is awaited on its own and
+					// logged on failure, never swallowed; the original failure is what
 					// callers see.
 					try {
-						await this.setValues({ mode: previousMode })
-					} catch (restoreError) {
+						await this.contextProxy.setValue("mode", previousMode)
+					} catch (rollbackError) {
 						this.log(
-							`[ClineProvider#createTask] Failed to restore the previous mode after custom-mode registration failed: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+							`[ClineProvider#createTask] Failed to restore the shared mode after custom-mode registration failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+						)
+					}
+					try {
+						await this.saveViewState("mode", previousViewMode)
+					} catch (rollbackError) {
+						this.log(
+							`[ClineProvider#createTask] Failed to restore the view mode pin after custom-mode registration failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
 						)
 					}
 					throw error
