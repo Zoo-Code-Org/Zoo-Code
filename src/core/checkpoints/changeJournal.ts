@@ -76,13 +76,25 @@ export async function appendChange(globalStorageDir: string, taskId: string, ent
 				await tail.close()
 			}
 		}
-	} catch {
-		// Journal absent (fresh append) or vanished between stat and open.
+	} catch (error) {
+		// A missing journal is a fresh append. Any other inspection failure
+		// means we cannot know whether a separator is required, so propagate
+		// instead of appending blind and losing the entry to a merged line.
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+			throw error
+		}
 	}
 	const data = Buffer.from(payload)
 	const handle = await fs.open(filePath, "a")
 	try {
-		await handle.write(data, 0, data.length)
+		// A single write can complete partially; sync only after the whole
+		// record is on the handle, or a short write would persist a torn entry
+		// while appendChange reports success.
+		let written = 0
+		while (written < data.length) {
+			const res = await handle.write(data, written, data.length - written)
+			written += res.bytesWritten
+		}
 		await handle.sync()
 	} finally {
 		await handle.close()
