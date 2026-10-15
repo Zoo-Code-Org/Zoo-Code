@@ -51,7 +51,9 @@ export async function appendChange(globalStorageDir: string, taskId: string, ent
  * Load all change-journal entries for a task.
  *
  * Torn-tail repair: if the final line is truncated (JSON.parse fails), it is
- * silently discarded.  The rest of the file is returned in order.  An absent
+ * silently discarded.  Lines that parse to valid JSON but are not
+ * entry-shaped (non-object, missing string path/checkpointId, or an
+ * unknown operation) are skipped for the same reason.  The rest of the file is returned in order.  An absent
  * or empty journal returns [].
  */
 export async function loadChanges(globalStorageDir: string, taskId: string): Promise<ChangeJournalEntry[]> {
@@ -78,7 +80,20 @@ export async function loadChanges(globalStorageDir: string, taskId: string): Pro
 	const entries: ChangeJournalEntry[] = []
 	for (let i = 0; i < lines.length; i++) {
 		try {
-			entries.push(JSON.parse(lines[i]) as ChangeJournalEntry)
+			const parsed: unknown = JSON.parse(lines[i])
+			// A torn append or manual edit can leave valid JSON that is not an
+			// entry (a bare number, null, or a differently-shaped object).
+			// Consumers read path/checkpointId unguarded, so skip any line that
+			// is not entry-shaped instead of returning it as an entry.
+			if (
+				parsed &&
+				typeof parsed === "object" &&
+				typeof (parsed as ChangeJournalEntry).path === "string" &&
+				typeof (parsed as ChangeJournalEntry).checkpointId === "string" &&
+				["create", "update", "delete"].includes((parsed as ChangeJournalEntry).operation)
+			) {
+				entries.push(parsed as ChangeJournalEntry)
+			}
 		} catch {
 			// A corrupt line before the final line (e.g. a partially flushed
 			// append) must not hide the valid entries after it. The final line
