@@ -786,9 +786,16 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 					),
 				)
 			: rest
-		return Object.fromEntries(
+		const configuration = Object.fromEntries(
 			Object.entries({ ...shared, ...apiConfiguration }).filter(([key]) => !isSecretStateKey(key)),
 		)
+		// An explicit apiProvider: undefined inside the nested profile clobbers the
+		// retained shared fallback through the spread above; restore it the same way
+		// getState() does with ?? so the provider never disappears from the result.
+		if (configuration.apiProvider === undefined && shared.apiProvider !== undefined) {
+			configuration.apiProvider = shared.apiProvider
+		}
+		return configuration
 	}
 
 	public async setConfiguration(values: RooCodeSettings) {
