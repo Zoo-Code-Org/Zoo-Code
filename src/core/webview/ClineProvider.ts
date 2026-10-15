@@ -4563,7 +4563,7 @@ export class ClineProvider
 			// Capture the selection a registration failure must roll back to:
 			// setValues below persists the payload's mode to shared and per-view
 			// state while the payload's custom modes are still unregistered.
-			const previousMode = this.getValue("mode")
+			const previousMode = this.contextProxy.getValue("mode")
 			await this.setValues(configuration)
 
 			if (configuration.allowedCommands) {
