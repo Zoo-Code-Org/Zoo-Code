@@ -1970,6 +1970,80 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it('rejects the prototype-colliding id "constructor" and keeps the pre-launch entry', async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await mockContext.globalState.update("viewStates", {
+				[provider["temporaryViewStateId"]]: { mode: "architect", updatedAt: 1 },
+			})
+
+			await provider["setViewStateId"]("constructor")
+
+			// The id is refused before re-keying, so the pre-launch entry stays under
+			// the temporary id (a later launch can still re-key it) and nothing is
+			// written under the inherited member's name.
+			expect(provider["viewStateId"]).toBe(provider["temporaryViewStateId"])
+			const states = mockContext.globalState.get("viewStates") as Record<string, unknown>
+			expect(Object.prototype.hasOwnProperty.call(states, "constructor")).toBe(false)
+			expect(states[provider["temporaryViewStateId"]]).toEqual({ mode: "architect", updatedAt: 1 })
+
+			await provider.dispose()
+		})
+
+		it('rejects the prototype-colliding id "toString" and keeps the pre-launch entry', async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await mockContext.globalState.update("viewStates", {
+				[provider["temporaryViewStateId"]]: { mode: "architect", updatedAt: 1 },
+			})
+
+			await provider["setViewStateId"]("toString")
+
+			// The id is refused before re-keying, so the pre-launch entry stays under
+			// the temporary id (a later launch can still re-key it) and nothing is
+			// written under the inherited member's name.
+			expect(provider["viewStateId"]).toBe(provider["temporaryViewStateId"])
+			const states = mockContext.globalState.get("viewStates") as Record<string, unknown>
+			expect(Object.prototype.hasOwnProperty.call(states, "toString")).toBe(false)
+			expect(states[provider["temporaryViewStateId"]]).toEqual({ mode: "architect", updatedAt: 1 })
+
+			await provider.dispose()
+		})
+
+		it("re-keys past an inherited member without treating it as an existing entry", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await mockContext.globalState.update("viewStates", {
+				[provider["temporaryViewStateId"]]: { mode: "architect", updatedAt: 1 },
+			})
+
+			// Directly exercise the re-key layer: even when handed a name that
+			// Object.prototype owns, the own-property check must copy the temporary
+			// entry instead of dropping it as if the stable key already existed.
+			await provider["rekeyPersistedViewStateEntry"]("toString")
+
+			const states = mockContext.globalState.get("viewStates") as Record<string, unknown>
+			expect(states["toString"]).toEqual({ mode: "architect", updatedAt: 1 })
+			expect(Object.prototype.hasOwnProperty.call(states, provider["temporaryViewStateId"])).toBe(false)
+
+			await provider.dispose()
+		})
+
 		it("restores the previous view id when the registration write fails so a later launch retries", async () => {
 			const contextProxy = new ContextProxy(mockContext)
 			const provider = new ClineProvider(

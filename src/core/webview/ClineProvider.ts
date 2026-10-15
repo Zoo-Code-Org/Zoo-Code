@@ -773,7 +773,12 @@ export class ClineProvider
 
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
 			const states = this.getPersistedViewStates({ fresh: true })
-			const previous = states[previousViewStateId]
+			// Own-property checks only: the map is a plain object, and an inherited
+			// Object.prototype member must never look like a persisted entry (a map
+			// written by an older build can still carry a "constructor"-style key).
+			const previous = Object.prototype.hasOwnProperty.call(states, previousViewStateId)
+				? states[previousViewStateId]
+				: undefined
 
 			if (!previous) {
 				return
@@ -781,7 +786,7 @@ export class ClineProvider
 
 			delete states[previousViewStateId]
 
-			if (!states[nextViewStateId]) {
+			if (!Object.prototype.hasOwnProperty.call(states, nextViewStateId)) {
 				states[nextViewStateId] = previous
 			}
 
@@ -815,9 +820,13 @@ export class ClineProvider
 		if (
 			!normalizedViewStateId ||
 			normalizedViewStateId === this.viewStateId ||
-			// Reject "__proto__": writing states["__proto__"] would go through the
-			// Object.prototype setter and be silently dropped by the later spread.
-			normalizedViewStateId === "__proto__"
+			// Reject every id that collides with an Object.prototype member: the
+			// persisted map is a plain object, so "__proto__" would go through the
+			// prototype setter (and be silently dropped by the later spread), while
+			// names like "constructor" or "toString" survive normalization and would
+			// make an inherited member look like an existing entry during re-keying,
+			// losing the view's pre-launch state.
+			Object.prototype.hasOwnProperty.call(Object.prototype, normalizedViewStateId)
 		) {
 			return
 		}
