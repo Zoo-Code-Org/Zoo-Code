@@ -189,7 +189,10 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				await task.diffViewProvider.saveChanges(
 					diagnosticsEnabled,
 					writeDelayMs,
-					undefined,
+					// Name the guard explicitly: a whole-file write is an update, and
+					// relying on the parameter's default would silently re-select a
+					// different guard if the default ever moved.
+					"update",
 					isOutsideWorkspace,
 					approvedCanonicalTarget,
 				)

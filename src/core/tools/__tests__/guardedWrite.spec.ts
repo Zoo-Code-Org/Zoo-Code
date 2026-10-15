@@ -271,9 +271,9 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			mockedFsRealpath.mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }))
 			const task = createMockTask()
 
-			await expect(guardedWrite(task, "inside.txt", "data", "create")).rejects.toThrow(
-				"Workspace could not be resolved",
-			)
+			// The first resolution that fails is the target's own; either refusal is
+			// fail-closed and neither publishes.
+			await expect(guardedWrite(task, "inside.txt", "data", "create")).rejects.toThrow(/could not be resolved/)
 
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
@@ -401,7 +401,57 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			await guardedWrite(task, "nested/in.txt", "data", "create")
 
-			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("nested/in.txt"), "data")
+			// The publish goes to the canonical target the containment check
+			// authorized, not to the alias the caller spelled.
+			expect(mockedSafeWriteText).toHaveBeenCalledWith("/real/workspace/nested/in.txt", "data")
+		})
+
+		it("publishes to the canonical target the containment check authorized, not to the alias", async () => {
+			// The check resolves the alias once and must publish to THAT value:
+			// safeWriteText re-resolves whatever path it is given, so handing it
+			// the alias lets a link retargeted after the check send the bytes to a
+			// file the containment decision never covered.
+			const alias = abs("link.txt")
+			const referent = path.join(path.resolve(WORKSPACE), "real.txt")
+			mockedFsRealpath.mockImplementation(async (p) => {
+				const str = String(p)
+				if (str === alias) {
+					return referent
+				}
+				return str
+			})
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask()
+
+			await guardedWrite(task, "link.txt", "data", "create")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(referent, "data")
+		})
+
+		it("compares the expected version against the bound canonical target", async () => {
+			// The version check and the publish must act on one target: comparing
+			// the token against the alias while publishing to the canonical path
+			// (or vice versa) authorizes a file the check never looked at.
+			const alias = abs("link.txt")
+			const referent = path.join(path.resolve(WORKSPACE), "real.txt")
+			mockedFsRealpath.mockImplementation(async (p) => {
+				const str = String(p)
+				if (str === alias) {
+					return referent
+				}
+				return str
+			})
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask()
+			task.observationRegistry.observe(alias, "v1", true)
+
+			await guardedWrite(task, "link.txt", "data", "update")
+
+			// The FIRST token read is the version comparison (the post-publish
+			// refresh also reads the bound target, so call order is the assertion).
+			expect(mockedComputeVersionToken.mock.calls[0]).toEqual([referent])
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(referent, "data")
 		})
 	})
 

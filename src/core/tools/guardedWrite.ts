@@ -185,14 +185,18 @@ export async function createIfAbsent(
 	// Re-checked under the lock, immediately before the publish: the path was authorized
 	// when it was queued, but a symlink can be swapped in while the link waited on the
 	// FIFO chain or on this lock.
-	verifyTarget?: () => Promise<void>,
+	verifyTarget?: () => Promise<string | undefined>,
 ): Promise<string | undefined> {
 	// Lock the key every other writer to this file uses: the resolved publish
 	// target, so a symlink alias and its referent share one lock.
 	return withFileLock(await resolveLockKey(absolutePath), async () => {
 		cancelledBeforePublish(absolutePath, displayPath, isCancelled)
+		// Bind the publish to the target the authorization check covers: the
+		// re-check runs first and returns the canonical path it authorized, and
+		// every step below acts on that fixed target.
+		const boundTarget = (await verifyTarget?.()) ?? absolutePath
 		try {
-			await fs.access(absolutePath)
+			await fs.access(boundTarget)
 		} catch (error: unknown) {
 			if (errorCode(error) !== "ENOENT") {
 				// A real I/O failure (EACCES, EIO, ...) -- not a guard verdict.
@@ -200,12 +204,11 @@ export async function createIfAbsent(
 			}
 			// Immediately before publication starts.
 			cancelledBeforePublish(absolutePath, displayPath, isCancelled)
-			await verifyTarget?.()
-			await safeWriteText(absolutePath, content)
+			await safeWriteText(boundTarget, content)
 			// Read the new token under the same lock, otherwise a peer lock-using
 			// writer can publish in the gap and the caller records that writer's
 			// token as its own observation.
-			return tokenAfterPublish(absolutePath)
+			return tokenAfterPublish(boundTarget)
 		}
 
 		throw new GuardRejectedError(
@@ -247,15 +250,18 @@ export async function replaceIfVersion(
 	// Re-checked under the lock, immediately before the publish: the path was authorized
 	// when it was queued, but a symlink can be swapped in while the link waited on the
 	// FIFO chain or on this lock.
-	verifyTarget?: () => Promise<void>,
+	verifyTarget?: () => Promise<string | undefined>,
 ): Promise<string | undefined> {
 	// Lock the key every other writer to this file uses: the resolved publish
 	// target, so a symlink alias and its referent share one lock.
 	return withFileLock(await resolveLockKey(absolutePath), async () => {
 		cancelledBeforePublish(absolutePath, displayPath, isCancelled)
+		// Bind first: the version comparison and the publish must act on the same
+		// target the authorization check covered.
+		const boundTarget = (await verifyTarget?.()) ?? absolutePath
 		let currentVersion: string
 		try {
-			currentVersion = await computeVersionToken(absolutePath)
+			currentVersion = await computeVersionToken(boundTarget)
 		} catch (error: unknown) {
 			if (errorCode(error) === "ENOENT") {
 				// The observed file was deleted after the read: the version recorded
@@ -281,12 +287,11 @@ export async function replaceIfVersion(
 		if (currentVersion === expectedVersion) {
 			// Immediately before publication starts.
 			cancelledBeforePublish(absolutePath, displayPath, isCancelled)
-			await verifyTarget?.()
-			await safeWriteText(absolutePath, content)
+			await safeWriteText(boundTarget, content)
 			// Read the new token under the same lock, otherwise a peer lock-using
 			// writer can publish in the gap and the caller records that writer's
 			// token as its own observation.
-			return tokenAfterPublish(absolutePath)
+			return tokenAfterPublish(boundTarget)
 		}
 
 		throw new GuardRejectedError(
@@ -364,6 +369,10 @@ async function assertCanonicalInsideWorkspace(
 	roots: string[],
 	absolutePath: string,
 	displayPath: string,
+	// The caller may already hold the canonical target it wants to publish to;
+	// checking THAT value (rather than resolving the path a second time) keeps the
+	// containment decision and the bound publish target the same resolution.
+	preResolvedTarget?: string,
 ): Promise<void> {
 	const resolvedRoots: string[] = []
 	const unresolvedRoots: string[] = []
@@ -385,7 +394,7 @@ async function assertCanonicalInsideWorkspace(
 			displayPath,
 		)
 	}
-	const target = await realpathNearest(absolutePath, displayPath)
+	const target = preResolvedTarget ?? (await realpathNearest(absolutePath, displayPath))
 	if (!resolvedRoots.some((root) => isInside(root, target))) {
 		throw new GuardRejectedError(
 			unresolvedRoots.length > 0
@@ -520,23 +529,29 @@ export async function guardedWrite(
 		}
 		authorizedTarget = options.approvedCanonicalTarget
 	}
-	const verifyTarget = async (): Promise<void> => {
+	const verifyTarget = async (): Promise<string> => {
+		// Resolve ONCE and return the canonical target: the containment decision
+		// below and the publish must act on the same resolution, so the guarded
+		// writers publish to THIS value instead of handing the caller's alias to
+		// safeWriteText (which would resolve it a third time - a link swapped in
+		// after the check would otherwise move the bytes to another file).
+		const resolved = await realpathNearest(absolutePath, displayPath)
 		if (!approvedOutside) {
-			await assertCanonicalInsideWorkspace(roots, absolutePath, displayPath)
-			return
+			await assertCanonicalInsideWorkspace(roots, absolutePath, displayPath, resolved)
+			return resolved
 		}
 		// For an approved outside-workspace write the re-check is an IDENTITY check: what
 		// resolves now must still be what was approved. A symlink swapped in - before this
 		// call or while the link waited on the chain - moves the write somewhere the user
 		// never saw, so the comparison is against the identity captured before the
 		// approval, never against a lookup done here.
-		const resolved = await realpathNearest(absolutePath, displayPath)
 		if (authorizedTarget !== resolved) {
 			throw new GuardRejectedError(
 				"The approved target no longer resolves to the path that was approved -- re-approve the write, then retry.",
 				displayPath,
 			)
 		}
+		return resolved
 	}
 	await verifyTarget()
 
