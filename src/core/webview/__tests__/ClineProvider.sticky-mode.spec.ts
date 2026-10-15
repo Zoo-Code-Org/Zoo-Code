@@ -210,6 +210,44 @@ vi.mock("@roo-code/telemetry", () => ({
 	},
 }))
 
+// Shared typed doubles for the mode-switch contract: one definition keeps every
+// test aligned when the Task/HistoryItem contract changes. The literal is
+// asserted as Partial<Task> so private members (_taskMode, saveClineMessages)
+// stay out of the Object.assign intersection type, which would otherwise
+// collapse to never.
+function createModeSwitchTask(overrides: Partial<Task> & Record<string, unknown> = {}): Task {
+	return Object.assign(
+		{} as Task,
+		{
+			taskId: "test-task-id",
+			taskMode: "code",
+			_taskMode: "code",
+			emit: vi.fn(),
+			saveClineMessages: vi.fn(),
+			clineMessages: [],
+			apiConversationHistory: [],
+			updateApiConfiguration: vi.fn(),
+		} as Partial<Task>,
+		overrides,
+	)
+}
+
+function createTaskHistoryItem(overrides: Partial<HistoryItem> = {}): HistoryItem {
+	return {
+		id: "test-task-id",
+		ts: Date.now(),
+		task: "Test task",
+		mode: "code",
+		number: 1,
+		tokensIn: 0,
+		tokensOut: 0,
+		cacheWrites: 0,
+		cacheReads: 0,
+		totalCost: 0,
+		...overrides,
+	}
+}
+
 describe("ClineProvider - Sticky Mode", () => {
 	let provider: ClineProvider
 	let mockContext: vscode.ExtensionContext
@@ -527,23 +565,7 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 
 		it("bails out before any task write when the mutation signal is already aborted", async () => {
-			// A minimal typed double keeps the test focused on the mode-switch contract.
-			// The literal is asserted as Partial<Task> so its private members (_taskMode,
-			// saveClineMessages) stay out of the Object.assign intersection type, which
-			// would otherwise collapse to never.
-			const mockTask = Object.assign(
-				{} as Task,
-				{
-					taskId: "test-task-id",
-					taskMode: "code",
-					_taskMode: undefined as string | undefined,
-					emit: vi.fn(),
-					saveClineMessages: vi.fn(),
-					clineMessages: [],
-					apiConversationHistory: [],
-					updateApiConfiguration: vi.fn(),
-				} as Partial<Task>,
-			)
+			const mockTask = createModeSwitchTask({ _taskMode: undefined as string | undefined })
 
 			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
 				return Promise.resolve([])
@@ -561,36 +583,9 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 
 		it("rolls back the landed history write and leaves no partial mode state when the signal aborts in flight", async () => {
-			// A minimal typed double keeps the test focused on the mode-switch contract.
-			// The literal is asserted as Partial<Task> so its private members (_taskMode,
-			// saveClineMessages) stay out of the Object.assign intersection type, which
-			// would otherwise collapse to never.
-			const mockTask = Object.assign(
-				{} as Task,
-				{
-					taskId: "test-task-id",
-					taskMode: "code",
-					_taskMode: "code",
-					emit: vi.fn(),
-					saveClineMessages: vi.fn(),
-					clineMessages: [],
-					apiConversationHistory: [],
-					updateApiConfiguration: vi.fn(),
-				} as Partial<Task>,
-			)
+			const mockTask = createModeSwitchTask()
 
-			const historyItem: HistoryItem = {
-				id: "test-task-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "code",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				cacheWrites: 0,
-				cacheReads: 0,
-				totalCost: 0,
-			}
+			const historyItem = createTaskHistoryItem()
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
 
 			// The history write settles only after the abort lands: the first call is
@@ -632,34 +627,9 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 
 		it("rolls back the task mode and history when the view mode pin write fails", async () => {
-			// Same typed double as the abort rollback test: the private members stay
-			// out of the Object.assign intersection type.
-			const mockTask = Object.assign(
-				{} as Task,
-				{
-					taskId: "test-task-id",
-					taskMode: "code",
-					_taskMode: "code",
-					emit: vi.fn(),
-					saveClineMessages: vi.fn(),
-					clineMessages: [],
-					apiConversationHistory: [],
-					updateApiConfiguration: vi.fn(),
-				} as Partial<Task>,
-			)
+			const mockTask = createModeSwitchTask()
 
-			const historyItem: HistoryItem = {
-				id: "test-task-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "code",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				cacheWrites: 0,
-				cacheReads: 0,
-				totalCost: 0,
-			}
+			const historyItem = createTaskHistoryItem()
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
 
 			// The task-history write lands; the view's durable mode pin write then
@@ -681,34 +651,9 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 
 		it("rolls back every mode-switch write when the mode-linked profile activation fails", async () => {
-			// Same typed double as the abort rollback test: the private members stay
-			// out of the Object.assign intersection type.
-			const mockTask = Object.assign(
-				{} as Task,
-				{
-					taskId: "test-task-id",
-					taskMode: "code",
-					_taskMode: "code",
-					emit: vi.fn(),
-					saveClineMessages: vi.fn(),
-					clineMessages: [],
-					apiConversationHistory: [],
-					updateApiConfiguration: vi.fn(),
-				} as Partial<Task>,
-			)
+			const mockTask = createModeSwitchTask()
 
-			const historyItem: HistoryItem = {
-				id: "test-task-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "code",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				cacheWrites: 0,
-				cacheReads: 0,
-				totalCost: 0,
-			}
+			const historyItem = createTaskHistoryItem()
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
 
 			// The task, pin, and shared writes all land; the mode-linked profile
@@ -741,32 +686,8 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 
 		it("keeps the committed mode switch when the post-activation state refresh fails", async () => {
-			// Same typed double as the activation-failure rollback test above.
-			const mockTask = Object.assign(
-				{} as Task,
-				{
-					taskId: "test-task-id",
-					taskMode: "code",
-					_taskMode: "code",
-					emit: vi.fn(),
-					saveClineMessages: vi.fn(),
-					clineMessages: [],
-					apiConversationHistory: [],
-					updateApiConfiguration: vi.fn(),
-				} as Partial<Task>,
-			)
-			const historyItem: HistoryItem = {
-				id: "test-task-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "code",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				cacheWrites: 0,
-				cacheReads: 0,
-				totalCost: 0,
-			}
+			const mockTask = createModeSwitchTask()
+			const historyItem = createTaskHistoryItem()
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
 			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 			await provider.saveViewState("mode", "code")
@@ -803,32 +724,8 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 
 		it("keeps the switched mode when the mode-linked activation fails after writing", async () => {
-			// Same typed double as the activation-failure rollback test above.
-			const mockTask = Object.assign(
-				{} as Task,
-				{
-					taskId: "test-task-id",
-					taskMode: "code",
-					_taskMode: "code",
-					emit: vi.fn(),
-					saveClineMessages: vi.fn(),
-					clineMessages: [],
-					apiConversationHistory: [],
-					updateApiConfiguration: vi.fn(),
-				} as Partial<Task>,
-			)
-			const historyItem: HistoryItem = {
-				id: "test-task-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "code",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				cacheWrites: 0,
-				cacheReads: 0,
-				totalCost: 0,
-			}
+			const mockTask = createModeSwitchTask()
+			const historyItem = createTaskHistoryItem()
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
 			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 			await provider.saveViewState("mode", "code")
@@ -869,32 +766,8 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 
 		it("keeps the switched mode when the mutation signal aborted before the failure", async () => {
-			// Same typed double as the activation-failure rollback test above.
-			const mockTask = Object.assign(
-				{} as Task,
-				{
-					taskId: "test-task-id",
-					taskMode: "code",
-					_taskMode: "code",
-					emit: vi.fn(),
-					saveClineMessages: vi.fn(),
-					clineMessages: [],
-					apiConversationHistory: [],
-					updateApiConfiguration: vi.fn(),
-				} as Partial<Task>,
-			)
-			const historyItem: HistoryItem = {
-				id: "test-task-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "code",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				cacheWrites: 0,
-				cacheReads: 0,
-				totalCost: 0,
-			}
+			const mockTask = createModeSwitchTask()
+			const historyItem = createTaskHistoryItem()
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
 			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 			await provider.saveViewState("mode", "code")
@@ -922,32 +795,8 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 
 		it("does not report ModeChanged for a mode switch that gets reconciled", async () => {
-			// Same typed double as the activation-failure rollback test above.
-			const mockTask = Object.assign(
-				{} as Task,
-				{
-					taskId: "test-task-id",
-					taskMode: "code",
-					_taskMode: "code",
-					emit: vi.fn(),
-					saveClineMessages: vi.fn(),
-					clineMessages: [],
-					apiConversationHistory: [],
-					updateApiConfiguration: vi.fn(),
-				} as Partial<Task>,
-			)
-			const historyItem: HistoryItem = {
-				id: "test-task-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "code",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				cacheWrites: 0,
-				cacheReads: 0,
-				totalCost: 0,
-			}
+			const mockTask = createModeSwitchTask()
+			const historyItem = createTaskHistoryItem()
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
 			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 			await provider.saveViewState("mode", "code")
@@ -973,32 +822,8 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 
 		it("keeps the committed switch when the lock-path state refresh fails", async () => {
-			// Same typed double as the activation-failure rollback test above.
-			const mockTask = Object.assign(
-				{} as Task,
-				{
-					taskId: "test-task-id",
-					taskMode: "code",
-					_taskMode: "code",
-					emit: vi.fn(),
-					saveClineMessages: vi.fn(),
-					clineMessages: [],
-					apiConversationHistory: [],
-					updateApiConfiguration: vi.fn(),
-				} as Partial<Task>,
-			)
-			const historyItem: HistoryItem = {
-				id: "test-task-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "code",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				cacheWrites: 0,
-				cacheReads: 0,
-				totalCost: 0,
-			}
+			const mockTask = createModeSwitchTask()
+			const historyItem = createTaskHistoryItem()
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
 			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 			await provider.saveViewState("mode", "code")
@@ -1023,32 +848,8 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 
 		it("records the mode default from the view's pinned profile, not the shared slot", async () => {
-			// Same typed double as the activation-failure rollback test above.
-			const mockTask = Object.assign(
-				{} as Task,
-				{
-					taskId: "test-task-id",
-					taskMode: "code",
-					_taskMode: "code",
-					emit: vi.fn(),
-					saveClineMessages: vi.fn(),
-					clineMessages: [],
-					apiConversationHistory: [],
-					updateApiConfiguration: vi.fn(),
-				} as Partial<Task>,
-			)
-			const historyItem: HistoryItem = {
-				id: "test-task-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "code",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				cacheWrites: 0,
-				cacheReads: 0,
-				totalCost: 0,
-			}
+			const mockTask = createModeSwitchTask()
+			const historyItem = createTaskHistoryItem()
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
 			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 			await provider.saveViewState("mode", "code")
@@ -1077,32 +878,8 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 
 		it("reconciles the switch when the mode-linked profile lookup fails", async () => {
-			// Same typed double as the activation-failure rollback test above.
-			const mockTask = Object.assign(
-				{} as Task,
-				{
-					taskId: "test-task-id",
-					taskMode: "code",
-					_taskMode: "code",
-					emit: vi.fn(),
-					saveClineMessages: vi.fn(),
-					clineMessages: [],
-					apiConversationHistory: [],
-					updateApiConfiguration: vi.fn(),
-				} as Partial<Task>,
-			)
-			const historyItem: HistoryItem = {
-				id: "test-task-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "code",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				cacheWrites: 0,
-				cacheReads: 0,
-				totalCost: 0,
-			}
+			const mockTask = createModeSwitchTask()
+			const historyItem = createTaskHistoryItem()
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
 			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 			await provider.saveViewState("mode", "code")
@@ -1137,32 +914,8 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 
 		it("keeps the switch when the activation fails after the profile write", async () => {
-			// Same typed double as the activation-failure rollback test above.
-			const mockTask = Object.assign(
-				{} as Task,
-				{
-					taskId: "test-task-id",
-					taskMode: "code",
-					_taskMode: "code",
-					emit: vi.fn(),
-					saveClineMessages: vi.fn(),
-					clineMessages: [],
-					apiConversationHistory: [],
-					updateApiConfiguration: vi.fn(),
-				} as Partial<Task>,
-			)
-			const historyItem: HistoryItem = {
-				id: "test-task-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "code",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				cacheWrites: 0,
-				cacheReads: 0,
-				totalCost: 0,
-			}
+			const mockTask = createModeSwitchTask()
+			const historyItem = createTaskHistoryItem()
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
 			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 			await provider.saveViewState("mode", "code")
@@ -1207,32 +960,8 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 
 		it("reports ModeChanged for a switch the catch keeps after activation wrote", async () => {
-			// Same typed double as the activation-failure rollback test above.
-			const mockTask = Object.assign(
-				{} as Task,
-				{
-					taskId: "test-task-id",
-					taskMode: "code",
-					_taskMode: "code",
-					emit: vi.fn(),
-					saveClineMessages: vi.fn(),
-					clineMessages: [],
-					apiConversationHistory: [],
-					updateApiConfiguration: vi.fn(),
-				} as Partial<Task>,
-			)
-			const historyItem: HistoryItem = {
-				id: "test-task-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "code",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				cacheWrites: 0,
-				cacheReads: 0,
-				totalCost: 0,
-			}
+			const mockTask = createModeSwitchTask()
+			const historyItem = createTaskHistoryItem()
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
 			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 			await provider.saveViewState("mode", "code")
@@ -1269,32 +998,8 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 
 		it("reports the committed mode when the signal aborts after the mode writes", async () => {
-			// Same typed double as the activation-failure rollback test above.
-			const mockTask = Object.assign(
-				{} as Task,
-				{
-					taskId: "test-task-id",
-					taskMode: "code",
-					_taskMode: "code",
-					emit: vi.fn(),
-					saveClineMessages: vi.fn(),
-					clineMessages: [],
-					apiConversationHistory: [],
-					updateApiConfiguration: vi.fn(),
-				} as Partial<Task>,
-			)
-			const historyItem: HistoryItem = {
-				id: "test-task-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "code",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				cacheWrites: 0,
-				cacheReads: 0,
-				totalCost: 0,
-			}
+			const mockTask = createModeSwitchTask()
+			const historyItem = createTaskHistoryItem()
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
 			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 			await provider.saveViewState("mode", "code")
@@ -1321,32 +1026,8 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 
 		it("stays silent when a newer mutation supersedes the aborted switch", async () => {
-			// Same typed double as the activation-failure rollback test above.
-			const mockTask = Object.assign(
-				{} as Task,
-				{
-					taskId: "test-task-id",
-					taskMode: "code",
-					_taskMode: "code",
-					emit: vi.fn(),
-					saveClineMessages: vi.fn(),
-					clineMessages: [],
-					apiConversationHistory: [],
-					updateApiConfiguration: vi.fn(),
-				} as Partial<Task>,
-			)
-			const historyItem: HistoryItem = {
-				id: "test-task-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "code",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				cacheWrites: 0,
-				cacheReads: 0,
-				totalCost: 0,
-			}
+			const mockTask = createModeSwitchTask()
+			const historyItem = createTaskHistoryItem()
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
 			vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 			await provider.saveViewState("mode", "code")
@@ -1374,32 +1055,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(postSpy).not.toHaveBeenCalled()
 		})
 		it("keeps the cancellation result when the abort rollback write itself fails", async () => {
-			const mockTask = Object.assign(
-				{} as Task,
-				{
-					taskId: "test-task-id",
-					taskMode: "code",
-					_taskMode: "code",
-					emit: vi.fn(),
-					saveClineMessages: vi.fn(),
-					clineMessages: [],
-					apiConversationHistory: [],
-					updateApiConfiguration: vi.fn(),
-				} as Partial<Task>,
-			)
+			const mockTask = createModeSwitchTask()
 
-			const historyItem: HistoryItem = {
-				id: "test-task-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "code",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				cacheWrites: 0,
-				cacheReads: 0,
-				totalCost: 0,
-			}
+			const historyItem = createTaskHistoryItem()
 			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
 
 			// The first write settles after the abort lands; the rollback write rejects:
@@ -1434,19 +1092,7 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 
 		it("preserves fields persisted during the pending window when rolling back the mode", async () => {
-			const mockTask = Object.assign(
-				{} as Task,
-				{
-					taskId: "test-task-id",
-					taskMode: "code",
-					_taskMode: "code",
-					emit: vi.fn(),
-					saveClineMessages: vi.fn(),
-					clineMessages: [],
-					apiConversationHistory: [],
-					updateApiConfiguration: vi.fn(),
-				} as Partial<Task>,
-			)
+			const mockTask = createModeSwitchTask()
 
 			const preSwitchItem: HistoryItem = {
 				id: "test-task-id",
@@ -1506,23 +1152,7 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 
 		it("proceeds normally when no mutation signal is provided", async () => {
-			// A minimal typed double keeps the test focused on the mode-switch contract.
-			// The literal is asserted as Partial<Task> so its private members (_taskMode,
-			// saveClineMessages) stay out of the Object.assign intersection type, which
-			// would otherwise collapse to never.
-			const mockTask = Object.assign(
-				{} as Task,
-				{
-					taskId: "test-task-id",
-					taskMode: "code",
-					_taskMode: undefined as string | undefined,
-					emit: vi.fn(),
-					saveClineMessages: vi.fn(),
-					clineMessages: [],
-					apiConversationHistory: [],
-					updateApiConfiguration: vi.fn(),
-				} as Partial<Task>,
-			)
+			const mockTask = createModeSwitchTask({ _taskMode: undefined as string | undefined })
 
 			vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
 				return Promise.resolve([])

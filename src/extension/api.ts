@@ -22,6 +22,7 @@ import {
 	RooCodeEventName,
 	TaskCommandName,
 	isSecretStateKey,
+	PROVIDER_SETTINGS_KEYS,
 	IpcOrigin,
 	IpcMessageType,
 } from "@roo-code/types"
@@ -765,8 +766,16 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		// level (the pre-existing flat shape) so the secret filter removes them before return.
 		const values = this.sidebarProvider.getValues()
 		const { apiConfiguration, ...rest } = values
+		// A view-local profile is a complete snapshot, not a patch over the shared
+		// store - getState() resolves it the same way. Drop the shared flat
+		// provider-settings keys before flattening, or a key the view's profile
+		// never defined (e.g. another profile's apiModelId or base URL) leaks in
+		// from whichever profile owns the shared store.
+		const shared = apiConfiguration
+			? Object.fromEntries(Object.entries(rest).filter(([key]) => !PROVIDER_SETTINGS_KEYS.some((k) => k === key)))
+			: rest
 		return Object.fromEntries(
-			Object.entries({ ...rest, ...apiConfiguration }).filter(([key]) => !isSecretStateKey(key)),
+			Object.entries({ ...shared, ...apiConfiguration }).filter(([key]) => !isSecretStateKey(key)),
 		)
 	}
 

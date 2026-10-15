@@ -101,4 +101,65 @@ describe("API - configuration", () => {
 		expect(configuration).not.toHaveProperty("apiKey")
 		expect(configuration).not.toHaveProperty("openRouterApiKey")
 	})
+
+	it("drops shared flat provider settings when a view-local profile is present", () => {
+		const getValues = vi.fn().mockReturnValue({
+			mode: "code",
+			currentApiConfigName: "view-profile",
+			// Flat provider keys belonging to whichever profile owns the shared store.
+			apiProvider: providerIdentifiers.anthropic,
+			apiModelId: "claude-sonnet-4-5",
+			anthropicBaseUrl: "https://shared.example/v1",
+			// A non-provider shared setting: must survive the strip.
+			customInstructions: "keep me",
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4o",
+			},
+		})
+		// Structural double: API.getConfiguration() only reads sidebarProvider.getValues()
+		// from the provider; the double assertion adapts this minimal shape to the
+		// constructor's ClineProvider parameter (same pattern as the tests above).
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getValues,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		const configuration = api.getConfiguration()
+
+		// The view-local snapshot wins outright; the shared store's provider keys
+		// the profile never defined must not leak through.
+		expect(configuration.apiProvider).toBe(providerIdentifiers.openrouter)
+		expect(configuration.apiModelId).toBeUndefined()
+		expect(configuration.anthropicBaseUrl).toBeUndefined()
+		expect(configuration.openRouterModelId).toBe("openai/gpt-4o")
+		expect(configuration.customInstructions).toBe("keep me")
+		expect(configuration.mode).toBe("code")
+		expect(configuration.currentApiConfigName).toBe("view-profile")
+	})
+
+	it("keeps shared flat provider settings when no view-local profile is present", () => {
+		const getValues = vi.fn().mockReturnValue({
+			mode: "code",
+			currentApiConfigName: "shared-profile",
+			apiProvider: providerIdentifiers.anthropic,
+			apiModelId: "claude-sonnet-4-5",
+		})
+		// Structural double: same pattern as the tests above.
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getValues,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		const configuration = api.getConfiguration()
+
+		expect(configuration.apiProvider).toBe(providerIdentifiers.anthropic)
+		expect(configuration.apiModelId).toBe("claude-sonnet-4-5")
+	})
 })
