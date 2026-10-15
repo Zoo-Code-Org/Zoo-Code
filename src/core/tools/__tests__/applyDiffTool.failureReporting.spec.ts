@@ -116,14 +116,15 @@ describe("ApplyDiffTool failure reporting", () => {
 		return blocks.join("\n")
 	}
 
-	async function runApplyDiff(diffResult: DiffResult, blockCount: number): Promise<string> {
+	async function runApplyDiff(diffResult: DiffResult, blockCount: number, diffOverride?: string): Promise<string> {
 		mockTask.diffStrategy = {
 			getName: () => "test",
 			applyDiff: vi.fn().mockResolvedValue(diffResult),
 			getProgressStatus: vi.fn().mockReturnValue({ icon: "diff-multiple", text: "x" }),
 		}
 
-		await applyDiffTool.execute({ path: testFilePath, diff: buildDiffContent(blockCount) }, mockTask, {
+		const diff = diffOverride ?? buildDiffContent(blockCount)
+		await applyDiffTool.execute({ path: testFilePath, diff }, mockTask, {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: vi.fn((result: ToolResponse) => {
@@ -257,6 +258,44 @@ describe("ApplyDiffTool failure reporting", () => {
 			expect(output).not.toContain("second line of failure 8")
 		})
 
+		it("prefixes multiple failures with a count summary that ignores successful parts", async () => {
+			const mixedParts: DiffResult[] = [{ success: true, content: "applied" }, ...makeFailureSet(2)]
+			const output = await runApplyDiff({ success: false, failParts: mixedParts }, 3)
+
+			expect(output).toContain(
+				"<error_details>\n2 diff blocks failed to apply. Fix the failures below before retrying.\n\n--- Diff block 1 of 2 ---\n",
+			)
+			expect(output).toContain("second line of failure 1\n\n--- Diff block 2 of 2 ---\nFAILURE-MARKER-2")
+		})
+
+		it("renders a single failure verbatim with no summary, label, details or trailer", async () => {
+			const output = await runApplyDiff({ success: false, failParts: makeFailureSet(1) }, 1)
+
+			expect(output).toContain("<error_details>\nFAILURE-MARKER-1\nsecond line of failure 1\n</error_details>")
+		})
+
+		it("separates the abbreviated trailer from the last summary and omits the remainder trailer", async () => {
+			const output = await runApplyDiff({ success: false, failParts: makeFailureSet(6) }, 6)
+
+			expect(output).toContain("FAILURE-MARKER-6\n\n(Failures 6-6 are shown")
+			expect(output).not.toContain("more failures not shown")
+		})
+
+		it("does not truncate a detailed failure of exactly the character cap", async () => {
+			const exactCapError = "z".repeat(4000)
+			const output = await runApplyDiff({ success: false, failParts: [makeFailure(exactCapError)] }, 1)
+
+			expect(output).not.toContain("[truncated")
+			expect(output).toContain(`${exactCapError}\n</error_details>`)
+		})
+
+		it("reports the exact number of omitted characters when truncating", async () => {
+			const oversizedError = `FAILURE-MARKER-1\n${"x".repeat(6000)}`
+			const output = await runApplyDiff({ success: false, failParts: [makeFailure(oversizedError)] }, 1)
+
+			expect(output).toContain(`[truncated; ${oversizedError.length - 4000} characters omitted`)
+		})
+
 		it("caps the number of abbreviated failures and reports the remainder as a count", async () => {
 			const output = await runApplyDiff({ success: false, failParts: makeFailureSet(60) }, 60)
 
@@ -283,6 +322,25 @@ describe("ApplyDiffTool failure reporting", () => {
 			const output = await runApplyDiff(partialResult(makeFailureSet(1)), 2)
 
 			expect(output).not.toContain("re-apply")
+		})
+
+		it("states how many blocks did not apply", async () => {
+			const output = await runApplyDiff(partialResult(makeFailureSet(2)), 3)
+
+			expect(output).toContain(`Applied 1 of 3 diff blocks to ${path.resolve("/workspace", testFilePath)}. `)
+			expect(output).toContain("The other 2 did NOT apply, so those changes are NOT in the file. ")
+		})
+
+		it("tolerates a successful result without failParts or SEARCH markers", async () => {
+			const output = await runApplyDiff(
+				{ success: true, content: "updated content" },
+				0,
+				"diff text without block markers",
+			)
+
+			expect(output).not.toContain("Applied")
+			expect(output).not.toContain("Making multiple related changes")
+			expect(output).toContain("Changes successfully applied.")
 		})
 
 		it("applies the abbreviation cap on the partial path as well", async () => {
