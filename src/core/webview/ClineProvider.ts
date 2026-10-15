@@ -1327,57 +1327,57 @@ export class ClineProvider
 
 		this._disposed = true
 
-		// A disposed provider will never register a stable view state id: release
-		// any API-driven task creation that is awaiting viewStateReadiness.
-		this.viewStateReadinessResolve()
-		this._postStateToWebviewThrottled.cancel()
-		this.log("Disposing ClineProvider...")
-
-		// Reject any tasks still waiting for a scheduler permit so they don't
-		// hold the event loop after the provider is torn down.
-		this.taskScheduler.cancelQueued()
-
-		// Clear all tasks from the stack. The first pop goes through evictCurrentTask()
-		// so an active delegated child is marked interrupted before the extension shuts down,
-		// rather than being left persisted as "active" across the reload.
-		if (this.taskRegistry.length > 0) {
-			const task = this.taskRegistry.current!
-			await this.evictCurrentTask()
-			await this.drainTaskDisposal(task)
-		}
-		while (this.taskRegistry.length > 0) {
-			const task = this.taskRegistry.current!
-			await this.removeClineFromStack()
-			await this.drainTaskDisposal(task)
-		}
-
-		this.log("Cleared all tasks")
-
-		// Clear all pending edit operations to prevent memory leaks
-		this.clearAllPendingEditOperations()
-		this.log("Cleared pending operations")
-
-		if (this.view && "dispose" in this.view) {
-			this.view.dispose()
-			this.log("Disposed webview")
-		}
-
-		this.clearWebviewResources()
-
-		// Clean up cloud service event listener
-		if (CloudService.hasInstance()) {
-			CloudService.instance.off("settings-updated", this.handleCloudSettingsUpdate)
-		}
-
-		while (this.disposables.length) {
-			const x = this.disposables.pop()
-
-			if (x) {
-				x.dispose()
-			}
-		}
-
 		try {
+			// A disposed provider will never register a stable view state id: release
+			// any API-driven task creation that is awaiting viewStateReadiness.
+			this.viewStateReadinessResolve()
+			this._postStateToWebviewThrottled.cancel()
+			this.log("Disposing ClineProvider...")
+
+			// Reject any tasks still waiting for a scheduler permit so they don't
+			// hold the event loop after the provider is torn down.
+			this.taskScheduler.cancelQueued()
+
+			// Clear all tasks from the stack. The first pop goes through evictCurrentTask()
+			// so an active delegated child is marked interrupted before the extension shuts down,
+			// rather than being left persisted as "active" across the reload.
+			if (this.taskRegistry.length > 0) {
+				const task = this.taskRegistry.current!
+				await this.evictCurrentTask()
+				await this.drainTaskDisposal(task)
+			}
+			while (this.taskRegistry.length > 0) {
+				const task = this.taskRegistry.current!
+				await this.removeClineFromStack()
+				await this.drainTaskDisposal(task)
+			}
+
+			this.log("Cleared all tasks")
+
+			// Clear all pending edit operations to prevent memory leaks
+			this.clearAllPendingEditOperations()
+			this.log("Cleared pending operations")
+
+			if (this.view && "dispose" in this.view) {
+				this.view.dispose()
+				this.log("Disposed webview")
+			}
+
+			this.clearWebviewResources()
+
+			// Clean up cloud service event listener
+			if (CloudService.hasInstance()) {
+				CloudService.instance.off("settings-updated", this.handleCloudSettingsUpdate)
+			}
+
+			while (this.disposables.length) {
+				const x = this.disposables.pop()
+
+				if (x) {
+					x.dispose()
+				}
+			}
+
 			this._workspaceTracker?.dispose()
 			this._workspaceTracker = undefined
 			await this.mcpHub?.unregisterClient()
@@ -1389,10 +1389,11 @@ export class ClineProvider
 			this.taskHistoryStore.dispose()
 			this.log("Disposed all disposables")
 		} finally {
-			// Deregistration must not depend on the cleanup above completing: a
-			// throwing disposable (e.g. an MCP client whose disposal rejects)
-			// would otherwise leave this provider registered while _disposed is
-			// already set, so no later retry could repair the registration.
+			// Deregistration must not depend on any cleanup step completing: a
+			// throwing disposable anywhere in dispose() (e.g. an MCP client whose
+			// disposal rejects) would otherwise leave this provider registered
+			// while _disposed is already set, so no later retry could repair the
+			// registration.
 			ClineProvider.activeInstances.delete(this)
 
 			// Clean up any event listeners attached to this provider
@@ -4660,6 +4661,10 @@ export class ClineProvider
 		configuration: RooCodeSettings = {},
 	): Promise<Task> {
 		if (configuration) {
+			// Capture the selection a registration failure must roll back to:
+			// setValues below persists the payload's mode to shared and per-view
+			// state while the payload's custom modes are still unregistered.
+			const previousMode = this.getValue("mode")
 			await this.setValues(configuration)
 
 			if (configuration.allowedCommands) {
@@ -4693,8 +4698,24 @@ export class ClineProvider
 			// when it merges .roomodes + global settings on refresh.  Persisting
 			// via updateCustomMode ensures modes survive the merge cycle.
 			if (configuration.customModes?.length) {
-				for (const mode of configuration.customModes) {
-					await this.customModesManager.updateCustomMode(mode.slug, mode)
+				try {
+					for (const mode of configuration.customModes) {
+						await this.customModesManager.updateCustomMode(mode.slug, mode)
+					}
+				} catch (error) {
+					// setValues already persisted the payload's mode selection to shared
+					// and per-view state; if registration fails the mode is not actually
+					// usable, so restore the previous selection before surfacing the
+					// failure. A failed restore is logged; the original failure is what
+					// callers see.
+					try {
+						await this.setValues({ mode: previousMode })
+					} catch (restoreError) {
+						this.log(
+							`[ClineProvider#createTask] Failed to restore the previous mode after custom-mode registration failed: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+						)
+					}
+					throw error
 				}
 			}
 		}
