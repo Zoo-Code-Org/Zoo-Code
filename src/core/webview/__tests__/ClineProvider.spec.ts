@@ -3910,6 +3910,30 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("restores the previous mode when custom-mode registration fails during createTask", async () => {
+			await provider.setValues({ mode: "architect" })
+			provider["customModesManager"].updateCustomMode = vi.fn().mockRejectedValue(new Error("registration down"))
+
+			await expect(
+				provider.createTask(
+					undefined,
+					undefined,
+					undefined,
+					{},
+					{
+						mode: "reviewer",
+						customModes: [
+							{ slug: "reviewer", name: "Reviewer", roleDefinition: "Reviews code", groups: [] },
+						],
+					},
+				),
+			).rejects.toThrow("registration down")
+
+			// The payload's mode reached shared + per-view state through setValues
+			// before registration failed; the failure path must roll both back.
+			expect(provider.getValues().mode).toBe("architect")
+		})
+
 		it("should sanitize raw viewStateId before using it as persisted viewStates key", async () => {
 			const provider = new ClineProvider(
 				mockContext,

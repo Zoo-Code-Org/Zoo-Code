@@ -4560,6 +4560,10 @@ export class ClineProvider
 		configuration: RooCodeSettings = {},
 	): Promise<Task> {
 		if (configuration) {
+			// Capture the selection a registration failure must roll back to:
+			// setValues below persists the payload's mode to shared and per-view
+			// state while the payload's custom modes are still unregistered.
+			const previousMode = this.getValue("mode")
 			await this.setValues(configuration)
 
 			if (configuration.allowedCommands) {
@@ -4593,8 +4597,24 @@ export class ClineProvider
 			// when it merges .roomodes + global settings on refresh.  Persisting
 			// via updateCustomMode ensures modes survive the merge cycle.
 			if (configuration.customModes?.length) {
-				for (const mode of configuration.customModes) {
-					await this.customModesManager.updateCustomMode(mode.slug, mode)
+				try {
+					for (const mode of configuration.customModes) {
+						await this.customModesManager.updateCustomMode(mode.slug, mode)
+					}
+				} catch (error) {
+					// setValues already persisted the payload's mode selection to shared
+					// and per-view state; if registration fails the mode is not actually
+					// usable, so restore the previous selection before surfacing the
+					// failure. A failed restore is logged; the original failure is what
+					// callers see.
+					try {
+						await this.setValues({ mode: previousMode })
+					} catch (restoreError) {
+						this.log(
+							`[ClineProvider#createTask] Failed to restore the previous mode after custom-mode registration failed: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+						)
+					}
+					throw error
 				}
 			}
 		}
