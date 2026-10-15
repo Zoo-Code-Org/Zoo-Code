@@ -48,6 +48,47 @@ describe("changeJournal", () => {
 			const raw = await fs.readFile(journalPath(tmpRoot, taskId), "utf8")
 			expect(raw.split("\n").filter((line) => line !== "")).toHaveLength(2)
 		})
+
+		it("repairs a torn tail before appending so both entries load", async () => {
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "good" }))
+			// Simulate a crash that tore the last append mid-write: the file now
+			// ends with an unterminated JSON fragment.
+			const filePath = journalPath(tmpRoot, taskId)
+			const raw = await fs.readFile(filePath, "utf8")
+			await fs.writeFile(filePath, raw + '{"path":"src/half.ts","operation":"upd')
+
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "after" }))
+
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual(["good", "after"])
+		})
+
+		it("does not insert a blank line when the journal ends cleanly", async () => {
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "a" }))
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "b" }))
+
+			const raw = await fs.readFile(journalPath(tmpRoot, taskId), "utf8")
+			expect(raw).not.toContain("\n\n")
+			expect(raw.split("\n").filter((line) => line !== "")).toHaveLength(2)
+		})
+	})
+
+	describe("task ID containment", () => {
+		it("rejects task IDs that could escape the tasks directory", async () => {
+			for (const bad of ["../../outside", "a/b", "a\\b", "", ".", ".."]) {
+				expect(() => journalPath(tmpRoot, bad)).toThrow(/Unsafe task ID/)
+				await expect(appendChange(tmpRoot, bad, entry({ checkpointId: "x" }))).rejects.toThrow(/Unsafe task ID/)
+				await expect(loadChanges(tmpRoot, bad)).rejects.toThrow(/Unsafe task ID/)
+				// Nothing was created outside the task directory.
+				await expect(fs.stat(path.join(tmpRoot, "..", "outside"))).rejects.toMatchObject({ code: "ENOENT" })
+			}
+		})
+
+		it("keeps a safe task ID under the tasks directory", () => {
+			expect(journalPath(tmpRoot, "task-42")).toBe(
+				path.join(tmpRoot, "tasks", "task-42", "checkpoints", "changes.jsonl"),
+			)
+		})
 	})
 
 	describe("loadChanges", () => {
