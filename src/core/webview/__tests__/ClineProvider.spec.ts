@@ -4125,6 +4125,55 @@ describe("ClineProvider", () => {
 			expect(ClineProvider.getAllInstances()).not.toContain(provider)
 		})
 
+		it("restores the previous mode when custom-mode registration fails during createTask", async () => {
+			await provider.setValues({ mode: "architect" })
+			provider["customModesManager"].updateCustomMode = vi.fn().mockRejectedValue(new Error("registration down"))
+
+			await expect(
+				provider.createTask(
+					undefined,
+					undefined,
+					undefined,
+					{},
+					{
+						mode: "reviewer",
+						customModes: [
+							{ slug: "reviewer", name: "Reviewer", roleDefinition: "Reviews code", groups: [] },
+						],
+					},
+				),
+			).rejects.toThrow("registration down")
+
+			// The payload's mode reached shared + per-view state through setValues
+			// before registration failed; the failure path must roll both back.
+			expect(provider.getValues().mode).toBe("architect")
+		})
+
+		it("deregisters the provider when an early cleanup step throws during dispose", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			// The first cleanup step throwing used to skip the deregistration below
+			// it: the provider stayed in activeInstances while _disposed was already
+			// set, so no later retry could repair the registration. The finally now
+			// covers the whole disposal operation.
+			provider["taskScheduler"] = {
+				cancelQueued: vi.fn(() => {
+					throw new Error("early cleanup boom")
+				}),
+			} as unknown as ClineProvider["taskScheduler"]
+			expect(ClineProvider.getAllInstances()).toContain(provider)
+
+			await expect(provider.dispose()).rejects.toThrow("early cleanup boom")
+
+			expect(ClineProvider.getAllInstances()).not.toContain(provider)
+		})
+
 		it("should sanitize raw viewStateId before using it as persisted viewStates key", async () => {
 			const provider = new ClineProvider(
 				mockContext,
