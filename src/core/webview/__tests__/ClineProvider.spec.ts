@@ -4429,6 +4429,12 @@ describe("ClineProvider", () => {
 						{ name: "activated-profile", id: "activated-id", apiProvider: providerIdentifiers.anthropic },
 					]),
 				setModeConfig: vi.fn().mockResolvedValue(undefined),
+				// The activation snapshot reads the prior record (not-found is the
+				// creation case) and the mode mapping: without these the snapshot
+				// throws a TypeError that upsert swallows, and the activation path
+				// this test names never runs.
+				getProfile: vi.fn().mockRejectedValue(new ProviderSettingsNotFoundError("activated-profile")),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
