@@ -397,6 +397,10 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.update).toHaveBeenCalledWith(testContent, true)
 			expect(mockAskApproval).toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.saveChanges).toHaveBeenCalled()
+			// The approved whole-file write names its guard explicitly: the third
+			// argument selects the write kind - passing undefined relied on the
+			// parameter's default instead of the tool's own decision.
+			expect(mockCline.diffViewProvider.saveChanges.mock.calls[0][2]).toBe("update")
 			expect(mockCline.fileContextTracker.trackFileContext).toHaveBeenCalledWith(testFilePath, "roo_edited")
 			expect(mockCline.didEditFile).toBe(true)
 		})
