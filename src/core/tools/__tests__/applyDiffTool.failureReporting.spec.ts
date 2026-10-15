@@ -127,6 +127,7 @@ describe("ApplyDiffTool failure reporting", () => {
 		await applyDiffTool.execute({ path: testFilePath, diff }, mockTask, {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
+			toolCallId: "tool-call-1",
 			pushToolResult: vi.fn((result: ToolResponse) => {
 				pushedResult = result
 			}),
