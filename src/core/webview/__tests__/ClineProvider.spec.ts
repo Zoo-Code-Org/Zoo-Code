@@ -3693,6 +3693,41 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("should keep a mode whose custom definition arrives in the same setValues payload", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			// createTask and setConfiguration call setValues(configuration) before
+			// registering configuration.customModes: the payload's own modes must count
+			// as valid even though the manager has not registered them yet.
+			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+			const modesModule = vi.mocked(await import("../../../shared/modes"))
+			const originalMode = modesModule.getModeBySlug("code")
+			modesModule.getModeBySlug.mockImplementation(((slug: string, customModes?: { slug: string }[]) =>
+				customModes?.some((mode) => mode.slug === slug)
+					? { slug }
+					: undefined) as typeof modesModule.getModeBySlug)
+
+			try {
+				await provider.setValues({
+					customModes: [{ slug: "new-mode", name: "New Mode", roleDefinition: "test", groups: ["read"] }],
+					mode: "new-mode",
+				})
+
+				expect(provider.contextProxy.getValue("mode")).toBe("new-mode")
+				expect(provider["viewLocalState"].mode).toBe("new-mode")
+			} finally {
+				modesModule.getModeBySlug.mockReturnValue(originalMode)
+			}
+
+			await provider.dispose()
+		})
+
 		it("should sanitize raw viewStateId before using it as persisted viewStates key", async () => {
 			const provider = new ClineProvider(
 				mockContext,
