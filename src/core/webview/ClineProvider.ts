@@ -4231,7 +4231,15 @@ export class ClineProvider
 
 	public async setValue<K extends keyof RooCodeSettings>(key: K, value: RooCodeSettings[K]) {
 		const previousSharedValues = { [key]: this.contextProxy.getValue(key) } as RooCodeSettings
-		await this.contextProxy.setValue(key, value)
+		try {
+			await this.contextProxy.setValue(key, value)
+		} catch (error) {
+			// The shared write is inside the rollback scope too: ContextProxy persists
+			// keys one at a time, so a rejected initial write must not leave a durable
+			// subset behind without the compensating restore below.
+			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues)
+			throw error
+		}
 		try {
 			await this._saveViewLocalStateFromMutation({ [key]: value })
 		} catch (error) {
@@ -4289,7 +4297,15 @@ export class ClineProvider
 		const previousSharedValues = Object.fromEntries(
 			Object.keys(sanitizedValues).map((key) => [key, this.contextProxy.getValue(key as keyof RooCodeSettings)]),
 		) as RooCodeSettings
-		await this.contextProxy.setValues(sanitizedValues)
+		try {
+			await this.contextProxy.setValues(sanitizedValues)
+		} catch (error) {
+			// Same scope rule as setValue: a multi-key write that fails partway has
+			// already persisted a durable subset, so the restore must cover the
+			// initial shared write, not only the per-view persistence below.
+			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues)
+			throw error
+		}
 		try {
 			await this._saveViewLocalStateFromMutation(sanitizedValues)
 		} catch (error) {

@@ -2106,6 +2106,63 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	describe("setter rollback scope", () => {
+		it("restores the shared store when the initial multi-key shared write fails", async () => {
+			const contextProxy = new ContextProxy(mockContext)
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				contextProxy,
+				new WebviewFocusTracker(),
+			)
+			await contextProxy.setValue("mode", "code")
+
+			const setValuesSpy = vi
+				.spyOn(contextProxy, "setValues")
+				.mockRejectedValueOnce(new Error("shared write failed"))
+
+			await expect(provider.setValues({ mode: "architect" })).rejects.toThrow("shared write failed")
+
+			// The first call is the failed forward write; the second is the rollback
+			// restoring the prior shared value through the same proxy.
+			expect(setValuesSpy).toHaveBeenCalledTimes(2)
+			expect(setValuesSpy.mock.calls[1][0]).toEqual({ mode: "code" })
+			// The per-view buffer never saw the failed value.
+			expect(provider["viewLocalState"].mode).toBeUndefined()
+
+			await provider.dispose()
+		})
+
+		it("restores the shared store when the initial single-key shared write fails", async () => {
+			const contextProxy = new ContextProxy(mockContext)
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				contextProxy,
+				new WebviewFocusTracker(),
+			)
+			await contextProxy.setValue("mode", "code")
+
+			const setValueSpy = vi
+				.spyOn(contextProxy, "setValue")
+				.mockRejectedValueOnce(new Error("shared write failed"))
+			const restoreSpy = vi.spyOn(contextProxy, "setValues")
+
+			await expect(provider.setValue("mode", "architect")).rejects.toThrow("shared write failed")
+
+			// The rollback routes through setValues (shared restore helper), and it
+			// must carry the prior value, not the failed one. (Later setValue calls
+			// belong to teardown; the forward write is the first call.)
+			expect(setValueSpy.mock.calls[0]).toEqual(["mode", "architect"])
+			expect(restoreSpy).toHaveBeenCalledWith({ mode: "code" })
+			expect(provider["viewLocalState"].mode).toBeUndefined()
+
+			await provider.dispose()
+		})
+	})
+
 	describe("setViewStateId", () => {
 		it('should ignore "__proto__" and keep the temporary viewId', async () => {
 			const provider = new ClineProvider(
