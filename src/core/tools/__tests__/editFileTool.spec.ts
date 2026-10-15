@@ -224,6 +224,7 @@ describe("editFileTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		return toolResult
@@ -301,6 +302,7 @@ describe("editFileTool", () => {
 					askApproval: mockAskApproval,
 					handleError: mockHandleError,
 					pushToolResult: localPushToolResult,
+					toolCallId: "test-tool-call-id",
 				})
 
 				return capturedResult
@@ -672,6 +674,7 @@ describe("editFileTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: localPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(capturedResult).toContain("Failed to read file")
