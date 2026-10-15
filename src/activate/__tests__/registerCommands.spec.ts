@@ -1083,6 +1083,35 @@ describe("openClineInNewTab", () => {
 		resolveSpy.mockRestore()
 		disposeSpy.mockRestore()
 	})
+
+	it("preserves the initialization error when provider cleanup also fails", async () => {
+		const resolveSpy = vi
+			.spyOn(ClineProvider.prototype, "resolveWebviewView")
+			.mockRejectedValue(new Error("init failed"))
+		// A throwing MCP disposable inside dispose() rejects the cleanup await;
+		// that rejection must not replace the initialization error the caller
+		// sees (deregistration itself already ran in dispose()'s finally path).
+		const disposeSpy = vi.spyOn(ClineProvider.prototype, "dispose").mockRejectedValue(new Error("cleanup boom"))
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValue(
+			Object.assign({} as vscode.WebviewPanel, {
+				webview: { postMessage: vi.fn() },
+				onDidChangeViewState: vi.fn(),
+				onDidDispose: vi.fn(),
+			}),
+		)
+
+		await expect(
+			openClineInNewTab({
+				context: mockContext,
+				outputChannel: mockOutputChannel,
+				webviewFocusTracker: new WebviewFocusTracker(),
+			}),
+		).rejects.toThrow("init failed")
+
+		resolveSpy.mockRestore()
+		disposeSpy.mockRestore()
+	})
+
 	it("falls back to an undefined MdmService when MdmService.getInstance throws", async () => {
 		;(MdmService.getInstance as Mock).mockImplementation(() => {
 			throw new Error("MDM service not initialized")
