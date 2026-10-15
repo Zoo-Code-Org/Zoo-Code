@@ -128,6 +128,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockAskApproval).toHaveBeenCalled()
@@ -262,6 +263,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockSaveDirectly).toHaveBeenCalledWith(
@@ -292,6 +294,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(reg.get(key)?.complete).toBe(false)
@@ -325,6 +328,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(reg.get(key)?.complete).toBe(true)
@@ -342,6 +346,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(reg.get(key)?.complete).toBe(false)
@@ -364,6 +369,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		// The seeded version survives the hunk read: the tool did not authorize a version the
@@ -386,6 +392,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		// The hunk read doubles as the S2 observation (ReadFileTool contract):
@@ -412,6 +419,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts"))).toBe(false)
@@ -440,6 +448,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts"))).toBe(false)
@@ -464,6 +473,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts"))).toBe(false)
@@ -478,6 +488,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockSaveDirectly).toHaveBeenCalledWith(
@@ -501,6 +512,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		// The source had no prior observation, so the hunk read records a partial
@@ -535,6 +547,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		// Nothing was downgraded: the destination keeps the completeness the model earned.
@@ -572,6 +585,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(completeAtPublish).toEqual([false])
@@ -595,6 +609,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(reg.get(destKey)?.complete).toBe(true)
@@ -613,6 +628,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		// Assert the value the tool actually passed, not the value the double wrote
@@ -640,6 +656,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(reg.get(path.resolve("/workspace/project", "src/old.ts"))).toBeUndefined()
@@ -668,6 +685,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(reg.get(destKey)).toBeUndefined()
@@ -684,6 +702,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockHandleError).toHaveBeenCalledWith("apply patch", guardError)
@@ -702,6 +721,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockHandleError).toHaveBeenCalledWith("apply patch", guardError)
@@ -719,6 +739,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockSaveChanges).toHaveBeenCalledWith(true, 1000, "edit", false, undefined)
@@ -735,6 +756,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockSaveChanges).toHaveBeenCalledWith(true, 1000, "create", false, undefined)
