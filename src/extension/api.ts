@@ -22,6 +22,7 @@ import {
 	RooCodeEventName,
 	TaskCommandName,
 	isSecretStateKey,
+	isSensitiveProviderConfigKey,
 	PROVIDER_SETTINGS_KEYS,
 	IpcOrigin,
 	IpcMessageType,
@@ -781,8 +782,14 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 					),
 				)
 			: rest
+		// Secrets never leave the flattened surface: SECRET_STATE_KEYS covers the
+		// *ApiKey shapes, and SENSITIVE_PROVIDER_CONFIG_KEYS covers credential
+		// values that use other name shapes (header maps, session tokens,
+		// service-account JSON, credential-file paths).
 		const configuration = Object.fromEntries(
-			Object.entries({ ...shared, ...apiConfiguration }).filter(([key]) => !isSecretStateKey(key)),
+			Object.entries({ ...shared, ...apiConfiguration }).filter(
+				([key]) => !isSecretStateKey(key) && !isSensitiveProviderConfigKey(key),
+			),
 		)
 		// An explicit apiProvider: undefined inside the nested profile clobbers the
 		// retained shared fallback through the spread above; restore it the same way
@@ -794,16 +801,99 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 	}
 
 	public async setConfiguration(values: RooCodeSettings) {
+		// The writes below are sequential, not transactional. Snapshot what each write
+		// overwrites so a later failure can compensate the writes that already landed;
+		// the original error is what callers see.
+		const previousValues = Object.fromEntries(
+			Object.keys(values).map((key) => [key, this.sidebarProvider.getValue(key as keyof RooCodeSettings)]),
+		) as RooCodeSettings
+		const profileName = values.currentApiConfigName || "default"
+		let previousProfile: ProviderSettings | undefined
+		let hadPreviousProfile = false
+		try {
+			const { name: _name, ...profile } = await this.sidebarProvider.providerSettingsManager.getProfile({
+				name: profileName,
+			})
+			previousProfile = profile as ProviderSettings
+			hadPreviousProfile = true
+		} catch {
+			// A missing profile is the normal first-save case: compensation then
+			// removes the profile this call creates.
+		}
+		const previousModeConfigs: Array<[string, string | undefined]> = values.modeApiConfigs
+			? await Promise.all(
+					Object.keys(values.modeApiConfigs).map(
+						async (mode) =>
+							[
+								mode,
+								await this.sidebarProvider.providerSettingsManager.getModeConfigId(mode as Mode),
+							] as [string, string | undefined],
+					),
+				)
+			: []
+
 		await this.sidebarProvider.setValues(values)
-		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
+
+		try {
+			await this.sidebarProvider.providerSettingsManager.saveConfig(profileName, values)
+		} catch (error) {
+			// Only the shared write landed: undo it before surfacing the failure.
+			await this.restoreConfigurationValues(previousValues)
+			throw error
+		}
+
 		if (values.modeApiConfigs) {
-			await Promise.all(
-				Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
-					this.sidebarProvider.providerSettingsManager.setModeConfig(mode as Mode, configId),
-				),
+			try {
+				await Promise.all(
+					Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
+						this.sidebarProvider.providerSettingsManager.setModeConfig(mode as Mode, configId),
+					),
+				)
+			} catch (error) {
+				// Undo every write that landed, each restore independently so one failed
+				// restore cannot strand the others: mode mappings, then the profile
+				// save, then the shared values.
+				for (const [mode, configId] of previousModeConfigs) {
+					try {
+						// A mode with no prior mapping is restored to an undefined id,
+						// which getModeConfigId reports as absent just like a missing key.
+						await this.sidebarProvider.providerSettingsManager.setModeConfig(
+							mode as Mode,
+							configId as string,
+						)
+					} catch (restoreError) {
+						this.log(
+							`[API#setConfiguration] failed to restore the mode mapping for ${mode}: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+						)
+					}
+				}
+				try {
+					if (hadPreviousProfile) {
+						await this.sidebarProvider.providerSettingsManager.saveConfig(profileName, previousProfile!)
+					} else {
+						await this.sidebarProvider.providerSettingsManager.deleteConfig(profileName)
+					}
+				} catch (restoreError) {
+					this.log(
+						`[API#setConfiguration] failed to restore the profile "${profileName}": ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+					)
+				}
+				await this.restoreConfigurationValues(previousValues)
+				throw error
+			}
+		}
+
+		await this.sidebarProvider.postStateToWebview()
+	}
+
+	private async restoreConfigurationValues(previous: RooCodeSettings): Promise<void> {
+		try {
+			await this.sidebarProvider.setValues(previous)
+		} catch (restoreError) {
+			this.log(
+				`[API#setConfiguration] failed to restore shared settings: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
 			)
 		}
-		await this.sidebarProvider.postStateToWebview()
 	}
 
 	public getGlobalState<K extends keyof GlobalState>(key: K): GlobalState[K] {
