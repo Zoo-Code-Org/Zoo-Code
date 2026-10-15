@@ -279,7 +279,8 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				pushToolResult: mockPushToolResult,
 			})
 
-			expect(mockTask.processQueuedMessages).toHaveBeenCalled()
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+			expect(mockTask.processQueuedMessages).toHaveBeenCalledTimes(1)
 		})
 
 		it("does not record a checkpoint when perWriteCheckpoints is disabled", async () => {
