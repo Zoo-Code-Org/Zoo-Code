@@ -174,6 +174,35 @@ describe("API - configuration", () => {
 		expect(configuration.anthropicBaseUrl).toBeUndefined()
 	})
 
+	it("falls back to the shared provider when a view-local profile sets apiProvider to undefined", () => {
+		const getValues = vi.fn().mockReturnValue({
+			mode: "code",
+			currentApiConfigName: "view-profile",
+			apiProvider: providerIdentifiers.anthropic,
+			// Explicit undefined in the nested profile: the flatten spread must not
+			// let it clobber the retained shared fallback (getState() uses ??).
+			apiConfiguration: {
+				apiProvider: undefined,
+				apiModelId: "gpt-4o",
+			},
+		})
+		// Structural double: API.getConfiguration() only reads sidebarProvider.getValues()
+		// from the provider; the double assertion adapts this minimal shape to the
+		// constructor's ClineProvider parameter (same pattern as the tests above).
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getValues,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		const configuration = api.getConfiguration()
+
+		expect(configuration.apiProvider).toBe(providerIdentifiers.anthropic)
+		expect(configuration.apiModelId).toBe("gpt-4o")
+	})
+
 	it("keeps shared flat provider settings when no view-local profile is present", () => {
 		const getValues = vi.fn().mockReturnValue({
 			mode: "code",
