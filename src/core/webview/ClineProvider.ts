@@ -370,6 +370,15 @@ export class ClineProvider
 	private viewLocalStateMutatedFields = new Set<"mode" | "currentApiConfigName" | "apiConfiguration">()
 
 	/**
+	 * Bumped whenever durable and in-memory view state are cleared as a unit (reset and
+	 * import broadcasts clear every live buffer through _clearViewLocalState). An
+	 * in-flight loadViewState captures it and abandons its assignment when the value has
+	 * moved, so a load that read pre-reset persisted entries cannot resurrect selections
+	 * a reset already cleared - the field-mutation tracking only covers field writes.
+	 */
+	private viewStateLoadGeneration = 0
+
+	/**
 	 * This view's pinned profile name from the view-local buffer. Exposed for
 	 * sibling-instance inspection (getAllInstances() filtering): `viewLocalState`
 	 * is private and must not be reached through bracket access.
@@ -891,6 +900,10 @@ export class ClineProvider
 		// Capture the id this load is for: a newer id registered while an async
 		// profile lookup is in flight must not be overwritten by this stale load.
 		const loadedForViewId = this.viewStateId
+		// Capture the clear generation too: a reset/import that clears view state as a
+		// unit does not change the id and is not a field mutation, so only the
+		// generation reveals that this load's reads are already stale.
+		const loadedForGeneration = this.viewStateLoadGeneration
 
 		// While the stable id has not been registered yet, the key is this instance's
 		// session-local name. Temporary names restart from 0 on every host start, so an
@@ -934,7 +947,7 @@ export class ClineProvider
 				}
 			}
 
-			if (this.viewStateId !== loadedForViewId) {
+			if (this.viewStateId !== loadedForViewId || this.viewStateLoadGeneration !== loadedForGeneration) {
 				this.log(`[loadViewState] Discarding stale state for superseded view id ${loadedForViewId}`)
 				return
 			}
@@ -4427,6 +4440,7 @@ export class ClineProvider
 	 * Clear view-local state cache so that getState() falls back to ContextProxy defaults.
 	 */
 	private _clearViewLocalState(): void {
+		this.viewStateLoadGeneration += 1
 		this.viewLocalState = {}
 	}
 

@@ -21,7 +21,9 @@ import {
 	type WebviewThemeFixture,
 	RooCodeEventName,
 	TaskCommandName,
+	isGlobalStateKey,
 	isSecretStateKey,
+	isSensitiveProviderConfigKey,
 	PROVIDER_SETTINGS_KEYS,
 	IpcOrigin,
 	IpcMessageType,
@@ -786,8 +788,14 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 					),
 				)
 			: rest
+		// Secrets never leave the flattened surface: SECRET_STATE_KEYS covers the
+		// *ApiKey shapes, and SENSITIVE_PROVIDER_CONFIG_KEYS covers credential
+		// values that use other name shapes (header maps, session tokens,
+		// service-account JSON, credential-file paths).
 		const configuration = Object.fromEntries(
-			Object.entries({ ...shared, ...apiConfiguration }).filter(([key]) => !isSecretStateKey(key)),
+			Object.entries({ ...shared, ...apiConfiguration }).filter(
+				([key]) => !isSecretStateKey(key) && !isSensitiveProviderConfigKey(key),
+			),
 		)
 		// An explicit apiProvider: undefined inside the nested profile clobbers the
 		// retained shared fallback through the spread above; restore it the same way
@@ -813,11 +821,22 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 
 	public getGlobalState<K extends keyof GlobalState>(key: K): GlobalState[K] {
 		this.assertTestOnlyApi("getGlobalState")
+		// The generic only constrains typed callers; a crafted runtime key can be
+		// any string. Refuse keys outside the settings schema before storage sees
+		// them, so the test-only API cannot read arbitrary global state.
+		if (!isGlobalStateKey(key)) {
+			throw new Error(`getGlobalState received a key outside the settings schema: ${String(key)}`)
+		}
 		return this.context.globalState.get<GlobalState[K]>(key)
 	}
 
 	public async setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): Promise<void> {
 		this.assertTestOnlyApi("setGlobalState")
+		// Same runtime boundary as getGlobalState: an unvalidated key must not be
+		// persisted into global state.
+		if (!isGlobalStateKey(key)) {
+			throw new Error(`setGlobalState received a key outside the settings schema: ${String(key)}`)
+		}
 		await this.context.globalState.update(key, value)
 	}
 

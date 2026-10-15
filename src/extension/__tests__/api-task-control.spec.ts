@@ -563,6 +563,29 @@ describe("API task controls - per-view review fixes", () => {
 			expect(update).toHaveBeenCalledWith("mode", "ask")
 			await expect(api.approveTaskAsk("missing-task")).resolves.toBe(false)
 		})
+
+		it("rejects runtime keys outside the settings schema before touching storage", async () => {
+			const get = vi.fn()
+			const update = vi.fn().mockResolvedValue(undefined)
+			sidebarProvider.context = {
+				extensionMode: vscode.ExtensionMode.Test,
+				globalState: { get, update },
+			}
+			api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory())
+
+			// The generic only constrains typed callers; a crafted runtime key must
+			// be refused by the schema check before it reaches globalState storage.
+			expect(() => api.getGlobalState("bogusKey" as never)).toThrow("outside the settings schema")
+			expect(get).not.toHaveBeenCalled()
+			await expect(api.setGlobalState("bogusKey" as never, 1 as never)).rejects.toThrow(
+				"outside the settings schema",
+			)
+			expect(update).not.toHaveBeenCalled()
+
+			// A schema key still passes through.
+			expect(api.getGlobalState("mode")).toBeUndefined()
+			expect(get).toHaveBeenCalledWith("mode")
+		})
 	})
 
 	describe("startNewTask view-state readiness", () => {

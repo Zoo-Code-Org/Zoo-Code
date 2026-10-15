@@ -2011,6 +2011,43 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("discards an in-flight load when a reset clears view state mid-load", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("reset-view")
+
+			await provider.contextProxy.setValue("viewStates", {
+				"reset-view": { currentApiConfigName: "stale-profile", updatedAt: 1 },
+			})
+
+			const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
+
+			const loading = provider["loadViewState"]()
+			await vi.waitFor(() => expect(getProfileSpy).toHaveBeenCalledTimes(1))
+
+			// A reset/import invalidation clears the view-local buffer mid-load (the
+			// broadcast path does exactly this). The clear is not a field mutation, so
+			// the mutation tracking above cannot protect it: the generation must.
+			provider["_clearViewLocalState"]()
+
+			resolveProfile({
+				name: "stale-profile",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-x",
+			})
+			await loading
+
+			// The stale load must not resurrect the selections the reset cleared.
+			expect(provider["viewLocalState"]).toEqual({})
+
+			await provider.dispose()
+		})
+
 		it("keeps a mid-load flat provider-settings write shared instead of overlaying the pinned profile", async () => {
 			const provider = new ClineProvider(
 				mockContext,

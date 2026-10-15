@@ -210,6 +210,46 @@ describe("API - configuration", () => {
 		expect(configuration.apiModelId).toBe("gpt-4o")
 	})
 
+	it("omits credential-bearing keys that SECRET_STATE_KEYS does not name", () => {
+		const getValues = vi.fn().mockReturnValue({
+			mode: "code",
+			currentApiConfigName: "view-profile",
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.openai,
+				apiKey: "sk-secret",
+				openAiHeaders: { Authorization: "Bearer header-token" },
+				vertexJsonCredentials: JSON.stringify({ token: "svc" }),
+				vertexKeyFile: "C:/secrets/vertex.json",
+				zooSessionToken: "zoo-session-token",
+				mimoApiKey: "mimo-key",
+				poeApiKey: "poe-key",
+				modelTemperature: 0.5,
+			},
+		})
+		// Structural double: API.getConfiguration() only reads sidebarProvider.getValues()
+		// from the provider; the double assertion adapts this minimal shape to the
+		// constructor's ClineProvider parameter (same pattern as the tests above).
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getValues,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		const configuration = api.getConfiguration()
+
+		expect(configuration.apiKey).toBeUndefined()
+		expect(configuration.openAiHeaders).toBeUndefined()
+		expect(configuration.vertexJsonCredentials).toBeUndefined()
+		expect(configuration.vertexKeyFile).toBeUndefined()
+		expect(configuration.zooSessionToken).toBeUndefined()
+		expect(configuration.mimoApiKey).toBeUndefined()
+		expect(configuration.poeApiKey).toBeUndefined()
+		expect(configuration.modelTemperature).toBe(0.5)
+		expect(configuration.apiProvider).toBe(providerIdentifiers.openai)
+	})
+
 	it("keeps shared flat provider settings when no view-local profile is present", () => {
 		const getValues = vi.fn().mockReturnValue({
 			mode: "code",
