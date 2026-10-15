@@ -250,6 +250,7 @@ describe("writeToFileTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		return toolResult

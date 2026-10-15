@@ -98,6 +98,7 @@ import { getTaskDirectoryPath } from "../../utils/storage"
 // prompts
 import { formatResponse } from "../prompts/responses"
 import { SYSTEM_PROMPT } from "../prompts/system"
+import { partitionDisabledToolsForProtocol } from "../prompts/tools/effective-tool-policy"
 import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
 
 // core modules
@@ -232,6 +233,11 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
+
+export interface ToolExecutionContext {
+	toolCallId: string
+	didReject: boolean
+}
 
 export interface TaskOptions extends CreateTaskOptions {
 	provider: ClineProvider
@@ -412,7 +418,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	rooIgnoreController?: RooIgnoreController
 	rooProtectedController?: RooProtectedController
 	fileContextTracker: FileContextTracker
-	terminalProcess?: RooTerminalProcess
+	terminalProcesses = new Map<string, RooTerminalProcess>()
+	activeToolContexts = new Map<string, ToolExecutionContext>()
 
 	// Editing
 	diffViewProvider: DiffViewProvider
@@ -2530,9 +2537,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	async handleTerminalOperation(terminalOperation: "continue" | "abort") {
 		if (terminalOperation === "continue") {
-			this.terminalProcess?.continue()
+			for (const process of this.terminalProcesses.values()) process.continue()
 		} else if (terminalOperation === "abort") {
-			this.terminalProcess?.abort()
+			for (const process of this.terminalProcesses.values()) process.abort()
 		}
 	}
 
@@ -2991,6 +2998,33 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					undefined,
 					{ isNonInteractive: true },
 				)
+			}
+
+			// Surface once per new task which `disabledTools` entries carry no
+			// disabling weight (protocol tools are exempt from user disabling).
+			// Detection reads the raw list, so the notice also fires when a
+			// model-profile `excludedTools` entry suppresses the tool through a
+			// separate route. `startTask` runs exactly once per new task, which
+			// is what bounds this to a single notice. The block is guarded like
+			// `getEnabledMcpToolsCount` above: this is a telemetry-class notice,
+			// so a rejection from the state read or the say must never keep the
+			// task loop from starting.
+			try {
+				const disabledToolsState = await this.providerRef.deref()?.getState()
+				const { ignored } = partitionDisabledToolsForProtocol(disabledToolsState?.disabledTools)
+				if (ignored.length > 0) {
+					await this.say(
+						"ignored_disabled_tools_warning",
+						JSON.stringify({ ignoredTools: ignored }),
+						undefined,
+						undefined,
+						undefined,
+						undefined,
+						{ isNonInteractive: true },
+					)
+				}
+			} catch (error) {
+				console.error("[Task#startTask] ignored-disabled-tools notice failed:", error)
 			}
 			this.isInitialized = true
 
@@ -4013,6 +4047,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.didCompleteReadingStream = false
 				this.userMessageContent = []
 				this.userMessageContentReady = false
+				this.activeToolContexts.clear()
 				this.didRejectTool = false
 				this.didAlreadyUseTool = false
 				this.assistantMessageSavedToHistory = false

@@ -1422,24 +1422,25 @@ describe("useSelectedModel", () => {
 			expect(result.current.info?.supportsImages).toBe(false)
 		})
 
-		it("pins a divergent family's contextWindow to maxInputTokens, not its advertised window", () => {
-			// claude-opus-4.8 is the row where contextWindow and maxInputTokens differ; a field swap to
-			// the advertised window would be caught here.
-			const family = "claude-opus-4.8"
-			const apiConfiguration: ProviderSettings = {
-				apiProvider: providerIdentifiers.vscodeLm,
-				vsCodeLmModelSelector: { vendor: "copilot", family },
-			}
+		it.each(["claude-opus-4.8", "claude-opus-5", "gemini-3.6-flash"] as const)(
+			"pins %s to the 197897 input ceiling, not its advertised window",
+			(family) => {
+				const apiConfiguration: ProviderSettings = {
+					apiProvider: providerIdentifiers.vscodeLm,
+					vsCodeLmModelSelector: { vendor: "copilot", family },
+				}
 
-			const wrapper = createWrapper()
-			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+				const wrapper = createWrapper()
+				const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			expect(result.current.provider).toBe(providerIdentifiers.vscodeLm)
-			expect(result.current.id).toBe(`copilot/${family}`)
-			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[family].maxInputTokens) // 197897
-			expect(result.current.info?.contextWindow).not.toBe(vscodeLlmModels[family].contextWindow) // NOT 679560
-			expect(result.current.info?.supportsImages).toBe(false)
-		})
+				expect(result.current.provider).toBe(providerIdentifiers.vscodeLm)
+				expect(result.current.id).toBe(`copilot/${family}`)
+				expect(result.current.info?.contextWindow).toBe(197897)
+				expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[family].maxInputTokens)
+				expect(result.current.info?.contextWindow).not.toBe(vscodeLlmModels[family].contextWindow)
+				expect(result.current.info?.supportsImages).toBe(false)
+			},
+		)
 
 		it("falls back to the default model's window for an unlisted family (NOT 128000)", () => {
 			const apiConfiguration: ProviderSettings = {
