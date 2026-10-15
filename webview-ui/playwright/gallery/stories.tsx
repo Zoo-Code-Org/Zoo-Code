@@ -141,6 +141,37 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"ignored-disabled-tools-warning": async () => {
+		const [{ AppProviders }, { ChatRowContent }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/chat/ChatRow"),
+		])
+		// Same payload shape Task.startTask emits, so the snapshot covers ChatRow's
+		// dispatch and locale lookup, not just the isolated warning row.
+		const message: import("@roo-code/types").ClineMessage = {
+			type: "say",
+			say: "ignored_disabled_tools_warning",
+			ts: 0,
+			text: JSON.stringify({ ignoredTools: ["attempt_completion"] }),
+		}
+		return (
+			<AppProviders>
+				<div className="w-full bg-vscode-editor-background px-[15px] py-[10px] text-vscode-foreground">
+					<ChatRowContent
+						message={message}
+						isExpanded={false}
+						isLast={false}
+						isStreaming={false}
+						onToggleExpand={() => undefined}
+						onSuggestionClick={() => undefined}
+						onBatchFileResponse={() => undefined}
+						onFollowUpUnmount={() => undefined}
+						isFollowUpAnswered={false}
+					/>
+				</div>
+			</AppProviders>
+		)
+	},
 	"layout-clipped-text": () => (
 		<div className="w-40">
 			<span data-testid="clipped-direct-text" className="block w-8 overflow-hidden whitespace-nowrap">
