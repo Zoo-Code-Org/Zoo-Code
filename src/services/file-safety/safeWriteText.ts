@@ -663,8 +663,12 @@ export async function safeWriteText(
 					// damaged bytes. Flush the copied target here; a failure is reported
 					// like the directory fsync failure, as a durability verdict on bytes
 					// that are already at the target.
+					// Open with write access: on Windows FlushFileBuffers requires
+					// GENERIC_WRITE on the handle, so a read-only handle can fail the flush
+					// even though the bytes are at the target - the same reason the backup
+					// fsync path opens "r+".
 					try {
-						const copiedFd = fsSync.openSync(targetPath, "r")
+						const copiedFd = fsSync.openSync(targetPath, "r+")
 						try {
 							_fsyncFile(copiedFd)
 						} finally {

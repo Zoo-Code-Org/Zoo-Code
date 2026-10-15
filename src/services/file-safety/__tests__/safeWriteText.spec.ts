@@ -1188,8 +1188,11 @@ describe("safeWriteText", () => {
 
 		await safeWriteText(targetPath, "new data", { failIfExist: true, platform: "linux" })
 
-		// The copied target itself was opened and fsynced AFTER the copy landed...
-		expect(fsSync.openSync).toHaveBeenCalledWith(targetPath, "r")
+		// The copied target itself was opened and fsynced AFTER the copy landed,
+		// with write access: Windows FlushFileBuffers requires GENERIC_WRITE, so a
+		// read-only handle would fail the flush and report a false durability error
+		// on bytes that are already published.
+		expect(fsSync.openSync).toHaveBeenCalledWith(targetPath, "r+")
 		const copyOrder = vi.mocked(fs.copyFile).mock.invocationCallOrder[0]
 		const openCalls = vi.mocked(fsSync.openSync).mock.calls
 		const targetOpenIndex = openCalls.findIndex((call) => String(call[0]) === targetPath)
