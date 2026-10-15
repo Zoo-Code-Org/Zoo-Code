@@ -5139,6 +5139,56 @@ describe("ClineProvider", () => {
 			mockContext.globalState.update = originalUpdate
 			await provider.dispose()
 		})
+		it("clears every live view's buffer and persisted entry when another view resets state", async () => {
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+				// @ts-ignore - Replace customModesManager with a test double (the real reset writes to disk).
+				provider.customModesManager = {
+					resetCustomModes: vi.fn().mockResolvedValue(undefined),
+					dispose: vi.fn(),
+				}
+				vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(
+					t("common:answers.yes") as unknown as vscode.MessageItem,
+				)
+				await provider["setViewStateId"]("stable-sidebar-view")
+				await provider.saveViewState("mode", "architect")
+				// The sibling pins a profile and buffers its settings snapshot, API
+				// key included - exactly what a credential-removing reset must not
+				// leave behind in another view.
+				await sibling["setViewStateId"]("stable-editor-view")
+				await sibling.saveViewState("mode", "code")
+				sibling["viewLocalState"].currentApiConfigName = "doomed-profile"
+				sibling["viewLocalState"].apiConfiguration = {
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "doomed-secret",
+				}
+
+				await provider.resetState()
+
+				expect(sibling["viewLocalState"]).toEqual({})
+				const persisted = (mockContext.globalState.get("viewStates") as Record<string, unknown>) ?? {}
+				expect(persisted["stable-editor-view"]).toBeUndefined()
+				expect(persisted["stable-sidebar-view"]).toBeUndefined()
+			} finally {
+				await sibling.dispose()
+				await provider.dispose()
+			}
+		})
 	})
 
 	describe("provider profile mutations", () => {
