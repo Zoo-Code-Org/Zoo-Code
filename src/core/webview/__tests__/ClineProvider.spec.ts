@@ -3532,6 +3532,9 @@ describe("ClineProvider", () => {
 
 		it("restores the previous mode when custom-mode registration fails during createTask", async () => {
 			await provider.setValues({ mode: "architect" })
+			// setValues mirrors the write into the view buffer; drop it so this case
+			// models a view that never pinned a mode of its own.
+			delete provider["viewLocalState"].mode
 			provider["customModesManager"].updateCustomMode = vi.fn().mockRejectedValue(new Error("registration down"))
 
 			await expect(
@@ -3551,6 +3554,36 @@ describe("ClineProvider", () => {
 
 			// The payload's mode reached shared + per-view state through setValues
 			// before registration failed; the failure path must roll both back.
+			expect(provider.getValues().mode).toBe("architect")
+			// The view had no pin before, and an unset pin must stay unset rather
+			// than becoming an explicit copy of the shared value.
+			expect(provider["viewLocalState"].mode).toBeUndefined()
+		})
+
+		it("restores the view's own mode pin separately when custom-mode registration fails", async () => {
+			await provider.setValues({ mode: "code" })
+			provider["viewLocalState"].mode = "architect"
+			provider["customModesManager"].updateCustomMode = vi.fn().mockRejectedValue(new Error("registration down"))
+
+			await expect(
+				provider.createTask(
+					undefined,
+					undefined,
+					undefined,
+					{},
+					{
+						mode: "reviewer",
+						customModes: [
+							{ slug: "reviewer", name: "Reviewer", roleDefinition: "Reviews code", groups: [] },
+						],
+					},
+				),
+			).rejects.toThrow("registration down")
+
+			// Shared and per-view selections roll back to their own prior values:
+			// the view keeps its architect pin, the shared store keeps code.
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(provider.contextProxy.getValue("mode")).toBe("code")
 			expect(provider.getValues().mode).toBe("architect")
 		})
 
