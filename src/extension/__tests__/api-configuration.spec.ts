@@ -148,6 +148,39 @@ describe("API - configuration", () => {
 		expect(configuration.currentApiConfigName).toBe("view-profile")
 	})
 
+	it("falls back to the shared provider when a view-local profile pins none", () => {
+		const getValues = vi.fn().mockReturnValue({
+			mode: "code",
+			currentApiConfigName: "view-profile",
+			// The shared store's provider selection: a legacy/partial pinned
+			// profile carries no apiProvider, and getState() falls back to this.
+			apiProvider: providerIdentifiers.anthropic,
+			apiModelId: "claude-sonnet-4-5",
+			anthropicBaseUrl: "https://shared.example/v1",
+			apiConfiguration: {
+				apiModelId: "gpt-4o",
+			},
+		})
+		// Structural double: API.getConfiguration() only reads sidebarProvider.getValues()
+		// from the provider; the double assertion adapts this minimal shape to the
+		// constructor's ClineProvider parameter (same pattern as the tests above).
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getValues,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		const configuration = api.getConfiguration()
+
+		// The shared provider survives as the fallback (matching getState()),
+		// while every other shared provider-setting key stays stripped.
+		expect(configuration.apiProvider).toBe(providerIdentifiers.anthropic)
+		expect(configuration.apiModelId).toBe("gpt-4o")
+		expect(configuration.anthropicBaseUrl).toBeUndefined()
+	})
+
 	it("keeps shared flat provider settings when no view-local profile is present", () => {
 		const getValues = vi.fn().mockReturnValue({
 			mode: "code",

@@ -501,7 +501,16 @@ export const createClineTabPanel = async ({
 		// panel is still open. A user close that landed during initialization
 		// already ran that handler.
 		liveTabPanels.delete(newPanel)
-		await tabProvider.dispose()
+		try {
+			await tabProvider.dispose()
+		} catch (cleanupError) {
+			// A cleanup rejection (e.g. an MCP client whose disposal throws) must
+			// not replace the initialization error the caller is about to see;
+			// dispose()'s finally path has already deregistered the provider.
+			tabProvider.log(
+				`Tab provider cleanup after failed init also failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+			)
+		}
 		throw error
 	}
 
