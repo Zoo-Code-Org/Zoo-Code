@@ -260,7 +260,10 @@ export async function checkpointSave(
 			// Only a real commit produces an entry (an empty or failed save
 			// resolves to undefined / rejects), and non-write checkpoint calls
 			// (e.g. the task-start baseline) pass no `write` value at all.
-			if (result?.commit && write) {
+			// A no-op checkpoint carries an empty writes array: unrelated workspace
+			// changes can still produce a commit, and emitting a card for it would
+			// show a change card with zero files. The checkpoint itself still runs.
+			if (result?.commit && write && (!Array.isArray(write) || write.length > 0)) {
 				const writes = Array.isArray(write) ? write : [write]
 				const globalStorageDir = task.providerRef.deref()?.context.globalStorageUri.fsPath
 				if (globalStorageDir) {
