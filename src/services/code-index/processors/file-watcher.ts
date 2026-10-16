@@ -13,6 +13,9 @@ import {
 } from "../interfaces"
 import { codeParser } from "./parser"
 import { FilePreparation } from "./file-preparation"
+import { FileEventAccumulator } from "./file-event-accumulator"
+import type { FileWatcherEvent } from "../interfaces/file-watcher-event"
+import type { PreparedWatcherFile } from "../interfaces/prepared-watcher-file"
 import { CacheManager } from "../cache-manager"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
@@ -25,11 +28,10 @@ import { Package } from "../../../shared/package"
 export class FileWatcher implements IFileWatcher {
 	private readonly filePreparation: FilePreparation
 	private ignoreInstance?: Ignore
-	private fileWatcher?: vscode.FileSystemWatcher
+	private fileSystemWatcher?: vscode.FileSystemWatcher
 	private ignoreController: RooIgnoreController
-	private accumulatedEvents: Map<string, { uri: vscode.Uri; type: "create" | "change" | "delete" }> = new Map()
-	private batchProcessDebounceTimer?: NodeJS.Timeout
-	private readonly BATCH_DEBOUNCE_DELAY_MS = 500
+	private readonly eventAccumulator: FileEventAccumulator
+	private batchReadySubscription?: vscode.Disposable
 	private readonly FILE_PROCESSING_CONCURRENCY_LIMIT = 10
 	private readonly batchSegmentThreshold: number
 
@@ -74,6 +76,7 @@ export class FileWatcher implements IFileWatcher {
 		ignoreController?: RooIgnoreController,
 		batchSegmentThreshold?: number,
 	) {
+		this.eventAccumulator = new FileEventAccumulator()
 		this.ignoreController = ignoreController || new RooIgnoreController(workspacePath)
 		if (ignoreInstance) {
 			this.ignoreInstance = ignoreInstance
@@ -107,81 +110,37 @@ export class FileWatcher implements IFileWatcher {
 	 * Initializes the file watcher
 	 */
 	async initialize(): Promise<void> {
+		this.batchReadySubscription?.dispose()
+		this.batchReadySubscription = this.eventAccumulator.onBatchReady(this.triggerBatchProcessing, this)
 		// Create file watcher
 		const filePattern = new vscode.RelativePattern(
 			this.workspacePath,
 			`**/*{${scannerExtensions.map((e) => e.substring(1)).join(",")}}`,
 		)
-		this.fileWatcher = vscode.workspace.createFileSystemWatcher(filePattern)
+		this.fileSystemWatcher = vscode.workspace.createFileSystemWatcher(filePattern)
 
 		// Register event handlers
-		this.fileWatcher.onDidCreate(this.handleFileCreated.bind(this))
-		this.fileWatcher.onDidChange(this.handleFileChanged.bind(this))
-		this.fileWatcher.onDidDelete(this.handleFileDeleted.bind(this))
+		this.fileSystemWatcher.onDidCreate((uri) => this.eventAccumulator.add({ uri, type: "create" }))
+		this.fileSystemWatcher.onDidChange((uri) => this.eventAccumulator.add({ uri, type: "change" }))
+		this.fileSystemWatcher.onDidDelete((uri) => this.eventAccumulator.add({ uri, type: "delete" }))
 	}
 
 	/**
 	 * Disposes the file watcher
 	 */
 	dispose(): void {
-		this.fileWatcher?.dispose()
-		if (this.batchProcessDebounceTimer) {
-			clearTimeout(this.batchProcessDebounceTimer)
-		}
+		this.fileSystemWatcher?.dispose()
+		this.batchReadySubscription?.dispose()
+		this.eventAccumulator.dispose()
 		this._onDidStartBatchProcessing.dispose()
 		this._onBatchProgressUpdate.dispose()
 		this._onDidFinishBatchProcessing.dispose()
-		this.accumulatedEvents.clear()
-	}
-
-	/**
-	 * Handles file creation events
-	 * @param uri URI of the created file
-	 */
-	private async handleFileCreated(uri: vscode.Uri): Promise<void> {
-		this.accumulatedEvents.set(uri.fsPath, { uri, type: "create" })
-		this.scheduleBatchProcessing()
-	}
-
-	/**
-	 * Handles file change events
-	 * @param uri URI of the changed file
-	 */
-	private async handleFileChanged(uri: vscode.Uri): Promise<void> {
-		this.accumulatedEvents.set(uri.fsPath, { uri, type: "change" })
-		this.scheduleBatchProcessing()
-	}
-
-	/**
-	 * Handles file deletion events
-	 * @param uri URI of the deleted file
-	 */
-	private async handleFileDeleted(uri: vscode.Uri): Promise<void> {
-		this.accumulatedEvents.set(uri.fsPath, { uri, type: "delete" })
-		this.scheduleBatchProcessing()
-	}
-
-	/**
-	 * Schedules batch processing with debounce
-	 */
-	private scheduleBatchProcessing(): void {
-		if (this.batchProcessDebounceTimer) {
-			clearTimeout(this.batchProcessDebounceTimer)
-		}
-		this.batchProcessDebounceTimer = setTimeout(() => this.triggerBatchProcessing(), this.BATCH_DEBOUNCE_DELAY_MS)
 	}
 
 	/**
 	 * Triggers processing of accumulated events
 	 */
-	private async triggerBatchProcessing(): Promise<void> {
-		if (this.accumulatedEvents.size === 0) {
-			return
-		}
-
-		const eventsToProcess = new Map(this.accumulatedEvents)
-		this.accumulatedEvents.clear()
-
+	private async triggerBatchProcessing(eventsToProcess: Map<string, FileWatcherEvent>): Promise<void> {
 		const filePathsInBatch = Array.from(eventsToProcess.keys())
 		this._onDidStartBatchProcessing.fire(filePathsInBatch)
 
@@ -256,7 +215,6 @@ export class FileWatcher implements IFileWatcher {
 		batchResults: FileProcessingResult[],
 		processedCountInBatch: number,
 		totalFilesInBatch: number,
-		pathsToExplicitlyDelete: string[],
 	): Promise<{
 		pointsForBatchUpsert: PointStruct[]
 		successfullyProcessedForUpsert: Array<{ path: string; newHash?: string }>
@@ -264,10 +222,9 @@ export class FileWatcher implements IFileWatcher {
 	}> {
 		const pointsForBatchUpsert: PointStruct[] = []
 		const successfullyProcessedForUpsert: Array<{ path: string; newHash?: string }> = []
-		const filesToProcessConcurrently = [...filesToUpsertDetails]
 
-		for (let i = 0; i < filesToProcessConcurrently.length; i += this.FILE_PROCESSING_CONCURRENCY_LIMIT) {
-			const chunkToProcess = filesToProcessConcurrently.slice(i, i + this.FILE_PROCESSING_CONCURRENCY_LIMIT)
+		for (let i = 0; i < filesToUpsertDetails.length; i += this.FILE_PROCESSING_CONCURRENCY_LIMIT) {
+			const chunkToProcess = filesToUpsertDetails.slice(i, i + this.FILE_PROCESSING_CONCURRENCY_LIMIT)
 
 			const chunkProcessingPromises = chunkToProcess.map(async (fileDetail) => {
 				this._onBatchProgressUpdate.fire({
@@ -275,71 +232,26 @@ export class FileWatcher implements IFileWatcher {
 					totalInBatch: totalFilesInBatch,
 					currentFile: fileDetail.path,
 				})
-				try {
-					const result = await this.processFile(fileDetail.path)
-					return { path: fileDetail.path, result: result, error: undefined }
-				} catch (e) {
-					const error = e as Error
-					console.error(`[FileWatcher] Unhandled exception processing file ${fileDetail.path}:`, e)
-					return { path: fileDetail.path, result: undefined, error: error }
-				}
+				return { path: fileDetail.path, result: await this.prepareFileForBatch(fileDetail.path) }
 			})
 
-			const settledChunkResults = await Promise.allSettled(chunkProcessingPromises)
+			// Each preparation failure is captured above so other files can still complete.
+			const chunkResults = await Promise.all(chunkProcessingPromises)
 
-			for (const settledResult of settledChunkResults) {
-				let resultPath: string | undefined
-
-				if (settledResult.status === "fulfilled") {
-					const { path, result, error: directError } = settledResult.value
-					resultPath = path
-
-					if (directError) {
-						batchResults.push({ path, status: "error", error: directError })
-					} else if (result) {
-						if (result.status === "skipped" || result.status === "local_error") {
-							batchResults.push(result)
-						} else if (result.status === "processed_for_batching" && result.pointsToUpsert) {
-							pointsForBatchUpsert.push(...result.pointsToUpsert)
-							if (result.path && result.newHash) {
-								successfullyProcessedForUpsert.push({ path: result.path, newHash: result.newHash })
-							} else if (result.path && !result.newHash) {
-								successfullyProcessedForUpsert.push({ path: result.path })
-							}
-						} else {
-							batchResults.push({
-								path,
-								status: "error",
-								error: new Error(
-									`Unexpected result status from processFile: ${result.status} for file ${path}`,
-								),
-							})
-						}
-					} else {
-						batchResults.push({
-							path,
-							status: "error",
-							error: new Error(`Fulfilled promise with no result or error for file ${path}`),
-						})
-					}
+			for (const { path, result } of chunkResults) {
+				if (result.kind === "completed") {
+					batchResults.push(result.result)
 				} else {
-					const error = settledResult.reason as Error
-					const rejectedPath = (settledResult.reason as any)?.path || "unknown"
-					console.error("[FileWatcher] A file processing promise was rejected:", settledResult.reason)
-					batchResults.push({
-						path: rejectedPath,
-						status: "error",
-						error: error,
-					})
+					pointsForBatchUpsert.push(...result.points)
+					if (result.file) successfullyProcessedForUpsert.push(result.file)
 				}
 
-				if (!pathsToExplicitlyDelete.includes(resultPath || "")) {
-					processedCountInBatch++
-				}
+				// A path has one final event, so upserts and explicit deletions are disjoint.
+				processedCountInBatch++
 				this._onBatchProgressUpdate.fire({
 					processedInBatch: processedCountInBatch,
 					totalInBatch: totalFilesInBatch,
-					currentFile: resultPath,
+					currentFile: path,
 				})
 			}
 		}
@@ -348,6 +260,46 @@ export class FileWatcher implements IFileWatcher {
 			pointsForBatchUpsert,
 			successfullyProcessedForUpsert,
 			processedCount: processedCountInBatch,
+		}
+	}
+
+	private async prepareFileForBatch(path: string): Promise<PreparedWatcherFile> {
+		let result: FileProcessingResult | undefined
+		try {
+			result = await this.processFile(path)
+		} catch (error) {
+			console.error(`[FileWatcher] Unhandled exception processing file ${path}:`, error)
+			if (error) return { kind: "completed", result: { path, status: "error", error: error as Error } }
+		}
+
+		if (!result) {
+			return {
+				kind: "completed",
+				result: {
+					path,
+					status: "error",
+					error: new Error(`Fulfilled promise with no result or error for file ${path}`),
+				},
+			}
+		}
+		if (result.status === "skipped" || result.status === "local_error") {
+			return { kind: "completed", result }
+		}
+		if (result.status === "processed_for_batching" && result.pointsToUpsert) {
+			const prepared: PreparedWatcherFile = { kind: "upsert", points: result.pointsToUpsert }
+			if (result.path) {
+				prepared.file = result.newHash ? { path: result.path, newHash: result.newHash } : { path: result.path }
+			}
+			return prepared
+		}
+
+		return {
+			kind: "completed",
+			result: {
+				path,
+				status: "error",
+				error: new Error(`Unexpected result status from processFile: ${result.status} for file ${path}`),
+			},
 		}
 	}
 
@@ -419,9 +371,7 @@ export class FileWatcher implements IFileWatcher {
 		return overallBatchError
 	}
 
-	private async processBatch(
-		eventsToProcess: Map<string, { uri: vscode.Uri; type: "create" | "change" | "delete" }>,
-	): Promise<void> {
+	private async processBatch(eventsToProcess: Map<string, FileWatcherEvent>): Promise<void> {
 		const batchResults: FileProcessingResult[] = []
 		let processedCountInBatch = 0
 		const totalFilesInBatch = eventsToProcess.size
@@ -471,7 +421,6 @@ export class FileWatcher implements IFileWatcher {
 			batchResults,
 			processedCountInBatch,
 			totalFilesInBatch,
-			pathsToExplicitlyDelete,
 		)
 		processedCountInBatch = upsertCount
 
@@ -493,7 +442,7 @@ export class FileWatcher implements IFileWatcher {
 			totalInBatch: totalFilesInBatch,
 		})
 
-		if (this.accumulatedEvents.size === 0) {
+		if (!this.eventAccumulator.hasPendingEvents) {
 			this._onBatchProgressUpdate.fire({
 				processedInBatch: 0,
 				totalInBatch: 0,
