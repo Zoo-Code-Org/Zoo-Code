@@ -978,6 +978,10 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		// The view pin is re-pinned to the first available profile,
 		// and the shared global selection is left untouched: no global write, no global activation.
 		expect(mockClineProvider.saveViewState).toHaveBeenCalledWith("currentApiConfigName", "shared-profile")
+		// The stale view-local overlay is cleared with the pin: a buffer still
+		// holding the missing profile's settings would keep serving them on top of
+		// the re-pinned selection.
+		expect(mockClineProvider.saveViewState).toHaveBeenCalledWith("apiConfiguration", undefined)
 		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith(
 			"currentApiConfigName",
 			"shared-profile",

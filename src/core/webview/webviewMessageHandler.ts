@@ -685,6 +685,11 @@ export const webviewMessageHandler = async (
 								// first listed profile) so the view adopts the shared choice; the
 								// global selection itself is left untouched.
 								await provider.saveViewState("currentApiConfigName", globalConfigName)
+								// The buffered overlay belongs to the profile that no longer
+								// resolves: drop it so getState() falls back to the settings of the
+								// re-pinned selection instead of serving the stale profile's
+								// provider, model, and keys to new tasks in this view.
+								await provider.saveViewState("apiConfiguration", undefined)
 								// Fall through: refresh listApiConfigMeta and post listApiConfig
 								// to this webview below.
 							} else {

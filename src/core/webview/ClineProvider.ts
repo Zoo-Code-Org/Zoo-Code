@@ -315,6 +315,18 @@ function removeTaskEventListeners(listeners: WeakMap<Task, Array<() => void>>, t
 	}
 }
 
+/**
+ * Raised when a profile activation or upsert failed after durable writes landed and at least one
+ * compensating write failed too. The persisted profile stores may now disagree, which is not the
+ * ordinary "the save failed and nothing changed" outcome the caller's `undefined` would suggest.
+ */
+class ProfileActivationInconsistentError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = "ProfileActivationInconsistentError"
+	}
+}
+
 export class ClineProvider
 	extends EventEmitter<TaskProviderEvents>
 	implements vscode.WebviewViewProvider, TelemetryPropertiesProvider, TaskProviderLike
@@ -4447,17 +4459,6 @@ export class ClineProvider
 				if (snapshot.instance._disposed) {
 					return
 				}
-
-				// The active task of a pinned view holds its own API handler built from
-				// the profile's settings: rebuild it with the saved settings or the
-				// running conversation keeps sending the old token even though the
-				// view's buffer has caught up. Only rebuild when the task actually runs
-				// under the saved profile: a task that follows a different sticky
-				// profile must keep its own settings. Direct private access across
-				// sibling instances of the same class is compile-time safe.
-				if (snapshot.instance.getCurrentTask()?.taskApiConfigName === name) {
-					snapshot.instance.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
-				}
 				await snapshot.instance.postStateToWebview()
 			}),
 		)
@@ -4495,6 +4496,25 @@ export class ClineProvider
 				)
 			}
 			throw rejected[0].reason
+		}
+
+		// Task-handler rebuilds run only after every sibling write and post landed: a
+		// rebuilt handler cannot be rolled back, so a failing sibling must not leave
+		// one view's running conversation on the new settings while the rollback
+		// restored its buffer. The active task of a pinned view holds its own API
+		// handler built from the profile's settings: rebuild it with the saved
+		// settings or the running conversation keeps sending the old token even
+		// though the view's buffer has caught up. Only rebuild when the task
+		// actually runs under the saved profile: a task that follows a different
+		// sticky profile must keep its own settings. Direct private access across
+		// sibling instances of the same class is compile-time safe.
+		for (const snapshot of snapshots) {
+			if (snapshot.instance._disposed) {
+				continue
+			}
+			if (snapshot.instance.getCurrentTask()?.taskApiConfigName === name) {
+				snapshot.instance.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+			}
 		}
 	}
 
