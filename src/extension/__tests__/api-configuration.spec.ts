@@ -223,6 +223,8 @@ describe("API - configuration", () => {
 				zooSessionToken: "zoo-session-token",
 				mimoApiKey: "mimo-key",
 				poeApiKey: "poe-key",
+				qwenCodeOauthPath: "C:/secrets/qwen-oauth.json",
+				geminiCliOAuthPath: "C:/secrets/gemini-oauth.json",
 				modelTemperature: 0.5,
 			},
 		})
@@ -246,6 +248,8 @@ describe("API - configuration", () => {
 		expect(configuration.zooSessionToken).toBeUndefined()
 		expect(configuration.mimoApiKey).toBeUndefined()
 		expect(configuration.poeApiKey).toBeUndefined()
+		expect(configuration.qwenCodeOauthPath).toBeUndefined()
+		expect(configuration.geminiCliOAuthPath).toBeUndefined()
 		expect(configuration.modelTemperature).toBe(0.5)
 		expect(configuration.apiProvider).toBe(providerIdentifiers.openai)
 	})

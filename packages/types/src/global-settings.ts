@@ -402,6 +402,8 @@ export const SENSITIVE_PROVIDER_CONFIG_KEYS = [
 	"zooSessionToken",
 	"mimoApiKey",
 	"poeApiKey",
+	"qwenCodeOauthPath",
+	"geminiCliOAuthPath",
 ] as const
 
 export const isSensitiveProviderConfigKey = (key: string): boolean =>
