@@ -12,6 +12,7 @@ import { guardedWrite } from "../guardedWrite"
 import { ApplyPatchTool } from "../ApplyPatchTool"
 import { PartialMoveError } from "../ApplyPatchTool"
 import { PostCommitDurabilityError } from "../../../services/file-safety/safeWriteText"
+import { withFileLock } from "../../../utils/fileLock"
 
 // The vi.mock factory exposes the fs/promises functions under a `default`
 // property (matching the SUT's default import), which the static module type
@@ -645,7 +646,9 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		// The hunk read records no observation when its stat fails, so the model has
 		// no authority over the source content the move carried over. Nothing is
 		// recorded for the destination before the write chain runs, so the guard still
-		// refuses a full-file write to a file the model never read.
+		// refuses a full-file write to a file the model never read. Without a usable
+		// observation the protected deletion also refuses to unlink the source: the
+		// move is reported half-applied rather than a success.
 		const destKey = path.resolve("/workspace/project", "src/new.ts")
 		const reg = mockTask.observationRegistry
 		mockedFsPromises.default.stat.mockImplementationOnce(() => Promise.reject(new Error("stat failed")))
@@ -669,7 +672,13 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 				"src/new.ts" +
 				" and was not read before this write -- read the file first, then retry.",
 		)
-		expect(mockHandleError).not.toHaveBeenCalled()
+		// No usable observation authorizes the source deletion, so the source is
+		// kept and the move surfaces as half-applied - not a completed success.
+		expect(mockHandleError).toHaveBeenCalledWith("apply patch", expect.any(PartialMoveError))
+		expect(mockedFsPromises.default.unlink).not.toHaveBeenCalledWith(
+			path.resolve("/workspace/project", "src/old.ts"),
+		)
+		expect(mockTask.fileContextTracker.trackFileContext).not.toHaveBeenCalledWith("src/new.ts", "roo_edited")
 	})
 
 	it("move: leaves an unobserved destination alone when the source read was partial", async () => {
@@ -693,6 +702,91 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 
 		expect(reg.get(destKey)).toBeUndefined()
 		expect(mockHandleError).not.toHaveBeenCalled()
+	})
+
+	it("move: keeps the source when it changed after the destination was published", async () => {
+		// The move was built from the observed version. A peer rewrote the source
+		// before the deletion ran: the destination no longer holds the whole source,
+		// so the deletion must not destroy the peer bytes - the move is reported
+		// half-applied and moved-file tracking stays untouched.
+		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
+		const reg = mockTask.observationRegistry
+		reg.observe(sourceKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+		const stable = {
+			dev: 7n,
+			ino: 4242n,
+			size: 1234n,
+			mtimeNs: 1_700_000_000_123_456_789n,
+			ctimeNs: 1_700_000_000_789_999_999n,
+		}
+		const changed = { ...stable, dev: 8n }
+		// The hunk read stats the source twice; the third stat is the deletion
+		// check under the advisory lock and sees the peer version.
+		mockedFsPromises.default.stat
+			.mockResolvedValueOnce(stable)
+			.mockResolvedValueOnce(stable)
+			.mockResolvedValueOnce(changed)
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+
+		expect(mockHandleError).toHaveBeenCalledWith("apply patch", expect.any(PartialMoveError))
+		expect(mockedFsPromises.default.unlink).not.toHaveBeenCalledWith(sourceKey)
+		expect(mockTask.fileContextTracker.trackFileContext).not.toHaveBeenCalledWith("src/new.ts", "roo_edited")
+	})
+
+	it("move: keeps the source when it vanished before the deletion", async () => {
+		// Whoever removed the source owns that removal: the move reports itself
+		// half-applied (destination committed, source already gone) instead of
+		// unlinking a path it no longer understands or claiming success.
+		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
+		const reg = mockTask.observationRegistry
+		reg.observe(sourceKey, "7:4242:1234:1700000000123456789:1700000000789999999", true)
+		const stable = {
+			dev: 7n,
+			ino: 4242n,
+			size: 1234n,
+			mtimeNs: 1_700_000_000_123_456_789n,
+			ctimeNs: 1_700_000_000_789_999_999n,
+		}
+		mockedFsPromises.default.stat
+			.mockResolvedValueOnce(stable)
+			.mockResolvedValueOnce(stable)
+			.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+
+		expect(mockHandleError).toHaveBeenCalledWith("apply patch", expect.any(PartialMoveError))
+		expect(mockedFsPromises.default.unlink).not.toHaveBeenCalledWith(sourceKey)
+	})
+
+	it("move: deletes the source under the advisory lock for the source path", async () => {
+		// The deletion must serialize with the guarded writers of the SOURCE path
+		// (safeWriteJson, task-history deletion), not just the destination: without
+		// the lock a peer could stage a write to the source between the version
+		// check and the unlink.
+		const sourceKey = path.resolve("/workspace/project", "src/old.ts")
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+
+		expect(mockHandleError).not.toHaveBeenCalled()
+		const lockKeys = vi.mocked(withFileLock).mock.calls.map((call) => String(call[0]))
+		expect(lockKeys.some((key) => key.toLowerCase().endsWith("old.ts"))).toBe(true)
+		expect(mockedFsPromises.default.unlink).toHaveBeenCalledWith(sourceKey)
 	})
 
 	it("update: surfaces the unobserved-existing remediation as a tool error", async () => {

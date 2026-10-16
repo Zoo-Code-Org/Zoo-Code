@@ -13,6 +13,8 @@ import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { sanitizeUnifiedDiff, computeDiffStats } from "../diff/stats"
 import { versionTokenOfStat } from "../../utils/versionToken"
 import { GuardRejectedError, errorCode } from "./guardedWrite"
+import { withFileLock } from "../../utils/fileLock"
+import { resolveLockKey } from "../../services/file-safety/safeWriteText"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import type { ToolUse } from "../../shared/tools"
 import { parsePatch, ParseError, processAllHunks } from "./apply-patch"
@@ -538,11 +540,51 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// keep working from: report it as its own failure class instead of
 			// logging it and continuing, so edit tracking and the tool result do
 			// not claim a completed move.
-			try {
-				await fs.unlink(absolutePath)
-			} catch (error: unknown) {
-				throw new PartialMoveError(change.path, change.movePath, error)
-			}
+			//
+			// The deletion is serialized under the source path's canonical advisory
+			// lock - the same key the guarded publish takes - and the source's
+			// version token is re-checked under that lock against the observation
+			// the move was built from. A source that vanished or changed after the
+			// destination landed, or that has no usable observation at all, is kept
+			// and the move is reported half-applied: the destination holds content
+			// that no longer matches the whole source, and unlinking a path this
+			// move no longer understands would destroy the only copy of a peer's
+			// change. The destination lock is released by the publish before this
+			// point, so the two locks are never held together; a change that
+			// combines them must acquire in the shared sorted-key order that
+			// safeWriteJson's dual-link path uses.
+			const sourceObservation = task.observationRegistry.get(absolutePath)
+			// Narrowed copies for the lock callback: the deletion runs after an
+			// await, where TypeScript no longer tracks the movePath narrowing.
+			const sourceRelPath = change.path
+			const destRelPath = change.movePath
+			await withFileLock(await resolveLockKey(absolutePath), async (lockedSourcePath) => {
+				let sourceToken: string
+				try {
+					sourceToken = versionTokenOfStat(await fs.stat(lockedSourcePath, { bigint: true }))
+				} catch (error: unknown) {
+					// The source vanished after the destination was published: whatever
+					// removed it owns that removal, and this move must not report a
+					// success it can no longer verify.
+					throw new PartialMoveError(sourceRelPath, destRelPath, error)
+				}
+				if (sourceObservation === undefined || sourceObservation.version !== sourceToken) {
+					throw new PartialMoveError(
+						sourceRelPath,
+						destRelPath,
+						new Error(
+							sourceObservation === undefined
+								? "the source has no observation to authorize its deletion; it was kept"
+								: "the source changed after the move was built; it was kept",
+						),
+					)
+				}
+				try {
+					await fs.unlink(lockedSourcePath)
+				} catch (error: unknown) {
+					throw new PartialMoveError(sourceRelPath, destRelPath, error)
+				}
+			})
 
 			await task.fileContextTracker.trackFileContext(change.movePath, "roo_edited" as RecordSource)
 		} else {
