@@ -878,6 +878,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "預設摺疊命令輸出",
+			"description": "預設摺疊命令輸出，包括內嵌終端機輸出。需要時可手動展開。此設定不會變更命令執行方式。"
+		},
 		"basic": {
 			"label": "終端機設定：基本",
 			"description": "基本終端機設定"

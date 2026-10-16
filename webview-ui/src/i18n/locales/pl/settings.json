@@ -851,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Domyślnie zwijaj wyniki poleceń",
+			"description": "Wyniki poleceń, także z terminala wbudowanego, są początkowo zwinięte. Można je ręcznie rozwinąć. Nie zmienia to sposobu wykonywania poleceń."
+		},
 		"basic": {
 			"label": "Ustawienia terminala: Podstawowe",
 			"description": "Podstawowe ustawienia terminala"

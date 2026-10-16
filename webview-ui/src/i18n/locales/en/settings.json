@@ -931,6 +931,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Collapse command output by default",
+			"description": "Start command output collapsed, including Inline Terminal output. Expand it manually when needed. This does not change how commands run."
+		},
 		"basic": {
 			"label": "Terminal Settings: Basic",
 			"description": "Basic terminal settings"

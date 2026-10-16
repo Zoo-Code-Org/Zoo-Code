@@ -851,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Thu gọn đầu ra lệnh theo mặc định",
+			"description": "Hiển thị đầu ra lệnh ở trạng thái thu gọn, kể cả terminal nội tuyến. Mở rộng thủ công khi cần. Cách chạy lệnh không thay đổi."
+		},
 		"basic": {
 			"label": "Cài đặt Terminal: Cơ bản",
 			"description": "Cài đặt cơ bản cho terminal"

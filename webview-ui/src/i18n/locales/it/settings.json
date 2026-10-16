@@ -851,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Comprimi l’output dei comandi per impostazione predefinita",
+			"description": "Mostra compresso l’output dei comandi, incluso quello del terminale inline. Espandilo manualmente quando necessario. L’esecuzione dei comandi non cambia."
+		},
 		"basic": {
 			"label": "Impostazioni terminale: Base",
 			"description": "Impostazioni base del terminale"

@@ -851,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Komut çıktısını varsayılan olarak daralt",
+			"description": "Satır içi terminal dahil komut çıktısını daraltılmış gösterir. Gerektiğinde elle genişletebilirsiniz. Komutların çalıştırılma biçimini değiştirmez."
+		},
 		"basic": {
 			"label": "Terminal Ayarları: Temel",
 			"description": "Temel terminal ayarları"

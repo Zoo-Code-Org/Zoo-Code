@@ -851,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Replega la sortida de les ordres per defecte",
+			"description": "Mostra replegada la sortida de les ordres, inclosa la del terminal en línia. Podeu desplegar-la manualment. Això no canvia com s’executen les ordres."
+		},
 		"basic": {
 			"label": "Configuració del terminal: Bàsica",
 			"description": "Configuració bàsica del terminal"

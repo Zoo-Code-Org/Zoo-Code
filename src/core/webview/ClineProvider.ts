@@ -48,6 +48,7 @@ import {
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
 	DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED,
 	DEFAULT_ALWAYS_DENY_UNAPPROVED_COMMANDS,
+	DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
@@ -2603,6 +2604,7 @@ export class ClineProvider
 			diffFuzzyThreshold,
 			terminalShellIntegrationTimeout,
 			terminalShellIntegrationDisabled,
+			collapseCommandOutputByDefault,
 			terminalCommandDelay,
 			terminalPowershellCounter,
 			terminalZshClearEolMark,
@@ -2775,6 +2777,8 @@ export class ClineProvider
 			diffFuzzyThreshold: diffFuzzyThreshold ?? DEFAULT_DIFF_FUZZY_THRESHOLD,
 			terminalShellIntegrationTimeout: terminalShellIntegrationTimeout ?? Terminal.defaultShellIntegrationTimeout,
 			terminalShellIntegrationDisabled: terminalShellIntegrationDisabled ?? true,
+			collapseCommandOutputByDefault:
+				collapseCommandOutputByDefault ?? DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT,
 			terminalCommandDelay: terminalCommandDelay ?? 0,
 			terminalPowershellCounter: terminalPowershellCounter ?? false,
 			terminalZshClearEolMark: terminalZshClearEolMark ?? true,
@@ -3011,6 +3015,8 @@ export class ClineProvider
 			terminalShellIntegrationTimeout:
 				stateValues.terminalShellIntegrationTimeout ?? Terminal.defaultShellIntegrationTimeout,
 			terminalShellIntegrationDisabled: stateValues.terminalShellIntegrationDisabled ?? true,
+			collapseCommandOutputByDefault:
+				stateValues.collapseCommandOutputByDefault ?? DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT,
 			terminalCommandDelay: stateValues.terminalCommandDelay ?? 0,
 			terminalPowershellCounter: stateValues.terminalPowershellCounter ?? false,
 			terminalZshClearEolMark: stateValues.terminalZshClearEolMark ?? true,

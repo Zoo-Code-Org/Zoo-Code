@@ -851,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "명령 출력을 기본적으로 접기",
+			"description": "인라인 터미널을 포함한 명령 출력을 접어서 표시합니다. 필요할 때 수동으로 펼칠 수 있습니다. 명령 실행 방식은 변경되지 않습니다."
+		},
 		"basic": {
 			"label": "터미널 설정: 기본",
 			"description": "기본 터미널 설정"

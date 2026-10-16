@@ -851,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Ciutkan keluaran perintah secara default",
+			"description": "Tampilkan keluaran perintah dalam keadaan diciutkan, termasuk terminal inline. Perluas secara manual bila diperlukan. Cara perintah dijalankan tidak berubah."
+		},
 		"basic": {
 			"label": "Pengaturan Terminal: Dasar",
 			"description": "Pengaturan terminal dasar"

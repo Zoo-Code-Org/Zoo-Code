@@ -851,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Replier la sortie des commandes par défaut",
+			"description": "Replie la sortie des commandes, y compris celle du terminal intégré. Dépliez-la manuellement si nécessaire. Cela ne change pas leur exécution."
+		},
 		"basic": {
 			"label": "Paramètres du terminal : Base",
 			"description": "Paramètres de base du terminal"

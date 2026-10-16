@@ -851,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Befehlsausgabe standardmäßig einklappen",
+			"description": "Befehlsausgaben werden zunächst eingeklappt, auch im Inline-Terminal. Bei Bedarf manuell aufklappen. Die Befehlsausführung bleibt unverändert."
+		},
 		"basic": {
 			"label": "Terminal-Einstellungen: Grundlegend",
 			"description": "Grundlegende Terminal-Einstellungen"

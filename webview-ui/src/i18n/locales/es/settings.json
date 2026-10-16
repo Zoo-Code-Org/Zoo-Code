@@ -851,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Contraer la salida de comandos por defecto",
+			"description": "Muestra contraída la salida de comandos, incluida la del terminal en línea. Puede expandirla manualmente. Esto no cambia cómo se ejecutan los comandos."
+		},
 		"basic": {
 			"label": "Configuración del terminal: Básica",
 			"description": "Configuración básica del terminal"

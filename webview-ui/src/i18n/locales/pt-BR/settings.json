@@ -851,6 +851,10 @@
 		}
 	},
 	"terminal": {
+		"collapseCommandOutput": {
+			"label": "Recolher a saída dos comandos por padrão",
+			"description": "Mostra recolhida a saída dos comandos, incluindo a do terminal inline. Expanda manualmente quando necessário. Isso não altera a execução dos comandos."
+		},
 		"basic": {
 			"label": "Configurações do terminal: Básicas",
 			"description": "Configurações básicas do terminal"
