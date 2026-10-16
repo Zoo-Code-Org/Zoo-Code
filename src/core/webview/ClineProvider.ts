@@ -195,6 +195,8 @@ function scheduleTask(
 // Keys a model-selector patch may touch: model IDs plus settings reset on model change.
 const PROFILE_MODEL_ID_PATCH_KEYS: ReadonlySet<string> = new Set(modelIdKeys)
 
+const BEDROCK_CUSTOM_ARN_MODEL_ID = "custom-arn"
+
 // These keys can only be cleared. Setting `awsCustomArn` would let a patch invoke a Bedrock
 // resource that the organization allow-list never checked, because the allow-list sees `apiModelId`.
 const PROFILE_MODEL_RESET_ONLY_KEYS: ReadonlySet<string> = new Set([
@@ -1940,6 +1942,22 @@ export class ClineProvider
 							delete merged[key]
 						} else {
 							throw new Error(`Key "${key}" is not allowed in a model patch`)
+						}
+					}
+
+					if (storedProvider === providerIdentifiers.bedrock) {
+						if (merged.apiModelId === BEDROCK_CUSTOM_ARN_MODEL_ID) {
+							// The allow-list only sees apiModelId, so a patch must not select an ARN it cannot supply.
+							if (!merged.awsCustomArn) {
+								throw new Error(
+									`Model "${BEDROCK_CUSTOM_ARN_MODEL_ID}" requires an existing custom ARN`,
+								)
+							}
+						} else {
+							// A retained ARN would override the allow-listed model, so drop it with its context fields.
+							for (const key of PROFILE_MODEL_RESET_ONLY_KEYS) {
+								if (key.startsWith("aws")) delete merged[key]
+							}
 						}
 					}
 

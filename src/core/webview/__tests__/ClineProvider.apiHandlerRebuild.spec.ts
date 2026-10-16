@@ -549,6 +549,68 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
 		})
 
+		describe("Bedrock custom ARN invariant", () => {
+			const arn = "arn:aws:bedrock:us-east-1:123456789012:inference-profile/unvetted"
+			const bedrockWithArn = {
+				name: "test-config",
+				id: "test-id",
+				apiProvider: providerIdentifiers.bedrock,
+				apiModelId: "custom-arn",
+				awsCustomArn: arn,
+				awsCustomArnBaseModelId: "anthropic.claude-3-sonnet-20240229-v1:0",
+				awsModelContextWindow: 200000,
+				awsRegion: "us-east-1",
+			}
+
+			beforeEach(() => {
+				provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue(bedrockWithArn)
+			})
+
+			test("drops the retained ARN and its context fields when the patch omits them", async () => {
+				await provider.updateProfileModel("test-config", providerIdentifiers.bedrock, {
+					apiModelId: "anthropic.claude-3-haiku-20240307-v1:0",
+				})
+
+				const saveConfig = vi.mocked(provider["providerSettingsManager"].saveConfig)
+				expect(saveConfig).toHaveBeenCalledTimes(1)
+				const saved = saveConfig.mock.calls[0][1]
+				expect(saved).toMatchObject({
+					apiModelId: "anthropic.claude-3-haiku-20240307-v1:0",
+					awsRegion: "us-east-1",
+				})
+				expect(saved).not.toHaveProperty("awsCustomArn")
+				expect(saved).not.toHaveProperty("awsCustomArnBaseModelId")
+				expect(saved).not.toHaveProperty("awsModelContextWindow")
+			})
+
+			test("keeps the ARN while custom-arn stays selected", async () => {
+				await provider.updateProfileModel("test-config", providerIdentifiers.bedrock, {
+					apiModelId: "custom-arn",
+				})
+
+				expect(vi.mocked(provider["providerSettingsManager"].saveConfig).mock.calls[0][1]).toMatchObject({
+					apiModelId: "custom-arn",
+					awsCustomArn: arn,
+				})
+			})
+
+			test("rejects selecting custom-arn when the profile has no ARN", async () => {
+				provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue({
+					name: "test-config",
+					id: "test-id",
+					apiProvider: providerIdentifiers.bedrock,
+					apiModelId: "anthropic.claude-3-haiku-20240307-v1:0",
+				})
+
+				await provider.updateProfileModel("test-config", providerIdentifiers.bedrock, {
+					apiModelId: "custom-arn",
+				})
+
+				expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
+				expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+			})
+		})
+
 		test("rejects an empty or non-string model id", async () => {
 			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, { openRouterModelId: "" })
 			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, { openRouterModelId: 42 })
