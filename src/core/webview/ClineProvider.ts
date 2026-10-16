@@ -648,7 +648,23 @@ export class ClineProvider
 				states[viewStateId] = next
 			}
 
-			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+			try {
+				await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+			} catch (error) {
+				// updateGlobalState applies the new map to the in-memory cache before
+				// the durable write, so a rejected write leaves the cache claiming an
+				// entry that never reached disk. Restore the cache to the value durable
+				// storage actually holds (undefined when the key was never written); the
+				// cache update lands even if this compensating write also fails, so
+				// readers cannot observe the lost entry either way.
+				try {
+					await this.contextProxy.setValue("viewStates", this.context.globalState.get("viewStates"))
+				} catch {
+					// The cache is updated before the durable attempt: it matches the
+					// durable value regardless of whether this restore write landed.
+				}
+				throw error
+			}
 		})
 
 		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
@@ -3308,16 +3324,6 @@ export class ClineProvider
 				if (snapshot.instance._disposed) {
 					return
 				}
-				// The active task of a pinned view holds its own API handler built from
-				// the profile's settings: rebuild it with the saved settings or the
-				// running conversation keeps sending the old token even though the
-				// view's buffer has caught up. Only rebuild when the task actually runs
-				// under the saved profile: a task that follows a different sticky
-				// profile must keep its own settings. Direct private access across
-				// sibling instances of the same class is compile-time safe.
-				if (snapshot.instance.getCurrentTask()?.taskApiConfigName === name) {
-					snapshot.instance.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
-				}
 				await snapshot.instance.postStateToWebview()
 			}),
 		)
@@ -3355,6 +3361,25 @@ export class ClineProvider
 				)
 			}
 			throw rejected[0].reason
+		}
+
+		// Task-handler rebuilds run only after every sibling write and post landed: a
+		// rebuilt handler cannot be rolled back, so a failing sibling must not leave
+		// one view's running conversation on the new settings while the rollback
+		// restored its buffer. The active task of a pinned view holds its own API
+		// handler built from the profile's settings: rebuild it with the saved
+		// settings or the running conversation keeps sending the old token even
+		// though the view's buffer has caught up. Only rebuild when the task
+		// actually runs under the saved profile: a task that follows a different
+		// sticky profile must keep its own settings. Direct private access across
+		// sibling instances of the same class is compile-time safe.
+		for (const snapshot of snapshots) {
+			if (snapshot.instance._disposed) {
+				continue
+			}
+			if (snapshot.instance.getCurrentTask()?.taskApiConfigName === name) {
+				snapshot.instance.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+			}
 		}
 	}
 
@@ -3481,6 +3506,48 @@ export class ClineProvider
 			}
 			await snapshot.instance.postStateToWebview()
 		}
+	}
+
+	/**
+	 * Re-point live views still pinned to a profile that is being renamed onto
+	 * the new name. A rename keeps the profile id, so a view pinned to the old
+	 * name should follow the record instead of falling back to the shared
+	 * selection: without this, the pin dangles at a name that no longer
+	 * resolves and the buffered overlay keeps serving the pre-rename copy.
+	 * Must run before the old name is deleted.
+	 */
+	public async repointViewLocalStateAfterProfileRename(
+		oldName: string,
+		newName: string,
+		renamedSettings: ProviderSettingsWithId | undefined,
+	): Promise<void> {
+		const affected = ClineProvider.getAllInstances().filter((instance) => instance.pinnedProfileName === oldName)
+
+		if (affected.length === 0) {
+			return
+		}
+
+		await Promise.all(
+			affected.map(async (instance) => {
+				// Assigning the settings (even undefined) is what replaces or clears the
+				// overlay: the renamed record's current settings are the only correct
+				// overlay for a pin that now names the new profile.
+				await instance._saveViewLocalStateFromMutation({
+					currentApiConfigName: newName,
+					apiConfiguration: renamedSettings,
+				})
+				// A task running under the old name holds its own API handler and sticky
+				// profile name: re-point both, or the conversation keeps sending the
+				// pre-rename configuration under a name that no longer resolves.
+				if (instance.getCurrentTask()?.taskApiConfigName === oldName) {
+					if (renamedSettings) {
+						instance.updateTaskApiHandlerIfNeeded(renamedSettings, { forceRebuild: true })
+					}
+					await instance.persistStickyProviderProfileToCurrentTask(newName)
+				}
+				await instance.postStateToWebview()
+			}),
+		)
 	}
 
 	async updateCustomInstructions(instructions?: string) {

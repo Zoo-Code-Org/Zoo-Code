@@ -4523,6 +4523,83 @@ describe("ClineProvider", () => {
 			await sibling.dispose()
 		})
 
+		it("defers task-handler rebuilds until every sibling refresh has landed", async () => {
+			// A rebuilt task handler cannot be rolled back: when a sibling refresh
+			// fails, the buffers roll back but a running conversation would keep the
+			// rebuilt (new-settings) handler. The rebuild must therefore wait until
+			// every sibling write and post has succeeded.
+			const updater = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const healthy = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const failing = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await healthy["setViewStateId"]("defer-healthy-view")
+			await healthy.saveViewState("currentApiConfigName", "shared-profile")
+			await failing["setViewStateId"]("defer-failing-view")
+			await failing.saveViewState("currentApiConfigName", "shared-profile")
+			// Double assertion: the method is private and vi.spyOn needs a property
+			// holder; house idiom in this spec (see the rebuild spies elsewhere).
+			const rebuildSpy = vi
+				.spyOn(
+					healthy as unknown as {
+						updateTaskApiHandlerIfNeeded: (
+							settings: ProviderSettings,
+							options: { forceRebuild?: boolean; skipCurrentTaskRebuild?: boolean },
+						) => void
+					},
+					"updateTaskApiHandlerIfNeeded",
+				)
+				.mockImplementation(() => {})
+			vi.spyOn(healthy, "getCurrentTask").mockReturnValue({
+				taskApiConfigName: "shared-profile",
+			} as unknown as ReturnType<ClineProvider["getCurrentTask"]>)
+			vi.spyOn(healthy, "postStateToWebview").mockResolvedValue(undefined)
+			const failingPost = vi
+				.spyOn(failing, "postStateToWebview")
+				.mockRejectedValue(new Error("sibling post down"))
+
+			await expect(
+				updater["refreshViewLocalStateForUpdatedProfile"]("shared-profile", {
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "fresh-key",
+				}),
+			).rejects.toThrow("sibling post down")
+
+			// The healthy sibling's buffer rolled back, and its running task kept its
+			// original handler: the rebuild never ran for the failed refresh.
+			expect(rebuildSpy).not.toHaveBeenCalled()
+
+			// Positive control: once every sibling lands, the rebuild runs.
+			failingPost.mockResolvedValue(undefined)
+			await updater["refreshViewLocalStateForUpdatedProfile"]("shared-profile", {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "fresh-key",
+			})
+			expect(rebuildSpy).toHaveBeenCalledWith(expect.objectContaining({ apiKey: "fresh-key" }), {
+				forceRebuild: true,
+			})
+
+			await updater.dispose()
+			await healthy.dispose()
+			await failing.dispose()
+		})
+
 		it("re-pins a live sibling but leaves one that has started disposing", async () => {
 			// Same second line of defence on the deletion path, with the live sibling as the positive
 			// control: it proves the deletion really reaches the sibling re-pin set, so the disposing
@@ -5964,6 +6041,66 @@ describe("ClineProvider", () => {
 			// settings (written by setProviderSettings) win; otherwise getState would
 			// report profile B's name with profile A's provider.
 			expect(state.apiConfiguration.apiProvider).toBe(providerIdentifiers.anthropic)
+			await provider.dispose()
+		})
+
+		it("restores the cached viewStates map when a persisted view-state write fails durably", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-sidebar-view")
+			await provider.contextProxy.setValue("viewStates", {
+				"other-view": { mode: "code", updatedAt: 1 },
+			})
+			// The next durable write fails; the cache was already updated optimistically.
+			const updateSpy = vi.spyOn(mockContext.globalState, "update").mockImplementationOnce(async () => {
+				throw new Error("durable write failed")
+			})
+
+			await expect(provider["savePersistedViewState"]({ mode: "architect", updatedAt: 2 })).rejects.toThrow(
+				"durable write failed",
+			)
+
+			// The in-memory cache must match durable storage: an entry that never
+			// reached disk cannot stay visible through getValue.
+			expect(provider.contextProxy.getValue("viewStates")).toEqual({
+				"other-view": { mode: "code", updatedAt: 1 },
+			})
+			updateSpy.mockRestore()
+			await provider.dispose()
+		})
+
+		it("re-points live views pinned to a renamed profile onto the new name", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-sidebar-view")
+			await provider.saveViewState("currentApiConfigName", "profile-old")
+			await provider.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "old-key",
+			})
+
+			await provider["repointViewLocalStateAfterProfileRename"]("profile-old", "profile-new", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "renamed-key",
+			})
+
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("profile-new")
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "renamed-key",
+			})
+			const viewStates = mockContext.globalState.get("viewStates") as Record<string, Record<string, unknown>>
+			expect(viewStates["stable-sidebar-view"].currentApiConfigName).toBe("profile-new")
 			await provider.dispose()
 		})
 
