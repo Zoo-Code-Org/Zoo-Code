@@ -1376,6 +1376,125 @@ describe("safeWriteText", () => {
 		})
 	})
 
+	// ── authorized root enforcement (dangling-link escape regression) ──────
+
+	describe("authorized root", () => {
+		const aurRoot = () => path.resolve("/tmp/aur-root")
+		const aurOutside = () => path.resolve("/tmp/aur-outside")
+		const enoent = () => Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+		const linkStats = () => {
+			const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats & {
+				isSymbolicLink?: () => boolean
+			}
+			s.isSymbolicLink = () => true
+			return s
+		}
+
+		it("refuses a dangling link inside the root whose referent is outside, creating nothing", async () => {
+			const root = aurRoot()
+			const linkPath = path.join(root, "approved.txt")
+			const referent = path.join(aurOutside(), "new", "secret.txt")
+			vi.mocked(fs.realpath).mockImplementation(async (p) => {
+				if (String(p) === root) return root
+				throw enoent()
+			})
+			vi.mocked(fs.lstat).mockResolvedValueOnce(linkStats())
+			vi.mocked(fs.readlink).mockResolvedValueOnce(referent)
+
+			await expect(safeWriteText(linkPath, "data", { platform: "linux", authorizedRoot: root })).rejects.toThrow(
+				/authorized root/,
+			)
+
+			// Nothing outside may be created or written: the refusal precedes mkdir.
+			expect(fs.mkdir).not.toHaveBeenCalled()
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
+
+		it("refuses an existing symlink whose referent is outside the root", async () => {
+			const root = aurRoot()
+			const linkPath = path.join(root, "link.txt")
+			const referent = path.join(aurOutside(), "secret.txt")
+			vi.mocked(fs.realpath).mockImplementation(async (p) => {
+				if (String(p) === root) return root
+				return referent
+			})
+
+			await expect(safeWriteText(linkPath, "data", { platform: "linux", authorizedRoot: root })).rejects.toThrow(
+				/authorized root/,
+			)
+			expect(fs.mkdir).not.toHaveBeenCalled()
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
+
+		it("publishes when the referent stays inside the root", async () => {
+			const root = aurRoot()
+			const linkPath = path.join(root, "link.txt")
+			const referent = path.join(root, "sub", "real.txt")
+			vi.mocked(fs.realpath).mockImplementation(async (p) => {
+				if (String(p) === root) return root
+				return referent
+			})
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(linkPath, "data", { platform: "linux", authorizedRoot: root })
+
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), referent)
+		})
+
+		it("leaves a requested path that is itself outside the root unconstrained", async () => {
+			const root = aurRoot()
+			const outside = path.join(aurOutside(), "x.txt")
+			vi.mocked(fs.realpath).mockImplementation(async (p) => {
+				if (String(p) === root) return root
+				return String(p)
+			})
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(outside, "data", { platform: "linux", authorizedRoot: root })
+
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), outside)
+		})
+
+		it("keeps the old behavior for an outside referent when no root is declared", async () => {
+			const linkPath = path.resolve("/tmp/aur-root/link.txt")
+			const referent = path.join(aurOutside(), "secret.txt")
+			vi.mocked(fs.realpath).mockResolvedValue(referent)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(linkPath, "data", { platform: "linux" })
+
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), referent)
+		})
+
+		it("falls back to the lexical root when the authorized root does not exist yet", async () => {
+			const root = aurRoot()
+			const linkPath = path.join(root, "approved.txt")
+			const referent = path.join(aurOutside(), "new", "secret.txt")
+			vi.mocked(fs.realpath).mockRejectedValue(enoent())
+			vi.mocked(fs.lstat).mockResolvedValueOnce(linkStats())
+			vi.mocked(fs.readlink).mockResolvedValueOnce(referent)
+
+			await expect(safeWriteText(linkPath, "data", { platform: "linux", authorizedRoot: root })).rejects.toThrow(
+				/authorized root/,
+			)
+			expect(fs.mkdir).not.toHaveBeenCalled()
+		})
+
+		it("propagates a non-ENOENT inspection failure of the authorized root", async () => {
+			const root = aurRoot()
+			const target = path.join(root, "target.txt")
+			vi.mocked(fs.realpath).mockImplementation(async (p) => {
+				if (String(p) === root) throw Object.assign(new Error("EACCES"), { code: "EACCES" })
+				return target
+			})
+
+			await expect(safeWriteText(target, "data", { platform: "linux", authorizedRoot: root })).rejects.toThrow(
+				"EACCES",
+			)
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
+	})
+
 	// ── Test 8: review fixes (permissions, partial writes, resolution, durability) ──
 
 	describe("review fixes", () => {

@@ -38,6 +38,16 @@ export interface SafeWriteTextOptions {
 	 * already written data to a temp file via a custom stream.
 	 */
 	tempPath?: string
+
+	/**
+	 * Authorized publish root. When set, a requested path that resolves lexically
+	 * inside this root must also publish inside it: a symlink or dangling link whose
+	 * referent escapes the root is rejected before anything is created or written,
+	 * so an approval that covered the inside path can never be spent on an outside
+	 * target. Requested paths that are themselves outside the root are not
+	 * constrained here - the caller's own approval flow governs those.
+	 */
+	authorizedRoot?: string
 }
 
 // -- helpers ---------------------------------------------------------------
@@ -366,11 +376,58 @@ export async function resolvePublishTarget(
 	}
 }
 
+/** Lexical containment: true when target sits at or under root. */
+function _isWithinRoot(root: string, target: string): boolean {
+	const rel = path.relative(root, target)
+	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))
+}
+
+/**
+ * Refuse a publish whose retained target escaped the caller's authorized root
+ * while the requested path sat inside it: the tool layer approved the inside
+ * path, so an escape here (a symlink or dangling link pointing outside the
+ * workspace) would land bytes the approval never covered outside the root, and
+ * the parent-directory mkdir below would happily create the outside parent
+ * first. A requested path that is itself outside the root is left alone - the
+ * caller's own approval flow covers outside-root writes, and this primitive has
+ * no opinion about a root it was not asked to enforce.
+ */
+async function _assertPublishWithinAuthorizedRoot(
+	authorizedRoot: string,
+	requestedPath: string,
+	targetPath: string,
+): Promise<void> {
+	let root: string
+	try {
+		root = await fs.realpath(authorizedRoot)
+	} catch (error: unknown) {
+		// ENOENT falls back to the lexical root: the root may be created by this
+		// very write's mkdir below. Any other inspection error propagates rather
+		// than silently skipping the boundary.
+		if (_errorCode(error) !== "ENOENT") {
+			throw error
+		}
+		root = path.resolve(authorizedRoot)
+	}
+	if (_isWithinRoot(root, requestedPath) && !_isWithinRoot(root, targetPath)) {
+		throw new Error(
+			`safeWriteText: refusing to publish ${targetPath}: the requested path ${requestedPath} is inside the authorized root ${root} but the resolved publish target is not. Nothing was written.`,
+		)
+	}
+}
+
 export async function safeWriteText(filePath: string, content: string, options?: SafeWriteTextOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 
 	// Resolve the symlink referent (see resolvePublishTarget).
 	const targetPath = await resolvePublishTarget(absoluteFilePath)
+
+	// Enforce the caller's authorized root before anything is created or written
+	// (the mkdir below can otherwise materialize an outside parent first).
+	if (options?.authorizedRoot !== undefined) {
+		await _assertPublishWithinAuthorizedRoot(options.authorizedRoot, absoluteFilePath, targetPath)
+	}
+
 	const dirPath = path.dirname(targetPath)
 
 	// Ensure parent directory exists (mirrors safeWriteJson behaviour).
