@@ -1,6 +1,5 @@
 import { DiffViewProvider, DIFF_VIEW_URI_SCHEME, DIFF_VIEW_LABEL_CHANGES } from "../DiffViewProvider"
 import * as vscode from "vscode"
-import * as path from "path"
 import delay from "delay"
 import { DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 
@@ -134,7 +133,7 @@ vi.mock("vscode", () => ({
 	TabInputTextDiff: class TabInputTextDiff {},
 	Uri: {
 		file: vi.fn((path) => ({ fsPath: path })),
-		parse: vi.fn((uri) => ({ with: vi.fn(() => ({})) })),
+		parse: vi.fn((_uri) => ({ with: vi.fn(() => ({})) })),
 	},
 }))
 
@@ -259,7 +258,7 @@ describe("DiffViewProvider", () => {
 			const callOrder: string[] = []
 
 			// Mock showTextDocument to track when it's called
-			vi.mocked(vscode.window.showTextDocument).mockImplementation(async (uri, options) => {
+			vi.mocked(vscode.window.showTextDocument).mockImplementation(async (_uri, options) => {
 				callOrder.push("showTextDocument")
 				expect(options).toEqual({ preview: false, viewColumn: vscode.ViewColumn.Active, preserveFocus: true })
 				return mockEditor as any
@@ -1034,7 +1033,7 @@ describe("DiffViewProvider", () => {
 			// Mock closeAllDiffViews
 			;(diffViewProvider as any).closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
 
-			const result = await diffViewProvider.saveChanges(true, 5000)
+			await diffViewProvider.saveChanges(true, 5000)
 
 			// Verify custom delay was used
 			expect(mockDelay).toHaveBeenCalledWith(5000)

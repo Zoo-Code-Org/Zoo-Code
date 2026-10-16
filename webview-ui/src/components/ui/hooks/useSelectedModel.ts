@@ -41,12 +41,15 @@ import {
 	isRetiredProvider,
 	getProviderDefaultModelId,
 	providerIdentifiers,
+	githubCopilotLanguageModel,
+	vscodeLlmBaselineModelInfo,
 } from "@roo-code/types"
 
 import { useRouterModels } from "./useRouterModels"
 import { useOpenRouterModelProviders } from "./useOpenRouterModelProviders"
 import { useLmStudioModels } from "./useLmStudioModels"
 import { useOllamaModels } from "./useOllamaModels"
+import { useGitHubCopilotModels, type GitHubCopilotModels } from "./useGitHubCopilotModels"
 
 /**
  * Helper to get a validated model ID for dynamic providers.
@@ -58,6 +61,27 @@ function getValidatedModelId(
 	defaultModelId: string,
 ): string {
 	return configuredId && availableModels?.[configuredId] ? configuredId : defaultModelId
+}
+
+/**
+ * Resolves a static-catalog model for providers backed by `BaseOpenAiCompatibleProvider`
+ * (Fireworks, Baseten, SambaNova). Mirrors the backend `getModel()`: a user-supplied custom
+ * model ID that isn't in the static list is honored with `openAiModelInfoSaneDefaults`, so the
+ * UI shows sensible limits (e.g. context window) instead of treating the selection as unknown.
+ */
+function getStaticCatalogModel(
+	configuredId: string | undefined,
+	models: Record<string, ModelInfo>,
+	defaultModelId: string,
+): { id: string; info: ModelInfo | undefined } {
+	// An empty configured ID means "unset": fall back to the provider default.
+	if (!configuredId) {
+		return { id: defaultModelId, info: models[defaultModelId] }
+	}
+	if (!Object.prototype.hasOwnProperty.call(models, configuredId)) {
+		return { id: configuredId, info: { ...openAiModelInfoSaneDefaults } }
+	}
+	return { id: configuredId, info: models[configuredId] }
 }
 
 /**
@@ -91,6 +115,8 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 	const openRouterModelProviders = useOpenRouterModelProviders(openRouterModelId)
 	const lmStudioModels = useLmStudioModels(lmStudioModelId)
 	const ollamaModels = useOllamaModels(ollamaModelId)
+	// Not part of readiness: until the host reports, the curated catalog describes the model.
+	const copilotModels = useGitHubCopilotModels(activeProvider === providerIdentifiers.githubCopilot)
 
 	// Compute readiness only for the data actually needed for the selected provider
 	const needRouterModels = shouldFetchRouterModels
@@ -128,6 +154,7 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 					openRouterModelProviders: (openRouterModelProviders.data || {}) as Record<string, ModelInfo>,
 					lmStudioModels: (lmStudioModels.data || undefined) as ModelRecord | undefined,
 					ollamaModels: (ollamaModels.data || undefined) as ModelRecord | undefined,
+					copilotModels: copilotModels.data,
 				})
 			: activeProvider === providerIdentifiers.kimiCode && apiConfiguration
 				? {
@@ -160,6 +187,7 @@ function getSelectedModel({
 	openRouterModelProviders,
 	lmStudioModels,
 	ollamaModels,
+	copilotModels,
 }: {
 	provider: ProviderName
 	apiConfiguration: ProviderSettings
@@ -167,6 +195,7 @@ function getSelectedModel({
 	openRouterModelProviders: Record<string, ModelInfo>
 	lmStudioModels: ModelRecord | undefined
 	ollamaModels: ModelRecord | undefined
+	copilotModels?: GitHubCopilotModels
 }): { id: string; info: ModelInfo | undefined } {
 	// the `undefined` case are used to show the invalid selection to prevent
 	// users from seeing the default model if their selection is invalid
@@ -233,11 +262,8 @@ function getSelectedModel({
 			const info = xaiModels[id as keyof typeof xaiModels]
 			return info ? { id, info } : { id, info: undefined }
 		}
-		case providerIdentifiers.baseten: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = basetenModels[id as keyof typeof basetenModels]
-			return { id, info }
-		}
+		case providerIdentifiers.baseten:
+			return getStaticCatalogModel(apiConfiguration.apiModelId, basetenModels, defaultModelId)
 		case providerIdentifiers.bedrock: {
 			const id = apiConfiguration.apiModelId ?? defaultModelId
 
@@ -410,6 +436,37 @@ function getSelectedModel({
 				info: modelInfo ? { ...lMStudioDefaultModelInfo, ...modelInfo } : undefined,
 			}
 		}
+		case providerIdentifiers.githubCopilot: {
+			const selector = apiConfiguration.vsCodeLmModelSelector
+			// What the host reports now wins; the curated catalog only describes a model it has not reported.
+			const reported = selector?.id
+				? copilotModels?.find((model) => model.id === selector.id)
+				: selector?.family
+					? copilotModels?.find((model) => model.family === selector.family)
+					: undefined
+			const knownModel = selector?.family
+				? vscodeLlmModels[selector.family as keyof typeof vscodeLlmModels]
+				: undefined
+			return {
+				id:
+					selector?.id ??
+					(selector?.family
+						? `${githubCopilotLanguageModel.vendor}/${selector.family}`
+						: vscodeLlmDefaultModelId),
+				info: {
+					...vscodeLlmBaselineModelInfo,
+					...knownModel,
+					// The extension enforces the curated input limit, so the UI must not show the larger window.
+					...(knownModel && { contextWindow: knownModel.maxInputTokens }),
+					...reported?.modelInfo,
+					// Vision and tool support are the host's word alone, as the extension reads them; the
+					// catalog marks every family as supporting both, which is not a host report.
+					supportsImages: reported?.modelInfo?.supportsImages,
+					supportsToolCalling: reported?.modelInfo?.supportsToolCalling,
+					supportsPromptCache: false,
+				},
+			}
+		}
 		case providerIdentifiers.vscodeLm: {
 			const id = apiConfiguration?.vsCodeLmModelSelector
 				? `${apiConfiguration.vsCodeLmModelSelector.vendor}/${apiConfiguration.vsCodeLmModelSelector.family}`
@@ -430,16 +487,10 @@ function getSelectedModel({
 			}
 			return { id, info }
 		}
-		case providerIdentifiers.sambanova: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = sambaNovaModels[id as keyof typeof sambaNovaModels]
-			return { id, info }
-		}
-		case providerIdentifiers.fireworks: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = fireworksModels[id as keyof typeof fireworksModels]
-			return { id, info }
-		}
+		case providerIdentifiers.sambanova:
+			return getStaticCatalogModel(apiConfiguration.apiModelId, sambaNovaModels, defaultModelId)
+		case providerIdentifiers.fireworks:
+			return getStaticCatalogModel(apiConfiguration.apiModelId, fireworksModels, defaultModelId)
 		case providerIdentifiers.friendli: {
 			const id = apiConfiguration.apiModelId ?? defaultModelId
 			const info = friendliModels[id as keyof typeof friendliModels]
