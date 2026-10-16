@@ -719,10 +719,31 @@ export class DiffViewProvider {
 			if (this.activeDiffEditor) {
 				const updatedDocument = this.activeDiffEditor.document
 				if (updatedDocument.isDirty) {
-					// The buffer holds the streamed content of a write that was never approved. Saving
-					// it here persisted exactly what this rollback is undoing - local history, file
-					// watchers, and, if the delete below fails, the content itself. Discard the buffer
-					// (force-close the tab) instead; the file goes away a moment later anyway.
+					// The diff tab's modified side holds the streamed content, and the tab is dirty
+					// while it does: closeAllDiffViews() skips dirty tabs (closing one would prompt),
+					// so the rollback must put the pre-stream content back and confirm a clean save
+					// BEFORE any tab or file goes. Unlinking the placeholder underneath an open dirty
+					// diff tab left the unapproved content one save away from recreating the deleted
+					// file. A refused restore or an unconfirmed save stops the rollback here - before
+					// the close and the delete - and propagates as the rollback hazard it is.
+					const edit = new vscode.WorkspaceEdit()
+					const fullRange = new vscode.Range(
+						updatedDocument.positionAt(0),
+						updatedDocument.positionAt(updatedDocument.getText().length),
+					)
+					edit.replace(updatedDocument.uri, fullRange, this.originalContent ?? "")
+					if (!(await vscode.workspace.applyEdit(edit))) {
+						throw new Error(
+							`Rollback could not restore the buffer for ${absolutePath}; it may still hold unapproved content, so the rollback stopped before closing tabs or deleting the file.`,
+						)
+					}
+					if (!(await updatedDocument.save())) {
+						throw new Error(
+							`Rollback could not save the restored buffer for ${absolutePath}; its clean state is unconfirmed, so the rollback stopped before closing tabs or deleting the file.`,
+						)
+					}
+					// A file-scheme buffer for the same path, if one is open, holds the same
+					// unapproved content: discard it with the same restore-save-close discipline.
 					await this.discardFileTab(absolutePath)
 					await this.closeAllDiffViews()
 				} else {
