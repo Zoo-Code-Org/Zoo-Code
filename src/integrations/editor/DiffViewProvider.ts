@@ -1779,6 +1779,21 @@ export class DiffViewProvider {
 			additionalRoots: this.additionalWorkspaceRoots(),
 		})
 
+		// The guarded publish wrote the bytes to disk directly. If the target
+		// document is already open, its buffer still holds the pre-publish text:
+		// a dirty buffer would republish those stale bytes over what the guard
+		// committed through VS Code's unguarded save path, and a clean one only
+		// catches up when the file watcher fires. Reconcile it before returning -
+		// reverting reloads the published bytes and clears the dirty flag - so no
+		// open buffer is left whose text differs from the publish. Reverting a
+		// document that already matches the disk is a no-op.
+		const openTarget = vscode.workspace.textDocuments.find((document) =>
+			arePathsEqual(document.uri.fsPath, absolutePath),
+		)
+		if (openTarget !== undefined) {
+			await this.revertDocument(openTarget)
+		}
+
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory
 		if (openFile) {

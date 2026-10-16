@@ -1135,6 +1135,32 @@ describe("DiffViewProvider", () => {
 			expect(dirtyDoc.save).not.toHaveBeenCalled()
 		})
 
+		it("reconciles an already-open target document after the guarded publish", async () => {
+			// guardedWrite wrote the published bytes to disk directly; the open
+			// buffer still holds the pre-publish text, and its dirty state means
+			// VS Code's ordinary save path would republish those stale bytes over
+			// what the guard committed. saveDirectly must reconcile the buffer
+			// before returning: reverting reloads the published bytes and clears
+			// the dirty flag.
+			const openDirtyDoc = {
+				uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+				isDirty: true,
+				save: vi.fn().mockResolvedValue(undefined),
+			} as unknown as vscode.TextDocument // Structural double: the revert path only reads uri and dirty state.
+			const documents = vscode.workspace.textDocuments as vscode.TextDocument[]
+			documents.push(openDirtyDoc)
+			try {
+				await diffViewProvider.saveDirectly("test.ts", "new content", false, false, 0)
+
+				expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.files.revert")
+				// The reconcile is a revert, not a save: saving would republish the
+				// stale buffer bytes over the publish.
+				expect(openDirtyDoc.save).not.toHaveBeenCalled()
+			} finally {
+				documents.splice(documents.indexOf(openDirtyDoc), 1)
+			}
+		})
+
 		it("should skip diagnostics when diagnosticsEnabled is false", async () => {
 			const mockDelay = vi.mocked(delay)
 			mockDelay.mockClear()
