@@ -342,6 +342,85 @@ describe("MiniMaxHandler", () => {
 			expect(firstChunk.value).toEqual({ type: "reasoning", text: thinkingContent })
 		})
 
+		it("captures thinking signatures for the next tool-loop request", async () => {
+			mockCreate.mockResolvedValueOnce(
+				asyncStreamFrom([
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "thinking_delta", thinking: "Inspect the file." },
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "signature_delta", signature: "signed-reasoning" },
+					},
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage("system prompt", []))
+
+			expect(chunks).toEqual([{ type: "reasoning", text: "Inspect the file." }])
+			expect(handler.getThoughtSignature()).toBe("signed-reasoning")
+		})
+
+		it("clears stale thinking signatures before the next request", async () => {
+			mockCreate
+				.mockResolvedValueOnce(
+					asyncStreamFrom([
+						{
+							type: "content_block_delta",
+							index: 0,
+							delta: { type: "signature_delta", signature: "signed-reasoning" },
+						},
+					]),
+				)
+				.mockResolvedValueOnce(
+					asyncStreamFrom([
+						{
+							type: "content_block_delta",
+							index: 0,
+							delta: { type: "thinking_delta", thinking: "Continue without a signature." },
+						},
+					]),
+				)
+
+			await collectStream(handler.createMessage("system prompt", []))
+			expect(handler.getThoughtSignature()).toBe("signed-reasoning")
+
+			await collectStream(handler.createMessage("system prompt", []))
+			expect(handler.getThoughtSignature()).toBeUndefined()
+		})
+
+		it("filters legacy reasoning blocks while preserving signed thinking blocks", async () => {
+			mockCreate.mockResolvedValueOnce(asyncStreamFrom([]))
+			// The Anthropic SDK does not model Zoo Code's legacy internal reasoning block,
+			// which can still be present in persisted conversation history.
+			const messages = [
+				{
+					role: "assistant",
+					content: [
+						{ type: "reasoning", text: "legacy unsigned reasoning", summary: [] },
+						{ type: "thinking", thinking: "signed reasoning", signature: "signature" },
+						{ type: "text", text: "I will inspect the file." },
+					],
+				},
+			] as unknown as Anthropic.Messages.MessageParam[]
+
+			await collectStream(handler.createMessage("system prompt", messages))
+
+			const request = mockCreate.mock.calls[0][0] as Anthropic.Messages.MessageCreateParams
+			expect(request.messages).toEqual([
+				{
+					role: "assistant",
+					content: [
+						{ type: "thinking", thinking: "signed reasoning", signature: "signature" },
+						{ type: "text", text: "I will inspect the file." },
+					],
+				},
+			])
+		})
+
 		it("should handle tool calls in stream", async () => {
 			mockCreate.mockResolvedValueOnce(
 				asyncStreamFrom([

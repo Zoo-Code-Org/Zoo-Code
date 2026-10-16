@@ -3,8 +3,9 @@ import { ConversationRole, Message, ContentBlock } from "@aws-sdk/client-bedrock
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 
 interface BedrockMessageContent {
-	type: "text" | "image" | "video" | "tool_use" | "tool_result"
+	type: "text" | "image" | "video" | "tool_use" | "tool_result" | "reasoning" | "thinking"
 	text?: string
+	thinking?: string
 	source?: {
 		type: "base64"
 		data: string | Uint8Array // string for Anthropic, Uint8Array for Bedrock
@@ -26,8 +27,13 @@ interface BedrockMessageContent {
 /**
  * Convert Anthropic messages to Bedrock Converse format
  * @param anthropicMessages Messages in Anthropic format
+ * @param options.preserveReasoning Replay reasoning/thinking blocks as `reasoningContent`.
+ *   Otherwise they are dropped, matching Task's stripping for models without `preserveReasoning`.
  */
-export function convertToBedrockConverseMessages(anthropicMessages: Anthropic.Messages.MessageParam[]): Message[] {
+export function convertToBedrockConverseMessages(
+	anthropicMessages: Anthropic.Messages.MessageParam[],
+	{ preserveReasoning = false }: { preserveReasoning?: boolean } = {},
+): Message[] {
 	return anthropicMessages.map((anthropicMessage) => {
 		// Map Anthropic roles to Bedrock roles
 		const role: ConversationRole = anthropicMessage.role === "assistant" ? "assistant" : "user"
@@ -43,8 +49,18 @@ export function convertToBedrockConverseMessages(anthropicMessages: Anthropic.Me
 			}
 		}
 
+		// Signed thinking blocks (e.g. from MiniMax) bypass Task's reasoning filter, so they can reach
+		// any Bedrock model after a provider switch. Unsigned reasoning is only safe for models that
+		// opt in; Claude would receive thinking it cannot verify.
+		const blocks = preserveReasoning
+			? anthropicMessage.content
+			: anthropicMessage.content.filter((block) => {
+					const type = (block as { type: string }).type
+					return type !== "reasoning" && type !== "thinking"
+				})
+
 		// Process complex content types
-		const content = anthropicMessage.content.map((block) => {
+		const content = blocks.map((block) => {
 			const messageBlock = block as BedrockMessageContent & {
 				id?: string
 				tool_use_id?: string
@@ -55,6 +71,25 @@ export function convertToBedrockConverseMessages(anthropicMessages: Anthropic.Me
 			if (messageBlock.type === "text") {
 				return {
 					text: messageBlock.text || "",
+				} as ContentBlock
+			}
+
+			if (messageBlock.type === "reasoning" && typeof messageBlock.text === "string") {
+				return {
+					reasoningContent: {
+						reasoningText: { text: messageBlock.text },
+					},
+				} as ContentBlock
+			}
+
+			if (messageBlock.type === "thinking" && typeof messageBlock.thinking === "string") {
+				// Bedrock does not capture its own signatures, so any stored signature was issued by
+				// another provider (e.g. MiniMax) and would fail Bedrock's verification. Unsigned
+				// reasoning is accepted (`signature` is optional), so replay the text only.
+				return {
+					reasoningContent: {
+						reasoningText: { text: messageBlock.thinking },
+					},
 				} as ContentBlock
 			}
 
@@ -203,7 +238,11 @@ export function convertToBedrockConverseMessages(anthropicMessages: Anthropic.Me
 
 		return {
 			role,
-			content,
+			// Bedrock rejects an empty content array; a reasoning-only turn becomes empty text.
+			content:
+				content.length === 0 && anthropicMessage.content.length > 0
+					? ([{ text: "" }] as ContentBlock[])
+					: content,
 		}
 	})
 }

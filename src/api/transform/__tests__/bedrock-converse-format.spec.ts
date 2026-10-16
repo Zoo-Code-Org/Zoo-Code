@@ -26,6 +26,104 @@ describe("convertToBedrockConverseMessages", () => {
 		])
 	})
 
+	it("converts internal reasoning blocks to Bedrock reasoning content", () => {
+		// The Anthropic SDK does not model Zoo Code's internal reasoning block,
+		// though this converter receives it from persisted conversation history.
+		const messages = [
+			{
+				role: "assistant",
+				content: [{ type: "reasoning", text: "I should inspect the file first.", summary: [] }],
+			},
+		] as unknown as Anthropic.Messages.MessageParam[]
+
+		expect(convertToBedrockConverseMessages(messages, { preserveReasoning: true })).toEqual([
+			{
+				role: "assistant",
+				content: [
+					{
+						reasoningContent: {
+							reasoningText: { text: "I should inspect the file first." },
+						},
+					},
+				],
+			},
+		])
+	})
+
+	it("drops reasoning and thinking blocks for models that do not preserve reasoning", () => {
+		// Signed thinking bypasses Task's reasoning filter, so the converter must not send it to e.g. Claude.
+		const messages = [
+			{
+				role: "assistant",
+				content: [
+					{ type: "thinking", thinking: "Signed elsewhere.", signature: "minimax-signature" },
+					{ type: "text", text: "Reading the file." },
+				],
+			},
+			{
+				role: "assistant",
+				content: [{ type: "reasoning", text: "Reasoning only.", summary: [] }],
+			},
+		] as unknown as Anthropic.Messages.MessageParam[]
+
+		expect(convertToBedrockConverseMessages(messages)).toStrictEqual([
+			{ role: "assistant", content: [{ text: "Reading the file." }] },
+			{ role: "assistant", content: [{ text: "" }] },
+		])
+	})
+
+	it("drops signatures issued by another provider when converting thinking blocks", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "assistant",
+				content: [
+					{
+						type: "thinking",
+						thinking: "I should inspect the file first.",
+						signature: "signed-reasoning",
+					},
+				],
+			},
+		]
+
+		// Bedrock never records signatures, so a stored one would fail Bedrock's verification.
+		expect(convertToBedrockConverseMessages(messages, { preserveReasoning: true })).toStrictEqual([
+			{
+				role: "assistant",
+				content: [
+					{
+						reasoningContent: {
+							reasoningText: { text: "I should inspect the file first." },
+						},
+					},
+				],
+			},
+		])
+	})
+
+	it("converts unsigned thinking blocks without adding a signature", () => {
+		// Persisted provider output can omit a signature even though the Anthropic SDK requires one.
+		const messages = [
+			{
+				role: "assistant",
+				content: [{ type: "thinking", thinking: "I should inspect the file first." }],
+			},
+		] as unknown as Anthropic.Messages.MessageParam[]
+
+		expect(convertToBedrockConverseMessages(messages, { preserveReasoning: true })).toStrictEqual([
+			{
+				role: "assistant",
+				content: [
+					{
+						reasoningContent: {
+							reasoningText: { text: "I should inspect the file first." },
+						},
+					},
+				],
+			},
+		])
+	})
+
 	it("converts messages with images correctly", () => {
 		const messages: Anthropic.Messages.MessageParam[] = [
 			{

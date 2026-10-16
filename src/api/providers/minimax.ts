@@ -9,6 +9,7 @@ import type { ApiHandlerOptions } from "../../shared/api"
 import { ApiStream } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 import { mergeEnvironmentDetailsForMiniMax } from "../transform/minimax-format"
+import { filterNonAnthropicBlocks } from "../transform/anthropic-filter"
 
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
@@ -52,6 +53,7 @@ function convertOpenAIToolChoice(
 export class MiniMaxHandler extends BaseProvider implements SingleCompletionHandler {
 	private options: ApiHandlerOptions
 	private client: Anthropic
+	private lastThoughtSignature?: string
 
 	constructor(options: ApiHandlerOptions) {
 		super()
@@ -83,6 +85,7 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 	): ApiStream {
 		const cacheControl: CacheControlEphemeral = { type: "ephemeral" }
 		const { id: modelId, info, maxTokens, temperature } = this.getModel()
+		this.lastThoughtSignature = undefined
 
 		// MiniMax M2 models support prompt caching
 		const supportsPromptCache = info.supportsPromptCache ?? false
@@ -91,7 +94,7 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 		// into the tool_result content. This preserves reasoning continuity for
 		// thinking models by preventing user messages from interrupting the
 		// reasoning context after tool use (similar to r1-format's mergeToolResultText).
-		const processedMessages = mergeEnvironmentDetailsForMiniMax(messages)
+		const processedMessages = filterNonAnthropicBlocks(mergeEnvironmentDetailsForMiniMax(messages))
 
 		// Build the system blocks array
 		const systemBlocks: Anthropic.Messages.TextBlockParam[] = [
@@ -193,6 +196,9 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 						case "thinking_delta":
 							yield { type: "reasoning", text: chunk.delta.thinking }
 							break
+						case "signature_delta":
+							this.lastThoughtSignature = chunk.delta.signature
+							break
 						case "text_delta":
 							yield { type: "text", text: chunk.delta.text }
 							break
@@ -233,6 +239,10 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 				totalCost,
 			}
 		}
+	}
+
+	getThoughtSignature(): string | undefined {
+		return this.lastThoughtSignature
 	}
 
 	/**
