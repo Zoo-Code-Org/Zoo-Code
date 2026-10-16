@@ -189,11 +189,42 @@ describe("checkpointSave change-journal wiring (B2)", () => {
 		expect(mockTask.enableCheckpoints).toBe(true)
 	})
 
-	it("does not crash when the provider has no globalStorageDir", async () => {
+	it("fails a write-metadata save before committing when the provider has no globalStorageDir", async () => {
+		// A commit whose journal update would be silently skipped is worse
+		// than no commit: rollback metadata would be incomplete with no error
+		// surfaced, so the save must fail before the Git commit runs.
 		mockTask.providerRef = { deref: () => undefined }
 
-		await expect(checkpointSave(mockTask as Task, false, true, write)).resolves.toMatchObject({ commit: COMMIT })
+		await expect(checkpointSave(mockTask as Task, false, true, write)).rejects.toThrow(/stable journal location/)
+		expect(saveCheckpointSpy).not.toHaveBeenCalled()
 		expect(mockTask.enableCheckpoints).toBe(true)
+		expect(await loadChanges(tmpStorageDir, TASK_ID)).toEqual([])
+	})
+
+	it("persists the journal through the captured location when the provider disappears during the commit", async () => {
+		// The weak provider reference dies while the Git save is awaited:
+		// the journal location captured before the commit must still be used,
+		// so a successful commit never silently loses its rollback metadata.
+		saveCheckpointSpy.mockImplementation(async () => {
+			mockTask.providerRef = { deref: () => undefined }
+			return { commit: COMMIT }
+		})
+
+		await expect(checkpointSave(mockTask as Task, false, true, write)).resolves.toMatchObject({ commit: COMMIT })
+
+		const entries = await loadChanges(tmpStorageDir, TASK_ID)
+		expect(entries).toHaveLength(1)
+		expect(entries[0]).toMatchObject({ path: "src/foo.ts", checkpointId: COMMIT })
+		expect(mockTask.enableCheckpoints).toBe(true)
+	})
+
+	it("still runs non-write checkpoint saves when the provider is gone (task-start baseline)", async () => {
+		// The pre-commit journal-location guard applies only to saves that
+		// carry write metadata; the baseline save has none and keeps the
+		// historical behavior.
+		mockTask.providerRef = { deref: () => undefined }
+
+		await expect(checkpointSave(mockTask as Task)).resolves.toMatchObject({ commit: COMMIT })
 		expect(await loadChanges(tmpStorageDir, TASK_ID)).toEqual([])
 	})
 
