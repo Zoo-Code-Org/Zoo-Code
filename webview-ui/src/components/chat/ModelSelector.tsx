@@ -31,6 +31,8 @@ import { IconButton } from "./IconButton"
 
 const SEARCH_THRESHOLD = 6
 
+const BEDROCK_CUSTOM_ARN_MODEL_ID = "custom-arn"
+
 // Providers whose model can only be picked via a bespoke Settings UI
 // (freeform text, local model discovery, or a compound vendor/family selector)
 // rather than a simple id list.
@@ -102,7 +104,12 @@ export const ModelSelector = ({
 	const modelIds = React.useMemo(() => {
 		if (!filteredModelRecord) return []
 		return Object.entries(filteredModelRecord)
-			.filter(([id, info]) => id === selectedModelId || !info.deprecated)
+			.filter(([id, info]) => {
+				if (id === selectedModelId) return true
+				// The host cannot set awsCustomArn, so picking this here would save a model id without an ARN.
+				if (id === BEDROCK_CUSTOM_ARN_MODEL_ID) return false
+				return !info.deprecated
+			})
 			.map(([id]) => id)
 			.sort((a, b) => a.localeCompare(b))
 	}, [filteredModelRecord, selectedModelId])

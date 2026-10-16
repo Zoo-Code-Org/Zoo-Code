@@ -155,6 +155,30 @@ describe("ModelSelector", () => {
 		expect(Object.values(patch)).not.toContain("")
 	})
 
+	test("hides the Bedrock custom-arn pseudo-model unless it is already selected", () => {
+		staticModelsOverride.value = { "model-a": base, "custom-arn": base }
+		const bedrockConfig: ProviderSettings = { apiProvider: providerIdentifiers.bedrock, apiModelId: "model-a" }
+		const { unmount } = render(<ModelSelector apiConfiguration={bedrockConfig} title="Select model" />)
+
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
+		expect(screen.getAllByTestId("model-selector-item")).toHaveLength(1)
+		expect(screen.queryByText("custom-arn")).not.toBeInTheDocument()
+		unmount()
+
+		render(
+			<ModelSelector
+				apiConfiguration={{
+					...bedrockConfig,
+					apiModelId: "custom-arn",
+					awsCustomArn: "arn:aws:bedrock:us-east-1:123456789012:inference-profile/x",
+				}}
+				title="Select model"
+			/>,
+		)
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
+		expect(screen.getAllByTestId("model-selector-item")).toHaveLength(2)
+	})
+
 	test("model items are real buttons so keyboard users can select them", () => {
 		staticModelsOverride.value = { "model-a": base, "model-b": base }
 
