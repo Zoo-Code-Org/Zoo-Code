@@ -268,9 +268,15 @@ export async function loadChanges(globalStorageDir: string, taskId: string): Pro
 			}
 		} catch {
 			// A corrupt line before the final line (e.g. a partially flushed
-			// append) must not hide the valid entries after it. The final line
-			// is still discarded as a torn tail — `continue` at the last index
-			// ends the loop either way.
+			// append) must not hide the valid entries after it. The final
+			// line is different: dropping an unverified record there can
+			// report an incomplete rollback history as valid (restore-latest
+			// would no-op over the lost write), and torn-tail repair is
+			// verified truncation owned by the append path, so a read
+			// rejects instead.
+			if (i === lines.length - 1) {
+				throw new Error(`Corrupt change journal entry at line ${i + 1} of ${filePath}`)
+			}
 			continue
 		}
 	}
