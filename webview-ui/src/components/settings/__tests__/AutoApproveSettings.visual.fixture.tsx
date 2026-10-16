@@ -13,6 +13,7 @@ interface AutoApproveState {
 	alwaysAllowSubtasks: boolean
 	alwaysAllowExecute: boolean
 	alwaysAllowFollowupQuestions: boolean
+	followupAutoApproveTimeoutMs?: number
 	destructiveCommandGuardEnabled: boolean
 	alwaysDenyUnapprovedCommands: boolean
 	allowedCommands: string[]
@@ -23,7 +24,7 @@ interface AutoApproveState {
 	allowedMaxCost?: number
 }
 
-export function AutoApproveSettingsStory() {
+export function AutoApproveSettingsStory({ followupAutoApproveTimeoutMs }: { followupAutoApproveTimeoutMs?: number }) {
 	// The blanket auto-deny checkbox is pinned here in its operative mode: with
 	// the destructive command guard on it is the fail-closed policy, and the
 	// guard's hidden command-list editors would otherwise vary the snapshot.
@@ -34,7 +35,8 @@ export function AutoApproveSettingsStory() {
 		alwaysAllowModeSwitch: false,
 		alwaysAllowSubtasks: false,
 		alwaysAllowExecute: true,
-		alwaysAllowFollowupQuestions: false,
+		alwaysAllowFollowupQuestions: followupAutoApproveTimeoutMs !== undefined,
+		followupAutoApproveTimeoutMs,
 		destructiveCommandGuardEnabled: true,
 		alwaysDenyUnapprovedCommands: true,
 		allowedCommands: [],
@@ -62,6 +64,7 @@ export function AutoApproveSettingsStory() {
 					return { ...current, [field]: Array.isArray(value) ? [...value] : [] }
 				case "allowedMaxRequests":
 				case "allowedMaxCost":
+				case "followupAutoApproveTimeoutMs":
 					return { ...current, [field]: typeof value === "number" ? value : undefined }
 				default:
 					return current

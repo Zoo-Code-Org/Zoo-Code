@@ -337,7 +337,8 @@
 		"followupQuestions": {
 			"label": "Câu hỏi",
 			"description": "Tự động chọn câu trả lời đầu tiên được đề xuất cho các câu hỏi tiếp theo sau thời gian chờ đã cấu hình",
-			"timeoutLabel": "Thời gian chờ trước khi tự động chọn câu trả lời đầu tiên"
+			"timeoutLabel": "Thời gian chờ trước khi tự động chọn câu trả lời đầu tiên",
+			"timeoutZeroDescription": "Đặt thành 0 để không bao giờ tự động chọn — luôn chờ bạn chọn câu trả lời theo cách thủ công"
 		},
 		"execute": {
 			"label": "Thực thi",
