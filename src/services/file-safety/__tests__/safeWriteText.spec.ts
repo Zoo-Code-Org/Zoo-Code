@@ -316,8 +316,12 @@ describe("safeWriteText", () => {
 
 			await safeWriteText(targetPath, "data", { platform: "win32" })
 
-			// write succeeded despite icacls failure (fallback to plain rename)
-			expect(fs.rename).toHaveBeenCalled()
+			// write succeeded despite icacls failure (fallback to plain rename):
+			// pin the commit rename onto the target - a rename to any other path
+			// would silently publish elsewhere - and pin that a failed save skips
+			// the restore step entirely.
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+			expect(execFile).toHaveBeenCalledTimes(1)
 		})
 
 		it("win32 DACL: a partial dump left by a failed save is still unlinked", async () => {

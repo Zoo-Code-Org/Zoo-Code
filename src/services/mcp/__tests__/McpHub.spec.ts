@@ -1051,6 +1051,12 @@ describe("McpHub", () => {
 						mcpServers: { "test-server": { type: "stdio", command: "node", args: ["test.js"] } },
 					}),
 				)
+				// Typed close doubles: updateServerConnections tears the connection
+				// down through transport.close() and client.close(). Empty doubles
+				// raise a TypeError that deleteConnection swallows, so the teardown
+				// would silently do nothing and the test would still pass.
+				const transportClose = vi.fn(async () => {})
+				const clientClose = vi.fn(async () => {})
 				mcpHub.connections = [
 					{
 						type: "connected",
@@ -1061,8 +1067,8 @@ describe("McpHub", () => {
 							args: ["test.js"],
 							source: "project",
 						},
-						client: {},
-						transport: {},
+						client: { close: clientClose },
+						transport: { close: transportClose },
 					} as unknown as ConnectedMcpConnection,
 				]
 
@@ -1070,6 +1076,10 @@ describe("McpHub", () => {
 				// configPath is chosen from THAT source. The write policy must be derived from the same
 				// value, or a project server reached through an omitted argument loses symlink refusal.
 				await mcpHub.deleteServer("test-server")
+
+				// The teardown ran to completion rather than dying on a TypeError.
+				expect(transportClose).toHaveBeenCalledTimes(1)
+				expect(clientClose).toHaveBeenCalledTimes(1)
 
 				const write = vi.mocked(safeWriteJson).mock.calls.at(-1)
 				expect(write && write[2]).toEqual(expect.objectContaining({ refuseSymlinkTarget: true }))
