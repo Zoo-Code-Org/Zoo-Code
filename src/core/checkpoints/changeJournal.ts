@@ -111,14 +111,14 @@ export async function appendChanges(
 				throw error
 			}
 		}
-		let payload = entries.map((entry) => JSON.stringify(entry) + "\n").join("")
-		// Torn-tail repair: a journal left without a trailing newline (e.g.
-		// a crash before this replacement path completed) must be terminated
-		// before the new lines or the first appended entry merges into the
-		// fragment.
+		// Torn-tail repair: a crash can leave the final line unterminated - a
+		// fragment of a lost write. The replacement truncates that fragment
+		// instead of preserving it, so the journal only ever holds complete
+		// records and a later entry can never mask the lost one.
 		if (content && !content.endsWith("\n")) {
-			payload = "\n" + payload
+			content = content.slice(0, content.lastIndexOf("\n") + 1)
 		}
+		const payload = entries.map((entry) => JSON.stringify(entry) + "\n").join("")
 		const tmpPath = path.join(dir, `${JOURNAL_FILENAME}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`)
 		const data = Buffer.from(content + payload)
 		try {
