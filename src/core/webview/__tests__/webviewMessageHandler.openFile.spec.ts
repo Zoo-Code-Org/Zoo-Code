@@ -274,6 +274,81 @@ describe("webviewMessageHandler - openFile markdown workspace containment", () =
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(cannotAccessPathError("link.txt"))
 	})
 
+	// ChangeCard.tsx tags its openFile posts with fromChangeCard: card paths
+	// are model-derived and survive persistence/import, so the host enforces
+	// the same containment as markdown-sourced requests.
+	it("opens a change-card file within the workspace using a relative path", async () => {
+		await webviewMessageHandler(mockProvider, {
+			type: "openFile",
+			text: "./src/a.ts",
+			values: { fromChangeCard: true },
+		})
+
+		expect(openFile).toHaveBeenCalledWith(nodePath.join(MOCK_CWD, "src/a.ts"), { fromChangeCard: true })
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+	})
+
+	it("rejects a change-card relative path that traverses outside the workspace", async () => {
+		await webviewMessageHandler(mockProvider, {
+			type: "openFile",
+			text: "./../../.env",
+			values: { fromChangeCard: true },
+		})
+
+		expect(openFile).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(cannotAccessPathError("./../../.env"))
+	})
+
+	it("rejects a change-card absolute path outside the workspace", async () => {
+		await webviewMessageHandler(mockProvider, {
+			type: "openFile",
+			text: OUTSIDE_ABS,
+			values: { fromChangeCard: true },
+		})
+
+		expect(openFile).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(cannotAccessPathError(OUTSIDE_ABS))
+	})
+
+	it("rejects a percent-encoded traversal posted by a change card", async () => {
+		// openFile decodes after containment, so the card path is decoded once
+		// at the boundary first: "%2e%2e" must not survive into a traversal.
+		await webviewMessageHandler(mockProvider, {
+			type: "openFile",
+			text: "./%2e%2e/%2e%2e/.env",
+			values: { fromChangeCard: true },
+		})
+
+		expect(openFile).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(cannotAccessPathError("./%2e%2e/%2e%2e/.env"))
+	})
+
+	it("opens a change-card file whose name legitimately contains a percent sign", async () => {
+		// "100%.txt" is not a valid percent-encoding: the best-effort decode
+		// keeps the literal name (the same fallback openFile applies).
+		await webviewMessageHandler(mockProvider, {
+			type: "openFile",
+			text: "./100%.txt",
+			values: { fromChangeCard: true },
+		})
+
+		expect(openFile).toHaveBeenCalledWith(nodePath.join(MOCK_CWD, "100%.txt"), { fromChangeCard: true })
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+	})
+
+	it("rejects a change-card path that escapes through a workspace symlink", async () => {
+		realWorld.symlinks.set(nodePath.join(MOCK_CWD, "link.txt"), nodePath.join(OUTSIDE_ROOT, "secret.txt"))
+
+		await webviewMessageHandler(mockProvider, {
+			type: "openFile",
+			text: "./link.txt",
+			values: { fromChangeCard: true },
+		})
+
+		expect(openFile).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(cannotAccessPathError("./link.txt"))
+	})
+
 	// A dangling symlink inside the workspace — an existing entry whose target
 	// is missing — must be rejected fail-closed: a creation flow (mkdir -p)
 	// would follow it and could escape the workspace.

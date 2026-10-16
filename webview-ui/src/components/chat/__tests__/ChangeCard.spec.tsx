@@ -376,12 +376,20 @@ describe("ChangeCard", () => {
 
 		// Diff row: the CodeAccordion header jump icon (own aria-label).
 		fireEvent.click(screen.getByLabelText("Open file: src/a.ts"))
-		expect(mockPostMessage).toHaveBeenCalledWith({ type: "openFile", text: "./src/a.ts" })
+		expect(mockPostMessage).toHaveBeenCalledWith({
+			type: "openFile",
+			text: "./src/a.ts",
+			values: { fromChangeCard: true },
+		})
 		mockPostMessage.mockClear()
 
 		// No-diff row: the open control on the plain path row.
 		fireEvent.click(screen.getByTestId("change-card-file-open-1"))
-		expect(mockPostMessage).toHaveBeenCalledWith({ type: "openFile", text: "./src/b.ts" })
+		expect(mockPostMessage).toHaveBeenCalledWith({
+			type: "openFile",
+			text: "./src/b.ts",
+			values: { fromChangeCard: true },
+		})
 	})
 
 	it("does not double-prefix paths that already carry the ./ marker", () => {
@@ -396,7 +404,11 @@ describe("ChangeCard", () => {
 		)
 
 		fireEvent.click(screen.getByTestId("change-card-file-open-0"))
-		expect(mockPostMessage).toHaveBeenCalledWith({ type: "openFile", text: "./src/c.ts" })
+		expect(mockPostMessage).toHaveBeenCalledWith({
+			type: "openFile",
+			text: "./src/c.ts",
+			values: { fromChangeCard: true },
+		})
 	})
 
 	it("renders the no-diff row open control as a native button so keyboard users can activate it", () => {

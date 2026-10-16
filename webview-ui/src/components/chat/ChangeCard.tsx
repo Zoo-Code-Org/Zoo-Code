@@ -156,7 +156,14 @@ export const ChangeCard = ({ message }: { message: ClineMessage }) => {
 	// paths against the current cwd (webviewMessageHandler "openFile"), so
 	// normalize the "./" prefix the same way FileChangesPanel does.
 	const openFileInEditor = (path: string) => {
-		vscode.postMessage({ type: "openFile", text: path.startsWith("./") ? path : "./" + path })
+		vscode.postMessage({
+			type: "openFile",
+			text: path.startsWith("./") ? path : "./" + path,
+			// Card paths are model-derived and survive persistence/import: the
+			// host treats this marker as an untrusted source and enforces
+			// workspace containment before opening (webviewMessageHandler).
+			values: { fromChangeCard: true },
+		})
 	}
 
 	const diffBadges = (additions: number, deletions: number) =>

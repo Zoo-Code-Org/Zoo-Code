@@ -1558,6 +1558,14 @@ export const webviewMessageHandler = async (
 			// slash-command settings) may legitimately open global config files
 			// outside the workspace, so they keep the previous behavior.
 			const fromMarkdown = message.values?.fromMarkdown === true
+			// Change-card file paths are model-derived and survive task
+			// persistence/import, so the host treats them as untrusted too
+			// (marker posted by ChangeCard.tsx): the same lexical + realpath
+			// containment runs. Card paths are plain filesystem paths rather
+			// than URL link targets, so they get a single best-effort decode -
+			// exactly the decode openFile itself applies after its check -
+			// instead of the markdown URL decode-to-fixed-point.
+			const fromChangeCard = message.values?.fromChangeCard === true
 			const rejectOutsideWorkspace = () => {
 				void vscode.window.showErrorMessage(
 					t("common:errors.cannot_access_path", {
@@ -1578,6 +1586,14 @@ export const webviewMessageHandler = async (
 					break
 				}
 				filePath = decoded
+			} else if (fromChangeCard) {
+				try {
+					filePath = decodeURIComponent(rawPath)
+				} catch {
+					// Not a valid percent-encoding: a literal filesystem name
+					// (e.g. "100%.txt"). openFile applies the same fallback.
+					filePath = rawPath
+				}
 			}
 			if (!path.isAbsolute(filePath)) {
 				const cwd = getCurrentCwd()
@@ -1590,22 +1606,28 @@ export const webviewMessageHandler = async (
 				filePath = path.resolve(cwd, filePath)
 			}
 			// Workspace-boundary validation (defense in depth): the webview already
-			// rejects traversal in markdown anchors, but refuse any markdown path
-			// that still resolves outside the workspace.
-			if (fromMarkdown && isPathOutsideWorkspace(filePath)) {
+			// rejects traversal in markdown anchors and change-card rows, but
+			// refuse any untrusted path that still resolves outside the workspace.
+			if ((fromMarkdown || fromChangeCard) && isPathOutsideWorkspace(filePath)) {
 				rejectOutsideWorkspace()
 				break
 			}
 			// Lexical containment cannot see symlinks: a link inside a workspace
 			// folder may resolve to a target outside the workspace. Re-check the
 			// real filesystem path (failing closed) before opening.
-			if (fromMarkdown && (await isRealPathOutsideWorkspace(filePath))) {
+			if ((fromMarkdown || fromChangeCard) && (await isRealPathOutsideWorkspace(filePath))) {
 				rejectOutsideWorkspace()
 				break
 			}
 			await openFile(
 				filePath,
-				message.values as { create?: boolean; content?: string; line?: number; fromMarkdown?: boolean },
+				message.values as {
+					create?: boolean
+					content?: string
+					line?: number
+					fromMarkdown?: boolean
+					fromChangeCard?: boolean
+				},
 			)
 			break
 		}
