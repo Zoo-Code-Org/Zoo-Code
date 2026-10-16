@@ -17,6 +17,7 @@ import {
 	type GlobalState,
 	type ProviderName,
 	type ProviderSettings,
+	type ProviderSettingsWithId,
 	type RooCodeSettings,
 	type ProviderSettingsEntry,
 	type StaticAppProperties,
@@ -653,7 +654,23 @@ export class ClineProvider
 				wroteEntry = true
 			}
 
-			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+			try {
+				await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+			} catch (error) {
+				// updateGlobalState applies the new map to the in-memory cache before
+				// the durable write, so a rejected write leaves the cache claiming an
+				// entry that never reached disk. Restore the cache to the value durable
+				// storage actually holds (undefined when the key was never written); the
+				// cache update lands even if this compensating write also fails, so
+				// readers cannot observe the lost entry either way.
+				try {
+					await this.contextProxy.setValue("viewStates", this.context.globalState.get("viewStates"))
+				} catch {
+					// The cache is updated before the durable attempt: it matches the
+					// durable value regardless of whether this restore write landed.
+				}
+				throw error
+			}
 			// Authorship is recorded only after the durable write lands: a failed persistence
 			// must not mark the temporary id as owned, or a later load would adopt an entry
 			// that was never actually stored.
@@ -3126,6 +3143,48 @@ export class ClineProvider
 		)
 	}
 
+	/**
+	 * Re-point live views still pinned to a profile that is being renamed onto
+	 * the new name. A rename keeps the profile id, so a view pinned to the old
+	 * name should follow the record instead of falling back to the shared
+	 * selection: without this, the pin dangles at a name that no longer
+	 * resolves and the buffered overlay keeps serving the pre-rename copy.
+	 * Must run before the old name is deleted.
+	 */
+	public async repointViewLocalStateAfterProfileRename(
+		oldName: string,
+		newName: string,
+		renamedSettings: ProviderSettingsWithId | undefined,
+	): Promise<void> {
+		const affected = ClineProvider.getAllInstances().filter((instance) => instance.pinnedProfileName === oldName)
+
+		if (affected.length === 0) {
+			return
+		}
+
+		await Promise.all(
+			affected.map(async (instance) => {
+				// Assigning the settings (even undefined) is what replaces or clears the
+				// overlay: the renamed record's current settings are the only correct
+				// overlay for a pin that now names the new profile.
+				await instance._saveViewLocalStateFromMutation({
+					currentApiConfigName: newName,
+					apiConfiguration: renamedSettings,
+				})
+				// A task running under the old name holds its own API handler and sticky
+				// profile name: re-point both, or the conversation keeps sending the
+				// pre-rename configuration under a name that no longer resolves.
+				if (instance.getCurrentTask()?.taskApiConfigName === oldName) {
+					if (renamedSettings) {
+						instance.updateTaskApiHandlerIfNeeded(renamedSettings, { forceRebuild: true })
+					}
+					await instance.persistStickyProviderProfileToCurrentTask(newName)
+				}
+				await instance.postStateToWebview()
+			}),
+		)
+	}
+
 	async updateCustomInstructions(instructions?: string) {
 		// User may be clearing the field.
 		await this.updateGlobalState("customInstructions", instructions || undefined)
@@ -4680,6 +4739,8 @@ export class ClineProvider
 			// per-view record while the payload's custom modes are still unregistered.
 			// The pin is read defensively because createTask is also driven through
 			// structural provider doubles that carry no view-local buffer.
+			const modeWasProvided = Object.prototype.hasOwnProperty.call(configuration, "mode")
+			const requestedMode = configuration.mode
 			const previousMode = this.contextProxy.getValue("mode")
 			const previousViewMode = this.viewLocalState?.mode
 			await this.setValues(configuration)
@@ -4727,14 +4788,21 @@ export class ClineProvider
 					// logged on failure, never swallowed; the original failure is what
 					// callers see.
 					try {
-						await this.contextProxy.setValue("mode", previousMode)
+						// Restore each layer only while it still holds the value this call wrote:
+						// updateCustomMode awaits queued file I/O, so another view may have
+						// moved a layer in the meantime, and that newer value must survive.
+						if (modeWasProvided && this.contextProxy.getValue("mode") === requestedMode) {
+							await this.contextProxy.setValue("mode", previousMode)
+						}
 					} catch (rollbackError) {
 						this.log(
 							`[ClineProvider#createTask] Failed to restore the shared mode after custom-mode registration failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
 						)
 					}
 					try {
-						await this.saveViewState("mode", previousViewMode)
+						if (modeWasProvided && this.viewLocalState?.mode === requestedMode) {
+							await this.saveViewState("mode", previousViewMode)
+						}
 					} catch (rollbackError) {
 						this.log(
 							`[ClineProvider#createTask] Failed to restore the view mode pin after custom-mode registration failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,

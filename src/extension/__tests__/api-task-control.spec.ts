@@ -78,6 +78,7 @@ type ProviderDouble = EventEmitter & {
 	isDisposed: boolean
 	viewStateReadiness: Promise<void>
 	taskHistoryStore: Map<string, unknown>
+	webviewFocusTracker: typeof focusTrackerDouble
 }
 
 type TaskDouble = EventEmitter & {
@@ -87,6 +88,10 @@ type TaskDouble = EventEmitter & {
 	denyAsk: Mock<() => void>
 	handleWebviewAskResponse: Mock<(response: "messageResponse", text?: string, images?: string[]) => void>
 }
+
+// Sentinel double: the API must forward the source provider's focus tracker to
+// newly created tab providers, so the tests assert this exact object arrives.
+const focusTrackerDouble = { kind: "focus-tracker-double" }
 
 const configuration: RooCodeSettings = {}
 
@@ -112,6 +117,7 @@ function createProvider(taskId = "task-1"): ProviderDouble {
 	provider.isDisposed = false
 	provider.viewStateReadiness = Promise.resolve()
 	provider.taskHistoryStore = new Map()
+	provider.webviewFocusTracker = focusTrackerDouble
 	return provider
 }
 
@@ -149,6 +155,7 @@ describe("API task controls", () => {
 			expect(createClineTabPanelMock).toHaveBeenCalledWith({
 				context: sidebarProvider.context,
 				outputChannel,
+				webviewFocusTracker: focusTrackerDouble,
 			})
 			expect(newTabProvider.evictCurrentTask).toHaveBeenCalledOnce()
 			expect(newTabProvider.createTask).toHaveBeenCalledWith(
@@ -176,6 +183,7 @@ describe("API task controls", () => {
 			expect(createClineTabPanelMock).toHaveBeenCalledWith({
 				context: sidebarProvider.context,
 				outputChannel,
+				webviewFocusTracker: focusTrackerDouble,
 			})
 			expect(newTabProvider.createTask).toHaveBeenCalledWith(
 				"keep editors",

@@ -1627,9 +1627,10 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 
-			// Each instance should have a unique viewId
-			expect(provider1.viewId).toBeDefined()
-			expect(provider2.viewId).toBeDefined()
+			// Each instance carries a unique, well-formed viewId: a render-context
+			// prefix (or the temp prefix for pre-view instances) plus a counter.
+			expect(provider1.viewId).toMatch(/^([a-z]+-\d+|temp-\d+)$/)
+			expect(provider2.viewId).toMatch(/^([a-z]+-\d+|temp-\d+)$/)
 			expect(provider1.viewId).not.toBe(provider2.viewId)
 
 			await provider1.dispose()
@@ -3830,6 +3831,66 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("restores the cached viewStates map when a persisted view-state write fails durably", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-sidebar-view")
+			await provider.contextProxy.setValue("viewStates", {
+				"other-view": { mode: "code", updatedAt: 1 },
+			})
+			// The next durable write fails; the cache was already updated optimistically.
+			const updateSpy = vi.spyOn(mockContext.globalState, "update").mockImplementationOnce(async () => {
+				throw new Error("durable write failed")
+			})
+
+			await expect(provider["savePersistedViewState"]({ mode: "architect", updatedAt: 2 })).rejects.toThrow(
+				"durable write failed",
+			)
+
+			// The in-memory cache must match durable storage: an entry that never
+			// reached disk cannot stay visible through getValue.
+			expect(provider.contextProxy.getValue("viewStates")).toEqual({
+				"other-view": { mode: "code", updatedAt: 1 },
+			})
+			updateSpy.mockRestore()
+			await provider.dispose()
+		})
+
+		it("re-points live views pinned to a renamed profile onto the new name", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-sidebar-view")
+			await provider.saveViewState("currentApiConfigName", "profile-old")
+			await provider.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "old-key",
+			})
+
+			await provider["repointViewLocalStateAfterProfileRename"]("profile-old", "profile-new", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "renamed-key",
+			})
+
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("profile-new")
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "renamed-key",
+			})
+			const viewStates = mockContext.globalState.get("viewStates") as Record<string, Record<string, unknown>>
+			expect(viewStates["stable-sidebar-view"].currentApiConfigName).toBe("profile-new")
+			await provider.dispose()
+		})
+
 		it("clears this view's buffered apiConfiguration when directly activating a profile", async () => {
 			const provider = new ClineProvider(
 				mockContext,
@@ -4174,6 +4235,98 @@ describe("ClineProvider", () => {
 			expect(provider["viewLocalState"].mode).toBe("architect")
 			expect(provider.contextProxy.getValue("mode")).toBe("code")
 			expect(provider.getValues().mode).toBe("architect")
+		})
+
+		it("keeps a newer shared mode written by another view when custom-mode registration fails", async () => {
+			await provider.setValues({ mode: "code" })
+			delete provider["viewLocalState"].mode
+			// updateCustomMode awaits queued file I/O: while it is in flight another
+			// view moves the shared mode, and only then does registration fail.
+			provider["customModesManager"].updateCustomMode = vi.fn().mockImplementation(async () => {
+				await provider.contextProxy.setValue("mode", "architect")
+				throw new Error("registration down")
+			})
+
+			await expect(
+				provider.createTask(
+					undefined,
+					undefined,
+					undefined,
+					{},
+					{
+						mode: "reviewer",
+						customModes: [
+							{ slug: "reviewer", name: "Reviewer", roleDefinition: "Reviews code", groups: [] },
+						],
+					},
+				),
+			).rejects.toThrow("registration down")
+
+			// The rollback owns the shared layer only while it still holds the value
+			// this call wrote; the other view's newer choice must survive.
+			expect(provider.contextProxy.getValue("mode")).toBe("architect")
+			// The view layer still held this call's value, so its own rollback ran:
+			// the pre-call absence is restored rather than left as "reviewer".
+			expect(provider["viewLocalState"].mode).toBeUndefined()
+		})
+
+		it("does not touch the shared mode on rollback when the configuration omitted mode", async () => {
+			await provider.setValues({ mode: "code" })
+			delete provider["viewLocalState"].mode
+			provider["customModesManager"].updateCustomMode = vi.fn().mockImplementation(async () => {
+				await provider.contextProxy.setValue("mode", "architect")
+				throw new Error("registration down")
+			})
+
+			await expect(
+				provider.createTask(
+					undefined,
+					undefined,
+					undefined,
+					{},
+					{
+						customModes: [
+							{ slug: "reviewer", name: "Reviewer", roleDefinition: "Reviews code", groups: [] },
+						],
+					},
+				),
+			).rejects.toThrow("registration down")
+
+			// This call never wrote a mode, so the rollback must leave the shared
+			// store alone even though the captured previous value differs.
+			expect(provider.contextProxy.getValue("mode")).toBe("architect")
+		})
+
+		it("keeps a newer view pin written during custom-mode registration when rollback runs", async () => {
+			await provider.setValues({ mode: "code" })
+			provider["viewLocalState"].mode = "code"
+			// Another view moves this view's pin while registration is in flight;
+			// the rollback must not overwrite that newer per-view choice.
+			provider["customModesManager"].updateCustomMode = vi.fn().mockImplementation(async () => {
+				await provider.saveViewState("mode", "architect")
+				throw new Error("registration down")
+			})
+
+			await expect(
+				provider.createTask(
+					undefined,
+					undefined,
+					undefined,
+					{},
+					{
+						mode: "reviewer",
+						customModes: [
+							{ slug: "reviewer", name: "Reviewer", roleDefinition: "Reviews code", groups: [] },
+						],
+					},
+				),
+			).rejects.toThrow("registration down")
+
+			// The view layer no longer holds this call's "reviewer", so the rollback
+			// leaves the newer architect pin alone; the shared layer still does and
+			// rolls back to its own prior value.
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(provider.contextProxy.getValue("mode")).toBe("code")
 		})
 
 		it("deregisters the provider when an early cleanup step throws during dispose", async () => {
