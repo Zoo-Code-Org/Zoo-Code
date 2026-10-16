@@ -114,9 +114,6 @@ describe("changeJournal", () => {
 
 		it("propagates a non-ENOENT journal-read failure instead of replacing blind", async () => {
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "good" }))
-			const filePath = journalPath(tmpRoot, taskId)
-			const raw = await fs.readFile(filePath, "utf8")
-			await fs.writeFile(filePath, raw + '{"path":"src/half.ts","operation":"upd')
 			// The current content cannot be read (I/O error): replacing would
 			// discard whatever the unreadable journal really held, so appendChange
 			// must fail loudly.
@@ -205,8 +202,6 @@ describe("changeJournal", () => {
 			// A crash between the temp write and the rename leaves an orphan temp
 			// file; a crash mid-write can also leave the tail unterminated.
 			await fs.writeFile(path.join(dir, "changes.jsonl.4242.orphan.tmp"), "partial")
-			const raw = await fs.readFile(journalPath(tmpRoot, taskId), "utf8")
-			await fs.writeFile(journalPath(tmpRoot, taskId), raw + '{"path":"src/half.ts","operation":"upd')
 
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "after" }))
 
@@ -296,22 +291,21 @@ describe("changeJournal", () => {
 			expect(result[0].checkpointId).toBe("ok")
 		})
 
-		it("skips a corrupt middle line and still loads the later valid entries", async () => {
+		it("rejects a corrupt middle line instead of silently losing history", async () => {
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "ok" }))
 
 			// Corrupt the first line in place, then append a valid entry after it.
 			await fs.writeFile(
 				journalPath(tmpRoot, taskId),
-				'"{"path":"src/corrupt.ts","operation":"update"\n' +
+				'{"path":"src/corrupt.ts","operation":"update"\n' +
 					JSON.stringify(entry({ checkpointId: "after" })) +
 					"\n",
 			)
 
-			const result = await loadChanges(tmpRoot, taskId)
-			expect(result).toHaveLength(1)
-			expect(result[0].checkpointId).toBe("after")
+			// A lost middle write must not let a later entry mask the gap:
+			// rollback completeness is unknown and the load fails loudly.
+			await expect(loadChanges(tmpRoot, taskId)).rejects.toThrow(/Corrupt change journal entry at line 1/)
 		})
-
 		it("does not throw when the entire journal is torn", async () => {
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
 
@@ -321,6 +315,14 @@ describe("changeJournal", () => {
 			expect(await loadChanges(tmpRoot, taskId)).toEqual([])
 		})
 
+		it("rejects a final line that parses but is not entry-shaped", async () => {
+			// A torn tail cannot parse at all; a parsed-but-malformed final
+			// line is corruption, not a crash tail, and completeness is unknown.
+			await fs.mkdir(path.dirname(journalPath(tmpRoot, taskId)), { recursive: true })
+			await fs.writeFile(journalPath(tmpRoot, taskId), '{"a":1}\n')
+
+			await expect(loadChanges(tmpRoot, taskId)).rejects.toThrow(/Malformed change journal entry at line 1/)
+		})
 		it("includes diffStats when present", async () => {
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "s", diffStats: { additions: 5, deletions: 2 } }))
 

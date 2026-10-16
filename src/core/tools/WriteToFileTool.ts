@@ -188,18 +188,17 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 			task.didEditFile = true
 
-			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, !fileExists)
-
-			pushToolResult(message)
-
 			if (perWriteCheckpoints) {
 				// B2: the change-journal entry for this write is appended inside
 				// checkpointSave (the hook stays a single call site), keyed by the
 				// checkpoint commit that call produces. Await so the checkpoint
-				// (staging + commit) finishes before the next queued write starts;
-				// otherwise two writes can collapse into one commit. B3a threads
+				// (staging + commit + journal) finishes before the next queued write
+				// starts; otherwise two writes can collapse into one commit. B3a threads
 				// the approval diff (for the change card) and whether the step was
 				// auto-approved (auto-approved steps always get the compact card).
+				// A persistence failure - a committed checkpoint whose journal update
+				// was lost - propagates to the catch below (explicit tool failure
+				// handling, surfacing the checkpoint id and affected paths).
 				const autoApproved =
 					(
 						await checkAutoApproval({
@@ -218,8 +217,13 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 						: undefined,
 					...(approvalDiff ? { diff: approvalDiff } : {}),
 					...(autoApproved ? { autoApproved: true } : {}),
-				}).catch(() => {})
+				})
 			}
+
+			// Emitted only after checkpoint + journal persistence succeeded.
+			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, !fileExists)
+
+			pushToolResult(message)
 
 			await task.diffViewProvider.reset()
 			this.resetPartialState()

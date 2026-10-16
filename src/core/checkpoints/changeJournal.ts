@@ -54,7 +54,7 @@ export function journalPath(globalStorageDir: string, taskId: string): string {
  */
 const journalQueues = new Map<string, Promise<unknown>>()
 
-function withTaskLock<T>(key: string, run: () => Promise<T>): Promise<T> {
+export function withTaskLock<T>(key: string, run: () => Promise<T>): Promise<T> {
 	const prev = journalQueues.get(key) ?? Promise.resolve()
 	// The next update runs after the previous one settles, whatever it did.
 	const next = prev.then(run, run)
@@ -111,14 +111,14 @@ export async function appendChanges(
 				throw error
 			}
 		}
-		let payload = entries.map((entry) => JSON.stringify(entry) + "\n").join("")
-		// Torn-tail repair: a journal left without a trailing newline (e.g.
-		// a crash before this replacement path completed) must be terminated
-		// before the new lines or the first appended entry merges into the
-		// fragment.
+		// Torn-tail repair: a crash can leave the final line unterminated - a
+		// fragment of a lost write. The replacement truncates that fragment
+		// instead of preserving it, so the journal only ever holds complete
+		// records and a later entry can never mask the lost one.
 		if (content && !content.endsWith("\n")) {
-			payload = "\n" + payload
+			content = content.slice(0, content.lastIndexOf("\n") + 1)
 		}
+		const payload = entries.map((entry) => JSON.stringify(entry) + "\n").join("")
 		const tmpPath = path.join(dir, `${JOURNAL_FILENAME}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`)
 		const data = Buffer.from(content + payload)
 		try {
@@ -165,10 +165,12 @@ export async function appendChange(globalStorageDir: string, taskId: string, ent
 /**
  * Load all change-journal entries for a task.
  *
- * Torn-tail repair: if the final line is truncated (JSON.parse fails), it is
- * silently discarded.  Lines that parse to valid JSON but are not
- * entry-shaped (non-object, missing string path/checkpointId, or an
- * unknown operation) are skipped for the same reason.  The rest of the file
+ * Torn-tail repair: if the FINAL line is truncated (JSON.parse fails) it is
+ * discarded - that is the verified crash tail.  Any other damage throws:
+ * a corrupt or non-entry-shaped line before the last one means a write was
+ * lost from the history, and a rollback that silently skipped it could
+ * restore to the wrong target.  Callers treat the rejection as "journal
+ * completeness unknown" and fail closed.  The rest of the file
  * is returned in order.  An absent
  * or empty journal returns [] — but only an ABSENT file. Any other read
  * failure (permissions, I/O) is rethrown: a journal that cannot be read must
@@ -202,28 +204,34 @@ export async function loadChanges(globalStorageDir: string, taskId: string): Pro
 
 	const entries: ChangeJournalEntry[] = []
 	for (let i = 0; i < lines.length; i++) {
+		let parsed: unknown
 		try {
-			const parsed: unknown = JSON.parse(lines[i])
-			// A torn append or manual edit can leave valid JSON that is not an
-			// entry (a bare number, null, or a differently-shaped object).
-			// Consumers read path/checkpointId unguarded, so skip any line that
-			// is not entry-shaped instead of returning it as an entry.
-			if (
+			parsed = JSON.parse(lines[i])
+		} catch {
+			// Only the final line may be a torn tail from a crash mid-append;
+			// truncating it is verified recovery. A corrupt MIDDLE line means a
+			// write was lost from the history, so journal completeness is
+			// unknown and rollback must fail loudly instead of picking an
+			// older entry as the restore target.
+			if (i === lines.length - 1) {
+				break
+			}
+			throw new Error(`Corrupt change journal entry at line ${i + 1} of ${filePath}`)
+		}
+		// A parsed line that is not entry-shaped is malformed, not a torn
+		// tail (a torn tail cannot parse at all) - reject it anywhere.
+		if (
+			!(
 				parsed &&
 				typeof parsed === "object" &&
 				typeof (parsed as ChangeJournalEntry).path === "string" &&
 				typeof (parsed as ChangeJournalEntry).checkpointId === "string" &&
 				["create", "update", "delete"].includes((parsed as ChangeJournalEntry).operation)
-			) {
-				entries.push(parsed as ChangeJournalEntry)
-			}
-		} catch {
-			// A corrupt line before the final line (e.g. a partially flushed
-			// append) must not hide the valid entries after it. The final line
-			// is still discarded as a torn tail — `continue` at the last index
-			// ends the loop either way.
-			continue
+			)
+		) {
+			throw new Error(`Malformed change journal entry at line ${i + 1} of ${filePath}`)
 		}
+		entries.push(parsed as ChangeJournalEntry)
 	}
 
 	return entries

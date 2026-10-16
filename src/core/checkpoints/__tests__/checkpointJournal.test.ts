@@ -189,6 +189,28 @@ describe("checkpointSave change-journal wiring (B2)", () => {
 		expect(mockTask.enableCheckpoints).toBe(true)
 	})
 
+	it("serializes the whole checkpoint transaction per task (commit + journal)", async () => {
+		// Two concurrent saves for the same task must not interleave their
+		// staging/commit with each other's journal replacement.
+		let inTransaction = 0
+		let maxConcurrent = 0
+		saveCheckpointSpy.mockImplementation(async () => {
+			inTransaction++
+			maxConcurrent = Math.max(maxConcurrent, inTransaction)
+			await new Promise((resolve) => setTimeout(resolve, 20))
+			inTransaction--
+			return { commit: COMMIT }
+		})
+
+		await Promise.all([
+			checkpointSave(mockTask as Task, false, true, write),
+			checkpointSave(mockTask as Task, false, true, { path: "src/second.ts", operation: "update" }),
+		])
+
+		expect(maxConcurrent).toBe(1)
+		expect((await loadChanges(tmpStorageDir, TASK_ID)).map((e) => e.path)).toEqual(["src/foo.ts", "src/second.ts"])
+	})
+
 	it("does not crash when the provider has no globalStorageDir", async () => {
 		mockTask.providerRef = { deref: () => undefined }
 
@@ -208,7 +230,11 @@ describe("checkpointSave change-journal wiring (B2)", () => {
 		// The checkpoint committed but the journal update did not persist: the
 		// save must not report a fully durable checkpoint, and the change card
 		// (which advertises the journaled files) must not be emitted.
-		await expect(checkpointSave(mockTask as Task, false, true, write)).rejects.toThrow()
+		await expect(checkpointSave(mockTask as Task, false, true, write)).rejects.toMatchObject({
+			name: "CheckpointPartialPersistenceError",
+			checkpointId: COMMIT,
+			writes: [{ path: "src/foo.ts", operation: "create", diffStats: { additions: 3, deletions: 0 } }],
+		})
 
 		// Propagation is not a checkpoint error: checkpoints stay enabled.
 		expect(mockTask.enableCheckpoints).toBe(true)
@@ -252,7 +278,8 @@ describe("loadChanges entry-shape validation (B2)", () => {
 			].join("\n") + "\n",
 		)
 
-		const entries = await loadChanges(tmpStorageDir, TASK_ID)
-		expect(entries).toEqual([{ path: "src/a.ts", operation: "create", checkpointId: "c1" }])
+		// Middle malformed records mean history was lost: the load fails
+		// loudly instead of returning a partial view.
+		await expect(loadChanges(tmpStorageDir, TASK_ID)).rejects.toThrow(/Malformed change journal entry at line 1/)
 	})
 })
