@@ -586,6 +586,30 @@ describe("API task controls - per-view review fixes", () => {
 			expect(api.getGlobalState("mode")).toBeUndefined()
 			expect(get).toHaveBeenCalledWith("mode")
 		})
+
+		it("rejects credential-bearing keys before touching storage", async () => {
+			const get = vi.fn()
+			const update = vi.fn().mockResolvedValue(undefined)
+			sidebarProvider.context = {
+				extensionMode: vscode.ExtensionMode.Test,
+				globalState: { get, update },
+			}
+			api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory())
+
+			// mimoApiKey and openAiHeaders are schema keys but carry credentials; the
+			// test-only API must refuse them before storage access, both directions.
+			expect(() => api.getGlobalState("mimoApiKey" as never)).toThrow("credential-bearing key")
+			expect(() => api.getGlobalState("openAiHeaders" as never)).toThrow("credential-bearing key")
+			expect(get).not.toHaveBeenCalled()
+			await expect(api.setGlobalState("mimoApiKey" as never, "sk-test" as never)).rejects.toThrow(
+				"credential-bearing key",
+			)
+			expect(update).not.toHaveBeenCalled()
+
+			// A non-credential schema key still passes through.
+			expect(api.getGlobalState("mode")).toBeUndefined()
+			expect(get).toHaveBeenCalledWith("mode")
+		})
 	})
 
 	describe("startNewTask view-state readiness", () => {

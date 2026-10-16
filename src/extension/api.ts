@@ -827,6 +827,12 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		if (!isGlobalStateKey(key)) {
 			throw new Error(`getGlobalState received a key outside the settings schema: ${String(key)}`)
 		}
+		// The global-state union still contains credential-bearing keys (API keys,
+		// headers, OAuth paths) that are not part of the secret-state union; refuse
+		// them before storage access so the test-only API cannot read credentials.
+		if (isSecretStateKey(String(key)) || isSensitiveProviderConfigKey(String(key))) {
+			throw new Error(`getGlobalState received a credential-bearing key: ${String(key)}`)
+		}
 		return this.context.globalState.get<GlobalState[K]>(key)
 	}
 
@@ -836,6 +842,11 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		// persisted into global state.
 		if (!isGlobalStateKey(key)) {
 			throw new Error(`setGlobalState received a key outside the settings schema: ${String(key)}`)
+		}
+		// Same credential boundary as getGlobalState: a crafted runtime key must not
+		// be able to persist secrets through the test-only surface.
+		if (isSecretStateKey(String(key)) || isSensitiveProviderConfigKey(String(key))) {
+			throw new Error(`setGlobalState received a credential-bearing key: ${String(key)}`)
 		}
 		await this.context.globalState.update(key, value)
 	}
