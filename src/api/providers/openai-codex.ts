@@ -11,7 +11,6 @@ import {
 	OpenAiCodexModelId,
 	openAiCodexModels,
 	SERVICE_TIER_KEY,
-	type ReasoningEffort,
 	type ReasoningEffortExtended,
 	type VerbosityLevel,
 	ApiProviderError,
@@ -191,7 +190,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		this.sessionId = uuidv7()
 	}
 
-	private normalizeUsage(usage: any, model: OpenAiCodexModel): ApiStreamUsageChunk | undefined {
+	private normalizeUsage(usage: any, _model: OpenAiCodexModel): ApiStreamUsageChunk | undefined {
 		if (!usage) return undefined
 
 		const inputDetails = usage.input_tokens_details ?? usage.prompt_tokens_details
@@ -607,7 +606,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		}
 	}
 
-	private formatFullConversation(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): any {
+	private formatFullConversation(_systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): any {
 		const formattedInput: any[] = []
 
 		for (const message of messages) {

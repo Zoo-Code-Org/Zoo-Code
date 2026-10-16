@@ -140,7 +140,7 @@ export class KenariHandler extends RouterProvider implements SingleCompletionHan
 	 * @returns The model's reply text, or an empty string if no content is returned.
 	 * @throws Error with a Kenari-specific prefix if the request fails.
 	 */
-	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
 		const { id: modelId, info } = await this.fetchModel()
 
 		try {

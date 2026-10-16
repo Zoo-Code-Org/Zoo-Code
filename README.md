@@ -48,6 +48,7 @@ Zoo Code builds on the foundation created by Roo Code and continues to expand it
 
 ## What's New in v3.88.0
 
+- 🐙 **GitHub Copilot provider:** Sign in to GitHub and use your Copilot models directly in Zoo Code.
 - ✨ **Provider and model support:** Use Grok Build and improved custom-model support. This release also fixes Bedrock model limits and sends the Codex verbosity setting.
 - 🧭 **Task reliability:** This release fixes cancellation handling, tool-turn continuation, and task-message saving.
 - ⚡ **Faster editing and chat:** File writes no longer use artificial delays by default. Chat messages carry less file data, and code actions reach the last active chat.
