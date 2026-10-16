@@ -3328,6 +3328,77 @@ describe("DiffViewProvider", () => {
 
 			// The restore never ran: the peer's bytes stay on disk.
 			expect(vscode.workspace.applyEdit).not.toHaveBeenCalled()
+			// The rejected rollback still finalized the session: the finalization is
+			// claimed so no preview authorization survives the rejection.
+			expect(diffViewProvider["sessionFinalizationClaimed"]).toBe(true)
+		})
+
+		it("reports a peer publish that landed after a real successful save as a rollback conflict", async () => {
+			// The rollback baseline must come from this session's own publish: a real
+			// saveChanges() records the token its publish left on disk, so a peer that
+			// republishes before the rollback is reported as a conflict instead of
+			// being silently overwritten. While guardedWrite resolved void the
+			// baseline stayed undefined and this exact sequence clobbered the peer.
+			await diffViewProvider.saveChanges(false)
+
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor // Structural double: the rollback only reads document/tab surface.
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider["relPath"] = "test.ts"
+			diffViewProvider.editType = "modify"
+			diffViewProvider["originalContent"] = "original"
+			// No manual lastWrittenToken: the successful save above must have recorded it.
+			vi.mocked(fs.stat).mockResolvedValue({
+				...previewStats,
+				size: 999n,
+				mtimeNs: 7n,
+				ctimeNs: 8n,
+			} as unknown as Awaited<ReturnType<typeof fs.stat>>)
+
+			await expect(diffViewProvider.revertChanges()).rejects.toBeInstanceOf(RollbackConflictError)
+			expect(vscode.workspace.applyEdit).not.toHaveBeenCalled()
+		})
+
+		it("does not carry the previous session's rollback baseline into a new session", async () => {
+			// The baseline belongs to the session that wrote it: a new session that
+			// is cancelled before writing anything must not compare its file's disk
+			// token against a token left by the previous session and report a false
+			// conflict that leaves the preview edit unreverted.
+			diffViewProvider["lastWrittenToken"] = "previous-session-token"
+			await openPreview()
+			diffViewProvider["activeDiffEditor"] = makeTextEditor({
+				document: makeTextDocument({
+					uri: makeUri(`${mockCwd}/test.txt`),
+					getText: vi.fn().mockReturnValue("new content"),
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				}),
+			})
+			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+
+			await expect(diffViewProvider.revertChanges()).resolves.toBeUndefined()
+			expect(vscode.workspace.applyEdit).toHaveBeenCalled()
+		})
+
+		it("drops the rollback baseline when the session is finalized", async () => {
+			// performFinalReset clears the other per-session fields; the rollback
+			// baseline must not survive it, or a reused provider compares the next
+			// session's file against the previous session's bytes.
+			diffViewProvider["lastWrittenToken"] = "our-token"
+			await diffViewProvider.reset()
+			expect(diffViewProvider["lastWrittenToken"]).toBeUndefined()
 		})
 
 		it("keeps a peer's file when the create placeholder was replaced before the rollback", async () => {
@@ -3767,6 +3838,14 @@ describe("DiffViewProvider", () => {
 
 	describe("userTouchedDocument close/keep behavior", () => {
 		const mockTargetPath = `${mockCwd}/mock-target-file.ts`
+
+		beforeEach(() => {
+			// The guarded-publish describe queues a stat mock that clearAllMocks does
+			// not undo. These tests model a session whose own publish is the last
+			// writer, so restore the file-wide default (no stat evidence) instead of
+			// letting a foreign token pose as a peer write.
+			vi.mocked(fs.stat).mockResolvedValue(undefined as unknown as Awaited<ReturnType<typeof fs.stat>>) // No stat evidence.
+		})
 
 		const buildActiveDiffEditor = () => ({
 			document: {

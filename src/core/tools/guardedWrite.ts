@@ -63,7 +63,7 @@ export class GuardRejectedError extends Error {
  * Settled entries are evicted (below), so a long-lived extension does not
  * accumulate a map entry per distinct written path.
  */
-const pendingChains = new Map<string, Promise<void>>()
+const pendingChains = new Map<string, Promise<unknown>>()
 
 /**
  * Enqueue a write operation on the per-path FIFO chain.
@@ -73,7 +73,7 @@ const pendingChains = new Map<string, Promise<void>>()
  * deleted once it settles — but only while it is still the current tail for
  * the path, so a replacement enqueued in the meantime keeps ownership.
  */
-function enqueue(pathKey: string, fn: () => Promise<void>): Promise<void> {
+function enqueue<T>(pathKey: string, fn: () => Promise<T>): Promise<T> {
 	const prev = pendingChains.get(pathKey) ?? Promise.resolve()
 	const next = prev.then(fn, fn)
 	pendingChains.set(pathKey, next)
@@ -381,7 +381,7 @@ export async function guardedWrite(
 	// view of another file must carry that view's completeness through the publish
 	// instead of claiming completeness for lines it never read.
 	completeOverride?: boolean,
-): Promise<void> {
+): Promise<string | undefined> {
 	const absolutePath = resolveAbsolutePath(task, relPathOrAbsolute)
 	// Model-facing path: the caller's own spelling, not the resolved absolute
 	// path. The guard key stays absolute, but a rejection must not put a
@@ -494,6 +494,11 @@ export async function guardedWrite(
 			// publish content built from the slice alone.
 			task.observationRegistry.observe(absolutePath, publishedToken, completeAfterPublish())
 		}
+		// Hand the publish's own token back: the save path records it as the
+		// rollback baseline, so a later disk state is compared against THIS
+		// session's write instead of a guess. Undefined when the guard could
+		// not read a token back (e.g. the edit guard path).
+		return publishedToken
 	})
 }
 

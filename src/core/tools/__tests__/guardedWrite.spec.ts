@@ -715,7 +715,8 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			// caller re-reads the file (observation refreshed to v2) and retries.
 			reg.observe(abs("settle.txt"), "v2")
 			const p2 = guardedWrite(task, "settle.txt", "second", "update")
-			await expect(p2).resolves.toBeUndefined()
+			// The publish resolves with the token the guard read back under its lock.
+			await expect(p2).resolves.toBe("v2")
 
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
 			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("settle.txt"), "second")
@@ -729,7 +730,7 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 
 			// A first write settles; its chain entry is evicted with it.
 			const p1 = guardedWrite(task, "evict.txt", "first", "update")
-			await expect(p1).resolves.toBeUndefined()
+			await expect(p1).resolves.toBe("v1")
 
 			// Two rapid writes submitted after the eviction must still run one
 			// at a time in submission order (the eviction must not drop the
