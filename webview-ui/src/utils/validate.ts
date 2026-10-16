@@ -8,6 +8,7 @@ import {
 	isDynamicProvider,
 	parseOpenAiExtraBody,
 	providerIdentifiers,
+	githubCopilotLanguageModel,
 } from "@roo-code/types"
 
 type OpenAiExtraBodyParseResult = ReturnType<typeof parseOpenAiExtraBody>
@@ -144,6 +145,14 @@ function validateModelsAndKeysProvided(
 			break
 		case providerIdentifiers.vscodeLm:
 			if (!apiConfiguration.vsCodeLmModelSelector) {
+				return i18next.t("settings:validation.modelSelector")
+			}
+			break
+		case providerIdentifiers.githubCopilot:
+			if (
+				apiConfiguration.vsCodeLmModelSelector?.vendor !== githubCopilotLanguageModel.vendor ||
+				(!apiConfiguration.vsCodeLmModelSelector.id && !apiConfiguration.vsCodeLmModelSelector.family)
+			) {
 				return i18next.t("settings:validation.modelSelector")
 			}
 			break
