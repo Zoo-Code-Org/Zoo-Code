@@ -24,6 +24,7 @@ const GEMINI_MODEL_NAME = geminiDefaultModelId
 describe("GeminiHandler", () => {
 	let handler: GeminiHandler
 	let mockGenerateContentStream: ReturnType<typeof vitest.fn>
+	let mockGenerateContent: ReturnType<typeof vitest.fn>
 
 	beforeEach(() => {
 		// Reset mocks
@@ -31,7 +32,7 @@ describe("GeminiHandler", () => {
 
 		// Create mock functions
 		mockGenerateContentStream = vitest.fn()
-		const mockGenerateContent = vitest.fn()
+		mockGenerateContent = vitest.fn()
 		const mockGetGenerativeModel = vitest.fn()
 
 		handler = new GeminiHandler({
@@ -332,6 +333,97 @@ describe("GeminiHandler", () => {
 			})
 		})
 
+		it("appends a user continuation when history ends with an assistant turn", async () => {
+			const generateContentStream = vitest.mocked(handler["client"].models.generateContentStream)
+			generateContentStream.mockResolvedValue(asyncStreamFrom([]))
+
+			await collectStream(handler.createMessage(systemPrompt, mockMessages))
+
+			expect(generateContentStream).toHaveBeenCalledWith(
+				expect.objectContaining({
+					contents: [
+						{ role: "user", parts: [{ text: "Hello" }] },
+						{ role: "model", parts: [{ text: "Hi there!" }] },
+						{ role: "user", parts: [{ text: "Continue." }] },
+					],
+				}),
+			)
+		})
+
+		it("synthesizes an empty function response when history ends with an unanswered function call", async () => {
+			const generateContentStream = vitest.mocked(handler["client"].models.generateContentStream)
+			generateContentStream.mockResolvedValue(asyncStreamFrom([]))
+
+			// Crash-resume shape: the model emitted a functionCall but the task was
+			// interrupted before the tool ran, so no tool_result exists for it.
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Read foo.ts" },
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "call-1", name: "read_file", input: { path: "foo.ts" } }],
+				},
+			]
+			const metadata = {
+				taskId: "test-task",
+				tools: [{ type: "function", function: { name: "read_file", description: "", parameters: {} } }],
+			} satisfies ApiHandlerCreateMessageMetadata
+
+			await collectStream(handler.createMessage(systemPrompt, messages, metadata))
+
+			// Without the synthesized functionResponse the request would end on an
+			// unanswered model functionCall turn and Gemini/Vertex would reject it.
+			const expectedBypassToken = Buffer.from("skip_thought_signature_validator").toString("base64")
+			expect(generateContentStream).toHaveBeenCalledWith(
+				expect.objectContaining({
+					contents: [
+						{ role: "user", parts: [{ text: "Read foo.ts" }] },
+						{
+							role: "model",
+							parts: [
+								{
+									functionCall: { name: "read_file", args: { path: "foo.ts" } },
+									thoughtSignature: expectedBypassToken,
+								},
+							],
+						},
+						{
+							role: "user",
+							parts: [
+								{
+									functionResponse: {
+										name: "read_file",
+										response: { name: "read_file", content: "(empty)" },
+									},
+								},
+							],
+						},
+					],
+				}),
+			)
+		})
+
+		it("does not append a continuation when history ends with a user turn", async () => {
+			const generateContentStream = vitest.mocked(handler["client"].models.generateContentStream)
+			generateContentStream.mockResolvedValue(asyncStreamFrom([]))
+			const userEndingMessages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Hello" },
+				{ role: "assistant", content: "Hi there!" },
+				{ role: "user", content: "Please continue" },
+			]
+
+			await collectStream(handler.createMessage(systemPrompt, userEndingMessages))
+
+			expect(generateContentStream).toHaveBeenCalledWith(
+				expect.objectContaining({
+					contents: [
+						{ role: "user", parts: [{ text: "Hello" }] },
+						{ role: "model", parts: [{ text: "Hi there!" }] },
+						{ role: "user", parts: [{ text: "Please continue" }] },
+					],
+				}),
+			)
+		})
+
 		it("generates request-unique tool call IDs across requests (#1714)", async () => {
 			const metadata = {
 				taskId: "test-task",
@@ -387,6 +479,26 @@ describe("GeminiHandler", () => {
 
 			await expect(collectStream(stream)).rejects.toThrow()
 		})
+
+		it("preserves status and errorDetails when the stream call rejects with a 429", async () => {
+			// Task.ts backoffAndAnnounce consumes errorDetails as an ARRAY of google.rpc
+			// detail objects and parses RetryInfo.retryDelay ("<n>s") on 429s.
+			const rateLimitError = Object.assign(new Error("rate limit exceeded"), {
+				status: 429,
+				errorDetails: [{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "30s" }],
+			})
+			mockGenerateContentStream.mockRejectedValue(rateLimitError)
+
+			const error = (await collectStream(handler.createMessage(systemPrompt, mockMessages)).catch(
+				(e: unknown) => e,
+			)) as Error & { status?: number; errorDetails?: unknown }
+
+			expect(error).toBeInstanceOf(Error)
+			expect(error.status).toBe(429)
+			expect(error.errorDetails).toEqual([
+				{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "30s" },
+			])
+		})
 	})
 
 	describe("completePrompt", () => {
@@ -417,6 +529,27 @@ describe("GeminiHandler", () => {
 			await expect(handler.completePrompt("Test prompt")).rejects.toThrow(
 				t("common:errors.gemini.generate_complete_prompt", { error: "Gemini API error" }),
 			)
+		})
+
+		it("preserves status and errorDetails when the completion call rejects with a 403", async () => {
+			// Same consumer contract as the 429 case: errorDetails is an array of
+			// google.rpc detail objects (ErrorInfo carries the denial reason).
+			const forbiddenError = Object.assign(new Error("permission denied"), {
+				status: 403,
+				errorDetails: [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "PERMISSION_DENIED" }],
+			})
+			mockGenerateContent.mockRejectedValue(forbiddenError)
+
+			const error = (await handler.completePrompt("Test prompt").catch((e: unknown) => e)) as Error & {
+				status?: number
+				errorDetails?: unknown
+			}
+
+			expect(error).toBeInstanceOf(Error)
+			expect(error.status).toBe(403)
+			expect(error.errorDetails).toEqual([
+				{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "PERMISSION_DENIED" },
+			])
 		})
 
 		it("should handle empty response", async () => {
@@ -464,6 +597,18 @@ describe("GeminiHandler", () => {
 			expect(modelInfo.info.cacheReadsPrice).toBeUndefined()
 			expect(modelInfo.info.cacheWritesPrice).toBeUndefined()
 			expect(modelInfo.info.tiers).toBeUndefined()
+		})
+
+		it("should strip only a trailing :thinking suffix, preserving mid-ID occurrences", () => {
+			const thinkingHandler = new GeminiHandler({
+				apiModelId: "gemini-:thinking-flash:thinking",
+				geminiApiKey: "test-key",
+			})
+
+			// String.replace eats the FIRST occurrence anywhere, which would turn this
+			// id into "gemini--flash:thinking" and leave a trailing suffix on the wire.
+			const modelInfo = thinkingHandler.getModel()
+			expect(modelInfo.id).toBe("gemini-:thinking-flash")
 		})
 
 		it("should not treat Object prototype keys as known models", () => {

@@ -59,7 +59,38 @@ export function convertAnthropicContentToGemini(
 		return [{ text: content }]
 	}
 
-	const parts = content.flatMap((block): Part | Part[] => {
+	const hasToolResults =
+		Array.isArray(content) &&
+		content.some(
+			(block) => typeof block === "object" && block !== null && "type" in block && block.type === "tool_result",
+		)
+
+	let siblingText: string | undefined
+	let lastToolResultIndex = -1
+
+	if (hasToolResults && Array.isArray(content)) {
+		const textBlocks = content.filter(
+			(block): block is Anthropic.Messages.TextBlockParam =>
+				typeof block === "object" && block !== null && "type" in block && block.type === "text",
+		)
+		const joinedText = textBlocks
+			.map((b) => b.text)
+			.filter(Boolean)
+			.join("\n\n")
+		if (joinedText) {
+			siblingText = joinedText
+		}
+
+		for (let i = content.length - 1; i >= 0; i--) {
+			const block = content[i]
+			if (typeof block === "object" && block !== null && "type" in block && block.type === "tool_result") {
+				lastToolResultIndex = i
+				break
+			}
+		}
+	}
+
+	const parts = content.flatMap((block, index): Part | Part[] => {
 		// Handle thoughtSignature blocks first
 		if (isThoughtSignatureContentBlock(block)) {
 			// We process thought signatures globally and attach them to the relevant parts
@@ -69,6 +100,12 @@ export function convertAnthropicContentToGemini(
 
 		switch (block.type) {
 			case "text":
+				// If the turn contains tool_result blocks, sibling text (such as environment_details)
+				// is merged into the last functionResponse part to avoid polluting function call turns
+				// with invalid text parts.
+				if (hasToolResults) {
+					return []
+				}
 				return { text: block.text }
 			case "image":
 				if (block.source.type !== "base64") {
@@ -105,34 +142,31 @@ export function convertAnthropicContentToGemini(
 					)
 				}
 
-				if (typeof block.content === "string") {
-					return {
-						functionResponse: {
-							name: toolName,
-							response: { name: toolName, content: block.content || "(empty)" },
-						},
-					}
-				}
-
-				if (!Array.isArray(block.content)) {
-					return []
-				}
-
-				const textParts: string[] = []
+				let contentText = ""
 				const imageParts: Part[] = []
 
-				for (const item of block.content) {
-					if (item.type === "text") {
-						textParts.push(item.text)
-					} else if (item.type === "image" && item.source.type === "base64") {
-						const { data, media_type } = item.source
-						imageParts.push({ inlineData: { data, mimeType: media_type } })
+				if (typeof block.content === "string") {
+					contentText = block.content
+				} else if (Array.isArray(block.content)) {
+					const textParts: string[] = []
+
+					for (const item of block.content) {
+						if (item.type === "text") {
+							textParts.push(item.text)
+						} else if (item.type === "image" && item.source.type === "base64") {
+							const { data, media_type } = item.source
+							imageParts.push({ inlineData: { data, mimeType: media_type } })
+						}
 					}
+
+					contentText =
+						textParts.join("\n\n") + (imageParts.length > 0 ? "\n\n(See next part for image)" : "")
 				}
 
-				// Create content text with a note about images if present
-				const contentText =
-					textParts.join("\n\n") + (imageParts.length > 0 ? "\n\n(See next part for image)" : "")
+				// If this is the last tool result in the message, append any sibling text (e.g. environment_details)
+				if (index === lastToolResultIndex && siblingText) {
+					contentText = contentText ? `${contentText}\n\n${siblingText}` : siblingText
+				}
 
 				// Return function response followed by any images
 				return [
@@ -207,4 +241,37 @@ export function convertAnthropicMessageToGemini(
 			parts,
 		},
 	]
+}
+
+// Gemini and Vertex AI reject contents that end on a model turn whose functionCall
+// parts have no matching functionResponse — the exact shape left behind when a task
+// crashes between the model's functionCall emit and tool execution. Synthesize a
+// closing functionResponse per dangling call so the history ends on a completed tool
+// turn and the role-based continuation logic in the Gemini handler applies as usual.
+// Uses the same "(empty)" sentinel as empty/null tool results above: the tool never
+// ran, so there is no real output to report.
+export function closeDanglingFunctionCalls(contents: Content[]): Content[] {
+	const last = contents.at(-1)
+	if (!last || last.role !== "model" || !last.parts) {
+		return contents
+	}
+
+	const danglingCalls = last.parts.flatMap((part) => (part.functionCall?.name ? [part.functionCall] : []))
+	if (danglingCalls.length === 0) {
+		return contents
+	}
+
+	// The dangling turn is the final content, so none of its calls can have a
+	// response anywhere later in the history.
+	contents.push({
+		role: "user",
+		parts: danglingCalls.map((call) => ({
+			functionResponse: {
+				name: call.name,
+				response: { name: call.name, content: "(empty)" },
+			},
+		})),
+	})
+
+	return contents
 }
