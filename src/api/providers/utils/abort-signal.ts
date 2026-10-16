@@ -1,18 +1,24 @@
 /**
  * Merge an optional external abort signal with an optional timeout.
  *
- * Timeout values <= 0 are treated as disabled. The timeout is created via the
+ * Timeout values <= 0 and non-finite values are treated as disabled; finite
+ * delays above 2^31-1 ms are capped (Node clamps them to 1 ms otherwise). The timeout is created via the
  * native AbortSignal.timeout() API, which self-manages its timer — callers do
  * not need to (and cannot) clear it manually.
  */
 export function mergeAbortSignalAndTimeout(externalSignal?: AbortSignal, timeoutMs?: number): AbortSignal | undefined {
-	const hasTimeout = typeof timeoutMs === "number" && timeoutMs > 0
+	// Node's AbortSignal.timeout() throws ERR_OUT_OF_RANGE for non-integer
+	// delays (Infinity) and clamps delays above 2^31-1 ms to 1 ms, which would
+	// abort almost immediately; treat non-finite values as "no timeout",
+	// round fractional delays up to whole milliseconds (uint32 validation
+	// throws for 1500.5), and cap the rest.
+	const hasTimeout = typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
 
 	if (!hasTimeout) {
 		return externalSignal
 	}
 
-	const timeoutSignal = AbortSignal.timeout(timeoutMs)
+	const timeoutSignal = AbortSignal.timeout(Math.min(Math.max(1, Math.ceil(timeoutMs)), 2_147_483_647))
 
 	if (!externalSignal) {
 		return timeoutSignal
@@ -34,6 +40,45 @@ export function mergeAbortSignals(primarySignal: AbortSignal, secondarySignal?: 
 	}
 
 	return AbortSignal.any([primarySignal, secondarySignal])
+}
+
+/**
+ * Bridge an optional caller-owned (external) abort signal to a per-request
+ * signal, with an explicit detach handle.
+ *
+ * The returned `signal` aborts together with the external signal (immediately
+ * if it is already aborted). Callers must invoke `dispose()` once the request
+ * ends - on completion, failure, and early generator exit alike: the listener
+ * is registered on the caller's long-lived signal, and an anonymous listener
+ * left attached would outlive the request and retain the per-request
+ * controller for every completed request.
+ *
+ * With no external signal, returns `{ signal: undefined, dispose: noop }` so
+ * the client-level timeout remains the only cancellation mechanism.
+ */
+export function bridgeExternalAbortSignal(externalSignal?: AbortSignal): {
+	signal?: AbortSignal
+	dispose: () => void
+} {
+	if (!externalSignal) {
+		return { signal: undefined, dispose: () => {} }
+	}
+
+	const controller = new AbortController()
+	if (externalSignal.aborted) {
+		controller.abort()
+		return { signal: controller.signal, dispose: () => {} }
+	}
+
+	// Retain the callback so the listener can be detached once this request
+	// ends: an anonymous listener on a long-lived external signal would
+	// outlive the request and retain the per-request controller.
+	const onExternalAbort = () => controller.abort()
+	externalSignal.addEventListener("abort", onExternalAbort, { once: true })
+	return {
+		signal: controller.signal,
+		dispose: () => externalSignal.removeEventListener("abort", onExternalAbort),
+	}
 }
 
 /**
@@ -115,7 +160,6 @@ export function rejectOnAbort<T>(pending: Promise<T>, signal: AbortSignal, provi
 	}
 	return new Promise<T>((resolve, reject) => {
 		const onAbort = () => reject(createAbortError(providerName))
-		// Stryker disable next-line ObjectLiteral,BooleanLiteral: a signal fires its abort event exactly once and the settle handler removes this listener, so the once flag is unobservable
 		signal.addEventListener("abort", onAbort, { once: true })
 		void pending.then(
 			(value) => {
