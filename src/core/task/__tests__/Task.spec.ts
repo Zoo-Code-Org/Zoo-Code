@@ -7514,6 +7514,90 @@ describe("Cline", () => {
 			)
 		})
 	})
+
+	// Change cards embed raw unified diffs of approved writes (full detail
+	// mode): task sync must not upload their file content to the cloud.
+	describe("cloud capture of change cards", () => {
+		const flushMicrotasks = () => new Promise<void>((resolve) => setImmediate(resolve))
+
+		it("keeps change_card messages out of cloud task-message capture", async () => {
+			const { CloudService } = await import("@roo-code/cloud")
+			const enabledSpy = vi.spyOn(CloudService, "isEnabled").mockReturnValue(true)
+			const captureSpy = vi.fn()
+			// Minimal double for the singleton getter: the capture path only
+			// calls captureEvent on the instance, and the real singleton is
+			// not initialized in this harness (the getter would throw).
+			const cloudDouble = { captureEvent: captureSpy } as unknown as import("@roo-code/cloud").CloudService
+			const instanceSpy = vi.spyOn(CloudService, "instance", "get").mockReturnValue(cloudDouble)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await flushMicrotasks()
+			captureSpy.mockClear()
+
+			const cardPayload = JSON.stringify({
+				checkpointId: "abc123",
+				files: [{ path: ".env", additions: 1, deletions: 0, diff: "+SECRET_KEY=hunter2" }],
+			})
+			await task.say("change_card", cardPayload, undefined, undefined, undefined, undefined, {
+				isNonInteractive: true,
+			})
+			await flushMicrotasks()
+
+			const cardCaptures = captureSpy.mock.calls.filter(
+				(call) =>
+					(call[0] as { properties?: { message?: { say?: string } } }).properties?.message?.say ===
+					"change_card",
+			)
+			expect(cardCaptures).toHaveLength(0)
+
+			// Control: an ordinary non-partial say still syncs while task
+			// capture is enabled, so the exclusion is change_card-specific.
+			await task.say("text", "ordinary message")
+			await flushMicrotasks()
+			const textCaptures = captureSpy.mock.calls.filter(
+				(call) =>
+					(call[0] as { properties?: { message?: { say?: string } } }).properties?.message?.say === "text",
+			)
+			expect(textCaptures.length).toBeGreaterThan(0)
+
+			enabledSpy.mockRestore()
+			instanceSpy.mockRestore()
+		})
+
+		it("keeps change_card messages out of the updateClineMessage capture path", async () => {
+			const { CloudService } = await import("@roo-code/cloud")
+			const enabledSpy = vi.spyOn(CloudService, "isEnabled").mockReturnValue(true)
+			const captureSpy = vi.fn()
+			const cloudDouble = { captureEvent: captureSpy } as unknown as import("@roo-code/cloud").CloudService
+			const instanceSpy = vi.spyOn(CloudService, "instance", "get").mockReturnValue(cloudDouble)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await flushMicrotasks()
+			captureSpy.mockClear()
+
+			const cardMessage = {
+				ts: Date.now(),
+				type: "say" as const,
+				say: "change_card" as const,
+				text: JSON.stringify({ checkpointId: "abc", files: [{ path: ".env", diff: "+SECRET=x" }] }),
+			}
+			await task["updateClineMessage"](cardMessage)
+			expect(captureSpy).not.toHaveBeenCalled()
+
+			enabledSpy.mockRestore()
+			instanceSpy.mockRestore()
+		})
+	})
 })
 
 describe("Queued message processing after condense", () => {
