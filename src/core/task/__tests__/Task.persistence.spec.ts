@@ -127,6 +127,9 @@ vi.mock("../../task-persistence", async (importOriginal) => {
 				deleteMany: vi.fn().mockResolvedValue(undefined),
 				reconcile: vi.fn().mockResolvedValue(undefined),
 				initialized: Promise.resolve(),
+				recordTaskActivity: vi.fn().mockResolvedValue(undefined),
+				markLocallyActive: vi.fn(),
+				markLocallyInactive: vi.fn(),
 			}
 		}),
 	}
@@ -2466,6 +2469,114 @@ describe("Task persistence", () => {
 			expect(saved).toBe(true)
 			// userMessageContent should be cleared on success
 			expect(task.userMessageContent).toEqual([])
+		})
+	})
+
+	describe("delegated-child liveness heartbeat and dispose ownership release", () => {
+		it("beats for the whole active lifetime, including while NOT streaming (ask-idle or long tool call)", async () => {
+			const recordSpy = vi
+				.spyOn(mockProvider.taskHistoryStore, "recordTaskActivity")
+				.mockResolvedValue(undefined)
+			// No task/images on either construction: start() then only starts the
+			// liveness machinery, never the (heavy) task loop — the narrow surface
+			// this test needs.
+			const parent = new Task({ provider: mockProvider, apiConfiguration: mockApiConfig, startTask: false })
+			const child = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				parentTask: parent,
+				startTask: false,
+			})
+
+			vi.useFakeTimers()
+			try {
+				child.start()
+				// The regression gate: the pre-fix beat was suppressed unless
+				// isStreaming, so a child awaiting a user ask or executing a long
+				// tool call showed BOTH liveness signals stale and could be
+				// misrepaired by the peer startup pass or the periodic tick.
+				expect(child.isStreaming).toBe(false)
+
+				await vi.advanceTimersByTimeAsync(60_000)
+				expect(recordSpy).toHaveBeenCalledWith(child.taskId)
+
+				// Cancellation silences the beat without waiting for disposal.
+				child.abort = true
+				recordSpy.mockClear()
+				await vi.advanceTimersByTimeAsync(120_000)
+				expect(recordSpy).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("never starts a heartbeat for standalone tasks", async () => {
+			const recordSpy = vi
+				.spyOn(mockProvider.taskHistoryStore, "recordTaskActivity")
+				.mockResolvedValue(undefined)
+			const standalone = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				startTask: false,
+			})
+
+			vi.useFakeTimers()
+			try {
+				standalone.start()
+				await vi.advanceTimersByTimeAsync(120_000)
+				expect(recordSpy).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("resumeAfterDelegation starts the liveness heartbeat (nested-delegation resume entry)", async () => {
+			// resumeAfterDelegation ends by continuing the full task loop; stub the
+			// loop and the history save so this test exercises only the resume
+			// prologue. Fake timers keep the started interval from leaking.
+			const parent = new Task({ provider: mockProvider, apiConfiguration: mockApiConfig, startTask: false })
+			const child = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				parentTask: parent,
+				startTask: false,
+			})
+			const access = child as unknown as {
+				initiateTaskLoop: (userContent: unknown[]) => Promise<void>
+				saveApiConversationHistory: (merge?: boolean) => Promise<boolean>
+				livenessHeartbeatInterval: ReturnType<typeof setInterval> | undefined
+			}
+			access.initiateTaskLoop = vi.fn().mockResolvedValue(undefined)
+			access.saveApiConversationHistory = vi.fn().mockResolvedValue(true)
+			// Pre-seed history so the hydrate path is skipped and the
+			// environment-details prologue has a user message to annotate.
+			child.apiConversationHistory.push({
+				role: "user",
+				content: [{ type: "text", text: "parent question" }],
+			})
+
+			vi.useFakeTimers()
+			try {
+				expect(access.livenessHeartbeatInterval).toBeUndefined()
+				await child.resumeAfterDelegation()
+				expect(access.livenessHeartbeatInterval).toBeDefined()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("dispose releases the local session ownership claim", async () => {
+			const releaseSpy = vi.spyOn(mockProvider.taskHistoryStore, "markLocallyInactive")
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			await task.dispose()
+
+			expect(releaseSpy).toHaveBeenCalledWith(task.taskId)
 		})
 	})
 })

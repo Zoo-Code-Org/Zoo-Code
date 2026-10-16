@@ -18,6 +18,7 @@ type Runnable = {
 	resumeTaskFromHistory: () => Promise<void>
 	startTask: (task?: string, images?: string[]) => Promise<void>
 	startIdleTelemetryCheck: () => void
+	startLivenessHeartbeat: () => void
 }
 
 function makeRunnable(overrides: Partial<Runnable> = {}): Runnable & { run(): Promise<void> } {
@@ -29,6 +30,7 @@ function makeRunnable(overrides: Partial<Runnable> = {}): Runnable & { run(): Pr
 		resumeTaskFromHistory: vi.fn().mockResolvedValue(undefined),
 		startTask: vi.fn().mockResolvedValue(undefined),
 		startIdleTelemetryCheck: vi.fn(),
+		startLivenessHeartbeat: vi.fn(),
 		...overrides,
 	}
 	// Bind the real run() implementation from Task.prototype to our stand-in.
