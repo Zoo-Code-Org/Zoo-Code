@@ -35,6 +35,7 @@ import {
 	type CloudUserInfo,
 	type CloudOrganizationMembership,
 	type CreateTaskOptions,
+	type ProviderSettingsWithId,
 	type TokenUsage,
 	type ToolUsage,
 	type ExtensionMessage,
@@ -208,6 +209,12 @@ type ProfileActivationSnapshot = {
 	currentApiConfigName: string | undefined
 	providerSettings: RooCodeSettings
 	viewApiConfiguration: ProviderSettings | undefined
+}
+
+type ProviderManagerSnapshot = {
+	previousRecord: ProviderSettingsWithId | undefined
+	recordExisted: boolean | undefined
+	previousCurrentProfileName: string | undefined
 }
 
 export class ClineProvider
@@ -2390,6 +2397,84 @@ export class ClineProvider
 		}
 	}
 
+	/**
+	 * Prior provider-manager state that the profile mutation group overwrites: the
+	 * manager's record for the profile being saved (or its confirmed absence) and
+	 * the manager-owned current selection. The manager store is the source of truth
+	 * that the profile list and the shared settings are derived from, so
+	 * compensation has to restore it and not only its ContextProxy copies.
+	 */
+	private async _snapshotProviderManagerState(name: string): Promise<ProviderManagerSnapshot> {
+		let previousRecord: ProviderSettingsWithId | undefined
+		let recordExisted: boolean | undefined
+		try {
+			const { name: _name, ...record } = await this.providerSettingsManager.getProfile({ name })
+			previousRecord = record as ProviderSettingsWithId
+			recordExisted = true
+		} catch (error: unknown) {
+			// A typed not-found proves the record is new; any other failure leaves the
+			// prior record unknown, and the restore must not delete what it cannot see.
+			if (error instanceof ProviderSettingsNotFoundError) {
+				recordExisted = false
+			}
+		}
+		let previousCurrentProfileName: string | undefined
+		try {
+			previousCurrentProfileName = await this.providerSettingsManager.getCurrentProfileName()
+		} catch {
+			// Best-effort: the selection restore is skipped when unreadable.
+		}
+		return { previousRecord, recordExisted, previousCurrentProfileName }
+	}
+
+	/**
+	 * Selection-only variant of the manager snapshot, for paths that overwrite the
+	 * manager selection without touching any profile record.
+	 */
+	private async _snapshotProviderManagerSelection(): Promise<ProviderManagerSnapshot> {
+		let previousCurrentProfileName: string | undefined
+		try {
+			previousCurrentProfileName = await this.providerSettingsManager.getCurrentProfileName()
+		} catch {
+			// Best-effort: the selection restore is skipped when unreadable.
+		}
+		return { previousRecord: undefined, recordExisted: undefined, previousCurrentProfileName }
+	}
+
+	/**
+	 * Restore the manager record for a mutation that failed after the record write
+	 * landed. A record the mutation created is deleted; a deletion that refuses
+	 * (last remaining configuration) is logged and leaves the record behind.
+	 */
+	private async _restoreProviderManagerRecord(name: string, snapshot: ProviderManagerSnapshot): Promise<void> {
+		try {
+			if (snapshot.recordExisted === true && snapshot.previousRecord) {
+				await this.providerSettingsManager.saveConfig(name, snapshot.previousRecord)
+			} else if (snapshot.recordExisted === false) {
+				await this.providerSettingsManager.deleteConfig(name)
+			}
+		} catch (error) {
+			this.log(
+				`[ClineProvider] profile-mutation rollback failed for the provider-manager record: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+	}
+
+	/**
+	 * Restore the manager-owned current selection captured by a prior snapshot.
+	 */
+	private async _restoreProviderManagerSelection(snapshot: ProviderManagerSnapshot): Promise<void> {
+		try {
+			if (snapshot.previousCurrentProfileName) {
+				await this.providerSettingsManager.activateProfile({ name: snapshot.previousCurrentProfileName })
+			}
+		} catch (error) {
+			this.log(
+				`[ClineProvider] profile-mutation rollback failed for the provider-manager selection: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+	}
+
 	async upsertProviderProfile(
 		name: string,
 		providerSettings: ProviderSettings,
@@ -2402,37 +2487,45 @@ export class ClineProvider
 				// we rely on the `ContextProxy`'s data store and in other cases
 				// we rely on the `ProviderSettingsManager`'s data store. It might
 				// be simpler to unify these two.
+				// The manager record written below belongs to the same mutation group as
+				// the activation writes: snapshot the prior manager record and the
+				// manager's own selection BEFORE saveConfig so a failure anywhere in the
+				// group compensates the manager store too, not just its ContextProxy
+				// copies. The shared/per-view snapshot is taken at the same point.
+				const managerSnapshot = await this._snapshotProviderManagerState(name)
+				const preWriteSnapshot = this._snapshotProfileActivationState()
 				const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
 
 				if (signal.aborted) return id
 
-				if (activate) {
-					const { mode } = await this.getState()
+				let activationMode: Mode | undefined
+				let priorModeConfigId: string | undefined
+				try {
+					if (activate) {
+						const { mode } = await this.getState()
+						activationMode = mode
 
-					// These promises do the following:
-					// 1. Adds or updates the list of provider profiles.
-					// 2. Sets the current provider profile.
-					// 3. Sets the current mode's provider profile.
-					// 4. Copies the provider settings to the context.
-					//
-					// Note: 1, 2, and 4 can be done in one `ContextProxy` call:
-					// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
-					// We should probably switch to that and verify that it works.
-					// I left the original implementation in just to be safe.
-					// Sibling views pinned to other profiles must keep their own
-					// settings: the shared write below replaces the shared store, so
-					// pin their profile's settings into their overlays first.
-					await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(name)
+						// These promises do the following:
+						// 1. Adds or updates the list of provider profiles.
+						// 2. Sets the current provider profile.
+						// 3. Sets the current mode's provider profile.
+						// 4. Copies the provider settings to the context.
+						//
+						// Note: 1, 2, and 4 can be done in one `ContextProxy` call:
+						// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
+						// We should probably switch to that and verify that it works.
+						// I left the original implementation in just to be safe.
+						// Sibling views pinned to other profiles must keep their own
+						// settings: the shared write below replaces the shared store, so
+						// pin their profile's settings into their overlays first.
+						await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(name)
 
-					const activationSnapshot = this._snapshotProfileActivationState()
-					let priorModeConfigId: string | undefined
-					try {
-						priorModeConfigId = await this.providerSettingsManager.getModeConfigId(mode)
-					} catch {
-						// Best-effort snapshot: when the prior mapping cannot be read the
-						// compensation restores the mapping as absent.
-					}
-					try {
+						try {
+							priorModeConfigId = await this.providerSettingsManager.getModeConfigId(mode)
+						} catch {
+							// Best-effort snapshot: when the prior mapping cannot be read the
+							// compensation restores the mapping as absent.
+						}
 						await Promise.all([
 							this.updateGlobalState(
 								"listApiConfigMeta",
@@ -2450,54 +2543,67 @@ export class ClineProvider
 							// new settings in getState().
 							this._saveViewLocalStateFromMutation({ apiConfiguration: undefined }),
 						])
-					} catch (error) {
-						// Compensate every write that may have landed: the mode mapping
-						// first (it belongs to this write group), then the shared and
-						// per-view state.
+
+						// Other live views may have buffered this profile's settings earlier;
+						// refresh them so their getState() cannot report the updated profile's
+						// name with stale settings.
+						await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
+
+						// Change the provider for the current task.
+						// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
+						this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+
+						// Keep the current task's sticky provider profile in sync with the newly-activated profile.
+						await this.persistStickyProviderProfileToCurrentTask(name)
+					} else {
+						await this.updateGlobalState(
+							"listApiConfigMeta",
+							await this.providerSettingsManager.listConfig(),
+						)
+
+						// A save that does not activate still changes the profile's settings, and
+						// every view pinned to it buffers a full copy of them. Refresh those views
+						// (and this one when it is the pinned view) or their getState() keeps
+						// serving the settings captured before the save under the same name.
+						if (this.pinnedProfileName === name) {
+							await this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
+							// Only rebuild when the task actually runs under the saved profile: a
+							// view pinned to this profile can hold a task that follows a different
+							// sticky profile, and the forced rebuild would silently switch that
+							// conversation to the saved profile's settings.
+							if (this.getCurrentTask()?.taskApiConfigName === name) {
+								this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+							}
+						}
+						await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
+					}
+
+					await this.postStateToWebview()
+					return id
+				} catch (error) {
+					// Compensate every write that may have landed, each restore awaited
+					// on its own so one failure cannot strand the rest: the manager
+					// record and selection first (the manager store is the source of
+					// truth that the profile list and the shared settings are derived
+					// from), then the mode mapping, then the shared and per-view state.
+					// The original failure is re-thrown for the caller.
+					await this._restoreProviderManagerRecord(name, managerSnapshot)
+					await this._restoreProviderManagerSelection(managerSnapshot)
+					if (activationMode !== undefined) {
 						try {
-							await this.providerSettingsManager.setModeConfig(mode, priorModeConfigId as string)
+							await this.providerSettingsManager.setModeConfig(
+								activationMode,
+								priorModeConfigId as string,
+							)
 						} catch (restoreError) {
 							this.log(
 								`[ClineProvider] profile-activation rollback failed for the mode mapping: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
 							)
 						}
-						await this._restoreProfileActivationState(activationSnapshot)
-						throw error
 					}
-
-					// Other live views may have buffered this profile's settings earlier;
-					// refresh them so their getState() cannot report the updated profile's
-					// name with stale settings.
-					await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
-
-					// Change the provider for the current task.
-					// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
-					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
-
-					// Keep the current task's sticky provider profile in sync with the newly-activated profile.
-					await this.persistStickyProviderProfileToCurrentTask(name)
-				} else {
-					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
-
-					// A save that does not activate still changes the profile's settings, and
-					// every view pinned to it buffers a full copy of them. Refresh those views
-					// (and this one when it is the pinned view) or their getState() keeps
-					// serving the settings captured before the save under the same name.
-					if (this.pinnedProfileName === name) {
-						await this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
-						// Only rebuild when the task actually runs under the saved profile: a
-						// view pinned to this profile can hold a task that follows a different
-						// sticky profile, and the forced rebuild would silently switch that
-						// conversation to the saved profile's settings.
-						if (this.getCurrentTask()?.taskApiConfigName === name) {
-							this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
-						}
-					}
-					await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
+					await this._restoreProfileActivationState(preWriteSnapshot)
+					throw error
 				}
-
-				await this.postStateToWebview()
-				return id
 			})
 		} catch (error) {
 			this.log(
@@ -2735,6 +2841,10 @@ export class ClineProvider
 		},
 		signal?: AbortSignal,
 	): Promise<void> {
+		// The manager selection written by activateProfile belongs to the same
+		// mutation group as the writes below: snapshot it first so a failed group
+		// compensates the manager store, not just its copies.
+		const managerSelectionSnapshot = await this._snapshotProviderManagerSelection()
 		const { name, id, ...providerSettings } = await this.providerSettingsManager.activateProfile(args)
 
 		if (signal?.aborted) return
@@ -2766,7 +2876,9 @@ export class ClineProvider
 					this._saveViewLocalStateFromMutation({ apiConfiguration: undefined }),
 				])
 			} catch (error) {
-				// Compensate every write that may have landed before the failure.
+				// Compensate every write that may have landed before the failure,
+				// including the manager selection written by activateProfile.
+				await this._restoreProviderManagerSelection(managerSelectionSnapshot)
 				await this._restoreProfileActivationState(activationSnapshot)
 				throw error
 			}

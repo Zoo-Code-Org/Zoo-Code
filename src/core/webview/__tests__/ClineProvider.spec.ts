@@ -3324,6 +3324,15 @@ describe("ClineProvider", () => {
 				{ name: "new-profile", id: "new-id", apiProvider: providerIdentifiers.openai },
 			])
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("old-mode-id")
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "new-profile",
+				id: "old-rec-id",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			vi.spyOn(provider.providerSettingsManager, "getCurrentProfileName").mockResolvedValue("old-profile")
+			const activateProfileSpy = vi
+				.spyOn(provider.providerSettingsManager, "activateProfile")
+				.mockResolvedValue({ name: "old-profile", apiProvider: providerIdentifiers.anthropic })
 			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockRejectedValue(
 				new Error("mode write failed"),
 			)
@@ -3344,6 +3353,14 @@ describe("ClineProvider", () => {
 				"old-profile",
 			])
 			expect(setProviderSettingsSpy).toHaveBeenCalledTimes(2)
+			// The manager store is compensated too: the record written by saveConfig
+			// returns to its prior content and the manager selection returns to the
+			// prior profile.
+			expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith("new-profile", {
+				id: "old-rec-id",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			expect(activateProfileSpy).toHaveBeenCalledWith({ name: "old-profile" })
 			await provider.dispose()
 		})
 
