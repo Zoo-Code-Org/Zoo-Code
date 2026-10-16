@@ -52,6 +52,22 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
 		}))
 }
 
+/** Structural check, so it holds for any host that supplies chat messages rather than one specific class. */
+function isChatMessage(value: unknown): value is vscode.LanguageModelChatMessage {
+	return typeof value === "object" && value !== null && "role" in value && "content" in value
+}
+
+/** True when any block, including those nested in tool results, carries an image. */
+export function containsImageBlock(content: unknown): boolean {
+	return (
+		Array.isArray(content) &&
+		content.some(
+			(block: { type?: string; content?: unknown }) =>
+				block.type === "image" || (block.type === "tool_result" && containsImageBlock(block.content)),
+		)
+	)
+}
+
 /**
  * Handles interaction with VS Code's Language Model API for chat-based operations.
  * This handler extends BaseProvider to provide VS Code LM specific functionality.
@@ -758,7 +774,7 @@ function extractLeakedToolCallsWithState(
 
 export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
-	private client: vscode.LanguageModelChat | null
+	protected client: vscode.LanguageModelChat | null
 	private disposable: vscode.Disposable | null
 	// Provider label for the shared abort contract (createAbortError).
 	private readonly providerName = "VS Code LM"
@@ -783,7 +799,12 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 					}
 				}
 			})
-			this.initializeClient()
+			void this.initializeClient().catch((error) => {
+				console.debug(
+					"Zoo Code <Language Model API>: Initial client setup failed; retrying on first use:",
+					error,
+				)
+			})
 		} catch (error) {
 			// Ensure cleanup if constructor fails
 			this.dispose()
@@ -837,33 +858,76 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				return models[0]
 			}
 
-			// Create a minimal model if no models are available
-			return {
-				id: "default-lm",
-				name: "Default Language Model",
-				vendor: "vscode",
-				family: "lm",
-				version: "1.0",
-				maxInputTokens: 8192,
-				sendRequest: async (_messages, _options, _token) => {
-					// Provide a minimal implementation
-					return {
-						stream: (async function* () {
-							yield new vscode.LanguageModelTextPart(
-								"Language model functionality is limited. Please check VS Code configuration.",
-							)
-						})(),
-						text: (async function* () {
-							yield "Language model functionality is limited. Please check VS Code configuration."
-						})(),
-					}
-				},
-				countTokens: async () => 0,
-			}
+			return this.createFallbackClient()
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : "Unknown error"
 			throw new Error(`Zoo Code <Language Model API>: Failed to select model: ${errorMessage}`)
 		}
+	}
+
+	/**
+	 * Client used when no installed model matches the selector. Subclasses whose models are not
+	 * interchangeable with a stub may refuse instead.
+	 */
+	protected createFallbackClient(): vscode.LanguageModelChat {
+		return {
+			id: "default-lm",
+			name: "Default Language Model",
+			vendor: "vscode",
+			family: "lm",
+			version: "1.0",
+			maxInputTokens: 8192,
+			sendRequest: async () => ({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart(
+						"Language model functionality is limited. Please check VS Code configuration.",
+					)
+				})(),
+				text: (async function* () {
+					yield "Language model functionality is limited. Please check VS Code configuration."
+				})(),
+			}),
+			countTokens: async () => 0,
+		}
+	}
+
+	/** Model info for a live client. */
+	protected deriveModelInfo(client: vscode.LanguageModelChat, modelId: string): ModelInfo {
+		return {
+			maxTokens: -1, // Unlimited tokens by default
+			contextWindow:
+				typeof client.maxInputTokens === "number"
+					? Math.max(0, client.maxInputTokens)
+					: openAiModelInfoSaneDefaults.contextWindow,
+			supportsImages: false, // VSCode Language Model API historically had no image input
+			supportsPromptCache: true,
+			inputPrice: 0,
+			outputPrice: 0,
+			description: `VSCode Language Model: ${modelId}`,
+		}
+	}
+
+	/** Model info reported before any client exists. */
+	protected getFallbackModelInfo(): ModelInfo {
+		return openAiModelInfoSaneDefaults
+	}
+
+	/** Whether image parts are sent to the model. */
+	protected supportsImageInput(_info: ModelInfo): boolean {
+		return false
+	}
+
+	/** Rejects a request the selected model cannot serve before anything is sent. */
+	protected assertRequestSupported(_messages: Anthropic.Messages.MessageParam[], _info: ModelInfo): void {}
+
+	/** Rejects a request whose measured input exceeds what the model accepts. */
+	protected assertWithinContextWindow(_inputTokens: number, _info: ModelInfo): void {}
+
+	/** The form in which a chat message is handed to the host's token counter. */
+	protected prepareMessageForCounting(
+		message: vscode.LanguageModelChatMessage,
+	): string | vscode.LanguageModelChatMessage {
+		return extractTextCountFromMessage(message)
 	}
 
 	/**
@@ -950,13 +1014,13 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 
 			if (typeof text === "string") {
 				tokenCount = await this.client.countTokens(text, cancellationToken)
-			} else if (text instanceof vscode.LanguageModelChatMessage) {
+			} else if (isChatMessage(text)) {
 				// For chat messages, ensure we have content
 				if (!text.content || (Array.isArray(text.content) && text.content.length === 0)) {
 					console.debug("Zoo Code <Language Model API>: Empty chat message content")
 					return 0
 				}
-				const countMessage = extractTextCountFromMessage(text)
+				const countMessage = this.prepareMessageForCounting(text)
 				tokenCount = await this.client.countTokens(countMessage, cancellationToken)
 			} else {
 				console.warn("Zoo Code <Language Model API>: Invalid input type for token counting")
@@ -999,13 +1063,13 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		}
 	}
 
-	private async calculateTotalInputTokens(vsCodeLmMessages: vscode.LanguageModelChatMessage[]): Promise<number> {
+	protected async calculateTotalInputTokens(vsCodeLmMessages: vscode.LanguageModelChatMessage[]): Promise<number> {
 		const messageTokens: number[] = await Promise.all(vsCodeLmMessages.map((msg) => this.internalCountTokens(msg)))
 
 		return messageTokens.reduce((sum: number, tokens: number): number => sum + tokens, 0)
 	}
 
-	private ensureCleanState(): void {
+	protected ensureCleanState(): void {
 		if (this.currentRequestCancellation) {
 			this.currentRequestCancellation.cancel()
 			this.currentRequestCancellation.dispose()
@@ -1013,7 +1077,19 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		}
 	}
 
-	private async getClient(): Promise<vscode.LanguageModelChat> {
+	/**
+	 * Releases one request's cancellation source. Unlike ensureCleanState(), it leaves a newer
+	 * request alone: a request that fails after another has started must not cancel that one.
+	 */
+	protected releaseRequestCancellation(source: vscode.CancellationTokenSource): void {
+		source.cancel()
+		source.dispose()
+		if (this.currentRequestCancellation === source) {
+			this.currentRequestCancellation = null
+		}
+	}
+
+	protected async getClient(): Promise<vscode.LanguageModelChat> {
 		if (!this.client) {
 			console.debug("Zoo Code <Language Model API>: Getting client with options:", {
 				vsCodeLmModelSelector: this.options.vsCodeLmModelSelector,
@@ -1201,11 +1277,14 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				throw createAbortError(this.providerName)
 			}
 
+			const modelInfo = this.getModel().info
+
 			// Process messages
 			const cleanedMessages = messages.map((msg) => ({
 				...msg,
 				content: this.cleanMessageContent(msg.content),
 			}))
+			this.assertRequestSupported(cleanedMessages, modelInfo)
 
 			// Keep context-window trimming on OUR side. Copilot's backend trims an over-window request
 			// without preserving tool_use/tool_result pairing, which orphans a tool_result and triggers a
@@ -1249,7 +1328,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			// Convert Anthropic messages to VS Code LM messages
 			const vsCodeLmMessages: vscode.LanguageModelChatMessage[] = [
 				vscode.LanguageModelChatMessage.Assistant(sanitizeSurrogates(systemPrompt)),
-				...convertToVsCodeLmMessages(cleanedMessages),
+				...convertToVsCodeLmMessages(cleanedMessages, this.supportsImageInput(modelInfo)),
 			]
 
 			// Calculate input tokens before starting the stream
@@ -1263,13 +1342,13 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			if (cancellationTokenSource.token.isCancellationRequested) {
 				throw createAbortError(this.providerName)
 			}
+			this.assertWithinContextWindow(totalInputTokens, modelInfo)
 
 			// Create the response stream with required options
 			const requestOptions: vscode.LanguageModelChatRequestOptions = {
 				justification: `Zoo Code would like to use '${client.name}' from '${client.vendor}', Click 'Allow' to proceed.`,
 				tools: convertToVsCodeLmTools(metadata?.tools ?? []),
 			}
-
 			const response: vscode.LanguageModelChatResponse = await client.sendRequest(
 				vsCodeLmMessages,
 				requestOptions,
@@ -1494,22 +1573,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			const modelParts = [this.client.vendor, this.client.family, this.client.version].filter(Boolean)
 
 			const modelId = this.client.id || modelParts.join(SELECTOR_SEPARATOR)
-
-			// Build model info with conservative defaults for missing values
-			const modelInfo: ModelInfo = {
-				maxTokens: -1, // Unlimited tokens by default
-				contextWindow:
-					typeof this.client.maxInputTokens === "number"
-						? Math.max(0, this.client.maxInputTokens)
-						: openAiModelInfoSaneDefaults.contextWindow,
-				supportsImages: false, // VSCode Language Model API currently doesn't support image inputs
-				supportsPromptCache: true,
-				inputPrice: 0,
-				outputPrice: 0,
-				description: `VSCode Language Model: ${modelId}`,
-			}
-
-			return { id: modelId, info: modelInfo }
+			return { id: modelId, info: this.deriveModelInfo(this.client, modelId) }
 		}
 
 		// Fallback when no client is available
@@ -1522,7 +1586,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		return {
 			id: fallbackId,
 			info: {
-				...openAiModelInfoSaneDefaults,
+				...this.getFallbackModelInfo(),
 				description: `VSCode Language Model (Fallback): ${fallbackId}`,
 			},
 		}
@@ -1548,6 +1612,11 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		return this.getModel().info.contextWindow
 	}
 
+	/** Request options for single-shot completions; the generic provider sends none. */
+	protected getCompletionRequestOptions(_client: vscode.LanguageModelChat): vscode.LanguageModelChatRequestOptions {
+		return {}
+	}
+
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		// The VS Code LanguageModelChat API cannot carry an AbortSignal: sendRequest
 		// only accepts a CancellationToken. Bridge the external signal and timeout
@@ -1557,13 +1626,14 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		const tokenSource = new vscode.CancellationTokenSource()
 		const externalAbortSignal = options?.abortSignal
 
-		// Apply the timeout only when it is a positive value: cancelling at once for a
+		// Apply the timeout only when the effective value (option, else the provider-wide
+		// request timeout default) is positive: cancelling at once for a
 		// zero/negative timeout would abort every such request immediately. Starting
 		// the timer before getClient() means a timeout that fires during a slow client
 		// lookup still cancels the request before any sendRequest call.
 		let timeoutId: ReturnType<typeof setTimeout> | undefined
-		const timeoutMs = options?.timeoutMs
-		if (timeoutMs !== undefined && Number.isFinite(timeoutMs) && timeoutMs > 0) {
+		const timeoutMs = options?.timeoutMs ?? this.timeoutMs
+		if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
 			// Node clamps delays above 2^31-1 ms to 1 ms (and Infinity coerces the
 			// same way), which would cancel almost immediately, and truncates
 			// fractional delays; round up and cap so the semantics match
@@ -1595,7 +1665,6 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			if (isAborted()) {
 				throw createAbortError(this.providerName)
 			}
-
 			const client = await this.getClient()
 
 			// Re-check after client initialization: the signal may have aborted (or the
@@ -1608,7 +1677,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 
 			const response = await client.sendRequest(
 				[vscode.LanguageModelChatMessage.User(prompt)],
-				{},
+				this.getCompletionRequestOptions(client),
 				tokenSource.token,
 			)
 			let result = ""
@@ -1652,7 +1721,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 }
 
 // Static blacklist of VS Code Language Model IDs that should be excluded from the model list e.g. because they will never work
-const VSCODE_LM_STATIC_BLACKLIST: string[] = ["claude-3.7-sonnet", "claude-3.7-sonnet-thought"]
+export const VSCODE_LM_STATIC_BLACKLIST: string[] = ["claude-3.7-sonnet", "claude-3.7-sonnet-thought"]
 
 export async function getVsCodeLmModels() {
 	try {

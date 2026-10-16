@@ -79,8 +79,9 @@ export function filterNativeToolsForMode(
 	// Resolve the single, request-scoped effective tool policy. The filter below
 	// consumes only its `tools` set (plus alias renames from model customization),
 	// so prompt generation and API tool construction agree on the logical allowed
-	// set — including the protocol-tool rule: unlisted, attempt_completion is
-	// advertised; listed in disabledTools/excludedTools, it is not.
+	// set — including the protocol-tool rule: a disabledTools entry naming
+	// attempt_completion is ignored, while a model-profile excludedTools entry
+	// keeps it out.
 	const modelInfo = settings?.modelInfo as ModelInfo | undefined
 
 	const policy = resolveEffectiveToolPolicy({
