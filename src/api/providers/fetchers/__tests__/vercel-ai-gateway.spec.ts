@@ -318,6 +318,22 @@ describe("Vercel AI Gateway Fetchers", () => {
 			expect(result.supportsTemperature).toBe(false)
 		})
 
+		it("marks Claude Sonnet 5.5 as not supporting temperature", () => {
+			const result = parseVercelAiGatewayModel({
+				id: "anthropic/claude-sonnet-5-5",
+				model: {
+					...baseModel,
+					id: "anthropic/claude-sonnet-5-5",
+					context_window: 1000000,
+					max_tokens: 128000,
+				},
+			})
+
+			expect(result.maxTokens).toBe(128000)
+			expect(result.contextWindow).toBe(1000000)
+			expect(result.supportsTemperature).toBe(false)
+		})
+
 		it("marks Claude Opus 5 as not supporting temperature", () => {
 			const result = parseVercelAiGatewayModel({
 				id: "anthropic/claude-opus-5",
