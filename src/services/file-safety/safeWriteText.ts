@@ -477,10 +477,16 @@ export async function safeWriteText(
 				rollbackFailure = { error: rollbackError, backupPath }
 			}
 		}
-		try {
-			await fs.unlink(tempPath).catch(() => {})
-		} catch {
-			// cleanup failure is non-fatal
+		// Only a write that never committed has a staged file to remove. After the
+		// commit rename the staged path names the published target: unlinking it
+		// here would at best miss with ENOENT, and at worst delete a file a
+		// concurrent writer has already claimed under the same staging name.
+		if (!committed) {
+			try {
+				await fs.unlink(tempPath).catch(() => {})
+			} catch {
+				// cleanup failure is non-fatal
+			}
 		}
 
 		// A failed self-staged write must not leave its staging directory behind.

@@ -5,6 +5,7 @@ import { JsonStreamStringify } from "json-stream-stringify"
 
 import { acquireFileLock } from "./fileLock"
 import {
+	PostCommitDurabilityError,
 	resolveLockKey,
 	resolvePublishTarget,
 	safeWriteText,
@@ -138,6 +139,16 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			`Operation failed for ${resolvedTargetPath ?? absoluteFilePath}: [Original Error Caught]`,
 			originalError,
 		)
+
+		// PostCommitDurabilityError means the commit rename landed: the staged
+		// path was renamed onto the target, so it is no longer a leftover temp
+		// file. Unlinking it here would at best race a concurrent writer that has
+		// already reused the staging name, and the published target must survive
+		// the durability failure with its new content. The error rethrows below,
+		// so the write is never observed as a confirmed-durable success.
+		if (originalError instanceof PostCommitDurabilityError) {
+			actualTempNewFilePath = null
+		}
 
 		const newFileToCleanupWithinCatch = actualTempNewFilePath
 

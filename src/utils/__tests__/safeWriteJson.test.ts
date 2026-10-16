@@ -4,7 +4,7 @@ import * as path from "path"
 import * as os from "os"
 
 import { safeWriteJson } from "../safeWriteJson"
-import { RollbackFailureError } from "../../services/file-safety/safeWriteText"
+import { PostCommitDurabilityError, RollbackFailureError } from "../../services/file-safety/safeWriteText"
 import * as lockfile from "proper-lockfile"
 
 // Capture actual implementations before the vi.mock factory runs,
@@ -441,7 +441,7 @@ describe("safeWriteJson", () => {
 	})
 
 	// Test for rollback failure scenario (the rollback rename now lives in safeWriteText)
-	test("re-throws the original error when the rollback rename fails, leaving an orphaned backup", async () => {
+	test("throws RollbackFailureError with the publish failure as cause when the rollback rename also fails, leaving an orphaned backup", async () => {
 		const initialData = { message: "Initial, orphaned when rollback fails" }
 		const newData = { message: "New content" }
 
@@ -463,7 +463,6 @@ describe("safeWriteJson", () => {
 			return fsPromisesActuals.rename!(oldPath, newPath)
 		})
 
-		// The original error must propagate, not the rollback error
 		// The rollback also failed, so the error reports the partial state: the publish
 		// failure stays the cause and the backup location is named.
 		let failure: RollbackFailureError | undefined
@@ -702,4 +701,44 @@ describe("safeWriteJson", () => {
 			expect(await readFileContent(currentTestFilePath)).toEqual({ after: true })
 		},
 	)
+
+	// ── post-commit durability: the published target must survive (PI regression) ──
+
+	it("keeps the published target with its new content when the post-commit directory fsync fails", async () => {
+		const fsSyncMod = await import("fs")
+		const realOpen = fsSyncMod.openSync
+		const realFsync = fsSyncMod.fsyncSync
+		// A sentinel fd identifies the parent-directory open that safeWriteText
+		// performs after the commit rename; only that fsync fails.
+		const sentinel = 987654
+		vi.spyOn(process, "platform", "get").mockReturnValue("linux")
+		vi.spyOn(fsSyncMod, "openSync").mockImplementation(((...args: unknown[]) => {
+			if (String(args[0]) === tempDir) {
+				return sentinel
+			}
+			return (realOpen as (...a: unknown[]) => unknown)(...args)
+		}) as never)
+		vi.spyOn(fsSyncMod, "fsyncSync").mockImplementation(((fd: number) => {
+			if (fd === sentinel) {
+				throw new Error("EIO fsync")
+			}
+			return (realFsync as (f: number) => unknown)(fd)
+		}) as never)
+
+		// Earlier tests in this file leave unlink history on the shared mock.
+		vi.mocked(fs.unlink).mockClear()
+
+		await expect(safeWriteJson(currentTestFilePath, { fresh: "content" })).rejects.toBeInstanceOf(
+			PostCommitDurabilityError,
+		)
+
+		// The rename committed: the target must still hold the new JSON, not be
+		// unlinked away by the catch cleanup of the consumed staging path.
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual({ fresh: "content" })
+		// The cleanup must not unlink the consumed staging path: after the commit
+		// rename it is no longer this write's file to remove.
+		const stagingUnlinks = vi.mocked(fs.unlink).mock.calls.filter((call) => /\.new_.*\.tmp$/.test(String(call[0])))
+		expect(stagingUnlinks).toHaveLength(0)
+	})
 })
