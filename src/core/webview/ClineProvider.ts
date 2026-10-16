@@ -2757,7 +2757,17 @@ export class ClineProvider
 				// copies. The shared/per-view snapshot is taken at the same point.
 				const managerSnapshot = await this._snapshotProviderManagerState(name)
 				const preWriteSnapshot = this._snapshotProfileActivationState()
-				const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
+				let id: string
+				try {
+					id = await this.providerSettingsManager.saveConfig(name, providerSettings)
+				} catch (error) {
+					// saveConfig assigns the record before awaiting the store write, so a
+					// rejection may still have landed the record: route through the
+					// manager-record rollback (which deletes a landed record and spends the
+					// create claim) instead of escaping the group with the claim leaked.
+					await this._restoreProviderManagerRecord(name, managerSnapshot)
+					throw error
+				}
 
 				if (signal.aborted) {
 					// The record landed; the create is complete, so the claim is spent.
