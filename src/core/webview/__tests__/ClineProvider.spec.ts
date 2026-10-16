@@ -3324,6 +3324,7 @@ describe("ClineProvider", () => {
 				{ name: "new-profile", id: "new-id", apiProvider: providerIdentifiers.openai },
 			])
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("old-mode-id")
+			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
 			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
 				name: "new-profile",
 				id: "old-rec-id",
@@ -3361,6 +3362,47 @@ describe("ClineProvider", () => {
 				apiProvider: providerIdentifiers.anthropic,
 			})
 			expect(activateProfileSpy).toHaveBeenCalledWith({ name: "old-profile" })
+			await provider.dispose()
+		})
+		it("deletes the newly created manager record when a later activation write fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// The profile is new: hasConfig confirms absence even though getProfile
+			// reports it through an untyped wrapper error.
+			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(false)
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockRejectedValue(
+				new Error("Config with name 'new-profile' not found"),
+			)
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("new-id")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "new-profile", id: "new-id", apiProvider: providerIdentifiers.openai },
+			])
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockRejectedValue(
+				new Error("mode write failed"),
+			)
+			vi.spyOn(provider.providerSettingsManager, "getCurrentProfileName").mockResolvedValue("old-profile")
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "old-profile",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			const deleteConfigSpy = vi
+				.spyOn(provider.providerSettingsManager, "deleteConfig")
+				.mockResolvedValue(undefined)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await expect(
+				provider.upsertProviderProfile("new-profile", { apiProvider: providerIdentifiers.openai }, true),
+			).resolves.toBeUndefined()
+
+			// Compensation must delete the record the mutation created, not skip the
+			// restore because the lookup threw an untyped not-found.
+			expect(deleteConfigSpy).toHaveBeenCalledWith("new-profile")
 			await provider.dispose()
 		})
 
