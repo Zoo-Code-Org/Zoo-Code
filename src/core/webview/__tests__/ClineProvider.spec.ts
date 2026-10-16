@@ -4622,12 +4622,13 @@ describe("ClineProvider - Router Models", () => {
 				kenari: mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
 	})
 
-	test("handles requestRouterModels with individual provider failures", async () => {
+	it("handles requestRouterModels with individual provider failures", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
@@ -4651,6 +4652,7 @@ describe("ClineProvider - Router Models", () => {
 			.mockRejectedValueOnce(new Error("Requesty API error")) // requesty fail
 			.mockResolvedValueOnce(mockModels) // unbound success
 			.mockResolvedValueOnce(mockModels) // vercel-ai-gateway success
+			.mockResolvedValueOnce(mockModels) // friendli success
 			.mockResolvedValueOnce(mockModels) // zoo-gateway success
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm fail
 			.mockResolvedValueOnce(mockModels) // opencode-go (public endpoint)
@@ -4678,6 +4680,7 @@ describe("ClineProvider - Router Models", () => {
 				kenari: mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
@@ -4783,6 +4786,7 @@ describe("ClineProvider - Router Models", () => {
 				kenari: mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})

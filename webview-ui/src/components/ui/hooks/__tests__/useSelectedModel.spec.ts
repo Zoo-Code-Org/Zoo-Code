@@ -1628,7 +1628,9 @@ describe("useSelectedModel", () => {
 
 	describe("friendli provider", () => {
 		beforeEach(() => {
-			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {}, friendli: {} }),
+			)
 
 			mockUseOpenRouterModelProviders.mockReturnValue({
 				data: {},
@@ -1650,7 +1652,30 @@ describe("useSelectedModel", () => {
 			expect(result.current.info).toEqual(friendliModels[friendliDefaultModelId])
 		})
 
-		it("should use custom model ID and info when model exists in friendliModels", () => {
+		it("should use custom model ID and info when model exists in routerModels", () => {
+			const dynamicModelInfo: ModelInfo = {
+				maxTokens: 202752,
+				contextWindow: 202752,
+				supportsImages: false,
+				supportsPromptCache: true,
+				supportsMaxTokens: true,
+				inputPrice: 1.4,
+				outputPrice: 4.4,
+				cacheWritesPrice: 0,
+				cacheReadsPrice: 0.26,
+				description: "Dynamic GLM-5.1 model from /v1/models",
+			}
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+					friendli: { "zai-org/GLM-5.1": dynamicModelInfo },
+				},
+				isLoading: false,
+				isError: false,
+			} as unknown as ReturnType<typeof useRouterModels>)
+
 			const apiConfiguration: ProviderSettings = {
 				apiProvider: providerIdentifiers.friendli,
 				apiModelId: "zai-org/GLM-5.1",
@@ -1661,7 +1686,135 @@ describe("useSelectedModel", () => {
 
 			expect(result.current.provider).toBe(providerIdentifiers.friendli)
 			expect(result.current.id).toBe("zai-org/GLM-5.1")
-			expect(result.current.info).toEqual(friendliModels["zai-org/GLM-5.1"])
+			expect(result.current.info).toEqual(dynamicModelInfo)
+		})
+		it("preserves saved static model when router data is empty", () => {
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+					friendli: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as unknown as ReturnType<typeof useRouterModels>)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.friendli,
+				apiModelId: "zai-org/GLM-5.2",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.id).toBe("zai-org/GLM-5.2")
+			expect(result.current.info).toEqual(friendliModels["zai-org/GLM-5.2"])
+		})
+
+		it("falls back to default model when router is empty and no saved model", () => {
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+					friendli: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as unknown as ReturnType<typeof useRouterModels>)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.friendli,
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.id).toBe(friendliDefaultModelId)
+			expect(result.current.info).toEqual(friendliModels[friendliDefaultModelId])
+		})
+
+		it("preserves a dynamic-only saved id with undefined info while router is still empty", () => {
+			// Mirrors FriendliHandler.getModel() on the extension host: during
+			// the loading window a saved id that isn't in the static seed
+			// keeps its id instead of silently becoming the default model.
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+					friendli: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as unknown as ReturnType<typeof useRouterModels>)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.friendli,
+				apiModelId: "nonexistent/model",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.id).toBe("nonexistent/model")
+			expect(result.current.info).toBeUndefined()
+		})
+
+		describe.each([
+			{ state: "loading", data: undefined, isLoading: true },
+			{ state: "absent", data: {}, isLoading: false },
+		])("with a $state router catalog", ({ data, isLoading }) => {
+			beforeEach(() => {
+				mockUseRouterModels.mockReturnValue(createRouterModelsResult(data, { isLoading }))
+			})
+
+			it.each([undefined, friendliDefaultModelId, "nonexistent/model"])(
+				"preserves selected model %s with static metadata when available",
+				(apiModelId) => {
+					const { result } = renderHook(
+						() => useSelectedModel({ apiProvider: providerIdentifiers.friendli, apiModelId }),
+						{ wrapper: createWrapper() },
+					)
+
+					const expectedId = apiModelId ?? friendliDefaultModelId
+					expect(result.current.id).toBe(expectedId)
+					expect(result.current.info).toEqual(friendliModels[expectedId])
+					expect(result.current.isLoading).toBe(isLoading)
+				},
+			)
+		})
+
+		it("prefers dynamic router info over static info for a model id present in both", () => {
+			const staticGlm52 = friendliModels["zai-org/GLM-5.2"]
+			const dynamicGlm52: ModelInfo = {
+				...staticGlm52,
+				description: "Dynamic GLM-5.2 from /v1/models",
+				inputPrice: 999,
+			}
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+					friendli: { "zai-org/GLM-5.2": dynamicGlm52 },
+				},
+				isLoading: false,
+				isError: false,
+			} as unknown as ReturnType<typeof useRouterModels>)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.friendli,
+				apiModelId: "zai-org/GLM-5.2",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.id).toBe("zai-org/GLM-5.2")
+			expect(result.current.info).toEqual(dynamicGlm52)
+			expect(result.current.info).not.toEqual(staticGlm52)
 		})
 	})
 

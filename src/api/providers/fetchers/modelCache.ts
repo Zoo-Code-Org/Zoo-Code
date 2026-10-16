@@ -500,6 +500,10 @@ export async function initializeModelCacheRefresh(buildHandler: (provider: Route
 				provider: providerIdentifiers.nanogpt,
 				options: { provider: providerIdentifiers.nanogpt },
 			},
+			{
+				provider: providerIdentifiers.friendli,
+				options: { provider: providerIdentifiers.friendli },
+			},
 		]
 
 		// Refresh each provider in background (fire and forget)

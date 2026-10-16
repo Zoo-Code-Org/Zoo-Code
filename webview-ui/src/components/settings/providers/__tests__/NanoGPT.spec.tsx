@@ -106,6 +106,7 @@ describe("NanoGPT", () => {
 		"kimi-code": {},
 		ollama: {},
 		lmstudio: {},
+		friendli: {},
 	}
 
 	const renderComponent = (apiConfiguration: ProviderSettings = {}) =>
