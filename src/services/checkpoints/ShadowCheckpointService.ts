@@ -423,14 +423,6 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 				throw new Error("Shadow git repo not initialized")
 			}
 
-			// Git pathspecs are always POSIX: normalize a native (Windows
-			// backslash) path before the git calls. Without this, `cat-file -e` on
-			// a backslashed path never matches, the file is treated as absent at
-			// the checkpoint, and the delete branch below would remove a file the
-			// checkpoint actually contains. The local fs.rm join keeps the native
-			// form, since the OS treats both separators interchangeably there.
-			const gitPath = filePath.toPosix()
-
 			// Constrain the path to the workspace before either branch: `..`
 			// segments would otherwise normalize (path.join / git pathspec) to a
 			// location outside `this.workspaceDir`, and the delete branch could
@@ -485,6 +477,17 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 				throw new Error(`restoreFile target resolves outside the workspace: ${filePath}`)
 			}
 
+			// Git pathspecs are always POSIX, but the path handed to git must be
+			// the same path containment just validated. Deriving it from the raw
+			// request with a blanket backslash conversion would reinterpret
+			// POSIX filename backslashes as separators: `link\secret.txt` (a
+			// legal POSIX filename) would reach git as `link/secret.txt` and
+			// could write through a symlinked directory the validated path never
+			// traversed. Derive the pathspec from the validated native path and
+			// convert only its real separators; on Windows this is exactly the
+			// native-to-POSIX normalization the journal and webview hand back.
+			const gitPath = path.relative(this.workspaceDir, resolvedTarget).split(path.sep).join("/")
+
 			// restoreFile restores exactly one regular file: a directory pathspec
 			// would recursively check out the whole subtree from the checkpoint,
 			// so reject directory targets - including "." and "" resolving to the
@@ -516,7 +519,9 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 				// single requested path.
 				await this.git.checkout([commitHash, "--", `:(literal)${gitPath}`])
 			} else {
-				await fs.rm(path.join(this.workspaceDir, filePath), { force: true })
+				// Use the validated path, not a re-join of the raw request: the
+				// delete branch must remove exactly what containment approved.
+				await fs.rm(resolvedTarget, { force: true })
 			}
 
 			const duration = Date.now() - start

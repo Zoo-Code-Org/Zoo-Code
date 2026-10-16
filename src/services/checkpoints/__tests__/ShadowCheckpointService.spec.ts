@@ -205,8 +205,9 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 			it("accepts a native backslashed path on Windows (git pathspecs are POSIX)", async () => {
 				if (process.platform !== "win32") {
 					// Off-Windows the journal paths are already POSIX, so there is
-					// nothing to normalize; the toPosix() call is still exercised
-					// as a no-op by every other restoreFile test.
+					// nothing to normalize; the native-separator handling is still
+					// exercised by every other restoreFile test (and the POSIX-only
+					// backslash case has its own test below).
 					return
 				}
 
@@ -228,6 +229,46 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				await service.restoreFile(commit1!.commit, "subdir" + path.sep + "inner.txt")
 
 				expect(await fs.readFile(subFile, "utf-8")).toBe("Ahoy, world!")
+			})
+
+			it("does not let a POSIX backslash path reach a symlinked directory through git", async () => {
+				// On POSIX a backslash is a legal filename character. Containment
+				// validates the literal `link\secret.txt` inside the workspace; a
+				// blanket backslash conversion for the git pathspec would hand git
+				// `link/secret.txt` - a path through a directory the validated
+				// path never traversed - and the checkout would act on it: git
+				// replaces the symlinked directory with a real one and restores a
+				// file the caller never requested (CWE-22 family: git acting on
+				// an unvalidated path; verified against real git on Linux).
+				if (process.platform === "win32") {
+					// Backslash is a separator on Windows; the scenario is POSIX-only.
+					return
+				}
+				const innerDir = path.join(service.workspaceDir, "link")
+				await fs.mkdir(innerDir)
+				await fs.writeFile(path.join(innerDir, "secret.txt"), "inside")
+				const commit1 = await service.saveCheckpoint("First checkpoint")
+				expect(commit1?.commit).toBeTruthy()
+
+				const outsideDir = path.join(tmpDir, `outside-${Date.now()}`)
+				await fs.mkdir(outsideDir, { recursive: true })
+				const outsideFile = path.join(outsideDir, "secret.txt")
+				await fs.writeFile(outsideFile, "outside")
+
+				// Replace the committed directory with a symlink to the outside dir.
+				await fs.rm(innerDir, { recursive: true })
+				await fs.symlink(outsideDir, innerDir, "dir")
+
+				await service.restoreFile(commit1!.commit, "link\\secret.txt")
+
+				// The literal name is not in the checkpoint, so the delete branch
+				// runs against the validated (literal) path: the symlink survives
+				// untouched (under the old pathspec it was replaced by a real
+				// directory holding a file nobody asked to restore) and the
+				// outside file behind it is untouched.
+				const linkStat = await fs.lstat(innerDir)
+				expect(linkStat.isSymbolicLink()).toBe(true)
+				expect(await fs.readFile(outsideFile, "utf-8")).toBe("outside")
 			})
 
 			it("rejects a restore target that escapes the workspace", async () => {
