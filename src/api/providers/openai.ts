@@ -9,6 +9,7 @@ import {
 	isAzureOpenAiBaseUrl,
 	openAiModelInfoSaneDefaults,
 	DEEP_SEEK_DEFAULT_TEMPERATURE,
+	DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS,
 	OPENAI_AZURE_AI_INFERENCE_PATH,
 	parseOpenAiExtraBody,
 } from "@roo-code/types"
@@ -91,9 +92,12 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		const { info: modelInfo, reasoning } = this.getModel()
 		const modelUrl = this.options.openAiBaseUrl ?? ""
 		const modelId = this.options.openAiModelId ?? ""
-		const enabledR1Format = this.options.openAiR1FormatEnabled ?? false
+		// Stryker disable next-line LogicalOperator: equivalent. An unset option makes `&&`
+		// yield undefined, which the parameter default in convertToolsForOpenAI turns back into
+		// the same strict value as `??`.
+		const strictToolSchemas = this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS
 		const isAzureAiInference = this._isAzureAiInference(modelUrl)
-		const deepseekReasoner = modelId.includes("deepseek-reasoner") || enabledR1Format
+		const deepseekReasoner = this.usesR1Format(modelId)
 
 		if (modelId.includes("o1") || modelId.includes("o3") || modelId.includes("o4")) {
 			yield* this.handleO3FamilyMessage(modelId, systemPrompt, messages, metadata)
@@ -173,7 +177,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				stream: true as const,
 				...(isGrokXAI ? {} : { stream_options: { include_usage: true } }),
 				...(reasoning && reasoning),
-				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tools: this.convertToolsForOpenAI(metadata?.tools, strictToolSchemas),
 				tool_choice: metadata?.tool_choice,
 				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 			}
@@ -241,7 +245,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 					: [systemMessage, ...convertToOpenAiMessages(messages)],
 				...reasoning,
 				// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS)
-				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tools: this.convertToolsForOpenAI(metadata?.tools, strictToolSchemas),
 				tool_choice: metadata?.tool_choice,
 				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 			}
@@ -294,6 +298,14 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		}
 	}
 
+	// Single gate for everything that depends on the R1 request format: message
+	// conversion in createMessage() and reasoning retention in getModel(). Both
+	// must agree, otherwise reasoning is converted for the request but stripped
+	// from the follow-up context (or vice versa).
+	private usesR1Format(modelId: string): boolean {
+		return modelId.includes("deepseek-reasoner") || (this.options.openAiR1FormatEnabled ?? false)
+	}
+
 	override getModel() {
 		const id = this.options.openAiModelId ?? ""
 		const info: ModelInfo = this.options.openAiCustomModelInfo ?? openAiModelInfoSaneDefaults
@@ -306,10 +318,19 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			settings: { ...this.options, reasoningEffort: info.reasoningEffort },
 			defaultTemperature: 0,
 		})
-		return { id, info, ...params }
+		// Local OpenAI-compatible reasoning models (llama.cpp, LM Studio, Ollama)
+		// stream reasoning_content, but Zoo Code strips it from the follow-up context
+		// unless info.preserveReasoning is set. Whenever createMessage() treats the
+		// model as R1 (deepseek-reasoner id or the R1 format toggle), also treat it
+		// as preserving reasoning so the chain is fed back.
+		return {
+			id,
+			info: this.usesR1Format(id) ? { ...info, preserveReasoning: true } : info,
+			...params,
+		}
 	}
 
-	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
 		try {
 			const isAzureAiInference = this._isAzureAiInference(this.options.openAiBaseUrl)
 			const model = this.getModel()
@@ -359,6 +380,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	): ApiStream {
 		const { info: modelInfo, reasoning } = this.getModel()
 		const methodIsAzureAiInference = this._isAzureAiInference(this.options.openAiBaseUrl)
+		// Stryker disable next-line LogicalOperator: equivalent. An unset option makes `&&`
+		// yield undefined, which the parameter default in convertToolsForOpenAI turns back into
+		// the same strict value as `??`.
+		const strictToolSchemas = this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS
 
 		if (this.options.openAiStreamingEnabled ?? true) {
 			const isGrokXAI = this._isGrokXAI(this.options.openAiBaseUrl)
@@ -377,7 +402,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				...reasoning,
 				temperature: undefined,
 				// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS)
-				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tools: this.convertToolsForOpenAI(metadata?.tools, strictToolSchemas),
 				tool_choice: metadata?.tool_choice,
 				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 			}
@@ -412,7 +437,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				...reasoning,
 				temperature: undefined,
 				// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS)
-				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tools: this.convertToolsForOpenAI(metadata?.tools, strictToolSchemas),
 				tool_choice: metadata?.tool_choice,
 				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 			}
@@ -526,7 +551,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	protected _getUrlHost(baseUrl?: string): string {
 		try {
 			return new URL(baseUrl ?? "").hostname
-		} catch (error) {
+		} catch {
 			return ""
 		}
 	}
@@ -594,7 +619,7 @@ export async function getOpenAiModels(baseUrl?: string, apiKey?: string, openAiH
 		const response = await axios.get(`${trimmedBaseUrl}/models`, config)
 		const modelsArray = response.data?.data?.map((model: any) => model.id) || []
 		return [...new Set<string>(modelsArray)]
-	} catch (error) {
+	} catch {
 		return []
 	}
 }

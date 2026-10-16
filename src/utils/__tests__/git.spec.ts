@@ -87,7 +87,7 @@ describe("git utils", () => {
 
 	describe("checkGitInstalled", () => {
 		it("should return true when git --version succeeds", async () => {
-			vitest.mocked(exec).mockImplementation((command: string, options: any, callback: any) => {
+			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
 				if (command === "git --version") {
 					callback(null, { stdout: "git version 2.39.2", stderr: "" })
 					return {} as any
@@ -102,7 +102,7 @@ describe("git utils", () => {
 		})
 
 		it("should return false when git --version fails", async () => {
-			vitest.mocked(exec).mockImplementation((command: string, options: any, callback: any) => {
+			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
 				if (command === "git --version") {
 					callback(new Error("git not found"))
 					return {} as any
@@ -117,7 +117,7 @@ describe("git utils", () => {
 		})
 
 		it("should handle unexpected errors gracefully", async () => {
-			vitest.mocked(exec).mockImplementation((command: string, options: any, callback: any) => {
+			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
 				if (command === "git --version") {
 					// Simulate an unexpected error
 					callback(new Error("Unexpected system error"))
@@ -158,7 +158,7 @@ describe("git utils", () => {
 				],
 			])
 
-			vitest.mocked(exec).mockImplementation((command: string, options: any, callback: any) => {
+			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
 				// Find matching response
 				for (const [cmd, response] of responses) {
 					if (command === cmd) {
@@ -192,7 +192,7 @@ describe("git utils", () => {
 		})
 
 		it("should return empty array when git is not installed", async () => {
-			vitest.mocked(exec).mockImplementation((command: string, options: any, callback: any) => {
+			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
 				if (command === "git --version") {
 					callback(new Error("git not found"))
 					return {} as any
@@ -212,7 +212,7 @@ describe("git utils", () => {
 				["git rev-parse --git-dir", null], // null indicates error should be called
 			])
 
-			vitest.mocked(exec).mockImplementation((command: string, options: any, callback: any) => {
+			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
 				const response = responses.get(command)
 				if (response === null) {
 					callback(new Error("not a git repository"))
@@ -246,7 +246,7 @@ describe("git utils", () => {
 				],
 			])
 
-			vitest.mocked(exec).mockImplementation((command: string, options: any, callback: any) => {
+			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
 				for (const [cmd, response] of responses) {
 					if (command === cmd) {
 						callback(null, response)
@@ -293,7 +293,7 @@ describe("git utils", () => {
 				['git show --format="" abc123', { stdout: mockDiff, stderr: "" }],
 			])
 
-			vitest.mocked(exec).mockImplementation((command: string, options: any, callback: any) => {
+			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
 				for (const [cmd, response] of responses) {
 					if (command.startsWith(cmd)) {
 						callback(null, response)
@@ -313,7 +313,7 @@ describe("git utils", () => {
 		})
 
 		it("should return error message when git is not installed", async () => {
-			vitest.mocked(exec).mockImplementation((command: string, options: any, callback: any) => {
+			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
 				if (command === "git --version") {
 					callback(new Error("git not found"))
 					return {} as any
@@ -332,7 +332,7 @@ describe("git utils", () => {
 				["git rev-parse --git-dir", null], // null indicates error should be called
 			])
 
-			vitest.mocked(exec).mockImplementation((command: string, options: any, callback: any) => {
+			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
 				const response = responses.get(command)
 				if (response === null) {
 					callback(new Error("not a git repository"))
@@ -363,7 +363,7 @@ describe("git utils", () => {
 				["git diff HEAD", { stdout: mockDiff, stderr: "" }],
 			])
 
-			vitest.mocked(exec).mockImplementation((command: string, options: any, callback: any) => {
+			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
 				for (const [cmd, response] of responses) {
 					if (command === cmd) {
 						callback(null, response)
@@ -388,7 +388,7 @@ describe("git utils", () => {
 				["git status --short", { stdout: "", stderr: "" }],
 			])
 
-			vitest.mocked(exec).mockImplementation((command: string, options: any, callback: any) => {
+			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
 				for (const [cmd, response] of responses) {
 					if (command === cmd) {
 						callback(null, response)
@@ -404,7 +404,7 @@ describe("git utils", () => {
 		})
 
 		it("should return error message when git is not installed", async () => {
-			vitest.mocked(exec).mockImplementation((command: string, options: any, callback: any) => {
+			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
 				if (command === "git --version") {
 					callback(new Error("git not found"))
 					return {} as any
@@ -423,7 +423,7 @@ describe("git utils", () => {
 				["git rev-parse --git-dir", null], // null indicates error should be called
 			])
 
-			vitest.mocked(exec).mockImplementation((command: string, options: any, callback: any) => {
+			vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
 				const response = responses.get(command)
 				if (response === null) {
 					callback(new Error("not a git repository"))
@@ -493,7 +493,7 @@ describe("getGitRepositoryInfo", () => {
 		const mockHead = "ref: refs/heads/main"
 
 		// Setup the readFile mock to return different values based on the path
-		gitSpy.mockImplementation((path: any, encoding: any) => {
+		gitSpy.mockImplementation((path: any, _encoding: any) => {
 			if (path === configPath) {
 				return Promise.resolve(mockConfig)
 			} else if (path === headPath) {
@@ -538,7 +538,7 @@ describe("getGitRepositoryInfo", () => {
 		const mockHead = "ref: refs/heads/main"
 
 		// Setup the readFile mock to return different values based on the path
-		gitSpy.mockImplementation((path: any, encoding: any) => {
+		gitSpy.mockImplementation((path: any, _encoding: any) => {
 			if (path === configPath) {
 				return Promise.resolve(mockConfig)
 			} else if (path === headPath) {
@@ -565,7 +565,7 @@ describe("getGitRepositoryInfo", () => {
 		vitest.mocked(fs.promises.access).mockResolvedValue(undefined)
 
 		// Setup the readFile mock to return different values based on the path
-		gitSpy.mockImplementation((path: any, encoding: any) => {
+		gitSpy.mockImplementation((path: any, _encoding: any) => {
 			if (path === configPath) {
 				return Promise.reject(new Error("Failed to read config"))
 			} else if (path === headPath) {
@@ -592,7 +592,7 @@ describe("getGitRepositoryInfo", () => {
 		vitest.mocked(fs.promises.access).mockResolvedValue(undefined)
 
 		// Setup the readFile mock to return different values based on the path
-		gitSpy.mockImplementation((path: any, encoding: any) => {
+		gitSpy.mockImplementation((path: any, _encoding: any) => {
 			if (path === configPath) {
 				return Promise.resolve(`
 [remote "origin"]
@@ -639,7 +639,7 @@ describe("getGitRepositoryInfo", () => {
 		const mockHead = "ref: refs/heads/main"
 
 		// Setup the readFile mock to return different values based on the path
-		gitSpy.mockImplementation((path: any, encoding: any) => {
+		gitSpy.mockImplementation((path: any, _encoding: any) => {
 			if (path === configPath) {
 				return Promise.resolve(mockConfig)
 			} else if (path === headPath) {
@@ -817,7 +817,7 @@ describe("getWorkspaceGitInfo", () => {
 `
 
 		// Setup the readFile mock to return config content
-		readFileSpy.mockImplementation((path: any, encoding: any) => {
+		readFileSpy.mockImplementation((path: any, _encoding: any) => {
 			if (path.includes("config")) {
 				return Promise.resolve(mockConfig)
 			}
@@ -858,7 +858,7 @@ MM src/both-modified.ts
 			["git status --porcelain=v1 --branch", { stdout: mockOutput, stderr: "" }],
 		])
 
-		vitest.mocked(exec).mockImplementation((command: string, options: any, callback: any) => {
+		vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
 			for (const [cmd, response] of responses) {
 				if (command === cmd) {
 					callback(null, response)
@@ -885,7 +885,7 @@ M  src/file1.ts
 			["git status --porcelain=v1 --branch", { stdout: mockOutput, stderr: "" }],
 		])
 
-		vitest.mocked(exec).mockImplementation((command: string, options: any, callback: any) => {
+		vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
 			for (const [cmd, response] of responses) {
 				if (command === cmd) {
 					callback(null, response)
@@ -904,7 +904,7 @@ M  src/file1.ts
 	})
 
 	it("should return null when git is not installed", async () => {
-		vitest.mocked(exec).mockImplementation((command: string, options: any, callback: any) => {
+		vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
 			if (command === "git --version") {
 				callback(new Error("git not found"))
 				return {} as any
@@ -923,7 +923,7 @@ M  src/file1.ts
 			["git rev-parse --git-dir", null],
 		])
 
-		vitest.mocked(exec).mockImplementation((command: string, options: any, callback: any) => {
+		vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
 			const response = responses.get(command)
 			if (response === null) {
 				callback(new Error("not a git repository"))
@@ -953,7 +953,7 @@ M  src/file1.ts
 			["git status --porcelain=v1 --branch", { stdout: mockOutput, stderr: "" }],
 		])
 
-		vitest.mocked(exec).mockImplementation((command: string, options: any, callback: any) => {
+		vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
 			for (const [cmd, response] of responses) {
 				if (command === cmd) {
 					callback(null, response)
@@ -979,7 +979,7 @@ M  src/file1.ts
 			["git status --porcelain=v1 --branch", { stdout: "", stderr: "" }],
 		])
 
-		vitest.mocked(exec).mockImplementation((command: string, options: any, callback: any) => {
+		vitest.mocked(exec).mockImplementation((command: string, _options: any, callback: any) => {
 			for (const [cmd, response] of responses) {
 				if (command === cmd) {
 					callback(null, response)
