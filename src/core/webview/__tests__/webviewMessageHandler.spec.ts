@@ -1006,6 +1006,32 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalled()
 	})
 
+	it("clears the stale overlay before persisting the re-pin so a failed pin stays retryable", async () => {
+		vi.mocked(mockClineProvider.providerSettingsManager.hasConfig).mockImplementation(
+			async (name: string) => name === "shared-profile",
+		)
+		const calls: Array<[string, unknown]> = []
+		const originalSaveViewState = mockClineProvider.saveViewState
+		mockClineProvider.saveViewState = vi.fn(async (key: string, value: unknown) => {
+			calls.push([key, value])
+			if (key === "currentApiConfigName") {
+				throw new Error("pin write failed")
+			}
+		})
+		try {
+			await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
+			await new Promise((resolve) => setImmediate(resolve))
+		} finally {
+			mockClineProvider.saveViewState = originalSaveViewState
+		}
+
+		// The overlay clear must land first: if the pin write then fails, the merged
+		// selection stays invalid and the repair retries on the next launch, instead of
+		// a valid pin serving the deleted profile's buffered settings.
+		expect(calls[0]).toEqual(["apiConfiguration", undefined])
+		expect(calls).toContainEqual(["currentApiConfigName", "shared-profile"])
+	})
+
 	it("records the legacy repair without activating a profile when no name is listed", async () => {
 		double.providerSettingsManager.listConfig = vi
 			.fn()

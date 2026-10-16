@@ -684,12 +684,13 @@ export const webviewMessageHandler = async (
 								// Re-pin this view to the still-valid shared global selection (not the
 								// first listed profile) so the view adopts the shared choice; the
 								// global selection itself is left untouched.
-								await provider.saveViewState("currentApiConfigName", globalConfigName)
-								// The buffered overlay belongs to the profile that no longer
-								// resolves: drop it so getState() falls back to the settings of the
-								// re-pinned selection instead of serving the stale profile's
-								// provider, model, and keys to new tasks in this view.
+								// Clear the buffered overlay first: it belongs to the profile that
+								// no longer resolves. If the pin write below then fails, the invalid
+								// selection stays retryable on the next launch; pinning first would
+								// leave a valid pin serving the stale profile's provider, model, and
+								// keys with the repair skipped.
 								await provider.saveViewState("apiConfiguration", undefined)
+								await provider.saveViewState("currentApiConfigName", globalConfigName)
 								// Fall through: refresh listApiConfigMeta and post listApiConfig
 								// to this webview below.
 							} else {
