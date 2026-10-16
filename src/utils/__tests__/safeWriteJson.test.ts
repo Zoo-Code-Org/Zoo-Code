@@ -1109,18 +1109,35 @@ describe("safeWriteJson", () => {
 		const realOpen = fsSyncMod.openSync
 		const realFsync = fsSyncMod.fsyncSync
 		// The parent-directory open that safeWriteText performs after the commit
-		// rename gets a REAL descriptor: safeWriteText closes it in its finally
-		// block, and a fabricated number would make closeSync fail with EBADF -
-		// a second failure behind the same wrapper, hiding which fsync broke.
+		// rename gets a REAL descriptor where the platform allows it: the SUT
+		// closes the fd in its finally block, and closing a fabricated number
+		// would raise EBADF there - a second failure behind the same wrapper,
+		// hiding which fsync broke. Where opening a directory is not allowed
+		// (Windows), a sentinel stands in and the close is stubbed for it, so
+		// the injected fsync failure is the only error in flight on every
+		// platform.
 		const fsyncFailure = new Error("EIO fsync")
+		const realClose = fsSyncMod.closeSync
 		let dirFd: number | undefined
+		let dirFdIsReal = false
 		vi.spyOn(process, "platform", "get").mockReturnValue("linux")
 		vi.spyOn(fsSyncMod, "openSync").mockImplementation(((...args: unknown[]) => {
 			if (String(args[0]) === tempDir) {
-				dirFd = (realOpen as (p: string, f: string) => number)(tempDir, "r")
+				try {
+					dirFd = (realOpen as (p: string, f: string) => number)(tempDir, "r")
+					dirFdIsReal = true
+				} catch {
+					dirFd = 987654
+				}
 				return dirFd
 			}
 			return (realOpen as (...a: unknown[]) => unknown)(...args)
+		}) as never)
+		vi.spyOn(fsSyncMod, "closeSync").mockImplementation(((fd: number) => {
+			if (fd === dirFd && !dirFdIsReal) {
+				return undefined
+			}
+			return (realClose as (f: number) => unknown)(fd)
 		}) as never)
 		vi.spyOn(fsSyncMod, "fsyncSync").mockImplementation(((fd: number) => {
 			if (fd === dirFd) {
