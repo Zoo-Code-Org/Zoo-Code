@@ -1935,13 +1935,16 @@ export class ClineProvider
 				async (signal) => {
 					const { name: _name, ...stored } = await this.providerSettingsManager.getProfile({ name })
 
-					if (stored.apiProvider !== expectedProvider) {
+					// Unset provider (e.g. the seeded default profile) resolves to anthropic, matching getState().
+					const storedProvider = stored.apiProvider ?? providerIdentifiers.anthropic
+
+					if (storedProvider !== expectedProvider) {
 						throw new Error(
-							`Profile "${name}" provider changed from "${expectedProvider}" to "${String(stored.apiProvider)}"`,
+							`Profile "${name}" provider changed from "${expectedProvider}" to "${storedProvider}"`,
 						)
 					}
 
-					const merged: Record<string, unknown> = { ...stored }
+					const merged: Record<string, unknown> = { ...stored, apiProvider: storedProvider }
 
 					for (const [key, value] of Object.entries(patch)) {
 						if (PROFILE_MODEL_ID_PATCH_KEYS.has(key)) {

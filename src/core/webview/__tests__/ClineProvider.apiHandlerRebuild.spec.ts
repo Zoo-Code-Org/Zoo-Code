@@ -488,6 +488,22 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
 		})
 
+		test("treats a stored profile without apiProvider as anthropic and persists that provider", async () => {
+			const { apiProvider: _apiProvider, ...unsetProfile } = storedProfile
+			provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue(unsetProfile)
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.anthropic, {
+				apiModelId: "claude-sonnet-4-5",
+			})
+
+			const saveConfig = vi.mocked(provider["providerSettingsManager"].saveConfig)
+			expect(saveConfig).toHaveBeenCalledTimes(1)
+			expect(saveConfig.mock.calls[0][1]).toMatchObject({
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-sonnet-4-5",
+			})
+		})
+
 		test("rejects patch keys outside the model and reset allow-list", async () => {
 			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
 				openRouterModelId: "anthropic/claude",
