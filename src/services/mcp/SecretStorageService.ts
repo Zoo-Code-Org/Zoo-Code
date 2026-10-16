@@ -6,6 +6,11 @@ export interface StoredMcpOAuthData {
 	/** Unix ms timestamp after which the access token should be considered expired. */
 	expires_at: number
 	/**
+	 * Issuer of the authorization server that issued these tokens. Refresh is
+	 * allowed only against the same issuer. Missing on data saved by older versions.
+	 */
+	issuer?: string
+	/**
 	 * Full DCR response from the auth server, persisted so that fields like
 	 * client_secret, grant_types, and token_endpoint_auth_method survive restarts.
 	 * Note: redirect_uris within this object may be stale (port changes between

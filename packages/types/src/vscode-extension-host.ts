@@ -12,7 +12,7 @@ import type { CloudUserInfo, CloudOrganizationMembership, OrganizationAllowList,
 import type { SerializedCustomToolDefinition } from "./custom-tool.js"
 import type { GitCommit } from "./git.js"
 import type { McpServer } from "./mcp.js"
-import { RouterModelsMessageType, type ModelRecord, type RouterModels } from "./model.js"
+import { RouterModelsMessageType, type ModelInfo, type ModelRecord, type RouterModels } from "./model.js"
 import { LmStudioModelsMessageType } from "./providers/lm-studio.js"
 import { OllamaModelsMessageType } from "./providers/ollama.js"
 import { OpenAiModelsMessageType } from "./providers/openai.js"
@@ -48,6 +48,8 @@ export interface ExtensionMessage {
 		| typeof OllamaModelsMessageType.ollamaModels
 		| typeof LmStudioModelsMessageType.lmStudioModels
 		| typeof VsCodeLmModelsMessageType.vsCodeLmModels
+		| typeof VsCodeLmModelsMessageType.githubCopilotModels
+		| typeof VsCodeLmModelsMessageType.githubCopilotSignInResult
 		| "vsCodeLmApiAvailable"
 		| "updatePrompt"
 		| "systemPrompt"
@@ -146,7 +148,16 @@ export interface ExtensionMessage {
 	openAiModels?: string[]
 	ollamaModels?: ModelRecord
 	lmStudioModels?: ModelRecord
-	vsCodeLmModels?: { vendor?: string; family?: string; version?: string; id?: string }[]
+	vsCodeLmModels?: {
+		vendor?: string
+		family?: string
+		version?: string
+		id?: string
+		name?: string
+		maxInputTokens?: number
+		modelInfo?: ModelInfo
+	}[]
+	githubCopilotAccount?: string | null
 	mcpServers?: McpServer[]
 	commits?: GitCommit[]
 	listApiConfig?: ProviderSettingsEntry[]
@@ -499,6 +510,9 @@ export interface WebviewMessage {
 		| typeof LmStudioModelsMessageType.requestLmStudioModels
 		| "requestRooModels"
 		| typeof VsCodeLmModelsMessageType.requestVsCodeLmModels
+		| typeof VsCodeLmModelsMessageType.githubCopilotSignIn
+		| typeof VsCodeLmModelsMessageType.githubCopilotReconnect
+		| typeof VsCodeLmModelsMessageType.githubCopilotManageAccount
 		| "openImage"
 		| "saveImage"
 		| "openFile"

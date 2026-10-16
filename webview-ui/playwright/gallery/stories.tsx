@@ -141,6 +141,37 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"ignored-disabled-tools-warning": async () => {
+		const [{ AppProviders }, { ChatRowContent }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/chat/ChatRow"),
+		])
+		// Same payload shape Task.startTask emits, so the snapshot covers ChatRow's
+		// dispatch and locale lookup, not just the isolated warning row.
+		const message: import("@roo-code/types").ClineMessage = {
+			type: "say",
+			say: "ignored_disabled_tools_warning",
+			ts: 0,
+			text: JSON.stringify({ ignoredTools: ["attempt_completion"] }),
+		}
+		return (
+			<AppProviders>
+				<div className="w-full bg-vscode-editor-background px-[15px] py-[10px] text-vscode-foreground">
+					<ChatRowContent
+						message={message}
+						isExpanded={false}
+						isLast={false}
+						isStreaming={false}
+						onToggleExpand={() => undefined}
+						onSuggestionClick={() => undefined}
+						onBatchFileResponse={() => undefined}
+						onFollowUpUnmount={() => undefined}
+						isFollowUpAnswered={false}
+					/>
+				</div>
+			</AppProviders>
+		)
+	},
 	"layout-clipped-text": () => (
 		<div className="w-40">
 			<span data-testid="clipped-direct-text" className="block w-8 overflow-hidden whitespace-nowrap">
@@ -307,6 +338,34 @@ export const stories: Record<string, Story> = {
 						handleCondenseContext={() => undefined}
 					/>
 				</div>
+			</AppProviders>
+		)
+	},
+	"github-copilot-settings": async () => {
+		const [{ AppProviders }, { VSCodeLM }, { providerIdentifiers }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/providers/VSCodeLM"),
+			import("@roo-code/types"),
+		])
+		function CopilotSettings() {
+			const [config, setConfig] = useState<import("@roo-code/types").ProviderSettings>({
+				apiProvider: providerIdentifiers.githubCopilot,
+				vsCodeLmModelSelector: { vendor: "copilot", id: "gpt-5.5", family: "gpt-5.5", version: "1" },
+			})
+			return (
+				<div data-testid="github-copilot-settings" className="w-[420px] p-4 bg-vscode-editor-background">
+					<VSCodeLM
+						apiConfiguration={config}
+						setApiConfigurationField={(field, value) =>
+							setConfig((previous) => ({ ...previous, [field]: value }))
+						}
+					/>
+				</div>
+			)
+		}
+		return (
+			<AppProviders>
+				<CopilotSettings />
 			</AppProviders>
 		)
 	},
