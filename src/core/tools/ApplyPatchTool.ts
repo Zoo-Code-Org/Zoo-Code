@@ -13,7 +13,6 @@ import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { sanitizeUnifiedDiff, computeDiffStats } from "../diff/stats"
 import { versionTokenOfStat } from "../../utils/versionToken"
 import { GuardRejectedError, errorCode } from "./guardedWrite"
-import { PostCommitDurabilityError } from "../../services/file-safety/safeWriteText"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import type { ToolUse } from "../../shared/tools"
 import { parsePatch, ParseError, processAllHunks } from "./apply-patch"
@@ -512,37 +511,21 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						task.observationRegistry.observe(moveAbsolutePath, destObs.version, false)
 					}
 				}
-				try {
-					await task.diffViewProvider.saveDirectly(
-						change.movePath,
-						newContent,
-						false,
-						diagnosticsEnabled,
-						writeDelayMs,
-						"create",
-						sourceComplete,
-					)
-				} catch (error: unknown) {
-					if (
-						error instanceof PostCommitDurabilityError &&
-						path.resolve(error.targetPath) === moveAbsolutePath
-					) {
-						// The commit rename landed: the destination carries the moved
-						// content even though durability failed. Finish the observable
-						// half of the move - remove the source - so the content is not
-						// left at both paths, then rethrow: a durability failure is not
-						// a completed move.
-						try {
-							await fs.unlink(absolutePath)
-						} catch (unlinkError: unknown) {
-							// The unlink failed on top of the durability failure: the content
-							// now exists at BOTH paths, which is the half-applied state the
-							// dedicated failure class exists to report.
-							throw new PartialMoveError(change.path, change.movePath, unlinkError)
-						}
-					}
-					throw error
-				}
+				// A PostCommitDurabilityError from this save means the commit rename
+				// landed but the destination's directory entry is not known to be
+				// durable: after a crash the destination may not survive. The source
+				// is deliberately NOT unlinked here - removing it could leave NEITHER
+				// path available - and the error propagates, so the model learns the
+				// move did not complete while both paths still hold the content.
+				await task.diffViewProvider.saveDirectly(
+					change.movePath,
+					newContent,
+					false,
+					diagnosticsEnabled,
+					writeDelayMs,
+					"create",
+					sourceComplete,
+				)
 			} else {
 				// Write to new path and delete old file
 				const parentDir = path.dirname(moveAbsolutePath)

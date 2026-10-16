@@ -485,11 +485,13 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		)
 	})
 
-	it("move: removes the source when the destination landed but durability failed, and reports the failure", async () => {
-		// A PostCommitDurabilityError means the commit rename ALREADY placed the
-		// bytes at the destination: the move is half-applied while the source
-		// survives. Swallowing the error left the content at both paths; the
-		// source removal must still run and the failure must still surface.
+	it("move: keeps the source when the destination landed but durability failed, and reports the failure", async () => {
+		// A PostCommitDurabilityError means the commit rename landed but the
+		// destination's directory entry is not known to be durable: after a
+		// crash the destination may not survive. Unlinking the source could
+		// then leave NEITHER path available, so the source is kept and the
+		// durability error surfaces - the model sees the move did not complete
+		// and both paths still hold the content.
 		mockSaveDirectly.mockRejectedValue(
 			new PostCommitDurabilityError(path.resolve("/workspace/project", "src/new.ts"), new Error("fsync failed")),
 		)
@@ -501,31 +503,14 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			toolCallId: "test-tool-call-id",
 		})
 
-		// The observable half of the move completed: the source is gone.
-		expect(mockedFsPromises.default.unlink).toHaveBeenCalledWith(path.resolve("/workspace/project", "src/old.ts"))
+		// The source is NOT unlinked: crash-availability beats tidiness - the
+		// destination may not survive without its directory entry, and a removed
+		// source would then leave neither path available.
+		expect(mockedFsPromises.default.unlink).not.toHaveBeenCalledWith(
+			path.resolve("/workspace/project", "src/old.ts"),
+		)
 		// And the durability failure is reported - not a completed move.
 		expect(mockHandleError).toHaveBeenCalledWith("apply patch", expect.any(PostCommitDurabilityError))
-	})
-
-	it("move: reports a source-unlink failure after a landed durability error as a partial move", async () => {
-		// The destination landed but durability failed, and the source unlink
-		// failed on top of it: the content exists at BOTH paths. Reporting only
-		// the durability error hid the duplicated file from the model; the
-		// half-applied state has its own failure class and must surface here.
-		mockSaveDirectly.mockRejectedValue(
-			new PostCommitDurabilityError(path.resolve("/workspace/project", "src/new.ts"), new Error("fsync failed")),
-		)
-		mockedFsPromises.default.unlink.mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }))
-
-		await tool.execute({ patch: movePatch }, mockTask as Task, {
-			askApproval: mockAskApproval,
-			handleError: mockHandleError,
-			pushToolResult: mockPushToolResult,
-			toolCallId: "test-tool-call-id",
-		})
-
-		expect(mockHandleError).toHaveBeenCalledWith("apply patch", expect.any(PartialMoveError))
-		expect(mockTask.fileContextTracker.trackFileContext).not.toHaveBeenCalledWith("src/new.ts", "roo_edited")
 	})
 
 	it("move: reports a source-unlink failure as a partial move instead of a success", async () => {
