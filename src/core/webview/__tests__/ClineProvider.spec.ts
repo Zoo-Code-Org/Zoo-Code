@@ -3575,6 +3575,38 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("restores the cached viewStates map when a re-key write fails durably", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// Seed a pre-launch entry under the temporary id through the real write
+			// path, so the re-key has a real entry to move and this instance authored it.
+			await provider["savePersistedViewState"]({ mode: "architect", updatedAt: 1 })
+
+			// The re-key's durable write fails; the cache was already updated optimistically.
+			const updateSpy = vi.spyOn(mockContext.globalState, "update").mockImplementationOnce(async () => {
+				throw new Error("durable write failed")
+			})
+
+			await expect(provider["rekeyPersistedViewStateEntry"]("stable-sidebar-view")).rejects.toThrow(
+				"durable write failed",
+			)
+
+			// The cache must match durable storage: the stable entry never reached disk,
+			// and the retry path depends on the temporary entry still being visible.
+			expect(provider.contextProxy.getValue("viewStates")).toEqual({
+				[provider.viewId]: { mode: "architect", updatedAt: 1 },
+			})
+			// Authorship survives the failure so a later registration can re-key again.
+			expect(provider["wroteUnderTemporaryViewStateId"]).toBe(true)
+			updateSpy.mockRestore()
+			await provider.dispose()
+		})
+
 		it("re-points live views pinned to a renamed profile onto the new name", async () => {
 			const provider = new ClineProvider(
 				mockContext,
