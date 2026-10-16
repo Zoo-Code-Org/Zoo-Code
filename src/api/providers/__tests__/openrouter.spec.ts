@@ -104,9 +104,9 @@ vitest.mock("../fetchers/modelCache", () => ({
 			},
 		})
 	}),
-	refreshModels: vitest.fn(async (options) => {
+	refreshModels: vitest.fn(async (options, handler) => {
 		const { getModels } = await import("../fetchers/modelCache")
-		return getModels(options)
+		return getModels(options, handler)
 	}),
 }))
 
@@ -682,11 +682,11 @@ describe("OpenRouterHandler", () => {
 			])
 			expect(firstChunks.parserEvents).toEqual([
 				{ type: "tool_call_start", id: "call_openrouter_a", name: "read_file" },
-				{ type: "tool_call_delta", id: "call_openrouter_a", delta: '{"path":"a' },
+				{ type: "tool_call_delta", id: "call_openrouter_a", name: "read_file", delta: '{"path":"a' },
 			])
 			expect(secondChunks.parserEvents).toEqual([
 				{ type: "tool_call_start", id: "call_openrouter_b", name: "read_file" },
-				{ type: "tool_call_delta", id: "call_openrouter_b", delta: '{"path":"b' },
+				{ type: "tool_call_delta", id: "call_openrouter_b", name: "read_file", delta: '{"path":"b' },
 			])
 		})
 
@@ -2640,6 +2640,13 @@ describe("OpenRouterHandler", () => {
 				expect.objectContaining({ model: expect.any(String) }),
 				expect.objectContaining({ timeout: 100_000 }),
 			)
+		})
+	})
+
+	describe("model catalog", () => {
+		it("reports its cache scope", () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			expect(handler.getModelCacheScope()).toEqual({ urlScoped: false, keyScoped: false, authScoped: false })
 		})
 	})
 })
