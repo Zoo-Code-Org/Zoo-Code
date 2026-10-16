@@ -35,7 +35,6 @@ vi.mock("fs/promises", () => {
 })
 
 // Import safeWriteJson to use in mocks
-import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 // Mock safeWriteJson
 vi.mock("../../../utils/safeWriteJson", () => ({
@@ -298,8 +297,6 @@ describe("McpHub", () => {
 		})
 
 		it("writes the default stub when the existing content has no mcpServers object", async () => {
-			const settingsPath = path.join("/mock/settings/path", "mcp_settings.json")
-
 			// Existence check sees an absent file, but the locked read finds content
 			// that does not carry a mcpServers object (e.g. a torn or foreign write).
 			vi.mocked(fs.access).mockRejectedValueOnce(
@@ -315,8 +312,6 @@ describe("McpHub", () => {
 		})
 
 		it("writes the default stub when the existing mcpServers value is not an object", async () => {
-			const settingsPath = path.join("/mock/settings/path", "mcp_settings.json")
-
 			vi.mocked(fs.access).mockRejectedValueOnce(
 				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
 			)
@@ -330,8 +325,6 @@ describe("McpHub", () => {
 		})
 
 		it("writes the default stub when the existing mcpServers value is an array", async () => {
-			const settingsPath = path.join("/mock/settings/path", "mcp_settings.json")
-
 			// Arrays satisfy `typeof === "object"`; an mcpServers map must be a
 			// plain object, so an array is invalid and replaced by the stub
 			// instead of being preserved and rejected by McpSettingsSchema later.
@@ -388,8 +381,6 @@ describe("McpHub", () => {
 		})
 
 		it("rejects creation when the locked read fails with an I/O error (EACCES)", async () => {
-			const settingsPath = path.join("/mock/settings/path", "mcp_settings.json")
-
 			vi.mocked(fs.access).mockRejectedValueOnce(
 				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
 			)

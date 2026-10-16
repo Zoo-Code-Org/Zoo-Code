@@ -232,7 +232,7 @@ export async function discoverSubfolderRooDirectories(cwd: string): Promise<stri
 
 		// Return sorted alphabetically
 		return Array.from(rooDirs).sort()
-	} catch (error) {
+	} catch {
 		// If discovery fails (e.g., ripgrep not available), return empty array
 		return []
 	}

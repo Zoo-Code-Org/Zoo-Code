@@ -2,7 +2,7 @@ import { Anthropic } from "@anthropic-ai/sdk"
 
 import { DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS, type ModelInfo } from "@roo-code/types"
 
-import type { ApiHandler, ApiHandlerCreateMessageMetadata } from "../index"
+import type { ApiHandler, ApiHandlerCreateMessageMetadata, ModelCacheScope } from "../index"
 import { ApiStream } from "../transform/stream"
 import { sanitizeSurrogates, sanitizeSurrogatesDeep } from "../transform/sanitize-surrogates"
 import { countTokens } from "../../utils/countTokens"
@@ -149,5 +149,12 @@ export abstract class BaseProvider implements ApiHandler {
 		}
 
 		return countTokens(content, { useWorker: true })
+	}
+
+	/**
+	 * Default: no special cache scoping. Catalog providers override this.
+	 */
+	getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: false, keyScoped: false, authScoped: false }
 	}
 }

@@ -8,7 +8,7 @@ vi.mock("http", () => ({
 
 function createMockServer() {
 	const mockServer = {
-		listen: vi.fn((port, host, callback) => {
+		listen: vi.fn((_port, _host, callback) => {
 			callback()
 			return mockServer
 		}),
