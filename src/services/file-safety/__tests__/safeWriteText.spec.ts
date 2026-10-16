@@ -155,26 +155,32 @@ function _stats(mode: number, gid?: number): fsSync.Stats {
 
 // ── Test 1: staging file created then cleaned after success ────────────────
 
+/** Reset the fs mocks and restore the defaults every suite in this
+ * file relies on. Shared with the top-level suites below so a filtered run
+ * (`vitest -t`) of any single suite starts from the same baseline.
+ */
+function _restoreFsDefaults(): void {
+	vi.resetAllMocks()
+	// After resetAllMocks, vi.fn() returns undefined — restore promise defaults.
+	vi.mocked(fs.mkdir).mockResolvedValue(undefined)
+	vi.mocked(fs.access).mockResolvedValue(undefined)
+	vi.mocked(fs.rename).mockResolvedValue(undefined)
+	vi.mocked(fs.unlink).mockResolvedValue(undefined)
+	// Link lookups default to 'not a link' so an ENOENT realpath falls back to the path.
+	vi.mocked(fs.lstat).mockResolvedValue(null as unknown as fsSync.Stats)
+	// Existing-target default: a regular 0o644 file.
+	vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o644))
+	// Staging path default: a real directory owned by this process.
+	vi.mocked(fsSync.lstatSync).mockReturnValue(_dirStats())
+	// Default sync-write behaviour: report that all requested bytes were
+	// written. The Buffer overload passes (fd, buffer, offset, length),
+	// so the fourth argument is the requested length.
+	vi.mocked(fsSync.writeSync).mockImplementation((...args: unknown[]) => (typeof args[3] === "number" ? args[3] : 0))
+}
+
 describe("safeWriteText", () => {
 	beforeEach(() => {
-		vi.resetAllMocks()
-		// After resetAllMocks, vi.fn() returns undefined — restore promise defaults.
-		vi.mocked(fs.mkdir).mockResolvedValue(undefined)
-		vi.mocked(fs.access).mockResolvedValue(undefined)
-		vi.mocked(fs.rename).mockResolvedValue(undefined)
-		vi.mocked(fs.unlink).mockResolvedValue(undefined)
-		// Link lookups default to 'not a link' so an ENOENT realpath falls back to the path.
-		vi.mocked(fs.lstat).mockResolvedValue(null as unknown as fsSync.Stats)
-		// Existing-target default: a regular 0o644 file.
-		vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o644))
-		// Staging path default: a real directory owned by this process.
-		vi.mocked(fsSync.lstatSync).mockReturnValue(_dirStats())
-		// Default sync-write behaviour: report that all requested bytes were
-		// written. The Buffer overload passes (fd, buffer, offset, length),
-		// so the fourth argument is the requested length.
-		vi.mocked(fsSync.writeSync).mockImplementation((...args: unknown[]) =>
-			typeof args[3] === "number" ? args[3] : 0,
-		)
+		_restoreFsDefaults()
 	})
 
 	describe("staging and cleanup", () => {
@@ -1519,6 +1525,26 @@ describe("safeWriteText", () => {
 			expect(fs.mkdir).not.toHaveBeenCalled()
 		})
 
+		it("refuses a new file whose parent directory is a symlink out of the root", async () => {
+			// The final component does not exist yet, so the retained target is
+			// lexical (root/sublink/new.txt). The parent link points outside the
+			// root, so the bytes land outside even though the name sits inside:
+			// a purely lexical inside test would let this through.
+			const root = aurRoot()
+			const requested = path.join(root, "sublink", "new.txt")
+			vi.mocked(fs.realpath).mockImplementation(async (p) => {
+				const s = String(p)
+				if (s === root) return root
+				if (s === path.join(root, "sublink")) return path.resolve("/outside")
+				throw enoent()
+			})
+
+			await expect(safeWriteText(requested, "data", { platform: "linux", authorizedRoot: root })).rejects.toThrow(
+				/authorized root/,
+			)
+			expect(fs.mkdir).not.toHaveBeenCalled()
+		})
+
 		it("propagates a non-ENOENT inspection failure of the authorized root", async () => {
 			const root = aurRoot()
 			const target = path.join(root, "target.txt")
@@ -1782,6 +1808,15 @@ describe("safeWriteText", () => {
 
 			// Once for the original staging call, once for the recovery.
 			expect(fsSync.mkdirSync).toHaveBeenCalledTimes(2)
+			// The recovery must recreate the directory that holds tempPath: a fresh
+			// random name would leave the reopened file parentless on a real
+			// filesystem and orphan the directory it did create.
+			const mkdirCalls = vi.mocked(fsSync.mkdirSync).mock.calls.map((call) => String(call[0]))
+			expect(mkdirCalls[1]).toBe(mkdirCalls[0])
+			// The first open is the failed temp open; its parent must be the
+			// directory the recovery recreated.
+			const opened = String(vi.mocked(fsSync.openSync).mock.calls[0]?.[0])
+			expect(path.dirname(opened)).toBe(mkdirCalls[0])
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
 		})
 
@@ -2197,6 +2232,10 @@ describe("partial backup after a failed copy (backup:true)", () => {
 })
 
 describe("staging directory release", () => {
+	beforeEach(() => {
+		_restoreFsDefaults()
+	})
+
 	it("retries a transient release failure once and then surfaces it", async () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
 		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")
@@ -2230,6 +2269,10 @@ describe("staging directory release", () => {
 })
 
 describe("post-create staging probe failure", () => {
+	beforeEach(() => {
+		_restoreFsDefaults()
+	})
+
 	it("removes a staging directory it created when the post-create lstat fails", async () => {
 		const ioError = Object.assign(new Error("EIO"), { code: "EIO" })
 		vi.mocked(fs.realpath).mockResolvedValue("/tmp/test-dir/target.txt")

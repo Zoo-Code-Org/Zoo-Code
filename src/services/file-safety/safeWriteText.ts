@@ -385,6 +385,32 @@ function _isWithinRoot(root: string, target: string): boolean {
 }
 
 /**
+ * Canonicalize a path that may not exist yet: resolve the nearest existing
+ * ancestor and re-append the missing tail. A dangling final component under
+ * a symlinked parent directory would otherwise look inside the root
+ * lexically while the write lands wherever the parent link points.
+ */
+async function _realpathNearestExisting(targetPath: string): Promise<string> {
+	const missing: string[] = []
+	let current = targetPath
+	for (;;) {
+		try {
+			const real = await fs.realpath(current)
+			return missing.length === 0 ? real : path.join(real, ...missing.reverse())
+		} catch (error: unknown) {
+			if (_errorCode(error) !== "ENOENT") {
+				throw error
+			}
+			const parent = path.dirname(current)
+			if (parent === current) {
+				return targetPath
+			}
+			missing.push(path.basename(current))
+			current = parent
+		}
+	}
+}
+/**
  * Refuse a publish whose retained target escaped the caller's authorized root
  * while the requested path sat inside it: the tool layer approved the inside
  * path, so an escape here (a symlink or dangling link pointing outside the
@@ -419,7 +445,11 @@ async function _assertPublishWithinAuthorizedRoot(
 	const lexicalRoot = path.resolve(authorizedRoot)
 	const roots = lexicalRoot === root ? [root] : [root, lexicalRoot]
 	const requestedInside = roots.some((candidate) => _isWithinRoot(candidate, requestedPath))
-	const targetInside = roots.some((candidate) => _isWithinRoot(candidate, targetPath))
+	// The retained target may still sit under a symlinked parent directory:
+	// resolve the nearest existing ancestor so the inside test sees where the
+	// bytes actually land, not just where the name lexically sits.
+	const effectiveTarget = await _realpathNearestExisting(targetPath)
+	const targetInside = roots.some((candidate) => _isWithinRoot(candidate, effectiveTarget))
 	if (requestedInside && !targetInside) {
 		throw new Error(
 			`safeWriteText: refusing to publish ${targetPath}: the requested path ${requestedPath} is inside the authorized root ${root} but the resolved publish target is not. Nothing was written.`,
@@ -528,12 +558,17 @@ export async function safeWriteText(filePath: string, content: string, options?:
 			try {
 				fd = fsSync.openSync(tempPath, "w", targetMode)
 			} catch (error: unknown) {
-				// Every write to one directory shares the staging dir, and a write that finishes
-				// removes it when empty. A concurrent writer can therefore remove it between
-				// _stagingDir() and this open. Re-create it and try once; any other errno, or
-				// a second ENOENT, is a real failure.
+				// The staging directory belongs to this write alone, but its release is
+				// best-effort and retried, so a lingering release can still race this open.
+				// Recreate the same path - a fresh random name would not contain tempPath,
+				// the reopen would fail again on a real filesystem, and the new directory
+				// would be orphaned - and verify it is a real directory before reopening.
+				// Any other errno, or a second ENOENT, is a real failure.
 				if (_errorCode(error) !== "ENOENT" || stagingDir === null) throw error
-				_stagingDir(dirPath)
+				fsSync.mkdirSync(stagingDir, { recursive: true, mode: 0o700 })
+				if (!fsSync.lstatSync(stagingDir).isDirectory()) {
+					throw new UnsafeStagingDirectoryError(stagingDir, "it exists and is not a directory")
+				}
 				fd = fsSync.openSync(tempPath, "w", targetMode)
 			}
 			// The creation mode handed to openSync is masked by the process umask: an existing
