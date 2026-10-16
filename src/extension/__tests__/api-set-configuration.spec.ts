@@ -107,6 +107,46 @@ describe("API.setConfiguration", () => {
 			apiProvider: undefined,
 			modeApiConfigs: undefined,
 		})
+	})
+
+	it("restores the shared values when the first shared write fails partway", async () => {
+		const provider = Object.assign({} as ClineProvider, {
+			context: {},
+			on: vi.fn(),
+			getValue: vi.fn((key: string) => (key === "currentApiConfigName" ? "old-name" : undefined)),
+			// ContextProxy.setValues persists keys one at a time: a rejection here can
+			// mean a durable subset of the payload already landed.
+			setValues: vi.fn().mockRejectedValue(new Error("shared write failed")),
+			contextProxy: {
+				setValues: vi.fn().mockResolvedValue(undefined),
+			},
+			providerSettingsManager: {
+				getProfile: vi.fn().mockRejectedValue(new Error("profile not found")),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue("default-id"),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+			},
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		})
+		const api = new API(
+			Object.assign({} as OutputChannel, { appendLine: vi.fn() }),
+			provider,
+			makeClineProviderFactory(),
+		)
+
+		await expect(
+			api.setConfiguration({ currentApiConfigName: "default", apiProvider: providerIdentifiers.openai }),
+		).rejects.toThrow("shared write failed")
+
+		// Compensation runs from the first write: the fields whose durable write may
+		// have landed are restored, and the later profile save never runs.
+		expect(provider.setValues).toHaveBeenCalledTimes(2)
+		expect(provider.setValues.mock.calls[1][0]).toEqual({
+			currentApiConfigName: "old-name",
+			apiProvider: undefined,
+		})
+		expect(provider.providerSettingsManager.saveConfig).not.toHaveBeenCalled()
 		expect(provider.postStateToWebview).not.toHaveBeenCalled()
 	})
 })

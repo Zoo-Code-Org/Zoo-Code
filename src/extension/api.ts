@@ -832,7 +832,15 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 				)
 			: []
 
-		await this.sidebarProvider.setValues(values)
+		try {
+			await this.sidebarProvider.setValues(values)
+		} catch (error) {
+			// ContextProxy.setValues persists keys one at a time: a rejection can
+			// leave a durable subset of `values` behind, so undo every field whose
+			// write may have landed before surfacing the failure.
+			await this.restoreConfigurationValues(previousValues)
+			throw error
+		}
 
 		try {
 			await this.sidebarProvider.providerSettingsManager.saveConfig(profileName, values)
