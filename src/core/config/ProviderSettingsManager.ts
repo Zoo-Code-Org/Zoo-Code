@@ -495,6 +495,22 @@ export class ProviderSettingsManager {
 	}
 
 	/**
+	 * Read the manager-owned current profile selection. Exposed for callers that
+	 * snapshot the full activation state before a mutation group so a failure can
+	 * compensate the manager store as well as its ContextProxy copies.
+	 */
+	public async getCurrentProfileName(): Promise<string | undefined> {
+		try {
+			return await this.lock(async () => {
+				const providerProfiles = await this.load()
+				return providerProfiles.currentApiConfigName
+			})
+		} catch (error) {
+			throw new Error(`Failed to read the active profile: ${error instanceof Error ? error.message : error}`)
+		}
+	}
+
+	/**
 	 * Activate a profile by name or ID.
 	 */
 	public async activateProfile(
