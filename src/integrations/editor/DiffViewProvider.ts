@@ -1791,7 +1791,31 @@ export class DiffViewProvider {
 			arePathsEqual(document.uri.fsPath, absolutePath),
 		)
 		if (openTarget !== undefined) {
-			await this.revertDocument(openTarget)
+			const reconciled = await this.revertDocument(openTarget).catch(() => false)
+			if (!reconciled) {
+				// The revert failed or the buffer stayed dirty: its stale bytes could
+				// still be republished by VS Code's ordinary save path over what the
+				// guard committed. Close the tab and reopen the document from disk so
+				// no dirty buffer survives; if the reopened buffer is still dirty,
+				// fail the operation rather than reporting success over it - the
+				// diagnostics/open path must not run while the target is dirty.
+				try {
+					await this.closeFileTab(absolutePath)
+				} catch {
+					// best-effort close: the reopened-document check below decides
+				}
+				await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
+				const reopened = vscode.workspace.textDocuments.find((document) =>
+					arePathsEqual(document.uri.fsPath, absolutePath),
+				)
+				if (reopened?.isDirty) {
+					throw new Error(
+						`saveDirectly: the open document at ${absolutePath} is still dirty after the guarded publish -- ` +
+							"reverting and reopening it did not reconcile the buffer, so its stale bytes could overwrite " +
+							"the published content on the next save; the write is reported as failed.",
+					)
+				}
+			}
 		}
 
 		// Open the document to ensure diagnostics are loaded

@@ -1146,10 +1146,19 @@ describe("DiffViewProvider", () => {
 				uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
 				isDirty: true,
 				save: vi.fn().mockResolvedValue(undefined),
-			} as unknown as vscode.TextDocument // Structural double: the revert path only reads uri and dirty state.
+			}
+			const docDouble = openDirtyDoc as unknown as vscode.TextDocument // Structural double: the revert path only reads uri and dirty state.
 			const documents = vscode.workspace.textDocuments as vscode.TextDocument[]
-			documents.push(openDirtyDoc)
+			documents.push(docDouble)
 			try {
+				// The revert command reloads the published bytes: the double's
+				// dirty flag clears when the revert runs, as it does in the editor.
+				vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command: string) => {
+					if (command === "workbench.action.files.revert") {
+						openDirtyDoc.isDirty = false
+					}
+				})
+
 				await diffViewProvider.saveDirectly("test.ts", "new content", false, false, 0)
 
 				expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.files.revert")
@@ -1157,7 +1166,46 @@ describe("DiffViewProvider", () => {
 				// stale buffer bytes over the publish.
 				expect(openDirtyDoc.save).not.toHaveBeenCalled()
 			} finally {
-				documents.splice(documents.indexOf(openDirtyDoc), 1)
+				documents.splice(documents.indexOf(docDouble), 1)
+				vi.mocked(vscode.commands.executeCommand).mockReset()
+			}
+		})
+
+		it("fails the write when the reconcile leaves the target dirty", async () => {
+			// The revert command rejects and the buffer stays dirty: reporting
+			// success would leave VS Code's ordinary save path free to republish
+			// the stale buffer over the guarded bytes. saveDirectly must close the
+			// tab and reopen the document from disk, and when the reopened buffer
+			// is still dirty it must fail instead of reporting success - the
+			// diagnostics/open path must not run over a dirty target.
+			const staleDoc = {
+				uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+				isDirty: true,
+				save: vi.fn().mockResolvedValue(undefined),
+			}
+			const docDouble = staleDoc as unknown as vscode.TextDocument // Structural double: the reconcile path only reads uri and dirty state.
+			const documents = vscode.workspace.textDocuments as vscode.TextDocument[]
+			documents.push(docDouble)
+			const closeFileTab = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeFileTab"] = closeFileTab
+			try {
+				vi.mocked(vscode.commands.executeCommand).mockRejectedValue(new Error("revert command failed"))
+
+				await expect(diffViewProvider.saveDirectly("test.ts", "new content", false, false, 0)).rejects.toThrow(
+					"still dirty after the guarded publish",
+				)
+
+				// The stale buffer is taken out of the save path: the tab was closed
+				// and the document reopened from disk before the failure surfaced,
+				// so a later save reads the published bytes, not the stale ones.
+				expect(closeFileTab).toHaveBeenCalledWith(`${mockCwd}/test.ts`)
+				expect(vscode.workspace.openTextDocument).toHaveBeenCalledWith(
+					expect.objectContaining({ fsPath: `${mockCwd}/test.ts` }),
+				)
+				expect(staleDoc.save).not.toHaveBeenCalled()
+			} finally {
+				documents.splice(documents.indexOf(docDouble), 1)
+				vi.mocked(vscode.commands.executeCommand).mockReset()
 			}
 		})
 
