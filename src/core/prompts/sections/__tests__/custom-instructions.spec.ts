@@ -284,7 +284,7 @@ describe("loadRuleFiles", () => {
 			},
 		] as any)
 
-		statMock.mockImplementation((path) => {
+		statMock.mockImplementation((_path) => {
 			return Promise.resolve({
 				isFile: vi.fn().mockReturnValue(true),
 			}) as any
@@ -1460,7 +1460,7 @@ describe("Rules directory reading", () => {
 			{ name: "Beta.txt", isFile: () => true, parentPath: "/fake/path/.roo/rules" }, // Test case-insensitive sorting
 		] as any)
 
-		statMock.mockImplementation((path) => {
+		statMock.mockImplementation((_path) => {
 			return Promise.resolve({
 				isFile: vi.fn().mockReturnValue(true),
 			}) as any
