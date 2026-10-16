@@ -1480,6 +1480,45 @@ describe("safeWriteText", () => {
 			expect(fs.mkdir).not.toHaveBeenCalled()
 		})
 
+		it("accepts an in-root target whose own name starts with two dots", async () => {
+			const root = aurRoot()
+			const linkPath = path.join(root, "link.txt")
+			const target = path.join(root, "..config")
+			vi.mocked(fs.realpath).mockImplementation(async (p) => {
+				if (String(p) === root) return root
+				return target
+			})
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(linkPath, "data", { platform: "linux", authorizedRoot: root })
+
+			// A sibling entry may be named "..config": a bare ".." prefix is not an
+			// escape, so the write must proceed rather than be refused.
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), target)
+		})
+
+		it("enforces the root when the workspace itself is reached through a symlink", async () => {
+			// The lexical cwd (/tmp/ws below) resolves to a different canonical root
+			// (/private/tmp/ws): matching only the canonical root would classify
+			// every inside request as outside and skip the guard entirely.
+			const lexicalRoot = path.resolve("/tmp/ws")
+			const canonicalRoot = path.resolve("/private/tmp/ws")
+			const linkPath = path.join(lexicalRoot, "approved.txt")
+			const referent = path.resolve("/etc/x")
+			vi.mocked(fs.realpath).mockImplementation(async (p) => {
+				const s = String(p)
+				if (s === lexicalRoot) return canonicalRoot
+				throw enoent()
+			})
+			vi.mocked(fs.lstat).mockResolvedValueOnce(linkStats())
+			vi.mocked(fs.readlink).mockResolvedValueOnce(referent)
+
+			await expect(
+				safeWriteText(linkPath, "data", { platform: "linux", authorizedRoot: lexicalRoot }),
+			).rejects.toThrow(/authorized root/)
+			expect(fs.mkdir).not.toHaveBeenCalled()
+		})
+
 		it("propagates a non-ENOENT inspection failure of the authorized root", async () => {
 			const root = aurRoot()
 			const target = path.join(root, "target.txt")

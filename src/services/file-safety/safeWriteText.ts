@@ -379,7 +379,9 @@ export async function resolvePublishTarget(
 /** Lexical containment: true when target sits at or under root. */
 function _isWithinRoot(root: string, target: string): boolean {
 	const rel = path.relative(root, target)
-	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))
+	// A leading ".." is an escape only as a full segment: a sibling entry
+	// may legitimately be named "..config", and path.relative reports it bare.
+	return rel === "" || (rel !== ".." && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel))
 }
 
 /**
@@ -409,7 +411,16 @@ async function _assertPublishWithinAuthorizedRoot(
 		}
 		root = path.resolve(authorizedRoot)
 	}
-	if (_isWithinRoot(root, requestedPath) && !_isWithinRoot(root, targetPath)) {
+	// A workspace opened through a symlink (e.g. /tmp/ws -> /private/tmp/ws)
+	// makes every inside path look outside the canonicalized root, which
+	// would skip the check exactly where it matters. Match both the canonical
+	// and the lexical root: an inside request is one that sits under either,
+	// and an inside target is one that sits under either.
+	const lexicalRoot = path.resolve(authorizedRoot)
+	const roots = lexicalRoot === root ? [root] : [root, lexicalRoot]
+	const requestedInside = roots.some((candidate) => _isWithinRoot(candidate, requestedPath))
+	const targetInside = roots.some((candidate) => _isWithinRoot(candidate, targetPath))
+	if (requestedInside && !targetInside) {
 		throw new Error(
 			`safeWriteText: refusing to publish ${targetPath}: the requested path ${requestedPath} is inside the authorized root ${root} but the resolved publish target is not. Nothing was written.`,
 		)
