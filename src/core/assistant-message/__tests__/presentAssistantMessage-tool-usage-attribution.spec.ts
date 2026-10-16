@@ -68,6 +68,7 @@ interface MockTask {
 	didCompleteReadingStream: boolean
 	didRejectTool: boolean
 	didAlreadyUseTool: boolean
+	activeToolContexts: Map<string, unknown>
 	consecutiveMistakeCount: number
 	clineMessages: unknown[]
 	getTaskMode: Mock<() => Promise<string>>
@@ -107,6 +108,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 			didCompleteReadingStream: false,
 			didRejectTool: false,
 			didAlreadyUseTool: false,
+			activeToolContexts: new Map(),
 			consecutiveMistakeCount: 0,
 			clineMessages: [],
 			getTaskMode: vi.fn().mockResolvedValue("code"),

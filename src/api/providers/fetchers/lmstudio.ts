@@ -7,7 +7,7 @@ import { throwIfAborted } from "../utils/abort-signal"
 
 import type { ApiHandler } from "../../index"
 
-import { flushModels, getModels } from "./modelCache"
+import { flushModels } from "./modelCache"
 
 const modelsWithLoadedDetails = new Set<string>()
 
@@ -91,7 +91,7 @@ export async function getLMStudioModels(
 				// Use the model path as the key since that's what users select
 				models[model.path] = parseLMStudioModel(model)
 			}
-		} catch (error) {
+		} catch {
 			console.warn("Failed to list downloaded models, falling back to loaded models only")
 		}
 

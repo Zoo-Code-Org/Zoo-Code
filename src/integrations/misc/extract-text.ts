@@ -79,7 +79,7 @@ export async function extractTextFromFileWithMetadata(
 ): Promise<ExtractTextResult> {
 	try {
 		await fs.access(filePath)
-	} catch (error) {
+	} catch {
 		throw new Error(`File not found: ${filePath}`)
 	}
 

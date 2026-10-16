@@ -3,6 +3,7 @@ import type { ModelInfo } from "@roo-code/types"
 import { WebviewMessage } from "../../shared/WebviewMessage"
 import { defaultModeSlug } from "../../shared/modes"
 import { buildApiHandler } from "../../api"
+import { disposeApiHandler } from "../../api/dispose-api-handler"
 
 import { SYSTEM_PROMPT } from "../prompts/system"
 import { MultiSearchReplaceDiffStrategy } from "../diff/strategies/multi-search-replace"
@@ -48,8 +49,9 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 	// info beforehand would build the preview from fallback metadata with different
 	// tool guidance than the runtime path (which fetches before tool construction).
 	let modelInfo: ModelInfo | undefined
+	let tempApiHandler: ReturnType<typeof buildApiHandler> | undefined
 	try {
-		const tempApiHandler = buildApiHandler(apiConfiguration)
+		tempApiHandler = buildApiHandler(apiConfiguration)
 		// A failed OR stalled metadata fetch degrades to the handler's fallback
 		// metadata (mirroring Task.safeEnsureModelFetched) rather than dropping
 		// model guidance entirely, so the preview keeps matching the runtime
@@ -79,6 +81,12 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 		modelInfo = tempApiHandler.getModel().info
 	} catch (error) {
 		console.error("Error reading model info for system prompt preview:", error)
+	} finally {
+		try {
+			disposeApiHandler(tempApiHandler)
+		} catch (error) {
+			console.error("Error disposing the system prompt preview's API handler:", error)
+		}
 	}
 
 	const systemPrompt = await SYSTEM_PROMPT(
