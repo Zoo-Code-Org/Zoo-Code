@@ -8,7 +8,7 @@ vi.mock("openai", () => {
 			return {
 				chat: {
 					completions: {
-						create: mockCreate.mockImplementation(async (options) =>
+						create: mockCreate.mockImplementation(async (_options) =>
 							asyncStreamFrom([
 								{
 									choices: [{ delta: { content: "Test response" }, index: 0 }],

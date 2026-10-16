@@ -12,6 +12,9 @@ import {
 	type RouterModels,
 	anthropicModels,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
+	BEDROCK_DEFAULT_CONTEXT,
+	BEDROCK_MAX_TOKENS,
+	bedrockModels,
 	litellmDefaultModelInfo,
 	kenariDefaultModelId,
 	kenariDefaultModelInfo,
@@ -24,10 +27,17 @@ import {
 	minimaxModels,
 	friendliDefaultModelId,
 	friendliModels,
+	fireworksDefaultModelId,
+	fireworksModels,
+	basetenDefaultModelId,
+	basetenModels,
+	sambaNovaDefaultModelId,
+	sambaNovaModels,
 	deepSeekDefaultModelId,
 	deepSeekModels,
 	openRouterDefaultModelId,
 	vscodeLlmModels,
+	githubCopilotLanguageModel,
 	vscodeLlmDefaultModelId,
 	moonshotDefaultModelId,
 	moonshotModels,
@@ -45,16 +55,19 @@ import { useRouterModels } from "../useRouterModels"
 import { useOpenRouterModelProviders } from "../useOpenRouterModelProviders"
 import { useLmStudioModels } from "../useLmStudioModels"
 import { useOllamaModels } from "../useOllamaModels"
+import { useGitHubCopilotModels } from "../useGitHubCopilotModels"
 
 vi.mock("../useRouterModels")
 vi.mock("../useOpenRouterModelProviders")
 vi.mock("../useLmStudioModels")
 vi.mock("../useOllamaModels")
+vi.mock("../useGitHubCopilotModels")
 
 const mockUseRouterModels = useRouterModels as Mock<typeof useRouterModels>
 const mockUseOpenRouterModelProviders = useOpenRouterModelProviders as Mock<typeof useOpenRouterModelProviders>
 const mockUseLmStudioModels = useLmStudioModels as Mock<typeof useLmStudioModels>
 const mockUseOllamaModels = useOllamaModels as Mock<typeof useOllamaModels>
+const mockUseGitHubCopilotModels = useGitHubCopilotModels as Mock<typeof useGitHubCopilotModels>
 
 type TestRouterModels = Partial<Record<keyof RouterModels, ModelRecord | null>>
 type QueryResultOptions = { isLoading?: boolean; isError?: boolean }
@@ -100,6 +113,7 @@ describe("useSelectedModel", () => {
 		mockUseOllamaModels.mockClear()
 		mockUseLmStudioModels.mockReturnValue(createLocalModelsResult({}))
 		mockUseOllamaModels.mockReturnValue(createLocalModelsResult({}))
+		mockUseGitHubCopilotModels.mockReturnValue({ data: undefined } as ReturnType<typeof useGitHubCopilotModels>)
 	})
 
 	const dynamicProviderCases = [
@@ -819,6 +833,121 @@ describe("useSelectedModel", () => {
 			expect(result.current.id).toBe("custom-arn")
 			expect(result.current.info?.supportsImages).toBe(true)
 		})
+
+		const renderCustomArn = (settings: Partial<ProviderSettings>) => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.bedrock,
+				apiModelId: "custom-arn",
+				awsCustomArn: "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/abcd1234efgh",
+				...settings,
+			}
+			return renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() }).result.current
+		}
+
+		it("uses the selected base model's info for a custom ARN", () => {
+			const { id, info } = renderCustomArn({ awsCustomArnBaseModelId: "anthropic.claude-opus-5-5" })
+
+			expect(id).toBe("custom-arn")
+			expect(info).toMatchObject({
+				contextWindow: 1_000_000,
+				maxTokens: bedrockModels["anthropic.claude-opus-5-5"].maxTokens,
+				supportsTemperature: false,
+				supportsReasoningBinary: true,
+			})
+		})
+
+		it("applies the 1M context option to a custom ARN base model that supports it", () => {
+			expect(renderCustomArn({ awsCustomArnBaseModelId: "anthropic.claude-opus-4-8" }).info?.contextWindow).toBe(
+				bedrockModels["anthropic.claude-opus-4-8"].contextWindow,
+			)
+			expect(
+				renderCustomArn({ awsCustomArnBaseModelId: "anthropic.claude-opus-4-8", awsBedrock1MContext: true })
+					.info?.contextWindow,
+			).toBe(1_000_000)
+		})
+
+		it("uses the 1M pricing tier for a custom ARN base model when 1M context is enabled", () => {
+			const opus48: ModelInfo = bedrockModels["anthropic.claude-opus-4-8"]
+			const tier = opus48.tiers?.[0]
+			expect(tier?.inputPrice).toBeGreaterThan(opus48.inputPrice ?? 0)
+
+			expect(
+				renderCustomArn({ awsCustomArnBaseModelId: "anthropic.claude-opus-4-8", awsBedrock1MContext: true })
+					.info,
+			).toMatchObject({
+				inputPrice: tier?.inputPrice,
+				outputPrice: tier?.outputPrice,
+				cacheWritesPrice: tier?.cacheWritesPrice,
+				cacheReadsPrice: tier?.cacheReadsPrice,
+			})
+			expect(renderCustomArn({ awsCustomArnBaseModelId: "anthropic.claude-opus-4-8" }).info?.inputPrice).toBe(
+				opus48.inputPrice,
+			)
+		})
+
+		it("keeps standard pricing with 1M context for a custom ARN base model without a pricing tier", () => {
+			const sonnet45: ModelInfo = bedrockModels["anthropic.claude-sonnet-4-5-20250929-v1:0"]
+			expect(sonnet45.tiers).toBeUndefined()
+
+			expect(
+				renderCustomArn({
+					awsCustomArnBaseModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0",
+					awsBedrock1MContext: true,
+				}).info,
+			).toMatchObject({
+				contextWindow: 1_000_000,
+				inputPrice: sonnet45.inputPrice,
+				outputPrice: sonnet45.outputPrice,
+				cacheWritesPrice: sonnet45.cacheWritesPrice,
+				cacheReadsPrice: sonnet45.cacheReadsPrice,
+			})
+		})
+
+		it("applies a configured context window to a listed custom ARN base model", () => {
+			expect(
+				renderCustomArn({
+					awsCustomArnBaseModelId: "anthropic.claude-opus-5-5",
+					awsModelContextWindow: 400_000,
+				}).info?.contextWindow,
+			).toBe(400_000)
+		})
+
+		it("detects the base model from an inference profile ARN that names it", () => {
+			const { info } = renderCustomArn({
+				awsCustomArn: "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-opus-4-8",
+			})
+
+			expect(info?.maxTokens).toBe(bedrockModels["anthropic.claude-opus-4-8"].maxTokens)
+		})
+
+		it("uses the provider fallback for an explicit Other choice even when the ARN names a model", () => {
+			const { info } = renderCustomArn({
+				awsCustomArn: "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-opus-4-8",
+				awsCustomArnBaseModelId: "other",
+			})
+
+			expect(info).toMatchObject({ contextWindow: BEDROCK_DEFAULT_CONTEXT, maxTokens: BEDROCK_MAX_TOKENS })
+		})
+
+		it("uses the named model of a foundation-model ARN regardless of the selected base model", () => {
+			const { info } = renderCustomArn({
+				awsCustomArn: "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
+				awsCustomArnBaseModelId: "anthropic.claude-opus-5-5",
+			})
+
+			expect(info?.maxTokens).toBe(bedrockModels["anthropic.claude-3-5-sonnet-20241022-v2:0"].maxTokens)
+		})
+
+		it("uses the provider fallback and user limits when the base model is not listed", () => {
+			expect(renderCustomArn({}).info).toMatchObject({
+				contextWindow: BEDROCK_DEFAULT_CONTEXT,
+				maxTokens: BEDROCK_MAX_TOKENS,
+			})
+			expect(renderCustomArn({ awsModelContextWindow: 32_000, modelMaxTokens: 2048 }).info).toMatchObject({
+				contextWindow: 32_000,
+				maxTokens: 2048,
+			})
+		})
 	})
 
 	describe("litellm provider", () => {
@@ -1271,6 +1400,169 @@ describe("useSelectedModel", () => {
 	})
 
 	describe("vscode-lm provider", () => {
+		const reportedModels = (...models: Array<{ id: string; family: string; modelInfo?: ModelInfo }>) =>
+			mockUseGitHubCopilotModels.mockReturnValue({
+				data: models.map((model) => ({ vendor: githubCopilotLanguageModel.vendor, version: "1", ...model })),
+			} as unknown as ReturnType<typeof useGitHubCopilotModels>)
+
+		const selectCopilot = (selector: NonNullable<ProviderSettings["vsCodeLmModelSelector"]>) =>
+			renderHook(() =>
+				useSelectedModel({ apiProvider: providerIdentifiers.githubCopilot, vsCodeLmModelSelector: selector }),
+			).result.current
+
+		it("only subscribes to the Copilot list while Copilot is the active provider", () => {
+			renderHook(() => useSelectedModel({ apiProvider: providerIdentifiers.vscodeLm }))
+			expect(mockUseGitHubCopilotModels).toHaveBeenLastCalledWith(false)
+
+			selectCopilot({ vendor: githubCopilotLanguageModel.vendor, id: "any" })
+			expect(mockUseGitHubCopilotModels).toHaveBeenLastCalledWith(true)
+		})
+
+		it("keeps vision unknown until the host reports it, even for a model the catalog knows supports images", () => {
+			const [curatedFamily] = Object.entries(vscodeLlmModels).find(([, entry]) => entry.supportsImages) ?? []
+			expect(curatedFamily).toBeDefined()
+
+			expect(
+				selectCopilot({ vendor: githubCopilotLanguageModel.vendor, family: curatedFamily }).info
+					?.supportsImages,
+			).toBeUndefined()
+		})
+
+		it("keeps tool support unknown until the host reports it, even though the catalog marks every family", () => {
+			const [curatedFamily] = Object.entries(vscodeLlmModels).find(([, entry]) => entry.supportsToolCalling) ?? []
+			expect(curatedFamily).toBeDefined()
+
+			expect(
+				selectCopilot({ vendor: githubCopilotLanguageModel.vendor, family: curatedFamily }).info
+					?.supportsToolCalling,
+			).toBeUndefined()
+		})
+
+		it.each([true, false])("shows the host-reported tool support (%s) for the selected model", (reported) => {
+			reportedModels({
+				id: "dynamic-tools",
+				family: "dynamic-tools",
+				modelInfo: { contextWindow: 128000, supportsToolCalling: reported, supportsPromptCache: false },
+			})
+
+			expect(
+				selectCopilot({ vendor: "copilot", id: "dynamic-tools", family: "dynamic-tools" }).info
+					?.supportsToolCalling,
+			).toBe(reported)
+		})
+
+		it("keeps missing Copilot image capability unknown instead of setting it to false", () => {
+			expect(
+				selectCopilot({ vendor: "copilot", id: "unknown-model", family: "unknown-model" }).info?.supportsImages,
+			).toBeUndefined()
+		})
+
+		it("uses what the host reports for the selected model: context and vision", () => {
+			reportedModels({
+				id: "dynamic-vision",
+				family: "dynamic-vision",
+				modelInfo: { contextWindow: 260000, supportsImages: true, supportsPromptCache: false },
+			})
+
+			const selected = selectCopilot({ vendor: "copilot", id: "dynamic-vision", family: "dynamic-vision" })
+
+			expect(selected.id).toBe("dynamic-vision")
+			expect(selected.info).toMatchObject({
+				contextWindow: 260000,
+				supportsImages: true,
+				supportsPromptCache: false,
+			})
+		})
+
+		it("lets a host report of no vision override the curated catalog", () => {
+			const [curatedFamily] = Object.entries(vscodeLlmModels).find(([, entry]) => entry.supportsImages) ?? []
+			reportedModels({
+				id: "text-only",
+				family: curatedFamily!,
+				modelInfo: { contextWindow: 1000, supportsImages: false, supportsPromptCache: false },
+			})
+
+			expect(
+				selectCopilot({ vendor: "copilot", id: "text-only", family: curatedFamily }).info?.supportsImages,
+			).toBe(false)
+		})
+
+		it("finds the reported model by family when the saved selector has no id", () => {
+			reportedModels(
+				{ id: "other", family: "other", modelInfo: { contextWindow: 1, supportsPromptCache: false } },
+				{
+					id: "by-family",
+					family: "wanted-family",
+					modelInfo: { contextWindow: 555, supportsPromptCache: false },
+				},
+			)
+
+			const selected = selectCopilot({ vendor: "copilot", family: "wanted-family" })
+
+			expect(selected.info?.contextWindow).toBe(555)
+			expect(selected.id).toBe("copilot/wanted-family")
+		})
+
+		it("falls back to the default model id when nothing is selected yet", () => {
+			const { result } = renderHook(() => useSelectedModel({ apiProvider: providerIdentifiers.githubCopilot }))
+			expect(result.current.id).toBe(vscodeLlmDefaultModelId)
+		})
+
+		it("shows the window the extension enforces, not a larger curated one, before the host reports", () => {
+			const [family, entry] =
+				Object.entries(vscodeLlmModels).find(([, e]) => e.contextWindow !== e.maxInputTokens) ?? []
+			expect(family).toBeDefined()
+
+			const selected = selectCopilot({ vendor: githubCopilotLanguageModel.vendor, family })
+
+			expect(selected.info?.contextWindow).toBe(entry!.maxInputTokens)
+			expect(selected.info?.contextWindow).toBeLessThan(entry!.contextWindow)
+		})
+
+		it("does not let a reported model that says nothing about vision inherit the catalog's flag", () => {
+			const [family] = Object.entries(vscodeLlmModels).find(([, e]) => e.supportsImages) ?? []
+			// An unreported capability arrives with its key absent, as it does after crossing the message boundary.
+			reportedModels({
+				id: "silent",
+				family: family!,
+				modelInfo: { contextWindow: 1000, supportsPromptCache: false },
+			})
+
+			expect(selectCopilot({ vendor: "copilot", id: "silent", family }).info?.supportsImages).toBeUndefined()
+		})
+
+		it("keeps vision unknown for a saved model the host's list does not include", () => {
+			const [family] = Object.entries(vscodeLlmModels).find(([, e]) => e.supportsImages) ?? []
+			reportedModels({ id: "someone-else", family: "someone-else" })
+
+			expect(selectCopilot({ vendor: "copilot", id: "not-listed", family }).info?.supportsImages).toBeUndefined()
+		})
+
+		it("picks the reported model matching the saved id, not merely the first one", () => {
+			reportedModels(
+				{ id: "other", family: "other", modelInfo: { contextWindow: 1, supportsPromptCache: false } },
+				{ id: "wanted", family: "wanted", modelInfo: { contextWindow: 777, supportsPromptCache: false } },
+			)
+
+			expect(selectCopilot({ vendor: "copilot", id: "wanted" }).info?.contextWindow).toBe(777)
+		})
+
+		it("follows a refreshed report for the same selection", () => {
+			reportedModels({ id: "m", family: "m", modelInfo: { contextWindow: 100, supportsPromptCache: false } })
+			const { result, rerender } = renderHook(() =>
+				useSelectedModel({
+					apiProvider: providerIdentifiers.githubCopilot,
+					vsCodeLmModelSelector: { vendor: "copilot", id: "m" },
+				}),
+			)
+			expect(result.current.info?.contextWindow).toBe(100)
+
+			reportedModels({ id: "m", family: "m", modelInfo: { contextWindow: 200, supportsPromptCache: false } })
+			rerender()
+
+			expect(result.current.info?.contextWindow).toBe(200)
+		})
+
 		beforeEach(() => {
 			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
 
@@ -1298,24 +1590,25 @@ describe("useSelectedModel", () => {
 			expect(result.current.info?.supportsImages).toBe(false)
 		})
 
-		it("pins a divergent family's contextWindow to maxInputTokens, not its advertised window", () => {
-			// claude-opus-4.8 is the row where contextWindow and maxInputTokens differ; a field swap to
-			// the advertised window would be caught here.
-			const family = "claude-opus-4.8"
-			const apiConfiguration: ProviderSettings = {
-				apiProvider: providerIdentifiers.vscodeLm,
-				vsCodeLmModelSelector: { vendor: "copilot", family },
-			}
+		it.each(["claude-opus-4.8", "claude-opus-5", "gemini-3.6-flash"] as const)(
+			"pins %s to the 197897 input ceiling, not its advertised window",
+			(family) => {
+				const apiConfiguration: ProviderSettings = {
+					apiProvider: providerIdentifiers.vscodeLm,
+					vsCodeLmModelSelector: { vendor: "copilot", family },
+				}
 
-			const wrapper = createWrapper()
-			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+				const wrapper = createWrapper()
+				const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			expect(result.current.provider).toBe(providerIdentifiers.vscodeLm)
-			expect(result.current.id).toBe(`copilot/${family}`)
-			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[family].maxInputTokens) // 197897
-			expect(result.current.info?.contextWindow).not.toBe(vscodeLlmModels[family].contextWindow) // NOT 679560
-			expect(result.current.info?.supportsImages).toBe(false)
-		})
+				expect(result.current.provider).toBe(providerIdentifiers.vscodeLm)
+				expect(result.current.id).toBe(`copilot/${family}`)
+				expect(result.current.info?.contextWindow).toBe(197897)
+				expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[family].maxInputTokens)
+				expect(result.current.info?.contextWindow).not.toBe(vscodeLlmModels[family].contextWindow)
+				expect(result.current.info?.supportsImages).toBe(false)
+			},
+		)
 
 		it("falls back to the default model's window for an unlisted family (NOT 128000)", () => {
 			const apiConfiguration: ProviderSettings = {
@@ -1370,6 +1663,107 @@ describe("useSelectedModel", () => {
 			expect(result.current.id).toBe("zai-org/GLM-5.1")
 			expect(result.current.info).toEqual(friendliModels["zai-org/GLM-5.1"])
 		})
+	})
+
+	describe("OpenAI-compatible static catalog providers (fireworks, baseten, sambanova)", () => {
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+		})
+
+		const staticCatalogCases = [
+			{
+				apiProvider: providerIdentifiers.fireworks,
+				defaultId: fireworksDefaultModelId,
+				models: fireworksModels as Record<string, ModelInfo>,
+				knownId: "accounts/fireworks/models/kimi-k2-instruct",
+			},
+			{
+				apiProvider: providerIdentifiers.baseten,
+				defaultId: basetenDefaultModelId,
+				models: basetenModels as Record<string, ModelInfo>,
+				knownId: Object.keys(basetenModels).find((id) => id !== basetenDefaultModelId)!,
+			},
+			{
+				apiProvider: providerIdentifiers.sambanova,
+				defaultId: sambaNovaDefaultModelId,
+				models: sambaNovaModels as Record<string, ModelInfo>,
+				knownId: Object.keys(sambaNovaModels).find((id) => id !== sambaNovaDefaultModelId)!,
+			},
+		]
+
+		it.each(staticCatalogCases)(
+			"returns the default $apiProvider model when no model is configured",
+			({ apiProvider, defaultId, models }) => {
+				const { result } = renderHook(() => useSelectedModel({ apiProvider }), { wrapper: createWrapper() })
+
+				expect(result.current.provider).toBe(apiProvider)
+				expect(result.current.id).toBe(defaultId)
+				expect(result.current.info).toEqual(models[defaultId])
+				expect(result.current.info).toBeDefined()
+			},
+		)
+
+		it.each(staticCatalogCases)(
+			"falls back to the default $apiProvider model when apiModelId is an empty string",
+			({ apiProvider, defaultId, models }) => {
+				const { result } = renderHook(() => useSelectedModel({ apiProvider, apiModelId: "" }), {
+					wrapper: createWrapper(),
+				})
+
+				expect(result.current.id).toBe(defaultId)
+				expect(result.current.info).toEqual(models[defaultId])
+				expect(result.current.info).toBeDefined()
+			},
+		)
+
+		it.each(staticCatalogCases)(
+			"returns known $apiProvider catalog metadata",
+			({ apiProvider, models, knownId }) => {
+				expect(knownId).toBeDefined()
+				const { result } = renderHook(() => useSelectedModel({ apiProvider, apiModelId: knownId }), {
+					wrapper: createWrapper(),
+				})
+
+				expect(result.current.provider).toBe(apiProvider)
+				expect(result.current.id).toBe(knownId)
+				expect(result.current.info).toEqual(models[knownId])
+			},
+		)
+
+		it.each([providerIdentifiers.fireworks, providerIdentifiers.baseten, providerIdentifiers.sambanova])(
+			"honors a custom %s model ID with sane default metadata (not undefined info)",
+			(apiProvider) => {
+				// Regression: custom models had undefined info, so the task header fell back to a
+				// context window of 1. The backend uses openAiModelInfoSaneDefaults, so the UI must too.
+				const { result } = renderHook(
+					() => useSelectedModel({ apiProvider, apiModelId: "some/custom-model-not-in-list" }),
+					{ wrapper: createWrapper() },
+				)
+
+				expect(result.current.id).toBe("some/custom-model-not-in-list")
+				expect(result.current.info).toEqual(openAiModelInfoSaneDefaults)
+				expect(result.current.info?.contextWindow).toBeGreaterThan(1)
+			},
+		)
+
+		describe.each([providerIdentifiers.fireworks, providerIdentifiers.baseten, providerIdentifiers.sambanova])(
+			"%s inherited Object.prototype keys",
+			(apiProvider) => {
+				// An `in` check would match these keys on the prototype chain and return a function as `info`.
+				it.each(["constructor", "toString", "__proto__", "hasOwnProperty"])(
+					"treats %s as a custom model ID with sane default metadata",
+					(apiModelId) => {
+						const { result } = renderHook(() => useSelectedModel({ apiProvider, apiModelId }), {
+							wrapper: createWrapper(),
+						})
+
+						expect(result.current.id).toBe(apiModelId)
+						expect(result.current.info).toEqual(openAiModelInfoSaneDefaults)
+					},
+				)
+			},
+		)
 	})
 
 	describe("Z AI provider", () => {

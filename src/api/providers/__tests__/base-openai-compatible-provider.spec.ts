@@ -1,7 +1,6 @@
 // npx vitest run api/providers/__tests__/base-openai-compatible-provider.spec.ts
 
 import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI from "openai"
 
 import { type ModelInfo, openAiModelInfoSaneDefaults } from "@roo-code/types"
 
@@ -365,9 +364,7 @@ describe("BaseOpenAiCompatibleProvider", () => {
 
 			await customHandler.completePrompt("hello")
 
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({ model: "some/custom-model-not-in-list" }),
-			)
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: "some/custom-model-not-in-list" }))
 		})
 	})
 

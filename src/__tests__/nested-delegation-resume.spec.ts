@@ -55,7 +55,7 @@ import { attemptCompletionTool } from "../core/tools/AttemptCompletionTool"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import type { Task } from "../core/task/Task"
 import { readTaskMessages } from "../core/task-persistence/taskMessages"
-import { readApiMessages, saveApiMessages, saveTaskMessages } from "../core/task-persistence"
+import { readApiMessages } from "../core/task-persistence"
 
 describe("Nested delegation resume (A → B → C)", () => {
 	beforeEach(() => {

@@ -296,6 +296,21 @@ describe("ProfileValidator", () => {
 			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
 		})
 
+		it.each([
+			["allows an allow-listed model", "copilot-gpt-3.5", true],
+			["blocks a model outside the allow-list", "copilot-other", false],
+		])("enforces the organization allow-list for the GitHub Copilot provider: %s", (_label, id, allowed) => {
+			const allowList: OrganizationAllowList = {
+				allowAll: false,
+				providers: { [providerIdentifiers.githubCopilot]: { allowAll: false, models: ["copilot-gpt-3.5"] } },
+			}
+			const profile: ProviderSettings = {
+				apiProvider: providerIdentifiers.githubCopilot,
+				vsCodeLmModelSelector: { vendor: "copilot", id },
+			}
+			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(allowed)
+		})
+
 		it("should extract lmStudioModelId for lmstudio provider", () => {
 			const allowList: OrganizationAllowList = {
 				allowAll: false,

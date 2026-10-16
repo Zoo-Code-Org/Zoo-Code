@@ -15,7 +15,6 @@ import delay from "delay"
 import pWaitFor from "p-wait-for"
 import { serializeError } from "serialize-error"
 import { Package } from "../../shared/package"
-import { formatToolInvocation } from "../tools/helpers/toolResultFormatting"
 
 import {
 	type TaskLike,
@@ -50,10 +49,11 @@ import {
 	isResumableAsk,
 	QueuedMessage,
 	DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
+	DEFAULT_TOOL_REPETITION_SOFT_LIMIT,
+	normalizeToolRepetitionSoftLimit,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	MAX_CHECKPOINT_TIMEOUT_SECONDS,
 	MIN_CHECKPOINT_TIMEOUT_SECONDS,
-	ConsecutiveMistakeError,
 	MAX_MCP_TOOLS_THRESHOLD,
 	countEnabledMcpTools,
 	providerIdentifiers,
@@ -63,25 +63,20 @@ import { CloudService } from "@roo-code/cloud"
 
 // api
 import { ApiHandler, ApiHandlerCreateMessageMetadata, buildApiHandler } from "../../api"
+import { disposeApiHandler } from "../../api/dispose-api-handler"
 import { ApiStream, GroundingSource } from "../../api/transform/stream"
 import { maybeRemoveImageBlocks } from "../../api/transform/image-cleaning"
 import { OutputTokenLimitError } from "../../api/providers/utils/output-token-limit-error"
 
 // shared
-import { findLastIndex } from "../../shared/array"
+import { findLast, findLastIndex } from "../../shared/array"
 import { combineApiRequests } from "../../shared/combineApiRequests"
 import { combineCommandSequences } from "../../shared/combineCommandSequences"
 import { t } from "../../i18n"
 import { getApiMetrics, hasTokenUsageChanged, hasToolUsageChanged } from "../../shared/getApiMetrics"
 import { ClineAskResponse } from "../../shared/WebviewMessage"
 import { defaultModeSlug, getModeBySlug } from "../../shared/modes"
-import {
-	DiffStrategy,
-	type AutoApprovalContext,
-	type ToolUse,
-	type ToolParamName,
-	toolParamNames,
-} from "../../shared/tools"
+import { DiffStrategy, type AutoApprovalContext, type ToolUse } from "../../shared/tools"
 import { getModelMaxOutputTokens } from "../../shared/api"
 
 // services
@@ -91,7 +86,6 @@ import { RepoPerTaskCheckpointService } from "../../services/checkpoints"
 
 // integrations
 import { DiffViewProvider } from "../../integrations/editor/DiffViewProvider"
-import { findToolName } from "../../integrations/misc/export-markdown"
 import { RooTerminalProcess } from "../../integrations/terminal/types"
 import { TerminalRegistry } from "../../integrations/terminal/TerminalRegistry"
 import { OutputInterceptor } from "../../integrations/terminal/OutputInterceptor"
@@ -105,6 +99,7 @@ import { getTaskDirectoryPath } from "../../utils/storage"
 // prompts
 import { formatResponse } from "../prompts/responses"
 import { SYSTEM_PROMPT } from "../prompts/system"
+import { partitionDisabledToolsForProtocol } from "../prompts/tools/effective-tool-policy"
 import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
 
 // core modules
@@ -114,6 +109,7 @@ import { FileContextTracker } from "../context-tracking/FileContextTracker"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
+import { type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
 import { manageContext, willManageContext } from "../context-management"
 import { ClineProvider } from "../webview/ClineProvider"
@@ -147,6 +143,8 @@ import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
+import { initialRunState, type Ask, type RunEvent, type RunState } from "./run-state/runState"
+import { applyRunEvent, type RunRejection } from "./run-state/runStateShadow"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
@@ -236,6 +234,11 @@ function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolutio
 
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
+
+export interface ToolExecutionContext {
+	toolCallId: string
+	didReject: boolean
+}
 
 export interface TaskOptions extends CreateTaskOptions {
 	provider: ClineProvider
@@ -403,9 +406,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	abortReason?: ClineApiReqCancelReason
 	isInitialized = false
 
+	runState: RunState = initialRunState
+	readonly runRejections: RunRejection[] = []
+
 	// API
 	apiConfiguration: ProviderSettings
 	api: ApiHandler
+	/**
+	 * Units of in-flight API work: a request from setup through its retries and
+	 * background usage drain, or a manual condense. Work can hold any handler it
+	 * read from `this.api`, so replaced handlers wait for the count to reach zero.
+	 */
+	private activeApiWork = 0
+	/** Handlers replaced during in-flight work; disposed when that work settles, or with the task. */
+	private retiredApis = new Set<ApiHandler>()
 	private rateLimitClock: RateLimitClock
 	private autoApprovalHandler: AutoApprovalHandler
 
@@ -413,7 +427,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	rooIgnoreController?: RooIgnoreController
 	rooProtectedController?: RooProtectedController
 	fileContextTracker: FileContextTracker
-	terminalProcess?: RooTerminalProcess
+	terminalProcesses = new Map<string, RooTerminalProcess>()
+	activeToolContexts = new Map<string, ToolExecutionContext>()
 
 	// Editing
 	diffViewProvider: DiffViewProvider
@@ -451,6 +466,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// Tool Use
 	consecutiveMistakeCount: number = 0
 	consecutiveMistakeLimit: number
+	toolRepetitionSoftLimit: number
 	consecutiveMistakeCountForApplyDiff: Map<string, number> = new Map()
 	consecutiveMistakeCountForEditFile: Map<string, number> = new Map()
 	consecutiveNoToolUseCount: number = 0
@@ -519,6 +535,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private completionPersistenceReadyPromise?: Promise<void>
 
 	/**
+	 * The tool-policy inputs captured for the API request currently being built
+	 * (see `attemptApiRequest`). The streaming presenter reads this field at call
+	 * time and binds it to `presentAssistantMessage`'s required parameter, so
+	 * every tool call of a request validates against the same frozen policy its
+	 * prompt was generated from. Re-assigned per API attempt — including retries,
+	 * whose generator-body re-execution re-captures before any new presentation
+	 * can fire.
+	 */
+	private requestPolicySnapshot?: RequestPolicySnapshot
+
+	/**
 	 * Fire-and-forget wrapper around `presentAssistantMessage` that swallows the
 	 * expected cancellation rejection (the presenter throws when `this.abort` is set)
 	 * and logs any other failure. Keeping it non-blocking preserves the streaming
@@ -526,7 +553,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * from crashing the extension host.
 	 */
 	private presentAssistantMessageSafe(): void {
-		void presentAssistantMessage(this).catch((error) => {
+		void presentAssistantMessage(this, this.requestPolicySnapshot!).catch((error) => {
 			// Discriminate on the error message rather than `this.abort` state,
 			// which can flip between the throw and the catch microtask running:
 			// a real failure followed by an abort flip would otherwise be
@@ -561,6 +588,48 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 		this.userMessageContent.push(toolResult)
 		return true
+	}
+
+	/**
+	 * Derives terminal tool-turn readiness from the protocol state instead of
+	 * relying exclusively on the presenter's one-shot boolean latch.
+	 *
+	 * A re-entrant presenter can lose the latch update after every tool has
+	 * already completed. At that point the assistant turn is safe to continue
+	 * when the stream is closed, presentation is idle, every content block is
+	 * final, and every tool call has its matching result.
+	 */
+	private hasCompleteToolResultsForCurrentTurn(): boolean {
+		// Do not require currentStreamingContentIndex to reach the end here.
+		// A non-abort presenter rejection releases the lock and is logged, but
+		// nothing schedules another presentation pass. Gating on the index would
+		// strand this wait after exactly that failure.
+		if (!this.didCompleteReadingStream || this.presentAssistantMessageLocked) {
+			return false
+		}
+
+		const toolResultIds = new Set(
+			this.userMessageContent
+				.filter((block): block is Anthropic.ToolResultBlockParam => block.type === "tool_result")
+				.map((block) => block.tool_use_id),
+		)
+		let toolUseCount = 0
+
+		for (const block of this.assistantMessageContent) {
+			if (block.partial) {
+				return false
+			}
+			if (block.type !== "tool_use" && block.type !== "mcp_tool_use") {
+				continue
+			}
+
+			toolUseCount++
+			if (!block.id || !toolResultIds.has(sanitizeToolUseId(block.id))) {
+				return false
+			}
+		}
+
+		return toolUseCount > 0
 	}
 	didRejectTool = false
 	didAlreadyUseTool = false
@@ -606,11 +675,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		enableCheckpoints = true,
 		checkpointTimeout = DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 		consecutiveMistakeLimit = DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
+		toolRepetitionSoftLimit = DEFAULT_TOOL_REPETITION_SOFT_LIMIT,
 		taskId,
 		task,
 		images,
 		historyItem,
-		experiments: experimentsConfig,
+		experiments: _experimentsConfig,
 		startTask = true,
 		rootTask,
 		parentTask,
@@ -677,6 +747,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.autoApprovalHandler = new AutoApprovalHandler()
 
 		this.consecutiveMistakeLimit = consecutiveMistakeLimit ?? DEFAULT_CONSECUTIVE_MISTAKE_LIMIT
+		this.toolRepetitionSoftLimit = normalizeToolRepetitionSoftLimit(
+			toolRepetitionSoftLimit ?? DEFAULT_TOOL_REPETITION_SOFT_LIMIT,
+			this.consecutiveMistakeLimit,
+		)
 		this.providerRef = new WeakRef(provider)
 		this.globalStoragePath = provider.context.globalStorageUri.fsPath
 		this.diffViewProvider = new DiffViewProvider(this.cwd, this)
@@ -732,7 +806,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Set up diff strategy
 		this.diffStrategy = new MultiSearchReplaceDiffStrategy(diffFuzzyThreshold)
 
-		this.toolRepetitionDetector = new ToolRepetitionDetector(this.consecutiveMistakeLimit)
+		this.toolRepetitionDetector = new ToolRepetitionDetector(
+			this.toolRepetitionSoftLimit,
+			this.consecutiveMistakeLimit,
+		)
 
 		// Initialize todo list if provided
 		if (initialTodos && initialTodos.length > 0) {
@@ -1677,7 +1754,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
-	/** Persists Cline messages and updates task metadata in the history store. Returns false on failure. */
+	/**
+	 * Persist the message array, then refresh the derived metadata / task-history entries.
+	 *
+	 * The returned boolean reflects the message write only: `saveTaskMessages` failure
+	 * leaves the on-disk record stale, so callers gating UI updates on durable state must
+	 * skip them. Metadata / task-history stage failures are logged and swallowed — the
+	 * message array is already persisted, and the next save recomputes and re-emits the
+	 * metadata.
+	 *
+	 * `merge` (default `true`) is passed through to `saveTaskMessages`: the in-memory
+	 * snapshot is merged with the on-disk record. `overwriteClineMessages` passes `false`
+	 * to replace the stored messages outright.
+	 */
 	private async saveClineMessages(merge = true): Promise<boolean> {
 		try {
 			await saveTaskMessages({
@@ -1686,7 +1775,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				globalStoragePath: this.globalStoragePath,
 				merge,
 			})
+		} catch (error) {
+			console.error("Failed to save Roo messages:", error)
+			return false
+		}
 
+		try {
 			if (this._taskApiConfigName === undefined) {
 				await this.taskApiConfigReady
 			}
@@ -1714,11 +1808,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const provider = this.providerRef.deref()
 			const existingStatus = provider?.taskHistoryStore.get(this.taskId)?.status
 			await provider?.updateTaskHistory(existingStatus ? { ...historyItem, status: existingStatus } : historyItem)
-			return true
 		} catch (error) {
-			console.error("Failed to save Roo messages:", error)
-			return false
+			// The message array was persisted above; a metadata or task-history failure must
+			// not mask that write (see the method docs). The next saveClineMessages() call
+			// recomputes and re-emits the metadata update.
+			console.error("Failed to save task metadata:", error)
 		}
+
+		return true
 	}
 
 	private findMessageByTimestamp(ts: number): ClineMessage | undefined {
@@ -1790,9 +1887,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// has to see and stalling a hands-free session. Leaving the message
 		// unclaimed lets the policy decision stand and keeps the message queued.
 		const queueMayAnswerThisAsk = !(blanketDenyEngaged && type === "command")
+		// A queued message must not short-circuit protected asks (e.g.
+		// DCG-blocked commands): claiming one here skips checkAutoApproval, and
+		// the drain below would auto-approve what protection intentionally
+		// leaves pending for explicit user approval.
 		const queuedMessage =
 			partial === true ||
 			type === "command_output" ||
+			isProtected ||
 			!queueMayAnswerThisAsk ||
 			!this.mayDrainQueuedMessageForAsk()
 				? undefined
@@ -2193,10 +2295,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// suggestion click that was incorrectly queued due to UI state), consume it
 					// immediately so the task doesn't hang. Command asks under blanket deny are
 					// excluded (`queueMayAnswerThisAsk`): a queued message must never stand in
-					// for the explicit approval the policy withheld.
+					// for the explicit approval the policy withheld. Protected asks are exempt
+					// too: like the pre-block drain above, they must wait for explicit user
+					// approval.
 					if (
 						queueMayAnswerThisAsk &&
 						shouldDrainQueuedMessageForAsk &&
+						!isProtected &&
 						!queuedCommandPolicyCheck &&
 						this.mayDrainQueuedMessageForAsk()
 					) {
@@ -2370,9 +2475,65 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * @param newApiConfiguration - The new API configuration to use
 	 */
 	public updateApiConfiguration(newApiConfiguration: ProviderSettings): void {
-		// Update the configuration and rebuild the API handler
+		// Update the configuration and rebuild the API handler. Handlers such as
+		// VS Code LM / GitHub Copilot own host listeners, so the old one is
+		// released — immediately when idle, or when the last request, retry,
+		// background drain, or condense that leased it settles.
+		const previousApi = this.api
 		this.apiConfiguration = newApiConfiguration
 		this.api = buildApiHandler(this.apiConfiguration)
+		this.retireApi(previousApi)
+
+		// Refresh only the soft tool-repetition limit from the new profile so an
+		// active task immediately enforces it. The task-level
+		// `consecutiveMistakeLimit` (the hard stop) is intentionally preserved:
+		// it may have been set explicitly at task creation (e.g. the extension
+		// API creates tasks with `Number.MAX_SAFE_INTEGER`), and a profile switch
+		// must not silently override it. The detector's in-progress counting
+		// state is preserved.
+		this.toolRepetitionSoftLimit = normalizeToolRepetitionSoftLimit(
+			newApiConfiguration.toolRepetitionSoftLimit ?? DEFAULT_TOOL_REPETITION_SOFT_LIMIT,
+			this.consecutiveMistakeLimit,
+		)
+		this.toolRepetitionDetector.updateLimits(this.toolRepetitionSoftLimit, this.consecutiveMistakeLimit)
+	}
+
+	/**
+	 * Marks the start of in-flight API work. The returned release is idempotent;
+	 * the last release disposes every handler replaced while work was running.
+	 */
+	private beginApiWork(): () => void {
+		this.activeApiWork++
+		let released = false
+		return () => {
+			if (released) return
+			released = true
+			this.activeApiWork--
+			if (this.activeApiWork > 0) return
+			const retired = [...this.retiredApis]
+			this.retiredApis.clear()
+			for (const api of retired) {
+				this.safeDisposeApi(api)
+			}
+		}
+	}
+
+	/** Disposes a replaced handler now, or once in-flight API work settles. */
+	private retireApi(api: ApiHandler): void {
+		if (api === this.api) return
+		if (this.activeApiWork > 0) {
+			this.retiredApis.add(api)
+		} else {
+			this.safeDisposeApi(api)
+		}
+	}
+
+	private safeDisposeApi(api: ApiHandler): void {
+		try {
+			disposeApiHandler(api)
+		} catch (error) {
+			console.error("Error disposing API handler:", error)
+		}
 	}
 
 	public async submitUserMessage(
@@ -2425,9 +2586,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	async handleTerminalOperation(terminalOperation: "continue" | "abort") {
 		if (terminalOperation === "continue") {
-			this.terminalProcess?.continue()
+			for (const process of this.terminalProcesses.values()) process.continue()
 		} else if (terminalOperation === "abort") {
-			this.terminalProcess?.abort()
+			for (const process of this.terminalProcesses.values()) process.abort()
 		}
 	}
 
@@ -2441,6 +2602,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	public async condenseContext(): Promise<void> {
+		const endApiWork = this.beginApiWork()
+		try {
+			await this.condenseContextWithActiveApi()
+		} finally {
+			endApiWork()
+		}
+	}
+
+	private async condenseContextWithActiveApi(): Promise<void> {
 		// CRITICAL: Flush any pending tool results before condensing
 		// to ensure tool_use/tool_result pairs are complete in history
 		await this.flushPendingToolResultsToHistory()
@@ -2525,7 +2695,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			cost,
 			newContextTokens = 0,
 			error,
-			errorDetails,
 			condenseId,
 		} = await summarizeConversation({
 			messages: this.apiConversationHistory,
@@ -2719,6 +2888,56 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return formatResponse.toolError(formatResponse.missingToolParameterError(paramName))
 	}
 
+	/**
+	 * Finalize a partial "tool" ask message without blocking for user input.
+	 * Call this in error paths where a partial tool message was opened during streaming
+	 * but execution failed before the normal approval flow could close it, so the webview
+	 * spinner does not get stuck in a loading state.
+	 *
+	 * The matching partial message may no longer be the final entry if another asynchronous
+	 * message was inserted between the partial ask and the error handler, so search backward
+	 * instead of relying on clineMessages.at(-1).
+	 *
+	 * Any in-progress `progressStatus` on the message is cleared as well: the ask is being
+	 * finalized because it will NOT complete, so a stale "in progress" indicator would be
+	 * misleading (the normal completion path overwrites it with the final status instead).
+	 *
+	 * `isAnswered` is stamped true because the ask is resolved by the system rather than
+	 * by the user: ChatView only shows ask buttons for unanswered messages, so leaving it
+	 * unset would keep Save/Reject armed for a write that already failed.
+	 */
+	async finalizePartialToolAsk(text?: string): Promise<void> {
+		const partialToolAsk = findLast(
+			this.clineMessages,
+			(message) =>
+				message.partial === true &&
+				message.type === "ask" &&
+				message.ask === "tool" &&
+				(text === undefined || message.text === text),
+		)
+
+		if (!partialToolAsk) {
+			return
+		}
+
+		partialToolAsk.partial = false
+		partialToolAsk.progressStatus = undefined
+		partialToolAsk.isAnswered = true
+		const saved = await this.saveClineMessages()
+		if (!saved) {
+			// The persistence write failed: the on-disk record still carries `partial: true`
+			// while the in-memory message is finalized. Skip the webview-only update so the
+			// two views do not diverge (a later state resync or restart reload would flip the
+			// spinner back on from the stale disk record). The next saveClineMessages() call
+			// re-persists the full message array and repairs the disk record.
+			console.error("[Task#finalizePartialToolAsk] saveClineMessages failed; skipping webview update")
+			return
+		}
+		await this.updateClineMessage(partialToolAsk).catch((error) => {
+			console.error("[Task#finalizePartialToolAsk] updateClineMessage failed:", error)
+		})
+	}
+
 	// Lifecycle
 	// Start / Resume / Abort / Dispose
 
@@ -2837,6 +3056,33 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					undefined,
 					{ isNonInteractive: true },
 				)
+			}
+
+			// Surface once per new task which `disabledTools` entries carry no
+			// disabling weight (protocol tools are exempt from user disabling).
+			// Detection reads the raw list, so the notice also fires when a
+			// model-profile `excludedTools` entry suppresses the tool through a
+			// separate route. `startTask` runs exactly once per new task, which
+			// is what bounds this to a single notice. The block is guarded like
+			// `getEnabledMcpToolsCount` above: this is a telemetry-class notice,
+			// so a rejection from the state read or the say must never keep the
+			// task loop from starting.
+			try {
+				const disabledToolsState = await this.providerRef.deref()?.getState()
+				const { ignored } = partitionDisabledToolsForProtocol(disabledToolsState?.disabledTools)
+				if (ignored.length > 0) {
+					await this.say(
+						"ignored_disabled_tools_warning",
+						JSON.stringify({ ignoredTools: ignored }),
+						undefined,
+						undefined,
+						undefined,
+						undefined,
+						{ isNonInteractive: true },
+					)
+				}
+			} catch (error) {
+				console.error("[Task#startTask] ignored-disabled-tools notice failed:", error)
 			}
 			this.isInitialized = true
 
@@ -3108,26 +3354,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			const newUserContent: Anthropic.Messages.ContentBlockParam[] = [...modifiedOldUserContent]
 
-			const agoText = ((): string => {
-				const timestamp = lastClineMessage?.ts ?? Date.now()
-				const now = Date.now()
-				const diff = now - timestamp
-				const minutes = Math.floor(diff / 60000)
-				const hours = Math.floor(minutes / 60)
-				const days = Math.floor(hours / 24)
-
-				if (days > 0) {
-					return `${days} day${days > 1 ? "s" : ""} ago`
-				}
-				if (hours > 0) {
-					return `${hours} hour${hours > 1 ? "s" : ""} ago`
-				}
-				if (minutes > 0) {
-					return `${minutes} minute${minutes > 1 ? "s" : ""} ago`
-				}
-				return "just now"
-			})()
-
 			if (responseText) {
 				newUserContent.push({
 					type: "text",
@@ -3253,6 +3479,65 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.debouncedEmitTokenUsage.flush()
 	}
 
+	markInitialized(): void {
+		this.isInitialized = true
+		this.driveRunEvent({ tag: "initialized" })
+	}
+
+	markStreamStarted(): void {
+		this.isStreaming = true
+		this.driveRunEvent({ tag: "streamStarted" })
+	}
+
+	markStreamCleanupFinished(): void {
+		this.didFinishAbortingStream = true
+		this.driveRunEvent({ tag: "streamCleanupFinished" })
+	}
+
+	markStreamEnded(): void {
+		this.isStreaming = false
+		this.driveRunEvent({ tag: "streamEnded" })
+	}
+
+	markAskStarted(ask: Exclude<Ask, { tag: "none" }>): void {
+		this.driveRunEvent({ tag: "askStarted", ask })
+	}
+
+	markAskSettled(askTs: number): void {
+		this.driveRunEvent({ tag: "askSettled", askTs })
+	}
+
+	markCompletionAccepted(askTs: number): void {
+		this.driveRunEvent({ tag: "completionAccepted", askTs })
+	}
+
+	setAbortReason(reason: ClineApiReqCancelReason): void {
+		this.abortReason ??= reason
+		this.driveRunEvent({ tag: "reasonSet", reason })
+	}
+
+	requestAbort(isAbandoned: boolean): void {
+		if (isAbandoned) {
+			this.abandoned = true
+		}
+		this.abort = true
+		this.driveRunEvent({ tag: "abortRequested", abandoned: isAbandoned })
+	}
+
+	requestAbandon(): void {
+		this.abandoned = true
+		this.driveRunEvent({ tag: "abandonRequested" })
+	}
+
+	requestDispose(): void {
+		this.abort = true
+		this.driveRunEvent({ tag: "disposeRequested" })
+	}
+
+	private driveRunEvent(event: RunEvent): void {
+		this.runState = applyRunEvent(this.runState, event, this.runRejections)
+	}
+
 	public abortTask(isAbandoned = false): Promise<void> {
 		if (isAbandoned) {
 			this.abandoned = true
@@ -3324,6 +3609,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async disposeOnce(): Promise<void> {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
 		this.cancelAssistantMessagePersistence()
+
+		// Release handler-owned host resources (e.g. VS Code configuration listeners).
+		// This is the fallback for leases that never settle; later lease releases
+		// find nothing retired and so cannot dispose twice.
+		const apis = new Set([...this.retiredApis, this.api])
+		this.retiredApis.clear()
+		for (const api of apis) {
+			this.safeDisposeApi(api)
+		}
 
 		// Stop the idle telemetry check and report any unflushed activity as a
 		// shutdown installment, so a task torn down mid-work (panel closed, task
@@ -3574,20 +3868,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 
 			if (this.consecutiveMistakeLimit > 0 && this.consecutiveMistakeCount >= this.consecutiveMistakeLimit) {
-				// Track consecutive mistake errors in telemetry via event and PostHog exception tracking.
-				// The reason is "no_tools_used" because this limit is reached via initiateTaskLoop
-				// which increments consecutiveMistakeCount when the model doesn't use any tools.
-				TelemetryService.instance.captureConsecutiveMistakeError(this.taskId)
-				TelemetryService.instance.captureException(
-					new ConsecutiveMistakeError(
-						`Task reached consecutive mistake limit (${this.consecutiveMistakeLimit})`,
-						this.taskId,
-						this.consecutiveMistakeCount,
-						this.consecutiveMistakeLimit,
-						"no_tools_used",
-						this.apiConfiguration.apiProvider,
-						getModelId(this.apiConfiguration),
-					),
+				// Track consecutive mistake errors in telemetry via a named event.
+				// The reason is "unknown" because many paths increment consecutiveMistakeCount
+				// (no tool use, tool validation and tool execution failures) and none records its cause.
+				TelemetryService.instance.captureConsecutiveMistakeError(
+					this.taskId,
+					"unknown",
+					this.consecutiveMistakeCount,
+					this.consecutiveMistakeLimit,
 				)
 
 				const { response, text, images } = await this.ask(
@@ -3808,6 +4096,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.didCompleteReadingStream = false
 				this.userMessageContent = []
 				this.userMessageContentReady = false
+				this.activeToolContexts.clear()
 				this.didRejectTool = false
 				this.didAlreadyUseTool = false
 				this.assistantMessageSavedToHistory = false
@@ -3835,7 +4124,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// This is especially important for tools and background usage collection
 				this.cachedStreamingModel = this.api.getModel()
 				const streamModelInfo = this.cachedStreamingModel.info
-				const cachedModelId = this.cachedStreamingModel.id
 
 				// Yields only if the first chunk is successful, otherwise will
 				// allow the user to retry the request (most likely due to rate
@@ -3940,9 +4228,33 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										// Without this check, duplicate tool_use blocks with the same ID would
 										// be added to assistantMessageContent, causing API 400 errors:
 										// "tool_use ids must be unique"
-										if (this.streamingToolCallIndices.has(event.id)) {
+										// Use compound key (id, name) to distinguish different tools with the same call ID.
+										const dedupKey = NativeToolCallParser.makeStreamingKey(event.id, event.name)
+										if (this.streamingToolCallIndices.has(dedupKey)) {
 											console.warn(
 												`[Task#${this.taskId}] Ignoring duplicate tool_call_start for ID: ${event.id} (tool: ${event.name})`,
+											)
+											continue
+										}
+
+										// A call ID that already appears in assistantMessageContent cannot be
+										// round-tripped: the API history builder dedupes tool_use blocks by ID and
+										// results are matched by tool_use_id, so a second entry with the same ID
+										// would be orphaned. The compound-key check above already rejects an
+										// identical (id, name) start in this stream, so reject any remaining start
+										// that reuses an ID, regardless of the entry's displayed name: alias
+										// resolution renames a streaming entry to its canonical tool (the streamed
+										// name is kept in originalName), which would otherwise let a same-ID start
+										// under the canonical name slip past a name comparison. The first call wins.
+										const idAlreadyUsed = this.assistantMessageContent.some(
+											(entry) =>
+												// Stryker disable next-line ConditionalExpression: only tool_use and mcp_tool_use entries ever carry an id — the text block pushed in the text case has no id field and the start events reaching this guard always carry the string id locked in by processRawChunk — so the type check cannot change the outcome of entry.id === event.id for any entry this pipeline produces; the false replacement is additionally killed by the rejection tests.
+												(entry.type === "tool_use" || entry.type === "mcp_tool_use") &&
+												(entry as { id?: string }).id === event.id,
+										)
+										if (idAlreadyUsed) {
+											console.warn(
+												`[Task#${this.taskId}] Ignoring tool_call_start reusing call ID ${event.id} (tool: ${event.name})`,
 											)
 											continue
 										}
@@ -3964,7 +4276,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 										// Track the index where this tool will be stored
 										const toolUseIndex = this.assistantMessageContent.length
-										this.streamingToolCallIndices.set(event.id, toolUseIndex)
+										this.streamingToolCallIndices.set(dedupKey, toolUseIndex)
 
 										// Create initial partial tool use
 										const partialToolUse: ToolUse = {
@@ -3983,16 +4295,43 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
 										this.presentAssistantMessageSafe()
 									} else if (event.type === "tool_call_delta") {
-										// Process chunk using streaming JSON parser
-										const partialToolUse = NativeToolCallParser.processStreamingChunk(
-											event.id,
-											event.delta,
-											nativeToolCallParserScope,
-										)
+										// Deltas from the raw-chunk path carry the tracked name: build the
+										// compound key directly so same-ID calls cannot share an
+										// accumulator. Deltas without a name (legacy provider streams)
+										// keep the deprecated single-entry-per-ID lookup.
+										let streamingKey: string | undefined
 
-										if (partialToolUse) {
-											// Get the index for this tool call
-											const toolUseIndex = this.streamingToolCallIndices.get(event.id)
+										// Stryker disable next-line ConditionalExpression: event.name is always a string on this path — the only delta events reaching this handler are emitted by processRawChunk with the tracked start name (never undefined), so the legacy nameless branch below is unreachable defensive code and the conditional always takes the named side.
+										if (event.name !== undefined) {
+											streamingKey = NativeToolCallParser.makeStreamingKey(event.id, event.name)
+										} else {
+											const legacyEntry = NativeToolCallParser.getStreamingToolCallById(
+												event.id,
+												nativeToolCallParserScope,
+											)
+											streamingKey = legacyEntry
+												? NativeToolCallParser.makeStreamingKey(
+														legacyEntry.id,
+														legacyEntry.name,
+													)
+												: undefined
+										}
+
+										const partialToolUse =
+											// Stryker disable next-line ConditionalExpression: streamingKey can never be undefined here — makeStreamingKey always returns a string and the legacy lookup branch above is unreachable (see the directive on the event.name check) — so the null side is unreachable defensive code.
+											streamingKey === undefined
+												? null
+												: NativeToolCallParser.processStreamingChunk(
+														streamingKey,
+														event.delta,
+														nativeToolCallParserScope,
+													)
+
+										// Stryker disable next-line ConditionalExpression, EqualityOperator: streamingKey is always a defined string on this path (makeStreamingKey never returns undefined; the legacy branch is unreachable per the directives above), and processStreamingChunk returns a partial ToolUse for a known key, so both defensive conditions reduce to the partialToolUse check and cannot change the observed behavior.
+										if (partialToolUse && streamingKey !== undefined) {
+											// Reuse the compound key built above: it is exactly the key the start event
+											// registered under, so the delta lookup needs no second encoding.
+											const toolUseIndex = this.streamingToolCallIndices.get(streamingKey)
 											if (toolUseIndex !== undefined) {
 												// Store the ID for native protocol
 												;(partialToolUse as any).id = event.id
@@ -4128,7 +4467,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								total?: number
 							},
 							messageIndex: number = apiReqIndex,
-							status: "completed" | "cancelled" = "completed",
+							_status: "completed" | "cancelled" = "completed",
 						) => {
 							if (
 								tokens.input > 0 ||
@@ -4279,6 +4618,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						console.error("Background usage collection failed:", error)
 					})
 				} catch (error) {
+					// Close the request generator so its `finally` releases the API
+					// work it holds (a replaced handler is disposed once nothing uses
+					// it). Async-generator `return()` queues behind a pending `next()`,
+					// so this settles as soon as the aborted stream does.
+					Promise.resolve(stream.return?.(undefined)).catch(() => {})
+
 					// Abandoned happens when extension is no longer waiting for the
 					// Cline instance to finish aborting (error is thrown here when
 					// any function in the for loop throws due to this.abort).
@@ -4377,14 +4722,42 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				const finalizeEvents = NativeToolCallParser.finalizeRawChunks(nativeToolCallParserScope)
 				for (const event of finalizeEvents) {
 					if (event.type === "tool_call_end") {
+						// Create compound key for deduplication (same pattern as streaming handler).
+						// End events carry the tool name; fall back to the id for events that don't.
+						// Stryker disable next-line LogicalOperator: event.name is always a string on this path — finalizeRawChunks emits end events with the tracked start name (a string, set before the tracker can start), so the ?? event.id fallback guards a nameless end event this pipeline cannot produce.
+						let eventName = event.name ?? event.id
+						let dedupKey = NativeToolCallParser.makeStreamingKey(event.id, eventName)
+
 						// Finalize the streaming tool call
-						const finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
-							event.id,
+						let finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
+							dedupKey,
 							nativeToolCallParserScope,
 						)
 
-						// Get the index for this tool call
-						const toolUseIndex = this.streamingToolCallIndices.get(event.id)
+						// Get the index for this tool call using compound key
+						let toolUseIndex = this.streamingToolCallIndices.get(dedupKey)
+
+						// Defensive resolution: if the end event's name does not match the start
+						// name (provider quirk), the compound-key lookup above misses and both the
+						// parser entry and the dedup tracking would stay stale. Resolve the tracked
+						// entry by id and target the real compound key for finalization and cleanup.
+						// Stryker disable next-line ConditionalExpression, LogicalOperator, EqualityOperator: the both-miss case is unreachable via the raw-chunk pipeline — end events carry the locked start name so the compound key resolves the registered entry, and a same-ID rejected-start end is always processed after the accepted start's end has already removed that entry; this defensive path protects against a cross-name end event the pipeline cannot produce.
+						if (finalToolUse === null && toolUseIndex === undefined) {
+							const resolved = NativeToolCallParser.getStreamingToolCallById(
+								event.id,
+								nativeToolCallParserScope,
+							)
+							// Stryker disable next-line ConditionalExpression: unreachable defensive region — getStreamingToolCallById can only resolve when the both-miss case above is reachable, which the raw-chunk pipeline cannot produce (see the directive there).
+							if (resolved) {
+								eventName = resolved.name
+								dedupKey = NativeToolCallParser.makeStreamingKey(resolved.id, resolved.name)
+								finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(
+									dedupKey,
+									nativeToolCallParserScope,
+								)
+								toolUseIndex = this.streamingToolCallIndices.get(dedupKey)
+							}
+						}
 
 						if (finalToolUse) {
 							// Store the tool call ID
@@ -4395,8 +4768,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								this.assistantMessageContent[toolUseIndex] = finalToolUse
 							}
 
-							// Clean up tracking
-							this.streamingToolCallIndices.delete(event.id)
+							// Clean up tracking using compound key
+							this.streamingToolCallIndices.delete(dedupKey)
 
 							// Mark that we have new content to process
 							this.userMessageContentReady = false
@@ -4425,8 +4798,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								;(existingToolUse as any).id = event.id
 							}
 
-							// Clean up tracking
-							this.streamingToolCallIndices.delete(event.id)
+							// Clean up tracking using compound key
+							this.streamingToolCallIndices.delete(dedupKey)
 
 							// Mark that we have new content to process
 							this.userMessageContentReady = false
@@ -4652,7 +5025,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// 	this.userMessageContentReady = true
 					// }
 
-					await pWaitFor(() => this.userMessageContentReady || this.abort || this.abandoned)
+					await pWaitFor(
+						() =>
+							this.userMessageContentReady ||
+							this.hasCompleteToolResultsForCurrentTurn() ||
+							this.abort ||
+							this.abandoned,
+					)
 
 					if (this.abort || this.abandoned) {
 						throw new Error(
@@ -4813,7 +5192,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				// If we reach here without continuing, return false (will always be false for now)
 				return false
-			} catch (error) {
+			} catch {
 				// This should never happen since the only thing that can throw an
 				// error is the attemptApiRequest, which is wrapped in a try catch
 				// that sends an ask where if noButtonClicked, will clear current
@@ -5169,11 +5548,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		retryAttempt: number = 0,
 		options: { skipProviderRateLimit?: boolean; requestModelInfo?: ModelInfo } = {},
 	): ApiStream {
+		// Hold replaced handlers from request setup until the stream is fully
+		// consumed (including the background usage drain) or closed early.
+		// Retries recurse through this method and nest their own unit of work.
+		const endApiWork = this.beginApiWork()
+		try {
+			yield* this.attemptApiRequestWithActiveApi(retryAttempt, options)
+		} finally {
+			endApiWork()
+		}
+	}
+
+	private async *attemptApiRequestWithActiveApi(
+		retryAttempt: number,
+		options: { skipProviderRateLimit?: boolean; requestModelInfo?: ModelInfo },
+	): ApiStream {
 		const state = await this.providerRef.deref()?.getState()
 
 		const {
 			autoApprovalEnabled,
-			requestDelaySeconds,
 			autoCondenseContext = true,
 			autoCondenseContextPercent = 100,
 			profileThresholds = {},
@@ -5211,6 +5604,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// caller threaded a snapshot its options object is forwarded unchanged —
 		// same reference, and never mutated.
 		const retryOptions = options.requestModelInfo === undefined ? { ...options, requestModelInfo } : options
+		// Publish this attempt's tool-policy snapshot from the same `state` read
+		// the prompt is built from: the snapshot's fields are read off that held
+		// local at the store itself, with no await between those reads and the
+		// assignment, and no policy input is re-read from live state across the
+		// awaits above, so the streaming presenter of this request validates
+		// against exactly the policy its prompt advertised. The generator body
+		// re-executes per retry, so each attempt re-captures before its stream
+		// can present anything.
+		this.requestPolicySnapshot = {
+			disabledTools: state?.disabledTools,
+			experiments: state?.experiments,
+			customModes: state?.customModes,
+			modelInfo: requestModelInfo,
+		}
 		const systemPrompt = await this.getSystemPrompt(state, requestModelInfo)
 
 		// A cancellation landing during the rate-limit countdown, the bounded metadata

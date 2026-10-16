@@ -1878,8 +1878,8 @@ describe("History resume delegation - parent metadata transitions", () => {
 
 			const atomicUpdatePair = vi.fn(
 				async (
-					firstId: string,
-					secondId: string,
+					_firstId: string,
+					_secondId: string,
 					firstUpdater: (h: HistoryItem) => HistoryItem,
 					secondUpdater: (h: HistoryItem) => HistoryItem,
 				) => {
@@ -1988,8 +1988,8 @@ describe("History resume delegation - parent metadata transitions", () => {
 			const taskHistoryStore = {
 				atomicUpdatePair: vi.fn(
 					async (
-						firstId: string,
-						secondId: string,
+						_firstId: string,
+						_secondId: string,
 						firstUpdater: (h: any) => any,
 						secondUpdater: (h: any) => any,
 					) => {

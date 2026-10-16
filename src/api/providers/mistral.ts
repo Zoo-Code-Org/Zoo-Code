@@ -15,7 +15,6 @@ import { ApiHandlerOptions } from "../../shared/api"
 
 import { convertToMistralMessages } from "../transform/mistral-format"
 import { ApiStream } from "../transform/stream"
-import { handleProviderError } from "./utils/error-handler"
 
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
@@ -192,7 +191,7 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 
 		return { id, info, maxTokens, temperature }
 	}
-	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
 		const { id: model, temperature } = this.getModel()
 
 		try {

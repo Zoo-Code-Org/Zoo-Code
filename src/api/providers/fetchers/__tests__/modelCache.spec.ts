@@ -40,15 +40,6 @@ vi.mock("fs", () => ({
 	readFileSync: vi.fn().mockReturnValue("{}"),
 }))
 
-// Mock all the model fetchers
-vi.mock("../litellm")
-vi.mock("../openrouter")
-vi.mock("../requesty")
-vi.mock("../kenari")
-vi.mock("../nanogpt")
-vi.mock("../moonshot")
-vi.mock("../zoo-gateway")
-
 // Mock ContextProxy with a simple static instance
 vi.mock("../../../core/config/ContextProxy", () => ({
 	ContextProxy: {
@@ -69,21 +60,28 @@ import * as fsSync from "fs"
 import NodeCache from "node-cache"
 import { TelemetryService } from "@roo-code/telemetry"
 import { getModels, getModelsFromCache } from "../modelCache"
-import { getLiteLLMModels } from "../litellm"
-import { getOpenRouterModels } from "../openrouter"
-import { getRequestyModels } from "../requesty"
-import { getKenariModels } from "../kenari"
-import { getNanoGptModels } from "../nanogpt"
-import { getMoonshotModels } from "../moonshot"
-import { getZooGatewayModels } from "../zoo-gateway"
+import type { ApiHandler, ModelCacheScope } from "../../../index"
+import type { GetModelsOptions } from "../../../../shared/api"
 
-const mockGetLiteLLMModels = getLiteLLMModels as Mock<typeof getLiteLLMModels>
-const mockGetOpenRouterModels = getOpenRouterModels as Mock<typeof getOpenRouterModels>
-const mockGetRequestyModels = getRequestyModels as Mock<typeof getRequestyModels>
-const mockGetKenariModels = getKenariModels as Mock<typeof getKenariModels>
-const mockGetNanoGptModels = getNanoGptModels as Mock<typeof getNanoGptModels>
-const mockGetMoonshotModels = getMoonshotModels as Mock<typeof getMoonshotModels>
-const mockGetZooGatewayModels = getZooGatewayModels as Mock<typeof getZooGatewayModels>
+function makeHandler(
+	scope: ModelCacheScope,
+	fetchModels: (options: GetModelsOptions, signal?: AbortSignal) => Promise<ModelRecord>,
+): ApiHandler {
+	return {
+		fetchModels,
+		getModelCacheScope: () => scope,
+	} as unknown as ApiHandler
+}
+
+const OPENROUTER_SCOPE: ModelCacheScope = { urlScoped: false, keyScoped: false, authScoped: false }
+const LITELLM_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: false }
+const REQUESTY_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: false }
+const NANOGPT_SCOPE: ModelCacheScope = { urlScoped: false, keyScoped: true, authScoped: false }
+const ZOO_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: true }
+const MOONSHOT_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: false }
+
+const openRouterHandler = makeHandler(OPENROUTER_SCOPE, vi.fn())
+const zooGatewayHandler = makeHandler(ZOO_SCOPE, vi.fn())
 
 const DUMMY_REQUESTY_KEY = "requesty-key-for-testing"
 
@@ -92,7 +90,7 @@ describe("getModels with new GetModelsOptions", () => {
 		vi.clearAllMocks()
 	})
 
-	it("calls getLiteLLMModels with correct parameters", async () => {
+	it("dispatches LiteLLM through the handler's fetchModels with the same options", async () => {
 		const mockModels = {
 			"claude-3-sonnet": {
 				maxTokens: 4096,
@@ -101,22 +99,22 @@ describe("getModels with new GetModelsOptions", () => {
 				description: "Claude 3 Sonnet via LiteLLM",
 			},
 		}
-		mockGetLiteLLMModels.mockResolvedValue(mockModels)
+		const fetchModels = vi.fn().mockResolvedValue(mockModels)
+		const handler = makeHandler(LITELLM_SCOPE, fetchModels)
 
-		const result = await getModels({
+		const options = {
 			provider: providerIdentifiers.litellm,
 			apiKey: "test-api-key",
 			baseUrl: "http://localhost:4000",
-		})
+		} as const
+		const result = await getModels(options, handler)
 
-		// Every single-flight fetch carries the flight's bound/abort signal.
-		expect(mockGetLiteLLMModels).toHaveBeenCalledWith("test-api-key", "http://localhost:4000", {
-			signal: expect.any(AbortSignal),
-		})
+		// The dispatcher forwards the caller's options to the handler's fetchModels.
+		expect(fetchModels).toHaveBeenCalledWith(options, expect.any(AbortSignal))
 		expect(result).toEqual(mockModels)
 	})
 
-	it("calls getOpenRouterModels for openrouter provider", async () => {
+	it("calls the handler's fetchModels for openrouter provider", async () => {
 		const mockModels = {
 			"openrouter/model": {
 				maxTokens: 8192,
@@ -125,11 +123,12 @@ describe("getModels with new GetModelsOptions", () => {
 				description: "OpenRouter model",
 			},
 		}
-		mockGetOpenRouterModels.mockResolvedValue(mockModels)
+		const fetchModels = vi.fn().mockResolvedValue(mockModels)
+		const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
-		const result = await getModels({ provider: providerIdentifiers.openrouter })
+		const result = await getModels({ provider: providerIdentifiers.openrouter }, handler)
 
-		expect(mockGetOpenRouterModels).toHaveBeenCalled()
+		expect(fetchModels).toHaveBeenCalled()
 		expect(result).toEqual(mockModels)
 	})
 
@@ -142,15 +141,16 @@ describe("getModels with new GetModelsOptions", () => {
 			},
 		}
 
-		mockGetOpenRouterModels.mockResolvedValue(mockModels)
+		const fetchModels = vi.fn().mockResolvedValue(mockModels)
+		const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
-		const result = await getModels({ provider: providerIdentifiers.openrouter })
+		const result = await getModels({ provider: providerIdentifiers.openrouter }, handler)
 
-		expect(mockGetOpenRouterModels).toHaveBeenCalled()
+		expect(fetchModels).toHaveBeenCalled()
 		expect(result).toEqual(mockModels)
 	})
 
-	it("calls getRequestyModels with optional API key", async () => {
+	it("calls the handler's fetchModels with optional API key", async () => {
 		const mockModels = {
 			"requesty/model": {
 				maxTokens: 4096,
@@ -159,13 +159,13 @@ describe("getModels with new GetModelsOptions", () => {
 				description: "Requesty model",
 			},
 		}
-		mockGetRequestyModels.mockResolvedValue(mockModels)
+		const fetchModels = vi.fn().mockResolvedValue(mockModels)
+		const handler = makeHandler(REQUESTY_SCOPE, fetchModels)
 
-		const result = await getModels({ provider: providerIdentifiers.requesty, apiKey: DUMMY_REQUESTY_KEY })
+		const options = { provider: providerIdentifiers.requesty, apiKey: DUMMY_REQUESTY_KEY } as const
+		const result = await getModels(options, handler)
 
-		expect(mockGetRequestyModels).toHaveBeenCalledWith(undefined, DUMMY_REQUESTY_KEY, {
-			signal: expect.any(AbortSignal),
-		})
+		expect(fetchModels).toHaveBeenCalledWith(options, expect.any(AbortSignal))
 		expect(result).toEqual(mockModels)
 	})
 
@@ -178,21 +178,21 @@ describe("getModels with new GetModelsOptions", () => {
 			},
 		}
 
-		mockGetRequestyModels.mockResolvedValue(mockModels)
+		const fetchModels = vi.fn().mockResolvedValue(mockModels)
+		const handler = makeHandler(REQUESTY_SCOPE, fetchModels)
 
-		const result = await getModels({
+		const options = {
 			provider: providerIdentifiers.requesty,
 			apiKey: DUMMY_REQUESTY_KEY,
 			baseUrl: "https://router.requesty.ai/v1",
-		})
+		} as const
+		const result = await getModels(options, handler)
 
-		expect(mockGetRequestyModels).toHaveBeenCalledWith("https://router.requesty.ai/v1", DUMMY_REQUESTY_KEY, {
-			signal: expect.any(AbortSignal),
-		})
+		expect(fetchModels).toHaveBeenCalledWith(options, expect.any(AbortSignal))
 		expect(result).toEqual(mockModels)
 	})
 
-	it("calls getKenariModels with optional API key", async () => {
+	it("calls the handler's fetchModels with optional API key for kenari", async () => {
 		const mockModels = {
 			"glm-5-2": {
 				maxTokens: 32768,
@@ -201,13 +201,13 @@ describe("getModels with new GetModelsOptions", () => {
 				description: "GLM 5.2 via Kenari",
 			},
 		}
-		mockGetKenariModels.mockResolvedValue(mockModels)
+		const fetchModels = vi.fn().mockResolvedValue(mockModels)
+		const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
-		const result = await getModels({ provider: providerIdentifiers.kenari, apiKey: "kenari-key-for-testing" })
+		const options = { provider: providerIdentifiers.kenari, apiKey: "kenari-key-for-testing" } as const
+		const result = await getModels(options, handler)
 
-		expect(mockGetKenariModels).toHaveBeenCalledWith("kenari-key-for-testing", {
-			signal: expect.any(AbortSignal),
-		})
+		expect(fetchModels).toHaveBeenCalledWith(options, expect.any(AbortSignal))
 		expect(result).toEqual(mockModels)
 	})
 
@@ -219,28 +219,34 @@ describe("getModels with new GetModelsOptions", () => {
 				supportsPromptCache: false,
 			},
 		}
-		mockGetNanoGptModels.mockResolvedValue(mockModels)
+		const fetchModels = vi.fn().mockResolvedValue(mockModels)
+		const handler = makeHandler(NANOGPT_SCOPE, fetchModels)
 
-		const result = await getModels({ provider: providerIdentifiers.nanogpt, apiKey: "nanogpt-key" })
+		const options = { provider: providerIdentifiers.nanogpt, apiKey: "nanogpt-key" } as const
+		const result = await getModels(options, handler)
 
-		expect(mockGetNanoGptModels).toHaveBeenCalledWith("nanogpt-key", { signal: expect.any(AbortSignal) })
+		expect(fetchModels).toHaveBeenCalledWith(options, expect.any(AbortSignal))
 		expect(result).toEqual(mockModels)
 	})
 
 	it("handles errors and re-throws them", async () => {
 		const expectedError = new Error("LiteLLM connection failed")
-		mockGetLiteLLMModels.mockRejectedValue(expectedError)
+		const fetchModels = vi.fn().mockRejectedValue(expectedError)
+		const handler = makeHandler(LITELLM_SCOPE, fetchModels)
 
 		await expect(
-			getModels({
-				provider: providerIdentifiers.litellm,
-				apiKey: "test-api-key",
-				baseUrl: "http://localhost:4000",
-			}),
+			getModels(
+				{
+					provider: providerIdentifiers.litellm,
+					apiKey: "test-api-key",
+					baseUrl: "http://localhost:4000",
+				},
+				handler,
+			),
 		).rejects.toThrow("LiteLLM connection failed")
 	})
 
-	it("calls getMoonshotModels with correct parameters", async () => {
+	it("calls the handler's fetchModels with correct parameters for moonshot", async () => {
 		const mockModels = {
 			"kimi-k2-0905-preview": {
 				maxTokens: 16384,
@@ -249,30 +255,34 @@ describe("getModels with new GetModelsOptions", () => {
 				description: "Moonshot Kimi K2",
 			},
 		}
-		mockGetMoonshotModels.mockResolvedValue(mockModels)
+		const fetchModels = vi.fn().mockResolvedValue(mockModels)
+		const handler = makeHandler(MOONSHOT_SCOPE, fetchModels)
 
-		const result = await getModels({
+		const options = {
 			provider: providerIdentifiers.moonshot,
 			apiKey: "test-key",
 			baseUrl: "https://api.moonshot.ai/v1",
-		})
+		} as const
+		const result = await getModels(options, handler)
 
-		expect(mockGetMoonshotModels).toHaveBeenCalledWith("https://api.moonshot.ai/v1", "test-key", {
-			signal: expect.any(AbortSignal),
-		})
+		expect(fetchModels).toHaveBeenCalledWith(options, expect.any(AbortSignal))
 		expect(result).toEqual(mockModels)
 	})
 
-	it("validates exhaustive provider checking with unknown provider", async () => {
-		// This test ensures TypeScript catches unknown providers at compile time
-		// In practice, the discriminated union should prevent this at compile time
+	it("rejects when the handler does not expose a dynamic model catalog", async () => {
+		// A handler without fetchModels (e.g. a non-catalog provider) must fail with a
+		// clear message instead of silently returning an empty catalog.
+		const handler = { getModelCacheScope: () => OPENROUTER_SCOPE } as unknown as ApiHandler
 		const unknownProvider = "unknown" as typeof providerIdentifiers.openrouter
 
 		await expect(
-			getModels({
-				provider: unknownProvider,
-			}),
-		).rejects.toThrow("Unknown provider: unknown")
+			getModels(
+				{
+					provider: unknownProvider,
+				},
+				handler,
+			),
+		).rejects.toThrow("Provider unknown does not expose a dynamic model catalog")
 	})
 })
 
@@ -294,7 +304,7 @@ describe("getModelsFromCache disk fallback", () => {
 	it("returns undefined when both memory and disk cache miss", () => {
 		vi.mocked(fsSync.existsSync).mockReturnValue(false)
 
-		const result = getModelsFromCache(providerIdentifiers.openrouter)
+		const result = getModelsFromCache({ provider: providerIdentifiers.openrouter }, openRouterHandler)
 
 		expect(result).toBeUndefined()
 	})
@@ -310,7 +320,7 @@ describe("getModelsFromCache disk fallback", () => {
 
 		mockCache.get.mockReturnValue(memoryModels)
 
-		const result = getModelsFromCache(providerIdentifiers.openrouter)
+		const result = getModelsFromCache({ provider: providerIdentifiers.openrouter }, openRouterHandler)
 
 		expect(result).toEqual(memoryModels)
 		// Disk should not be checked when memory cache hits
@@ -328,7 +338,7 @@ describe("getModelsFromCache disk fallback", () => {
 
 		mockCache.get.mockReturnValue(previousUserModels)
 
-		const result = getModelsFromCache(providerIdentifiers.zooGateway)
+		const result = getModelsFromCache({ provider: providerIdentifiers.zooGateway }, zooGatewayHandler)
 
 		expect(result).toBeUndefined()
 		expect(mockCache.get).not.toHaveBeenCalled()
@@ -350,7 +360,7 @@ describe("getModelsFromCache disk fallback", () => {
 		vi.mocked(fsSync.existsSync).mockReturnValue(true)
 		vi.mocked(fsSync.readFileSync).mockReturnValue(JSON.stringify(diskModels))
 
-		const result = getModelsFromCache(providerIdentifiers.openrouter)
+		const result = getModelsFromCache({ provider: providerIdentifiers.openrouter }, openRouterHandler)
 
 		// In the test environment, ContextProxy.instance may not be fully initialized,
 		// so getCacheDirectoryPathSync returns undefined and disk cache is not attempted
@@ -365,7 +375,7 @@ describe("getModelsFromCache disk fallback", () => {
 
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 
-		const result = getModelsFromCache(providerIdentifiers.openrouter)
+		const result = getModelsFromCache({ provider: providerIdentifiers.openrouter }, openRouterHandler)
 
 		expect(result).toBeUndefined()
 		expect(consoleErrorSpy).toHaveBeenCalled()
@@ -379,7 +389,7 @@ describe("getModelsFromCache disk fallback", () => {
 
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 
-		const result = getModelsFromCache(providerIdentifiers.openrouter)
+		const result = getModelsFromCache({ provider: providerIdentifiers.openrouter }, openRouterHandler)
 
 		expect(result).toBeUndefined()
 		expect(consoleErrorSpy).toHaveBeenCalled()
@@ -407,9 +417,10 @@ describe("empty cache protection", () => {
 	describe("getModels", () => {
 		it("does not cache empty API responses", async () => {
 			// API returns empty object (simulating failure)
-			mockGetOpenRouterModels.mockResolvedValue({})
+			const fetchModels = vi.fn().mockResolvedValue({})
+			const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
-			const result = await getModels({ provider: providerIdentifiers.openrouter })
+			const result = await getModels({ provider: providerIdentifiers.openrouter }, handler)
 
 			// Should return empty but NOT cache it
 			expect(result).toEqual({})
@@ -425,9 +436,10 @@ describe("empty cache protection", () => {
 					description: "OpenRouter model",
 				},
 			}
-			mockGetOpenRouterModels.mockResolvedValue(mockModels)
+			const fetchModels = vi.fn().mockResolvedValue(mockModels)
+			const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
-			const result = await getModels({ provider: providerIdentifiers.openrouter })
+			const result = await getModels({ provider: providerIdentifiers.openrouter }, handler)
 
 			expect(result).toEqual(mockModels)
 			expect(mockSet).toHaveBeenCalledWith("openrouter", mockModels)
@@ -447,13 +459,14 @@ describe("empty cache protection", () => {
 			const delayedPromise = new Promise<typeof mockModels>((resolve) => {
 				resolvePromise = resolve
 			})
-			mockGetOpenRouterModels.mockReturnValue(delayedPromise)
+			const fetchModels = vi.fn().mockReturnValue(delayedPromise)
+			const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 			mockGet.mockReturnValue(undefined)
 
-			const promise1 = getModels({ provider: providerIdentifiers.openrouter })
-			const promise2 = getModels({ provider: providerIdentifiers.openrouter })
+			const promise1 = getModels({ provider: providerIdentifiers.openrouter }, handler)
+			const promise2 = getModels({ provider: providerIdentifiers.openrouter }, handler)
 
-			expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(1)
+			expect(fetchModels).toHaveBeenCalledTimes(1)
 
 			resolvePromise!(mockModels)
 
@@ -482,13 +495,14 @@ describe("empty cache protection", () => {
 					description: "Second response",
 				},
 			}
-			mockGetOpenRouterModels.mockResolvedValueOnce(firstModels).mockResolvedValueOnce(secondModels)
+			const fetchModels = vi.fn().mockResolvedValueOnce(firstModels).mockResolvedValueOnce(secondModels)
+			const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 			mockGet.mockReturnValue(undefined)
 
-			const result1 = await getModels({ provider: providerIdentifiers.openrouter })
-			const result2 = await getModels({ provider: providerIdentifiers.openrouter })
+			const result1 = await getModels({ provider: providerIdentifiers.openrouter }, handler)
+			const result2 = await getModels({ provider: providerIdentifiers.openrouter }, handler)
 
-			expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(2)
+			expect(fetchModels).toHaveBeenCalledTimes(2)
 			expect(result1).toEqual(firstModels)
 			expect(result2).toEqual(secondModels)
 		})
@@ -509,15 +523,16 @@ describe("empty cache protection", () => {
 			const delayedPromise = new Promise<typeof mockModels>((resolve) => {
 				resolvePromise = resolve
 			})
-			mockGetOpenRouterModels.mockReturnValue(delayedPromise)
+			const fetchModels = vi.fn().mockReturnValue(delayedPromise)
+			const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 			mockGet.mockReturnValue(undefined)
 
 			const { refreshModels } = await import("../modelCache")
 
-			const getPromise = getModels({ provider: providerIdentifiers.openrouter })
-			const refreshPromise = refreshModels({ provider: providerIdentifiers.openrouter })
+			const getPromise = getModels({ provider: providerIdentifiers.openrouter }, handler)
+			const refreshPromise = refreshModels({ provider: providerIdentifiers.openrouter }, handler)
 
-			expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(1)
+			expect(fetchModels).toHaveBeenCalledTimes(1)
 
 			resolvePromise!(mockModels)
 
@@ -538,16 +553,17 @@ describe("empty cache protection", () => {
 			const delayedRejection = new Promise<never>((_resolve, reject) => {
 				rejectPromise = reject
 			})
-			mockGetOpenRouterModels.mockReturnValue(delayedRejection)
+			const fetchModels = vi.fn().mockReturnValue(delayedRejection)
+			const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 			mockGet.mockReturnValue(undefined)
 
 			const { refreshModels } = await import("../modelCache")
 
 			// refreshModels() starts (and registers) the shared fetch; getModels() joins it.
-			const refreshPromise = refreshModels({ provider: providerIdentifiers.openrouter })
-			const getPromise = getModels({ provider: providerIdentifiers.openrouter })
+			const refreshPromise = refreshModels({ provider: providerIdentifiers.openrouter }, handler)
+			const getPromise = getModels({ provider: providerIdentifiers.openrouter }, handler)
 
-			expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(1)
+			expect(fetchModels).toHaveBeenCalledTimes(1)
 
 			rejectPromise!(fetchError)
 
@@ -574,15 +590,22 @@ describe("empty cache protection", () => {
 					description: "Server B model",
 				},
 			}
-			mockGetLiteLLMModels.mockResolvedValueOnce(mockModelsA).mockResolvedValueOnce(mockModelsB)
+			const fetchModels = vi.fn().mockResolvedValueOnce(mockModelsA).mockResolvedValueOnce(mockModelsB)
+			const handler = makeHandler(LITELLM_SCOPE, fetchModels)
 			mockGet.mockReturnValue(undefined)
 
 			const [resultA, resultB] = await Promise.all([
-				getModels({ provider: providerIdentifiers.litellm, apiKey: "key-a", baseUrl: "http://server-a:4000" }),
-				getModels({ provider: providerIdentifiers.litellm, apiKey: "key-b", baseUrl: "http://server-b:4000" }),
+				getModels(
+					{ provider: providerIdentifiers.litellm, apiKey: "key-a", baseUrl: "http://server-a:4000" },
+					handler,
+				),
+				getModels(
+					{ provider: providerIdentifiers.litellm, apiKey: "key-b", baseUrl: "http://server-b:4000" },
+					handler,
+				),
 			])
 
-			expect(mockGetLiteLLMModels).toHaveBeenCalledTimes(2)
+			expect(fetchModels).toHaveBeenCalledTimes(2)
 			expect(resultA).toEqual(mockModelsA)
 			expect(resultB).toEqual(mockModelsB)
 		})
@@ -590,9 +613,10 @@ describe("empty cache protection", () => {
 		it("re-arms the empty-response throttle after a non-empty response from an auth-scoped provider", async () => {
 			// zoo-gateway is auth-scoped and skips caching entirely, but a non-empty response
 			// must still clear the throttle so a later empty response is reported again.
-			mockGetZooGatewayModels.mockResolvedValueOnce({})
+			const fetchModels = vi.fn().mockResolvedValueOnce({})
+			const handler = makeHandler(ZOO_SCOPE, fetchModels)
 
-			await getModels({ provider: providerIdentifiers.zooGateway, apiKey: "test-key" })
+			await getModels({ provider: providerIdentifiers.zooGateway, apiKey: "test-key" }, handler)
 
 			expect(TelemetryService.instance.captureEvent).toHaveBeenCalledTimes(1)
 
@@ -604,16 +628,16 @@ describe("empty cache protection", () => {
 					description: "Zoo Gateway model",
 				},
 			}
-			mockGetZooGatewayModels.mockResolvedValueOnce(mockModels)
+			fetchModels.mockResolvedValueOnce(mockModels)
 
-			await getModels({ provider: providerIdentifiers.zooGateway, apiKey: "test-key" })
+			await getModels({ provider: providerIdentifiers.zooGateway, apiKey: "test-key" }, handler)
 
 			// Auth-scoped providers never populate the cache.
 			expect(mockSet).not.toHaveBeenCalled()
 
-			mockGetZooGatewayModels.mockResolvedValueOnce({})
+			fetchModels.mockResolvedValueOnce({})
 
-			await getModels({ provider: providerIdentifiers.zooGateway, apiKey: "test-key" })
+			await getModels({ provider: providerIdentifiers.zooGateway, apiKey: "test-key" }, handler)
 
 			// The throttle should have been re-armed by the non-empty response above, so this
 			// second empty response is reported again instead of being suppressed.
@@ -635,10 +659,11 @@ describe("empty cache protection", () => {
 			// Memory cache has existing data
 			mockGet.mockReturnValue(existingModels)
 			// API returns empty (failure)
-			mockGetOpenRouterModels.mockResolvedValue({})
+			const fetchModels = vi.fn().mockResolvedValue({})
+			const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
 			const { refreshModels } = await import("../modelCache")
-			const result = await refreshModels({ provider: providerIdentifiers.openrouter })
+			const result = await refreshModels({ provider: providerIdentifiers.openrouter }, handler)
 
 			// Should return existing cache, not empty
 			expect(result).toEqual(existingModels)
@@ -665,10 +690,11 @@ describe("empty cache protection", () => {
 			}
 
 			mockGet.mockReturnValue(existingModels)
-			mockGetOpenRouterModels.mockResolvedValue(newModels)
+			const fetchModels = vi.fn().mockResolvedValue(newModels)
+			const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
 			const { refreshModels } = await import("../modelCache")
-			const result = await refreshModels({ provider: providerIdentifiers.openrouter })
+			const result = await refreshModels({ provider: providerIdentifiers.openrouter }, handler)
 
 			// Should return new models
 			expect(result).toEqual(newModels)
@@ -687,10 +713,11 @@ describe("empty cache protection", () => {
 			}
 
 			mockGet.mockReturnValue(existingModels)
-			mockGetOpenRouterModels.mockRejectedValue(new Error("API error"))
+			const fetchModels = vi.fn().mockRejectedValue(new Error("API error"))
+			const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
 			const { refreshModels } = await import("../modelCache")
-			const result = await refreshModels({ provider: providerIdentifiers.openrouter })
+			const result = await refreshModels({ provider: providerIdentifiers.openrouter }, handler)
 
 			// Should return existing cache on error
 			expect(result).toEqual(existingModels)
@@ -698,10 +725,11 @@ describe("empty cache protection", () => {
 
 		it("returns empty object when API errors and no cache exists", async () => {
 			mockGet.mockReturnValue(undefined)
-			mockGetOpenRouterModels.mockRejectedValue(new Error("API error"))
+			const fetchModels = vi.fn().mockRejectedValue(new Error("API error"))
+			const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
 			const { refreshModels } = await import("../modelCache")
-			const result = await refreshModels({ provider: providerIdentifiers.openrouter })
+			const result = await refreshModels({ provider: providerIdentifiers.openrouter }, handler)
 
 			// Should return empty when no cache and API fails
 			expect(result).toEqual({})
@@ -711,10 +739,11 @@ describe("empty cache protection", () => {
 			// Both memory and disk cache are empty (initial state)
 			mockGet.mockReturnValue(undefined)
 			// API returns empty (failure/rate limit)
-			mockGetOpenRouterModels.mockResolvedValue({})
+			const fetchModels = vi.fn().mockResolvedValue({})
+			const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
 			const { refreshModels } = await import("../modelCache")
-			const result = await refreshModels({ provider: providerIdentifiers.openrouter })
+			const result = await refreshModels({ provider: providerIdentifiers.openrouter }, handler)
 
 			// Should return empty but NOT cache it
 			expect(result).toEqual({})
@@ -736,17 +765,18 @@ describe("empty cache protection", () => {
 			const delayedPromise = new Promise<typeof mockModels>((resolve) => {
 				resolvePromise = resolve
 			})
-			mockGetOpenRouterModels.mockReturnValue(delayedPromise)
+			const fetchModels = vi.fn().mockReturnValue(delayedPromise)
+			const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 			mockGet.mockReturnValue(undefined)
 
 			const { refreshModels } = await import("../modelCache")
 
 			// Start two concurrent refresh calls
-			const promise1 = refreshModels({ provider: providerIdentifiers.openrouter })
-			const promise2 = refreshModels({ provider: providerIdentifiers.openrouter })
+			const promise1 = refreshModels({ provider: providerIdentifiers.openrouter }, handler)
+			const promise2 = refreshModels({ provider: providerIdentifiers.openrouter }, handler)
 
 			// API should only be called once (second call reuses in-flight request)
-			expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(1)
+			expect(fetchModels).toHaveBeenCalledTimes(1)
 
 			// Resolve the API call
 			resolvePromise!(mockModels)
@@ -769,33 +799,34 @@ describe("empty cache protection", () => {
 					description: "Requesty model",
 				},
 			}
-			mockGetRequestyModels.mockResolvedValue(mockModels)
+			const fetchModels = vi.fn().mockResolvedValue(mockModels)
+			const handler = makeHandler(REQUESTY_SCOPE, fetchModels)
 
 			const { refreshModels } = await import("../modelCache")
 
 			// Different keys -> separate compound keys -> two distinct fetches.
 			const [a, b] = await Promise.all([
-				refreshModels({ provider: providerIdentifiers.requesty, apiKey: "key-one" }),
-				refreshModels({ provider: providerIdentifiers.requesty, apiKey: "key-two" }),
+				refreshModels({ provider: providerIdentifiers.requesty, apiKey: "key-one" }, handler),
+				refreshModels({ provider: providerIdentifiers.requesty, apiKey: "key-two" }, handler),
 			])
-			expect(mockGetRequestyModels).toHaveBeenCalledTimes(2)
+			expect(fetchModels).toHaveBeenCalledTimes(2)
 			expect(a).toEqual(mockModels)
 			expect(b).toEqual(mockModels)
 
-			mockGetRequestyModels.mockClear()
+			fetchModels.mockClear()
 
 			// Same key -> same compound key -> a single shared in-flight fetch.
 			let resolveShared: (value: typeof mockModels) => void
-			mockGetRequestyModels.mockReturnValue(
+			fetchModels.mockReturnValue(
 				new Promise<typeof mockModels>((resolve) => {
 					resolveShared = resolve
 				}),
 			)
 
-			const shared1 = refreshModels({ provider: providerIdentifiers.requesty, apiKey: "same-key" })
-			const shared2 = refreshModels({ provider: providerIdentifiers.requesty, apiKey: "same-key" })
+			const shared1 = refreshModels({ provider: providerIdentifiers.requesty, apiKey: "same-key" }, handler)
+			const shared2 = refreshModels({ provider: providerIdentifiers.requesty, apiKey: "same-key" }, handler)
 
-			expect(mockGetRequestyModels).toHaveBeenCalledTimes(1)
+			expect(fetchModels).toHaveBeenCalledTimes(1)
 
 			resolveShared!(mockModels)
 			const [s1, s2] = await Promise.all([shared1, shared2])
@@ -810,9 +841,12 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 
 	let freshGetModels: ModelCacheModule["getModels"]
 	let freshRefreshModels: ModelCacheModule["refreshModels"]
-	let freshMockGetOpenRouterModels: Mock<typeof getOpenRouterModels>
-	let freshMockGetLiteLLMModels: Mock<typeof getLiteLLMModels>
-	let freshMockGetZooGatewayModels: Mock<typeof getZooGatewayModels>
+	let freshOpenRouterFetch: Mock
+	let freshLiteLLMFetch: Mock
+	let freshZooGatewayFetch: Mock
+	let freshOpenRouterHandler: ApiHandler
+	let freshLiteLLMHandler: ApiHandler
+	let freshZooGatewayHandler: ApiHandler
 
 	beforeEach(async () => {
 		// The empty-response throttle is deliberately module-level, persistent state (once per
@@ -821,15 +855,16 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 		vi.clearAllMocks()
 
 		const modelCacheModule: ModelCacheModule = await import("../modelCache")
-		const openRouterModule = await import("../openrouter")
-		const liteLLMModule = await import("../litellm")
-		const zooGatewayModule = await import("../zoo-gateway")
 
 		freshGetModels = modelCacheModule.getModels
 		freshRefreshModels = modelCacheModule.refreshModels
-		freshMockGetOpenRouterModels = openRouterModule.getOpenRouterModels as Mock<typeof getOpenRouterModels>
-		freshMockGetLiteLLMModels = liteLLMModule.getLiteLLMModels as Mock<typeof getLiteLLMModels>
-		freshMockGetZooGatewayModels = zooGatewayModule.getZooGatewayModels as Mock<typeof getZooGatewayModels>
+
+		freshOpenRouterFetch = vi.fn()
+		freshLiteLLMFetch = vi.fn()
+		freshZooGatewayFetch = vi.fn()
+		freshOpenRouterHandler = makeHandler(OPENROUTER_SCOPE, freshOpenRouterFetch)
+		freshLiteLLMHandler = makeHandler(LITELLM_SCOPE, freshLiteLLMFetch)
+		freshZooGatewayHandler = makeHandler(ZOO_SCOPE, freshZooGatewayFetch)
 
 		const NodeCacheModule = await import("node-cache")
 		const MockedNodeCache = vi.mocked(NodeCacheModule.default)
@@ -838,11 +873,11 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 	})
 
 	it("fires MODEL_CACHE_EMPTY_RESPONSE only once for repeated empty getModels responses from the same provider", async () => {
-		freshMockGetOpenRouterModels.mockResolvedValue({})
+		freshOpenRouterFetch.mockResolvedValue({})
 
-		await freshGetModels({ provider: providerIdentifiers.openrouter })
-		await freshGetModels({ provider: providerIdentifiers.openrouter })
-		await freshGetModels({ provider: providerIdentifiers.openrouter })
+		await freshGetModels({ provider: providerIdentifiers.openrouter }, freshOpenRouterHandler)
+		await freshGetModels({ provider: providerIdentifiers.openrouter }, freshOpenRouterHandler)
+		await freshGetModels({ provider: providerIdentifiers.openrouter }, freshOpenRouterHandler)
 
 		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
 		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(1)
@@ -855,12 +890,12 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 	it("fires again after a non-empty response resets the throttle", async () => {
 		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
 
-		freshMockGetOpenRouterModels.mockResolvedValue({})
-		await freshGetModels({ provider: providerIdentifiers.openrouter })
-		await freshGetModels({ provider: providerIdentifiers.openrouter })
+		freshOpenRouterFetch.mockResolvedValue({})
+		await freshGetModels({ provider: providerIdentifiers.openrouter }, freshOpenRouterHandler)
+		await freshGetModels({ provider: providerIdentifiers.openrouter }, freshOpenRouterHandler)
 		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(1)
 
-		freshMockGetOpenRouterModels.mockResolvedValue({
+		freshOpenRouterFetch.mockResolvedValue({
 			"openrouter/model": {
 				maxTokens: 8192,
 				contextWindow: 128000,
@@ -868,10 +903,10 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 				description: "OpenRouter model",
 			},
 		})
-		await freshGetModels({ provider: providerIdentifiers.openrouter })
+		await freshGetModels({ provider: providerIdentifiers.openrouter }, freshOpenRouterHandler)
 
-		freshMockGetOpenRouterModels.mockResolvedValue({})
-		await freshGetModels({ provider: providerIdentifiers.openrouter })
+		freshOpenRouterFetch.mockResolvedValue({})
+		await freshGetModels({ provider: providerIdentifiers.openrouter }, freshOpenRouterHandler)
 
 		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
 	})
@@ -879,11 +914,14 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 	it("throttles independently per provider", async () => {
 		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
 
-		freshMockGetOpenRouterModels.mockResolvedValue({})
-		freshMockGetLiteLLMModels.mockResolvedValue({})
+		freshOpenRouterFetch.mockResolvedValue({})
+		freshLiteLLMFetch.mockResolvedValue({})
 
-		await freshGetModels({ provider: providerIdentifiers.openrouter })
-		await freshGetModels({ provider: providerIdentifiers.litellm, apiKey: "key", baseUrl: "http://localhost:4000" })
+		await freshGetModels({ provider: providerIdentifiers.openrouter }, freshOpenRouterHandler)
+		await freshGetModels(
+			{ provider: providerIdentifiers.litellm, apiKey: "key", baseUrl: "http://localhost:4000" },
+			freshLiteLLMHandler,
+		)
 
 		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
 	})
@@ -891,10 +929,10 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 	it("throttles empty responses from refreshModels using the same per-key gate", async () => {
 		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
 
-		freshMockGetOpenRouterModels.mockResolvedValue({})
+		freshOpenRouterFetch.mockResolvedValue({})
 
-		await freshRefreshModels({ provider: providerIdentifiers.openrouter })
-		await freshRefreshModels({ provider: providerIdentifiers.openrouter })
+		await freshRefreshModels({ provider: providerIdentifiers.openrouter }, freshOpenRouterHandler)
+		await freshRefreshModels({ provider: providerIdentifiers.openrouter }, freshOpenRouterHandler)
 
 		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(1)
 		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledWith(
@@ -914,42 +952,60 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 		// signal for the other.
 		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
 
-		freshMockGetLiteLLMModels.mockResolvedValue({})
+		freshLiteLLMFetch.mockResolvedValue({})
 
-		await freshGetModels({
-			provider: providerIdentifiers.litellm,
-			apiKey: "key-a",
-			baseUrl: "http://server-a:4000",
-		})
-		await freshGetModels({
-			provider: providerIdentifiers.litellm,
-			apiKey: "key-a",
-			baseUrl: "http://server-a:4000",
-		})
-		await freshGetModels({
-			provider: providerIdentifiers.litellm,
-			apiKey: "key-b",
-			baseUrl: "http://server-b:4000",
-		})
+		await freshGetModels(
+			{
+				provider: providerIdentifiers.litellm,
+				apiKey: "key-a",
+				baseUrl: "http://server-a:4000",
+			},
+			freshLiteLLMHandler,
+		)
+		await freshGetModels(
+			{
+				provider: providerIdentifiers.litellm,
+				apiKey: "key-a",
+				baseUrl: "http://server-a:4000",
+			},
+			freshLiteLLMHandler,
+		)
+		await freshGetModels(
+			{
+				provider: providerIdentifiers.litellm,
+				apiKey: "key-b",
+				baseUrl: "http://server-b:4000",
+			},
+			freshLiteLLMHandler,
+		)
 
 		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
 	})
 
 	it("throttles zoo-gateway independently per session token, even though caching itself is skipped", async () => {
-		// zoo-gateway is auth-scoped (see AUTH_SCOPED_PROVIDERS) and never persists to the
-		// memory/disk cache, but the empty-response throttle must still discriminate by
-		// identity: a sign-out/sign-in cycle to a different account carries a different
-		// session token (apiKey) on the same gateway URL, and must not have its empty-response
-		// signal suppressed by the previous account's throttle entry.
+		// zoo-gateway is auth-scoped and never persists to the memory/disk cache, but the
+		// empty-response throttle must still discriminate by identity: a sign-out/sign-in cycle
+		// to a different account carries a different session token (apiKey) on the same gateway
+		// URL, and must not have its empty-response signal suppressed by the previous account's
+		// throttle entry.
 		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
 
-		freshMockGetZooGatewayModels.mockResolvedValue({})
+		freshZooGatewayFetch.mockResolvedValue({})
 
-		await freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-a-token" })
-		await freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-a-token" })
+		await freshGetModels(
+			{ provider: providerIdentifiers.zooGateway, apiKey: "account-a-token" },
+			freshZooGatewayHandler,
+		)
+		await freshGetModels(
+			{ provider: providerIdentifiers.zooGateway, apiKey: "account-a-token" },
+			freshZooGatewayHandler,
+		)
 		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(1)
 
-		await freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-b-token" })
+		await freshGetModels(
+			{ provider: providerIdentifiers.zooGateway, apiKey: "account-b-token" },
+			freshZooGatewayHandler,
+		)
 		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
 	})
 
@@ -958,28 +1014,34 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 		// must also be treated as a distinct identity for throttle purposes.
 		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
 
-		freshMockGetZooGatewayModels.mockResolvedValue({})
+		freshZooGatewayFetch.mockResolvedValue({})
 
-		await freshGetModels({
-			provider: providerIdentifiers.zooGateway,
-			apiKey: "token",
-			baseUrl: "https://gateway-a.example.com",
-		})
-		await freshGetModels({
-			provider: providerIdentifiers.zooGateway,
-			apiKey: "token",
-			baseUrl: "https://gateway-b.example.com",
-		})
+		await freshGetModels(
+			{
+				provider: providerIdentifiers.zooGateway,
+				apiKey: "token",
+				baseUrl: "https://gateway-a.example.com",
+			},
+			freshZooGatewayHandler,
+		)
+		await freshGetModels(
+			{
+				provider: providerIdentifiers.zooGateway,
+				apiKey: "token",
+				baseUrl: "https://gateway-b.example.com",
+			},
+			freshZooGatewayHandler,
+		)
 
 		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
 	})
 
 	it("never shares results across different zoo-gateway credentials (auth isolation)", async () => {
-		// Auth-scoped providers (see AUTH_SCOPED_PROVIDERS) bypass dedupedFetch entirely --
-		// shouldSkipCache is true for zoo-gateway, so every call fires its own provider fetch
-		// and none are deduplicated. That means two concurrent calls can never resolve into
-		// each other's result regardless of token, which this test confirms for two different
-		// account tokens; the companion case below confirms the same holds for one token too.
+		// Auth-scoped providers bypass dedupedFetch entirely -- shouldSkipCache is true for
+		// zoo-gateway, so every call fires its own provider fetch and none are deduplicated.
+		// That means two concurrent calls can never resolve into each other's result regardless
+		// of token, which this test confirms for two different account tokens; the companion
+		// case below confirms the same holds for one token too.
 		const accountAModels = {
 			"zoo-gateway/account-a-model": {
 				maxTokens: 4096,
@@ -999,7 +1061,7 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 
 		let resolveA: (value: typeof accountAModels) => void
 		let resolveB: (value: typeof accountBModels) => void
-		freshMockGetZooGatewayModels
+		freshZooGatewayFetch
 			.mockImplementationOnce(
 				() =>
 					new Promise((resolve) => {
@@ -1013,10 +1075,16 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 					}),
 			)
 
-		const promiseA = freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-a-token" })
-		const promiseB = freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-b-token" })
+		const promiseA = freshGetModels(
+			{ provider: providerIdentifiers.zooGateway, apiKey: "account-a-token" },
+			freshZooGatewayHandler,
+		)
+		const promiseB = freshGetModels(
+			{ provider: providerIdentifiers.zooGateway, apiKey: "account-b-token" },
+			freshZooGatewayHandler,
+		)
 
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		expect(freshZooGatewayFetch).toHaveBeenCalledTimes(2)
 
 		resolveB!(accountBModels)
 		resolveA!(accountAModels)
@@ -1030,25 +1098,26 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 		// Auth-scoped providers skip dedupedFetch unconditionally, so even two calls carrying
 		// an identical token each fire their own provider fetch -- there is no in-flight sharing
 		// to key correctly or incorrectly for these providers.
-		freshMockGetZooGatewayModels.mockResolvedValue({})
+		freshZooGatewayFetch.mockResolvedValue({})
 
 		await Promise.all([
-			freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "same-token" }),
-			freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "same-token" }),
+			freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "same-token" }, freshZooGatewayHandler),
+			freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "same-token" }, freshZooGatewayHandler),
 		])
 
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		expect(freshZooGatewayFetch).toHaveBeenCalledTimes(2)
 	})
 })
 
 describe("key-scoped cache key derivation", () => {
-	// Exercises the per-API-key cache discriminator that all KEY_SCOPED_PROVIDERS share.
-	// Requesty is used only because it is a key-scoped provider with a mocked fetcher; the
-	// behavior under test is provider-agnostic.
+	// Exercises the per-API-key cache discriminator that all key-scoped providers share.
+	// Requesty is used only because it is a key-scoped provider; the behavior under test is
+	// provider-agnostic.
 	const keyScopedProvider = providerIdentifiers.requesty
 
 	let mockCache: Mocked<NodeCache>
 	let mockSet: Mocked<NodeCache>["set"]
+	let handler: ApiHandler
 
 	const mockModels = {
 		"key-scoped/model": {
@@ -1065,7 +1134,7 @@ describe("key-scoped cache key derivation", () => {
 		mockCache = vi.mocked(new MockedNodeCache())
 		mockCache.get.mockReturnValue(undefined)
 		mockSet = mockCache.set
-		mockGetRequestyModels.mockResolvedValue(mockModels)
+		handler = makeHandler(REQUESTY_SCOPE, vi.fn().mockResolvedValue(mockModels))
 	})
 
 	// Returns the cache key the result was written under (first arg of the matching set call).
@@ -1075,11 +1144,11 @@ describe("key-scoped cache key derivation", () => {
 	}
 
 	it("writes different cache keys for different API keys", async () => {
-		await getModels({ provider: keyScopedProvider, apiKey: "key-one" })
+		await getModels({ provider: keyScopedProvider, apiKey: "key-one" }, handler)
 		const firstKey = writtenCacheKey()
 
 		mockSet.mockClear()
-		await getModels({ provider: keyScopedProvider, apiKey: "key-two" })
+		await getModels({ provider: keyScopedProvider, apiKey: "key-two" }, handler)
 		const secondKey = writtenCacheKey()
 
 		expect(firstKey).toBeDefined()
@@ -1088,11 +1157,11 @@ describe("key-scoped cache key derivation", () => {
 	})
 
 	it("writes the same cache key for repeated calls with the same API key", async () => {
-		await getModels({ provider: keyScopedProvider, apiKey: "stable-key" })
+		await getModels({ provider: keyScopedProvider, apiKey: "stable-key" }, handler)
 		const firstKey = writtenCacheKey()
 
 		mockSet.mockClear()
-		await getModels({ provider: keyScopedProvider, apiKey: "stable-key" })
+		await getModels({ provider: keyScopedProvider, apiKey: "stable-key" }, handler)
 		const secondKey = writtenCacheKey()
 
 		expect(firstKey).toEqual(secondKey)
@@ -1100,7 +1169,7 @@ describe("key-scoped cache key derivation", () => {
 
 	it("does not embed the raw API key in the cache key and truncates the discriminator", async () => {
 		const apiKey = "super-secret-api-key-value"
-		await getModels({ provider: keyScopedProvider, apiKey })
+		await getModels({ provider: keyScopedProvider, apiKey }, handler)
 		const cacheKey = writtenCacheKey()
 
 		// The raw secret must never appear in the on-disk-bound cache key.
@@ -1116,18 +1185,20 @@ describe("NanoGPT key-scoped cache isolation", () => {
 		"openai/gpt-5.6-sol": { maxTokens: 128000, contextWindow: 1050000, supportsPromptCache: false },
 	}
 
+	let handler: ApiHandler
+
 	beforeEach(() => {
 		vi.clearAllMocks()
-		mockGetNanoGptModels.mockResolvedValue(nanoGptModels)
+		handler = makeHandler(NANOGPT_SCOPE, vi.fn().mockResolvedValue(nanoGptModels))
 	})
 
 	it("separates public, key A, and key B cache identities without exposing raw keys", async () => {
 		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
 		mockCache.get.mockReturnValue(undefined)
 
-		await getModels({ provider: providerIdentifiers.nanogpt })
-		await getModels({ provider: providerIdentifiers.nanogpt, apiKey: "nano-key-a" })
-		await getModels({ provider: providerIdentifiers.nanogpt, apiKey: "nano-key-b" })
+		await getModels({ provider: providerIdentifiers.nanogpt }, handler)
+		await getModels({ provider: providerIdentifiers.nanogpt, apiKey: "nano-key-a" }, handler)
+		await getModels({ provider: providerIdentifiers.nanogpt, apiKey: "nano-key-b" }, handler)
 
 		const cacheKeys = mockCache.set.mock.calls.map(([key]) => key as string)
 		expect(new Set(cacheKeys).size).toBe(3)
@@ -1139,7 +1210,7 @@ describe("NanoGPT key-scoped cache isolation", () => {
 describe("compound cache key derivation across scoping dimensions", () => {
 	// Exercises every branch of getCacheKey via the public getModels() entry point.
 	// litellm is url-scoped AND key-scoped; openrouter is neither, so it hits the bare
-	// provider fallback. The fetcher mocks let us observe the cache key the result is
+	// provider fallback. The handler doubles let us observe the cache key the result is
 	// written under (first arg of the matching memoryCache.set call).
 	const mockModels = {
 		"compound/model": {
@@ -1151,6 +1222,8 @@ describe("compound cache key derivation across scoping dimensions", () => {
 	}
 
 	let mockSet: Mock
+	let liteLLMHandler: ApiHandler
+	let openRouterHandler: ApiHandler
 
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -1158,8 +1231,8 @@ describe("compound cache key derivation across scoping dimensions", () => {
 		const mockCache = new MockedNodeCache()
 		;(mockCache.get as Mock).mockReturnValue(undefined)
 		mockSet = mockCache.set as unknown as Mock
-		mockGetLiteLLMModels.mockResolvedValue(mockModels)
-		mockGetOpenRouterModels.mockResolvedValue(mockModels)
+		liteLLMHandler = makeHandler(LITELLM_SCOPE, vi.fn().mockResolvedValue(mockModels))
+		openRouterHandler = makeHandler(OPENROUTER_SCOPE, vi.fn().mockResolvedValue(mockModels))
 	})
 
 	const writtenCacheKey = (): string => {
@@ -1168,11 +1241,14 @@ describe("compound cache key derivation across scoping dimensions", () => {
 	}
 
 	it("includes both the server URL and the key discriminator for url+key-scoped providers", async () => {
-		await getModels({
-			provider: providerIdentifiers.litellm,
-			apiKey: "compound-key",
-			baseUrl: "http://host:4000",
-		})
+		await getModels(
+			{
+				provider: providerIdentifiers.litellm,
+				apiKey: "compound-key",
+				baseUrl: "http://host:4000",
+			},
+			liteLLMHandler,
+		)
 		const cacheKey = writtenCacheKey()
 
 		// Expected shape: provider:url:keyDiscriminator
@@ -1180,26 +1256,32 @@ describe("compound cache key derivation across scoping dimensions", () => {
 	})
 
 	it("normalizes trailing slashes in the server URL so equivalent URLs share a cache key", async () => {
-		await getModels({
-			provider: providerIdentifiers.litellm,
-			apiKey: "compound-key",
-			baseUrl: "http://host:4000/",
-		})
+		await getModels(
+			{
+				provider: providerIdentifiers.litellm,
+				apiKey: "compound-key",
+				baseUrl: "http://host:4000/",
+			},
+			liteLLMHandler,
+		)
 		const withSlash = writtenCacheKey()
 
 		mockSet.mockClear()
-		await getModels({
-			provider: providerIdentifiers.litellm,
-			apiKey: "compound-key",
-			baseUrl: "http://host:4000",
-		})
+		await getModels(
+			{
+				provider: providerIdentifiers.litellm,
+				apiKey: "compound-key",
+				baseUrl: "http://host:4000",
+			},
+			liteLLMHandler,
+		)
 		const withoutSlash = writtenCacheKey()
 
 		expect(withSlash).toEqual(withoutSlash)
 	})
 
 	it("includes only the server URL when a url-scoped provider has no API key", async () => {
-		await getModels({ provider: providerIdentifiers.litellm, baseUrl: "http://host:4000" })
+		await getModels({ provider: providerIdentifiers.litellm, baseUrl: "http://host:4000" }, liteLLMHandler)
 		const cacheKey = writtenCacheKey()
 
 		// No trailing key discriminator when apiKey is absent.
@@ -1207,11 +1289,14 @@ describe("compound cache key derivation across scoping dimensions", () => {
 	})
 
 	it("falls back to the bare provider name for providers that are neither url- nor key-scoped", async () => {
-		await getModels({
-			provider: providerIdentifiers.openrouter,
-			apiKey: "ignored-key",
-			baseUrl: "http://ignored:4000",
-		})
+		await getModels(
+			{
+				provider: providerIdentifiers.openrouter,
+				apiKey: "ignored-key",
+				baseUrl: "http://ignored:4000",
+			},
+			openRouterHandler,
+		)
 		const cacheKey = writtenCacheKey()
 
 		expect(cacheKey).toBe("openrouter")
@@ -1250,54 +1335,63 @@ const setupCancellationMocks = () => {
 	vi.mocked(fsSync.existsSync).mockReturnValue(false)
 }
 
-// A fetcher double that never settles on its own and reports the signal the dispatcher gave it.
+// A fetchModels double that never settles on its own and reports the signal the dispatcher
+// gave it. Wrap it with makeHandler(OPENROUTER_SCOPE, ...) at the call site.
 const neverSettlingFetcher = (capture: (signal: AbortSignal | undefined) => void) =>
-	mockGetOpenRouterModels.mockImplementation((_options, opts) => {
-		capture(opts?.signal)
-		return new Promise<typeof cancelledModels>(() => {})
+	vi.fn<(options: GetModelsOptions, signal?: AbortSignal) => Promise<ModelRecord>>((_options, signal) => {
+		capture(signal)
+		return new Promise<ModelRecord>(() => {})
 	})
 
 it("threads a cancellation signal into the dispatched fetcher from both entry points", async () => {
 	setupCancellationMocks()
-	mockGetOpenRouterModels.mockResolvedValue(cancelledModels)
+	const fetchModels = vi.fn().mockResolvedValue(cancelledModels)
+	const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
 	const controller = new AbortController()
-	await getModels({ provider: providerIdentifiers.openrouter, signal: controller.signal })
+	await getModels({ provider: providerIdentifiers.openrouter, signal: controller.signal }, handler)
 
-	const getCall = mockGetOpenRouterModels.mock.calls[mockGetOpenRouterModels.mock.calls.length - 1]
-	expect(getCall[1]?.signal).toBeInstanceOf(AbortSignal)
+	const getCall = fetchModels.mock.calls[fetchModels.mock.calls.length - 1]
+	expect(getCall[1]).toBeInstanceOf(AbortSignal)
 
 	const { refreshModels } = await import("../modelCache")
-	await refreshModels({ provider: providerIdentifiers.openrouter, signal: controller.signal })
+	await refreshModels({ provider: providerIdentifiers.openrouter, signal: controller.signal }, handler)
 
-	const refreshCall = mockGetOpenRouterModels.mock.calls[mockGetOpenRouterModels.mock.calls.length - 1]
-	expect(refreshCall[1]?.signal).toBeInstanceOf(AbortSignal)
+	const refreshCall = fetchModels.mock.calls[fetchModels.mock.calls.length - 1]
+	expect(refreshCall[1]).toBeInstanceOf(AbortSignal)
 })
 
 it("rejects a pre-aborted caller without creating or starting any flight", async () => {
 	setupCancellationMocks()
+	const fetchModels = vi.fn()
+	const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 	const preAborted = AbortSignal.abort()
 
-	await expect(getModels({ provider: providerIdentifiers.openrouter, signal: preAborted })).rejects.toMatchObject({
+	await expect(
+		getModels({ provider: providerIdentifiers.openrouter, signal: preAborted }, handler),
+	).rejects.toMatchObject({
 		name: "AbortError",
 	})
-	expect(mockGetOpenRouterModels).not.toHaveBeenCalled()
+	expect(fetchModels).not.toHaveBeenCalled()
 
 	// refreshModels() keeps its graceful-degradation contract even for a pre-aborted caller.
 	const { refreshModels } = await import("../modelCache")
-	await expect(refreshModels({ provider: providerIdentifiers.openrouter, signal: preAborted })).resolves.toEqual({})
-	expect(mockGetOpenRouterModels).not.toHaveBeenCalled()
+	await expect(
+		refreshModels({ provider: providerIdentifiers.openrouter, signal: preAborted }, handler),
+	).resolves.toEqual({})
+	expect(fetchModels).not.toHaveBeenCalled()
 })
 
 it("rejects the last waiter at the abort event and releases the entry synchronously", async () => {
 	setupCancellationMocks()
 	let flightSignal: AbortSignal | undefined
-	neverSettlingFetcher((signal) => {
+	const fetchModels = neverSettlingFetcher((signal) => {
 		flightSignal = signal
 	})
+	const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
 	const controller = new AbortController()
-	const waitPromise = getModels({ provider: providerIdentifiers.openrouter, signal: controller.signal })
+	const waitPromise = getModels({ provider: providerIdentifiers.openrouter, signal: controller.signal }, handler)
 
 	controller.abort()
 
@@ -1308,16 +1402,16 @@ it("rejects the last waiter at the abort event and releases the entry synchronou
 
 	// Entry already gone at the very next synchronous observation: a fresh call starts a fresh
 	// fetch instead of joining the doomed one.
-	mockGetOpenRouterModels.mockResolvedValueOnce(cancelledModelsB)
-	await expect(getModels({ provider: providerIdentifiers.openrouter })).resolves.toEqual(cancelledModelsB)
-	expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(2)
+	fetchModels.mockResolvedValueOnce(cancelledModelsB)
+	await expect(getModels({ provider: providerIdentifiers.openrouter }, handler)).resolves.toEqual(cancelledModelsB)
+	expect(fetchModels).toHaveBeenCalledTimes(2)
 })
 
 it("serves a joiner that arrives after the last-waiter release with a fresh request", async () => {
 	setupCancellationMocks()
 	let resolveSecond: ((models: ModelRecord) => void) | undefined
 	let fetchCalls = 0
-	mockGetOpenRouterModels.mockImplementation((_options, _opts) => {
+	const fetchModels = vi.fn((_options: GetModelsOptions, _signal?: AbortSignal) => {
 		fetchCalls++
 		if (fetchCalls === 1) {
 			return new Promise<ModelRecord>(() => {})
@@ -1326,15 +1420,16 @@ it("serves a joiner that arrives after the last-waiter release with a fresh requ
 			resolveSecond = resolve
 		})
 	})
+	const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
 	const controller = new AbortController()
-	const aborted = getModels({ provider: providerIdentifiers.openrouter, signal: controller.signal })
+	const aborted = getModels({ provider: providerIdentifiers.openrouter, signal: controller.signal }, handler)
 	controller.abort()
 	await expect(aborted).rejects.toMatchObject({ name: "AbortError" })
 
 	// Joined strictly after the release but while the doomed fetch's rejection is still
 	// outstanding: must be a fresh flight, not the doomed promise.
-	const fresh = getModels({ provider: providerIdentifiers.openrouter })
+	const fresh = getModels({ provider: providerIdentifiers.openrouter }, handler)
 	expect(fetchCalls).toBe(2)
 	resolveSecond!(cancelledModelsB)
 	await expect(fresh).resolves.toEqual(cancelledModelsB)
@@ -1351,16 +1446,17 @@ it("keeps entry bookkeeping consistent for both settle-vs-abort race orders", as
 	setupCancellationMocks()
 	let resolveRaced: ((models: ModelRecord) => void) | undefined
 	let resolveSecond: ((models: ModelRecord) => void) | undefined
-	mockGetOpenRouterModels.mockImplementation(() => {
+	const fetchModels = vi.fn(() => {
 		return new Promise<ModelRecord>((resolve) => {
 			resolveRaced = resolve
 		})
 	})
+	const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
 	const controllerA = new AbortController()
 	const controllerB = new AbortController()
-	const racedA = getModels({ provider: providerIdentifiers.openrouter, signal: controllerA.signal })
-	const racedB = getModels({ provider: providerIdentifiers.openrouter, signal: controllerB.signal })
+	const racedA = getModels({ provider: providerIdentifiers.openrouter, signal: controllerA.signal }, handler)
+	const racedB = getModels({ provider: providerIdentifiers.openrouter, signal: controllerB.signal }, handler)
 
 	controllerA.abort()
 	controllerB.abort()
@@ -1368,29 +1464,29 @@ it("keeps entry bookkeeping consistent for both settle-vs-abort race orders", as
 	await expect(racedB).rejects.toMatchObject({ name: "AbortError" })
 
 	// A fresh flight takes the slot while the doomed fetch is still pending...
-	mockGetOpenRouterModels.mockImplementation(() => {
+	fetchModels.mockImplementation(() => {
 		return new Promise<ModelRecord>((resolve) => {
 			resolveSecond = resolve
 		})
 	})
-	const successor = getModels({ provider: providerIdentifiers.openrouter })
-	expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(2)
+	const successor = getModels({ provider: providerIdentifiers.openrouter }, handler)
+	expect(fetchModels).toHaveBeenCalledTimes(2)
 	// ...and only NOW the doomed fetch settles, queueing its guarded delete.
 	resolveRaced!(raceModels)
 	await drainMicrotasks()
 
 	// The newer flight survived the stale delete: another caller still joins it (no 3rd fetch).
-	const lateJoiner = getModels({ provider: providerIdentifiers.openrouter })
-	expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(2)
+	const lateJoiner = getModels({ provider: providerIdentifiers.openrouter }, handler)
+	expect(fetchModels).toHaveBeenCalledTimes(2)
 	resolveSecond!(cancelledModelsB)
 	await expect(successor).resolves.toEqual(cancelledModelsB)
 	await expect(lateJoiner).resolves.toEqual(cancelledModelsB)
 
 	// Order 2: settlement wins. The waiter resolves through the fetch; an abort dispatched
 	// afterwards finds the waiter already detached and changes nothing.
-	mockGetOpenRouterModels.mockResolvedValueOnce(cancelledModelsB)
+	fetchModels.mockResolvedValueOnce(cancelledModelsB)
 	const lateController = new AbortController()
-	const settleFirst = getModels({ provider: providerIdentifiers.openrouter, signal: lateController.signal })
+	const settleFirst = getModels({ provider: providerIdentifiers.openrouter, signal: lateController.signal }, handler)
 	await drainMicrotasks()
 	lateController.abort()
 	await expect(settleFirst).resolves.toEqual(cancelledModelsB)
@@ -1400,16 +1496,17 @@ it("leaves the fetch and the entry intact when one of two waiters aborts", async
 	setupCancellationMocks()
 	let flightSignal: AbortSignal | undefined
 	let resolvePending: ((models: typeof cancelledModels) => void) | undefined
-	mockGetOpenRouterModels.mockImplementation((_options, opts) => {
-		flightSignal = opts?.signal
+	const fetchModels = vi.fn((_options: GetModelsOptions, signal?: AbortSignal) => {
+		flightSignal = signal
 		return new Promise<typeof cancelledModels>((resolve) => {
 			resolvePending = resolve
 		})
 	})
+	const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
 	const controller = new AbortController()
-	const aborting = getModels({ provider: providerIdentifiers.openrouter, signal: controller.signal })
-	const staying = getModels({ provider: providerIdentifiers.openrouter })
+	const aborting = getModels({ provider: providerIdentifiers.openrouter, signal: controller.signal }, handler)
+	const staying = getModels({ provider: providerIdentifiers.openrouter }, handler)
 
 	controller.abort()
 	await expect(aborting).rejects.toMatchObject({ name: "AbortError" })
@@ -1418,8 +1515,8 @@ it("leaves the fetch and the entry intact when one of two waiters aborts", async
 	expect(flightSignal?.aborted).toBe(false)
 
 	// A third concurrent caller joins the SAME flight (not a fresh one) while two waiters remain.
-	const joining = getModels({ provider: providerIdentifiers.openrouter })
-	expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(1)
+	const joining = getModels({ provider: providerIdentifiers.openrouter }, handler)
+	expect(fetchModels).toHaveBeenCalledTimes(1)
 
 	resolvePending!(cancelledModels)
 	await expect(staying).resolves.toEqual(cancelledModels)
@@ -1429,14 +1526,15 @@ it("leaves the fetch and the entry intact when one of two waiters aborts", async
 it("aborts the shared fetch when the last waiter leaves", async () => {
 	setupCancellationMocks()
 	let flightSignal: AbortSignal | undefined
-	neverSettlingFetcher((signal) => {
+	const fetchModels = neverSettlingFetcher((signal) => {
 		flightSignal = signal
 	})
+	const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
 	const first = new AbortController()
 	const second = new AbortController()
-	const waitA = getModels({ provider: providerIdentifiers.openrouter, signal: first.signal })
-	const waitB = getModels({ provider: providerIdentifiers.openrouter, signal: second.signal })
+	const waitA = getModels({ provider: providerIdentifiers.openrouter, signal: first.signal }, handler)
+	const waitB = getModels({ provider: providerIdentifiers.openrouter, signal: second.signal }, handler)
 
 	first.abort()
 	expect(flightSignal?.aborted).toBe(false)
@@ -1452,16 +1550,17 @@ it("aborts the shared fetch when the last waiter leaves", async () => {
 it("keeps a sibling waiter running when a joiner aborts its own signal", async () => {
 	setupCancellationMocks()
 	let resolvePending: ((models: typeof cancelledModels) => void) | undefined
-	mockGetOpenRouterModels.mockReturnValue(
+	const fetchModels = vi.fn().mockReturnValue(
 		new Promise<typeof cancelledModels>((resolve) => {
 			resolvePending = resolve
 		}),
 	)
+	const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
 	const joiningController = new AbortController()
 	const siblingController = new AbortController()
-	const joiner = getModels({ provider: providerIdentifiers.openrouter, signal: joiningController.signal })
-	const sibling = getModels({ provider: providerIdentifiers.openrouter, signal: siblingController.signal })
+	const joiner = getModels({ provider: providerIdentifiers.openrouter, signal: joiningController.signal }, handler)
+	const sibling = getModels({ provider: providerIdentifiers.openrouter, signal: siblingController.signal }, handler)
 
 	let siblingSettled = false
 	const tracked = sibling.then(
@@ -1493,13 +1592,14 @@ it("rejects every waiter and releases the entry when the flight timeout fires", 
 	})
 	try {
 		let flightSignal: AbortSignal | undefined
-		neverSettlingFetcher((signal) => {
+		const fetchModels = neverSettlingFetcher((signal) => {
 			flightSignal = signal
 		})
+		const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
 		const firstController = new AbortController()
-		const waitA = getModels({ provider: providerIdentifiers.openrouter, signal: firstController.signal })
-		const waitB = getModels({ provider: providerIdentifiers.openrouter })
+		const waitA = getModels({ provider: providerIdentifiers.openrouter, signal: firstController.signal }, handler)
+		const waitB = getModels({ provider: providerIdentifiers.openrouter }, handler)
 
 		// The bound is owned by the single-flight entry, armed once at flight creation.
 		expect(timeoutSpy).toHaveBeenCalledTimes(1)
@@ -1514,10 +1614,12 @@ it("rejects every waiter and releases the entry when the flight timeout fires", 
 		expect(flightSignal?.aborted).toBe(true)
 
 		// Entry released on timeout: the next caller starts a fresh flight with its own timer.
-		mockGetOpenRouterModels.mockResolvedValueOnce(cancelledModelsB)
-		await expect(getModels({ provider: providerIdentifiers.openrouter })).resolves.toEqual(cancelledModelsB)
+		fetchModels.mockResolvedValueOnce(cancelledModelsB)
+		await expect(getModels({ provider: providerIdentifiers.openrouter }, handler)).resolves.toEqual(
+			cancelledModelsB,
+		)
 		expect(timeoutSpy).toHaveBeenCalledTimes(2)
-		expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(2)
+		expect(fetchModels).toHaveBeenCalledTimes(2)
 	} finally {
 		timeoutSpy.mockRestore()
 	}
@@ -1532,10 +1634,11 @@ it("detaches the timeout and waiter listeners when the flight settles", async ()
 		return timeoutController.signal
 	})
 	try {
-		mockGetOpenRouterModels.mockResolvedValueOnce(cancelledModels)
+		const fetchModels = vi.fn().mockResolvedValueOnce(cancelledModels)
+		const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 		// No caller signal: the waiter's abort view IS the timeout signal, so both the
 		// flight's timeout listener and the waiter's listener live on that one signal.
-		await expect(getModels({ provider: providerIdentifiers.openrouter })).resolves.toEqual(cancelledModels)
+		await expect(getModels({ provider: providerIdentifiers.openrouter }, handler)).resolves.toEqual(cancelledModels)
 		await drainMicrotasks()
 
 		// Nothing may keep observing the flight's bound after settlement: every abort listener
@@ -1555,14 +1658,15 @@ it("treats a timeout and a caller abort firing back-to-back as idempotent detach
 		return timeoutController.signal
 	})
 	try {
-		neverSettlingFetcher(() => {})
+		const fetchModels = neverSettlingFetcher(() => {})
+		const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 		let rejectionsA = 0
 		let rejectionsB = 0
 
 		const controllerA = new AbortController()
 		const controllerB = new AbortController()
-		const waitA = getModels({ provider: providerIdentifiers.openrouter, signal: controllerA.signal })
-		const waitB = getModels({ provider: providerIdentifiers.openrouter, signal: controllerB.signal })
+		const waitA = getModels({ provider: providerIdentifiers.openrouter, signal: controllerA.signal }, handler)
+		const waitB = getModels({ provider: providerIdentifiers.openrouter, signal: controllerB.signal }, handler)
 		waitA.catch(() => {
 			rejectionsA++
 		})
@@ -1580,9 +1684,11 @@ it("treats a timeout and a caller abort firing back-to-back as idempotent detach
 		expect(rejectionsB).toBe(1)
 
 		// Entry state stayed consistent through both events: the next caller gets a fresh flight.
-		mockGetOpenRouterModels.mockResolvedValueOnce(cancelledModelsB)
-		await expect(getModels({ provider: providerIdentifiers.openrouter })).resolves.toEqual(cancelledModelsB)
-		expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(2)
+		fetchModels.mockResolvedValueOnce(cancelledModelsB)
+		await expect(getModels({ provider: providerIdentifiers.openrouter }, handler)).resolves.toEqual(
+			cancelledModelsB,
+		)
+		expect(fetchModels).toHaveBeenCalledTimes(2)
 	} finally {
 		timeoutSpy.mockRestore()
 	}
@@ -1590,10 +1696,11 @@ it("treats a timeout and a caller abort firing back-to-back as idempotent detach
 
 it("makes an abort that arrives after settlement inert", async () => {
 	setupCancellationMocks()
-	mockGetOpenRouterModels.mockResolvedValueOnce(cancelledModels)
+	const fetchModels = vi.fn().mockResolvedValueOnce(cancelledModels)
+	const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
 	const controller = new AbortController()
-	const waitPromise = getModels({ provider: providerIdentifiers.openrouter, signal: controller.signal })
+	const waitPromise = getModels({ provider: providerIdentifiers.openrouter, signal: controller.signal }, handler)
 	const result = await waitPromise
 	expect(result).toEqual(cancelledModels)
 
@@ -1602,19 +1709,20 @@ it("makes an abort that arrives after settlement inert", async () => {
 
 	// The settled flight already removed its entry; the late abort must not resurrect or abort
 	// anything, and a later caller still starts a fresh fetch.
-	mockGetOpenRouterModels.mockResolvedValueOnce(cancelledModelsB)
-	await expect(getModels({ provider: providerIdentifiers.openrouter })).resolves.toEqual(cancelledModelsB)
-	expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(2)
+	fetchModels.mockResolvedValueOnce(cancelledModelsB)
+	await expect(getModels({ provider: providerIdentifiers.openrouter }, handler)).resolves.toEqual(cancelledModelsB)
+	expect(fetchModels).toHaveBeenCalledTimes(2)
 })
 
 it("rejects getModels but degrades refreshModels promptly when their fetch is aborted", async () => {
 	setupCancellationMocks()
-	neverSettlingFetcher(() => {})
+	const fetchModels = neverSettlingFetcher(() => {})
+	const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
 	// getModels() surfaces the abort as a rejection at abort time even though the fetch never
 	// settles on its own.
 	const getController = new AbortController()
-	const getPromise = getModels({ provider: providerIdentifiers.openrouter, signal: getController.signal })
+	const getPromise = getModels({ provider: providerIdentifiers.openrouter, signal: getController.signal }, handler)
 	getController.abort()
 	await expect(getPromise).rejects.toMatchObject({ name: "AbortError" })
 
@@ -1624,7 +1732,10 @@ it("rejects getModels but degrades refreshModels promptly when their fetch is ab
 	mockCache.get.mockReturnValue(cancelledModels)
 	const { refreshModels } = await import("../modelCache")
 	const refreshController = new AbortController()
-	const refreshPromise = refreshModels({ provider: providerIdentifiers.openrouter, signal: refreshController.signal })
+	const refreshPromise = refreshModels(
+		{ provider: providerIdentifiers.openrouter, signal: refreshController.signal },
+		handler,
+	)
 	refreshController.abort()
 	await expect(refreshPromise).resolves.toEqual(cancelledModels)
 })
@@ -1632,17 +1743,20 @@ it("rejects getModels but degrades refreshModels promptly when their fetch is ab
 it("releases the entry for a fetcher double that honors no cancellation at all", async () => {
 	setupCancellationMocks()
 	// Release-only double: ignores the forwarded signal entirely and never settles.
-	mockGetOpenRouterModels.mockImplementation(() => new Promise<typeof cancelledModels>(() => {}))
+	const fetchModels = vi.fn<(options: GetModelsOptions, signal?: AbortSignal) => Promise<ModelRecord>>(
+		() => new Promise<ModelRecord>(() => {}),
+	)
+	const handler = makeHandler(OPENROUTER_SCOPE, fetchModels)
 
 	const controller = new AbortController()
-	const waiting = getModels({ provider: providerIdentifiers.openrouter, signal: controller.signal })
+	const waiting = getModels({ provider: providerIdentifiers.openrouter, signal: controller.signal }, handler)
 	controller.abort()
 
 	// Waiter stopped and entry released despite the client exposing no cancellation surface.
 	await expect(waiting).rejects.toMatchObject({ name: "AbortError" })
-	mockGetOpenRouterModels.mockResolvedValueOnce(cancelledModelsB)
-	await expect(getModels({ provider: providerIdentifiers.openrouter })).resolves.toEqual(cancelledModelsB)
-	expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(2)
+	fetchModels.mockResolvedValueOnce(cancelledModelsB)
+	await expect(getModels({ provider: providerIdentifiers.openrouter }, handler)).resolves.toEqual(cancelledModelsB)
+	expect(fetchModels).toHaveBeenCalledTimes(2)
 })
 
 it("ignores the caller signal on the auth-scoped bypass without entering the flight map", async () => {
@@ -1651,22 +1765,26 @@ it("ignores the caller signal on the auth-scoped bypass without entering the fli
 	// auth-scoped bypass must never touch that machinery.
 	const boundSpy = vi.spyOn(AbortSignal, "timeout")
 	try {
-		mockGetZooGatewayModels.mockResolvedValue(cancelledModelsB)
+		const fetchModels = vi.fn().mockResolvedValue(cancelledModelsB)
+		const handler = makeHandler(ZOO_SCOPE, fetchModels)
 
 		const controller = new AbortController()
-		const first = getModels({
-			provider: providerIdentifiers.zooGateway,
-			apiKey: "token-a",
-			signal: controller.signal,
-		})
+		const first = getModels(
+			{
+				provider: providerIdentifiers.zooGateway,
+				apiKey: "token-a",
+				signal: controller.signal,
+			},
+			handler,
+		)
 		// Auth isolation requires no dedup even for an identical provider+token: each call fires
 		// its own fetch, so the bypass never shares (or poisons) a flight with anything.
-		const second = getModels({ provider: providerIdentifiers.zooGateway, apiKey: "token-a" })
-		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
-		// The bypass carries no cancellation: the fetcher receives exactly its own options
-		// argument, so the caller's bound is never threaded to this path.
-		expect(mockGetZooGatewayModels.mock.calls[0]).toHaveLength(1)
-		expect(mockGetZooGatewayModels.mock.calls[1]).toHaveLength(1)
+		const second = getModels({ provider: providerIdentifiers.zooGateway, apiKey: "token-a" }, handler)
+		expect(fetchModels).toHaveBeenCalledTimes(2)
+		// The bypass carries no cancellation: the dispatcher forwards no signal on this path,
+		// so the caller's bound is never threaded to the handler's fetchModels.
+		expect(fetchModels.mock.calls[0][1]).toBeUndefined()
+		expect(fetchModels.mock.calls[1][1]).toBeUndefined()
 
 		// The caller's signal is ignored on this path: aborting changes nothing for a fetch the
 		// single-flight never owns, and the fetcher's own request bound remains the stop mechanism.
