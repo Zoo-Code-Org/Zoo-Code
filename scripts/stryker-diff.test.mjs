@@ -11,6 +11,7 @@ import {
 	MAX_MUTANTS,
 	PACKAGE_CONFIGS,
 	appendSummary,
+	assertNoDisableDirectives,
 	buildManifest,
 	discoverRelatedTestFiles,
 	evaluateReport,
@@ -32,7 +33,6 @@ import {
 	runManifest,
 	selectFromGit,
 	testsFromMutationReport,
-	validateDisableDirectives,
 } from "./stryker-diff.mjs"
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
@@ -61,7 +61,9 @@ describe("mutation testing workflow", () => {
 		assert.ok(!workflow.includes("github.event.pull_request.base.sha"))
 		assert.ok(workflow.includes("steps.mutation_report.outputs.artifact-url"))
 		assert.ok(workflow.includes("open the package's mutation.html file"))
-		assert.ok(workflow.includes("Enforce executable-line scope and run advisory mutation testing"))
+		assert.ok(
+			workflow.includes("Enforce executable-line scope and directive policy, run advisory mutation testing"),
+		)
 		assert.equal(workflow.match(/continue-on-error: true/g)?.length, 1)
 		assert.equal(workflow.match(/Could not write the job summary/g)?.length, 2)
 		const script = fs.readFileSync(path.join(repositoryRoot, "scripts/stryker-diff.mjs"), "utf8")
@@ -297,15 +299,16 @@ describe("buildManifest", () => {
 		)
 	})
 
-	it("reports invalid mutation exclusions without bypassing executable-line accounting", () => {
-		const manifest = buildManifest(
-			[{ status: "A", path: "packages/core/src/value.ts" }],
-			() => "// Stryker disable next-line all: noisy\nexport const value = true\n",
-			() => "",
+	it("fails the manifest when a mutation-tested file contains a Stryker suppression comment", () => {
+		assert.throws(
+			() =>
+				buildManifest(
+					[{ status: "A", path: "packages/core/src/value.ts" }],
+					() => "// Stryker disable next-line all: noisy\nexport const value = true\n",
+					() => "",
+				),
+			/Stryker suppression comments are not allowed/,
 		)
-
-		assert.equal(manifest.packages[0].changedExecutableLines, 1)
-		assert.match(manifest.advisories.join("\n"), /broad or unreasoned exclusions are not allowed/)
 	})
 })
 
@@ -583,35 +586,97 @@ describe("selectFromGit", () => {
 	})
 })
 
-describe("mutation exclusions", () => {
-	it("allows a targeted mutator exclusion with a reason", () => {
+describe("Stryker suppression directive prohibition", () => {
+	it("rejects every Stryker suppression comment, however well-formed", () => {
+		for (const source of [
+			"// Stryker disable next-line EqualityOperator: equivalent for normalized input\nreturn value <= limit\n",
+			"// Stryker disable next-line all: noisy\nreturn value\n",
+			"// Stryker disable next-line EqualityOperator\nreturn value\n",
+			"// Stryker disable start\nreturn value\n// Stryker disable end\n",
+			"// Stryker enable next-line EqualityOperator: undo\nreturn value\n",
+			"\t\t// Stryker disable string\nreturn value\n",
+		]) {
+			assert.throws(
+				() => assertNoDisableDirectives(source, new Set([1]), "source.ts"),
+				/Stryker suppression comments are not allowed/,
+			)
+		}
+	})
+
+	it("matches comment tokens only, never string literals or template text", () => {
 		assert.doesNotThrow(() =>
-			validateDisableDirectives(
-				"// Stryker disable next-line EqualityOperator: equivalent for normalized input\nreturn value <= limit\n",
-				new Set([1]),
+			assertNoDisableDirectives(
+				'export const guidance = "// Stryker disable all"\nreturn value\n',
+				new Set([1, 2]),
 				"source.ts",
 			),
 		)
-	})
-
-	it("rejects broad or unreasoned exclusions", () => {
-		assert.throws(
-			() =>
-				validateDisableDirectives(
-					"// Stryker disable next-line all: noisy\nreturn value\n",
-					new Set([1]),
-					"source.ts",
-				),
-			/broad or unreasoned exclusions are not allowed/,
+		assert.doesNotThrow(() =>
+			assertNoDisableDirectives(
+				"const doc = `// Stryker disable next-line all`\nreturn value\n",
+				new Set([1, 2]),
+				"source.ts",
+			),
+		)
+		assert.doesNotThrow(() =>
+			assertNoDisableDirectives(
+				"const text = `${value} // Stryker disable all`\nreturn value\n",
+				new Set([1, 2]),
+				"source.ts",
+			),
 		)
 		assert.throws(
 			() =>
-				validateDisableDirectives(
-					"// Stryker disable next-line EqualityOperator\nreturn value\n",
+				assertNoDisableDirectives(
+					"const text = `${value}`\n// Stryker disable next-line all: reason\nreturn value\n",
+					new Set([1, 2, 3]),
+					"source.ts",
+				),
+			/Stryker suppression comments are not allowed/,
+		)
+		assert.throws(
+			() =>
+				assertNoDisableDirectives(
+					"const a = `x${`y${z}`} tail` // Stryker disable all: reason\nreturn value\n",
+					new Set([1, 2]),
+					"source.ts",
+				),
+			/Stryker suppression comments are not allowed/,
+		)
+		assert.throws(
+			() =>
+				assertNoDisableDirectives(
+					"return value // Stryker disable next-line all: reason\n",
 					new Set([1]),
 					"source.ts",
 				),
-			/broad or unreasoned exclusions are not allowed/,
+			/Stryker suppression comments are not allowed/,
+		)
+	})
+
+	it("ignores directive-looking JSX text in tsx sources", () => {
+		assert.doesNotThrow(() =>
+			assertNoDisableDirectives(
+				"const el = <div> // Stryker disable all\n</div>\n",
+				new Set([1, 2]),
+				"source.tsx",
+			),
+		)
+		assert.throws(
+			() =>
+				assertNoDisableDirectives(
+					"const el = <div>{ // Stryker disable next-line all: reason\nx}</div>\n",
+					new Set([1, 2]),
+					"source.tsx",
+				),
+			/Stryker suppression comments are not allowed/,
+		)
+	})
+
+	it("accepts sources without suppression comments", () => {
+		assert.doesNotThrow(() => assertNoDisableDirectives("return value <= limit\n", new Set([1]), "source.ts"))
+		assert.doesNotThrow(() =>
+			assertNoDisableDirectives("// not a stryker comment\nreturn value\n", new Set([1]), "source.ts"),
 		)
 	})
 })
@@ -641,7 +706,7 @@ describe("failure output", () => {
 		},
 	]
 
-	it("lists every advisory mutant with tests, reproduction, exclusion, and report guidance", () => {
+	it("lists every advisory mutant with tests, reproduction, directive policy, and report guidance", () => {
 		const baseSha = "a".repeat(40)
 		const headSha = "b".repeat(40)
 		const summary = formatSummary(
@@ -672,7 +737,8 @@ describe("failure output", () => {
 		for (const mutant of blocking) assert.ok(summary.includes(mutant.mutatorName))
 		assert.ok(summary.includes('"left \\| right"'))
 		assert.ok(summary.includes(`node scripts/stryker-diff.mjs ci --base ${baseSha} --head ${headSha}`))
-		assert.ok(summary.includes("Stryker disable next-line ConditionalExpression:"))
+		assert.ok(summary.includes("Stryker suppression comments"))
+		assert.ok(summary.includes("are not allowed in this repository"))
 		assert.ok(summary.includes("`reports/mutation/extension/mutation.html`"))
 		assert.ok(summary.includes("`changed-code-mutation-report` artifact"))
 		assert.ok(summary.includes("### Advisory findings"))

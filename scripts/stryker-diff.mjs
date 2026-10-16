@@ -74,8 +74,7 @@ const VALID_MUTANT_STATUSES = new Set(["Killed", "Timeout", "Survived", "NoCover
 const BLOCKING_MUTANT_STATUSES = new Set(["Survived", "NoCoverage"])
 const SOURCE_EXTENSIONS = new Set([".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"])
 const EXCLUDED_PATH_SEGMENTS = ["/__mocks__/", "/__tests__/", "/fixtures/", "/test-utils/"]
-const DISABLE_DIRECTIVE =
-	/^\s*\/\/\s*Stryker disable next-line ([A-Za-z][A-Za-z0-9]*(?:,[A-Za-z][A-Za-z0-9]*)*)\s*:\s*(\S.*)$/
+const SUPPRESSION_DIRECTIVE = /\/\/\s*Stryker\s+(?:disable|enable)\b/
 
 export function parseNameStatus(output) {
 	const tokens = output.split("\0")
@@ -159,20 +158,42 @@ export function executableChangedLines(source, changedLines, filePath = "source.
 	return executable
 }
 
-export function validateDisableDirectives(source, changedLines, filePath) {
-	const lines = source.split(/\r?\n/)
-	for (const lineNumber of changedLines) {
-		const line = lines[lineNumber - 1] ?? ""
-		if (!line.includes("Stryker disable")) continue
-
-		const match = DISABLE_DIRECTIVE.exec(line)
-		if (!match || match[1].split(",").some((mutator) => mutator.toLowerCase() === "all")) {
-			throw new Error(
-				`${filePath}:${lineNumber}: mutation exclusions must use ` +
-					'"// Stryker disable next-line MutatorName: concrete reason"; broad or unreasoned exclusions are not allowed.',
-			)
+export function assertNoDisableDirectives(source, lineNumbers, filePath) {
+	// Comment ranges come from the parsed source: string literals and template text that mention
+	// the directive syntax must not fail the gate, and a raw scanner misclassifies text after a
+	// template interpolation because it never resumes the template lexical goal.
+	const scriptKind = filePath.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+	const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, scriptKind)
+	const seen = new Set()
+	function checkRanges(ranges) {
+		for (const range of ranges ?? []) {
+			if (seen.has(range.pos)) continue
+			seen.add(range.pos)
+			// getLeadingCommentRanges is text-based: inside JSX, directive-looking rendered text
+			// (e.g. <div> // Stryker disable all) is JsxText, not a comment, and must not fail.
+			if (ts.getTokenAtPosition(sourceFile, range.pos).kind === ts.SyntaxKind.JsxText) continue
+			if (!SUPPRESSION_DIRECTIVE.test(source.slice(range.pos, range.end))) continue
+			const lineNumber = (source.slice(0, range.pos).match(/\n/g)?.length ?? 0) + 1
+			if (lineNumbers.has(lineNumber)) {
+				throw new Error(
+					`${filePath}:${lineNumber}: Stryker suppression comments are not allowed in this repository. ` +
+						"Kill the mutant with a focused test instead; if the mutant is genuinely equivalent, explain the " +
+						"equivalence in the pull request and a maintainer will decide on a narrow gate-config exclusion.",
+				)
+			}
 		}
 	}
+	function visitTokens(node) {
+		for (const child of node.getChildren(sourceFile)) {
+			if (ts.isToken(child)) {
+				checkRanges(ts.getLeadingCommentRanges(source, child.pos))
+				checkRanges(ts.getTrailingCommentRanges(source, child.end))
+			} else {
+				visitTokens(child)
+			}
+		}
+	}
+	visitTokens(sourceFile)
 }
 
 export function toRanges(lines) {
@@ -225,11 +246,7 @@ export function buildManifest(entries, readSource, diffForPath) {
 				? new Set(Array.from({ length: sourceLineCount }, (_, index) => index + 1))
 				: parseChangedLines(diffForPath(entry.path))
 
-		try {
-			validateDisableDirectives(source, new Set(source.split(/\r?\n/).map((_, index) => index + 1)), entry.path)
-		} catch (error) {
-			advisories.push(error.message)
-		}
+		assertNoDisableDirectives(source, new Set(source.split(/\r?\n/).map((_, index) => index + 1)), entry.path)
 		const executableLines = executableChangedLines(source, changedLines, entry.path)
 		if (executableLines.size === 0) continue
 
@@ -608,14 +625,7 @@ export function formatSummary(rows, advisories, manifest = {}) {
 		lines.push(
 			"### Resolve a mutation gap",
 			"",
-			"Add or strengthen a focused test that fails under the mutation. If the mutant is equivalent, request maintainer approval for the narrowest mutator-specific exclusion and explain why it cannot change behavior:",
-			"",
-			"```ts",
-			"// Stryker disable next-line ConditionalExpression: normalized input cannot reach the alternate branch",
-			"const result = condition ? value : fallback",
-			"```",
-			"",
-			"Broad `all` exclusions and exclusions without a concrete reason are reported as advisories.",
+			"Add or strengthen a focused test that fails under the mutation. Stryker suppression comments (`// Stryker disable ...`) are not allowed in this repository: the gate fails any pull request that introduces them. If you believe a mutant is genuinely equivalent, explain why in the pull request and a maintainer will decide on a narrow gate-config exclusion.",
 		)
 	}
 
