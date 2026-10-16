@@ -2057,7 +2057,10 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			// The rollback failure is logged with its own message and the original error
 			// still propagates: a failed switch must not be swallowed into a logged no-op.
-			expect(appendLine).toHaveBeenCalledWith(expect.stringContaining("Failed to roll back shared mode"))
+			// The shared restore now runs inside setValue's own compensation (the
+			// reconcile skips it once the setter already compensated), so the failure
+			// surfaces under the setter's rollback log.
+			expect(appendLine).toHaveBeenCalledWith(expect.stringContaining("Shared-state rollback after failed"))
 			expect(appendLine).toHaveBeenCalledWith(expect.stringContaining('Failed to persist mode "ask"'))
 
 			await provider.dispose()

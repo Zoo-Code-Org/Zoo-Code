@@ -2396,8 +2396,13 @@ export class ClineProvider
 				// buffer stays in sync with the durable global write: getValues() merges
 				// viewLocalState on top of the ContextProxy values, so an unsynced stale
 				// restored mode would otherwise shadow the fresh switch for consumers.
-				sharedAttempted = true
+				// Mark the shared write as attempted only once it resolved: a rejection
+				// is already compensated inside setValue (which restores the prior
+				// shared value before rethrowing), and reconciling again here would
+				// replay the same restore. A resolved write, by contrast, must be
+				// restored by the reconcile when a later write fails.
 				await this.setValue("mode", newMode)
+				sharedAttempted = true
 			}
 
 			// If workspace lock is on, keep the current API config: the mode-linked
