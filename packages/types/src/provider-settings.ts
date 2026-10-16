@@ -3,6 +3,7 @@ import { z } from "zod"
 import { providerDefinitionList, type ProviderDefinition } from "./provider-settings/index.js"
 import { API_PROVIDER_FIELD, SETTINGS_SHAPE_FIELD } from "./provider-settings/common.js"
 export {
+	DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS,
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
 	parseOpenAiExtraBody,
 	kimiCodeAuthMethodSchema,
@@ -55,6 +56,31 @@ import {
 export const DEFAULT_CONSECUTIVE_MISTAKE_LIMIT = 3
 
 /**
+ * Number of identical consecutive tool calls allowed before the tool is
+ * soft-blocked. When reached, the tool is not executed and the model is
+ * asked to justify why it needs to repeat the call. Set to 0 to disable.
+ */
+export const DEFAULT_TOOL_REPETITION_SOFT_LIMIT = 2
+
+/**
+ * Shared by `ToolRepetitionDetector`, `Task` and the settings UI.
+ * Clamps the soft limit to `[0, hardLimit - 1]` so it fires before the hard
+ * stop. A hard limit of 0 disables the whole mechanism, so soft becomes 0 too.
+ *
+ * An effectively unreachable hard limit (`Number.MAX_SAFE_INTEGER` or larger,
+ * e.g. tasks created through the extension API) also disables the soft tier:
+ * without a reachable hard stop, soft blocking would reject every identical
+ * call from then on with no escalation to the user.
+ */
+export function normalizeToolRepetitionSoftLimit(softLimit: number, hardLimit: number): number {
+	if (hardLimit <= 0 || hardLimit >= Number.MAX_SAFE_INTEGER) {
+		return 0
+	}
+
+	return Math.max(0, Math.min(softLimit, hardLimit - 1))
+}
+
+/**
  * DynamicProvider
  *
  * Dynamic provider requires external API calls in order to get the model list.
@@ -100,7 +126,7 @@ export const isLocalProvider = (key: string): key is LocalProvider => localProvi
  * model list.
  */
 
-export const internalProviders = [providerIdentifiers.vscodeLm] as const
+export const internalProviders = [providerIdentifiers.vscodeLm, providerIdentifiers.githubCopilot] as const
 
 export type InternalProvider = (typeof internalProviders)[number]
 
@@ -488,6 +514,11 @@ export const MODELS_BY_PROVIDER: Record<
 	[providerIdentifiers.vscodeLm]: {
 		id: providerIdentifiers.vscodeLm,
 		label: "VS Code LM API",
+		models: Object.keys(vscodeLlmModels),
+	},
+	[providerIdentifiers.githubCopilot]: {
+		id: providerIdentifiers.githubCopilot,
+		label: "GitHub Copilot",
 		models: Object.keys(vscodeLlmModels),
 	},
 	[providerIdentifiers.xai]: { id: providerIdentifiers.xai, label: "xAI (Grok)", models: Object.keys(xaiModels) },

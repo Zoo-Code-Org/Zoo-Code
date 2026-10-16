@@ -414,7 +414,7 @@ describe("OpenAiHandler", () => {
 		})
 
 		it("should handle tool calls in streaming responses", async () => {
-			mockCreate.mockImplementation(async (options) =>
+			mockCreate.mockImplementation(async (_options) =>
 				asyncStreamFrom([
 					{
 						choices: [
@@ -491,7 +491,7 @@ describe("OpenAiHandler", () => {
 		})
 
 		it("should yield tool calls even when finish_reason is not set (fallback behavior)", async () => {
-			mockCreate.mockImplementation(async (options) =>
+			mockCreate.mockImplementation(async (_options) =>
 				asyncStreamFrom([
 					{
 						choices: [
@@ -1118,6 +1118,46 @@ describe("OpenAiHandler", () => {
 			expect(model.id).toBe("")
 			expect(model.info).toBeDefined()
 		})
+
+		it("should set preserveReasoning when openAiR1FormatEnabled is on", () => {
+			const r1Handler = new OpenAiHandler({
+				...mockOptions,
+				openAiR1FormatEnabled: true,
+			})
+			const model = r1Handler.getModel()
+			expect(model.info).toEqual({ ...openAiModelInfoSaneDefaults, preserveReasoning: true })
+		})
+
+		it("should set preserveReasoning for deepseek-reasoner model ids without the toggle", () => {
+			const deepseekHandler = new OpenAiHandler({
+				...mockOptions,
+				openAiModelId: "deepseek-reasoner",
+			})
+			const model = deepseekHandler.getModel()
+			expect(model.info.preserveReasoning).toBe(true)
+		})
+
+		it("should merge preserveReasoning into custom model info when openAiR1FormatEnabled is on", () => {
+			const customInfo: ModelInfo = {
+				...openAiModelInfoSaneDefaults,
+				contextWindow: 32_768,
+				supportsImages: false,
+			}
+			const r1Handler = new OpenAiHandler({
+				...mockOptions,
+				openAiCustomModelInfo: customInfo,
+				openAiR1FormatEnabled: true,
+			})
+			const model = r1Handler.getModel()
+			expect(model.info).toEqual({ ...customInfo, preserveReasoning: true })
+			expect(model.info.contextWindow).toBe(32_768)
+			expect(model.info.supportsImages).toBe(false)
+		})
+
+		it("should not set preserveReasoning by default", () => {
+			const model = handler.getModel()
+			expect(model.info.preserveReasoning).toBeUndefined()
+		})
 	})
 
 	describe("Azure AI Inference Service", () => {
@@ -1421,7 +1461,7 @@ describe("OpenAiHandler", () => {
 			]
 
 			const stream = o3Handler.createMessage(systemPrompt, messages)
-			const chunks = await collectStream(stream)
+			await collectStream(stream)
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -1504,7 +1544,7 @@ describe("OpenAiHandler", () => {
 		it("should handle tool calls with O3 model in streaming mode", async () => {
 			const o3Handler = new OpenAiHandler(o3Options)
 
-			mockCreate.mockImplementation(async (options) =>
+			mockCreate.mockImplementation(async (_options) =>
 				asyncStreamFrom([
 					{
 						choices: [
@@ -1564,7 +1604,7 @@ describe("OpenAiHandler", () => {
 		it("should yield tool calls for O3 model even when finish_reason is not set (fallback behavior)", async () => {
 			const o3Handler = new OpenAiHandler(o3Options)
 
-			mockCreate.mockImplementation(async (options) =>
+			mockCreate.mockImplementation(async (_options) =>
 				asyncStreamFrom([
 					{
 						choices: [
@@ -1623,7 +1663,7 @@ describe("OpenAiHandler", () => {
 			]
 
 			const stream = o3Handler.createMessage(systemPrompt, messages)
-			const chunks = await collectStream(stream)
+			await collectStream(stream)
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -1664,7 +1704,7 @@ describe("OpenAiHandler", () => {
 			]
 
 			const stream = o3Handler.createMessage(systemPrompt, messages)
-			const chunks = await collectStream(stream)
+			await collectStream(stream)
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -1832,6 +1872,174 @@ describe("OpenAiHandler", () => {
 			expect(lastCall[0]).toHaveProperty("stream_options")
 			expect(lastCall[0].stream_options).toEqual({ include_usage: true })
 		})
+	})
+})
+
+describe("OpenAiHandler - strict tool schemas", () => {
+	const systemPrompt = "You are a helpful assistant."
+	const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello!" }]
+	const tools: OpenAI.Chat.ChatCompletionFunctionTool[] = [
+		{
+			type: "function",
+			function: {
+				name: "test_tool",
+				description: "A test tool",
+				parameters: {
+					type: "object",
+					properties: {
+						path: { type: "string" },
+						offset: { type: "integer" },
+					},
+					required: ["path"],
+				},
+			},
+		},
+	]
+	const baseOptions = () =>
+		makeApiHandlerOptions({
+			openAiApiKey: "test-api-key",
+			openAiModelId: "gpt-4",
+			openAiBaseUrl: "https://api.openai.com/v1",
+		})
+
+	beforeEach(() => {
+		mockCreate.mockClear()
+	})
+
+	it("sends strict: true with normalized schemas by default", async () => {
+		const handler = new OpenAiHandler(baseOptions())
+		const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task", tools })
+		await collectStream(stream)
+
+		expect(mockCreate).toHaveBeenCalledTimes(1)
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.tools).toHaveLength(1)
+		expect(request.tools[0].function.strict).toBe(true)
+		expect(request.tools[0].function.parameters.required).toEqual(["path", "offset"])
+		expect(request.tools[0].function.parameters.additionalProperties).toBe(false)
+	})
+
+	it("sends strict: false with the declared schema when openAiStrictToolSchemas is false", async () => {
+		const handler = new OpenAiHandler({ ...baseOptions(), openAiStrictToolSchemas: false })
+		const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task", tools })
+		await collectStream(stream)
+
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.tools[0].function.strict).toBe(false)
+		// Declared schema preserved: original required array, no additionalProperties coercion
+		expect(request.tools[0].function.parameters).toEqual(tools[0].function.parameters)
+	})
+
+	it("propagates a gateway 400 that rejects strict tool schemas", async () => {
+		const strictRejection = Object.assign(
+			new Error("strict=true requires generated function arguments to satisfy the declared JSON Schema"),
+			{ status: 400 },
+		)
+		mockCreate.mockRejectedValueOnce(strictRejection)
+
+		const handler = new OpenAiHandler({ ...baseOptions(), openAiStrictToolSchemas: true })
+		const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task", tools })
+
+		let caught: unknown
+		try {
+			await collectStream(stream)
+		} catch (error) {
+			caught = error
+		}
+
+		expect(caught).toBeInstanceOf(Error)
+		expect((caught as Error).message).toContain("OpenAI completion error")
+		expect((caught as Error & { status?: number }).status).toBe(400)
+	})
+
+	it("omits tools when the request carries none", async () => {
+		const handler = new OpenAiHandler(baseOptions())
+		const stream = handler.createMessage(systemPrompt, messages)
+		await collectStream(stream)
+
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.tools).toBeUndefined()
+	})
+
+	it("sends strict: false for non-streaming requests when openAiStrictToolSchemas is false", async () => {
+		const handler = new OpenAiHandler({
+			...baseOptions(),
+			openAiStreamingEnabled: false,
+			openAiStrictToolSchemas: false,
+		})
+		const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task", tools })
+		await collectStream(stream)
+
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.tools[0].function.strict).toBe(false)
+		expect(request.tools[0].function.parameters).toEqual(tools[0].function.parameters)
+	})
+
+	it("sends strict: true with normalized schemas for O3-family streaming requests by default", async () => {
+		const handler = new OpenAiHandler({
+			...baseOptions(),
+			openAiModelId: "o3-mini",
+			openAiCustomModelInfo: {
+				contextWindow: 128_000,
+				maxTokens: 65_536,
+				supportsPromptCache: false,
+				reasoningEffort: "medium" as "low" | "medium" | "high",
+			},
+		})
+		const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task", tools })
+		await collectStream(stream)
+
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.model).toBe("o3-mini")
+		expect(request.stream).toBe(true)
+		expect(request.tools[0].function.strict).toBe(true)
+		expect(request.tools[0].function.parameters.required).toEqual(["path", "offset"])
+	})
+
+	it("sends strict: false with the declared schema for O3-family streaming requests when disabled", async () => {
+		// The streaming O3 branch builds its own request, so the strict argument
+		// must be asserted on that path as well: dropping it at the streaming call
+		// would otherwise keep passing the non-streaming test.
+		const handler = new OpenAiHandler({
+			...baseOptions(),
+			openAiModelId: "o3-mini",
+			openAiStrictToolSchemas: false,
+			openAiCustomModelInfo: {
+				contextWindow: 128_000,
+				maxTokens: 65_536,
+				supportsPromptCache: false,
+				reasoningEffort: "medium" as "low" | "medium" | "high",
+			},
+		})
+		const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task", tools })
+		await collectStream(stream)
+
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.model).toBe("o3-mini")
+		expect(request.stream).toBe(true)
+		expect(request.tools[0].function.strict).toBe(false)
+		expect(request.tools[0].function.parameters).toEqual(tools[0].function.parameters)
+	})
+
+	it("sends strict: false with the declared schema for O3-family non-streaming requests when disabled", async () => {
+		const handler = new OpenAiHandler({
+			...baseOptions(),
+			openAiModelId: "o3-mini",
+			openAiStreamingEnabled: false,
+			openAiStrictToolSchemas: false,
+			openAiCustomModelInfo: {
+				contextWindow: 128_000,
+				maxTokens: 65_536,
+				supportsPromptCache: false,
+				reasoningEffort: "medium" as "low" | "medium" | "high",
+			},
+		})
+		const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task", tools })
+		await collectStream(stream)
+
+		const request = mockCreate.mock.calls[0][0]
+		expect(request.tools[0].function.strict).toBe(false)
+		expect(request.tools[0].function.parameters).toEqual(tools[0].function.parameters)
 	})
 })
 
