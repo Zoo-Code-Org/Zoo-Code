@@ -16,7 +16,7 @@ import { DIFF_VIEW_URI_SCHEME } from "../../integrations/editor/DiffViewProvider
 
 import { CheckpointServiceOptions, RepoPerTaskCheckpointService } from "../../services/checkpoints"
 
-import { appendChange } from "./changeJournal"
+import { appendChanges } from "./changeJournal"
 import { buildChangeCardPayload } from "./changeCard"
 
 const WARNING_THRESHOLD_MS = 5000
@@ -253,57 +253,65 @@ export async function checkpointSave(
 	TelemetryService.instance.captureCheckpointCreated(task.taskId)
 
 	// Start the checkpoint process in the background.
-	return service
+	// Save failures keep the historical behavior: logged, checkpoints
+	// disabled, and the save resolves undefined. Journal/card work below runs
+	// only for a real commit and its failures propagate to the caller
+	// instead of flowing through this handler.
+	const result = await service
 		.saveCheckpoint(`Task: ${task.taskId}, Time: ${Date.now()}`, { allowEmpty: force, suppressMessage })
-		.then(async (result) => {
-			// B2: record successful file writes in the per-task change journal.
-			// Only a real commit produces an entry (an empty or failed save
-			// resolves to undefined / rejects), and non-write checkpoint calls
-			// (e.g. the task-start baseline) pass no `write` value at all.
-			// A no-op checkpoint carries an empty writes array: unrelated workspace
-			// changes can still produce a commit, and emitting a card for it would
-			// show a change card with zero files. The checkpoint itself still runs.
-			if (result?.commit && write && (!Array.isArray(write) || write.length > 0)) {
-				const writes = Array.isArray(write) ? write : [write]
-				const globalStorageDir = task.providerRef.deref()?.context.globalStorageUri.fsPath
-				if (globalStorageDir) {
-					// Append sequentially so journal lines preserve write order. A
-					// journal failure is logged here and never propagates to the
-					// checkpoint error handler (checkpoints stay enabled).
-					try {
-						for (const w of writes) {
-							await appendChange(globalStorageDir, task.taskId, {
-								path: w.path,
-								operation: w.operation,
-								checkpointId: result.commit,
-								...(w.diffStats ? { diffStats: w.diffStats } : {}),
-							})
-						}
-					} catch (err) {
-						console.error("[Task#checkpointSave] failed to append change journal entry", err)
-					}
-				}
-
-				// B3a: emit the per-step change card now that the checkpoint commit
-				// exists. The card reuses the approval diff/stats the tool already
-				// computed and is always emitted (auto-approved steps included);
-				// a card failure is logged and never disables checkpoints.
-				try {
-					const state = await task.providerRef.deref()?.getState()
-					const card = buildChangeCardPayload(result.commit, writes, state?.changeCardDetail)
-					await task.say("change_card", JSON.stringify(card), undefined, undefined, undefined, undefined, {
-						isNonInteractive: true,
-					})
-				} catch (err) {
-					console.error("[Task#checkpointSave] failed to emit change card", err)
-				}
-			}
-			return result
-		})
 		.catch((err) => {
 			console.error("[Task#checkpointSave] caught unexpected error, disabling checkpoints", err)
 			task.enableCheckpoints = false
 		})
+	// B2: record successful file writes in the per-task change journal.
+	// Only a real commit produces an entry (an empty or failed save
+	// resolves to undefined / rejects), and non-write checkpoint calls
+	// (e.g. the task-start baseline) pass no `write` value at all.
+	// A no-op checkpoint carries an empty writes array: unrelated workspace
+	// changes can still produce a commit, and emitting a card for it would
+	// show a change card with zero files. The checkpoint itself still runs.
+	if (result?.commit && write && (!Array.isArray(write) || write.length > 0)) {
+		const writes = Array.isArray(write) ? write : [write]
+		const globalStorageDir = task.providerRef.deref()?.context.globalStorageUri.fsPath
+		if (globalStorageDir) {
+			// Persist the whole step's journal update as one serialized,
+			// atomic replacement (temp file + fsync + rename + directory
+			// sync), preserving write order. A journal failure is logged and
+			// propagated: the checkpoint must not be reported fully durable
+			// while its journal entries were lost.
+			try {
+				await appendChanges(
+					globalStorageDir,
+					task.taskId,
+					writes.map((w) => ({
+						path: w.path,
+						operation: w.operation,
+						checkpointId: result.commit,
+						...(w.diffStats ? { diffStats: w.diffStats } : {}),
+					})),
+				)
+			} catch (err) {
+				console.error("[Task#checkpointSave] failed to persist change journal entries", err)
+				throw err
+			}
+		}
+
+		// B3a: emit the per-step change card now that the checkpoint commit
+		// exists and the journal update is durable (a journal failure above
+		// propagated and skips the card). The card reuses the approval diff/stats the tool already
+		// computed and is always emitted (auto-approved steps included);
+		// a card failure is logged and never disables checkpoints.
+		try {
+			const state = await task.providerRef.deref()?.getState()
+			const card = buildChangeCardPayload(result.commit, writes, state?.changeCardDetail)
+			await task.say("change_card", JSON.stringify(card), undefined, undefined, undefined, undefined, {
+				isNonInteractive: true,
+			})
+		} catch (err) {
+			console.error("[Task#checkpointSave] failed to emit change card", err)
+		}
+	}
+	return result
 }
 
 export type CheckpointRestoreOptions = {

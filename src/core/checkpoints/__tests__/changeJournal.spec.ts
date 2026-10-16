@@ -4,7 +4,7 @@ import path from "path"
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { appendChange, journalPath, loadChanges, type ChangeJournalEntry } from "../changeJournal"
+import { appendChange, appendChanges, journalPath, loadChanges, type ChangeJournalEntry } from "../changeJournal"
 
 describe("changeJournal", () => {
 	const taskId = "test-task"
@@ -72,22 +72,63 @@ describe("changeJournal", () => {
 			expect(raw.split("\n").filter((line) => line !== "")).toHaveLength(2)
 		})
 
-		it("propagates a non-ENOENT tail-inspection failure instead of appending blind", async () => {
+		it("syncs the parent directory after every journal replacement (POSIX)", async () => {
+			const platformDesc = Object.getOwnPropertyDescriptor(process, "platform")
+			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
+			const dirPath = path.dirname(journalPath(tmpRoot, taskId))
+			const realOpen = fs.open
+			const synced: string[] = []
+			const closed: string[] = []
+			// Windows cannot open directories, so the directory handle is doubled
+			// here: the code under test only opens it on non-win32 platforms.
+			const openSpy = vi.spyOn(fs, "open").mockImplementation(async (pathish, flags) => {
+				const openAs = realOpen as (p: string | URL, f?: string) => Promise<fs.FileHandle>
+				const p = typeof pathish === "string" ? pathish : String(pathish)
+				if (p === dirPath && flags === "r") {
+					return {
+						sync: async () => {
+							synced.push(p)
+						},
+						close: async () => {
+							closed.push(p)
+						},
+					} as unknown as fs.FileHandle
+				}
+				return openAs(p, flags as string | undefined)
+			})
+			try {
+				await appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
+				expect(synced).toEqual([dirPath])
+				expect(closed).toEqual([dirPath])
+				// Every replacement renames a new file into place, so the directory
+				// entry is re-synced on each update.
+				await appendChange(tmpRoot, taskId, entry({ checkpointId: "second" }))
+				expect(synced).toHaveLength(2)
+			} finally {
+				openSpy.mockRestore()
+				if (platformDesc) Object.defineProperty(process, "platform", platformDesc)
+			}
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual(["first", "second"])
+		})
+
+		it("propagates a non-ENOENT journal-read failure instead of replacing blind", async () => {
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "good" }))
 			const filePath = journalPath(tmpRoot, taskId)
 			const raw = await fs.readFile(filePath, "utf8")
 			await fs.writeFile(filePath, raw + '{"path":"src/half.ts","operation":"upd')
-			// The tail cannot be inspected (I/O error): appending would merge the
-			// new entry into the fragment, so appendChange must fail loudly.
-			const statSpy = vi
-				.spyOn(fs, "stat")
+			// The current content cannot be read (I/O error): replacing would
+			// discard whatever the unreadable journal really held, so appendChange
+			// must fail loudly.
+			const readSpy = vi
+				.spyOn(fs, "readFile")
 				.mockRejectedValueOnce(Object.assign(new Error("simulated I/O error"), { code: "EIO" }))
 			try {
 				await expect(appendChange(tmpRoot, taskId, entry({ checkpointId: "after" }))).rejects.toMatchObject({
 					code: "EIO",
 				})
 			} finally {
-				statSpy.mockRestore()
+				readSpy.mockRestore()
 			}
 			// The failed append wrote nothing: the next append still repairs and loads.
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "after" }))
@@ -101,7 +142,7 @@ describe("changeJournal", () => {
 			const openSpy = vi.spyOn(fs, "open").mockImplementation(async (pathish, flags) => {
 				const openAs = realOpen as (p: string | URL, f?: string) => Promise<fs.FileHandle>
 				const handle = await openAs(pathish as string | URL, flags as string | undefined)
-				if (flags === "a") {
+				if (flags === "w") {
 					const realWrite = handle.write.bind(handle)
 					let first = true
 					handle.write = (async (buf: Uint8Array, off?: number, len?: number) => {
@@ -123,6 +164,59 @@ describe("changeJournal", () => {
 			}
 			const result = await loadChanges(tmpRoot, taskId)
 			expect(result.map((e) => e.checkpointId)).toEqual(["first", "second"])
+		})
+
+		it("serializes concurrent updates to the same task", async () => {
+			await Promise.all([
+				appendChange(tmpRoot, taskId, entry({ checkpointId: "c1" })),
+				appendChange(tmpRoot, taskId, entry({ checkpointId: "c2" })),
+			])
+
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId).sort()).toEqual(["c1", "c2"])
+		})
+
+		it("leaves the journal untouched when the atomic rename fails mid-update", async () => {
+			await appendChanges(tmpRoot, taskId, [entry({ checkpointId: "kept" })])
+			const renameSpy = vi.spyOn(fs, "rename").mockRejectedValueOnce(new Error("simulated rename failure"))
+			try {
+				await expect(
+					appendChanges(tmpRoot, taskId, [
+						entry({ checkpointId: "m1", path: "src/m1.ts" }),
+						entry({ checkpointId: "m2", path: "src/m2.ts" }),
+					]),
+				).rejects.toThrow("simulated rename failure")
+			} finally {
+				renameSpy.mockRestore()
+			}
+			// Neither of the two new entries survived: the update is all-or-nothing.
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual(["kept"])
+			// The failed temp file was cleaned up.
+			const leftovers = (await fs.readdir(path.dirname(journalPath(tmpRoot, taskId)))).filter((name) =>
+				name.endsWith(".tmp"),
+			)
+			expect(leftovers).toEqual([])
+		})
+
+		it("recovers after a crash left a stale temp file and a torn tail", async () => {
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "before" }))
+			const dir = path.dirname(journalPath(tmpRoot, taskId))
+			// A crash between the temp write and the rename leaves an orphan temp
+			// file; a crash mid-write can also leave the tail unterminated.
+			await fs.writeFile(path.join(dir, "changes.jsonl.4242.orphan.tmp"), "partial")
+			const raw = await fs.readFile(journalPath(tmpRoot, taskId), "utf8")
+			await fs.writeFile(journalPath(tmpRoot, taskId), raw + '{"path":"src/half.ts","operation":"upd')
+
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "after" }))
+
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual(["before", "after"])
+		})
+
+		it("does not create a journal for an empty update", async () => {
+			await appendChanges(tmpRoot, taskId, [])
+			await expect(fs.stat(journalPath(tmpRoot, taskId))).rejects.toMatchObject({ code: "ENOENT" })
 		})
 	})
 

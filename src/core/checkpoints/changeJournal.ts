@@ -48,64 +48,128 @@ export function journalPath(globalStorageDir: string, taskId: string): string {
 }
 
 /**
- * Append one change-journal entry to the per-task changes.jsonl file.
- *
- * Torn-tail repair: a crash mid-append can leave the file without a trailing
- * newline; appending directly would splice the new entry into the fragment and
- * lose both at load time, so the tail is terminated before the new line is
- * written. The append is fsynced so a durable checkpoint implies a durable
- * journal entry; a crash mid-write can still tear the appended line itself,
- * which loadChanges tolerates as a torn tail. Creates parent directories if
- * they don't exist yet (e.g. first checkpoint).
+ * Per-task update queue: journal replacements for one task never overlap,
+ * so concurrent checkpoint saves cannot lose each other's entries through
+ * the read-modify-write cycle below.
  */
-export async function appendChange(globalStorageDir: string, taskId: string, entry: ChangeJournalEntry): Promise<void> {
+const journalQueues = new Map<string, Promise<unknown>>()
+
+function withTaskLock<T>(key: string, run: () => Promise<T>): Promise<T> {
+	const prev = journalQueues.get(key) ?? Promise.resolve()
+	// The next update runs after the previous one settles, whatever it did.
+	const next = prev.then(run, run)
+	// The queued promise swallows its outcome so a failed update neither
+	// blocks later updates nor surfaces as an unhandled rejection; callers
+	// observe the failure through `next`.
+	journalQueues.set(
+		key,
+		next.then(
+			() => undefined,
+			() => undefined,
+		),
+	)
+	return next
+}
+
+/**
+ * Append change-journal entries to the per-task changes.jsonl file as one
+ * serialized, atomic update.
+ *
+ * The whole multi-entry update is a crash-safe replacement: the current
+ * journal is read, a torn tail is terminated, the complete next content is
+ * written to a temporary file in the same directory and fsynced, then
+ * atomically renamed onto the journal, and the parent directory is fsynced
+ * (POSIX; Windows cannot open directories). A crash at any point leaves
+ * either the old complete journal or the new complete journal - never a
+ * half-applied multi-file update - and a durable checkpoint implies a
+ * durable journal entry. Creates parent directories if they don't exist
+ * yet (e.g. first checkpoint).
+ *
+ * Failures propagate: callers must not report a fully durable checkpoint
+ * when the journal update did not complete.
+ */
+export async function appendChanges(
+	globalStorageDir: string,
+	taskId: string,
+	entries: ChangeJournalEntry[],
+): Promise<void> {
+	if (entries.length === 0) {
+		return
+	}
 	const filePath = journalPath(globalStorageDir, taskId)
-	await fs.mkdir(path.dirname(filePath), { recursive: true })
-	let payload = JSON.stringify(entry) + "\n"
-	try {
-		const stat = await fs.stat(filePath)
-		if (stat.size > 0) {
-			const tail = await fs.open(filePath, "r")
-			try {
-				const last = Buffer.alloc(1)
-				await tail.read(last, 0, 1, stat.size - 1)
-				if (last[0] !== 0x0a) {
-					payload = "\n" + payload
-				}
-			} finally {
-				await tail.close()
+	return withTaskLock(filePath, async () => {
+		const dir = path.dirname(filePath)
+		await fs.mkdir(dir, { recursive: true })
+		let content = ""
+		try {
+			content = await fs.readFile(filePath, "utf8")
+		} catch (error) {
+			// A missing journal is a fresh history. Any other read failure
+			// means the complete next content cannot be built, so propagate
+			// instead of replacing the journal with a partial view of it.
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+				throw error
 			}
 		}
-	} catch (error) {
-		// A missing journal is a fresh append. Any other inspection failure
-		// means we cannot know whether a separator is required, so propagate
-		// instead of appending blind and losing the entry to a merged line.
-		if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+		let payload = entries.map((entry) => JSON.stringify(entry) + "\n").join("")
+		// Torn-tail repair: a journal left without a trailing newline (e.g.
+		// a crash before this replacement path completed) must be terminated
+		// before the new lines or the first appended entry merges into the
+		// fragment.
+		if (content && !content.endsWith("\n")) {
+			payload = "\n" + payload
+		}
+		const tmpPath = path.join(dir, `${JOURNAL_FILENAME}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`)
+		const data = Buffer.from(content + payload)
+		try {
+			const handle = await fs.open(tmpPath, "w")
+			try {
+				// A single write can complete partially; sync only after the
+				// whole content is on the handle, or a short write would
+				// rename a torn journal into place.
+				let written = 0
+				while (written < data.length) {
+					const res = await handle.write(data, written, data.length - written)
+					written += res.bytesWritten
+				}
+				await handle.sync()
+			} finally {
+				await handle.close()
+			}
+			await fs.rename(tmpPath, filePath)
+			if (process.platform !== "win32") {
+				// The rename replaced the directory entry: on POSIX the
+				// directory itself must be synced for the new entry to
+				// survive a crash (Windows cannot open directories).
+				const dirHandle = await fs.open(dir, "r")
+				try {
+					await dirHandle.sync()
+				} finally {
+					await dirHandle.close()
+				}
+			}
+		} catch (error) {
+			// Best-effort cleanup: the rename never completed, so the journal
+			// still holds the previous complete content; drop the temp file.
+			await fs.rm(tmpPath, { force: true }).catch(() => {})
 			throw error
 		}
-	}
-	const data = Buffer.from(payload)
-	const handle = await fs.open(filePath, "a")
-	try {
-		// A single write can complete partially; sync only after the whole
-		// record is on the handle, or a short write would persist a torn entry
-		// while appendChange reports success.
-		let written = 0
-		while (written < data.length) {
-			const res = await handle.write(data, written, data.length - written)
-			written += res.bytesWritten
-		}
-		await handle.sync()
-	} finally {
-		await handle.close()
-	}
+	})
+}
+
+/** Append a single entry; see appendChanges for the durability contract. */
+export async function appendChange(globalStorageDir: string, taskId: string, entry: ChangeJournalEntry): Promise<void> {
+	await appendChanges(globalStorageDir, taskId, [entry])
 }
 
 /**
  * Load all change-journal entries for a task.
  *
  * Torn-tail repair: if the final line is truncated (JSON.parse fails), it is
- * silently discarded.  The rest of the file is returned in order.  An absent
+ * silently discarded.  Lines that parse to valid JSON but are not
+ * entry-shaped (non-object, missing string path/checkpointId, or an
+ * unknown operation) are skipped for the same reason.  The rest of the file
+ * is returned in order.  An absent
  * or empty journal returns [] — but only an ABSENT file. Any other read
  * failure (permissions, I/O) is rethrown: a journal that cannot be read must
  * not be indistinguishable from one that is legitimately empty.
@@ -139,7 +203,20 @@ export async function loadChanges(globalStorageDir: string, taskId: string): Pro
 	const entries: ChangeJournalEntry[] = []
 	for (let i = 0; i < lines.length; i++) {
 		try {
-			entries.push(JSON.parse(lines[i]) as ChangeJournalEntry)
+			const parsed: unknown = JSON.parse(lines[i])
+			// A torn append or manual edit can leave valid JSON that is not an
+			// entry (a bare number, null, or a differently-shaped object).
+			// Consumers read path/checkpointId unguarded, so skip any line that
+			// is not entry-shaped instead of returning it as an entry.
+			if (
+				parsed &&
+				typeof parsed === "object" &&
+				typeof (parsed as ChangeJournalEntry).path === "string" &&
+				typeof (parsed as ChangeJournalEntry).checkpointId === "string" &&
+				["create", "update", "delete"].includes((parsed as ChangeJournalEntry).operation)
+			) {
+				entries.push(parsed as ChangeJournalEntry)
+			}
 		} catch {
 			// A corrupt line before the final line (e.g. a partially flushed
 			// append) must not hide the valid entries after it. The final line
