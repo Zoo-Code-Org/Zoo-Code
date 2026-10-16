@@ -357,8 +357,13 @@ export class DiffViewProvider {
 		const updatedDocument = this.activeDiffEditor.document
 		const editedContent = updatedDocument.getText()
 
-		if (updatedDocument.isDirty) {
-			await updatedDocument.save()
+		if (updatedDocument.isDirty && !(await updatedDocument.save())) {
+			// save() resolving false (without throwing) means the write did not persist. Stop
+			// BEFORE the commit point: onCommit has not run and placeholderPath stays owned, so
+			// the caller still holds an uncommitted cleanup state and the teardown removes what
+			// open() created. Reporting this write as durable would strand an unpersisted file
+			// whose ownership had already been released.
+			throw new Error(`Saving ${absolutePath} was not confirmed; the write was not committed.`)
 		}
 
 		// The write is irreversible from here: a clean document already matches disk, and a saved

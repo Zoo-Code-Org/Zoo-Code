@@ -1219,6 +1219,26 @@ describe("DiffViewProvider", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(`${mockCwd}/mock-target-file.ts`)
 		})
 
+		it("open() does not claim placeholder ownership when the placeholder write fails", async () => {
+			// The failed open may have died inside fs.writeFile(); placeholderPath is set only
+			// after the write succeeds, so a failed write must not mark a file this edit never
+			// created as owned, and the rollback must still remove the directories it did
+			// create without unlinking the unowned path.
+			const { createDirectoriesForFile } = await import("../../../utils/fs")
+			vi.mocked(createDirectoriesForFile).mockResolvedValueOnce([`${mockCwd}/new-parent`])
+			vi.mocked(fs.writeFile).mockRejectedValueOnce(new Error("EACCES: permission denied"))
+
+			await expect(diffViewProvider.open("mock-target-file.ts")).rejects.toThrow("EACCES: permission denied")
+
+			expect(diffViewProvider["placeholderPath"]).toBeUndefined()
+			expect(diffViewProvider["createdDirs"]).toEqual([`${mockCwd}/new-parent`])
+
+			await diffViewProvider.revertChanges()
+
+			expect(fs.unlink).not.toHaveBeenCalled()
+			expect(fs.rmdir).toHaveBeenCalledWith(`${mockCwd}/new-parent`)
+		})
+
 		it("revertChanges() stops before the document work for an existing file when no editor exists", async () => {
 			// The modify branch used to dereference activeDiffEditor unconditionally. When open()
 			// never produced an editor there is no document to restore, and the old code threw a
@@ -1341,6 +1361,7 @@ describe("DiffViewProvider", () => {
 			editor.document.isDirty = true
 			editor.document.save = vi.fn(async () => {
 				order.push("save")
+				return true
 			})
 			Object.assign(diffViewProvider, {
 				relPath: "mock-target-file.ts",
@@ -1389,6 +1410,61 @@ describe("DiffViewProvider", () => {
 
 			expect(order).toEqual(["save"])
 			expect(diffViewProvider["placeholderPath"]).toBe(mockTargetPath)
+		})
+
+		it("saveChanges() does not commit when the save resolves false", async () => {
+			// save() can resolve false without throwing: the write did not persist. The commit
+			// point was never reached, so onCommit must not run and the placeholder must stay
+			// owned - reporting the write as durable would strand an unpersisted file whose
+			// cleanup ownership had already been released.
+			const order: string[] = []
+			const editor = buildActiveDiffEditor()
+			editor.document.isDirty = true
+			editor.document.save = vi.fn(async () => {
+				order.push("save")
+				return false
+			})
+			Object.assign(diffViewProvider, {
+				relPath: "mock-target-file.ts",
+				newContent: "content",
+				activeDiffEditor: editor,
+				placeholderPath: mockTargetPath,
+			})
+
+			await expect(diffViewProvider.saveChanges(false, 0, () => order.push("commit"))).rejects.toThrow(
+				"was not confirmed; the write was not committed",
+			)
+
+			expect(order).toEqual(["save"])
+			expect(diffViewProvider["placeholderPath"]).toBe(mockTargetPath)
+		})
+
+		it("saveChanges() commits an already-clean document and releases placeholder ownership", async () => {
+			// A clean document already matches disk and never saves, but it crosses the same
+			// commit point: the callback must run and the placeholder ownership must be
+			// released even though no save happened.
+			const editor = buildActiveDiffEditor()
+			editor.document.isDirty = false
+			const onCommit = vi.fn()
+			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+			diffViewProvider["closeFileTab"] = vi.fn().mockResolvedValue(undefined)
+			Object.assign(diffViewProvider, {
+				relPath: "mock-target-file.ts",
+				newContent: "content",
+				activeDiffEditor: editor,
+				placeholderPath: mockTargetPath,
+				documentWasOpen: false,
+				userTouchedDocument: false,
+				preEditScrollLine: undefined,
+				editType: "modify",
+				originalContent: "original",
+			})
+
+			await diffViewProvider.saveChanges(false, 0, onCommit)
+
+			expect(editor.document.save).not.toHaveBeenCalled()
+			expect(onCommit).toHaveBeenCalledTimes(1)
+			expect(diffViewProvider["placeholderPath"]).toBeUndefined()
 		})
 
 		it("revertChanges() surfaces a placeholder delete that failed for a non-ENOENT reason", async () => {
