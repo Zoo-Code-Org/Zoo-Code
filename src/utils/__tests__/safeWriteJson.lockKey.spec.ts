@@ -170,6 +170,23 @@ describe("safeWriteJson lock key under a peer commit", () => {
 
 		expect(await resolveLockKey(file)).toBe(path.join(canonicalDir, "history_item.json"))
 	})
+
+	it("propagates a non-ENOENT resolution failure instead of keying on the alias", async () => {
+		// EACCES from realpath is not a dangling link: falling back to the walk
+		// would key this writer to the alias path while a writer reaching the
+		// referent directly keys the referent, and the two writers would take
+		// different locks for the same file.
+		const aliasDir = path.join(os.tmpdir(), "alias-dir")
+		const file = path.join(aliasDir, "history_item.json")
+		const eacces = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+		mockedRealpath.mockImplementation(async () => {
+			throw eacces
+		})
+		mockedLstat.mockImplementation(
+			async () => ({ isSymbolicLink: () => false, isFile: () => true }) as unknown as BigIntStats,
+		)
+		await expect(resolveLockKey(file)).rejects.toBe(eacces)
+	})
 })
 
 it("does not log a cleanup error when the safety net finds the temp file already gone", async () => {
@@ -186,12 +203,17 @@ it("does not log a cleanup error when the safety net finds the temp file already
 	const unlinkSpy = vi.spyOn(fs, "unlink").mockRejectedValue(enoent)
 	const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
 
-	await expect(safeWriteJson(target, { id: "task-1" })).rejects.toThrow("commit rename failed")
+	try {
+		await expect(safeWriteJson(target, { id: "task-1" })).rejects.toThrow("commit rename failed")
 
-	// Only the original failure is reported.
-	expect(consoleError).toHaveBeenCalledTimes(1)
-
-	renameSpy.mockRestore()
-	unlinkSpy.mockRestore()
-	consoleError.mockRestore()
+		// Only the original failure is reported.
+		expect(consoleError).toHaveBeenCalledTimes(1)
+	} finally {
+		// Restore even when an assertion fails: the afterEach cleanup runs fs.rm
+		// with these spies still in place otherwise, and later tests inherit a
+		// rejecting rename.
+		renameSpy.mockRestore()
+		unlinkSpy.mockRestore()
+		consoleError.mockRestore()
+	}
 })
