@@ -681,11 +681,13 @@ export const webviewMessageHandler = async (
 								// Re-pin this view to the still-valid shared global selection (not the
 								// first listed profile) so the view adopts the shared choice; the
 								// global selection itself is left untouched.
-								await provider.saveViewState("currentApiConfigName", globalConfigName)
-								// Drop any overlay this view kept for the deleted profile: getState() would
-								// otherwise keep serving the deleted profile's provider and key under the global
-								// name. The shared provider keys already hold the global profile's settings.
+								// Drop any overlay this view kept for the deleted profile first: getState()
+								// would otherwise keep serving the deleted profile's provider and key under
+								// the global name. Clearing before the pin write keeps the repair retryable:
+								// if the pin write fails, the invalid selection is detected again on the
+								// next launch instead of a valid pin serving the stale overlay.
 								await provider.saveViewState("apiConfiguration", undefined)
+								await provider.saveViewState("currentApiConfigName", globalConfigName)
 								// The state posted earlier in this flow still carried the missing pin, so push
 								// the corrected state; only listApiConfig is posted below.
 								await provider.postStateToWebview()
@@ -2493,8 +2495,23 @@ export const webviewMessageHandler = async (
 						id,
 					})
 
-					// Delete the old configuration.
-					await provider.providerSettingsManager.deleteConfig(oldName)
+					// Delete the old configuration. A failure here would leave both names
+					// resolving and every live view pinned to the new name: undo the re-point
+					// and drop the new record so the pre-rename state survives intact.
+					try {
+						await provider.providerSettingsManager.deleteConfig(oldName)
+					} catch (error) {
+						try {
+							await provider.repointViewLocalStateAfterProfileRename(newName, oldName, {
+								...message.apiConfiguration,
+								id,
+							})
+							await provider.providerSettingsManager.deleteConfig(newName)
+						} catch {
+							// Best-effort compensation; the original failure is what callers see.
+						}
+						throw error
+					}
 
 					// Re-activate to update the global settings related to the
 					// currently activated provider profile.
