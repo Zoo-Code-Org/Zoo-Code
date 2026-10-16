@@ -309,7 +309,9 @@ describe("MarkdownBlock", () => {
 
 		it("does not match @ in the middle of a word or log entry", async () => {
 			const markdown = "Error: Failed@localhost/status code 404."
-			const { container } = render(<MarkdownBlock markdown={markdown} />)
+			// Mentions enabled: without the prop no span is ever built, so the
+			// zero-span assertion would pass whatever the boundary regex does.
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
 
 			await screen.findByText(/Error/, { exact: false })
 
