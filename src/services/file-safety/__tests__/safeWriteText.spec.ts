@@ -143,11 +143,14 @@ describe("safeWriteText", () => {
 
 			await safeWriteText(targetPath, "hello", { platform: "linux" })
 
-			// the staging subdir is removed best-effort after the commit rename
-			// (stringContaining: the SUT and the test helper resolve Windows
-			// drive-relative paths differently, as in the existing staging tests)
+			// the staging subdir is removed best-effort after the commit rename.
+			// Exact path read back from the create: the SUT releases the same
+			// directory it staged in, and a substring match would also accept a
+			// release aimed at some other staging directory.
 			expect(fs.rmdir).toHaveBeenCalledTimes(1)
-			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
+			const stagingDir = String(vi.mocked(fsSync.mkdirSync).mock.calls[0]?.[0])
+			expect(stagingDir).toContain(".file-safety-staging")
+			expect(fs.rmdir).toHaveBeenCalledWith(stagingDir)
 			// the win32 DACL restore gate must stay closed on other platforms:
 			// no icacls save or restore is attempted
 			expect(execFile).not.toHaveBeenCalled()
@@ -163,7 +166,9 @@ describe("safeWriteText", () => {
 			await expect(safeWriteText(targetPath, "hello")).resolves.toBeUndefined()
 
 			expect(fs.rmdir).toHaveBeenCalledTimes(1)
-			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
+			const stagingDir = String(vi.mocked(fsSync.mkdirSync).mock.calls[0]?.[0])
+			expect(stagingDir).toContain(".file-safety-staging")
+			expect(fs.rmdir).toHaveBeenCalledWith(stagingDir)
 			if (process.platform === "win32") {
 				// default platform is win32: the DACL save + restore still ran
 				// through the default icacls path (options?.execFileRunner must
@@ -197,7 +202,9 @@ describe("safeWriteText", () => {
 			// the commit rename still happened and the rmdir error was swallowed
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"), targetPath)
 			expect(fs.rmdir).toHaveBeenCalledTimes(1)
-			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
+			const stagingDir = String(vi.mocked(fsSync.mkdirSync).mock.calls[0]?.[0])
+			expect(stagingDir).toContain(".file-safety-staging")
+			expect(fs.rmdir).toHaveBeenCalledWith(stagingDir)
 		})
 
 		it("gives each self-staged write its own staging directory so a concurrent write cannot remove it", async () => {
