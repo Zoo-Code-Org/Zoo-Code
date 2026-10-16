@@ -164,6 +164,44 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			])
 		})
 
+		it("emits per-file success results only after the post-patch checkpoint persists", async () => {
+			await tool.execute({ patch: deletePatch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			// CR follow-up: the buffered success result is emitted only after
+			// checkpointSave resolved - a success is never reported before its
+			// journal save completes.
+			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("Successfully deleted"))
+			const saveOrder = mockedCheckpointSave.mock.invocationCallOrder[0]
+			const resultOrder = mockPushToolResult.mock.invocationCallOrder[0]
+			expect(saveOrder).toBeLessThan(resultOrder)
+		})
+
+		it("drops buffered success results and still hands off on a journal persistence failure", async () => {
+			mockedCheckpointSave.mockRejectedValueOnce(
+				new Error(
+					"Checkpoint abc123def was committed but its change journal could not be persisted (files: src/obsolete.ts); rollback metadata is incomplete.",
+				),
+			)
+
+			await tool.execute({ patch: deletePatch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			// The delete succeeded on disk, so the queued handoff still runs,
+			// but no success result is emitted: the persistence failure
+			// surfaces through handleError instead.
+			expect(mockPushToolResult).not.toHaveBeenCalled()
+			expect(mockHandleError).toHaveBeenCalledWith("apply patch", expect.any(Error))
+			expect(vi.mocked(mockTask.processQueuedMessages)).toHaveBeenCalled()
+		})
 		it("does not record a checkpoint when perWriteCheckpoints is disabled", async () => {
 			// Structural cast for the test double (matches the mock style used for the controllers above).
 			const ref = (mockTask["providerRef"] as unknown as { deref: MockedFunction<() => unknown> }).deref

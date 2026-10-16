@@ -32,6 +32,13 @@ interface ApplyPatchParams {
 interface ApplyPatchFileOpResult {
 	succeeded: boolean
 	wrote: boolean
+	/**
+	 * Successful per-file result message. Buffered by execute and emitted only
+	 * after the post-patch checkpoint + journal persistence succeeded, so a
+	 * success is never reported before its journal save completes. Failure
+	 * results stay immediate.
+	 */
+	resultMessage?: string
 }
 
 export class ApplyPatchTool extends BaseTool<"apply_patch"> {
@@ -69,6 +76,11 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 	async execute(params: ApplyPatchParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
 		const { patch } = params
 		const { handleError, pushToolResult } = callbacks
+
+		// Declared before the try so the finally block can hand off queued
+		// messages when a write succeeded but the post-patch checkpoint failed.
+		const successfulChanges: ApplyPatchFileChange[] = []
+		const bufferedResults: string[] = []
 
 		try {
 			// Validate required parameters
@@ -122,7 +134,6 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// — a no-op update must not be journaled). A rejected approval or a
 			// failed local write never gets checkpointed as a success.
 			let patchSucceeded = true
-			const successfulChanges: ApplyPatchFileChange[] = []
 			for (const change of changes) {
 				const relPath = change.path
 				const absolutePath = path.resolve(task.cwd, relPath)
@@ -157,6 +168,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					if (addResult.wrote) {
 						successfulChanges.push(change)
 					}
+					if (addResult.resultMessage) {
+						bufferedResults.push(addResult.resultMessage)
+					}
 				} else if (change.type === "delete") {
 					// Delete file
 					const deleteResult = await this.handleDeleteFile(
@@ -171,6 +185,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					if (deleteResult.wrote) {
 						successfulChanges.push(change)
 					}
+					if (deleteResult.resultMessage) {
+						bufferedResults.push(deleteResult.resultMessage)
+					}
 				} else if (change.type === "update") {
 					// Update file (a no-op update succeeds without writing)
 					const updateResult = await this.handleUpdateFile(
@@ -184,6 +201,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					patchSucceeded = updateResult.succeeded && patchSucceeded
 					if (updateResult.wrote) {
 						successfulChanges.push(change)
+					}
+					if (updateResult.resultMessage) {
+						bufferedResults.push(updateResult.resultMessage)
 					}
 				}
 			}
@@ -241,17 +261,26 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				}
 			}
 
-			// B2: deferred from the per-file handlers - a queued write must not
-			// start until the post-patch checkpoint above has persisted. The
-			// handlers used to process queued messages right after each
-			// successful write; a write happened if and only if
-			// `successfulChanges` is non-empty, so one call here preserves that.
-			if (successfulChanges.length > 0) {
-				task.processQueuedMessages()
+			// CR follow-up: successful per-file results are emitted only after
+			// the post-patch checkpoint + journal persistence above succeeded.
+			// A persistence failure routes to the catch below and the buffered
+			// successes are dropped in favor of the tool failure result;
+			// failure results stayed immediate.
+			for (const message of bufferedResults) {
+				pushToolResult(message)
 			}
 		} catch (error) {
 			await handleError("apply patch", error as Error)
 			await task.diffViewProvider.reset()
+		} finally {
+			// B2: deferred from the per-file handlers - a queued write must not
+			// start until the post-patch checkpoint above has persisted. The
+			// handoff runs even when that checkpoint/journal persistence
+			// rejected: the file writes themselves succeeded and upstream
+			// handed off after every successful write.
+			if (successfulChanges.length > 0) {
+				task.processQueuedMessages()
+			}
 		}
 	}
 
@@ -357,9 +386,8 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task.didEditFile = true
 
 		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, true)
-		pushToolResult(message)
 		await task.diffViewProvider.reset()
-		return { succeeded: true, wrote: true }
+		return { succeeded: true, wrote: true, resultMessage: message }
 	}
 
 	private async handleDeleteFile(
@@ -429,8 +457,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		}
 
 		task.didEditFile = true
-		pushToolResult(`Successfully deleted ${relPath}`)
-		return { succeeded: true, wrote: true }
+		return { succeeded: true, wrote: true, resultMessage: `Successfully deleted ${relPath}` }
 	}
 
 	private async handleUpdateFile(
@@ -473,9 +500,8 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// nothing was written, so the whole-patch success state is kept —
 			// but `wrote` stays false so the change journal does not document a
 			// write that never happened.
-			pushToolResult(`No changes needed for '${relPath}'`)
 			await task.diffViewProvider.reset()
-			return { succeeded: true, wrote: false }
+			return { succeeded: true, wrote: false, resultMessage: `No changes needed for '${relPath}'` }
 		}
 
 		// Check experiment settings
@@ -622,15 +648,14 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task.didEditFile = true
 
 		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, false)
-		pushToolResult(message)
 		await task.diffViewProvider.reset()
 		if (!moveSucceeded) {
 			// The destination file was written on disk before the source
 			// deletion failed, so the write must still be checkpointed and
 			// journaled; the move itself is reported as failed.
-			return { succeeded: false, wrote: true }
+			return { succeeded: false, wrote: true, resultMessage: message }
 		}
-		return { succeeded: true, wrote: true }
+		return { succeeded: true, wrote: true, resultMessage: message }
 	}
 
 	override async handlePartial(task: Task, block: ToolUse<"apply_patch">): Promise<void> {

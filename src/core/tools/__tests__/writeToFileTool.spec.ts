@@ -117,7 +117,9 @@ describe("writeToFileTool", () => {
 	const mockedStripLineNumbers = stripLineNumbers as MockedFunction<typeof stripLineNumbers>
 	const mockedPathResolve = path.resolve as MockedFunction<typeof path.resolve>
 
-	const mockCline: any = {}
+	const mockCline: any = {
+		processQueuedMessages: vi.fn(),
+	}
 	let mockAskApproval: ReturnType<typeof vi.fn<AskApproval>>
 	let mockHandleError: ReturnType<typeof vi.fn<HandleError>>
 	let mockPushToolResult: ReturnType<typeof vi.fn<PushToolResult>>
@@ -544,6 +546,9 @@ describe("writeToFileTool", () => {
 			expect(surfaced).toContain("test/file.txt")
 			// The normal successful tool result is not emitted.
 			expect(mockPushToolResult).not.toHaveBeenCalled()
+
+			// The write itself succeeded: the queued handoff still runs (finally).
+			expect(mockCline.processQueuedMessages).toHaveBeenCalled()
 		})
 
 		it("waits for the per-write checkpoint before the tool completes", async () => {
