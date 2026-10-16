@@ -400,15 +400,16 @@ describe("changeJournal", () => {
 			expect(result[0].checkpointId).toBe("ok")
 		})
 
-		it("discards a torn final line and returns the complete entries", async () => {
+		it("rejects a torn final line instead of silently dropping it", async () => {
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "ok" }))
 
-			// Append a second line truncated mid-content, with no trailing newline.
+			// Append a second line truncated mid-content, with no trailing
+			// newline. Without verified truncation there is no evidence this
+			// is a crash tail rather than a corrupted record, and silently
+			// dropping it would report an incomplete history as valid.
 			await fs.appendFile(journalPath(tmpRoot, taskId), '{"path":"src/half.ts","operation":"upd')
 
-			const result = await loadChanges(tmpRoot, taskId)
-			expect(result).toHaveLength(1)
-			expect(result[0].checkpointId).toBe("ok")
+			await expect(loadChanges(tmpRoot, taskId)).rejects.toThrow(/Corrupt change journal entry at line 2/)
 		})
 
 		it("skips a corrupt middle line and still loads the later valid entries", async () => {
@@ -427,13 +428,15 @@ describe("changeJournal", () => {
 			expect(result[0].checkpointId).toBe("after")
 		})
 
-		it("does not throw when the entire journal is torn", async () => {
+		it("rejects a journal whose only record is torn", async () => {
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
 
-			// Truncate to a single character — definitely invalid JSON.
+			// Truncate to a single character — definitely invalid JSON. The
+			// append path repairs such a tail on the next write; a read must
+			// not report the lost record as a complete (empty) history.
 			await fs.writeFile(journalPath(tmpRoot, taskId), "{")
 
-			expect(await loadChanges(tmpRoot, taskId)).toEqual([])
+			await expect(loadChanges(tmpRoot, taskId)).rejects.toThrow(/Corrupt change journal entry at line 1/)
 		})
 
 		it("includes diffStats when present", async () => {
