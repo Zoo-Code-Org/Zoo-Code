@@ -3406,6 +3406,156 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("does not delete a newly created record while another create for the same name is in flight", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"tab",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			for (const instance of [providerA, providerB]) {
+				vi.spyOn(instance.providerSettingsManager, "hasConfig").mockResolvedValue(false)
+				vi.spyOn(instance.providerSettingsManager, "getCurrentProfileName").mockResolvedValue(undefined)
+			}
+			const deleteSpyA = vi.spyOn(providerA.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
+			const deleteSpyB = vi.spyOn(providerB.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
+
+			// Both views confirm the name is absent before saving it: each create is
+			// claimed so a rollback can tell whose deletion is safe.
+			const snapshotA = await providerA["_snapshotProviderManagerState"]("dup-profile")
+			const snapshotB = await providerB["_snapshotProviderManagerState"]("dup-profile")
+			expect(snapshotA.claimedCreate).toBe(true)
+			expect(snapshotB.claimedCreate).toBe(true)
+
+			// A's activation fails while B's create for the same name is still in
+			// flight: the surviving record may belong to B, so A must not delete it.
+			await providerA["_restoreProviderManagerRecord"]("dup-profile", snapshotA)
+			expect(deleteSpyA).not.toHaveBeenCalled()
+
+			// B fails too: the last claimant to settle owns the deletion.
+			await providerB["_restoreProviderManagerRecord"]("dup-profile", snapshotB)
+			expect(deleteSpyB).toHaveBeenCalledWith("dup-profile")
+
+			await providerA.dispose()
+			await providerB.dispose()
+		})
+
+		it("keeps this view's own profile pin when an activation rollback restores the shared selection", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-sidebar-view")
+			// The view pins profile-a while another view's choice sits in the shared
+			// selection.
+			await provider.saveViewState("currentApiConfigName", "profile-a")
+			await provider.contextProxy.setValue("currentApiConfigName", "profile-b")
+
+			const snapshot = provider["_snapshotProfileActivationState"]()
+			// The activation moved the shared selection; a later write failed.
+			await provider.setValue("currentApiConfigName", "profile-c")
+			await provider["_restoreProfileActivationState"](snapshot)
+
+			// The shared selection returns to its prior value...
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("profile-b")
+			// ...but this view's own pin is restored to its own choice, not the
+			// shared one: the rollback must not replace the pin with profile-b.
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("profile-a")
+			const viewStates = mockContext.globalState.get("viewStates") as Record<string, Record<string, unknown>>
+			expect(viewStates["stable-sidebar-view"].currentApiConfigName).toBe("profile-a")
+			await provider.dispose()
+		})
+
+		it("does not rewrite unrelated global keys when an activation rollback restores provider settings", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const snapshot = provider["_snapshotProfileActivationState"]()
+			// An unrelated key legitimately changes while the activation group is in
+			// flight.
+			await provider.contextProxy.setValue("customInstructions", "written during activation")
+			await provider["_restoreProfileActivationState"](snapshot)
+			// The rollback restores provider settings only; it must not replay the
+			// whole global-state copy over keys that moved in the meantime.
+			expect(provider.contextProxy.getValue("customInstructions")).toBe("written during activation")
+			await provider.dispose()
+		})
+
+		it("restores the cached viewStates map when a persisted view-state write fails durably", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-sidebar-view")
+			await provider.contextProxy.setValue("viewStates", {
+				"other-view": { mode: "code", updatedAt: 1 },
+			})
+			// The next durable write fails; the cache was already updated optimistically.
+			const updateSpy = vi.spyOn(mockContext.globalState, "update").mockImplementationOnce(async () => {
+				throw new Error("durable write failed")
+			})
+
+			await expect(provider["savePersistedViewState"]({ mode: "architect", updatedAt: 2 })).rejects.toThrow(
+				"durable write failed",
+			)
+
+			// The in-memory cache must match durable storage: an entry that never
+			// reached disk cannot stay visible through getValue.
+			expect(provider.contextProxy.getValue("viewStates")).toEqual({
+				"other-view": { mode: "code", updatedAt: 1 },
+			})
+			updateSpy.mockRestore()
+			await provider.dispose()
+		})
+
+		it("re-points live views pinned to a renamed profile onto the new name", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-sidebar-view")
+			await provider.saveViewState("currentApiConfigName", "profile-old")
+			await provider.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "old-key",
+			})
+
+			await provider["repointViewLocalStateAfterProfileRename"]("profile-old", "profile-new", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "renamed-key",
+			})
+
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("profile-new")
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "renamed-key",
+			})
+			const viewStates = mockContext.globalState.get("viewStates") as Record<string, Record<string, unknown>>
+			expect(viewStates["stable-sidebar-view"].currentApiConfigName).toBe("profile-new")
+			await provider.dispose()
+		})
+
 		it("clears this view's buffered apiConfiguration when directly activating a profile", async () => {
 			const provider = new ClineProvider(
 				mockContext,

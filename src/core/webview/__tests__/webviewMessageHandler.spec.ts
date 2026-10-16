@@ -1962,6 +1962,53 @@ describe("zooCodeSignOut", () => {
 	})
 })
 
+describe("webviewMessageHandler - renameApiConfiguration", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("re-points views pinned to the old name before the old name is deleted", async () => {
+		const order: string[] = []
+		// Double assertion: the spec-wide provider double only declares the members
+		// most tests drive; this structural widening keeps the new test free of any.
+		const provider = mockClineProvider as unknown as {
+			providerSettingsManager: {
+				getProfile: ReturnType<typeof vi.fn>
+				saveConfig: ReturnType<typeof vi.fn>
+				deleteConfig: ReturnType<typeof vi.fn>
+			}
+			repointViewLocalStateAfterProfileRename: ReturnType<typeof vi.fn>
+			activateProviderProfile: ReturnType<typeof vi.fn>
+		}
+		provider.providerSettingsManager = {
+			getProfile: vi.fn().mockResolvedValue({ id: "profile-id" }),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn(async () => {
+				order.push("delete")
+			}),
+		}
+		const repoint = vi.fn(async () => {
+			order.push("repoint")
+		})
+		provider.repointViewLocalStateAfterProfileRename = repoint
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		expect(repoint).toHaveBeenCalledWith("old-profile", "new-profile", {
+			apiProvider: providerIdentifiers.anthropic,
+			id: "profile-id",
+		})
+		// The re-point must precede the deletion: a pinned view switches while the
+		// old name still resolves, instead of dangling for a window.
+		expect(order).toEqual(["repoint", "delete"])
+	})
+})
+
 describe("webviewMessageHandler - kimiCodeSignIn", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()

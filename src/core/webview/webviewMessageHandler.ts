@@ -2350,6 +2350,15 @@ export const webviewMessageHandler = async (
 					// Create a new configuration with the new name and old ID.
 					await provider.providerSettingsManager.saveConfig(newName, { ...message.apiConfiguration, id })
 
+					// Re-point live views pinned to the old name before it stops
+					// resolving: the rename keeps the id, so their pins should follow the
+					// record instead of dangling, and their overlays must serve the
+					// renamed settings rather than the pre-rename copy.
+					await provider.repointViewLocalStateAfterProfileRename(oldName, newName, {
+						...message.apiConfiguration,
+						id,
+					})
+
 					// Delete the old configuration.
 					await provider.providerSettingsManager.deleteConfig(oldName)
 

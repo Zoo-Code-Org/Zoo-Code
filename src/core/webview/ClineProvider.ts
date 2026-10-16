@@ -12,6 +12,7 @@ import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
 
 import {
+	PROVIDER_SETTINGS_KEYS,
 	type TaskProviderLike,
 	type TaskProviderEvents,
 	type GlobalState,
@@ -204,9 +205,36 @@ type GetStateOptions = {
 	includeTaskHistory?: boolean
 }
 
+/**
+ * In-flight profile-create claims shared by every provider instance in this
+ * extension host. A rollback may only delete a record whose creation it can
+ * prove it owns: when two views concurrently create the same new name, both
+ * observe `hasConfig === false`, yet the surviving record belongs to the
+ * create that completed. A failed create must therefore skip the deletion
+ * while another create for the same name is still in flight, and the last
+ * claimant to settle performs it.
+ */
+const profileCreateClaims = new Map<string, number>()
+
+function claimProfileCreate(name: string): void {
+	profileCreateClaims.set(name, (profileCreateClaims.get(name) ?? 0) + 1)
+}
+
+/** Drops one claim and reports whether the caller was the last claimant. */
+function releaseProfileCreate(name: string): boolean {
+	const remaining = (profileCreateClaims.get(name) ?? 1) - 1
+	if (remaining <= 0) {
+		profileCreateClaims.delete(name)
+		return true
+	}
+	profileCreateClaims.set(name, remaining)
+	return false
+}
+
 type ProfileActivationSnapshot = {
 	listApiConfigMeta: ProviderSettingsEntry[] | undefined
 	currentApiConfigName: string | undefined
+	viewCurrentApiConfigName: string | undefined
 	providerSettings: RooCodeSettings
 	viewApiConfiguration: ProviderSettings | undefined
 }
@@ -215,6 +243,7 @@ type ProviderManagerSnapshot = {
 	previousRecord: ProviderSettingsWithId | undefined
 	recordExisted: boolean | undefined
 	previousCurrentProfileName: string | undefined
+	claimedCreate: boolean
 }
 
 export class ClineProvider
@@ -629,7 +658,23 @@ export class ClineProvider
 				wroteEntry = true
 			}
 
-			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+			try {
+				await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+			} catch (error) {
+				// updateGlobalState applies the new map to the in-memory cache before
+				// the durable write, so a rejected write leaves the cache claiming an
+				// entry that never reached disk. Restore the cache to the value durable
+				// storage actually holds (undefined when the key was never written); the
+				// cache update lands even if this compensating write also fails, so
+				// readers cannot observe the lost entry either way.
+				try {
+					await this.contextProxy.setValue("viewStates", this.context.globalState.get("viewStates"))
+				} catch {
+					// The cache is updated before the durable attempt: it matches the
+					// durable value regardless of whether this restore write landed.
+				}
+				throw error
+			}
 			// Authorship is recorded only after the durable write lands: a failed persistence
 			// must not mark the temporary id as owned, or a later load would adopt an entry
 			// that was never actually stored.
@@ -2353,10 +2398,21 @@ export class ClineProvider
 	 * concurrent write group so a failure can compensate the writes that landed.
 	 */
 	private _snapshotProfileActivationState(): ProfileActivationSnapshot {
+		// Capture only the provider-settings keys. getValues() returns the whole
+		// global state, and restoring that copy would write unrelated keys
+		// (viewStates, mode, taskHistory, ...) back over changes that legitimately
+		// landed while the activation group was in flight.
+		const allValues = this.contextProxy.getValues()
+		const providerSettings = Object.fromEntries(
+			PROVIDER_SETTINGS_KEYS.map((key) => [key, allValues[key]]),
+		) as RooCodeSettings
 		return {
 			listApiConfigMeta: this.contextProxy.getValue("listApiConfigMeta"),
 			currentApiConfigName: this.contextProxy.getValue("currentApiConfigName"),
-			providerSettings: this.contextProxy.getValues(),
+			// This view's own pin: the rollback must restore it as-is instead of
+			// overwriting it with the shared selection.
+			viewCurrentApiConfigName: this.viewLocalState?.currentApiConfigName,
+			providerSettings,
 			viewApiConfiguration: this.viewLocalState?.apiConfiguration,
 		}
 	}
@@ -2375,7 +2431,11 @@ export class ClineProvider
 			)
 		}
 		try {
-			await this.setValue("currentApiConfigName", snapshot.currentApiConfigName)
+			// Restore the shared selection through the ContextProxy directly:
+			// this.setValue would also write the shared value into this view's pin
+			// and its durable viewStates entry, replacing the view's own selection
+			// with another view's choice.
+			await this.contextProxy.setValue("currentApiConfigName", snapshot.currentApiConfigName)
 		} catch (error) {
 			this.log(
 				`[ClineProvider] profile-activation rollback failed for the current profile selection: ${error instanceof Error ? error.message : String(error)}`,
@@ -2389,7 +2449,13 @@ export class ClineProvider
 			)
 		}
 		try {
-			await this._saveViewLocalStateFromMutation({ apiConfiguration: snapshot.viewApiConfiguration })
+			// Restore this view's own pin and overlay together: an absent pin stays
+			// absent (undefined deletes the entry) instead of materializing a pin
+			// from the shared value.
+			await this._saveViewLocalStateFromMutation({
+				currentApiConfigName: snapshot.viewCurrentApiConfigName,
+				apiConfiguration: snapshot.viewApiConfiguration,
+			})
 		} catch (error) {
 			this.log(
 				`[ClineProvider] profile-activation rollback failed for the view-local overlay: ${error instanceof Error ? error.message : String(error)}`,
@@ -2407,6 +2473,7 @@ export class ClineProvider
 	private async _snapshotProviderManagerState(name: string): Promise<ProviderManagerSnapshot> {
 		let previousRecord: ProviderSettingsWithId | undefined
 		let recordExisted: boolean | undefined
+		let claimedCreate = false
 		try {
 			// hasConfig distinguishes a confirmed absence from a read failure; the
 			// generic wrapper getProfile throws for a missing record cannot, because
@@ -2415,6 +2482,12 @@ export class ClineProvider
 			if (recordExisted) {
 				const { name: _name, ...record } = await this.providerSettingsManager.getProfile({ name })
 				previousRecord = record as ProviderSettingsWithId
+			} else {
+				// Confirmed absence: claim the create so a concurrent create of the
+				// same name by another view can make this rollback skip the deletion
+				// that would destroy the other view's successful save.
+				claimProfileCreate(name)
+				claimedCreate = true
 			}
 		} catch {
 			// Unreadable: the restore must not delete what it cannot see.
@@ -2426,7 +2499,7 @@ export class ClineProvider
 		} catch {
 			// Best-effort: the selection restore is skipped when unreadable.
 		}
-		return { previousRecord, recordExisted, previousCurrentProfileName }
+		return { previousRecord, recordExisted, previousCurrentProfileName, claimedCreate }
 	}
 
 	/**
@@ -2453,7 +2526,13 @@ export class ClineProvider
 			if (snapshot.recordExisted === true && snapshot.previousRecord) {
 				await this.providerSettingsManager.saveConfig(name, snapshot.previousRecord)
 			} else if (snapshot.recordExisted === false) {
-				await this.providerSettingsManager.deleteConfig(name)
+				// Delete only when this mutation owns the last create claim for the
+				// name: another view may have created the same profile concurrently
+				// and succeeded, and the record belongs to that save.
+				const lastClaimant = snapshot.claimedCreate ? releaseProfileCreate(name) : true
+				if (lastClaimant) {
+					await this.providerSettingsManager.deleteConfig(name)
+				}
 			}
 		} catch (error) {
 			this.log(
@@ -2498,7 +2577,13 @@ export class ClineProvider
 				const preWriteSnapshot = this._snapshotProfileActivationState()
 				const id = await this.providerSettingsManager.saveConfig(name, providerSettings)
 
-				if (signal.aborted) return id
+				if (signal.aborted) {
+					// The record landed; the create is complete, so the claim is spent.
+					if (managerSnapshot.claimedCreate) {
+						releaseProfileCreate(name)
+					}
+					return id
+				}
 
 				let activationMode: Mode | undefined
 				let priorModeConfigId: string | undefined
@@ -2581,6 +2666,11 @@ export class ClineProvider
 					}
 
 					await this.postStateToWebview()
+					// The create completed: the claim is spent and later rollbacks of
+					// other creates must see this one as finished.
+					if (managerSnapshot.claimedCreate) {
+						releaseProfileCreate(name)
+					}
 					return id
 				} catch (error) {
 					// Compensate every write that may have landed, each restore awaited
@@ -3004,6 +3094,48 @@ export class ClineProvider
 						instance.updateTaskApiHandlerIfNeeded(replacementSettings, { forceRebuild: true })
 					}
 					await instance.persistStickyProviderProfileToCurrentTask(replacementName)
+				}
+				await instance.postStateToWebview()
+			}),
+		)
+	}
+
+	/**
+	 * Re-point live views still pinned to a profile that is being renamed onto
+	 * the new name. A rename keeps the profile id, so a view pinned to the old
+	 * name should follow the record instead of falling back to the shared
+	 * selection: without this, the pin dangles at a name that no longer
+	 * resolves and the buffered overlay keeps serving the pre-rename copy.
+	 * Must run before the old name is deleted.
+	 */
+	public async repointViewLocalStateAfterProfileRename(
+		oldName: string,
+		newName: string,
+		renamedSettings: ProviderSettings | undefined,
+	): Promise<void> {
+		const affected = ClineProvider.getAllInstances().filter((instance) => instance.pinnedProfileName === oldName)
+
+		if (affected.length === 0) {
+			return
+		}
+
+		await Promise.all(
+			affected.map(async (instance) => {
+				// Assigning the settings (even undefined) is what replaces or clears the
+				// overlay: the renamed record's current settings are the only correct
+				// overlay for a pin that now names the new profile.
+				await instance._saveViewLocalStateFromMutation({
+					currentApiConfigName: newName,
+					apiConfiguration: renamedSettings,
+				})
+				// A task running under the old name holds its own API handler and sticky
+				// profile name: re-point both, or the conversation keeps sending the
+				// pre-rename configuration under a name that no longer resolves.
+				if (instance.getCurrentTask()?.taskApiConfigName === oldName) {
+					if (renamedSettings) {
+						instance.updateTaskApiHandlerIfNeeded(renamedSettings, { forceRebuild: true })
+					}
+					await instance.persistStickyProviderProfileToCurrentTask(newName)
 				}
 				await instance.postStateToWebview()
 			}),
