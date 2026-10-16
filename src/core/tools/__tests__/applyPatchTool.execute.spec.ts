@@ -507,6 +507,27 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(mockHandleError).toHaveBeenCalledWith("apply patch", expect.any(PostCommitDurabilityError))
 	})
 
+	it("move: reports a source-unlink failure after a landed durability error as a partial move", async () => {
+		// The destination landed but durability failed, and the source unlink
+		// failed on top of it: the content exists at BOTH paths. Reporting only
+		// the durability error hid the duplicated file from the model; the
+		// half-applied state has its own failure class and must surface here.
+		mockSaveDirectly.mockRejectedValue(
+			new PostCommitDurabilityError(path.resolve("/workspace/project", "src/new.ts"), new Error("fsync failed")),
+		)
+		mockedFsPromises.default.unlink.mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }))
+
+		await tool.execute({ patch: movePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+
+		expect(mockHandleError).toHaveBeenCalledWith("apply patch", expect.any(PartialMoveError))
+		expect(mockTask.fileContextTracker.trackFileContext).not.toHaveBeenCalledWith("src/new.ts", "roo_edited")
+	})
+
 	it("move: reports a source-unlink failure as a partial move instead of a success", async () => {
 		// The destination is published but the source survives: the content now
 		// exists at BOTH paths. Logging the unlink failure and continuing reported

@@ -532,11 +532,14 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						// half of the move - remove the source - so the content is not
 						// left at both paths, then rethrow: a durability failure is not
 						// a completed move.
-						await fs.unlink(absolutePath).catch((unlinkError: unknown) => {
-							console.error(
-								`Move to ${change.movePath} is half-applied: the destination was published but the source could not be removed (${String(unlinkError)}).`,
-							)
-						})
+						try {
+							await fs.unlink(absolutePath)
+						} catch (unlinkError: unknown) {
+							// The unlink failed on top of the durability failure: the content
+							// now exists at BOTH paths, which is the half-applied state the
+							// dedicated failure class exists to report.
+							throw new PartialMoveError(change.path, change.movePath, unlinkError)
+						}
 					}
 					throw error
 				}
