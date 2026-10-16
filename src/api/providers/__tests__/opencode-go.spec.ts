@@ -237,6 +237,20 @@ describe("OpencodeGoHandler", () => {
 			})
 		})
 
+		it("falls back to a stable per-instance session ID when no taskId is provided", async () => {
+			const handler = new OpencodeGoHandler(mockOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const sessionId = mockCreate.mock.calls[0][1]?.headers["x-opencode-session"]
+			expect(sessionId).toEqual(expect.any(String))
+
+			// The same handler instance reuses its session ID across requests.
+			await collectStream(handler.createMessage("sys", messages))
+			expect(mockCreate.mock.calls[1][1]?.headers["x-opencode-session"]).toBe(sessionId)
+		})
+
 		it("forwards the model's default reasoning_effort for reasoning-capable models", async () => {
 			const handler = new OpencodeGoHandler(mockOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
@@ -829,7 +843,9 @@ describe("OpencodeGoHandler", () => {
 					max_completion_tokens: 40_960,
 					reasoning_effort: "medium",
 				}),
-				{},
+				expect.objectContaining({
+					headers: expect.objectContaining({ "x-opencode-session": expect.any(String) }),
+				}),
 			)
 		})
 
@@ -855,7 +871,26 @@ describe("OpencodeGoHandler", () => {
 			mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
 			const handler = new OpencodeGoHandler({ ...mockOptions, includeMaxTokens: true, modelMaxTokens: 4321 })
 			await handler.completePrompt("ping")
-			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 4321 }), {})
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ max_completion_tokens: 4321 }),
+				expect.objectContaining({
+					headers: expect.objectContaining({ "x-opencode-session": expect.any(String) }),
+				}),
+			)
+		})
+
+		it("sends the per-instance session ID on non-streaming completions", async () => {
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+			const handler = new OpencodeGoHandler(mockOptions)
+
+			await handler.completePrompt("ping")
+			const sessionId = mockCreate.mock.calls[0][1]?.headers["x-opencode-session"]
+			expect(sessionId).toEqual(expect.any(String))
+
+			// completePrompt has no taskId metadata, so the per-instance ID is
+			// reused across calls on the same handler.
+			await handler.completePrompt("ping")
+			expect(mockCreate.mock.calls[1][1]?.headers["x-opencode-session"]).toBe(sessionId)
 		})
 	})
 
@@ -932,6 +967,20 @@ describe("OpencodeGoHandler", () => {
 			expect(mockAnthropicCreate.mock.calls[0][1]?.headers).toMatchObject({
 				"x-opencode-session": "conversation-123",
 			})
+		})
+
+		it("falls back to a stable per-instance session ID when no taskId is provided", async () => {
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const sessionId = mockAnthropicCreate.mock.calls[0][1]?.headers["x-opencode-session"]
+			expect(sessionId).toEqual(expect.any(String))
+
+			// The same handler instance reuses its session ID across requests.
+			await collectStream(handler.createMessage("sys", messages))
+			expect(mockAnthropicCreate.mock.calls[1][1]?.headers["x-opencode-session"]).toBe(sessionId)
 		})
 
 		it("streams text, tool-call, usage and cost chunks from the Anthropic stream", async () => {
@@ -1046,6 +1095,37 @@ describe("OpencodeGoHandler", () => {
 			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 2048 }), undefined)
 		})
 
+		it("completePrompt falls back to the model max_tokens when includeMaxTokens is on but modelMaxTokens is unset", async () => {
+			mockAnthropicCreate.mockResolvedValue({
+				content: [{ type: "text", text: "ok" }],
+			})
+
+			const handler = new OpencodeGoHandler({ ...anthropicOptions, includeMaxTokens: true })
+			await handler.completePrompt("ping")
+			const callArgs = mockAnthropicCreate.mock.calls[0][0] as Record<string, unknown>
+			// qwen3.7-max maxTokens (65_536) clamped to 20% of 1M context => 65_536.
+			expect(callArgs.max_tokens).toBe(65_536)
+		})
+
+		it("completePrompt sends the per-instance session ID via the Anthropic client default headers", async () => {
+			mockAnthropicCreate.mockResolvedValue({
+				content: [{ type: "text", text: "ok" }],
+			})
+
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			await handler.completePrompt("ping")
+
+			// completePrompt passes no per-request options; the session header
+			// is a default header on the Anthropic client (streaming overrides
+			// it with taskId when available).
+			expect(mockAnthropicCreate.mock.calls[0][1]).toBeUndefined()
+			expect(Anthropic).toHaveBeenCalledWith(
+				expect.objectContaining({
+					defaultHeaders: expect.objectContaining({ "x-opencode-session": expect.any(String) }),
+				}),
+			)
+		})
+
 		it("completePrompt rethrows non-Error values unchanged from the Anthropic path", async () => {
 			mockAnthropicCreate.mockRejectedValue("not an error")
 			const handler = new OpencodeGoHandler(anthropicOptions)
@@ -1110,7 +1190,7 @@ describe("OpencodeGoHandler", () => {
 			// a pre-aborted signal settles in the cancellation scope before the mock
 			// runs, which would leave this catch untested.
 			const controller = new AbortController()
-			mockAnthropicCreate.mockImplementationOnce(async (_params: unknown, options: { signal?: AbortSignal }) => {
+			mockAnthropicCreate.mockImplementationOnce(async (_params: unknown, _options: { signal?: AbortSignal }) => {
 				controller.abort()
 				throw new AnthropicAbortError()
 			})
@@ -1184,7 +1264,7 @@ describe("OpencodeGoHandler", () => {
 			// scope still lets the model lookup finish and the catch observes an
 			// aborted signal.
 			const controller = new AbortController()
-			mockAnthropicCreate.mockImplementationOnce(async (_params: unknown, options: { signal?: AbortSignal }) => {
+			mockAnthropicCreate.mockImplementationOnce(async (_params: unknown, _options: { signal?: AbortSignal }) => {
 				controller.abort()
 				throw new Error("boom")
 			})
@@ -1232,7 +1312,7 @@ describe("OpencodeGoHandler", () => {
 				expect(await handler.completePrompt("ping")).toBe("response")
 				expect(mockCreate).toHaveBeenCalledWith(
 					expect.objectContaining({ model: expect.any(String), stream: false }),
-					{}, // empty object when no options
+					{ headers: { "x-opencode-session": expect.any(String) } }, // session header only: no signal/timeout
 				)
 			})
 
@@ -1246,7 +1326,7 @@ describe("OpencodeGoHandler", () => {
 				await handler.completePrompt("ping", { abortSignal: controller.signal })
 				expect(mockCreate).toHaveBeenCalledWith(
 					expect.objectContaining({ model: expect.any(String), stream: false }),
-					{ signal: controller.signal },
+					{ signal: controller.signal, headers: { "x-opencode-session": expect.any(String) } },
 				)
 			})
 
@@ -1260,7 +1340,11 @@ describe("OpencodeGoHandler", () => {
 				await handler.completePrompt("ping", { abortSignal: controller.signal, timeoutMs: 10000 })
 				expect(mockCreate).toHaveBeenCalledWith(
 					expect.objectContaining({ model: expect.any(String), stream: false }),
-					{ signal: controller.signal, timeout: 10000 },
+					{
+						signal: controller.signal,
+						timeout: 10000,
+						headers: { "x-opencode-session": expect.any(String) },
+					},
 				)
 			})
 
@@ -1273,7 +1357,7 @@ describe("OpencodeGoHandler", () => {
 				await handler.completePrompt("ping", { timeoutMs: 5000 })
 				expect(mockCreate).toHaveBeenCalledWith(
 					expect.objectContaining({ model: expect.any(String), stream: false }),
-					{ timeout: 5000 },
+					{ timeout: 5000, headers: { "x-opencode-session": expect.any(String) } },
 				)
 			})
 
@@ -1299,7 +1383,7 @@ describe("OpencodeGoHandler", () => {
 				// a pre-aborted signal settles in the cancellation scope before the mock
 				// runs, which would leave this catch untested.
 				const controller = new AbortController()
-				mockCreate.mockImplementationOnce(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				mockCreate.mockImplementationOnce(async (_params: unknown, _options: { signal?: AbortSignal }) => {
 					controller.abort()
 					throw new APIUserAbortError()
 				})
@@ -1342,7 +1426,7 @@ describe("OpencodeGoHandler", () => {
 				expect(result).toBe("response")
 				expect(mockCreate).toHaveBeenCalledWith(
 					expect.objectContaining({ model: expect.any(String), stream: false }),
-					{}, // empty object when no options
+					{ headers: { "x-opencode-session": expect.any(String) } }, // session header only: no signal/timeout
 				)
 			})
 
@@ -1353,7 +1437,7 @@ describe("OpencodeGoHandler", () => {
 				// scope still lets the model lookup finish and the catch observes an
 				// aborted signal.
 				const controller = new AbortController()
-				mockCreate.mockImplementationOnce(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				mockCreate.mockImplementationOnce(async (_params: unknown, _options: { signal?: AbortSignal }) => {
 					controller.abort()
 					throw new Error("boom")
 				})
@@ -1826,6 +1910,22 @@ describe("OpencodeGoHandler", () => {
 			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", addedListener, { once: true })
 			expect(removeListenerSpy).toHaveBeenCalledWith("abort", addedListener)
 			expect(controller.signal.aborted).toBe(false)
+		})
+
+		it("falls back to a stable per-instance session ID when no taskId is provided", async () => {
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const requestOptions = mockResponsesCreate.mock.calls[0][1] as { headers: Record<string, string> }
+			const sessionId = requestOptions.headers["x-opencode-session"]
+			expect(sessionId).toEqual(expect.any(String))
+
+			// The same handler instance reuses its session ID across requests.
+			await collectStream(handler.createMessage("sys", messages))
+			const secondOptions = mockResponsesCreate.mock.calls[1][1] as { headers: Record<string, string> }
+			expect(secondOptions.headers["x-opencode-session"]).toBe(sessionId)
 		})
 
 		it("closes the Responses iterator when the consumer stops early", async () => {
@@ -2336,7 +2436,10 @@ describe("OpencodeGoHandler", () => {
 
 			await handler.completePrompt("ping", { abortSignal: controller.signal })
 
-			expect(mockResponsesCreate.mock.calls[0][1]).toEqual({ signal: controller.signal })
+			expect(mockResponsesCreate.mock.calls[0][1]).toEqual({
+				signal: controller.signal,
+				headers: { "x-opencode-session": expect.any(String) },
+			})
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
@@ -2346,7 +2449,10 @@ describe("OpencodeGoHandler", () => {
 
 			await handler.completePrompt("ping", { timeoutMs: 5_000 })
 
-			expect(mockResponsesCreate.mock.calls[0][1]).toEqual({ timeout: 5_000 })
+			expect(mockResponsesCreate.mock.calls[0][1]).toEqual({
+				timeout: 5_000,
+				headers: { "x-opencode-session": expect.any(String) },
+			})
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
@@ -2373,7 +2479,7 @@ describe("OpencodeGoHandler", () => {
 			// a pre-aborted signal settles in the cancellation scope before the mock
 			// runs, which would leave this catch untested.
 			const controller = new AbortController()
-			mockResponsesCreate.mockImplementationOnce(async (_body: unknown, options: { signal?: AbortSignal }) => {
+			mockResponsesCreate.mockImplementationOnce(async (_body: unknown, _options: { signal?: AbortSignal }) => {
 				controller.abort()
 				throw new APIUserAbortError()
 			})
@@ -2402,6 +2508,17 @@ describe("OpencodeGoHandler", () => {
 			)
 			expect(error).toMatchObject({ name: "AbortError" })
 			expect((error as Error).message).toBe("The Opencode Go request was aborted")
+		})
+
+		it("completePrompt sends the per-instance session ID to the Responses endpoint", async () => {
+			mockResponsesCreate.mockResolvedValue({ output_text: "Hello!" })
+			const handler = new OpencodeGoHandler(lunaOptions)
+
+			await handler.completePrompt("ping")
+
+			expect(mockResponsesCreate.mock.calls[0][1]?.headers).toMatchObject({
+				"x-opencode-session": expect.any(String),
+			})
 		})
 
 		it("completePrompt wraps errors with an Opencode Go-specific message", async () => {

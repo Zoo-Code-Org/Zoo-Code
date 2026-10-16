@@ -4,7 +4,7 @@
 vitest.mock("vscode", () => ({
 	workspace: {
 		getConfiguration: vitest.fn(() => ({
-			get: vitest.fn((key: string, defaultValue: any) => defaultValue),
+			get: vitest.fn((_key: string, defaultValue: any) => defaultValue),
 		})),
 	},
 }))

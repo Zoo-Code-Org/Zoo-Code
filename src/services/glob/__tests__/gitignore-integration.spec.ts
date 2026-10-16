@@ -87,7 +87,7 @@ describe("list-files gitignore integration", () => {
 		mockSpawn.mockReturnValue(createMockRipgrepProcess([rgFiles]) as any)
 
 		// Call listFiles in recursive mode
-		const [files, didHitLimit] = await listFiles(tempDir, true, 100)
+		const [files] = await listFiles(tempDir, true, 100)
 
 		// Filter out only directories from the results
 		const directoriesInResult = files.filter((f) => f.endsWith("/"))
@@ -120,7 +120,7 @@ describe("list-files gitignore integration", () => {
 		mockSpawn.mockReturnValue(createMockRipgrepProcess() as any)
 
 		// Call listFiles in recursive mode
-		const [files, didHitLimit] = await listFiles(tempDir, true, 100)
+		const [files] = await listFiles(tempDir, true, 100)
 
 		// Filter out only directories from the results
 		const directoriesInResult = files.filter((f) => f.endsWith("/"))
@@ -149,10 +149,10 @@ describe("list-files gitignore integration", () => {
 		mockSpawn.mockReturnValue(createMockRipgrepProcess([rgFiles]) as any)
 
 		// Call listFiles in NON-recursive mode
-		const [files, didHitLimit] = await listFiles(tempDir, false, 100)
+		const [files] = await listFiles(tempDir, false, 100)
 
 		// Verify ripgrep was called without --no-ignore-vcs (should respect .gitignore)
-		const [rgPath, args] = mockSpawn.mock.calls[0]
+		const [, args] = mockSpawn.mock.calls[0]
 		expect(args).not.toContain("--no-ignore-vcs")
 
 		// Filter out only directories from the results

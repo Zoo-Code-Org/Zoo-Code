@@ -120,6 +120,36 @@ describe("OpenAICompatibleHandler", () => {
 			expect(textChunks[0].text).toBe("Test response")
 		})
 
+		it("should map cache read and reasoning tokens from ai v7 usage details", async () => {
+			async function* mockFullStream() {
+				yield { type: "text-delta", text: "ok" }
+			}
+
+			mockStreamText.mockReturnValue({
+				fullStream: mockFullStream(),
+				usage: Promise.resolve({
+					inputTokens: 20,
+					outputTokens: 10,
+					inputTokenDetails: { cacheReadTokens: 7 },
+					outputTokenDetails: { reasoningTokens: 4 },
+					raw: {},
+				}),
+			})
+
+			const chunks: ApiStreamChunk[] = []
+			for await (const chunk of handler.createMessage(systemPrompt, messages)) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.find((chunk) => chunk.type === "usage")).toEqual({
+				type: "usage",
+				inputTokens: 20,
+				outputTokens: 10,
+				cacheReadTokens: 7,
+				reasoningTokens: 4,
+			})
+		})
+
 		it("should handle multiple stream parts and yield usage metrics", async () => {
 			async function* mockFullStream() {
 				yield { type: "text-delta", text: "First part" }

@@ -15,7 +15,6 @@ import {
 	AnthropicReasoningParams,
 	AnthropicProviderReasoningParams,
 	OpenAiReasoningParams,
-	RooReasoningParams,
 	GeminiReasoningParams,
 	GeminiThinkingLevel,
 } from "../reasoning"
