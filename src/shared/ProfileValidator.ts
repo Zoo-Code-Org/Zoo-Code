@@ -70,6 +70,7 @@ export class ProfileValidator {
 			case providerIdentifiers.lmstudio:
 				return profile.lmStudioModelId
 			case providerIdentifiers.vscodeLm:
+			case providerIdentifiers.githubCopilot:
 				// We probably need something more flexible for this one, if we need to really support it here.
 				return profile.vsCodeLmModelSelector?.id
 			case providerIdentifiers.openrouter:

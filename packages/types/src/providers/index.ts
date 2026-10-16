@@ -116,6 +116,7 @@ export function getProviderDefaultModelId(
 		case providerIdentifiers.lmstudio:
 			return NO_DEFAULT_MODEL_ID
 		case providerIdentifiers.vscodeLm:
+		case providerIdentifiers.githubCopilot:
 			return vscodeLlmDefaultModelId
 		case providerIdentifiers.sambanova:
 			return sambaNovaDefaultModelId
