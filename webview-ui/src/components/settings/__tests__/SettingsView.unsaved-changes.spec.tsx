@@ -8,6 +8,7 @@ import React from "react"
 
 import SettingsView from "../SettingsView"
 import { vscode } from "@src/utils/vscode"
+import { OpenAICodexWebSocketToggle } from "../providers/OpenAICodexWebSocketToggle"
 
 const postMessage = vi.spyOn(vscode, "postMessage").mockImplementation(() => {})
 
@@ -683,6 +684,45 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 			},
 		})
 	})
+
+	it.each([true, false, undefined])(
+		"buffers Codex WebSocket edits from %s until Save despite a live refresh",
+		async (enabled) => {
+			const configuration: ProviderSettings = {
+				apiProvider: providerIdentifiers.openaiCodex,
+				apiModelId: "gpt-5.6-sol",
+				openAiCodexUseWebSocket: enabled,
+			}
+			vi.mocked(useExtensionState, { partial: true }).mockReturnValue({
+				...defaultExtensionState,
+				apiConfiguration: configuration,
+			})
+			vi.mocked(ApiOptions).mockImplementation(({ apiConfiguration, setApiConfigurationField }) => (
+				<OpenAICodexWebSocketToggle
+					value={apiConfiguration.openAiCodexUseWebSocket}
+					onChange={(value) => setApiConfigurationField("openAiCodexUseWebSocket", value)}
+				/>
+			))
+			const view = renderWithExtensionState(<SettingsView onDone={vi.fn()} />, { queryClient })
+			fireEvent.click(await screen.findByRole("checkbox", { name: "settings:openAiCodexWebSocket.label" }))
+			vi.mocked(useExtensionState, { partial: true }).mockReturnValue({
+				...defaultExtensionState,
+				apiConfiguration: { ...configuration },
+			})
+			view.rerender(<SettingsView onDone={vi.fn()} />)
+			const checkbox = screen.getByRole("checkbox", { name: "settings:openAiCodexWebSocket.label" })
+			if (enabled) expect(checkbox).not.toBeChecked()
+			else expect(checkbox).toBeChecked()
+			expect(configuration.openAiCodexUseWebSocket).toBe(enabled)
+			expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+			fireEvent.click(screen.getByTestId("save-button"))
+			expect(postMessage).toHaveBeenCalledWith({
+				type: "upsertApiConfiguration",
+				text: "default",
+				apiConfiguration: { ...configuration, openAiCodexUseWebSocket: !enabled },
+			})
+		},
+	)
 
 	it("keeps OpenAI-compatible reasoning edits cached until Save despite a live state refresh", async () => {
 		const configuration: ProviderSettings = {
