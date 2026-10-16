@@ -1,7 +1,7 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from "react"
 import { VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 import { Trans } from "react-i18next"
-import { ChevronsUpDown, Check, X, Info } from "lucide-react"
+import { ChevronsUpDown, Info } from "lucide-react"
 
 import {
 	type ProviderSettings,
@@ -13,21 +13,9 @@ import {
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { useSelectedModel } from "@/components/ui/hooks/useSelectedModel"
-import { filterModels } from "./utils/organizationFilters"
 import { cn } from "@src/lib/utils"
-import {
-	Command,
-	CommandEmpty,
-	CommandGroup,
-	CommandInput,
-	CommandItem,
-	CommandList,
-	Popover,
-	PopoverContent,
-	PopoverTrigger,
-	Button,
-} from "@src/components/ui"
-import { useEscapeKey } from "@src/hooks/useEscapeKey"
+import { Button } from "@src/components/ui"
+import { ModelSelect } from "@/components/ui/model-select/ModelSelect"
 
 import { ModelInfoView } from "./ModelInfoView"
 import { ApiErrorMessage } from "./ApiErrorMessage"
@@ -96,23 +84,20 @@ export const ModelPicker = ({
 }: ModelPickerProps) => {
 	const { t } = useAppTranslation()
 
-	const [open, setOpen] = useState(false)
 	const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
 	const isInitialized = useRef(false)
-	const searchInputRef = useRef<HTMLInputElement>(null)
-	const selectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-	const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
 	const { id: selectedModelId, info: selectedModelInfo } = useSelectedModel(apiConfiguration)
 
-	// Get the display value for the current selection
-	// If displayTransform is provided, use it to convert the stored value to a display string
+	// Derive the display value for the current selection. If displayTransform
+	// is provided, convert the stored value to a display string; otherwise
+	// use the resolved selected model id from useSelectedModel.
 	const displayValue = useMemo(() => {
 		if (displayTransform) {
 			const storedValue = apiConfiguration[modelIdKey]
-			return storedValue ? displayTransform(storedValue) : undefined
+			return storedValue ? displayTransform(storedValue) : ""
 		}
-		return selectedModelId
+		return selectedModelId ?? ""
 	}, [displayTransform, apiConfiguration, modelIdKey, selectedModelId])
 
 	const activeProvider =
@@ -120,175 +105,50 @@ export const ModelPicker = ({
 			? undefined
 			: apiConfiguration.apiProvider
 
-	const modelIds = useMemo(() => {
-		const filteredModels = filterModels(models, activeProvider, organizationAllowList)
-
-		// Include the currently selected model even if deprecated (so users can see what they have selected)
-		// But filter out other deprecated models from being newly selectable
-		const availableModels = Object.entries(filteredModels ?? {})
-			.filter(([modelId, modelInfo]) => {
-				// Always include the currently selected model
-				if (modelId === selectedModelId) return true
-				// Filter out deprecated models that aren't currently selected
-				return !modelInfo.deprecated
-			})
-			.reduce(
-				(acc, [modelId, modelInfo]) => {
-					acc[modelId] = modelInfo
-					return acc
-				},
-				{} as Record<string, ModelInfo>,
-			)
-
-		return Object.keys(availableModels).sort((a, b) => a.localeCompare(b))
-	}, [models, activeProvider, organizationAllowList, selectedModelId])
-
-	const [searchValue, setSearchValue] = useState("")
-
 	const onSelect = useCallback(
 		(modelId: string) => {
-			if (!modelId) {
-				return
-			}
-
-			setOpen(false)
-
-			// Apply value transform if provided (e.g., for VSCodeLM selector)
+			if (!modelId) return
 			const valueToStore = valueTransform ? valueTransform(modelId) : modelId
 			setApiConfigurationField(modelIdKey, valueToStore as ProviderSettings[ModelIdKey])
-
-			// Call the optional change callback
 			onModelChange?.(modelId)
-
-			// Clear any existing timeout
-			if (selectTimeoutRef.current) {
-				clearTimeout(selectTimeoutRef.current)
-			}
-
-			// Delay to ensure the popover is closed before setting the search value.
-			selectTimeoutRef.current = setTimeout(() => setSearchValue(""), 100)
 		},
 		[modelIdKey, setApiConfigurationField, valueTransform, onModelChange],
 	)
 
-	const onOpenChange = useCallback((open: boolean) => {
-		setOpen(open)
-
-		// Abandon the current search if the popover is closed.
-		if (!open) {
-			// Clear any existing timeout
-			if (closeTimeoutRef.current) {
-				clearTimeout(closeTimeoutRef.current)
-			}
-
-			// Clear the search value when closing instead of prefilling it
-			closeTimeoutRef.current = setTimeout(() => setSearchValue(""), 100)
-		}
-	}, [])
-
-	const onClearSearch = useCallback(() => {
-		setSearchValue("")
-		searchInputRef.current?.focus()
-	}, [])
-
+	// Auto-initialize a default model when none is selected yet. This runs
+	// only once and only for the settings picker (the chat selector never
+	// auto-writes configuration).
 	useEffect(() => {
-		if (!selectedModelId && !isInitialized.current) {
-			const initialValue = modelIds.includes(selectedModelId) ? selectedModelId : defaultModelId
+		if (isInitialized.current) return
+		if (!selectedModelId) {
+			const initialValue = selectedModelId === defaultModelId ? selectedModelId : defaultModelId
 			setApiConfigurationField(modelIdKey, initialValue, false) // false = automatic initialization
 		}
-
 		isInitialized.current = true
-	}, [modelIds, setApiConfigurationField, modelIdKey, selectedModelId, defaultModelId])
-
-	// Cleanup timeouts on unmount to prevent test flakiness
-	useEffect(() => {
-		return () => {
-			if (selectTimeoutRef.current) {
-				clearTimeout(selectTimeoutRef.current)
-			}
-			if (closeTimeoutRef.current) {
-				clearTimeout(closeTimeoutRef.current)
-			}
-		}
-	}, [])
-
-	// Use the shared ESC key handler hook
-	useEscapeKey(open, () => setOpen(false))
+	}, [selectedModelId, defaultModelId, modelIdKey, setApiConfigurationField])
 
 	return (
 		<>
 			<div>
 				<label className="block font-medium mb-1">{label ?? t("settings:modelPicker.label")}</label>
-				<Popover open={open} onOpenChange={onOpenChange}>
-					<PopoverTrigger asChild>
+				<ModelSelect
+					models={models}
+					value={displayValue}
+					onChange={onSelect}
+					activeProvider={activeProvider}
+					organizationAllowList={organizationAllowList}
+					contentClassName="w-[var(--radix-popover-trigger-width)]"
+					renderTrigger={({ displayValue: value, placeholder }) => (
 						<Button
 							variant="combobox"
 							role="combobox"
-							aria-expanded={open}
-							className="w-full justify-between"
+							className={cn("w-full justify-between")}
 							data-testid="model-picker-button">
-							<div className="truncate">{displayValue ?? t("settings:common.select")}</div>
+							<div className="truncate">{value || placeholder}</div>
 							<ChevronsUpDown className="opacity-50" />
 						</Button>
-					</PopoverTrigger>
-					<PopoverContent className="p-0 w-[var(--radix-popover-trigger-width)]">
-						<Command>
-							<div className="relative">
-								<CommandInput
-									ref={searchInputRef}
-									value={searchValue}
-									onValueChange={setSearchValue}
-									placeholder={t("settings:modelPicker.searchPlaceholder")}
-									className="h-9 mr-4"
-									data-testid="model-input"
-								/>
-								{searchValue.length > 0 && (
-									<div className="absolute right-2 top-0 bottom-0 flex items-center justify-center">
-										<X
-											className="text-vscode-input-foreground opacity-50 hover:opacity-100 size-4 p-0.5 cursor-pointer"
-											onClick={onClearSearch}
-										/>
-									</div>
-								)}
-							</div>
-							<CommandList>
-								<CommandEmpty>
-									{searchValue && (
-										<div className="py-2 px-1 text-sm">
-											{t("settings:modelPicker.noMatchFound")}
-										</div>
-									)}
-								</CommandEmpty>
-								<CommandGroup>
-									{modelIds.map((model) => (
-										<CommandItem
-											key={model}
-											value={model}
-											onSelect={onSelect}
-											data-testid={`model-option-${model}`}>
-											<span className="truncate" title={model}>
-												{model}
-											</span>
-											<Check
-												className={cn(
-													"size-4 p-0.5 ml-auto",
-													model === displayValue ? "opacity-100" : "opacity-0",
-												)}
-											/>
-										</CommandItem>
-									))}
-								</CommandGroup>
-							</CommandList>
-							{searchValue && !modelIds.includes(searchValue) && (
-								<div className="p-1 border-t border-vscode-input-border">
-									<CommandItem data-testid="use-custom-model" value={searchValue} onSelect={onSelect}>
-										{t("settings:modelPicker.useCustomModel", { modelId: searchValue })}
-									</CommandItem>
-								</div>
-							)}
-						</Command>
-					</PopoverContent>
-				</Popover>
+					)}
+				/>
 			</div>
 			{errorMessage && <ApiErrorMessage errorMessage={errorMessage} />}
 			{selectedModelInfo?.deprecated && (

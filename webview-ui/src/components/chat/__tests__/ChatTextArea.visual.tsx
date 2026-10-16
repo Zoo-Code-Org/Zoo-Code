@@ -17,7 +17,7 @@ for (const theme of visualThemes) {
 		await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
 		for (
 			let index = 0;
-			index < 10 && !(await editor.evaluate((element) => element === document.activeElement));
+			index < 15 && !(await editor.evaluate((element) => element === document.activeElement));
 			index++
 		) {
 			await page.keyboard.press("Tab")
