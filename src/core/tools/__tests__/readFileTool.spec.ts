@@ -22,9 +22,8 @@ import type { Task, ToolExecutionContext } from "../../task/Task"
 
 import { isBinaryFile } from "isbinaryfile"
 
-import { readFileTool, ReadFileTool } from "../ReadFileTool"
+import { readFileTool } from "../ReadFileTool"
 import { ObservationRegistry } from "../../task/observationRegistry"
-import { computeVersionToken } from "../../../utils/versionToken"
 import { formatResponse } from "../../prompts/responses"
 import { validateImageForProcessing, processImageFile, isSupportedImageFormat } from "../helpers/imageHelpers"
 import { extractTextFromFile, getSupportedBinaryFormats } from "../../../integrations/misc/extract-text"
