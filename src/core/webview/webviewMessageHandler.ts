@@ -2359,8 +2359,23 @@ export const webviewMessageHandler = async (
 						id,
 					})
 
-					// Delete the old configuration.
-					await provider.providerSettingsManager.deleteConfig(oldName)
+					// Delete the old configuration. A failure here would leave both names
+					// resolving and every live view pinned to the new name: undo the re-point
+					// and drop the new record so the pre-rename state survives intact.
+					try {
+						await provider.providerSettingsManager.deleteConfig(oldName)
+					} catch (error) {
+						try {
+							await provider.repointViewLocalStateAfterProfileRename(newName, oldName, {
+								...message.apiConfiguration,
+								id,
+							})
+							await provider.providerSettingsManager.deleteConfig(newName)
+						} catch {
+							// Best-effort compensation; the original failure is what callers see.
+						}
+						throw error
+					}
 
 					// Re-activate to update the global settings related to the
 					// currently activated provider profile.
