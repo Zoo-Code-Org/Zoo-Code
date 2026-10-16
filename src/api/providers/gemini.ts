@@ -27,6 +27,9 @@ import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, Complete
 import { BaseProvider } from "./base-provider"
 import { NOT_PROVIDED } from "./constants"
 import { parseVertexJsonCredentials } from "./utils/vertex-credentials"
+import { createAbortError, isRequestAborted, throwIfAborted } from "./utils/abort-signal"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
+import { getRequestTimeoutMs } from "./utils/request-timeout"
 
 type GeminiHandlerOptions = ApiHandlerOptions & {
 	isVertex?: boolean
@@ -344,7 +347,22 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			}
 		}
 
-		const params: GenerateContentParameters = { model, contents, config }
+		// Fast-fail if the request was already aborted before building.
+		throwIfAborted(metadata?.abortSignal)
+
+		// The request-local controller is the provider-owned abort handle; the
+		// signal the SDK receives merges it with the external Task signal
+		// (AbortSignal.any inside RequestConfigBuilder), so external aborts
+		// cancel the in-flight request without manual listener management.
+		const requestBuilder = new RequestConfigBuilder<{ signal?: AbortSignal }>()
+		requestBuilder.addMergedSignal(new AbortController(), metadata)
+		const requestSignal = requestBuilder.getOption("signal")
+
+		const params: GenerateContentParameters = {
+			model,
+			contents,
+			config: requestSignal ? { ...config, abortSignal: requestSignal } : config,
+		}
 
 		try {
 			const result = await this.client.models.generateContentStream(params)
@@ -360,6 +378,12 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			let toolCallCounter = 0
 
 			for await (const chunk of result) {
+				// Stop consuming buffered chunks once the request is aborted (the
+				// SDK iterator may keep delivering buffered content after abort).
+				if (requestSignal?.aborted) {
+					break
+				}
+
 				// Track the final structured response (per SDK pattern: candidate.finishReason)
 				if (chunk.candidates && chunk.candidates[0]?.finishReason) {
 					finalResponse = chunk as { responseId?: string }
@@ -391,6 +415,9 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 							if (part.thought) {
 								// This is a thinking/reasoning part
 								if (part.text) {
+									// Re-check before emitting: the consumer may have aborted
+									// while processing a previously yielded part of this chunk.
+									throwIfAborted(requestSignal)
 									yield { type: "reasoning", text: part.text }
 								}
 							} else if (part.functionCall) {
@@ -400,6 +427,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 								const args = JSON.stringify(part.functionCall.args)
 
 								// Emit name first
+								throwIfAborted(requestSignal)
 								yield {
 									type: "tool_call_partial",
 									index: toolCallCounter,
@@ -409,6 +437,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 								}
 
 								// Then emit arguments
+								throwIfAborted(requestSignal)
 								yield {
 									type: "tool_call_partial",
 									index: toolCallCounter,
@@ -421,6 +450,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 							} else {
 								// This is regular content
 								if (part.text) {
+									throwIfAborted(requestSignal)
 									yield { type: "text", text: part.text }
 								}
 							}
@@ -429,6 +459,9 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 				}
 
 				// Fallback to the original text property if no candidates structure
+				// (no pre-yield guard here: this is the only yield of a fallback
+				// chunk, and the top-of-loop check runs without a suspension point
+				// before it).
 				else if (chunk.text) {
 					yield { type: "text", text: chunk.text }
 				}
@@ -437,6 +470,11 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 					lastUsageMetadata = chunk.usageMetadata
 				}
 			}
+
+			// An aborted request must surface as an AbortError, not as a normal
+			// stream completion: the top-of-loop break (or a swallowed mid-stream
+			// abort) ends the loop without throwing otherwise.
+			throwIfAborted(requestSignal)
 
 			if (finalResponse?.responseId) {
 				// Capture responseId so Task.addToApiConversationHistory can store it
@@ -473,6 +511,11 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 				}
 			}
 		} catch (error) {
+			// Aborted request: covers both the external signal and SDK-native
+			// abort errors that may surface before the signal flag propagates.
+			if (isRequestAborted(error, metadata?.abortSignal)) {
+				throw createAbortError("Gemini")
+			}
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model, "createMessage")
 			TelemetryService.instance.captureException(apiError)
@@ -573,7 +616,10 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 		return citationLinks.join(", ")
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Fast-fail if the request was already aborted before building.
+		throwIfAborted(options?.abortSignal)
+
 		const { id: model, info } = this.getModel()
 
 		try {
@@ -581,12 +627,27 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			const temperatureConfig: number | undefined = supportsTemperature
 				? (this.options.modelTemperature ?? info.defaultTemperature ?? 1)
 				: info.defaultTemperature
+			const httpOpts: { timeout?: number; baseUrl?: string } = {}
+			// Per the abort-signal series contract, timeoutMs <= 0 means 'no per-request
+			// timeout': the option is omitted entirely (some SDKs treat 0 as an
+			// immediate timeout).
+			const timeoutMs = getRequestTimeoutMs(options?.timeoutMs)
+			if (timeoutMs !== undefined) {
+				httpOpts.timeout = timeoutMs
+			}
+			if (this.options.googleGeminiBaseUrl) {
+				httpOpts.baseUrl = this.options.googleGeminiBaseUrl
+			}
 
 			const promptConfig: GenerateContentConfig = {
-				httpOptions: this.options.googleGeminiBaseUrl
-					? { baseUrl: this.options.googleGeminiBaseUrl }
-					: undefined,
+				httpOptions: Object.keys(httpOpts).length > 0 ? httpOpts : undefined,
 				temperature: temperatureConfig,
+			}
+
+			// @google/genai expects request cancellation on config.abortSignal
+			// (not httpOptions.signal), so the signal is passed directly to the config.
+			if (options?.abortSignal) {
+				promptConfig.abortSignal = options.abortSignal
 			}
 
 			const request = {
@@ -609,6 +670,11 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 
 			return text
 		} catch (error) {
+			// Aborted request: covers both the external signal and SDK-native
+			// abort errors that may surface before the signal flag propagates.
+			if (isRequestAborted(error, options?.abortSignal)) {
+				throw createAbortError("Gemini")
+			}
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model, "completePrompt")
 			TelemetryService.instance.captureException(apiError)
