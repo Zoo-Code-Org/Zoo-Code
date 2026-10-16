@@ -569,6 +569,34 @@ describe("API task controls - per-view review fixes", () => {
 			expect(update).toHaveBeenCalledWith("mode", "ask")
 			await expect(api.approveTaskAsk("missing-task")).resolves.toBe(false)
 		})
+
+		it("rejects PII keys and malformed values before touching global-state storage", async () => {
+			const get = vi.fn().mockReturnValue("stored")
+			const update = vi.fn().mockResolvedValue(undefined)
+			sidebarProvider.context = {
+				extensionMode: vscode.ExtensionMode.Test,
+				globalState: { get, update },
+			}
+			api = new API(
+				outputChannel,
+				asClineProvider(sidebarProvider),
+				makeTabCreatingFactory(sidebarProvider, outputChannel),
+			)
+
+			// Task history carries user PII and stays unreachable even though it is a
+			// plain GlobalState key.
+			expect(() => api.getGlobalState("taskHistory")).toThrow("PII-bearing key")
+			await expect(api.setGlobalState("taskHistory", [])).rejects.toThrow("PII-bearing key")
+			// Values are runtime data: a malformed value is rejected before storage.
+			await expect(api.setGlobalState("alwaysAllowWrite", {} as never)).rejects.toThrow("invalid value for key")
+			// Provider-settings keys have no global-settings schema entry.
+			await expect(api.setGlobalState("apiModelId", "x")).rejects.toThrow("without a value schema")
+			expect(update).not.toHaveBeenCalled()
+			expect(get).not.toHaveBeenCalled()
+			// An allowed key with a valid value still works.
+			await api.setGlobalState("mode", "ask")
+			expect(update).toHaveBeenCalledWith("mode", "ask")
+		})
 	})
 
 	describe("startNewTask view-state readiness", () => {

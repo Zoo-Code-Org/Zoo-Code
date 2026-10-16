@@ -23,6 +23,8 @@ import {
 	TaskCommandName,
 	isSecretStateKey,
 	isSensitiveProviderConfigKey,
+	isGlobalStateKey,
+	globalSettingsSchema,
 	PROVIDER_SETTINGS_KEYS,
 	IpcOrigin,
 	IpcMessageType,
@@ -786,9 +788,15 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		// *ApiKey shapes, and SENSITIVE_PROVIDER_CONFIG_KEYS covers credential
 		// values that use other name shapes (header maps, session tokens,
 		// service-account JSON, credential-file paths).
+		// Retired providers keep their legacy fields through passthrough, and those
+		// names (e.g. groqApiKey, huggingFaceSecurityToken) predate the explicit
+		// secret lists and appear in neither. Treat credential-shaped key names as
+		// secret on this flattened surface so a retired profile cannot expose them.
+		const legacyCredentialKeyRe = /(?:ApiKey|ApiToken|SecurityToken|AccessToken|SessionToken|Credentials|Secret)$/
 		const configuration = Object.fromEntries(
 			Object.entries({ ...shared, ...apiConfiguration }).filter(
-				([key]) => !isSecretStateKey(key) && !isSensitiveProviderConfigKey(key),
+				([key]) =>
+					!isSecretStateKey(key) && !isSensitiveProviderConfigKey(key) && !legacyCredentialKeyRe.test(key),
 			),
 		)
 		// An explicit apiProvider: undefined inside the nested profile clobbers the
@@ -810,6 +818,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		const profileName = values.currentApiConfigName || "default"
 		let previousProfile: ProviderSettings | undefined
 		let hadPreviousProfile = false
+		let profileLookupInconclusive = false
 		try {
 			const { name: _name, ...profile } = await this.sidebarProvider.providerSettingsManager.getProfile({
 				name: profileName,
@@ -818,7 +827,15 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 			hadPreviousProfile = true
 		} catch {
 			// A missing profile is the normal first-save case: compensation then
-			// removes the profile this call creates.
+			// removes the profile this call creates. A transient read failure must not
+			// be mistaken for absence or compensation would delete a profile that
+			// exists: confirm with hasConfig, and when even that fails, leave the
+			// stored record alone during compensation.
+			try {
+				hadPreviousProfile = await this.sidebarProvider.providerSettingsManager.hasConfig(profileName)
+			} catch {
+				profileLookupInconclusive = true
+			}
 		}
 		const previousModeConfigs: Array<[string, string | undefined]> = values.modeApiConfigs
 			? await Promise.all(
@@ -882,10 +899,16 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 					}
 				}
 				try {
-					if (hadPreviousProfile) {
-						await this.sidebarProvider.providerSettingsManager.saveConfig(profileName, previousProfile!)
-					} else {
+					if (hadPreviousProfile && previousProfile) {
+						await this.sidebarProvider.providerSettingsManager.saveConfig(profileName, previousProfile)
+					} else if (!hadPreviousProfile && !profileLookupInconclusive) {
 						await this.sidebarProvider.providerSettingsManager.deleteConfig(profileName)
+					} else {
+						// The profile exists but its read failed: there is no snapshot to
+						// restore and deleting would destroy it - leave it as-is.
+						this.log(
+							`[API#setConfiguration] profile lookup for "${profileName}" was inconclusive; leaving the stored record untouched during compensation.`,
+						)
 					}
 				} catch (restoreError) {
 					this.log(
@@ -912,11 +935,58 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 
 	public getGlobalState<K extends keyof GlobalState>(key: K): GlobalState[K] {
 		this.assertTestOnlyApi("getGlobalState")
+		// The generic only constrains typed callers; a crafted runtime key can be
+		// any string. Refuse keys outside the settings schema before storage sees
+		// them, so the test-only API cannot read arbitrary global state.
+		if (!isGlobalStateKey(key)) {
+			throw new Error(`getGlobalState received a key outside the settings schema: ${String(key)}`)
+		}
+		// The global-state union still contains credential-bearing keys (API keys,
+		// headers, OAuth paths) that are not part of the secret-state union; refuse
+		// them before storage access so the test-only API cannot read credentials.
+		if (isSecretStateKey(String(key)) || isSensitiveProviderConfigKey(String(key))) {
+			throw new Error(`getGlobalState received a credential-bearing key: ${String(key)}`)
+		}
+		// Task history carries user PII (task texts): out of bounds for this surface
+		// even though it is a plain GlobalState key.
+		if (key === "taskHistory") {
+			throw new Error(`getGlobalState received a PII-bearing key: ${String(key)}`)
+		}
 		return this.context.globalState.get<GlobalState[K]>(key)
 	}
 
 	public async setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): Promise<void> {
 		this.assertTestOnlyApi("setGlobalState")
+		// Same runtime boundary as getGlobalState: an unvalidated key must not be
+		// persisted into global state.
+		if (!isGlobalStateKey(key)) {
+			throw new Error(`setGlobalState received a key outside the settings schema: ${String(key)}`)
+		}
+		// Same credential boundary as getGlobalState: a crafted runtime key must not
+		// be able to persist secrets through the test-only surface.
+		if (isSecretStateKey(String(key)) || isSensitiveProviderConfigKey(String(key))) {
+			throw new Error(`setGlobalState received a credential-bearing key: ${String(key)}`)
+		}
+		// Task history carries user PII (task texts): out of bounds for this surface
+		// even though it is a plain GlobalState key.
+		if (key === "taskHistory") {
+			throw new Error(`setGlobalState received a PII-bearing key: ${String(key)}`)
+		}
+		// The value is runtime data: parse it against the key's schema so malformed
+		// state never reaches durable storage. Keys without a global-settings schema
+		// entry (provider settings) are not seedable through this surface.
+		const valueSchema = (
+			globalSettingsSchema.shape as Record<
+				string,
+				{ safeParse: (value: unknown) => { success: boolean } } | undefined
+			>
+		)[String(key)]
+		if (!valueSchema) {
+			throw new Error(`setGlobalState received a key without a value schema: ${String(key)}`)
+		}
+		if (!valueSchema.safeParse(value).success) {
+			throw new Error(`setGlobalState received an invalid value for key: ${String(key)}`)
+		}
 		await this.context.globalState.update(key, value)
 	}
 

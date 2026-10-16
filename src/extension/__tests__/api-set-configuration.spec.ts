@@ -37,6 +37,7 @@ describe("API.setConfiguration", () => {
 			providerSettingsManager: {
 				saveConfig: vi.fn().mockResolvedValue("default-id"),
 				getProfile: vi.fn().mockRejectedValue(new Error("profile not found")),
+				hasConfig: vi.fn().mockResolvedValue(false),
 			},
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),
 		})
@@ -116,6 +117,7 @@ describe("API.setConfiguration", () => {
 			},
 			providerSettingsManager: {
 				getProfile: vi.fn().mockRejectedValue(new Error("profile not found")),
+				hasConfig: vi.fn().mockResolvedValue(false),
 				getModeConfigId: vi.fn().mockResolvedValue("old-mode-id"),
 				saveConfig: vi.fn().mockResolvedValue("default-id"),
 				setModeConfig: vi.fn().mockRejectedValue(new Error("mode write failed")),
@@ -150,6 +152,52 @@ describe("API.setConfiguration", () => {
 		})
 	})
 
+	it("leaves the stored profile alone when a transient read failure makes the lookup inconclusive", async () => {
+		const provider = Object.assign({} as ClineProvider, {
+			context: {},
+			on: vi.fn(),
+			getValue: vi.fn((key: string) => (key === "currentApiConfigName" ? "old-name" : undefined)),
+			setValues: vi.fn().mockResolvedValue(undefined),
+			contextProxy: {
+				setValues: vi.fn().mockResolvedValue(undefined),
+			},
+			providerSettingsManager: {
+				getProfile: vi.fn().mockRejectedValue(new Error("transient read failure")),
+				hasConfig: vi.fn().mockResolvedValue(true),
+				getModeConfigId: vi.fn().mockResolvedValue("old-mode-id"),
+				saveConfig: vi.fn().mockResolvedValue("default-id"),
+				setModeConfig: vi.fn().mockRejectedValue(new Error("mode write failed")),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+			},
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		})
+		const appendLine = vi.fn()
+		// enableLogging so the compensation notice reaches the output channel.
+		const api = new API(
+			Object.assign({} as OutputChannel, { appendLine }),
+			provider,
+			makeClineProviderFactory(),
+			undefined,
+			true,
+		)
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "default",
+				apiProvider: providerIdentifiers.openai,
+				modeApiConfigs: { code: "new-id" },
+			}),
+		).rejects.toThrow("mode write failed")
+
+		// The profile exists (hasConfig confirms it) but its read failed: deleting
+		// would destroy an existing profile and there is no snapshot to restore, so
+		// compensation leaves the stored record alone and says why.
+		expect(provider.providerSettingsManager.deleteConfig).not.toHaveBeenCalled()
+		expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledOnce()
+		expect(appendLine).toHaveBeenCalledWith(
+			expect.stringContaining('profile lookup for "default" was inconclusive'),
+		)
+	})
 	it("restores the shared values when the first shared write fails partway", async () => {
 		// The durable state visible to the caller once every write has settled.
 		const stored: Record<string, unknown> = {}
@@ -175,6 +223,7 @@ describe("API.setConfiguration", () => {
 			},
 			providerSettingsManager: {
 				getProfile: vi.fn().mockRejectedValue(new Error("profile not found")),
+				hasConfig: vi.fn().mockResolvedValue(false),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				saveConfig: vi.fn().mockResolvedValue("default-id"),
 				setModeConfig: vi.fn().mockResolvedValue(undefined),
