@@ -2470,14 +2470,18 @@ export const webviewMessageHandler = async (
 					// Create a new configuration with the new name and old ID.
 					await provider.providerSettingsManager.saveConfig(newName, { ...message.apiConfiguration, id })
 
+					// saveConfig normalizes the record (legacy downgrades, schema parse): hand
+					// the stored copy to the views and task handlers instead of the raw
+					// webview payload, so unvalidated fields cannot bypass the profile-schema
+					// normalization on the way into view state.
+					const { name: _renamedName, ...normalizedRenamed } =
+						await provider.providerSettingsManager.getProfile({ name: newName })
+
 					// Re-point live views pinned to the old name before it stops
 					// resolving: the rename keeps the id, so their pins should follow the
 					// record instead of dangling, and their overlays must serve the
 					// renamed settings rather than the pre-rename copy.
-					await provider.repointViewLocalStateAfterProfileRename(oldName, newName, {
-						...message.apiConfiguration,
-						id,
-					})
+					await provider.repointViewLocalStateAfterProfileRename(oldName, newName, normalizedRenamed)
 
 					// Delete the old configuration. A failure here would leave both names
 					// resolving and every live view pinned to the new name: undo the re-point
@@ -2486,10 +2490,7 @@ export const webviewMessageHandler = async (
 						await provider.providerSettingsManager.deleteConfig(oldName)
 					} catch (error) {
 						try {
-							await provider.repointViewLocalStateAfterProfileRename(newName, oldName, {
-								...message.apiConfiguration,
-								id,
-							})
+							await provider.repointViewLocalStateAfterProfileRename(newName, oldName, normalizedRenamed)
 							await provider.providerSettingsManager.deleteConfig(newName)
 						} catch {
 							// Best-effort compensation; the original failure is what callers see.

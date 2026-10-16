@@ -2823,7 +2823,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 	it("re-points views pinned to the old name before the old name is deleted", async () => {
 		const order: string[] = []
 		provider.providerSettingsManager = {
-			getProfile: vi.fn().mockResolvedValue({ id: "profile-id" }),
+			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
 			saveConfig: vi.fn().mockResolvedValue(undefined),
 			deleteConfig: vi.fn(async () => {
 				order.push("delete")
@@ -2852,7 +2852,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 
 	it("does not delete the old profile when the re-point fails", async () => {
 		provider.providerSettingsManager = {
-			getProfile: vi.fn().mockResolvedValue({ id: "profile-id" }),
+			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
 			saveConfig: vi.fn().mockResolvedValue(undefined),
 			deleteConfig: vi.fn().mockResolvedValue(undefined),
 		}
@@ -2873,7 +2873,7 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 
 	it("restores the old pin and removes the new profile when the deletion fails", async () => {
 		provider.providerSettingsManager = {
-			getProfile: vi.fn().mockResolvedValue({ id: "profile-id" }),
+			getProfile: vi.fn().mockResolvedValue({ id: "profile-id", apiProvider: providerIdentifiers.anthropic }),
 			saveConfig: vi.fn().mockResolvedValue(undefined),
 			deleteConfig: vi.fn(async (name: string) => {
 				if (name === "old-profile") {
@@ -2900,6 +2900,35 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("new-profile")
 		expect(provider.activateProviderProfile).not.toHaveBeenCalled()
 		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
+	})
+
+	it("re-points views with the stored record instead of the raw webview payload", async () => {
+		provider.providerSettingsManager = {
+			getProfile: vi.fn().mockResolvedValueOnce({ id: "profile-id" }).mockResolvedValueOnce({
+				id: "profile-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "stored-model",
+			}),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+		}
+		const repoint = vi.fn().mockResolvedValue(undefined)
+		provider.repointViewLocalStateAfterProfileRename = repoint
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		// saveConfig normalizes the record; the views and task handlers must receive
+		// that stored copy, not the raw webview payload with its unvalidated fields.
+		expect(repoint).toHaveBeenCalledWith("old-profile", "new-profile", {
+			id: "profile-id",
+			apiProvider: providerIdentifiers.anthropic,
+			apiModelId: "stored-model",
+		})
 	})
 })
 
