@@ -1,5 +1,7 @@
 import { z } from "zod"
 
+import { hookMessageSchema } from "./hooks.js"
+
 /**
  * ClineAsk
  */
@@ -173,6 +175,7 @@ export const clineSays = [
 	"too_many_tools_warning",
 	"ignored_disabled_tools_warning",
 	"tool",
+	"hook",
 ] as const
 
 export const clineSaySchema = z.enum(clineSays)
@@ -262,6 +265,7 @@ export const clineMessageSchema = z.object({
 	conversationHistoryIndex: z.number().optional(),
 	checkpoint: z.record(z.string(), z.unknown()).optional(),
 	progressStatus: toolProgressStatusSchema.optional(),
+	hook: hookMessageSchema.optional(),
 	/**
 	 * Data for successful context condensation.
 	 * Present when `say: "condense_context"` and `partial: false`.
