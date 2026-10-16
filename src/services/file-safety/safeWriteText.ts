@@ -218,7 +218,14 @@ async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
 export async function resolveLockKey(absoluteFilePath: string): Promise<string> {
 	try {
 		return await canonicalDirKey(await resolvePublishTarget(absoluteFilePath))
-	} catch {
+	} catch (error: unknown) {
+		// Only a dangling link (ENOENT) may fall through to the walk: any other
+		// resolution error (EACCES, EIO) would key this writer to the alias path
+		// while a writer reaching the referent directly keys the referent, and
+		// the two writers would then take different locks for one file.
+		if (errorCode(error) !== "ENOENT") {
+			throw error
+		}
 		// A real readlink throws for anything that is not a link, so a normal chain
 		// ends the walk. Two links that point at each other never would, so the
 		// walk is bounded and callers use the key they actually reached.
