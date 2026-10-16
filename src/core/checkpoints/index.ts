@@ -275,6 +275,19 @@ export async function checkpointSave(
 	// The journal-file lock inside appendChanges uses a distinct key, so no
 	// reentrancy is required here.
 	const globalStorageDir = task.providerRef.deref()?.context.globalStorageUri.fsPath
+	// A save that carries write metadata needs a stable journal location for
+	// the whole commit + journal transaction. The location is already
+	// captured above (for the transaction lock key), so it survives the
+	// provider reference disappearing while the Git save is awaited. Without
+	// a location at all, fail before committing so the tool reports an
+	// explicit failure instead of a checkpoint nobody can roll back.
+	const journalWrites = write === undefined ? undefined : Array.isArray(write) ? write : [write]
+	const hasWriteMetadata = !!journalWrites && journalWrites.length > 0
+	if (hasWriteMetadata && !globalStorageDir) {
+		throw new Error(
+			"Checkpoint save with write metadata requires a stable journal location, but the provider reference or global storage path is unavailable.",
+		)
+	}
 	const runTransaction = async () => {
 		// Start the checkpoint process in the background.
 		// Save failures keep the historical behavior: logged, checkpoints
@@ -294,35 +307,46 @@ export async function checkpointSave(
 		// A no-op checkpoint carries an empty writes array: unrelated workspace
 		// changes can still produce a commit, and emitting a card for it would
 		// show a change card with zero files. The checkpoint itself still runs.
-		if (result?.commit && write && (!Array.isArray(write) || write.length > 0)) {
-			const writes = Array.isArray(write) ? write : [write]
-			if (globalStorageDir) {
-				// Persist the whole step's journal update as one serialized,
-				// atomic replacement (temp file + fsync + rename + directory
-				// sync), preserving write order. A journal failure is logged and
-				// propagated: the checkpoint must not be reported fully durable
-				// while its journal entries were lost.
-				try {
-					await appendChanges(
-						globalStorageDir,
-						task.taskId,
-						writes.map((w) => ({
-							path: w.path,
-							operation: w.operation,
-							checkpointId: result.commit,
-							...(w.diffStats ? { diffStats: w.diffStats } : {}),
-						})),
-					)
-				} catch (err) {
-					console.error("[Task#checkpointSave] failed to persist change journal entries", err)
-					throw new CheckpointPartialPersistenceError(
-						`Checkpoint ${result.commit} was committed but its change journal could not be persisted (files: ${writes
-							.map((w) => w.path)
-							.join(", ")}); rollback metadata is incomplete.`,
-						result.commit,
-						writes,
-					)
-				}
+		if (result?.commit && hasWriteMetadata) {
+			const writes = journalWrites ?? []
+			if (!globalStorageDir) {
+				// Defensive: the pre-commit guard above normally makes this
+				// unreachable. If the location is nonetheless gone while the
+				// commit succeeded, surface the partial state instead of
+				// skipping the journal silently.
+				throw new CheckpointPartialPersistenceError(
+					`Checkpoint ${result.commit} was committed but no stable journal location was available (files: ${writes
+						.map((w) => w.path)
+						.join(", ")}); rollback metadata is incomplete.`,
+					result.commit,
+					writes,
+				)
+			}
+			// Persist the whole step's journal update as one serialized,
+			// atomic replacement (temp file + fsync + rename + directory
+			// sync), preserving write order. A journal failure is logged and
+			// propagated: the checkpoint must not be reported fully durable
+			// while its journal entries were lost.
+			try {
+				await appendChanges(
+					globalStorageDir,
+					task.taskId,
+					writes.map((w) => ({
+						path: w.path,
+						operation: w.operation,
+						checkpointId: result.commit,
+						...(w.diffStats ? { diffStats: w.diffStats } : {}),
+					})),
+				)
+			} catch (err) {
+				console.error("[Task#checkpointSave] failed to persist change journal entries", err)
+				throw new CheckpointPartialPersistenceError(
+					`Checkpoint ${result.commit} was committed but its change journal could not be persisted (files: ${writes
+						.map((w) => w.path)
+						.join(", ")}); rollback metadata is incomplete.`,
+					result.commit,
+					writes,
+				)
 			}
 
 			// B3a: emit the per-step change card now that the checkpoint commit
