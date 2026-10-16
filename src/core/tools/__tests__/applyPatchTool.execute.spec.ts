@@ -16,6 +16,7 @@ const mockedFsPromises = vi.mocked(
 	fsPromises as unknown as {
 		default: {
 			unlink: MockedFunction<typeof fsPromises.unlink>
+			rm: MockedFunction<typeof fsPromises.rm>
 			writeFile: MockedFunction<typeof fsPromises.writeFile>
 		}
 	},
@@ -25,6 +26,7 @@ vi.mock("fs/promises", () => ({
 	default: {
 		readFile: vi.fn().mockResolvedValue("original file content\n"),
 		unlink: vi.fn().mockResolvedValue(undefined),
+		rm: vi.fn().mockResolvedValue(undefined),
 		mkdir: vi.fn().mockResolvedValue(undefined),
 		writeFile: vi.fn().mockResolvedValue(undefined),
 	},
@@ -144,6 +146,62 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 *** End Patch`
 		const mockedCheckpointSave = checkpointSave as MockedFunction<typeof checkpointSave>
 
+		it("restores the pre-move state and fails the operation when source deletion fails", async () => {
+			const patch = `*** Begin Patch
+*** Update File: src/old.ts
+*** Move to: src/new.ts
+@@
+-original file content
++new content
+*** End Patch`
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			mockedFsPromises.default.unlink.mockRejectedValueOnce(
+				Object.assign(new Error("EBUSY: resource busy or locked"), { code: "EBUSY" }),
+			)
+			// The restore itself fails too: the failure is logged, not swallowed.
+			mockedFsPromises.default.rm.mockRejectedValueOnce(new Error("EROFS: read-only file system"))
+
+			await tool.execute({ patch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			// The destination write is undone so the file does not live in two places.
+			expect(mockedFsPromises.default.rm).toHaveBeenCalledWith(expect.stringContaining("new.ts"), { force: true })
+			expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to restore pre-move state"))
+			errorSpy.mockRestore()
+			// The move is reported as failed rather than as a successful write...
+			expect(mockPushToolResult).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to delete original file after move"),
+			)
+			// ...and no whole-patch checkpoint is recorded for the failed move.
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+		})
+
+		it("persists an explicit partial-state checkpoint before handoff when a later operation fails", async () => {
+			const patch = `*** Begin Patch
+*** Delete File: src/obsolete.ts
+*** Delete File: src/locked.ts
+*** End Patch`
+			// The first delete succeeds; the second fails.
+			mockedFsPromises.default.unlink.mockRejectedValueOnce(new Error("EPERM: operation not permitted"))
+
+			await tool.execute({ patch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			// The retained successful delete gets an explicit partial-state
+			// checkpoint before the queued-message handoff.
+			expect(mockedCheckpointSave).toHaveBeenCalledTimes(1)
+			const checkpointAt = mockedCheckpointSave.mock.invocationCallOrder[0] ?? Infinity
+			const handoffAt = vi.mocked(mockTask.processQueuedMessages).mock.invocationCallOrder[0] ?? Infinity
+			expect(checkpointAt).toBeLessThan(handoffAt)
+		})
 		it("records one suppressed checkpoint for the whole patch (default-on)", async () => {
 			await tool.execute({ patch: deletePatch }, mockTask as Task, {
 				askApproval: mockAskApproval,
@@ -260,10 +318,13 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				toolCallId: "test-tool-call-id",
 			})
 
-			// No whole-patch checkpoint (the patch failed), but the successful
-			// write still hands off.
-			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+			// The retained successful write gets an explicit partial-state
+			// checkpoint before the queued-message handoff.
+			expect(mockedCheckpointSave).toHaveBeenCalledTimes(1)
 			expect(mockTask.processQueuedMessages).toHaveBeenCalled()
+			expect(mockedCheckpointSave.mock.invocationCallOrder[0]).toBeLessThan(
+				vi.mocked(mockTask.processQueuedMessages).mock.invocationCallOrder[0] ?? Infinity,
+			)
 		})
 
 		it("hands off queued messages when a later file fails the access check", async () => {
@@ -287,8 +348,15 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				toolCallId: "test-tool-call-id",
 			})
 
-			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+			// The earlier successful delete is retained: an explicit partial-state
+			// checkpoint persists it before the deferred handoff.
+			expect(mockedCheckpointSave).toHaveBeenCalledTimes(1)
 			expect(mockTask.processQueuedMessages).toHaveBeenCalledTimes(1)
+			// The access-failed file is never written and the loop stops there.
+			expect(mockTask.fileContextTracker.trackFileContext).not.toHaveBeenCalledWith(
+				"src/secret.ts",
+				expect.anything(),
+			)
 		})
 
 		it("does not record a checkpoint when perWriteCheckpoints is disabled", async () => {

@@ -122,7 +122,11 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				if (!accessAllowed) {
 					await task.say("rooignore_error", relPath)
 					pushToolResult(formatResponse.rooIgnoreError(relPath))
-					return
+					// Partial failure: earlier successful writes are retained; break so the
+					// explicit partial-state checkpoint below persists them before the
+					// queued-message handoff in the finally block.
+					patchSucceeded = false
+					break
 				}
 
 				// Check if file is write-protected
@@ -170,7 +174,18 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				if (perWriteCheckpoints !== false) {
 					// Await so the whole-patch checkpoint persists before the tool
 					// completes; an unawaited save lets queued work interleave its own
-					// checkpoint and lets shutdown lose the commit.
+					// checkpoint and lets shutdown lose the commit. Called only after
+					// every filesystem operation succeeded.
+					await checkpointSave(task, false, true).catch(() => {})
+				}
+			} else if (handoffPending) {
+				// Partial failure: the earlier successful operations keep their writes
+				// in the workspace. Persist an explicit partial-state checkpoint before
+				// the queued-message handoff (the finally block below) so those retained
+				// writes have rollback metadata instead of being carried forward
+				// unpersisted; the failed operation already reported itself.
+				const perWriteCheckpoints = (await task.providerRef?.deref()?.getState())?.perWriteCheckpoints
+				if (perWriteCheckpoints !== false) {
 					await checkpointSave(task, false, true).catch(() => {})
 				}
 			}
@@ -480,7 +495,20 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			try {
 				await fs.unlink(absolutePath)
 			} catch (error) {
-				console.error(`Failed to delete original file after move: ${error}`)
+				// The source is still present (locked or protected): undo the destination
+				// write so the file does not live in two places, and report the move as
+				// failed. Returning true here would let the whole-patch checkpoint
+				// persist a duplicated file as if the move had succeeded.
+				try {
+					await fs.rm(moveAbsolutePath, { force: true })
+				} catch (restoreError) {
+					console.error(`Failed to restore pre-move state after source deletion failure: ${restoreError}`)
+				}
+				const moveErrorMessage = `Failed to delete original file after move '${relPath}': ${error instanceof Error ? error.message : String(error)}`
+				await task.say("error", moveErrorMessage)
+				pushToolResult(formatResponse.toolError(moveErrorMessage))
+				await task.diffViewProvider.reset()
+				return false
 			}
 
 			await task.fileContextTracker.trackFileContext(change.movePath, "roo_edited" as RecordSource)
