@@ -3424,6 +3424,7 @@ export class ClineProvider
 			// fills the in-memory buffer before the durable write settles, so even a rejected write
 			// leaves the view re-pointed. Each restore is awaited on its own so one failing restore
 			// cannot skip the next one.
+			const restoreFailures: string[] = []
 			for (const snapshot of snapshots) {
 				// A provider that has begun disposal owns an orphaned viewStates key: viewId comes from
 				// the monotonic nextViewId counter, so no future view ever reads that entry again and
@@ -3439,14 +3440,23 @@ export class ClineProvider
 						apiConfiguration: snapshot.previousOverlay,
 					})
 				} catch (rollbackError: unknown) {
+					const message = rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
 					snapshot.instance.log(
-						`[rePinViewLocalStateForDeletedProfile] Could not restore the pin for view ${snapshot.instance.viewId} after a failed re-pin: ${
-							rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-						}`,
+						`[rePinViewLocalStateForDeletedProfile] Could not restore the pin for view ${snapshot.instance.viewId} after a failed re-pin: ${message}`,
 					)
+					// Collect, do not swallow: an incomplete compensation must reach the
+					// caller, or a sibling left pinned to the deleted profile is invisible.
+					restoreFailures.push(`view ${snapshot.instance.viewId}: ${message}`)
 				}
 			}
-			throw rejected[0].reason
+			const original = rejected[0].reason
+			if (restoreFailures.length > 0) {
+				const prefix = original instanceof Error ? original.message : String(original)
+				throw new Error(`${prefix}; sibling restore also failed: ${restoreFailures.join("; ")}`, {
+					cause: original instanceof Error ? original : undefined,
+				})
+			}
+			throw original
 		}
 
 		// Only after every sibling's re-pin landed: switching a task is not part of the durable
