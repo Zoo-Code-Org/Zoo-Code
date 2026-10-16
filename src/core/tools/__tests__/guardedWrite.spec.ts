@@ -36,6 +36,10 @@ vi.mock("../../../utils/versionToken", () => ({
 vi.mock("../../../services/file-safety/safeWriteText", () => ({
 	safeWriteText: vi.fn(),
 	resolveLockKey: vi.fn(async (p: string) => p),
+	// The dual-identity lock takes this alias-entry key beside the referent
+	// key; the identity default folds both to one (a single lock, as every
+	// pre-existing test expects), and the sorted-order test overrides it.
+	resolveLinkPathLockKey: vi.fn(async (p: string) => p),
 	// The guard fixes the publish target inside the lock through this helper;
 	// the default identity keeps every other test's path unchanged.
 	resolvePublishTarget: vi.fn(async (p: string) => p),
@@ -75,6 +79,10 @@ interface MockTaskOptions {
 	cwd?: string
 	observationRegistry?: ObservationRegistry
 	abort?: boolean
+	// The guard re-runs the allowlist decision on the retained publish target;
+	// the default double allows everything, and the alias-binding tests supply a
+	// controller that denies the resolved target.
+	rooIgnoreController?: { validateAccess: (filePath: string) => boolean }
 }
 
 /**
@@ -87,6 +95,7 @@ function createMockTask(options: MockTaskOptions = {}): Task {
 		cwd: options.cwd ?? WORKSPACE,
 		abort: options.abort ?? false,
 		observationRegistry: options.observationRegistry ?? new ObservationRegistry(),
+		...(options.rooIgnoreController ? { rooIgnoreController: options.rooIgnoreController } : {}),
 	}
 	return task as unknown as Task
 }
@@ -1021,5 +1030,110 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 		)
 		expect(staleError?.path).toBe("src/thing.ts")
 		expect(mockedSafeWriteText).not.toHaveBeenCalled()
+	})
+
+	describe("allowlist binding to the retained publish target", () => {
+		// The tool layer validates the alias the caller named. The guard must
+		// re-run that decision on the retained target under the lock, and lock
+		// both the alias entry and the resolved referent, or a link retargeted
+		// after the tool's check sends the approved bytes to an ignored or
+		// external file.
+
+		it("replaceIfVersion stops when the retained target fails the allowlist, before the version comparison", async () => {
+			const authorize = vi.fn(() => {
+				throw new GuardRejectedError("denied", "alias.txt")
+			})
+			mockedResolvePublishTarget.mockResolvedValue(abs("outside/ref.txt"))
+
+			await expect(
+				replaceIfVersion(abs("alias.txt"), "v1", "hello", "alias.txt", undefined, authorize),
+			).rejects.toBeInstanceOf(GuardRejectedError)
+
+			// The decision runs on the retained target, not the alias, and it
+			// precedes the version comparison and the publish.
+			expect(authorize).toHaveBeenCalledWith(abs("outside/ref.txt"))
+			expect(mockedComputeVersionToken).not.toHaveBeenCalled()
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("replaceIfVersion publishes when the retained target passes the allowlist", async () => {
+			const authorize = vi.fn()
+			mockedFsAccess.mockResolvedValue(undefined)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			mockedResolvePublishTarget.mockResolvedValue(abs("alias.txt"))
+
+			await replaceIfVersion(abs("alias.txt"), "v1", "hello", "alias.txt", undefined, authorize)
+
+			expect(authorize).toHaveBeenCalledWith(abs("alias.txt"))
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("alias.txt"), "hello")
+		})
+
+		it("createIfAbsent stops when the retained target fails the allowlist", async () => {
+			const authorize = vi.fn(() => {
+				throw new GuardRejectedError("denied", "alias.txt")
+			})
+			mockedResolvePublishTarget.mockResolvedValue(abs("outside/ref.txt"))
+
+			await expect(
+				createIfAbsent(abs("alias.txt"), "hello", "alias.txt", undefined, authorize),
+			).rejects.toBeInstanceOf(GuardRejectedError)
+
+			expect(authorize).toHaveBeenCalledWith(abs("outside/ref.txt"))
+			expect(mockedFsAccess).not.toHaveBeenCalled()
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("guardedWrite rejects when the alias passes the allowlist but the resolved target is ignored", async () => {
+			// The row's scenario: a symlink passes validateAccess while it points
+			// at an allowed file; the retained referent is outside the allowlist,
+			// and the guarded publish must not write there.
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			mockedResolvePublishTarget.mockResolvedValue(abs("ignored/secret.txt"))
+			const validateAccess = vi.fn((p: string) => p === abs("link.txt"))
+			const task = createMockTask({ rooIgnoreController: { validateAccess } })
+
+			await expect(guardedWrite(task, "link.txt", "hello", "create")).rejects.toBeInstanceOf(GuardRejectedError)
+
+			expect(validateAccess).toHaveBeenCalledWith(abs("ignored/secret.txt"))
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("guardedWrite publishes when the retained target passes the allowlist", async () => {
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			mockedResolvePublishTarget.mockResolvedValue(abs("ok.txt"))
+			const validateAccess = vi.fn().mockReturnValue(true)
+			const task = createMockTask({ rooIgnoreController: { validateAccess } })
+
+			await guardedWrite(task, "ok.txt", "hello", "create")
+
+			expect(validateAccess).toHaveBeenCalledWith(abs("ok.txt"))
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("ok.txt"), "hello")
+		})
+
+		it("takes both the alias and the referent lock in sorted order when they differ", async () => {
+			// A protocol writer that swaps the link itself holds the alias entry
+			// lock; a guarded write holding only the referent lock could publish
+			// through a link mid-swap. Distinct keys are taken in sorted order,
+			// the shared order safeWriteJson's dual-link path uses.
+			mockedResolveLockKey.mockResolvedValue(abs("aaa-referent.txt"))
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+
+			await guardedWrite(createMockTask(), "zzz-alias.txt", "hello", "create")
+
+			const keys = mockedWithFileLock.mock.calls.map((call) => String(call[0]))
+			expect(keys).toEqual([abs("aaa-referent.txt"), abs("zzz-alias.txt")])
+		})
+
+		it("takes a single lock when the alias and referent keys fold to one", async () => {
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+
+			await guardedWrite(createMockTask(), "plain.txt", "hello", "create")
+
+			expect(mockedWithFileLock).toHaveBeenCalledTimes(1)
+		})
 	})
 })

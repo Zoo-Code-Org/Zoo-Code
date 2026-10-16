@@ -29,6 +29,7 @@ import { computeVersionToken } from "../../utils/versionToken"
 import { withFileLock } from "../../utils/fileLock"
 import { resolveLockKey } from "../../services/file-safety/safeWriteText"
 import { resolvePublishTarget } from "../../services/file-safety/safeWriteText"
+import { resolveLinkPathLockKey } from "../../services/file-safety/safeWriteText"
 import type { Task } from "../task/Task"
 
 // -- Types ------------------------------------------------------------------
@@ -191,6 +192,26 @@ async function fixedPublishTarget(absolutePath: string): Promise<string> {
 	})
 }
 
+/**
+ * Acquire the advisory locks covering BOTH identities of a guarded write:
+ * the resolved referent key every writer to the file uses, and the alias
+ * entry key (resolveLinkPathLockKey: canonical parent, final component never
+ * followed) that a protocol writer swapping the link itself holds - the same
+ * pair and folding safeWriteJson's dual-link path uses. Distinct keys are
+ * taken in sorted order, the shared order of that path, so two guarded
+ * writes can never deadlock, and withFileLock's own unwinding releases them
+ * inner-first.
+ */
+async function withBothIdentityLocks<T>(absolutePath: string, operation: () => Promise<T>): Promise<T> {
+	const referentKey = await resolveLockKey(absolutePath)
+	const aliasKey = await resolveLinkPathLockKey(absolutePath)
+	if (aliasKey === referentKey) {
+		return withFileLock(referentKey, operation)
+	}
+	const [first, second] = aliasKey < referentKey ? [aliasKey, referentKey] : [referentKey, aliasKey]
+	return withFileLock(first, () => withFileLock(second, operation))
+}
+
 export async function createIfAbsent(
 	absolutePath: string,
 	content: string | Uint8Array,
@@ -198,12 +219,20 @@ export async function createIfAbsent(
 	// Re-checked under the lock: a link that waited on the FIFO chain can outlive
 	// the task that queued it.
 	isCancelled?: () => boolean,
+	// Called under the lock with the RETAINED publish target before any check:
+	// the caller's allowlist decision was made about the alias, and a link
+	// retargeted (or a hard-link alias swapped in) since then names a different
+	// file. The callback re-runs the access decision on the retained target and
+	// throws to stop the publish.
+	authorizeTarget?: (retainedTarget: string) => void,
 ): Promise<string | undefined> {
-	// Lock the key every other writer to this file uses: the resolved publish
-	// target, so a symlink alias and its referent share one lock.
-	return withFileLock(await resolveLockKey(absolutePath), async () => {
+	// Lock both identities of the write: the resolved referent every other
+	// writer to this file uses, and the alias entry a link-swapping protocol
+	// writer holds.
+	return withBothIdentityLocks(absolutePath, async () => {
 		cancelledBeforePublish(absolutePath, displayPath, isCancelled)
 		const publishTarget = await fixedPublishTarget(absolutePath)
+		authorizeTarget?.(publishTarget)
 		try {
 			await fs.access(publishTarget)
 		} catch (error: unknown) {
@@ -263,16 +292,24 @@ export async function replaceIfVersion(
 	// Re-checked under the lock: a link that waited on the FIFO chain can outlive
 	// the task that queued it.
 	isCancelled?: () => boolean,
+	// Called under the lock with the RETAINED publish target before the version
+	// comparison: the caller's allowlist decision was made about the alias, and
+	// a link retargeted (or a hard-link alias swapped in) since then names a
+	// different file. The callback re-runs the access decision on the retained
+	// target and throws to stop the publish.
+	authorizeTarget?: (retainedTarget: string) => void,
 ): Promise<string | undefined> {
-	// Lock the key every other writer to this file uses: the resolved publish
-	// target, so a symlink alias and its referent share one lock.
-	return withFileLock(await resolveLockKey(absolutePath), async () => {
+	// Lock both identities of the write: the resolved referent every other
+	// writer to this file uses, and the alias entry a link-swapping protocol
+	// writer holds.
+	return withBothIdentityLocks(absolutePath, async () => {
 		cancelledBeforePublish(absolutePath, displayPath, isCancelled)
 		// Resolve and retain the publish target inside the lock: the version
 		// comparison and the publish below both act on this fixed target, so a
 		// symlink retargeted after the caller's allowlist check cannot send the
 		// write to a file the version check never covered.
 		const publishTarget = await fixedPublishTarget(absolutePath)
+		authorizeTarget?.(publishTarget)
 		let currentVersion: string
 		try {
 			currentVersion = await computeVersionToken(publishTarget)
@@ -392,6 +429,19 @@ export async function guardedWrite(
 		// a write queued before an abort can still reach its turn on the chain after the
 		// task is gone, and the caller has already reported the write to the model.
 		const displayPath = relPathOrAbsolute
+		// The tool layer validated the caller's alias before the write; re-run that
+		// decision on the retained publish target under the lock, so a link
+		// retargeted after the tool's check - or a hard-link alias whose new
+		// referent the version token cannot tell apart - cannot send the approved
+		// bytes to an ignored or external file.
+		const authorizeTarget = (retainedTarget: string): void => {
+			if (task.rooIgnoreController && !task.rooIgnoreController.validateAccess(retainedTarget)) {
+				throw new GuardRejectedError(
+					"The ignore allowlist denied access to the resolved publish target -- nothing was written.",
+					displayPath,
+				)
+			}
+		}
 
 		if (task.abort) {
 			throw new GuardRejectedError(
@@ -425,6 +475,7 @@ export async function guardedWrite(
 						content,
 						displayPath,
 						() => task.abort,
+						authorizeTarget,
 					)
 				}
 			} else {
@@ -448,10 +499,22 @@ export async function guardedWrite(
 
 				if (obs === undefined) {
 					// Never read: only an absent target may be created.
-					publishedToken = await createIfAbsent(absolutePath, content, displayPath, () => task.abort)
+					publishedToken = await createIfAbsent(
+						absolutePath,
+						content,
+						displayPath,
+						() => task.abort,
+						authorizeTarget,
+					)
 				} else if (absent) {
 					// A "create" on a file that vanished after the read recreates it.
-					publishedToken = await createIfAbsent(absolutePath, content, displayPath, () => task.abort)
+					publishedToken = await createIfAbsent(
+						absolutePath,
+						content,
+						displayPath,
+						() => task.abort,
+						authorizeTarget,
+					)
 				} else {
 					// The version recorded at read time must still match the on-disk
 					// token.
@@ -461,6 +524,7 @@ export async function guardedWrite(
 						content,
 						displayPath,
 						() => task.abort,
+						authorizeTarget,
 					)
 				}
 			}

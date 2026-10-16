@@ -47,6 +47,10 @@ vi.mock("../../../services/file-safety/safeWriteText", () => ({
 	// The guard fixes the publish target inside the lock through this helper;
 	// the identity default keeps every path in this file unchanged.
 	resolvePublishTarget: vi.fn(async (p: string) => p),
+	// The dual-identity lock takes this alias-entry key beside the referent
+	// key; the identity default folds both to one, as every path here is a
+	// plain file.
+	resolveLinkPathLockKey: vi.fn(async (p: string) => p),
 	// The guarded write recognises a landed-but-not-durable publish by this error's
 	// identity, and this spec replaces the whole module, so the class is restated
 	// here with the real constructor shape rather than imported.
