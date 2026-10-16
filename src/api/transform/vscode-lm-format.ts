@@ -1,6 +1,7 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import * as vscode from "vscode"
 
+import { createImagePart, createUserMessage, type ImagePart } from "./vscode-lm-image-part"
 import {
 	HAS_LONE_SURROGATE,
 	LONE_SURROGATE,
@@ -92,8 +93,27 @@ export function decodeToolNameSurrogates(name: string): string {
 	return decoded
 }
 
+function convertImageToVsCodeLmPart(image: Anthropic.Messages.ImageBlockParam, supportsImages: boolean) {
+	if (supportsImages) {
+		if (image.source.type !== "base64") {
+			throw new Error("GitHub Copilot image input requires base64 image data, not an image URL.")
+		}
+		const part = createImagePart(Buffer.from(image.source.data, "base64"), image.source.media_type)
+		if (!part) {
+			throw new Error("Image input requires a newer version of VS Code that can send image data.")
+		}
+		return part
+	}
+	return new vscode.LanguageModelTextPart(
+		image.source.type === "base64"
+			? `[Image (base64): ${image.source.media_type} not supported by VSCode LM API]`
+			: `[Image (${image.source.type}): not supported by VSCode LM API]`,
+	)
+}
+
 export function convertToVsCodeLmMessages(
 	anthropicMessages: Anthropic.Messages.MessageParam[],
+	supportsImages = false,
 ): vscode.LanguageModelChatMessage[] {
 	const vsCodeLmMessages: vscode.LanguageModelChatMessage[] = []
 
@@ -132,19 +152,12 @@ export function convertToVsCodeLmMessages(
 					// Convert tool messages to ToolResultParts
 					...toolMessages.map((toolMessage) => {
 						// Process tool result content into TextParts
-						const toolContentParts: vscode.LanguageModelTextPart[] =
+						const toolContentParts: Array<vscode.LanguageModelTextPart | ImagePart> =
 							typeof toolMessage.content === "string"
 								? [new vscode.LanguageModelTextPart(sanitizeSurrogates(toolMessage.content))]
 								: (toolMessage.content?.map((part) => {
 										if (part.type === "image") {
-											if (part.source.type === "base64") {
-												return new vscode.LanguageModelTextPart(
-													`[Image (base64): ${part.source.media_type} not supported by VSCode LM API]`,
-												)
-											}
-											return new vscode.LanguageModelTextPart(
-												`[Image (${part.source.type}): not supported by VSCode LM API]`,
-											)
+											return convertImageToVsCodeLmPart(part, supportsImages)
 										}
 										if (part.type === "text") {
 											return new vscode.LanguageModelTextPart(sanitizeSurrogates(part.text))
@@ -161,21 +174,14 @@ export function convertToVsCodeLmMessages(
 					// Convert non-tool messages to TextParts after tool messages
 					...nonToolMessages.map((part) => {
 						if (part.type === "image") {
-							if (part.source.type === "base64") {
-								return new vscode.LanguageModelTextPart(
-									`[Image (base64): ${part.source.media_type} not supported by VSCode LM API]`,
-								)
-							}
-							return new vscode.LanguageModelTextPart(
-								`[Image (${part.source.type}): not supported by VSCode LM API]`,
-							)
+							return convertImageToVsCodeLmPart(part, supportsImages)
 						}
 						return new vscode.LanguageModelTextPart(sanitizeSurrogates(part.text))
 					}),
 				]
 
 				// Add single user message with all content parts
-				vsCodeLmMessages.push(vscode.LanguageModelChatMessage.User(contentParts))
+				vsCodeLmMessages.push(createUserMessage(contentParts))
 				break
 			}
 

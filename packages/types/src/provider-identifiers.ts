@@ -18,6 +18,7 @@ export const providerIdentifiers = {
 	ollama: "ollama",
 	lmstudio: "lmstudio",
 	vscodeLm: "vscode-lm",
+	githubCopilot: "github-copilot",
 	openai: "openai",
 	fakeAi: "fake-ai",
 	anthropic: "anthropic",

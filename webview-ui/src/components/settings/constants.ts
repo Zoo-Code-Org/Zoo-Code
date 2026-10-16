@@ -57,6 +57,7 @@ export const PROVIDERS: Array<{ value: string; label: string; proxy: boolean }> 
 	{ value: providerIdentifiers.vertex, label: "GCP Vertex AI", proxy: false },
 	{ value: providerIdentifiers.bedrock, label: "Amazon Bedrock", proxy: false },
 	{ value: providerIdentifiers.vscodeLm, label: "VS Code LM API", proxy: false },
+	{ value: providerIdentifiers.githubCopilot, label: "GitHub Copilot", proxy: false },
 	{ value: providerIdentifiers.mistral, label: "Mistral", proxy: false },
 	{ value: providerIdentifiers.lmstudio, label: "LM Studio", proxy: true },
 	{ value: providerIdentifiers.ollama, label: "Ollama", proxy: true },
