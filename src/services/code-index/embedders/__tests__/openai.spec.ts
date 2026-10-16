@@ -73,7 +73,7 @@ describe("OpenAiEmbedder", () => {
 		})
 
 		it("should use 'not-provided' if API key is not provided", () => {
-			const embedderWithoutKey = new OpenAiEmbedder({
+			new OpenAiEmbedder({
 				openAiEmbeddingModelId: "text-embedding-3-small",
 			})
 

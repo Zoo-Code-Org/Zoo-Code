@@ -18,7 +18,6 @@ vitest.mock("openai", async () => {
 })
 
 import OpenAI from "openai"
-import type { Anthropic } from "@anthropic-ai/sdk"
 
 import { xaiDefaultModelId, xaiModels } from "@roo-code/types"
 
@@ -67,6 +66,21 @@ describe("XAIHandler", () => {
 		const model = handlerWithModel.getModel()
 		expect(model.id).toBe(testModelId)
 		expect(model.info).toEqual(xaiModels[testModelId])
+	})
+
+	it("should return grok-build-0.1 when specified", () => {
+		const testModelId = "grok-build-0.1"
+		const handlerWithModel = new XAIHandler({ apiModelId: testModelId })
+		const model = handlerWithModel.getModel()
+		expect(model.id).toBe(testModelId)
+		expect(model.info).toEqual(xaiModels[testModelId])
+	})
+
+	it("should return default model for an unknown model id", () => {
+		const handlerWithModel = new XAIHandler({ apiModelId: "grok-build-0.1-not-a-model" })
+		const model = handlerWithModel.getModel()
+		expect(model.id).toBe(xaiDefaultModelId)
+		expect(model.info).toEqual(xaiModels[xaiDefaultModelId])
 	})
 
 	it("should use Responses API (client.responses.create)", async () => {

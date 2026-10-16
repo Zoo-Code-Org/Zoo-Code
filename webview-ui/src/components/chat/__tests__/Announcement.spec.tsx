@@ -14,7 +14,7 @@ vi.mock("@src/utils/vscode", () => ({
 
 vi.mock("@roo/package", () => ({
 	Package: {
-		version: "3.84.0",
+		version: "3.88.0",
 	},
 }))
 
@@ -32,13 +32,13 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 	useAppTranslation: () => ({
 		t: (key: string, options?: { version?: string }) => {
 			const translations: Record<string, string> = {
-				"chat:announcement.release.heading": "What's New:",
+				"chat:announcement.release.heading": "What is new in Zoo Code v3.88.0",
 				"chat:announcement.release.highlight1":
-					"✨ New SOTA models added: Use GPT-6 Sol, GPT-6 Luna, and Claude Opus 5.5 across supported providers.",
+					"✨ Provider and model support: Use Grok Build and improved custom-model support. This release also fixes Bedrock model limits and sends the Codex verbosity setting.",
 				"chat:announcement.release.highlight2":
-					"🧭 More reliable tasks and subtasks: Keep delegated modes isolated, preserve subtask links after repeated stops, and protect orchestrator settings when slash commands switch modes.",
+					"🧭 Task reliability: This release fixes cancellation handling, tool-turn continuation, and task-message saving.",
 				"chat:announcement.release.highlight3":
-					"🛠️ More dependable terminal, provider, and code-search behavior: Improve terminal behavior across Windows and non-English environments, strengthen provider responses and cancellation, and make code search use the correct workspace more consistently.",
+					"⚡ Faster editing and chat: File writes no longer use artificial delays by default. Chat messages carry less file data, and code actions reach the last active chat.",
 			}
 
 			if (key === "chat:announcement.title") {
@@ -54,20 +54,21 @@ describe("Announcement", () => {
 	it("renders the announcement title and highlights", () => {
 		render(<Announcement hideAnnouncement={vi.fn()} />)
 
-		expect(screen.getByText("Zoo Code 3.84.0 Released")).toBeInTheDocument()
+		expect(screen.getByText("Zoo Code 3.88.0 Released")).toBeInTheDocument()
+		expect(screen.getByText("What is new in Zoo Code v3.88.0")).toBeInTheDocument()
 		expect(
 			screen.getByText(
-				"✨ New SOTA models added: Use GPT-6 Sol, GPT-6 Luna, and Claude Opus 5.5 across supported providers.",
+				"✨ Provider and model support: Use Grok Build and improved custom-model support. This release also fixes Bedrock model limits and sends the Codex verbosity setting.",
 			),
 		).toBeInTheDocument()
 		expect(
 			screen.getByText(
-				"🧭 More reliable tasks and subtasks: Keep delegated modes isolated, preserve subtask links after repeated stops, and protect orchestrator settings when slash commands switch modes.",
+				"🧭 Task reliability: This release fixes cancellation handling, tool-turn continuation, and task-message saving.",
 			),
 		).toBeInTheDocument()
 		expect(
 			screen.getByText(
-				"🛠️ More dependable terminal, provider, and code-search behavior: Improve terminal behavior across Windows and non-English environments, strengthen provider responses and cancellation, and make code search use the correct workspace more consistently.",
+				"⚡ Faster editing and chat: File writes no longer use artificial delays by default. Chat messages carry less file data, and code actions reach the last active chat.",
 			),
 		).toBeInTheDocument()
 	})

@@ -1,3 +1,4 @@
+import { v7 as uuidv7 } from "uuid"
 import {
 	Anthropic,
 	APIConnectionTimeoutError as AnthropicTimeoutError,
@@ -8,6 +9,7 @@ import OpenAI, { APIConnectionTimeoutError, APIUserAbortError } from "openai"
 
 import {
 	type ModelInfo,
+	type ModelRecord,
 	type ReasoningEffortExtended,
 	opencodeGoDefaultModelId,
 	opencodeGoDefaultModelInfo,
@@ -17,7 +19,7 @@ import {
 	providerIdentifiers,
 } from "@roo-code/types"
 
-import { ApiHandlerOptions } from "../../shared/api"
+import { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import { ApiStream, type ApiStreamUsageChunk } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
@@ -27,8 +29,14 @@ import { getModelParams } from "../transform/model-params"
 import { convertToResponsesApiInput } from "../transform/responses-api-input"
 import { processResponsesApiStream } from "../transform/responses-api-stream"
 
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import type {
+	SingleCompletionHandler,
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+} from "../index"
 import { RouterProvider } from "./router-provider"
+import { getOpencodeGoModels } from "./fetchers/opencode-go"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 import { DEFAULT_HEADERS } from "./constants"
 import { calculateApiCostAnthropic, calculateApiCostOpenAI } from "../../shared/cost"
@@ -76,9 +84,9 @@ type OpencodeGoFormat = "anthropic" | "openai" | "responses"
  *   - Anthropic Messages (`/v1/messages`) — used by Qwen (qwen3.8-max,
  *     qwen3.7-max, qwen3.7-plus, qwen3.6-plus) and MiniMax (minimax-m3,
  *     minimax-m2.7, minimax-m2.5) models.
- *   - OpenAI Responses (`/v1/responses`) — used by gpt-5.6-luna, whose
- *     chat-completions adapter fails with an opaque HTTP 500
- *     (Zoo-Code-Org/Zoo-Code#1431).
+ *   - OpenAI Responses (`/v1/responses`) — used by `gpt-5.6-luna` and
+ *     `gpt-6-luna`, whose chat-completions adapters are not supported by the
+ *     Go gateway.
  *
  * Sending an Anthropic-format model to the chat completions endpoint is
  * rejected with `401 Model <id> is not supported for format oa-compat`, so this
@@ -103,6 +111,13 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	 */
 	private readonly anthropicClient: Anthropic
 
+	/**
+	 * Stable per-handler session ID sent as `x-opencode-session` when no
+	 * `metadata.taskId` is available, so every request carries operator-side
+	 * session affinity (mirrors the OpenAiNativeHandler fallback pattern).
+	 */
+	private readonly sessionId: string
+
 	/** Creates a new handler bound to the user's Go API key and selected model. */
 	constructor(options: ApiHandlerOptions) {
 		super({
@@ -115,14 +130,29 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			defaultModelInfo: opencodeGoDefaultModelInfo,
 		})
 
+		this.sessionId = uuidv7()
+
 		this.anthropicClient = new Anthropic({
 			baseURL: "https://opencode.ai/zen/go",
 			apiKey: options.opencodeGoApiKey,
 			defaultHeaders: {
 				...DEFAULT_HEADERS,
 				...(options.openAiHeaders || {}),
+				// completePrompt has no taskId metadata, so the per-handler
+				// session id provides operator-side session affinity here;
+				// streaming requests override it with taskId when available.
+				"x-opencode-session": this.sessionId,
 			},
 		})
+	}
+
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: false, keyScoped: false, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getOpencodeGoModels(options.apiKey, ...fetchOpts)
 	}
 
 	/**
@@ -188,7 +218,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	 *
 	 * Anthropic-format models (Qwen/MiniMax) are streamed via
 	 * {@link streamAnthropicMessage} against `/v1/messages`; Responses-format
-	 * models (gpt-5.6-luna) are streamed via {@link streamResponsesMessage}
+	 * models (`gpt-5.6-luna` and `gpt-6-luna`) are streamed via {@link streamResponsesMessage}
 	 * against `/v1/responses`; all other models use the OpenAI-compatible chat
 	 * completions endpoint.
 	 *
@@ -318,12 +348,10 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 				}),
 			}
 
-			const completion = metadata?.taskId
-				? await this.client.chat.completions.create(body, {
-						signal: controller.signal,
-						headers: { "x-opencode-session": metadata.taskId },
-					})
-				: await this.client.chat.completions.create(body, { signal: controller.signal })
+			const completion = await this.client.chat.completions.create(body, {
+				signal: controller.signal,
+				headers: { "x-opencode-session": metadata?.taskId ?? this.sessionId },
+			})
 
 			for await (const chunk of completion) {
 				const delta = chunk.choices[0]?.delta
@@ -375,7 +403,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 
 	/**
 	 * Streams an OpenAI Responses-format completion for Go models that only
-	 * accept the `/v1/responses` endpoint (currently gpt-5.6-luna).
+	 * accept the `/v1/responses` endpoint (`gpt-5.6-luna` and `gpt-6-luna`).
 	 *
 	 * Follows the focused xAI handler pattern: the conversation is converted
 	 * with the shared {@link convertToResponsesApiInput} transform, the system
@@ -393,7 +421,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	private async *streamResponsesMessage(
 		modelId: string,
 		info: ModelInfo,
-		temperature: number | undefined,
+		_temperature: number | undefined,
 		maxTokens: number | undefined,
 		reasoningEffort: ReasoningEffortExtended | undefined,
 		systemPrompt: string,
@@ -474,7 +502,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		try {
 			stream = await this.client.responses.create(requestBody, {
 				signal: abortSignal,
-				headers: metadata?.taskId ? { "x-opencode-session": metadata.taskId } : undefined,
+				headers: { "x-opencode-session": metadata?.taskId ?? this.sessionId },
 			})
 		} catch (error) {
 			// isRequestAborted covers the signal-aborted case plus the OpenAI
@@ -611,12 +639,10 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		// errors propagate unchanged, matching the OpenAI streaming path.
 		let stream
 		try {
-			stream = metadata?.taskId
-				? await this.anthropicClient.messages.create(requestParams, {
-						signal: abortSignal,
-						headers: { "x-opencode-session": metadata.taskId },
-					})
-				: await this.anthropicClient.messages.create(requestParams, { signal: abortSignal })
+			stream = await this.anthropicClient.messages.create(requestParams, {
+				signal: abortSignal,
+				headers: { "x-opencode-session": metadata?.taskId ?? this.sessionId },
+			})
 		} catch (error) {
 			// Preserve abort identity (series standard): a cancelled request
 			// must surface as a DOM-standard AbortError, not a wrapped
@@ -899,7 +925,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 								}
 							: {}),
 					},
-					createOptions,
+					{ ...createOptions, headers: { "x-opencode-session": this.sessionId } },
 				)
 				return response.output_text || ""
 			} catch (error) {
@@ -949,7 +975,10 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 				...(options?.timeoutMs !== undefined && options.timeoutMs > 0 && { timeout: options.timeoutMs }),
 			}
 
-			const response = await this.client.chat.completions.create(requestOptions, createOptions)
+			const response = await this.client.chat.completions.create(requestOptions, {
+				...createOptions,
+				headers: { "x-opencode-session": this.sessionId },
+			})
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
 			// Preserve abort identity (series standard): caller-initiated

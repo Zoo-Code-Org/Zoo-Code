@@ -61,7 +61,7 @@ The bugs come from the runtime layer and from state that escapes the checked red
 
 ### Run state is a set of loose booleans
 
-`Task` models mutually exclusive run phases with independent flags. Examples: `abort`, `didFinishAbortingStream`, `isInitialized`, `isPaused`, `isWaitingForFirstChunk`, `isStreaming`, `didRejectTool`, `didAlreadyUseTool`, `didToolFailInCurrentTurn`, `didCompleteReadingStream`. Dispatch re-entrancy uses `presentAssistantMessageLocked` and `presentAssistantMessageHasPendingUpdates`.
+`Task` models mutually exclusive run phases with independent flags. Examples: `abort`, `didFinishAbortingStream`, `isInitialized`, `isWaitingForFirstChunk`, `isStreaming`, `didRejectTool`, `didAlreadyUseTool`, `didToolFailInCurrentTurn`, `didCompleteReadingStream`. Dispatch re-entrancy uses `presentAssistantMessageLocked` and `presentAssistantMessageHasPendingUpdates`.
 
 N independent booleans admit 2^N representable states. Only a few are legal. The type system cannot reject the rest. Some combinations are legal phases. For example, `abort` and `isStreaming` are both true during the graceful drain window (`Task.ts:2685, 3484, 3756`). The type system cannot tell a legal combination from an illegal one. The one flag-combination defect with a source is the duplicated render state in #325.
 
