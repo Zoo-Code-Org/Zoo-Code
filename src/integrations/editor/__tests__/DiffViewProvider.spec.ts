@@ -1239,6 +1239,31 @@ describe("DiffViewProvider", () => {
 			expect(fs.rmdir).toHaveBeenCalledWith(`${mockCwd}/new-parent`)
 		})
 
+		it("discardOwnedPlaceholder() unlinks the owned placeholder and releases ownership", async () => {
+			// The approved-but-uncommitted state: the file on disk is still the empty
+			// placeholder this edit created, so removing it is safe and releasing ownership
+			// after the removal keeps reset() from stranding it unowned.
+			diffViewProvider["placeholderPath"] = mockTargetPath
+
+			await diffViewProvider.discardOwnedPlaceholder()
+
+			expect(fs.unlink).toHaveBeenCalledWith(mockTargetPath)
+			expect(diffViewProvider["placeholderPath"]).toBeUndefined()
+		})
+
+		it("discardOwnedPlaceholder() is a no-op without ownership and tolerates a vanished file", async () => {
+			// An edit that never created a file must not unlink anything, and a placeholder
+			// that vanished externally is still a released ownership, not a new failure.
+			await diffViewProvider.discardOwnedPlaceholder()
+			expect(fs.unlink).not.toHaveBeenCalled()
+
+			diffViewProvider["placeholderPath"] = mockTargetPath
+			vi.mocked(fs.unlink).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+			await expect(diffViewProvider.discardOwnedPlaceholder()).resolves.toBeUndefined()
+			expect(diffViewProvider["placeholderPath"]).toBeUndefined()
+		})
+
 		it("revertChanges() stops before the document work for an existing file when no editor exists", async () => {
 			// The modify branch used to dereference activeDiffEditor unconditionally. When open()
 			// never produced an editor there is no document to restore, and the old code threw a

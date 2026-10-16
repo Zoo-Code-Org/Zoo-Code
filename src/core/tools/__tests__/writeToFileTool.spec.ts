@@ -171,6 +171,7 @@ describe("writeToFileTool", () => {
 			reset: vi.fn().mockResolvedValue(undefined),
 			revertChanges: vi.fn().mockResolvedValue(undefined),
 			discardUnapprovedStream: vi.fn().mockResolvedValue(undefined),
+			discardOwnedPlaceholder: vi.fn().mockResolvedValue(undefined),
 			saveDirectly: vi.fn().mockResolvedValue(undefined),
 			saveChanges: vi.fn().mockResolvedValue({
 				newProblemsMessage: "",
@@ -1409,6 +1410,34 @@ describe("writeToFileTool", () => {
 			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
 			expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+		})
+
+		it("removes the owned placeholder when saveChanges fails before the commit point", async () => {
+			// save() resolving false makes saveChanges() throw before onCommit: approval is not
+			// persistence. The tool must not report success, and the empty placeholder open()
+			// created must be removed while it is still owned - reset() would otherwise strand
+			// it unowned for a later attempt to mistake for the pre-existing target.
+			const order: string[] = []
+			mockCline.diffViewProvider.saveChanges.mockImplementationOnce(async () => {
+				throw new Error("Saving /test/path.txt was not confirmed; the write was not committed.")
+			})
+			mockCline.diffViewProvider.discardOwnedPlaceholder = vi.fn(async () => {
+				order.push("discardPlaceholder")
+			})
+			mockCline.diffViewProvider.reset = vi.fn(async () => {
+				order.push("reset")
+			})
+
+			await executeWriteFileTool({}, { fileExists: false })
+
+			// No success: the failure reaches handleError, not a write result.
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			expect(mockCline.diffViewProvider.pushToolWriteResult).not.toHaveBeenCalled()
+			// The approved content stays in the editor (no discard of the buffer), but the
+			// owned placeholder is removed BEFORE reset() clears the ownership.
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.discardOwnedPlaceholder).toHaveBeenCalledTimes(1)
+			expect(order).toEqual(["discardPlaceholder", "reset"])
 		})
 
 		it("continues execute error cleanup when finalizing partial ask fails", async () => {

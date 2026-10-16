@@ -176,6 +176,23 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		}
 	}
 
+	/**
+	 * Cleanup for an approved write whose saveChanges() failed before its commit point:
+	 * approval is not persistence - nothing landed, so the placeholder open() created is
+	 * still the empty file on disk and still owned. Remove it before reset() forgets the
+	 * ownership, or the empty file is stranded unowned: a later attempt would treat it as
+	 * the pre-existing target and a later denial's rollback would no longer delete it.
+	 * The dirty editor keeps the approved content for a manual save or retry. Failures
+	 * are logged, matching the other cleanup helpers in this file.
+	 */
+	private async discardOwnedPlaceholderBeforeReset(task: Task): Promise<void> {
+		try {
+			await task.diffViewProvider.discardOwnedPlaceholder()
+		} catch (placeholderError) {
+			console.error("Error removing the uncommitted write_to_file placeholder:", placeholderError)
+		}
+	}
+
 	private async finalizePartialToolAskAfterFailure(task: Task, text?: string): Promise<void> {
 		await task.finalizePartialToolAsk(text).catch((finalizeError) => {
 			console.error("Error finalizing write_to_file partial tool ask:", finalizeError)
@@ -498,6 +515,10 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				// cleaning up this call's debris.
 				if (!writeApproved && !writeCommitted) {
 					reverted = await this.discardUnapprovedStreamBeforeReset(task)
+				} else if (writeApproved && !writeCommitted) {
+					// saveChanges() failed before its commit point: the write never persisted,
+					// so the owned empty placeholder must not be stranded unowned by reset().
+					await this.discardOwnedPlaceholderBeforeReset(task)
 				}
 				await this.resetDiffViewAfterWrite(task)
 				if (!reverted) {

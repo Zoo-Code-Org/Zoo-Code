@@ -575,6 +575,24 @@ export class DiffViewProvider {
 	}
 
 	/**
+	 * Release the placeholder this edit owns when the approved write never committed:
+	 * saveChanges() threw before its commit point, so the file on disk is still the empty
+	 * placeholder open() created. Leaving it behind unowned would make a later attempt
+	 * treat it as the pre-existing target and strand an empty file no rollback recognizes
+	 * anymore. The dirty editor (it holds the approved content for a manual save or retry)
+	 * and the created directories are deliberately untouched: that save needs both the
+	 * buffer and its parent directories.
+	 */
+	async discardOwnedPlaceholder(): Promise<void> {
+		const placeholderPath = this.placeholderPath
+		if (!placeholderPath) {
+			return
+		}
+		await this.removeCreatedFile(placeholderPath)
+		this.placeholderPath = undefined
+	}
+
+	/**
 	 * Release a diff view whose content was never approved: an abandoned partial stream,
 	 * a failed stream, or a write the user was never asked to approve (rooignore denial,
 	 * validation failure). Deliberately NOT the same as revertChanges(), because
