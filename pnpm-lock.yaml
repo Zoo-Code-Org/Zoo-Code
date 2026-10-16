@@ -11,8 +11,8 @@ overrides:
   rollup: 4.60.4
   vite: 8.1.0
   undici: 6.28.1
-  '@ai-sdk/provider@3': 3.0.13
-  '@ai-sdk/provider-utils@4': 4.0.35
+  '@ai-sdk/provider@3': 3.0.18
+  '@ai-sdk/provider-utils@4': 4.0.58
   form-data: '>=4.0.4'
   bluebird: '>=3.7.2'
   glob: 11.1.0
@@ -999,9 +999,9 @@ packages:
     peerDependencies:
       zod: 3.25.76
 
-  '@ai-sdk/provider-utils@4.0.35':
-    resolution: {integrity: sha512-bjYld/2KGPLt78kpqbya+fD4LYS7BqVQJyUjE3qAHrYB0FR2Q90BaWEVIBZaguTWXf/A8L6uG1zO1v9TxVlGWg==}
-    engines: {node: '>=18'}
+  '@ai-sdk/provider-utils@4.0.58':
+    resolution: {integrity: sha512-3YtZ9GmBNVLaiO6RSc/xrb5wY1RF0UYfCg6AQfdSaDWljX8EaSEC5s8PEch6mKXzOoM76v1yHK7CxYMJY2C1CA==}
+    engines: {node: '>=18.17'}
     peerDependencies:
       zod: 3.25.76
 
@@ -1011,8 +1011,8 @@ packages:
     peerDependencies:
       zod: 3.25.76
 
-  '@ai-sdk/provider@3.0.13':
-    resolution: {integrity: sha512-ZPtVYt5QIJzOta1kdUiDuCx4HhFkvNPv/rvmZ2b1iXwybYjJsCnNYR4PAw4kW7rgVfDARvHXcU64efWuqNp6bw==}
+  '@ai-sdk/provider@3.0.18':
+    resolution: {integrity: sha512-IpefF5ssZVOZCD4Wu7zxt6PwZoGT2HLVjxpJ10Bjx6EAmRfLYJPjyrfxb0RYDlwvXnDb9nkQ7Do/oJVDuRFzew==}
     engines: {node: '>=18'}
 
   '@ai-sdk/provider@4.0.28':
@@ -5055,6 +5055,7 @@ packages:
   eslint@9.39.4:
     resolution: {integrity: sha512-XoMjdBOwe/esVgEvLmNsD3IRHkm7fbKIUGvrleloJXUZgDHig2IPWNniv+GwjyJXzuNqVjlr5+4yVUZjycJwfQ==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'
@@ -8982,8 +8983,8 @@ snapshots:
 
   '@ai-sdk/anthropic@3.0.42(zod@3.25.76)':
     dependencies:
-      '@ai-sdk/provider': 3.0.13
-      '@ai-sdk/provider-utils': 4.0.35(zod@3.25.76)
+      '@ai-sdk/provider': 3.0.18
+      '@ai-sdk/provider-utils': 4.0.58(zod@3.25.76)
       zod: 3.25.76
 
   '@ai-sdk/gateway@4.0.115(zod@3.25.76)':
@@ -8995,8 +8996,8 @@ snapshots:
 
   '@ai-sdk/openai-compatible@2.0.56(zod@3.25.76)':
     dependencies:
-      '@ai-sdk/provider': 3.0.13
-      '@ai-sdk/provider-utils': 4.0.35(zod@3.25.76)
+      '@ai-sdk/provider': 3.0.18
+      '@ai-sdk/provider-utils': 4.0.58(zod@3.25.76)
       zod: 3.25.76
 
   '@ai-sdk/openai-compatible@3.0.70(zod@3.25.76)':
@@ -9007,15 +9008,16 @@ snapshots:
 
   '@ai-sdk/openai@3.0.27(zod@3.25.76)':
     dependencies:
-      '@ai-sdk/provider': 3.0.13
-      '@ai-sdk/provider-utils': 4.0.35(zod@3.25.76)
+      '@ai-sdk/provider': 3.0.18
+      '@ai-sdk/provider-utils': 4.0.58(zod@3.25.76)
       zod: 3.25.76
 
-  '@ai-sdk/provider-utils@4.0.35(zod@3.25.76)':
+  '@ai-sdk/provider-utils@4.0.58(zod@3.25.76)':
     dependencies:
-      '@ai-sdk/provider': 3.0.13
+      '@ai-sdk/provider': 3.0.18
       '@standard-schema/spec': 1.1.0
       eventsource-parser: 3.1.0
+      undici: 6.28.1
       zod: 3.25.76
 
   '@ai-sdk/provider-utils@5.0.61(zod@3.25.76)':
@@ -9027,7 +9029,7 @@ snapshots:
       undici: 6.28.1
       zod: 3.25.76
 
-  '@ai-sdk/provider@3.0.13':
+  '@ai-sdk/provider@3.0.18':
     dependencies:
       json-schema: 0.4.0
 
@@ -12250,8 +12252,8 @@ snapshots:
       '@ai-sdk/anthropic': 3.0.42(zod@3.25.76)
       '@ai-sdk/openai': 3.0.27(zod@3.25.76)
       '@ai-sdk/openai-compatible': 2.0.56(zod@3.25.76)
-      '@ai-sdk/provider': 3.0.13
-      '@ai-sdk/provider-utils': 4.0.35(zod@3.25.76)
+      '@ai-sdk/provider': 3.0.18
+      '@ai-sdk/provider-utils': 4.0.58(zod@3.25.76)
       ai: 7.0.142(zod@3.25.76)
     transitivePeerDependencies:
       - zod
