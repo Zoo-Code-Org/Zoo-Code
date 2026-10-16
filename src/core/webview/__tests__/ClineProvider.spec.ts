@@ -4663,6 +4663,66 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("restores the cached viewStates map when a persisted view-state write fails durably", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-sidebar-view")
+			await provider.contextProxy.setValue("viewStates", {
+				"other-view": { mode: "code", updatedAt: 1 },
+			})
+			// The next durable write fails; the cache was already updated optimistically.
+			const updateSpy = vi.spyOn(mockContext.globalState, "update").mockImplementationOnce(async () => {
+				throw new Error("durable write failed")
+			})
+
+			await expect(provider["savePersistedViewState"]({ mode: "architect", updatedAt: 2 })).rejects.toThrow(
+				"durable write failed",
+			)
+
+			// The in-memory cache must match durable storage: an entry that never
+			// reached disk cannot stay visible through getValue.
+			expect(provider.contextProxy.getValue("viewStates")).toEqual({
+				"other-view": { mode: "code", updatedAt: 1 },
+			})
+			updateSpy.mockRestore()
+			await provider.dispose()
+		})
+
+		it("re-points live views pinned to a renamed profile onto the new name", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-sidebar-view")
+			await provider.saveViewState("currentApiConfigName", "profile-old")
+			await provider.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "old-key",
+			})
+
+			await provider["repointViewLocalStateAfterProfileRename"]("profile-old", "profile-new", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "renamed-key",
+			})
+
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("profile-new")
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "renamed-key",
+			})
+			const viewStates = mockContext.globalState.get("viewStates") as Record<string, Record<string, unknown>>
+			expect(viewStates["stable-sidebar-view"].currentApiConfigName).toBe("profile-new")
+			await provider.dispose()
+		})
+
 		it("clears this view's buffered apiConfiguration when directly activating a profile", async () => {
 			const provider = new ClineProvider(
 				mockContext,
