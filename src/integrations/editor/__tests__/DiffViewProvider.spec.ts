@@ -1235,6 +1235,11 @@ describe("DiffViewProvider", () => {
 			expect(vscode.workspace.applyEdit).not.toHaveBeenCalled()
 			expect(fs.unlink).not.toHaveBeenCalled()
 			expect(fs.rmdir).not.toHaveBeenCalled()
+			// Only the document work is skipped: the shared teardown still runs, so no
+			// stale session survives the rollback.
+			expect(diffViewProvider["relPath"]).toBeUndefined()
+			expect(diffViewProvider["isEditing"]).toBe(false)
+			expect(diffViewProvider["editType"]).toBeUndefined()
 		})
 
 		it("revertChanges() keeps rolling back the remaining directories when one rmdir hits ENOENT", async () => {

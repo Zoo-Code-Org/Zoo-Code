@@ -1,6 +1,7 @@
 // npx vitest run __tests__/removeClineFromStack-delegation.spec.ts
 
 import { describe, it, expect, vi } from "vitest"
+import { RooCodeEventName } from "@roo-code/types"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { TaskRegistry } from "../core/task/TaskRegistry"
 import { PendingActionSettlementError, type Task } from "../core/task/Task"
@@ -206,6 +207,9 @@ describe("ClineProvider failed history restoration cleanup", () => {
 	it("releases the tool's per-task state before a directly disposed task loses its listeners", async () => {
 		const key = "failed-history-task.inst-1"
 		const order: string[] = []
+		// The listener identity matters: the release must detach THIS function, so the
+		// fixture binds it to a variable instead of an anonymous inline no-op.
+		const abortCleanup = vi.fn()
 		const task = {
 			taskId: "failed-history-task",
 			instanceId: "inst-1",
@@ -226,7 +230,7 @@ describe("ClineProvider failed history restoration cleanup", () => {
 			streamFailed: false,
 			streamError: undefined,
 			task,
-			abortCleanup: () => {},
+			abortCleanup,
 		})
 		const taskEventListeners = new Map([[task, [vi.fn()]]])
 		const taskRegistry = new TaskRegistry()
@@ -241,6 +245,9 @@ describe("ClineProvider failed history restoration cleanup", () => {
 
 		expect(order).toEqual(["state-cleared", "dispose"])
 		expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+		// Dropping the map entry is not enough: the registered TaskAborted listener must
+		// be detached with the same function reference it was registered with.
+		expect(task.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
 	})
 
 	it("keeps the task active after an unrelated history resume failure", async () => {

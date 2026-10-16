@@ -667,22 +667,14 @@ export class DiffViewProvider {
 			// saveDirectly() sets it for a file that was written with approval, so unlinking
 			// absolutePath unconditionally can delete content the user approved.
 			if (placeholderPath) {
-				await fs.unlink(placeholderPath).catch((error: unknown) => {
-					// open() creates the placeholder; if it is already gone there is nothing
-					// left to remove and the discard did its job.
-					if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
-						throw error
-					}
-				})
+				// The helpers carry the ENOENT tolerance: open() creates the placeholder,
+				// and if it is already gone there is nothing left to remove.
+				await this.removeCreatedFile(placeholderPath)
 			}
 
 			// Remove only the directories this edit created, in reverse order.
 			for (let i = createdDirs.length - 1; i >= 0; i--) {
-				await fs.rmdir(createdDirs[i]).catch((error: unknown) => {
-					if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
-						throw error
-					}
-				})
+				await this.removeCreatedDir(createdDirs[i])
 			}
 		} catch (error) {
 			cleanupFailure = error
@@ -750,43 +742,45 @@ export class DiffViewProvider {
 				await this.removeCreatedDir(this.createdDirs[i])
 			}
 		} else {
-			// Only reachable after a successful open(), so the editor exists.
+			// The document revert needs the editor. A failed open() (openDiffEditor rejects
+			// after open() already set relPath/isEditing) leaves none: skip only the document
+			// work then, and let execution reach the shared teardown below - returning early
+			// would leave relPath, editType, isEditing and the preview-tab snapshot behind,
+			// the exact stale-session state this method's rollback guarantees rule out.
 			const updatedDocument = this.activeDiffEditor?.document
-			if (!updatedDocument) {
-				return
+			if (updatedDocument) {
+				// Revert document.
+				const edit = new vscode.WorkspaceEdit()
+
+				const fullRange = new vscode.Range(
+					updatedDocument.positionAt(0),
+					updatedDocument.positionAt(updatedDocument.getText().length),
+				)
+
+				edit.replace(updatedDocument.uri, fullRange, this.stripAllBOMs(this.originalContent ?? ""))
+
+				// Apply the edit and save, since contents shouldn't have changed
+				// this won't show in local history unless of course the user made
+				// changes and saved during the edit.
+				await vscode.workspace.applyEdit(edit)
+				await updatedDocument.save()
+
+				await this.closeAllDiffViews()
+
+				// Read auto-close preferences from state; fall back to defaults that
+				// preserve the existing behavior when unset.
+				const revertTask = this.taskRef.deref()
+				const revertState = await revertTask?.providerRef.deref()?.getState()
+
+				await this.keepOrCloseEditedFile(
+					absolutePath,
+					false,
+					revertState?.autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
+					revertState?.autoCloseZooOpenedFilesAfterUserEdited ??
+						DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
+					revertState?.autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
+				)
 			}
-
-			// Revert document.
-			const edit = new vscode.WorkspaceEdit()
-
-			const fullRange = new vscode.Range(
-				updatedDocument.positionAt(0),
-				updatedDocument.positionAt(updatedDocument.getText().length),
-			)
-
-			edit.replace(updatedDocument.uri, fullRange, this.stripAllBOMs(this.originalContent ?? ""))
-
-			// Apply the edit and save, since contents shouldn't have changed
-			// this won't show in local history unless of course the user made
-			// changes and saved during the edit.
-			await vscode.workspace.applyEdit(edit)
-			await updatedDocument.save()
-
-			await this.closeAllDiffViews()
-
-			// Read auto-close preferences from state; fall back to defaults that
-			// preserve the existing behavior when unset.
-			const revertTask = this.taskRef.deref()
-			const revertState = await revertTask?.providerRef.deref()?.getState()
-
-			await this.keepOrCloseEditedFile(
-				absolutePath,
-				false,
-				revertState?.autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
-				revertState?.autoCloseZooOpenedFilesAfterUserEdited ??
-					DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
-				revertState?.autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
-			)
 		}
 
 		// Restore any preview tabs the diff evicted, reconstructing the user's
