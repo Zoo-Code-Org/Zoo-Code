@@ -112,19 +112,39 @@ describe("LmStudioHandler", () => {
 			expect(textChunks[0].text).toBe("Test response")
 		})
 
-		it("should forward the task abortSignal to the client request", async () => {
+		it("should forward an abort signal to the client request", async () => {
 			const controller = new AbortController()
 
-			await collectStream(
-				handler.createMessage(systemPrompt, messages, {
-					taskId: "test-task",
-					abortSignal: controller.signal,
-				}),
-			)
-
-			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ stream: true }), {
-				signal: controller.signal,
+			let releaseStream!: () => void
+			const streamGate = new Promise<void>((resolve) => {
+				releaseStream = resolve
 			})
+			mockCreate.mockImplementationOnce(async () => {
+				await streamGate
+				return asyncStreamFrom([{ choices: [{ delta: { content: "Test response" }, index: 0 }], usage: null }])
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages, {
+				taskId: "test-task",
+				abortSignal: controller.signal,
+			})
+			const collected = collectStream(stream).catch((error: unknown) => error)
+
+			// The stream is still open, so the abort can only reach the request signal through
+			// the bridge: the provider's finally block has not run yet.
+			await new Promise((resolve) => setTimeout(resolve, 20))
+			const options = mockCreate.mock.calls[0][1] as { signal?: AbortSignal }
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ stream: true }),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
+			expect(options.signal?.aborted).toBe(false)
+
+			controller.abort()
+			expect(options.signal?.aborted).toBe(true)
+
+			releaseStream()
+			await collected
 		})
 
 		it("streams reasoning chunks from delta.reasoning_content", async () => {
@@ -219,18 +239,66 @@ describe("LmStudioHandler", () => {
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
 			)
 		})
+
+		it("should not issue the request when the caller aborts while input token counting is pending", async () => {
+			const controller = new AbortController()
+			let releaseCount!: () => void
+			const countGate = new Promise<void>((resolve) => {
+				releaseCount = resolve
+			})
+			const countSpy = vi.spyOn(handler, "countTokens").mockImplementation(async () => {
+				await countGate
+				return 10
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages, {
+				taskId: "test-task-id",
+				abortSignal: controller.signal,
+			})
+			const pending = collectStream(stream).catch((error: unknown) => error)
+
+			// Let the generator reach the token count, then abort while it is pending.
+			const start = Date.now()
+			while (countSpy.mock.calls.length === 0) {
+				if (Date.now() - start > 5000) {
+					throw new Error("timed out waiting for the token count")
+				}
+				await new Promise((resolve) => setTimeout(resolve, 5))
+			}
+			controller.abort()
+
+			try {
+				// The count gate is still closed, so cancellation itself has to settle the
+				// pending count. Releasing the gate first would let counting finish normally
+				// and the later pre-request abort check would make this pass anyway.
+				const raced = await Promise.race([
+					pending,
+					new Promise((resolve) => setTimeout(() => resolve(undefined), 300)),
+				])
+				expect(raced).toBeInstanceOf(Error)
+				expect((raced as Error).name).toBe("AbortError")
+				expect((raced as Error).message).toBe("The LM Studio request was aborted")
+			} finally {
+				releaseCount()
+			}
+
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("completePrompt", () => {
 		it("should complete prompt successfully", async () => {
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("Test response")
-			expect(mockCreate).toHaveBeenCalledWith({
-				model: mockOptions.lmStudioModelId,
-				messages: [{ role: "user", content: "Test prompt" }],
-				temperature: 0,
-				stream: false,
-			})
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: mockOptions.lmStudioModelId,
+					messages: [{ role: "user", content: "Test prompt" }],
+					temperature: 0,
+					stream: false,
+				},
+				undefined, // no abort signal or timeout: no request options reach the SDK
+			)
 		})
 
 		it("should handle API errors", async () => {

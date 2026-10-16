@@ -1,18 +1,24 @@
 /**
  * Merge an optional external abort signal with an optional timeout.
  *
- * Timeout values <= 0 are treated as disabled. The timeout is created via the
+ * Timeout values <= 0 and non-finite values are treated as disabled; finite
+ * delays above 2^31-1 ms are capped (Node clamps them to 1 ms otherwise). The timeout is created via the
  * native AbortSignal.timeout() API, which self-manages its timer — callers do
  * not need to (and cannot) clear it manually.
  */
 export function mergeAbortSignalAndTimeout(externalSignal?: AbortSignal, timeoutMs?: number): AbortSignal | undefined {
-	const hasTimeout = typeof timeoutMs === "number" && timeoutMs > 0
+	// Node's AbortSignal.timeout() throws ERR_OUT_OF_RANGE for non-integer
+	// delays (Infinity) and clamps delays above 2^31-1 ms to 1 ms, which would
+	// abort almost immediately; treat non-finite values as "no timeout",
+	// round fractional delays up to whole milliseconds (uint32 validation
+	// throws for 1500.5), and cap the rest.
+	const hasTimeout = typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
 
 	if (!hasTimeout) {
 		return externalSignal
 	}
 
-	const timeoutSignal = AbortSignal.timeout(timeoutMs)
+	const timeoutSignal = AbortSignal.timeout(Math.min(Math.max(1, Math.ceil(timeoutMs)), 2_147_483_647))
 
 	if (!externalSignal) {
 		return timeoutSignal
@@ -115,7 +121,6 @@ export function rejectOnAbort<T>(pending: Promise<T>, signal: AbortSignal, provi
 	}
 	return new Promise<T>((resolve, reject) => {
 		const onAbort = () => reject(createAbortError(providerName))
-		// Stryker disable next-line ObjectLiteral,BooleanLiteral: a signal fires its abort event exactly once and the settle handler removes this listener, so the once flag is unobservable
 		signal.addEventListener("abort", onAbort, { once: true })
 		void pending.then(
 			(value) => {
@@ -163,4 +168,60 @@ export async function resolveModelWithAbort<T>(
 		}
 		throw error
 	}
+}
+
+/**
+ * Await pending work, but reject with a request abort error the moment the
+ * signal aborts. The underlying promise keeps running to completion — only
+ * the wait is cut — so shared work (a deduped token refresh, for example) is
+ * never cancelled by one request's signal.
+ *
+ * An undefined signal skips the race entirely, and an already-aborted signal
+ * rejects immediately: listeners registered on an already-aborted signal
+ * never fire, so the aborted state must be checked up front.
+ */
+export function settleOnAbort<T>(
+	pending: Promise<T>,
+	signal: AbortSignal | undefined,
+	providerName: string,
+): Promise<T> {
+	if (!signal) {
+		return pending
+	}
+	if (signal.aborted) {
+		// Nobody awaits `pending` after this early return: attach a no-op
+		// rejection handler so a rejecting pending promise cannot surface as
+		// an unhandled rejection while its work runs to completion.
+		void pending.catch(() => {})
+		return Promise.reject(createAbortError(providerName))
+	}
+	return new Promise<T>((resolve, reject) => {
+		// Detach the exact registered listener at most once, from whichever
+		// side settles first: the abort callback (the pending promise may
+		// never settle, e.g. a wedged shared refresh) or the pending
+		// promise's fulfillment/rejection handlers (no abort ever fires).
+		let detached = false
+		const cleanup = () => {
+			if (detached) {
+				return
+			}
+			detached = true
+			signal.removeEventListener("abort", onAbort)
+		}
+		const onAbort = () => {
+			cleanup()
+			reject(createAbortError(providerName))
+		}
+		signal.addEventListener("abort", onAbort)
+		void pending.then(
+			(value) => {
+				cleanup()
+				resolve(value)
+			},
+			(error) => {
+				cleanup()
+				reject(error)
+			},
+		)
+	})
 }
