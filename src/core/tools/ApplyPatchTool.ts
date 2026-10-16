@@ -216,8 +216,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					// approval diff/stats and auto-approval state, retained by the
 					// handlers, feed the per-step change card.
 					// Awaited: a later write must not interleave with this patch's
-					// staging/commit/journal/change-card work. checkpointSave never
-					// rejects (service call wrapped in try/catch upstream).
+					// staging/commit/journal/change-card work. checkpointSave rejects with a
+					// CheckpointPartialPersistenceError when a committed checkpoint's
+					// journal update fails; the catch below reports it.
 					await checkpointSave(
 						task,
 						false,

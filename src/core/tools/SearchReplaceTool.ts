@@ -246,8 +246,9 @@ export class SearchReplaceTool extends BaseTool<"search_replace"> {
 					).decision === "approve"
 				// Awaited: a later tool block must not interleave with this
 				// search-and-replace's staging/commit/journal/change-card work.
-				// checkpointSave never rejects (service call wrapped in try/catch
-				// upstream).
+				// checkpointSave rejects with a CheckpointPartialPersistenceError
+				// when a committed checkpoint's journal update fails; the catch below
+				// reports it.
 				await checkpointSave(task, false, true, {
 					path: relPath,
 					operation: "update",

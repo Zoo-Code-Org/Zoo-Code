@@ -157,6 +157,29 @@ describe("ApplyDiffTool.execute - per-write checkpoint and change card (B3a, epi
 		})
 	})
 
+	it("routes a journal persistence failure to tool failure handling without a success result", async () => {
+		// The checkpoint committed but its journal update failed: the edit must
+		// not be reported as fully persisted.
+		mockCheckpointSave.mockRejectedValueOnce(
+			new Error(
+				"Checkpoint deadbeef was committed but its change journal could not be persisted (files: src/thing.ts); rollback metadata is incomplete.",
+			),
+		)
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
+		})
+
+		expect(mockHandleError).toHaveBeenCalledWith("applying diff", expect.any(Error))
+		const surfaced = String(mockHandleError.mock.calls[0]?.[1])
+		expect(surfaced).toContain("deadbeef")
+		expect(surfaced).toContain("src/thing.ts")
+		expect(mockPushToolResult).not.toHaveBeenCalled()
+	})
+
 	it("marks auto-approved steps so the card renders compact", async () => {
 		mockCheckAutoApproval.mockResolvedValueOnce({ decision: "approve" })
 

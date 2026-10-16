@@ -527,6 +527,25 @@ describe("writeToFileTool", () => {
 			expect(mockedCheckpointSave).not.toHaveBeenCalled()
 		})
 
+		it("routes a journal persistence failure to tool failure handling without a success result", async () => {
+			// The checkpoint committed but its journal update failed: the tool
+			// must not report the write as a complete success.
+			mockedCheckpointSave.mockRejectedValueOnce(
+				new Error(
+					"Checkpoint abc123def was committed but its change journal could not be persisted (files: test/file.txt); rollback metadata is incomplete.",
+				),
+			)
+
+			await executeWriteFileTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			const surfaced = String(mockHandleError.mock.calls[0]?.[1])
+			expect(surfaced).toContain("abc123def")
+			expect(surfaced).toContain("test/file.txt")
+			// The normal successful tool result is not emitted.
+			expect(mockPushToolResult).not.toHaveBeenCalled()
+		})
+
 		it("waits for the per-write checkpoint before the tool completes", async () => {
 			let checkpointStarted = false
 			let releaseCheckpoint: () => void = () => {}

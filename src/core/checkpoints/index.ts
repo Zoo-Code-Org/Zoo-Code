@@ -237,6 +237,22 @@ export type CheckpointWriteInfo = {
 	 */
 	autoApproved?: boolean
 }
+/**
+ * Thrown when a checkpoint commit succeeded but its journal/card persistence
+ * did not. Carries the committed checkpoint id and the complete affected write
+ * set so tool callers can report an explicit partial-persistence state
+ * instead of a silent full success.
+ */
+export class CheckpointPartialPersistenceError extends Error {
+	constructor(
+		message: string,
+		readonly checkpointId: string,
+		readonly writes: CheckpointWriteInfo[],
+	) {
+		super(message)
+		this.name = "CheckpointPartialPersistenceError"
+	}
+}
 
 export async function checkpointSave(
 	task: Task,
@@ -292,7 +308,13 @@ export async function checkpointSave(
 				)
 			} catch (err) {
 				console.error("[Task#checkpointSave] failed to persist change journal entries", err)
-				throw err
+				throw new CheckpointPartialPersistenceError(
+					`Checkpoint ${result.commit} was committed but its change journal could not be persisted (files: ${writes
+						.map((w) => w.path)
+						.join(", ")}); rollback metadata is incomplete.`,
+					result.commit,
+					writes,
+				)
 			}
 		}
 

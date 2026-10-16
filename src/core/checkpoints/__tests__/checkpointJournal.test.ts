@@ -208,7 +208,11 @@ describe("checkpointSave change-journal wiring (B2)", () => {
 		// The checkpoint committed but the journal update did not persist: the
 		// save must not report a fully durable checkpoint, and the change card
 		// (which advertises the journaled files) must not be emitted.
-		await expect(checkpointSave(mockTask as Task, false, true, write)).rejects.toThrow()
+		await expect(checkpointSave(mockTask as Task, false, true, write)).rejects.toMatchObject({
+			name: "CheckpointPartialPersistenceError",
+			checkpointId: COMMIT,
+			writes: [{ path: "src/foo.ts", operation: "create", diffStats: { additions: 3, deletions: 0 } }],
+		})
 
 		// Propagation is not a checkpoint error: checkpoints stay enabled.
 		expect(mockTask.enableCheckpoints).toBe(true)

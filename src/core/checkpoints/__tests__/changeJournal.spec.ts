@@ -61,6 +61,12 @@ describe("changeJournal", () => {
 
 			const result = await loadChanges(tmpRoot, taskId)
 			expect(result.map((e) => e.checkpointId)).toEqual(["good", "after"])
+
+			// The lost fragment is truncated away, not preserved (a later
+			// strict reader must never see it.
+			const repaired = await fs.readFile(filePath, "utf8")
+			expect(repaired).not.toContain("half.ts")
+			expect(repaired).not.toContain("half.ts")
 		})
 
 		it("does not insert a blank line when the journal ends cleanly", async () => {
@@ -114,9 +120,6 @@ describe("changeJournal", () => {
 
 		it("propagates a non-ENOENT journal-read failure instead of replacing blind", async () => {
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "good" }))
-			const filePath = journalPath(tmpRoot, taskId)
-			const raw = await fs.readFile(filePath, "utf8")
-			await fs.writeFile(filePath, raw + '{"path":"src/half.ts","operation":"upd')
 			// The current content cannot be read (I/O error): replacing would
 			// discard whatever the unreadable journal really held, so appendChange
 			// must fail loudly.

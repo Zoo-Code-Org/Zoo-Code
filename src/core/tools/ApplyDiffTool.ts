@@ -257,7 +257,11 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					...(diffStats ? { diffStats: { additions: diffStats.added, deletions: diffStats.removed } } : {}),
 					...(unifiedPatch ? { diff: unifiedPatch } : {}),
 					...(autoApproved ? { autoApproved: true } : {}),
-				}).catch(() => {})
+					// A persistence failure (a committed checkpoint whose journal
+					// update was lost) propagates to the catch below - explicit tool
+					// failure handling surfacing the checkpoint id and affected paths -
+					// instead of reporting the edit as fully persisted.
+				})
 			}
 
 			// Track file edit operation
