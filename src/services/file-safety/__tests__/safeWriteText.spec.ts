@@ -11,6 +11,7 @@ import {
 	safeWriteText,
 	StagingPathError,
 	TargetExistsError,
+	UnsupportedFilesystemError,
 	TargetMovedError,
 	AncestorReplacedError,
 	OrphanedBackupError,
@@ -1158,97 +1159,34 @@ describe("safeWriteText", () => {
 		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText"), canonical)
 	})
 
-	it("falls back to an exclusive copy when the filesystem has no hard links", async () => {
-		// FAT32/exFAT and some SMB mounts reject link(2); the create must still work, and
-		// COPYFILE_EXCL keeps the no-replace verdict identical.
+	it("fails closed when the filesystem has no atomic no-replace primitive", async () => {
+		// FAT32/exFAT and some SMB mounts reject link(2). Publishing by an exclusive
+		// copy would put bytes at the final name that readers can observe mid-copy,
+		// and a crash or an EIO mid-copy leaves damaged bytes there with the
+		// 'already exists' verdict on retry. No atomic no-replace primitive exists
+		// on those volumes, so the guarded create refuses to publish at all.
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 		vi.mocked(fs.link).mockRejectedValue(Object.assign(new Error("ENOTSUP"), { code: "ENOTSUP" }))
 
-		await safeWriteText(targetPath, "new data", { failIfExist: true, platform: "linux" })
+		await expect(
+			safeWriteText(targetPath, "new data", { failIfExist: true, platform: "linux" }),
+		).rejects.toBeInstanceOf(UnsupportedFilesystemError)
 
-		expect(fs.copyFile).toHaveBeenCalledWith(
-			expect.stringContaining("safeWriteText"),
-			targetPath,
-			fsSync.constants.COPYFILE_EXCL,
-		)
+		// Nothing was published: no copy at the final name, no rename - the name
+		// stays absent for a retry on a capable volume.
+		// Every "no hard links here" code takes the same fail-closed path.
+		for (const code of ["EPERM", "ENOTSUP", "ENOSYS"]) {
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fs.link).mockRejectedValue(Object.assign(new Error(code), { code }))
+
+			await expect(
+				safeWriteText(targetPath, "new data", { failIfExist: true, platform: "linux" }),
+			).rejects.toBeInstanceOf(UnsupportedFilesystemError)
+		}
+		expect(fs.copyFile).not.toHaveBeenCalled()
 		expect(fs.rename).not.toHaveBeenCalled()
 	})
-
-	it("fsyncs the copied target after the exclusive-copy fallback", async () => {
-		// The copy creates a NEW inode at the target: the staged inode's pre-commit
-		// fsync does not cover it and step 4b flushes only the parent directory.
-		// Without this flush a crash on FAT32/exFAT/SMB can leave a zero-length or
-		// partial target while the write reported success - and the retry then gets
-		// the 'already exists' verdict on damaged bytes.
-		const targetPath = "/tmp/test-dir/target.txt"
-		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-		vi.mocked(fs.link).mockRejectedValue(Object.assign(new Error("ENOTSUP"), { code: "ENOTSUP" }))
-		vi.mocked(fsSync.openSync).mockReturnValue(1)
-
-		await safeWriteText(targetPath, "new data", { failIfExist: true, platform: "linux" })
-
-		// The copied target itself was opened and fsynced AFTER the copy landed,
-		// with write access: Windows FlushFileBuffers requires GENERIC_WRITE, so a
-		// read-only handle would fail the flush and report a false durability error
-		// on bytes that are already published.
-		expect(fsSync.openSync).toHaveBeenCalledWith(targetPath, "r+")
-		const copyOrder = vi.mocked(fs.copyFile).mock.invocationCallOrder[0]
-		const openCalls = vi.mocked(fsSync.openSync).mock.calls
-		const targetOpenIndex = openCalls.findIndex((call) => String(call[0]) === targetPath)
-		expect(targetOpenIndex).toBeGreaterThanOrEqual(0)
-		const targetOpenOrder = vi.mocked(fsSync.openSync).mock.invocationCallOrder[targetOpenIndex]
-		expect(targetOpenOrder).toBeGreaterThan(copyOrder)
-		// ...and the write still reports success.
-	})
-
-	it("reports a durability failure when the copied target cannot be fsynced", async () => {
-		// The bytes are at the target but not known to be on disk: the same
-		// durability verdict the directory fsync failure gets, never a swallowed
-		// success.
-		const targetPath = "/tmp/test-dir/target.txt"
-		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-		vi.mocked(fs.link).mockRejectedValue(Object.assign(new Error("ENOTSUP"), { code: "ENOTSUP" }))
-		vi.mocked(fsSync.openSync).mockImplementation((target) => {
-			if (String(target) === targetPath) throw new Error("EIO")
-			return 1
-		})
-
-		await expect(safeWriteText(targetPath, "new data", { failIfExist: true, platform: "linux" })).rejects.toThrow(
-			PostCommitDurabilityError,
-		)
-	})
-
-	it("removes the partially copied target when the exclusive copy fails mid-copy", async () => {
-		// The copy writes directly to the final name: an EIO/ENOSPC mid-copy leaves a
-		// partial file that readers would observe as content and a retry would report
-		// as 'already exists' on damaged bytes. COPYFILE_EXCL guarantees this write
-		// created the name, so the failure path must remove it.
-		const targetPath = "/tmp/test-dir/target.txt"
-		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-		vi.mocked(fs.link).mockRejectedValue(Object.assign(new Error("ENOTSUP"), { code: "ENOTSUP" }))
-		vi.mocked(fs.copyFile).mockRejectedValue(Object.assign(new Error("EIO"), { code: "EIO" }))
-		vi.mocked(fs.unlink).mockClear()
-
-		await expect(
-			safeWriteText(targetPath, "new data", { failIfExist: true, platform: "linux" }),
-		).rejects.toMatchObject({ code: "EIO" })
-
-		// The partial target was removed - the name is absent again for the retry.
-		expect(vi.mocked(fs.unlink).mock.calls.some((call) => String(call[0]) === targetPath)).toBe(true)
-	})
-
-	it("refuses the write when the exclusive copy finds an existing target", async () => {
-		const targetPath = "/tmp/test-dir/target.txt"
-		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-		vi.mocked(fs.link).mockRejectedValue(Object.assign(new Error("EPERM"), { code: "EPERM" }))
-		vi.mocked(fs.copyFile).mockRejectedValue(Object.assign(new Error("EEXIST"), { code: "EEXIST" }))
-
-		await expect(
-			safeWriteText(targetPath, "new data", { failIfExist: true, platform: "linux" }),
-		).rejects.toBeInstanceOf(TargetExistsError)
-	})
-
 	it("still reports success when the staged copy cannot be unlinked after the link", async () => {
 		// An antivirus handle on Windows can make unlink fail with EBUSY after link(2)
 		// published the name. The content is readable at the target, so the write must

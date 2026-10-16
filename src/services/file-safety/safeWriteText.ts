@@ -159,6 +159,25 @@ export class TargetExistsError extends Error {
 }
 
 /**
+ * A conditional create (failIfExist) found that the volume hosting the target has
+ * no atomic no-replace primitive: link(2) reported that hard links do not exist
+ * here, and publishing by copy would put bytes at the final name that readers can
+ * observe mid-copy. Nothing is published - the write fails closed so a retry on a
+ * capable volume (or a caller that accepts non-atomic publication) decides.
+ */
+export class UnsupportedFilesystemError extends Error {
+	readonly targetPath: string
+	constructor(targetPath: string, cause: unknown) {
+		super(
+			`Filesystem hosting ${targetPath} has no atomic no-replace commit primitive -- the guarded create refused to publish by copy.`,
+			{ cause },
+		)
+		this.name = "UnsupportedFilesystemError"
+		this.targetPath = targetPath
+	}
+}
+
+/**
  * The path resolved to something other than the target the caller authorized.
  * Nothing is staged or published: a link swapped in after the caller's containment
  * check would otherwise send the write to a file that check never covered.
@@ -653,53 +672,17 @@ export async function safeWriteText(
 						throw new TargetExistsError(targetPath)
 					}
 					// FAT32/exFAT volumes and some SMB/network mounts have no hard links, where
-					// link(2) fails EPERM/ENOTSUP/ENOSYS. Fall back to an exclusive copy so a
-					// create still works there: copyFile with COPYFILE_EXCL still fails EEXIST
-					// when the name exists, so the no-replace verdict is unchanged. Unlike link(2)
-					// the copy is not atomic - a reader can observe a partial file - so it is only
-					// used when the atomic primitive is unavailable.
+					// link(2) fails EPERM/ENOTSUP/ENOSYS. The fallback this replaces published by
+					// an exclusive copy directly at the final name, but a copy is not atomic:
+					// readers can observe a partial file, and a crash or an EIO mid-copy leaves
+					// damaged bytes under the final name with the 'already exists' verdict on
+					// retry. No atomic no-replace primitive exists on those volumes, so the
+					// guarded create fails closed - nothing is published and the caller learns
+					// the volume cannot honor the contract.
 					if (code !== "EPERM" && code !== "ENOTSUP" && code !== "ENOSYS") {
 						throw error
 					}
-					try {
-						await fs.copyFile(tempPath, targetPath, fsSync.constants.COPYFILE_EXCL)
-					} catch (copyError: unknown) {
-						if (errorCode(copyError) === "EEXIST") {
-							throw new TargetExistsError(targetPath)
-						}
-						// The copy writes directly to the final name: a mid-copy failure
-						// (EIO, ENOSPC) leaves a partial file at the target that readers
-						// would observe as content, and a retry would then get the
-						// 'already exists' verdict on damaged bytes. COPYFILE_EXCL
-						// guarantees this write created the name, so removing it restores
-						// the pre-write absence; the staged copy is removed by the outer
-						// cleanup.
-						await fs.unlink(targetPath).catch(() => undefined)
-						throw copyError
-					}
-					// The copy created a NEW inode at the target: the staged inode was
-					// fsynced before the commit, but the copied bytes live on an inode
-					// nobody has flushed, and step 4b fsyncs only the parent directory.
-					// On FAT32/exFAT and SMB mounts a crash right after the publish can
-					// then leave a zero-length or partial target while the write reported
-					// success - and a retry would get the 'already exists' verdict on
-					// damaged bytes. Flush the copied target here; a failure is reported
-					// like the directory fsync failure, as a durability verdict on bytes
-					// that are already at the target.
-					// Open with write access: on Windows FlushFileBuffers requires
-					// GENERIC_WRITE on the handle, so a read-only handle can fail the flush
-					// even though the bytes are at the target - the same reason the backup
-					// fsync path opens "r+".
-					try {
-						const copiedFd = fsSync.openSync(targetPath, "r+")
-						try {
-							_fsyncFile(copiedFd)
-						} finally {
-							fsSync.closeSync(copiedFd)
-						}
-					} catch (error: unknown) {
-						throw new PostCommitDurabilityError(targetPath, error, true)
-					}
+					throw new UnsupportedFilesystemError(targetPath, error)
 				}
 			} else {
 				await fs.rename(tempPath, targetPath)
