@@ -19,6 +19,7 @@ import { DEFAULT_HEADERS } from "./constants"
 import { handleOpenAIError } from "./utils/error-handler"
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 
 /**
  * Configuration options for creating an OpenAI-compatible provider.
@@ -175,6 +176,12 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 			toolChoice: this.mapToolChoice(metadata?.tool_choice),
 		}
 
+		// Forward the external abort signal (e.g. task cancellation) so the in-flight
+		// stream is aborted when the request is cancelled
+		if (metadata?.abortSignal) {
+			requestOptions.abortSignal = metadata.abortSignal
+		}
+
 		// Use streamText for streaming responses
 		try {
 			const result = streamText(requestOptions)
@@ -202,6 +209,11 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 				yield this.processUsageMetrics(usage)
 			}
 		} catch (error) {
+			// Cancellation is not an API failure: when the caller's bridged signal is
+			// what ended the stream, the abort contract surfaces unchanged.
+			if (metadata?.abortSignal?.aborted) {
+				throw error
+			}
 			throw handleOpenAIError(error, this.config.providerName)
 		}
 	}
@@ -209,19 +221,34 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 	/**
 	 * Complete a prompt using the AI SDK generateText.
 	 */
-	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		const mergedAbortSignal = RequestConfigBuilder.mergeAbortSignalAndTimeout(
+			options?.abortSignal,
+			options?.timeoutMs,
+		)
 		try {
 			const languageModel = this.getLanguageModel()
 
-			const { text } = await generateText({
+			const generateOptions: Parameters<typeof generateText>[0] & { abortSignal?: AbortSignal } = {
 				model: languageModel,
 				prompt,
 				maxOutputTokens: this.getMaxOutputTokens(),
 				temperature: this.config.temperature ?? 0,
-			})
+			}
+			if (mergedAbortSignal) {
+				generateOptions.abortSignal = mergedAbortSignal
+			}
+
+			const { text } = await generateText(generateOptions)
 
 			return text
 		} catch (error) {
+			// A cancelled request is not an API failure: the abort contract (the raw
+			// AbortError / DOMException) must surface unchanged, so it is re-thrown
+			// before the provider error-wrap.
+			if (mergedAbortSignal?.aborted) {
+				throw error
+			}
 			throw handleOpenAIError(error, this.config.providerName)
 		}
 	}

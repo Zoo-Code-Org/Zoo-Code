@@ -1,18 +1,24 @@
 /**
  * Merge an optional external abort signal with an optional timeout.
  *
- * Timeout values <= 0 are treated as disabled. The timeout is created via the
+ * Timeout values <= 0 and non-finite values are treated as disabled; finite
+ * delays above 2^31-1 ms are capped (Node clamps them to 1 ms otherwise). The timeout is created via the
  * native AbortSignal.timeout() API, which self-manages its timer — callers do
  * not need to (and cannot) clear it manually.
  */
 export function mergeAbortSignalAndTimeout(externalSignal?: AbortSignal, timeoutMs?: number): AbortSignal | undefined {
-	const hasTimeout = typeof timeoutMs === "number" && timeoutMs > 0
+	// Node's AbortSignal.timeout() throws ERR_OUT_OF_RANGE for non-integer
+	// delays (Infinity) and clamps delays above 2^31-1 ms to 1 ms, which would
+	// abort almost immediately; treat non-finite values as "no timeout",
+	// round fractional delays up to whole milliseconds (uint32 validation
+	// throws for 1500.5), and cap the rest.
+	const hasTimeout = typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
 
 	if (!hasTimeout) {
 		return externalSignal
 	}
 
-	const timeoutSignal = AbortSignal.timeout(timeoutMs)
+	const timeoutSignal = AbortSignal.timeout(Math.min(Math.max(1, Math.ceil(timeoutMs)), 2_147_483_647))
 
 	if (!externalSignal) {
 		return timeoutSignal
