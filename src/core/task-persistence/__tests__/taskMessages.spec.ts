@@ -19,7 +19,7 @@ vi.mock("../../../utils/safeWriteJson", () => ({
 }))
 
 // Import after mocks
-import { saveTaskMessages, readTaskMessages } from "../taskMessages"
+import { saveTaskMessages, readTaskMessages, updateTaskMessages } from "../taskMessages"
 
 let tmpBaseDir: string
 
@@ -98,6 +98,55 @@ describe("taskMessages.saveTaskMessages", () => {
 			expect.objectContaining({ ts: 1, text: "disk" }),
 			expect.objectContaining({ ts: 2, text: "incoming" }),
 		])
+	})
+})
+
+describe("taskMessages.updateTaskMessages", () => {
+	it("keeps legacy same-timestamp identities distinct across removal and rollback", async () => {
+		const { safeWriteJson } =
+			await vi.importActual<typeof import("../../../utils/safeWriteJson")>("../../../utils/safeWriteJson")
+		const options = { taskId: "task-legacy-update", globalStoragePath: tmpBaseDir }
+		hoisted.safeWriteJsonMock.mockImplementationOnce(safeWriteJson)
+		await saveTaskMessages({ ...options, messages: [] })
+		await fs.writeFile(
+			path.join(tmpBaseDir, "tasks", options.taskId, "ui_messages.json"),
+			JSON.stringify([
+				{ ts: 1, type: "say", say: "checkpoint_saved", text: "checkpoint" },
+				{ ts: 1, type: "say", say: "text", text: "keep" },
+			]),
+		)
+		let removed: ClineMessage[] = []
+		hoisted.safeWriteJsonMock.mockImplementationOnce(safeWriteJson)
+		await updateTaskMessages({
+			...options,
+			update: (messages) => {
+				removed = messages.slice(0, 1)
+				return messages.slice(1)
+			},
+		})
+		hoisted.safeWriteJsonMock.mockImplementationOnce(safeWriteJson)
+		await saveTaskMessages({ ...options, messages: removed, merge: true })
+		const messages = await readTaskMessages(options)
+		expect(messages.map((message) => message.text).sort()).toEqual(["checkpoint", "keep"])
+		expect(new Set(messages.map((message) => message.messageId)).size).toBe(2)
+	})
+
+	it.each([null, "invalid", {}])("rejects a missing or invalid locked snapshot: %j", async (existing: unknown) => {
+		const { safeWriteJson } =
+			await vi.importActual<typeof import("../../../utils/safeWriteJson")>("../../../utils/safeWriteJson")
+		hoisted.safeWriteJsonMock.mockImplementationOnce(safeWriteJson)
+		const taskId = "task-invalid-update"
+		const taskDir = path.join(tmpBaseDir, "tasks", taskId)
+		await fs.mkdir(taskDir, { recursive: true })
+		const filePath = path.join(taskDir, "ui_messages.json")
+		if (existing !== null) await fs.writeFile(filePath, JSON.stringify(existing))
+		const update = vi.fn((messages: ClineMessage[]) => messages)
+		await expect(updateTaskMessages({ taskId, globalStoragePath: tmpBaseDir, update })).rejects.toMatchObject({
+			kind: "invalid",
+		})
+		expect(update).not.toHaveBeenCalled()
+		if (existing !== null) expect(JSON.parse(await fs.readFile(filePath, "utf8"))).toEqual(existing)
+		else await expect(fs.stat(filePath)).rejects.toMatchObject({ code: "ENOENT" })
 	})
 })
 
