@@ -386,13 +386,7 @@ describe("SwitchModeTool", () => {
 			pushToolResult: vi.fn(),
 			toolCallId: "test-call-id",
 		}
-		const block = {
-			type: "tool_use" as const,
-			name: "switch_mode" as const,
-			params: { mode_slug: "architect", reason: "test" },
-			partial: false,
-			nativeArgs: { mode_slug: "architect", reason: "test" },
-		} as unknown as ToolUse<"switch_mode"> // mirrors the createBlock helper above
+		const block = createBlock({ mode_slug: "architect", reason: "test" })
 
 		await switchModeTool.handle(toolTask, block, callbacks)
 
