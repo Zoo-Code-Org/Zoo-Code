@@ -197,23 +197,27 @@ describe("checkpointSave change-journal wiring (B2)", () => {
 		expect(await loadChanges(tmpStorageDir, TASK_ID)).toEqual([])
 	})
 
-	it("logs and continues when the journal cannot be written (checkpoints stay enabled)", async () => {
-		// Block the per-task checkpoint dir so the journal mkdir/append fails.
+	it("propagates a journal persistence failure after the commit and emits no change card", async () => {
+		// Block the per-task checkpoint dir so the journal mkdir/read fails.
 		const taskDir = path.join(tmpStorageDir, "tasks", TASK_ID)
 		await fs.mkdir(taskDir, { recursive: true })
 		await fs.writeFile(path.join(taskDir, "checkpoints"), "blocker")
 
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
-		// The journal failure is swallowed (logged, not rethrown), so the
-		// checkpoint result still resolves exactly as without journaling.
-		await expect(checkpointSave(mockTask as Task, false, true, write)).resolves.toMatchObject({ commit: COMMIT })
+		// The checkpoint committed but the journal update did not persist: the
+		// save must not report a fully durable checkpoint, and the change card
+		// (which advertises the journaled files) must not be emitted.
+		await expect(checkpointSave(mockTask as Task, false, true, write)).rejects.toThrow()
 
+		// Propagation is not a checkpoint error: checkpoints stay enabled.
 		expect(mockTask.enableCheckpoints).toBe(true)
 		expect(consoleErrorSpy).toHaveBeenCalledWith(
-			expect.stringContaining("failed to append change journal entry"),
+			expect.stringContaining("failed to persist change journal entries"),
 			expect.anything(),
 		)
+		const cardCalls = vi.mocked(mockTask.say).mock.calls.filter((call) => call[0] === "change_card")
+		expect(cardCalls).toHaveLength(0)
 	})
 })
 
