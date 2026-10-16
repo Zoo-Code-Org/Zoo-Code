@@ -1257,9 +1257,19 @@ export class DiffViewProvider {
 						const diskStat = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 						const diskToken = diskStat === undefined ? undefined : versionTokenOfStat(diskStat)
 						const oursToken = this.lastWrittenToken ?? this.placeholderVersion
-						if (diskToken !== undefined && oursToken !== undefined && diskToken !== oursToken) {
+						if (oursToken === undefined || diskToken === undefined || diskToken !== oursToken) {
+							// Ownership is unknown - this session recorded no token (an
+							// identity-only or failed stat-bracketed create), or the disk
+							// reports none - or mismatched (a peer replaced the placeholder).
+							// In every one of those cases the unlink would delete bytes this
+							// rollback cannot prove it owns: preserve the path and report the
+							// conflict explicitly instead.
 							await this.closeAllDiffViews()
-							throw new RollbackConflictError(absolutePath, oursToken, diskToken)
+							throw new RollbackConflictError(
+								absolutePath,
+								oursToken ?? "<no-session-version>",
+								diskToken ?? "<absent>",
+							)
 						}
 						// No save before the delete: saving the diff buffer would publish the
 						// cancelled edit's content to disk immediately before deleting it -
@@ -1298,25 +1308,33 @@ export class DiffViewProvider {
 					// eligibility - replaceIfVersion re-reads the version under the lock,
 					// and that read is the authoritative check the publish is bound to.
 					const diskStat = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
-					let casPublished = false
-					if (expectedToken !== undefined && diskStat !== undefined) {
-						try {
-							await replaceIfVersion(absolutePath, expectedToken, originalBytes, displayRelPath)
-							casPublished = true
-						} catch (error: unknown) {
-							if (error instanceof GuardRejectedError) {
-								// The CAS rejected: the peer's bytes are preserved. Report the
-								// conflict with the disk token the rejection is about.
-								const conflictStat = await fs
-									.stat(absolutePath, { bigint: true })
-									.catch(() => undefined)
-								const diskToken =
-									conflictStat === undefined ? "<absent>" : versionTokenOfStat(conflictStat)
-								await this.closeAllDiffViews()
-								throw new RollbackConflictError(absolutePath, expectedToken, diskToken)
-							}
-							throw error
+					if (expectedToken === undefined || diskStat === undefined) {
+						// One side of the comparison has no version: the session never
+						// recorded what it left (a publish whose token read failed), or the
+						// disk reports no version at all. There is nothing to bind a publish
+						// to, and an unguarded save here could overwrite a peer's bytes with
+						// originalContent - the exact loss the CAS exists to prevent. Preserve
+						// the disk state and report the conflict explicitly instead.
+						const diskToken = diskStat === undefined ? "<absent>" : versionTokenOfStat(diskStat)
+						await this.closeAllDiffViews()
+						throw new RollbackConflictError(
+							absolutePath,
+							expectedToken ?? "<no-session-version>",
+							diskToken,
+						)
+					}
+					try {
+						await replaceIfVersion(absolutePath, expectedToken, originalBytes, displayRelPath)
+					} catch (error: unknown) {
+						if (error instanceof GuardRejectedError) {
+							// The CAS rejected: the peer's bytes are preserved. Report the
+							// conflict with the disk token the rejection is about.
+							const conflictStat = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+							const diskToken = conflictStat === undefined ? "<absent>" : versionTokenOfStat(conflictStat)
+							await this.closeAllDiffViews()
+							throw new RollbackConflictError(absolutePath, expectedToken, diskToken)
 						}
+						throw error
 					}
 
 					// Restore the buffer to the original content.
@@ -1330,20 +1348,11 @@ export class DiffViewProvider {
 					edit.replace(updatedDocument.uri, fullRange, originalBytes)
 					await vscode.workspace.applyEdit(edit)
 
-					if (casPublished) {
-						// The CAS published the original bytes outside VS Code's save path:
-						// reconcile the buffer with the disk - reverting reloads the published
-						// bytes and clears the dirty flag - instead of saving the buffer back
-						// over the disk through the unguarded path this rollback replaced.
-						await this.revertDocument(updatedDocument)
-					} else {
-						// No CAS: either this session never published to the path (no expected
-						// version exists) or the disk reported no version to compare against
-						// (absent or unreadable). Saving the restored buffer rewrites the
-						// bytes this session last knew, as it did before the guarded rollback
-						// existed; there was no version to bind the publish to.
-						await updatedDocument.save()
-					}
+					// The CAS published the original bytes outside VS Code's save path:
+					// reconcile the buffer with the disk - reverting reloads the published
+					// bytes and clears the dirty flag - instead of saving the buffer back
+					// over the disk through the unguarded path this rollback replaced.
+					await this.revertDocument(updatedDocument)
 
 					await this.closeAllDiffViews()
 

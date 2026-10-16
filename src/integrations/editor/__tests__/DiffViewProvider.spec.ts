@@ -3404,6 +3404,115 @@ describe("DiffViewProvider", () => {
 			expect(vscode.workspace.applyEdit).not.toHaveBeenCalled()
 		})
 
+		it("revertChanges() preserves the disk when the session has no rollback baseline", async () => {
+			// A guarded publish whose token read failed leaves the session without a
+			// version to bind the restore to. The old fallback saved originalContent
+			// unguarded - over any peer write landing in that window. The rollback
+			// now preserves the disk state and reports the conflict explicitly.
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor // Structural double: the rollback only reads document/tab surface.
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider["relPath"] = "test.ts"
+			diffViewProvider.editType = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["lastWrittenToken"] = undefined
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+
+			await expect(diffViewProvider.revertChanges()).rejects.toMatchObject({
+				name: "RollbackConflictError",
+				oursToken: "<no-session-version>",
+				diskToken: versionTokenOfStat(previewStats),
+			})
+			// The disk was preserved: no publish of originalContent, no buffer write.
+			expect(safeWriteText).not.toHaveBeenCalledWith(expect.any(String), "original")
+			expect(vscode.workspace.applyEdit).not.toHaveBeenCalled()
+		})
+
+		it("revertChanges() preserves the disk when the disk reports no version", async () => {
+			// The mirror case: the session recorded a token but the disk reports no
+			// version to compare against (absent or unreadable). Saving here would
+			// recreate or clobber a path whose state this session cannot prove.
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor // Structural double: the rollback only reads document/tab surface.
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider["relPath"] = "test.ts"
+			diffViewProvider.editType = "modify"
+			diffViewProvider["originalContent"] = "original"
+			diffViewProvider["lastWrittenToken"] = versionTokenOfStat(previewStats)
+			vi.mocked(fs.stat).mockResolvedValue(undefined as unknown as Awaited<ReturnType<typeof fs.stat>>) // No stat evidence.
+
+			await expect(diffViewProvider.revertChanges()).rejects.toMatchObject({
+				name: "RollbackConflictError",
+				oursToken: versionTokenOfStat(previewStats),
+				diskToken: "<absent>",
+			})
+			expect(safeWriteText).not.toHaveBeenCalledWith(expect.any(String), "original")
+			expect(vscode.workspace.applyEdit).not.toHaveBeenCalled()
+		})
+
+		it("revertChanges() keeps a peer replacement when the create recorded an identity only", async () => {
+			// A create whose placeholder token is unavailable (identity-only or failed
+			// stat-bracketed open) cannot prove ownership of the path it is about to
+			// unlink: a peer replacement landing in that window would be deleted by a
+			// rollback that never saw it. The unlink runs only on a proven token match;
+			// an unknown owner keeps the path and the created directories.
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("placeholder content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor // Structural double: the rollback only reads document/tab surface.
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider["relPath"] = "test.ts"
+			diffViewProvider.editType = "create"
+			diffViewProvider["lastWrittenToken"] = undefined
+			diffViewProvider["placeholderVersion"] = undefined
+			diffViewProvider["placeholderIdentity"] = { dev: BigInt(1), ino: BigInt(2) }
+			diffViewProvider["createdDirs"] = [`${mockCwd}/newdir`]
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+
+			await expect(diffViewProvider.revertChanges()).rejects.toMatchObject({
+				name: "RollbackConflictError",
+				oursToken: "<no-session-version>",
+				diskToken: versionTokenOfStat(previewStats),
+			})
+			// Ownership unknown: neither the unlink nor the directory cleanup ran.
+			expect(fs.unlink).not.toHaveBeenCalled()
+			expect(fs.rmdir).not.toHaveBeenCalled()
+		})
+
 		it("reports a peer publish that landed after a real successful save as a rollback conflict", async () => {
 			// The rollback baseline must come from this session's own publish: a real
 			// saveChanges() records the token its publish left on disk, so a peer that
@@ -3463,8 +3572,14 @@ describe("DiffViewProvider", () => {
 			})
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
 
-			await expect(diffViewProvider.revertChanges()).resolves.toBeUndefined()
-			expect(vscode.workspace.applyEdit).toHaveBeenCalled()
+			// The new contract: a session with no baseline has no version to bind a
+			// restore to, so the rollback preserves the disk and reports the conflict
+			// explicitly instead of saving bytes it cannot tie to a checked version.
+			await expect(diffViewProvider.revertChanges()).rejects.toMatchObject({
+				name: "RollbackConflictError",
+				oursToken: "<no-session-version>",
+			})
+			expect(vscode.workspace.applyEdit).not.toHaveBeenCalled()
 		})
 
 		it("drops the rollback baseline when the session is finalized", async () => {
@@ -3919,6 +4034,19 @@ describe("DiffViewProvider", () => {
 
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockSavedEditor as any)
 			;(diffViewProvider as any).closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			// The CAS rollback needs both sides of the version comparison: this session
+			// left the token and the disk still reports it.
+			const scrollStats = {
+				isDirectory: () => false,
+				dev: BigInt(1),
+				ino: BigInt(2),
+				size: BigInt(300),
+				mtimeNs: BigInt(4_000_000_000n),
+				ctimeNs: BigInt(5_000_000_000n),
+			} as unknown as BigIntStats
+			vi.mocked(fs.stat).mockResolvedValue(scrollStats)
+			vi.mocked(computeVersionToken).mockResolvedValue(versionTokenOfStat(scrollStats))
+			diffViewProvider["lastWrittenToken"] = versionTokenOfStat(scrollStats)
 			;(diffViewProvider as any).documentWasOpen = true
 			;(diffViewProvider as any).preEditScrollLine = 15
 			;(diffViewProvider as any).editType = "modify"
@@ -3947,12 +4075,29 @@ describe("DiffViewProvider", () => {
 	describe("userTouchedDocument close/keep behavior", () => {
 		const mockTargetPath = `${mockCwd}/mock-target-file.ts`
 
+		// Synthetic stat for the session's own publish, tokenized with the real
+		// versionTokenOfStat so the rollback's compare-and-swap sees a matching pair.
+		const ownStats = {
+			isDirectory: () => false,
+			dev: BigInt(1),
+			ino: BigInt(2),
+			size: BigInt(300),
+			mtimeNs: BigInt(4_000_000_000n),
+			ctimeNs: BigInt(5_000_000_000n),
+		} as unknown as BigIntStats
+
 		beforeEach(() => {
 			// The guarded-publish describe queues a stat mock that clearAllMocks does
 			// not undo. These tests model a session whose own publish is the last
-			// writer, so restore the file-wide default (no stat evidence) instead of
-			// letting a foreign token pose as a peer write.
-			vi.mocked(fs.stat).mockResolvedValue(undefined as unknown as Awaited<ReturnType<typeof fs.stat>>) // No stat evidence.
+			// writer, so pin the disk evidence and the session baseline to the same
+			// token instead of letting a foreign token pose as a peer write - the
+			// rollback now refuses to act without both sides of the comparison.
+			vi.mocked(fs.stat).mockResolvedValue(ownStats)
+			// The file-wide observation and version source are "v1" (see the top-level
+			// beforeEach): the session baseline must be the token the guarded publish
+			// actually recorded, and the stat above only has to exist for the rollback
+			// to have disk evidence to bind to.
+			diffViewProvider["lastWrittenToken"] = "v1"
 		})
 
 		const buildActiveDiffEditor = () => ({
@@ -4128,9 +4273,12 @@ describe("DiffViewProvider", () => {
 			release()
 			const [result] = await Promise.all([save, revert])
 
-			// Both rollback writes happened after the publish settled, so the final bytes
-			// on disk are the rollback's originalContent, not the cancelled edit.
-			expect(rollbackWritesAfterPublishSettled).toEqual([true, true])
+			// The rollback's document write happened after the publish settled; the
+			// disk publish went through the compare-and-swap (not the buffer save), so
+			// the final bytes on disk are the rollback's originalContent, not the
+			// cancelled edit, and the buffer was reconciled by reverting onto them.
+			expect(rollbackWritesAfterPublishSettled).toEqual([true])
+			expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.files.revert")
 			expect(result).toEqual({
 				newProblemsMessage: undefined,
 				userEdits: undefined,
@@ -4806,7 +4954,9 @@ describe("DiffViewProvider", () => {
 			await diffViewProvider.revertChanges()
 
 			expect(closeFileTab).toHaveBeenCalledWith(mockTargetPath)
-			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
+			// The CAS-published rollback reconciles the buffer by reverting, which
+			// activates the document once; the tab itself is closed by closeFileTab.
+			expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.files.revert")
 		})
 
 		it("revertChanges() keeps the file open when the user touched it", async () => {
@@ -5087,6 +5237,17 @@ describe("DiffViewProvider", () => {
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
 			;(diffViewProvider as any).closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
 			;(diffViewProvider as any).closeFileTab = closeFileTab
+			// The CAS rollback needs both sides of the version comparison: this session
+			// left "v1" (the file-wide observation) and the disk reports evidence.
+			vi.mocked(fs.stat).mockResolvedValue({
+				isDirectory: () => false,
+				dev: BigInt(1),
+				ino: BigInt(2),
+				size: BigInt(300),
+				mtimeNs: BigInt(4_000_000_000n),
+				ctimeNs: BigInt(5_000_000_000n),
+			} as unknown as BigIntStats)
+			diffViewProvider["lastWrittenToken"] = "v1"
 			;(diffViewProvider as any).relPath = "mock-target-file.ts"
 			;(diffViewProvider as any).documentWasOpen = false
 			;(diffViewProvider as any).userTouchedDocument = false
@@ -5100,7 +5261,9 @@ describe("DiffViewProvider", () => {
 			await diffViewProvider.revertChanges()
 
 			expect(closeFileTab).toHaveBeenCalledWith(mockTargetPath)
-			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
+			// The CAS-published rollback reconciles the buffer by reverting, which
+			// activates the document once; the tab itself is closed by closeFileTab.
+			expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.files.revert")
 		})
 	})
 
