@@ -46,7 +46,7 @@ jobs:
               if: github.event_name == 'pull_request'
               run: pnpm test:mutation-ci
 
-            - name: Enforce executable-line scope and run advisory mutation testing
+            - name: Enforce executable-line scope and directive policy, run advisory mutation testing
               if: github.event_name == 'pull_request'
               env:
                   HEAD_SHA: ${{ github.sha }}

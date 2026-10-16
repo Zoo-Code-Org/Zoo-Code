@@ -74,8 +74,7 @@ const VALID_MUTANT_STATUSES = new Set(["Killed", "Timeout", "Survived", "NoCover
 const BLOCKING_MUTANT_STATUSES = new Set(["Survived", "NoCoverage"])
 const SOURCE_EXTENSIONS = new Set([".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"])
 const EXCLUDED_PATH_SEGMENTS = ["/__mocks__/", "/__tests__/", "/fixtures/", "/test-utils/"]
-const DISABLE_DIRECTIVE =
-	/^\s*\/\/\s*Stryker disable next-line ([A-Za-z][A-Za-z0-9]*(?:,[A-Za-z][A-Za-z0-9]*)*)\s*:\s*(\S.*)$/
+const SUPPRESSION_DIRECTIVE = /\/\/\s*Stryker\s+(?:disable|enable)\b/
 
 export function parseNameStatus(output) {
 	const tokens = output.split("\0")
@@ -159,20 +158,42 @@ export function executableChangedLines(source, changedLines, filePath = "source.
 	return executable
 }
 
-export function validateDisableDirectives(source, changedLines, filePath) {
-	const lines = source.split(/\r?\n/)
-	for (const lineNumber of changedLines) {
-		const line = lines[lineNumber - 1] ?? ""
-		if (!line.includes("Stryker disable")) continue
-
-		const match = DISABLE_DIRECTIVE.exec(line)
-		if (!match || match[1].split(",").some((mutator) => mutator.toLowerCase() === "all")) {
-			throw new Error(
-				`${filePath}:${lineNumber}: mutation exclusions must use ` +
-					'"// Stryker disable next-line MutatorName: concrete reason"; broad or unreasoned exclusions are not allowed.',
-			)
+export function assertNoDisableDirectives(source, lineNumbers, filePath) {
+	// Comment ranges come from the parsed source: string literals and template text that mention
+	// the directive syntax must not fail the gate, and a raw scanner misclassifies text after a
+	// template interpolation because it never resumes the template lexical goal.
+	const scriptKind = filePath.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+	const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, scriptKind)
+	const seen = new Set()
+	function checkRanges(ranges) {
+		for (const range of ranges ?? []) {
+			if (seen.has(range.pos)) continue
+			seen.add(range.pos)
+			// getLeadingCommentRanges is text-based: inside JSX, directive-looking rendered text
+			// (e.g. <div> // Stryker disable all) is JsxText, not a comment, and must not fail.
+			if (ts.getTokenAtPosition(sourceFile, range.pos).kind === ts.SyntaxKind.JsxText) continue
+			if (!SUPPRESSION_DIRECTIVE.test(source.slice(range.pos, range.end))) continue
+			const lineNumber = (source.slice(0, range.pos).match(/\n/g)?.length ?? 0) + 1
+			if (lineNumbers.has(lineNumber)) {
+				throw new Error(
+					`${filePath}:${lineNumber}: Stryker suppression comments are not allowed in this repository. ` +
+						"Kill the mutant with a focused test instead; if the mutant is genuinely equivalent, explain the " +
+						"equivalence in the pull request and a maintainer will decide on a narrow gate-config exclusion.",
+				)
+			}
 		}
 	}
+	function visitTokens(node) {
+		for (const child of node.getChildren(sourceFile)) {
+			if (ts.isToken(child)) {
+				checkRanges(ts.getLeadingCommentRanges(source, child.pos))
+				checkRanges(ts.getTrailingCommentRanges(source, child.end))
+			} else {
+				visitTokens(child)
+			}
+		}
+	}
+	visitTokens(sourceFile)
 }
 
 export function toRanges(lines) {
@@ -225,11 +246,7 @@ export function buildManifest(entries, readSource, diffForPath) {
 				? new Set(Array.from({ length: sourceLineCount }, (_, index) => index + 1))
 				: parseChangedLines(diffForPath(entry.path))
 
-		try {
-			validateDisableDirectives(source, new Set(source.split(/\r?\n/).map((_, index) => index + 1)), entry.path)
-		} catch (error) {
-			advisories.push(error.message)
-		}
+		assertNoDisableDirectives(source, new Set(source.split(/\r?\n/).map((_, index) => index + 1)), entry.path)
 		const executableLines = executableChangedLines(source, changedLines, entry.path)
 		if (executableLines.size === 0) continue
 
@@ -465,6 +482,40 @@ export function mutantCounts(report) {
 	return counts
 }
 
+export function loadEquivalences(repoRoot) {
+	const file = path.join(repoRoot, "scripts/stryker-equivalences.json")
+	if (!fs.existsSync(file)) return []
+	const parsed = JSON.parse(fs.readFileSync(file, "utf8"))
+	return parsed.equivalences ?? []
+}
+
+export function applyEquivalences(counts, equivalences, packageEntry, reportedFiles = new Set()) {
+	// The key includes the replacement: one condition yields both `=> true` and `=> false`
+	// ConditionalExpression mutants, and only the reviewed replacement may be accepted.
+	const index = new Map(
+		equivalences.map((entry) => [`${entry.file}:${entry.line}:${entry.mutator}:${entry.replacement}`, entry]),
+	)
+	const used = new Set()
+	const blocking = []
+	let equivalent = 0
+	for (const mutant of counts.blocking) {
+		const key = `${packageEntry.root}/${mutant.filePath}:${mutant.location?.start?.line}:${mutant.mutatorName}:${mutant.replacement}`
+		if (index.has(key)) {
+			used.add(key)
+			equivalent++
+		} else {
+			blocking.push(mutant)
+		}
+	}
+	const unusedEquivalences = equivalences.filter(
+		(entry) =>
+			entry.file.startsWith(packageEntry.sourceRoot) &&
+			reportedFiles.has(entry.file) &&
+			!used.has(`${entry.file}:${entry.line}:${entry.mutator}:${entry.replacement}`),
+	)
+	return { ...counts, blocking, equivalent, unusedEquivalences }
+}
+
 function escapeWorkflowData(value) {
 	return String(value).replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A")
 }
@@ -569,15 +620,15 @@ export function formatSummary(rows, advisories, manifest = {}) {
 	const lines = [
 		"## Changed-code mutation testing",
 		"",
-		"| Package | Changed executable lines | Valid | Killed | Timeout | Survived | No coverage | Result |",
-		"| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+		"| Package | Changed executable lines | Valid | Killed | Timeout | Survived | No coverage | Equivalent | Result |",
+		"| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
 	]
 	for (const row of rows) {
 		lines.push(
-			`| ${row.id} | ${row.changedLines} | ${row.valid} | ${row.killed} | ${row.timeout} | ${row.survived} | ${row.noCoverage} | ${row.result} |`,
+			`| ${row.id} | ${row.changedLines} | ${row.valid} | ${row.killed} | ${row.timeout} | ${row.survived} | ${row.noCoverage} | ${row.equivalent ?? 0} | ${row.result} |`,
 		)
 	}
-	if (rows.length === 0) lines.push("| — | 0 | 0 | 0 | 0 | 0 | 0 | Not applicable |")
+	if (rows.length === 0) lines.push("| — | 0 | 0 | 0 | 0 | 0 | 0 | 0 | Not applicable |")
 
 	if (rows.length > 0) {
 		lines.push("", "### Focused tests")
@@ -608,14 +659,7 @@ export function formatSummary(rows, advisories, manifest = {}) {
 		lines.push(
 			"### Resolve a mutation gap",
 			"",
-			"Add or strengthen a focused test that fails under the mutation. If the mutant is equivalent, request maintainer approval for the narrowest mutator-specific exclusion and explain why it cannot change behavior:",
-			"",
-			"```ts",
-			"// Stryker disable next-line ConditionalExpression: normalized input cannot reach the alternate branch",
-			"const result = condition ? value : fallback",
-			"```",
-			"",
-			"Broad `all` exclusions and exclusions without a concrete reason are reported as advisories.",
+			"Add or strengthen a focused test that fails under the mutation. Stryker suppression comments (`// Stryker disable ...`) are not allowed in this repository: the gate fails any pull request that introduces them. If you believe a mutant is genuinely equivalent, explain why in the pull request and a maintainer will decide on a narrow gate-config exclusion.",
 		)
 	}
 
@@ -670,9 +714,17 @@ export function appendSummary(rows, advisories, manifest) {
 	}
 }
 
-export function evaluateReport(report, packageEntry) {
-	const counts = mutantCounts(report)
+export function evaluateReport(report, packageEntry, equivalences = []) {
+	const reportedFiles = new Set(Object.keys(report.files ?? {}).map((filePath) => `${packageEntry.root}/${filePath}`))
+	const counts = applyEquivalences(mutantCounts(report), equivalences, packageEntry, reportedFiles)
 	const advisories = []
+	if (counts.unusedEquivalences.length > 0) {
+		advisories.push(
+			`${packageEntry.id} matched none of its accepted equivalence entries for files under test ` +
+				`(${counts.unusedEquivalences.map((entry) => `${entry.file}:${entry.line}:${entry.mutator}:${entry.replacement}`).join(", ")}). ` +
+				"The code shifted or the mutant is now killed; update or remove the stale entries.",
+		)
+	}
 	if (counts.valid > MAX_MUTANTS) {
 		advisories.push(
 			`${packageEntry.id} generated ${counts.valid} valid mutants (limit ${MAX_MUTANTS}). ` +
@@ -695,8 +747,10 @@ export function runManifest(
 	{
 		runMutation = runStryker,
 		readMutationReport = (reportPath) => JSON.parse(fs.readFileSync(reportPath, "utf8")),
+		readEquivalences = loadEquivalences,
 	} = {},
 ) {
+	const equivalences = readEquivalences(repoRoot)
 	const rows = []
 	const advisories = [...(manifest.advisories ?? [])]
 	const annotationState = { total: 0, perFile: new Map() }
@@ -737,6 +791,7 @@ export function runManifest(
 					timeout: 0,
 					survived: 0,
 					noCoverage: 0,
+					equivalent: 0,
 					result: "No mutants generated",
 				})
 				continue
@@ -746,7 +801,7 @@ export function runManifest(
 			const jsonReportPath = path.join(reportRoot, packageEntry.id, "mutation.json")
 			const report = readMutationReport(jsonReportPath)
 			packageEntry.testFiles = testsFromMutationReport(report, packageEntry.testFiles)
-			counts = evaluateReport(report, packageEntry)
+			counts = evaluateReport(report, packageEntry, equivalences)
 			for (const annotation of formatAnnotations(
 				counts.blocking,
 				packageEntry.runRoot ?? packageEntry.root,
@@ -781,6 +836,7 @@ export function runManifest(
 				timeout: counts?.timeout ?? 0,
 				survived: counts?.survived ?? 0,
 				noCoverage: counts?.noCoverage ?? 0,
+				equivalent: counts?.equivalent ?? 0,
 				blocking: counts?.blocking ?? [],
 				result: "Advisory incomplete",
 			})

@@ -28,6 +28,14 @@ New or substantially changed test files must not add `@typescript-eslint/no-expl
 - Validate with `pnpm --dir src run check-types`, the narrowest affected Vitest suite, and `pnpm --dir src exec eslint --prune-suppressions --max-warnings=0 <relative-test-file>`; the run must not add a new entry or raise an existing count.
 - An exception requires a comment next to the cast explaining why no typed alternative exists and maintainer approval in review.
 
+## Stryker Suppression Comments
+
+Do not add Stryker suppression comments (`// Stryker disable ...`, `// Stryker enable ...`) to source files. The changed-code mutation gate (`scripts/stryker-diff.mjs`, run by the `mutation-diff` CI job) fails any pull request that introduces them in mutation-tested files.
+
+- Kill surviving or uncovered mutants by adding or strengthening a focused test that fails under the mutation.
+- If a mutant is genuinely equivalent, explain the equivalence in the PR description; maintainers decide on narrow gate-config exclusions. Do not add a suppression locally to get green.
+- Suppressions left by earlier revisions are removed when their file is touched; do not reintroduce them.
+
 ## Persisted Setting Checklist
 
 When adding or changing a user setting, trace the complete round trip. A setting is not complete merely because its control renders or its value reaches storage.

@@ -11,6 +11,7 @@ import {
 	MAX_MUTANTS,
 	PACKAGE_CONFIGS,
 	appendSummary,
+	assertNoDisableDirectives,
 	buildManifest,
 	discoverRelatedTestFiles,
 	evaluateReport,
@@ -20,6 +21,7 @@ import {
 	formatAnnotationCommand,
 	formatBlockingMutants,
 	formatSummary,
+	loadEquivalences,
 	mutantCounts,
 	parseChangedLines,
 	parseNameStatus,
@@ -32,7 +34,6 @@ import {
 	runManifest,
 	selectFromGit,
 	testsFromMutationReport,
-	validateDisableDirectives,
 } from "./stryker-diff.mjs"
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
@@ -61,7 +62,9 @@ describe("mutation testing workflow", () => {
 		assert.ok(!workflow.includes("github.event.pull_request.base.sha"))
 		assert.ok(workflow.includes("steps.mutation_report.outputs.artifact-url"))
 		assert.ok(workflow.includes("open the package's mutation.html file"))
-		assert.ok(workflow.includes("Enforce executable-line scope and run advisory mutation testing"))
+		assert.ok(
+			workflow.includes("Enforce executable-line scope and directive policy, run advisory mutation testing"),
+		)
 		assert.equal(workflow.match(/continue-on-error: true/g)?.length, 1)
 		assert.equal(workflow.match(/Could not write the job summary/g)?.length, 2)
 		const script = fs.readFileSync(path.join(repositoryRoot, "scripts/stryker-diff.mjs"), "utf8")
@@ -297,15 +300,16 @@ describe("buildManifest", () => {
 		)
 	})
 
-	it("reports invalid mutation exclusions without bypassing executable-line accounting", () => {
-		const manifest = buildManifest(
-			[{ status: "A", path: "packages/core/src/value.ts" }],
-			() => "// Stryker disable next-line all: noisy\nexport const value = true\n",
-			() => "",
+	it("fails the manifest when a mutation-tested file contains a Stryker suppression comment", () => {
+		assert.throws(
+			() =>
+				buildManifest(
+					[{ status: "A", path: "packages/core/src/value.ts" }],
+					() => "// Stryker disable next-line all: noisy\nexport const value = true\n",
+					() => "",
+				),
+			/Stryker suppression comments are not allowed/,
 		)
-
-		assert.equal(manifest.packages[0].changedExecutableLines, 1)
-		assert.match(manifest.advisories.join("\n"), /broad or unreasoned exclusions are not allowed/)
 	})
 })
 
@@ -583,35 +587,97 @@ describe("selectFromGit", () => {
 	})
 })
 
-describe("mutation exclusions", () => {
-	it("allows a targeted mutator exclusion with a reason", () => {
+describe("Stryker suppression directive prohibition", () => {
+	it("rejects every Stryker suppression comment, however well-formed", () => {
+		for (const source of [
+			"// Stryker disable next-line EqualityOperator: equivalent for normalized input\nreturn value <= limit\n",
+			"// Stryker disable next-line all: noisy\nreturn value\n",
+			"// Stryker disable next-line EqualityOperator\nreturn value\n",
+			"// Stryker disable start\nreturn value\n// Stryker disable end\n",
+			"// Stryker enable next-line EqualityOperator: undo\nreturn value\n",
+			"\t\t// Stryker disable string\nreturn value\n",
+		]) {
+			assert.throws(
+				() => assertNoDisableDirectives(source, new Set([1]), "source.ts"),
+				/Stryker suppression comments are not allowed/,
+			)
+		}
+	})
+
+	it("matches comment tokens only, never string literals or template text", () => {
 		assert.doesNotThrow(() =>
-			validateDisableDirectives(
-				"// Stryker disable next-line EqualityOperator: equivalent for normalized input\nreturn value <= limit\n",
-				new Set([1]),
+			assertNoDisableDirectives(
+				'export const guidance = "// Stryker disable all"\nreturn value\n',
+				new Set([1, 2]),
 				"source.ts",
 			),
 		)
-	})
-
-	it("rejects broad or unreasoned exclusions", () => {
-		assert.throws(
-			() =>
-				validateDisableDirectives(
-					"// Stryker disable next-line all: noisy\nreturn value\n",
-					new Set([1]),
-					"source.ts",
-				),
-			/broad or unreasoned exclusions are not allowed/,
+		assert.doesNotThrow(() =>
+			assertNoDisableDirectives(
+				"const doc = `// Stryker disable next-line all`\nreturn value\n",
+				new Set([1, 2]),
+				"source.ts",
+			),
+		)
+		assert.doesNotThrow(() =>
+			assertNoDisableDirectives(
+				"const text = `${value} // Stryker disable all`\nreturn value\n",
+				new Set([1, 2]),
+				"source.ts",
+			),
 		)
 		assert.throws(
 			() =>
-				validateDisableDirectives(
-					"// Stryker disable next-line EqualityOperator\nreturn value\n",
+				assertNoDisableDirectives(
+					"const text = `${value}`\n// Stryker disable next-line all: reason\nreturn value\n",
+					new Set([1, 2, 3]),
+					"source.ts",
+				),
+			/Stryker suppression comments are not allowed/,
+		)
+		assert.throws(
+			() =>
+				assertNoDisableDirectives(
+					"const a = `x${`y${z}`} tail` // Stryker disable all: reason\nreturn value\n",
+					new Set([1, 2]),
+					"source.ts",
+				),
+			/Stryker suppression comments are not allowed/,
+		)
+		assert.throws(
+			() =>
+				assertNoDisableDirectives(
+					"return value // Stryker disable next-line all: reason\n",
 					new Set([1]),
 					"source.ts",
 				),
-			/broad or unreasoned exclusions are not allowed/,
+			/Stryker suppression comments are not allowed/,
+		)
+	})
+
+	it("ignores directive-looking JSX text in tsx sources", () => {
+		assert.doesNotThrow(() =>
+			assertNoDisableDirectives(
+				"const el = <div> // Stryker disable all\n</div>\n",
+				new Set([1, 2]),
+				"source.tsx",
+			),
+		)
+		assert.throws(
+			() =>
+				assertNoDisableDirectives(
+					"const el = <div>{ // Stryker disable next-line all: reason\nx}</div>\n",
+					new Set([1, 2]),
+					"source.tsx",
+				),
+			/Stryker suppression comments are not allowed/,
+		)
+	})
+
+	it("accepts sources without suppression comments", () => {
+		assert.doesNotThrow(() => assertNoDisableDirectives("return value <= limit\n", new Set([1]), "source.ts"))
+		assert.doesNotThrow(() =>
+			assertNoDisableDirectives("// not a stryker comment\nreturn value\n", new Set([1]), "source.ts"),
 		)
 	})
 })
@@ -641,7 +707,7 @@ describe("failure output", () => {
 		},
 	]
 
-	it("lists every advisory mutant with tests, reproduction, exclusion, and report guidance", () => {
+	it("lists every advisory mutant with tests, reproduction, directive policy, and report guidance", () => {
 		const baseSha = "a".repeat(40)
 		const headSha = "b".repeat(40)
 		const summary = formatSummary(
@@ -672,7 +738,8 @@ describe("failure output", () => {
 		for (const mutant of blocking) assert.ok(summary.includes(mutant.mutatorName))
 		assert.ok(summary.includes('"left \\| right"'))
 		assert.ok(summary.includes(`node scripts/stryker-diff.mjs ci --base ${baseSha} --head ${headSha}`))
-		assert.ok(summary.includes("Stryker disable next-line ConditionalExpression:"))
+		assert.ok(summary.includes("Stryker suppression comments"))
+		assert.ok(summary.includes("are not allowed in this repository"))
 		assert.ok(summary.includes("`reports/mutation/extension/mutation.html`"))
 		assert.ok(summary.includes("`changed-code-mutation-report` artifact"))
 		assert.ok(summary.includes("### Advisory findings"))
@@ -986,5 +1053,199 @@ describe("report evaluation", () => {
 			evaluateReport({ files: { "src/value.ts": { mutants } } }, packageEntry).advisories.join("\n"),
 			/result is inconclusive/,
 		)
+	})
+})
+
+describe("accepted equivalent mutants", () => {
+	const packageEntry = { id: "extension", root: "src", sourceRoot: "src/" }
+	const report = {
+		files: {
+			"utils/pathUtils.ts": {
+				mutants: [
+					{
+						status: "Survived",
+						mutatorName: "EqualityOperator",
+						replacement: "<=",
+						location: { start: { line: 45 } },
+					},
+					{
+						status: "Survived",
+						mutatorName: "ConditionalExpression",
+						replacement: "true",
+						location: { start: { line: 50 } },
+					},
+				],
+			},
+		},
+	}
+	const equivalences = [
+		{
+			file: "src/utils/pathUtils.ts",
+			line: 45,
+			mutator: "EqualityOperator",
+			replacement: "<=",
+			reason: "defensive bound never hit",
+		},
+		{
+			file: "src/utils/pathUtils.ts",
+			line: 99,
+			mutator: "BlockStatement",
+			replacement: "{}",
+			reason: "entry whose mutant is gone",
+		},
+		{
+			file: "src/other.ts",
+			line: 7,
+			mutator: "Foo",
+			replacement: "bar",
+			reason: "file not part of this run",
+		},
+	]
+
+	it("removes accepted equivalent mutants from the blocking set", () => {
+		const counts = evaluateReport(report, packageEntry, equivalences)
+		assert.equal(counts.equivalent, 1)
+		assert.equal(counts.survived, 2)
+		assert.equal(counts.blocking.length, 1)
+		assert.equal(counts.blocking[0].mutatorName, "ConditionalExpression")
+	})
+
+	it("accepts only the reviewed replacement when two mutants share a key", () => {
+		const twoMutants = {
+			files: {
+				"utils/pathUtils.ts": {
+					mutants: [
+						{
+							status: "Survived",
+							mutatorName: "ConditionalExpression",
+							replacement: "true",
+							location: { start: { line: 50 } },
+						},
+						{
+							status: "Survived",
+							mutatorName: "ConditionalExpression",
+							replacement: "false",
+							location: { start: { line: 50 } },
+						},
+					],
+				},
+			},
+		}
+		const reviewed = [
+			{
+				file: "src/utils/pathUtils.ts",
+				line: 50,
+				mutator: "ConditionalExpression",
+				replacement: "true",
+				reason: "only the true replacement is equivalent here",
+			},
+		]
+		const counts = evaluateReport(twoMutants, packageEntry, reviewed)
+		assert.equal(counts.equivalent, 1)
+		assert.equal(counts.blocking.length, 1)
+		assert.equal(counts.blocking[0].replacement, "false")
+	})
+
+	it("advises about stale entries only for files present in the report", () => {
+		const advisories = evaluateReport(report, packageEntry, equivalences).advisories.join("\n")
+		assert.match(advisories, /src\/utils\/pathUtils\.ts:99:BlockStatement/)
+		assert.doesNotMatch(advisories, /src\/other\.ts/)
+	})
+
+	it("keeps prior behavior when no equivalences are configured", () => {
+		const counts = evaluateReport(report, packageEntry)
+		assert.equal(counts.blocking.length, 2)
+		assert.equal(counts.equivalent, 0)
+	})
+
+	it("applies registry equivalences through the runManifest pipeline", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-equiv-manifest-"))
+		const packageEntry = {
+			id: "core",
+			root: "packages/core",
+			sourceRoot: "packages/core/",
+			vitestConfig: "vitest.unit.config.ts",
+			selectors: ["src/value.ts:1-1"],
+			changedExecutableLines: 1,
+		}
+		try {
+			const row = runManifest(repo, { packages: [{ ...packageEntry }] }, path.join(repo, "reports"), {
+				runMutation: (_repoRoot, _entry, _reportRoot, dryRunOnly) =>
+					dryRunOnly ? "Instrumented 1 source file(s) with 1 mutant(s)" : "",
+				readMutationReport: () => ({
+					files: {
+						"src/value.ts": {
+							mutants: [
+								{
+									status: "Survived",
+									mutatorName: "BooleanLiteral",
+									replacement: "false",
+									location: { start: { line: 1 } },
+								},
+							],
+						},
+					},
+				}),
+				readEquivalences: () => [
+					{
+						file: "packages/core/src/value.ts",
+						line: 1,
+						mutator: "BooleanLiteral",
+						replacement: "false",
+						reason: "the mutated branch is unreachable in every caller",
+					},
+				],
+			})[0]
+			assert.equal(row.equivalent, 1)
+			assert.equal(row.result, "Passed")
+			assert.deepEqual(row.advisories, [])
+		} finally {
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("loads no equivalences when the registry file is absent", () => {
+		assert.deepEqual(loadEquivalences(fs.mkdtempSync(path.join(os.tmpdir(), "stryker-eq-"))), [])
+	})
+
+	it("ships registry entries with file, line, mutator, and reason", () => {
+		const registry = JSON.parse(
+			fs.readFileSync(path.join(repositoryRoot, "scripts/stryker-equivalences.json"), "utf8"),
+		).equivalences
+		assert.ok(registry.length > 0)
+		for (const entry of registry) {
+			assert.match(entry.file, /^(src|packages)\//)
+			assert.ok(Number.isInteger(entry.line))
+			assert.ok(entry.mutator)
+			assert.equal(typeof entry.replacement, "string")
+			assert.ok(entry.reason.length > 20)
+		}
+	})
+
+	it("reports the equivalent column in the summary", () => {
+		const summary = formatSummary(
+			[
+				{
+					id: "extension",
+					root: "src",
+					changedLines: 1,
+					valid: 2,
+					killed: 1,
+					timeout: 0,
+					survived: 1,
+					noCoverage: 0,
+					equivalent: 1,
+					result: "Passed",
+					testFiles: [],
+				},
+			],
+			[],
+			{},
+		)
+		const header = summary.split("\n").find((line) => line.includes("| Equivalent |")) ?? ""
+		const delimiter = summary.split("\n")[summary.split("\n").indexOf(header) + 1] ?? ""
+		assert.equal(header.split("|").length, delimiter.split("|").length)
+		assert.ok(summary.includes("| Equivalent |"))
+		assert.ok(summary.includes("| 1 | Passed |"))
 	})
 })
