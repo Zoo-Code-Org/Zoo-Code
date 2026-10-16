@@ -3448,6 +3448,39 @@ describe("ClineProvider", () => {
 			await providerB.dispose()
 		})
 
+		it("spends the create claim when the profile save itself fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(false)
+			vi.spyOn(provider.providerSettingsManager, "getCurrentProfileName").mockResolvedValue(undefined)
+			const deleteSpy = vi.spyOn(provider.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "saveConfig")
+				.mockRejectedValueOnce(new Error("store write failed"))
+				.mockResolvedValue("profile-id")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			// The first create fails inside saveConfig: its rollback must spend the claim
+			// even though the record write itself is what failed.
+			await provider.upsertProviderProfile("leaky-profile", { apiProvider: providerIdentifiers.openai }, false)
+
+			// A second create of the same name now fails during activation instead.
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockRejectedValue(
+				new Error("mode write failed"),
+			)
+			await provider.upsertProviderProfile("leaky-profile", { apiProvider: providerIdentifiers.openai }, true)
+
+			// A claim leaked by the first create would make this rollback defer to a
+			// create that never happened and strand the landed record: the deletion
+			// must land.
+			expect(deleteSpy).toHaveBeenCalledWith("leaky-profile")
+			await provider.dispose()
+		})
+
 		it("keeps this view's own profile pin when an activation rollback restores the shared selection", async () => {
 			const provider = new ClineProvider(
 				mockContext,
