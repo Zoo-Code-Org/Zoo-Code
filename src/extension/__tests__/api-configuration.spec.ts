@@ -109,6 +109,36 @@ describe("API - configuration", () => {
 		expect(configuration).not.toHaveProperty("openRouterApiKey")
 	})
 
+	it("strips legacy retired-provider credential fields from the flattened surface", () => {
+		const getValues = vi.fn().mockReturnValue({
+			mode: "code",
+			currentApiConfigName: "retired-view-profile",
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.anthropic,
+				groqApiKey: "legacy-groq-secret",
+				huggingFaceSecurityToken: "legacy-hf-secret",
+				openRouterModelId: "openai/gpt-4o",
+			},
+		})
+		// Structural double: API.getConfiguration() only reads sidebarProvider.getValues()
+		// from the provider; the double assertion adapts this minimal shape to the
+		// constructor's ClineProvider parameter (same pattern as the tests above).
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getValues,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		const configuration = api.getConfiguration()
+
+		// Retired providers keep their legacy fields through passthrough; the
+		// credential-shaped names must not reach the public API.
+		expect(configuration).not.toHaveProperty("groqApiKey")
+		expect(configuration).not.toHaveProperty("huggingFaceSecurityToken")
+		expect(configuration.openRouterModelId).toBe("openai/gpt-4o")
+	})
 	it("drops shared flat provider settings when a view-local profile is present", () => {
 		const getValues = vi.fn().mockReturnValue({
 			mode: "code",

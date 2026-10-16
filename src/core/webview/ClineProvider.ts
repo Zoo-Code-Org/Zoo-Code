@@ -814,7 +814,23 @@ export class ClineProvider
 				states[nextViewStateId] = previous
 			}
 
-			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+			try {
+				await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+			} catch (error) {
+				// updateGlobalState applies the new map to the in-memory cache before
+				// the durable write, so a rejected re-key would leave the cache serving
+				// the stable entry while durable storage still holds the temporary one.
+				// Restore the cache to the value durable storage actually holds (the same
+				// rollback savePersistedViewState applies), so a later load or a retry of
+				// the registration sees the pre-rekey entry.
+				try {
+					await this.contextProxy.setValue("viewStates", this.context.globalState.get("viewStates"))
+				} catch {
+					// The cache is updated before the durable attempt: it matches the
+					// durable value regardless of whether this restore write landed.
+				}
+				throw error
+			}
 
 			// Only a successful write clears authorship: a failed attempt leaves the entry
 			// under the temporary name, and a retry must still be able to re-key it.

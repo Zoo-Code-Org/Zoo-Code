@@ -24,6 +24,7 @@ import {
 	isGlobalStateKey,
 	isSecretStateKey,
 	isSensitiveProviderConfigKey,
+	globalSettingsSchema,
 	PROVIDER_SETTINGS_KEYS,
 	IpcOrigin,
 	IpcMessageType,
@@ -793,9 +794,15 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		// *ApiKey shapes, and SENSITIVE_PROVIDER_CONFIG_KEYS covers credential
 		// values that use other name shapes (header maps, session tokens,
 		// service-account JSON, credential-file paths).
+		// Retired providers keep their legacy fields through passthrough, and those
+		// names (e.g. groqApiKey, huggingFaceSecurityToken) predate the explicit
+		// secret lists and appear in neither. Treat credential-shaped key names as
+		// secret on this flattened surface so a retired profile cannot expose them.
+		const legacyCredentialKeyRe = /(?:ApiKey|ApiToken|SecurityToken|AccessToken|SessionToken|Credentials|Secret)$/
 		const configuration = Object.fromEntries(
 			Object.entries({ ...shared, ...apiConfiguration }).filter(
-				([key]) => !isSecretStateKey(key) && !isSensitiveProviderConfigKey(key),
+				([key]) =>
+					!isSecretStateKey(key) && !isSensitiveProviderConfigKey(key) && !legacyCredentialKeyRe.test(key),
 			),
 		)
 		// An explicit apiProvider: undefined inside the nested profile clobbers the
@@ -834,6 +841,11 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		if (isSecretStateKey(String(key)) || isSensitiveProviderConfigKey(String(key))) {
 			throw new Error(`getGlobalState received a credential-bearing key: ${String(key)}`)
 		}
+		// Task history carries user PII (task texts): out of bounds for this surface
+		// even though it is a plain GlobalState key.
+		if (key === "taskHistory") {
+			throw new Error(`getGlobalState received a PII-bearing key: ${String(key)}`)
+		}
 		return this.context.globalState.get<GlobalState[K]>(key)
 	}
 
@@ -848,6 +860,26 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		// be able to persist secrets through the test-only surface.
 		if (isSecretStateKey(String(key)) || isSensitiveProviderConfigKey(String(key))) {
 			throw new Error(`setGlobalState received a credential-bearing key: ${String(key)}`)
+		}
+		// Task history carries user PII (task texts): out of bounds for this surface
+		// even though it is a plain GlobalState key.
+		if (key === "taskHistory") {
+			throw new Error(`setGlobalState received a PII-bearing key: ${String(key)}`)
+		}
+		// The value is runtime data: parse it against the key's schema so malformed
+		// state never reaches durable storage. Keys without a global-settings schema
+		// entry (provider settings) are not seedable through this surface.
+		const valueSchema = (
+			globalSettingsSchema.shape as Record<
+				string,
+				{ safeParse: (value: unknown) => { success: boolean } } | undefined
+			>
+		)[String(key)]
+		if (!valueSchema) {
+			throw new Error(`setGlobalState received a key without a value schema: ${String(key)}`)
+		}
+		if (!valueSchema.safeParse(value).success) {
+			throw new Error(`setGlobalState received an invalid value for key: ${String(key)}`)
 		}
 		await this.context.globalState.update(key, value)
 	}
