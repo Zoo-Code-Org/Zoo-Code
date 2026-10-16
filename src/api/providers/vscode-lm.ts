@@ -1168,8 +1168,15 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		// The listener is kept in a named const and removed in the finally block
 		// because { once: true } only detaches it when the signal actually aborts.
 		let onExternalAbort: (() => void) | undefined
+		// Recorded separately from the token: cleanup also cancels the token, and a
+		// host token's flag is not observable before its cancel settles, so the
+		// token alone cannot always tell a caller's abort apart at a re-check point.
+		let abortedByCaller = false
 		if (externalAbortSignal) {
-			onExternalAbort = () => cancellationTokenSource.cancel()
+			onExternalAbort = () => {
+				abortedByCaller = true
+				cancellationTokenSource.cancel()
+			}
 			externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
 		}
 
@@ -1272,7 +1279,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			// superseded this one and cancelled its token. Bail before counting input
 			// tokens or invoking the host so no work happens for a cancelled request.
 			// The token is the superset here: the bridge makes every external abort cancel it.
-			if (cancellationTokenSource.token.isCancellationRequested) {
+			if (abortedByCaller || cancellationTokenSource.token.isCancellationRequested) {
 				cancellationTokenSource.cancel()
 				throw createAbortError(this.providerName)
 			}
@@ -1339,7 +1346,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			// newer request may have superseded this one and cancelled its token. Bail
 			// before invoking the host so no work happens for a cancelled request. The
 			// token is the superset here: the bridge makes every external abort cancel it.
-			if (cancellationTokenSource.token.isCancellationRequested) {
+			if (abortedByCaller || cancellationTokenSource.token.isCancellationRequested) {
 				throw createAbortError(this.providerName)
 			}
 			this.assertWithinContextWindow(totalInputTokens, modelInfo)
