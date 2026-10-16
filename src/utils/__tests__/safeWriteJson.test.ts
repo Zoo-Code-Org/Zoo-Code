@@ -1106,41 +1106,22 @@ describe("safeWriteJson", () => {
 
 	it("keeps the published target with its new content when the post-commit directory fsync fails", async () => {
 		const fsSyncMod = await import("fs")
-		const realOpen = fsSyncMod.openSync
 		const realFsync = fsSyncMod.fsyncSync
-		// The parent-directory open that safeWriteText performs after the commit
-		// rename gets a REAL descriptor where the platform allows it: the SUT
-		// closes the fd in its finally block, and closing a fabricated number
-		// would raise EBADF there - a second failure behind the same wrapper,
-		// hiding which fsync broke. Where opening a directory is not allowed
-		// (Windows), a sentinel stands in and the close is stubbed for it, so
-		// the injected fsync failure is the only error in flight on every
-		// platform.
+		// The parent-directory fsync is the only fsync that runs after the
+		// commit rename. Watching the rename itself - rather than fabricating a
+		// descriptor - keeps the SUT in charge of opening and closing its own
+		// real directory handle, so the injected fsync failure is the only
+		// error in flight on every platform.
 		const fsyncFailure = new Error("EIO fsync")
-		const realClose = fsSyncMod.closeSync
-		let dirFd: number | undefined
-		let dirFdIsReal = false
+		let committed = false
+		const actualRename = fsPromisesActuals.rename!
+		vi.mocked(fs.rename).mockImplementation((async (from: string, to: string) => {
+			await actualRename(from, to)
+			committed = true
+		}) as typeof fs.rename)
 		vi.spyOn(process, "platform", "get").mockReturnValue("linux")
-		vi.spyOn(fsSyncMod, "openSync").mockImplementation(((...args: unknown[]) => {
-			if (String(args[0]) === tempDir) {
-				try {
-					dirFd = (realOpen as (p: string, f: string) => number)(tempDir, "r")
-					dirFdIsReal = true
-				} catch {
-					dirFd = 987654
-				}
-				return dirFd
-			}
-			return (realOpen as (...a: unknown[]) => unknown)(...args)
-		}) as never)
-		vi.spyOn(fsSyncMod, "closeSync").mockImplementation(((fd: number) => {
-			if (fd === dirFd && !dirFdIsReal) {
-				return undefined
-			}
-			return (realClose as (f: number) => unknown)(fd)
-		}) as never)
 		vi.spyOn(fsSyncMod, "fsyncSync").mockImplementation(((fd: number) => {
-			if (fd === dirFd) {
+			if (committed) {
 				throw fsyncFailure
 			}
 			return (realFsync as (f: number) => unknown)(fd)
