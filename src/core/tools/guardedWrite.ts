@@ -316,6 +316,63 @@ function resolveAbsolutePath(task: Task, relPathOrAbsolute: string): string {
 }
 
 /**
+ * Reject a write whose bytes would land outside the task working directory.
+ * The lexical resolve above is not a boundary: a relative path can carry ".."
+ * segments, and an intermediate symlink (link -> /external) makes an approved
+ * workspace spelling publish outside the workspace while approval and
+ * .rooignore judged the workspace spelling. Canonicalize through the nearest
+ * existing ancestor - the shape the publish itself follows - and require the
+ * result to sit under the canonical working directory. A workspace opened
+ * through a symlink matches the lexical root too, so inside paths keep working.
+ */
+async function assertWithinCanonicalRoot(cwd: string, absolutePath: string): Promise<void> {
+	let root: string
+	try {
+		root = await fs.realpath(cwd)
+	} catch (error: unknown) {
+		// ENOENT falls back to the lexical root: the workspace directory may be
+		// created by this very write. Any other inspection error propagates
+		// rather than silently skipping the boundary.
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+			throw error
+		}
+		root = path.resolve(cwd)
+	}
+	const lexicalRoot = path.resolve(cwd)
+	const roots = lexicalRoot === root ? [root] : [root, lexicalRoot]
+	// Resolve the nearest existing ancestor and re-append the missing tail, so
+	// symlinked parents are judged by where the bytes actually land.
+	let effective = absolutePath
+	const tail: string[] = []
+	let probe = absolutePath
+	for (;;) {
+		try {
+			const real = await fs.realpath(probe)
+			effective = tail.length > 0 ? path.join(real, ...tail) : real
+			break
+		} catch (error: unknown) {
+			const code = (error as NodeJS.ErrnoException).code
+			if (code !== "ENOENT" && code !== "ENOTDIR") {
+				throw error
+			}
+			const parent = path.dirname(probe)
+			if (parent === probe) {
+				effective = absolutePath
+				break
+			}
+			tail.unshift(path.basename(probe))
+			probe = parent
+		}
+	}
+	const inside = roots.some((candidate) => effective === candidate || effective.startsWith(candidate + path.sep))
+	if (!inside) {
+		throw new Error(
+			`guardedWrite: refusing to write ${absolutePath}: the target resolves to ${effective}, outside the working directory ${lexicalRoot}`,
+		)
+	}
+}
+
+/**
  * Guarded write entry point.
  *
  * 1. Resolves the absolute path against task.cwd.
@@ -334,6 +391,10 @@ export async function guardedWrite(
 	kind: GuardedWriteKind = "update",
 ): Promise<void> {
 	const absolutePath = resolveAbsolutePath(task, relPathOrAbsolute)
+	// The approval and .rooignore decisions were made on the workspace
+	// spelling; verify the canonical target before any guarded I/O so a ".."
+	// escape or a symlinked ancestor cannot publish outside the workspace.
+	await assertWithinCanonicalRoot(task.cwd, absolutePath)
 
 	// Snapshot the observation when the write is issued, not when its link runs.
 	// A refresh after a publish must not retroactively validate a second write that

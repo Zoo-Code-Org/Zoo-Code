@@ -25,6 +25,7 @@ import type { Task } from "../../task/Task"
 vi.mock("fs/promises", () => ({
 	access: vi.fn(),
 	stat: vi.fn(),
+	realpath: vi.fn(),
 }))
 
 vi.mock("../../../utils/versionToken", () => ({
@@ -79,6 +80,9 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 	beforeEach(() => {
 		vi.resetAllMocks()
 		resetChain()
+		// Canonical-root check default: every path is its own real path, so the
+		// inside-workspace fixtures stay inside without per-test setup.
+		vi.mocked(fs.realpath).mockImplementation(async (p) => String(p))
 	})
 
 	describe("unobserved create", () => {
@@ -454,6 +458,39 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("sub/dir.txt"), "content", {
 				preCommitVerify: expect.any(Function),
 			})
+		})
+		it("rejects a relative path that escapes the working directory", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("../outside/x.txt"), "v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await expect(guardedWrite(task, "../outside/x.txt", "content", "update")).rejects.toThrow(
+				"outside the working directory",
+			)
+			// The escape is refused before any guarded I/O: nothing was staged or published.
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("rejects a write whose intermediate directory is a symlink outside the workspace", async () => {
+			const reg = new ObservationRegistry()
+			const target = abs("link/config.json")
+			reg.observe(target, "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			// link -> /external: the approval and the observation carry the workspace
+			// spelling, but the bytes land in /external without a canonical check.
+			vi.mocked(fs.realpath).mockImplementation(async (p) => {
+				const text = String(p)
+				if (text === abs("link") || text === target) {
+					return path.join("/external", path.basename(text))
+				}
+				return text
+			})
+			const task = createMockTask({ observationRegistry: reg })
+
+			await expect(guardedWrite(task, "link/config.json", "content", "update")).rejects.toThrow(
+				"outside the working directory",
+			)
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
 
 		it("normalizes an already-absolute input (trailing separator) to the observation key", async () => {

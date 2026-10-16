@@ -10,6 +10,7 @@ import type { Task } from "../../task/Task"
 import { ApplyDiffTool } from "../ApplyDiffTool"
 
 vi.mock("fs/promises", () => ({
+	realpath: vi.fn(async (p: string) => String(p)),
 	default: {
 		readFile: vi.fn().mockResolvedValue("original file content\n"),
 		stat: vi.fn().mockResolvedValue({
