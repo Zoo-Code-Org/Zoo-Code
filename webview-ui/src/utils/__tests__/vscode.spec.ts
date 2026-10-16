@@ -54,6 +54,25 @@ describe("VSCodeAPIWrapper", () => {
 		expect(wrapper.getViewStateId()).toBe("persisted-view")
 	})
 
+	it("replaces a stored Object.prototype member id with a generated one", () => {
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: { randomUUID: vi.fn(() => "generated-view") },
+		})
+		const storage = createMockStorage({ vscodeState: JSON.stringify({ viewStateId: "constructor" }) })
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		// The host's setViewStateId rejects every Object.prototype member name; accepting
+		// "constructor" here would make every launch message rejected and strand the
+		// pre-launch entry under the temporary id forever.
+		expect(wrapper.getViewStateId()).toBe("generated-view")
+		expect(JSON.parse(storage.getItem("vscodeState")!)).toMatchObject({ viewStateId: "generated-view" })
+	})
+
 	it("creates and persists a new viewStateId when storage has been cleared", () => {
 		Object.defineProperty(globalThis, "crypto", {
 			configurable: true,
