@@ -21,6 +21,7 @@ import {
 	type WebviewThemeFixture,
 	RooCodeEventName,
 	TaskCommandName,
+	isGlobalStateKey,
 	isSecretStateKey,
 	isSensitiveProviderConfigKey,
 	PROVIDER_SETTINGS_KEYS,
@@ -821,11 +822,33 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 
 	public getGlobalState<K extends keyof GlobalState>(key: K): GlobalState[K] {
 		this.assertTestOnlyApi("getGlobalState")
+		// The generic only constrains typed callers; a crafted runtime key can be
+		// any string. Refuse keys outside the settings schema before storage sees
+		// them, so the test-only API cannot read arbitrary global state.
+		if (!isGlobalStateKey(key)) {
+			throw new Error(`getGlobalState received a key outside the settings schema: ${String(key)}`)
+		}
+		// The global-state union still contains credential-bearing keys (API keys,
+		// headers, OAuth paths) that are not part of the secret-state union; refuse
+		// them before storage access so the test-only API cannot read credentials.
+		if (isSecretStateKey(String(key)) || isSensitiveProviderConfigKey(String(key))) {
+			throw new Error(`getGlobalState received a credential-bearing key: ${String(key)}`)
+		}
 		return this.context.globalState.get<GlobalState[K]>(key)
 	}
 
 	public async setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): Promise<void> {
 		this.assertTestOnlyApi("setGlobalState")
+		// Same runtime boundary as getGlobalState: an unvalidated key must not be
+		// persisted into global state.
+		if (!isGlobalStateKey(key)) {
+			throw new Error(`setGlobalState received a key outside the settings schema: ${String(key)}`)
+		}
+		// Same credential boundary as getGlobalState: a crafted runtime key must not
+		// be able to persist secrets through the test-only surface.
+		if (isSecretStateKey(String(key)) || isSensitiveProviderConfigKey(String(key))) {
+			throw new Error(`setGlobalState received a credential-bearing key: ${String(key)}`)
+		}
 		await this.context.globalState.update(key, value)
 	}
 
