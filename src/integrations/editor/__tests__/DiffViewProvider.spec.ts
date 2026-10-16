@@ -15,14 +15,6 @@ vi.mock("fs/promises", () => ({
 	readFile: vi.fn().mockResolvedValue("file content"),
 	writeFile: vi.fn().mockResolvedValue(undefined),
 	access: vi.fn().mockResolvedValue(undefined),
-	mkdir: vi.fn().mockResolvedValue(undefined),
-	rename: vi.fn().mockResolvedValue(undefined),
-	unlink: vi.fn().mockResolvedValue(undefined),
-}))
-
-// Mock safeWriteText (used by saveDirectly)
-vi.mock("../../../services/file-safety/safeWriteText", () => ({
-	safeWriteText: vi.fn().mockResolvedValue(undefined),
 }))
 
 // Mock utils
@@ -34,8 +26,6 @@ vi.mock("../../../utils/fs", () => ({
 vi.mock("path", () => ({
 	resolve: vi.fn((cwd, relPath) => `${cwd}/${relPath}`),
 	basename: vi.fn((path) => path.split("/").pop()),
-	dirname: vi.fn((path) => path.split("/").slice(0, -1).join("/") || "/"),
-	join: (...args: string[]) => args.join("/"),
 }))
 
 // Mock vscode
@@ -801,9 +791,9 @@ describe("DiffViewProvider", () => {
 
 			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 2000)
 
-			// Verify file was written via safeWriteText
-			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			// Verify file was written
+			const fs = await import("fs/promises")
+			expect(fs.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
 
 			// Verify file was opened without focus
 			expect(vscode.window.showTextDocument).toHaveBeenCalledWith(
@@ -824,9 +814,9 @@ describe("DiffViewProvider", () => {
 		it("should not open file when openWithoutFocus is false", async () => {
 			await diffViewProvider.saveDirectly("test.ts", "new content", false, true, 1000)
 
-			// Verify file was written via safeWriteText
-			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			// Verify file was written
+			const fs = await import("fs/promises")
+			expect(fs.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
 
 			// Verify file was NOT opened
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
@@ -839,9 +829,9 @@ describe("DiffViewProvider", () => {
 
 			await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 1000)
 
-			// Verify file was written via safeWriteText
-			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			// Verify file was written
+			const fs = await import("fs/promises")
+			expect(fs.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
 
 			// Verify delay was NOT called
 			expect(mockDelay).not.toHaveBeenCalled()
