@@ -30,6 +30,7 @@ export class EditTool extends BaseTool<"edit"> {
 	async execute(params: EditParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
 		const { file_path: relPath, old_string: oldString, new_string: newString, replace_all: replaceAll } = params
 		const { askApproval, handleError, pushToolResult } = callbacks
+		let didWrite = false
 
 		try {
 			// Validate required parameters
@@ -227,10 +228,7 @@ export class EditTool extends BaseTool<"edit"> {
 			}
 
 			task.didEditFile = true
-
-			// Get the formatted response message
-			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, false)
-			pushToolResult(message)
+			didWrite = true
 
 			if (perWriteCheckpoints) {
 				// B2: the change-journal entry for this edit is appended inside
@@ -261,15 +259,25 @@ export class EditTool extends BaseTool<"edit"> {
 				})
 			}
 
+			// Emitted only after checkpoint + journal persistence succeeded: a
+			// persistence failure must not report the edit as fully persisted.
+			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, false)
+			pushToolResult(message)
+
 			await task.diffViewProvider.reset()
 			this.resetPartialState()
-
-			// Process any queued messages after file edit completes
-			task.processQueuedMessages()
 		} catch (error) {
 			await handleError("edit", error as Error)
 			await task.diffViewProvider.reset()
 			this.resetPartialState()
+		} finally {
+			// Hand off queued messages whenever the write itself succeeded -
+			// including when the post-write checkpoint/journal persistence then
+			// rejected (the write is real; upstream handed off after every
+			// successful write).
+			if (didWrite) {
+				task.processQueuedMessages()
+			}
 		}
 	}
 

@@ -8,6 +8,7 @@ import { isPathOutsideWorkspace } from "../../../utils/pathUtils"
 import { getReadablePath } from "../../../utils/path"
 import { ToolUse, ToolResponse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
 import { editTool } from "../EditTool"
+import { checkpointSave } from "../../checkpoints"
 
 vi.mock("fs/promises", () => ({
 	default: {
@@ -432,6 +433,22 @@ describe("editTool", () => {
 			await executeEditTool()
 
 			expect(mockTask.fileContextTracker.trackFileContext).toHaveBeenCalledWith(testFilePath, "roo_edited")
+		})
+
+		it("routes a journal persistence failure to tool failure handling without a success result", async () => {
+			const mockedCheckpointSave = checkpointSave as MockedFunction<typeof checkpointSave>
+			mockedCheckpointSave.mockRejectedValueOnce(
+				new Error(
+					"Checkpoint abc123def was committed but its change journal could not be persisted (files: test/file.txt); rollback metadata is incomplete.",
+				),
+			)
+
+			await executeEditTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("edit", expect.any(Error))
+			expect(mockPushToolResult).not.toHaveBeenCalled()
+			// The write itself succeeded: the queued handoff still runs.
+			expect(vi.mocked(mockTask.processQueuedMessages)).toHaveBeenCalled()
 		})
 	})
 })

@@ -29,6 +29,7 @@ export class SearchReplaceTool extends BaseTool<"search_replace"> {
 	async execute(params: SearchReplaceParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
 		const { file_path, old_string, new_string } = params
 		const { askApproval, handleError, pushToolResult } = callbacks
+		let didWrite = false
 
 		try {
 			// Validate required parameters
@@ -223,10 +224,7 @@ export class SearchReplaceTool extends BaseTool<"search_replace"> {
 			}
 
 			task.didEditFile = true
-
-			// Get the formatted response message
-			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, false)
-			pushToolResult(message)
+			didWrite = true
 
 			if (perWriteCheckpoints) {
 				// B2: the change-journal entry for this search-and-replace is appended
@@ -258,15 +256,25 @@ export class SearchReplaceTool extends BaseTool<"search_replace"> {
 				})
 			}
 
+			// Emitted only after checkpoint + journal persistence succeeded: a
+			// persistence failure must not report the edit as fully persisted.
+			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, false)
+			pushToolResult(message)
+
 			await task.diffViewProvider.reset()
 			this.resetPartialState()
-
-			// Process any queued messages after file edit completes
-			task.processQueuedMessages()
 		} catch (error) {
 			await handleError("search and replace", error as Error)
 			await task.diffViewProvider.reset()
 			this.resetPartialState()
+		} finally {
+			// Hand off queued messages whenever the write itself succeeded -
+			// including when the post-write checkpoint/journal persistence then
+			// rejected (the write is real; upstream handed off after every
+			// successful write).
+			if (didWrite) {
+				task.processQueuedMessages()
+			}
 		}
 	}
 

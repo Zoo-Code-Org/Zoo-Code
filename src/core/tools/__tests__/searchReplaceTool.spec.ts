@@ -8,6 +8,7 @@ import { isPathOutsideWorkspace } from "../../../utils/pathUtils"
 import { getReadablePath } from "../../../utils/path"
 import { ToolUse, ToolResponse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
 import { searchReplaceTool } from "../SearchReplaceTool"
+import { checkpointSave } from "../../checkpoints"
 
 vi.mock("fs/promises", () => ({
 	default: {
@@ -447,6 +448,22 @@ describe("searchReplaceTool", () => {
 
 			expect(mockCline.consecutiveMistakeCount).toBe(0)
 			expect(mockAskApproval).toHaveBeenCalled()
+		})
+
+		it("routes a journal persistence failure to tool failure handling without a success result", async () => {
+			const mockedCheckpointSave = checkpointSave as MockedFunction<typeof checkpointSave>
+			mockedCheckpointSave.mockRejectedValueOnce(
+				new Error(
+					"Checkpoint abc123def was committed but its change journal could not be persisted (files: test/file.txt); rollback metadata is incomplete.",
+				),
+			)
+
+			await executeSearchReplaceTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("search and replace", expect.any(Error))
+			expect(mockPushToolResult).not.toHaveBeenCalled()
+			// The write itself succeeded: the queued handoff still runs.
+			expect(vi.mocked(mockCline.processQueuedMessages)).toHaveBeenCalled()
 		})
 	})
 })

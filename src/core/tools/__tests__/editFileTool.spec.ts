@@ -906,5 +906,22 @@ describe("editFileTool", () => {
 			await executePromise
 			expect(settled).toBe(true)
 		})
+		it("routes a journal persistence failure to tool failure handling without a success result", async () => {
+			// The checkpoint committed but its journal update failed: the edit
+			// must not report the write as fully persisted...
+			mockedCheckpointSave.mockRejectedValueOnce(
+				new Error(
+					"Checkpoint abc123def was committed but its change journal could not be persisted (files: test/file.txt); rollback metadata is incomplete.",
+				),
+			)
+
+			await executeEditFileTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("edit_file", expect.any(Error))
+			expect(mockPushToolResult).not.toHaveBeenCalled()
+			// ...and the queued handoff still runs, because the file write
+			// itself succeeded (CR follow-up: hand off from finally).
+			expect(vi.mocked(mockTask.processQueuedMessages)).toHaveBeenCalled()
+		})
 	})
 })
