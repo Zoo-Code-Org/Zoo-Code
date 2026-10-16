@@ -3,8 +3,8 @@ import { Writable } from "stream"
 import * as path from "path"
 import * as os from "os"
 
+import { PostCommitDurabilityError } from "../../services/file-safety/safeWriteText"
 import { safeWriteJson } from "../safeWriteJson"
-import { PostCommitDurabilityError, RollbackFailureError } from "../../services/file-safety/safeWriteText"
 
 // Capture actual implementations before the vi.mock factory runs,
 // so they are never wrapped by vi.fn() — avoids infinite recursion when
@@ -159,7 +159,7 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual({ initial: "content" })
 	})
 
-	test("should handle failure when renaming filePath to tempBackupFilePath (filePath exists)", async () => {
+	test("should handle failure when the commit rename fails (filePath exists)", async () => {
 		const initialData = { message: "Initial content, should remain" }
 		const newData = { message: "New content, should not be written" }
 
@@ -178,7 +178,7 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual(initialData)
 	})
 
-	test("should handle failure when renaming tempNewFilePath to filePath (filePath exists, backup succeeded)", async () => {
+	test("should handle failure when renaming tempNewFilePath to filePath (filePath exists, backup copy taken)", async () => {
 		const initialData = { message: "Initial content, should be restored" }
 		const newData = { message: "New content" }
 
@@ -192,14 +192,8 @@ describe("safeWriteJson", () => {
 		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
 			renameCallCount++
 			if (renameCallCount === 1) {
-				// First call: filePath -> tempBackupFilePath (should succeed)
-				return fsPromisesActuals.rename!(oldPath, newPath)
-			} else if (renameCallCount === 2) {
-				// Second call: tempNewFilePath -> filePath (should fail)
+				// The commit rename is the only rename in this flow: it fails.
 				throw new Error("Rename from temp to final failed")
-			} else if (renameCallCount === 3) {
-				// Third call: tempBackupFilePath -> filePath (rollback, should succeed)
-				return fsPromisesActuals.rename!(oldPath, newPath)
 			}
 			// Default: use original implementation
 			return fsPromisesActuals.rename!(oldPath, newPath)
@@ -350,16 +344,11 @@ describe("safeWriteJson", () => {
 
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
-		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
-		let renameCallCount = 0
-		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
-			renameCallCount++
-			if (renameCallCount === 2) {
-				// Second call: tempNewFilePath -> filePath (should fail)
-				throw new Error("Rename failed")
-			}
-			// For all other calls, use the original implementation
-			return fsPromisesActuals.rename!(oldPath, newPath)
+		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn.
+		// Once-only so the override does not leak into later tests: the commit rename is
+		// the only rename in this flow.
+		vi.mocked(fs.rename).mockImplementationOnce(async () => {
+			throw new Error("Rename failed")
 		})
 
 		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Rename failed")
@@ -439,9 +428,10 @@ describe("safeWriteJson", () => {
 		expect(vi.mocked(fs.access)).toHaveBeenCalled()
 	})
 
-	// Test for rollback failure scenario (the rollback rename now lives in safeWriteText)
-	test("throws RollbackFailureError with the publish failure as cause when the rollback rename also fails, leaving an orphaned backup", async () => {
-		const initialData = { message: "Initial, orphaned when rollback fails" }
+	// The backup is a copy taken before the commit, so a failed commit has nothing to
+	// roll back: the target keeps its previous content and the copy is removed.
+	test("a failed commit keeps the previous content at the target and removes the backup copy", async () => {
+		const initialData = { message: "Initial, must survive a failed commit" }
 		const newData = { message: "New content" }
 
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
@@ -452,37 +442,24 @@ describe("safeWriteJson", () => {
 		let renameCallCount = 0
 		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
 			renameCallCount++
-			if (renameCallCount === 2) {
-				// Second call: tempNewFilePath -> filePath (fail)
+			if (renameCallCount === 1) {
+				// The commit rename fails; there is no rollback rename to fail.
 				throw new Error("Primary rename failed")
-			} else if (renameCallCount === 3) {
-				// Third call: backup -> filePath (rollback, also fail)
-				throw new Error("Rollback rename failed")
 			}
 			return fsPromisesActuals.rename!(oldPath, newPath)
 		})
 
-		// The rollback also failed, so the error reports the partial state: the publish
-		// failure stays the cause and the backup location is named.
-		let failure: RollbackFailureError | undefined
-		await safeWriteJson(currentTestFilePath, newData).catch((e: unknown) => {
-			if (e instanceof RollbackFailureError) {
-				failure = e
-				return
-			}
-			throw e
-		})
+		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Primary rename failed")
 
-		expect(failure).toBeInstanceOf(RollbackFailureError)
-		expect(failure?.cause).toBeInstanceOf(Error)
-		expect(failure?.rollbackError).toBeInstanceOf(Error)
-		expect(failure?.backupPath).toContain("safeWriteText.bak_")
+		// Exactly one rename was attempted, and it was the commit.
+		expect(renameCallCount).toBe(1)
 
-		// The rollback failed inside safeWriteText, so the target is gone and
-		// the backup is orphaned on disk.
-		expect(await fileExists(currentTestFilePath)).toBe(false)
+		// The target never left its path, so the previous content is still what a
+		// reader sees, and no orphaned backup copy is left behind either.
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual(initialData)
 		const entries = await fs.readdir(tempDir)
-		expect(entries.some((entry) => entry.includes("safeWriteText.bak_"))).toBe(true)
+		expect(entries.some((entry) => entry.includes("safeWriteText.bak_"))).toBe(false)
 
 		consoleErrorSpy.mockRestore()
 	})
@@ -684,10 +661,6 @@ describe("safeWriteJson", () => {
 		}
 	})
 
-	// CWE-732 regression: safeWriteJson stages the temp itself and passes it
-	// via tempPath, so safeWriteText must apply the existing target's mode to
-	// the staged temp before the atomic rename — otherwise a 0o600 target is
-	// published as 0o644. POSIX-only assertion (Windows ignores POSIX modes).
 	test.skipIf(process.platform === "win32")(
 		"preserves a restrictive 0o600 target mode through the atomic publish",
 		async () => {
