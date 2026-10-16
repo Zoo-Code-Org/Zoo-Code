@@ -359,7 +359,9 @@ describe("safeWriteText", () => {
 				return 1
 			})
 
-			await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).rejects.toThrow(PostCommitDurabilityError)
+			await expect(safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })).rejects.toThrow(
+				PostCommitDurabilityError,
+			)
 
 			// The commit rename already published the new content, so the backup must
 			// not be renamed back over it: only target->backup and temp->target run.
