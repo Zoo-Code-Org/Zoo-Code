@@ -64,6 +64,47 @@ describe("API.setConfiguration", () => {
 		expect(provider.postStateToWebview).toHaveBeenCalledTimes(1)
 	})
 
+	it("merges the existing profile so a partial save keeps omitted settings", async () => {
+		const provider = Object.assign({} as ClineProvider, {
+			context: {},
+			on: vi.fn(),
+			getValue: vi.fn(),
+			setValues: vi.fn().mockResolvedValue(undefined),
+			contextProxy: {
+				setValues: vi.fn().mockResolvedValue(undefined),
+			},
+			providerSettingsManager: {
+				getProfile: vi.fn().mockResolvedValue({
+					name: "default",
+					id: "default-id",
+					apiProvider: providerIdentifiers.openai,
+					apiModelId: "gpt-4o",
+				}),
+				saveConfig: vi.fn().mockResolvedValue("default-id"),
+			},
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		})
+		const api = new API(
+			Object.assign({} as OutputChannel, { appendLine: vi.fn() }),
+			provider,
+			makeClineProviderFactory(),
+		)
+
+		await api.setConfiguration({
+			currentApiConfigName: "default",
+			apiProvider: providerIdentifiers.anthropic,
+		})
+
+		// saveConfig replaces the stored record: the partial values must land on
+		// top of the existing profile so settings the caller omitted survive.
+		expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith("default", {
+			id: "default-id",
+			apiProvider: providerIdentifiers.anthropic,
+			apiModelId: "gpt-4o",
+			currentApiConfigName: "default",
+		})
+	})
+
 	it("compensates the landed writes when a later write fails", async () => {
 		const provider = Object.assign({} as ClineProvider, {
 			context: {},

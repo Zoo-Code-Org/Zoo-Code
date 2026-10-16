@@ -843,7 +843,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		}
 
 		try {
-			await this.sidebarProvider.providerSettingsManager.saveConfig(profileName, values)
+			// saveConfig replaces the stored record instead of merging: land a partial
+			// values object on top of the existing profile so provider settings the
+			// caller omitted keep their stored values instead of being dropped.
+			await this.sidebarProvider.providerSettingsManager.saveConfig(
+				profileName,
+				previousProfile ? { ...previousProfile, ...values } : values,
+			)
 		} catch (error) {
 			// Only the shared write landed: undo it before surfacing the failure.
 			await this.restoreConfigurationValues(previousValues)

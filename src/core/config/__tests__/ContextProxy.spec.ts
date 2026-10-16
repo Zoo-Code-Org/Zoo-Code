@@ -76,11 +76,13 @@ describe("ContextProxy", () => {
 
 	describe("constructor", () => {
 		it("should initialize state cache with all global state keys", () => {
-			// +3 for the migration checks:
+			// +5 for the migration checks:
 			// 1. openRouterImageGenerationSettings
 			// 2. customCondensingPrompt
 			// 3. customSupportPrompts (for migrateOldDefaultCondensingPrompt)
-			expect(mockGlobalState.get).toHaveBeenCalledTimes(GLOBAL_STATE_KEYS.length + 3)
+			// 4. mimoApiKey legacy-plaintext probe
+			// 5. poeApiKey legacy-plaintext probe
+			expect(mockGlobalState.get).toHaveBeenCalledTimes(GLOBAL_STATE_KEYS.length + 5)
 			for (const key of GLOBAL_STATE_KEYS) {
 				expect(mockGlobalState.get).toHaveBeenCalledWith(key)
 			}
@@ -123,6 +125,27 @@ describe("ContextProxy", () => {
 			// plaintext value.
 			expect(migrated.getSecret("mimoApiKey")).toBe("current-secret")
 			expect(mockSecrets.store).not.toHaveBeenCalledWith("mimoApiKey", expect.anything())
+			// The redundant plaintext copy must still be erased: leaving it keeps the
+			// exposure alive forever, and a deletion that failed once must be retried.
+			expect(mockGlobalState.update).toHaveBeenCalledWith("mimoApiKey", undefined)
+		})
+
+		it("keeps the plaintext copy when the migrated secret write fails", async () => {
+			mockSecrets.get.mockImplementation(async (key: string) =>
+				key === "mimoApiKey" || key === "poeApiKey" ? undefined : "test-secret",
+			)
+			mockGlobalState.get.mockImplementation((key: string) => (key === "mimoApiKey" ? "legacy-mimo" : undefined))
+			mockSecrets.store.mockImplementationOnce(async () => {
+				throw new Error("secret store failed")
+			})
+
+			const migrated = new ContextProxy(mockContext)
+			await migrated.initialize()
+
+			// Erasing the plaintext before the secret write lands could lose the key:
+			// the value must survive for a retry on the next initialization.
+			expect(mockGlobalState.update).not.toHaveBeenCalledWith("mimoApiKey", undefined)
+			expect(migrated.getSecret("mimoApiKey")).toBeUndefined()
 		})
 
 		it("should initialize secret cache with all secret keys", () => {
@@ -145,8 +168,8 @@ describe("ContextProxy", () => {
 			const result = proxy.getGlobalState("apiProvider")
 			expect(result).toBe("deepseek")
 
-			// Original context should be called once during updateGlobalState (+3 for migration checks)
-			expect(mockGlobalState.get).toHaveBeenCalledTimes(GLOBAL_STATE_KEYS.length + 3) // From initialization + migration checks
+			// Original context should be called once during updateGlobalState (+5 for migration checks)
+			expect(mockGlobalState.get).toHaveBeenCalledTimes(GLOBAL_STATE_KEYS.length + 5) // From initialization + migration checks
 		})
 
 		it("should handle default values correctly", async () => {

@@ -3794,6 +3794,34 @@ describe("ClineProvider", () => {
 			expect(viewStates["stable-sidebar-view"].currentApiConfigName).toBe("profile-new")
 			await provider.dispose()
 		})
+		it("re-points persisted pins of closed views onto the renamed profile", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// A closed view's durable pin names the profile about to be renamed; no
+			// live instance carries it, so only the persisted map can repair it.
+			await provider.contextProxy.setValue("viewStates", {
+				"closed-view": { currentApiConfigName: "profile-old", mode: "code", updatedAt: 1 },
+			})
+			await provider["setViewStateId"]("stable-sidebar-view")
+			await provider.saveViewState("currentApiConfigName", "profile-old")
+
+			await provider["repointViewLocalStateAfterProfileRename"]("profile-old", "profile-new", {
+				apiProvider: providerIdentifiers.openrouter,
+			})
+
+			const viewStates = mockContext.globalState.get("viewStates") as Record<string, Record<string, unknown>>
+			// The closed view must launch onto the renamed profile instead of dangling at
+			// the deleted name and being repaired to whatever the shared selection became
+			// in the meantime.
+			expect(viewStates["closed-view"].currentApiConfigName).toBe("profile-new")
+			expect(viewStates["stable-sidebar-view"].currentApiConfigName).toBe("profile-new")
+			await provider.dispose()
+		})
 
 		it("clears this view's buffered apiConfiguration when directly activating a profile", async () => {
 			const provider = new ClineProvider(

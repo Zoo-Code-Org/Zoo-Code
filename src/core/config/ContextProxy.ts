@@ -128,15 +128,22 @@ export class ContextProxy {
 		// value is relocated to secret storage and the plaintext copy is dropped.
 		for (const key of ["mimoApiKey", "poeApiKey"] as const) {
 			try {
-				if (this.secretCache[key] === undefined) {
-					const legacyValue = this.originalContext.globalState.get<string>(key)
-					if (legacyValue !== undefined) {
-						await this.originalContext.secrets.store(key, legacyValue)
-						this.secretCache[key] = legacyValue
-						this.durableSecrets.set(key, legacyValue)
-						await this.originalContext.globalState.update(key, undefined)
-					}
+				const legacyValue = this.originalContext.globalState.get<string>(key)
+				if (legacyValue === undefined) {
+					continue
 				}
+				// Preserve an existing secret: the plaintext copy is redundant once a
+				// secret exists, and a deletion that failed earlier must still be
+				// retried while the secret already wins reads.
+				if (this.secretCache[key] === undefined) {
+					await this.originalContext.secrets.store(key, legacyValue)
+					this.secretCache[key] = legacyValue
+					this.durableSecrets.set(key, legacyValue)
+				}
+				// Erase the plaintext only after the secret write succeeded (or was
+				// unnecessary): a failed store leaves the value for a retry instead of
+				// losing the user's key.
+				await this.originalContext.globalState.update(key, undefined)
 			} catch (error) {
 				logger.error(
 					`Error migrating legacy secret ${key}: ${error instanceof Error ? error.message : String(error)}`,
