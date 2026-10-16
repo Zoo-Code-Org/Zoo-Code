@@ -6,7 +6,7 @@ import matter from "gray-matter"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
 import { getGlobalRooDirectory, getGlobalAgentsDirectory, getProjectAgentsDirectoryForCwd } from "../roo-config"
 import { directoryExists, fileExists } from "../roo-config"
-import { SkillMetadata, SkillContent } from "../../shared/skills"
+import { SkillMetadata, SkillContent, SkillDiagnostic } from "../../shared/skills"
 import { modes, getAllModes } from "../../shared/modes"
 import {
 	validateSkillName as validateSkillNameShared,
@@ -16,10 +16,44 @@ import {
 import { t } from "../../i18n"
 
 // Re-export for convenience
-export type { SkillMetadata, SkillContent }
+export type { SkillMetadata, SkillContent, SkillDiagnostic }
 
 // Direct children (new skill folders or container symlinks) and their SKILL.md files.
 const SKILLS_WATCH_PATTERN = "{*,*/SKILL.md}"
+
+/**
+ * Extract the raw top-level `key: ...` line from the frontmatter block of a
+ * SKILL.md file, along with its 1-based line number in the file. Used to
+ * point users at the exact line when YAML parsing fails (see issue #859).
+ * Returns undefined when the file has no frontmatter block or no matching
+ * top-level line.
+ */
+function getFrontmatterLine(fileContent: string, key: string): { line: string; lineNumber: number } | undefined {
+	const match = fileContent.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+	if (!match) {
+		return undefined
+	}
+	const linePattern = new RegExp(`^${key}\\s*:`)
+	const frontmatterLines = match[1].split(/\r?\n/)
+	const index = frontmatterLines.findIndex((line) => linePattern.test(line))
+	if (index === -1) {
+		return undefined
+	}
+	// The opening `---` occupies file line 1, so frontmatter index 0 is file line 2.
+	return { line: frontmatterLines[index], lineNumber: index + 2 }
+}
+
+// gray-matter's bundled typings predate its options passthrough: `stringify`
+// forwards its options object to js-yaml's safeDump, so js-yaml dump options
+// such as `lineWidth` are honored at runtime even though the declared
+// `GrayMatterOption` interface does not list them. This type names the
+// supported subset explicitly (see issue #859).
+type SkillYamlDumpOptions = matter.GrayMatterOption<string, SkillYamlDumpOptions> & { lineWidth: number }
+
+// `lineWidth: -1` keeps long plain scalars (e.g. descriptions) on a single
+// line instead of reflowing them into folded block scalars, keeping SKILL.md
+// files stable across edits.
+const SKILL_YAML_DUMP_OPTIONS: SkillYamlDumpOptions = { lineWidth: -1 }
 
 /** Mutable state shared by every scan in a single discovery pass. */
 interface DiscoveryPass {
@@ -35,6 +69,8 @@ interface DiscoveryPass {
 	 * unreadable for a moment. Everything else is replaced by the results of the pass.
 	 */
 	failedPaths: string[]
+	/** Frontmatter parse failures recorded during this pass. Published to the manager only when the pass ends. */
+	diagnostics: SkillDiagnostic[]
 }
 
 function isNotFoundError(error: unknown): boolean {
@@ -59,6 +95,7 @@ function isHiddenEntry(name: string): boolean {
 
 export class SkillsManager {
 	private skills: Map<string, SkillMetadata> = new Map()
+	private diagnostics: SkillDiagnostic[] = []
 	// SKILL.md paths of skills that come from a symlinked container. These are read-only for move/delete.
 	private containerSkillPaths: Set<string> = new Set()
 	// Published symlinked containers: real path -> the root entry that links to it
@@ -108,6 +145,7 @@ export class SkillsManager {
 			containerSkillPaths: new Set(),
 			containers: new Map(),
 			failedPaths: [],
+			diagnostics: [],
 		}
 		const skillsDirs = await this.getSkillsDirectories()
 
@@ -148,6 +186,7 @@ export class SkillsManager {
 		this.skills = pass.skills
 		this.containerSkillPaths = pass.containerSkillPaths
 		this.containers = pass.containers
+		this.diagnostics = pass.diagnostics
 	}
 
 	/**
@@ -315,8 +354,44 @@ export class SkillsManager {
 		}
 
 		try {
-			// Use gray-matter to parse frontmatter
-			const { data: frontmatter } = matter(fileContent)
+			// Parse the frontmatter. Parse errors are handled separately from field
+			// validation so that YAML syntax problems (e.g. unescaped double quotes in
+			// the description) report the actual cause instead of a misleading
+			// "missing required field" message (see issue #859).
+			//
+			// The `{}` options argument is deliberate: gray-matter keeps a global
+			// content-keyed cache and populates it *before* parsing, so a
+			// frontmatter that throws on first parse is cached with an empty data
+			// object and every later parse of the same content silently returns
+			// that empty object instead of re-throwing. Passing options disables
+			// the cache for this call, keeping the parse deterministic.
+			let parsed: ReturnType<typeof matter>
+			try {
+				parsed = matter(fileContent, {})
+			} catch (error) {
+				this.recordDiagnostic(skillMdPath, source, error, pass.diagnostics)
+				console.error(`Failed to parse skill at ${skillDir}:`, error)
+				// The most common cause is unescaped double quotes in the
+				// description value. Only hint at that when the parser error is
+				// located on the description line itself, so a valid quoted
+				// description plus an unrelated YAML error elsewhere does not
+				// produce a misleading hint (see issue #859).
+				const descriptionLine = getFrontmatterLine(fileContent, "description")
+				const errorMark = (error as { mark?: { line?: unknown } }).mark
+				if (
+					descriptionLine?.line.includes('"') &&
+					typeof errorMark?.line === "number" &&
+					errorMark.line + 1 === descriptionLine.lineNumber
+				) {
+					console.error(
+						`Hint: the "description" value in ${skillMdPath} contains unescaped double quotes. ` +
+							"Wrap the value in single quotes (or escape the double quotes) and save.",
+					)
+				}
+				return undefined
+			}
+
+			const { data: frontmatter } = parsed
 
 			// Validate required fields (only name and description for now)
 			if (!frontmatter.name || typeof frontmatter.name !== "string") {
@@ -389,6 +464,29 @@ export class SkillsManager {
 			console.error(`Failed to load skill at ${skillDir}:`, error)
 			return undefined
 		}
+	}
+
+	/**
+	 * Record a frontmatter parse failure so the user learns which SKILL.md is broken
+	 * and why, with the parser's own reason and location when available (see issue #859).
+	 */
+	private recordDiagnostic(
+		path: string,
+		source: "global" | "project",
+		error: unknown,
+		diagnostics: SkillDiagnostic[],
+	): void {
+		const yamlError = error as {
+			reason?: unknown
+			message?: unknown
+			mark?: { line?: unknown; column?: unknown }
+		}
+		const reason = typeof yamlError.reason === "string" ? yamlError.reason : undefined
+		const errorMessage = error instanceof Error ? error.message.split("\n", 1)[0] : String(error)
+		const line = typeof yamlError.mark?.line === "number" ? yamlError.mark.line + 1 : undefined
+		const column = typeof yamlError.mark?.column === "number" ? yamlError.mark.column + 1 : undefined
+
+		diagnostics.push({ path, source, message: reason ?? errorMessage, line, column })
 	}
 
 	/**
@@ -502,6 +600,10 @@ export class SkillsManager {
 	 * Get all skills metadata (for UI display)
 	 * Returns skills from all sources without content
 	 */
+	getSkillDiagnostics(): SkillDiagnostic[] {
+		return [...this.diagnostics]
+	}
+
 	getSkillsMetadata(): SkillMetadata[] {
 		return this.getAllSkills()
 	}
@@ -610,26 +712,25 @@ export class SkillsManager {
 			.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
 			.join(" ")
 
-		// Build frontmatter with optional modeSlugs
-		const frontmatterLines = [`name: ${name}`, `description: ${trimmedDescription}`]
-		if (modeSlugs && modeSlugs.length > 0) {
-			frontmatterLines.push(`modeSlugs:`)
-			for (const slug of modeSlugs) {
-				frontmatterLines.push(`  - ${slug}`)
-			}
+		// Build the frontmatter as data and serialize it with gray-matter so
+		// values containing YAML special characters (e.g. double quotes in the
+		// description) are quoted/escaped automatically. Hand-built frontmatter
+		// produced unparseable SKILL.md files that silently failed to load
+		// (see issue #859). lineWidth: -1 keeps plain values on a single line,
+		// matching the previous output format.
+		const frontmatter = {
+			name,
+			description: trimmedDescription,
+			...(modeSlugs && modeSlugs.length > 0 ? { modeSlugs } : {}),
 		}
-
-		const skillContent = `---
-${frontmatterLines.join("\n")}
----
-
+		const body = `
 # ${titleName}
 
 ## Instructions
 
 Add your skill instructions here.
 `
-
+		const skillContent = matter.stringify(body, frontmatter, SKILL_YAML_DUMP_OPTIONS)
 		// Write the SKILL.md file
 		await fs.writeFile(skillMdPath, skillContent, "utf-8")
 
@@ -958,8 +1059,10 @@ Add your skill instructions here.
 			delete frontmatter.mode
 		}
 
-		// Serialize back to SKILL.md format
-		const newContent = matter.stringify(body, frontmatter)
+		// Serialize back to SKILL.md format. lineWidth: -1 prevents long
+		// values from being reflowed into folded block scalars, keeping the
+		// file stable (see issue #859).
+		const newContent = matter.stringify(body, frontmatter, SKILL_YAML_DUMP_OPTIONS)
 		await fs.writeFile(skill.path, newContent, "utf-8")
 
 		// Refresh skills list
