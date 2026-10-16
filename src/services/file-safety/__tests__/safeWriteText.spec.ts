@@ -4,7 +4,7 @@ import { execFile } from "child_process"
 import type { ChildProcess } from "child_process"
 import * as path from "path"
 
-import { DaclRestoreError, resolvePublishTarget, safeWriteText, type SafeWriteTextOptions } from "../safeWriteText"
+import { DaclRestoreError, resolvePublishTarget, safeWriteText } from "../safeWriteText"
 
 // The two failure classes are module-private (knip ignores __tests__, so a
 // test-only export would be reported as unused), so tests match them by name.
