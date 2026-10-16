@@ -21,6 +21,9 @@ vi.mock("delay", () => ({
 // Mock fs/promises
 vi.mock("fs/promises", () => ({
 	readFile: vi.fn().mockResolvedValue("file content"),
+	// guardedWrite canonicalizes the target before publishing; identity realpath
+	// keeps every fixture inside the workspace.
+	realpath: vi.fn(async (p: string) => String(p)),
 	writeFile: vi.fn().mockResolvedValue(undefined),
 	access: vi.fn().mockResolvedValue(undefined),
 	mkdir: vi.fn().mockResolvedValue(undefined),
@@ -54,7 +57,10 @@ vi.mock("../../../utils/fs", () => ({
 
 // Mock path
 vi.mock("path", () => ({
-	resolve: vi.fn((cwd, relPath) => `${cwd}/${relPath}`),
+	// Variadic like the real resolve: guardedWrite also calls resolve(cwd)
+	// with a single argument.
+	resolve: vi.fn((...parts: string[]) => (parts.length === 1 ? parts[0] : `${parts[0]}/${parts.slice(1).join("/")}`)),
+	sep: "/",
 	isAbsolute: vi.fn((p: string) => p.startsWith("/")),
 	basename: vi.fn((path) => path.split("/").pop()),
 	dirname: vi.fn((path) => path.split("/").slice(0, -1).join("/") || "/"),
