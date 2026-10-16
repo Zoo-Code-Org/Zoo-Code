@@ -289,17 +289,37 @@ export async function checkpointSave(
 		)
 	}
 	const runTransaction = async () => {
-		// Start the checkpoint process in the background.
-		// Save failures keep the historical behavior: logged, checkpoints
-		// disabled, and the save resolves undefined. Journal/card work below runs
-		// only for a real commit and its failures propagate to the caller
-		// instead of flowing through this handler.
-		const result = await service
-			.saveCheckpoint(`Task: ${task.taskId}, Time: ${Date.now()}`, { allowEmpty: force, suppressMessage })
-			.catch((err) => {
+		// Save failures keep the historical behavior for non-write calls:
+		// logged, checkpoints disabled, and the save resolves undefined. A
+		// write-metadata save must not swallow a failed commit: the file write
+		// already happened, so the caller must see an explicit failure instead
+		// of a success whose rollback metadata does not exist. Journal/card
+		// work below runs only for a real commit, and its failures propagate to
+		// the caller instead of flowing through this handler.
+		const savePromise = service.saveCheckpoint(`Task: ${task.taskId}, Time: ${Date.now()}`, {
+			allowEmpty: force,
+			suppressMessage,
+		})
+		// `void` keeps the historical union member of the awaited legacy
+		// catch path (and of this function's return type) unchanged.
+		let result: Awaited<typeof savePromise> | void
+		if (hasWriteMetadata) {
+			try {
+				result = await savePromise
+			} catch (err) {
+				console.error("[Task#checkpointSave] caught unexpected error, disabling checkpoints", err)
+				task.enableCheckpoints = false
+				throw new Error(
+					`Checkpoint save failed after a file write; the write has no rollback metadata: ${err instanceof Error ? err.message : String(err)}`,
+					{ cause: err },
+				)
+			}
+		} else {
+			result = await savePromise.catch((err) => {
 				console.error("[Task#checkpointSave] caught unexpected error, disabling checkpoints", err)
 				task.enableCheckpoints = false
 			})
+		}
 		// B2: record successful file writes in the per-task change journal.
 		// Only a real commit produces an entry (an empty or failed save
 		// resolves to undefined / rejects), and non-write checkpoint calls
