@@ -416,6 +416,24 @@ async function realpathNearest(target: string, displayPath: string): Promise<str
 				displayPath,
 			)
 		}
+		// The leaf itself can be a dangling link: realpath reports ENOENT for it
+		// exactly as for a not-yet-created file, but the publish resolves the name
+		// again and would then follow a referent this check never authorized.
+		const leaf = await fs.lstat(lexical, { bigint: true }).catch((lstatError: unknown) => {
+			if (errorCode(lstatError) === "ENOENT") {
+				return undefined
+			}
+			throw new GuardRejectedError(
+				"Path could not be resolved, so it cannot be checked against the workspace -- retry with a path inside the workspace.",
+				displayPath,
+			)
+		})
+		if (leaf?.isSymbolicLink()) {
+			throw new GuardRejectedError(
+				`Path is a link that does not resolve -- retry with a path inside the workspace.`,
+				displayPath,
+			)
+		}
 		const missing: string[] = []
 		let ancestor = lexical
 		while (true) {
