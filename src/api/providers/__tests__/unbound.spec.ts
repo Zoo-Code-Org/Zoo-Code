@@ -437,7 +437,7 @@ describe("UnboundHandler", () => {
 		// a pre-aborted signal settles in the cancellation scope before the mock
 		// runs, which would leave this catch untested.
 		const controller = new AbortController()
-		sharedMockCreate.mockImplementationOnce(async (_params: unknown, options: { signal?: AbortSignal }) => {
+		sharedMockCreate.mockImplementationOnce(async (_params: unknown, _options: { signal?: AbortSignal }) => {
 			controller.abort()
 			throw new APIUserAbortError()
 		})
@@ -484,7 +484,7 @@ describe("UnboundHandler", () => {
 		// fires inside the request so the cancellation scope still lets the model
 		// lookup finish and the catch observes an aborted signal.
 		const controller = new AbortController()
-		sharedMockCreate.mockImplementationOnce(async (_params: unknown, options: { signal?: AbortSignal }) => {
+		sharedMockCreate.mockImplementationOnce(async (_params: unknown, _options: { signal?: AbortSignal }) => {
 			controller.abort()
 			throw new Error("boom")
 		})

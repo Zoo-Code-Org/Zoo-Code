@@ -905,7 +905,7 @@ describe("VercelAiGatewayHandler", () => {
 			// a pre-aborted signal settles in the cancellation scope before the mock
 			// runs, which would leave this catch untested.
 			const controller = new AbortController()
-			mockCreate.mockImplementationOnce(async (_params: unknown, options: { signal?: AbortSignal }) => {
+			mockCreate.mockImplementationOnce(async (_params: unknown, _options: { signal?: AbortSignal }) => {
 				controller.abort()
 				throw new APIUserAbortError()
 			})
@@ -947,7 +947,7 @@ describe("VercelAiGatewayHandler", () => {
 			// scope still lets the model lookup finish and the catch observes an
 			// aborted signal.
 			const controller = new AbortController()
-			mockCreate.mockImplementationOnce(async (_params: unknown, options: { signal?: AbortSignal }) => {
+			mockCreate.mockImplementationOnce(async (_params: unknown, _options: { signal?: AbortSignal }) => {
 				controller.abort()
 				throw new Error("boom")
 			})
