@@ -36,7 +36,7 @@ vi.mock("path", async () => {
 			return args.join(separator)
 		}),
 		isAbsolute: vi.fn().mockReturnValue(false),
-		relative: vi.fn().mockImplementation((from, to) => {
+		relative: vi.fn().mockImplementation((_from, to) => {
 			return to
 		}),
 	}
@@ -232,6 +232,7 @@ describe("searchReplaceTool", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		return toolResult
@@ -396,6 +397,7 @@ describe("searchReplaceTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: localPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(capturedResult).toContain("Error:")

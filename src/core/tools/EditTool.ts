@@ -110,7 +110,7 @@ export class EditTool extends BaseTool<"edit"> {
 						readVersionToken = preReadToken
 					}
 				}
-			} catch (error) {
+			} catch {
 				task.consecutiveMistakeCount++
 				task.recordToolError("edit")
 				const errorMessage = `Failed to read file '${relPath}'. Please verify file permissions and try again.`

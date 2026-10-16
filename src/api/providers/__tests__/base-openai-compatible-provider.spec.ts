@@ -1,7 +1,6 @@
 // npx vitest run api/providers/__tests__/base-openai-compatible-provider.spec.ts
 
 import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI from "openai"
 
 import { type ModelInfo, openAiModelInfoSaneDefaults } from "@roo-code/types"
 

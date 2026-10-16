@@ -138,6 +138,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockSaveDirectly).toHaveBeenCalledWith(
@@ -161,6 +162,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockHandleError).toHaveBeenCalledWith("applying diff", guardError)
@@ -173,6 +175,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		// The focus-disruption save has no diff view to observe the file, so the tool read
@@ -214,6 +217,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		// A read that straddled a write proves nothing about the current version, so no
@@ -247,6 +251,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Both stat calls must be consumed: beforeEach only clears call history, so a
@@ -284,6 +289,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockSaveDirectly).not.toHaveBeenCalled()
@@ -299,6 +305,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockSaveDirectly).not.toHaveBeenCalled()
@@ -333,6 +340,7 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(diffViewStub.saveChanges).toHaveBeenCalled()

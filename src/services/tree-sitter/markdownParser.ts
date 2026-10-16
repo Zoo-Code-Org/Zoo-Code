@@ -49,7 +49,7 @@ export function parseMarkdown(content: string): QueryCapture[] {
 	const setextH1Regex = /^={3,}\s*$/
 	const setextH2Regex = /^-{3,}\s*$/
 	// Valid setext header text line should be plain text (not empty, not indented, not a special element)
-	const validSetextTextRegex = /^\s*[^#<>!\[\]`\t]+[^\n]$/
+	const validSetextTextRegex = /^\s*[^#<>![\]`\t]+[^\n]$/
 
 	// Find all headers in the document
 	for (let i = 0; i < lines.length; i++) {

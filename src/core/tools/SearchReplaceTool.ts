@@ -115,7 +115,7 @@ export class SearchReplaceTool extends BaseTool<"search_replace"> {
 						readVersionToken = preReadToken
 					}
 				}
-			} catch (error) {
+			} catch {
 				task.consecutiveMistakeCount++
 				task.recordToolError("search_replace")
 				const errorMessage = `Failed to read file '${relPath}'. Please verify file permissions and try again.`

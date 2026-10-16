@@ -107,6 +107,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockAskApproval).toHaveBeenCalled()
@@ -229,6 +230,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockSaveDirectly).toHaveBeenCalledWith(
@@ -249,6 +251,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		// The hunk read doubles as the S2 observation (ReadFileTool contract):
@@ -275,6 +278,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts"))).toBe(false)
@@ -308,6 +312,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// A stat failure is not evidence the file changed and not a reason to abort the
@@ -336,6 +341,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("Failed to process patch"))
@@ -352,6 +358,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockPushToolResult).toHaveBeenCalledWith("Changes were rejected by the user.")
@@ -387,6 +394,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(diffViewStub.saveChanges).toHaveBeenCalled()
@@ -401,6 +409,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockSaveDirectly).toHaveBeenCalledWith(
@@ -421,6 +430,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockSaveDirectly).toHaveBeenCalledWith(
@@ -445,6 +455,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		// The destination saveDirectly is the guarded publish for a move: a failure there
@@ -466,6 +477,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockHandleError).toHaveBeenCalledWith("apply patch", guardError)
@@ -484,6 +496,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 			askApproval: mockAskApproval,
 			handleError: mockHandleError,
 			pushToolResult: mockPushToolResult,
+			toolCallId: "test-tool-call-id",
 		})
 
 		expect(mockHandleError).toHaveBeenCalledWith("apply patch", guardError)
