@@ -28,6 +28,7 @@ vi.mock("../../../services/file-safety/safeWriteText", async (importOriginal) =>
 	return {
 		...actual,
 		safeWriteText: vi.fn().mockResolvedValue(undefined),
+		assertPublishWithinAuthorizedRoot: vi.fn().mockResolvedValue(undefined),
 	}
 })
 
@@ -795,6 +796,26 @@ describe("DiffViewProvider", () => {
 	})
 
 	describe("saveDirectly method", () => {
+		it("rejects an escaped target before creating directories for it", async () => {
+			const { assertPublishWithinAuthorizedRoot, safeWriteText } =
+				await import("../../../services/file-safety/safeWriteText")
+			const { createDirectoriesForFile } = await import("../../../utils/fs")
+			vi.mocked(createDirectoriesForFile).mockClear()
+			vi.mocked(safeWriteText).mockClear()
+			const escape = new Error("safeWriteText: refusing to publish outside the authorized root")
+			vi.mocked(assertPublishWithinAuthorizedRoot).mockRejectedValueOnce(escape)
+
+			await expect(diffViewProvider.saveDirectly("linkdir/new/secret.txt", "x", false, false, 0)).rejects.toThrow(
+				"refusing to publish",
+			)
+
+			// The allow-list decision must precede the filesystem mutation:
+			// createDirectoriesForFile follows symlinks, so running it first would
+			// already have created the outside directory the check exists to protect.
+			expect(createDirectoriesForFile).not.toHaveBeenCalled()
+			expect(safeWriteText).not.toHaveBeenCalled()
+			vi.mocked(assertPublishWithinAuthorizedRoot).mockResolvedValue(undefined)
+		})
 		it("rejects a save over a read-only target instead of renaming onto it", async () => {
 			const fs = await import("fs/promises")
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")

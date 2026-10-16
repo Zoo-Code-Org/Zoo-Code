@@ -19,7 +19,7 @@ import { arePathsEqual, getReadablePath } from "../../utils/path"
 import { formatResponse } from "../../core/prompts/responses"
 import { diagnosticsToProblemsString, getNewDiagnostics } from "../diagnostics"
 import { Task } from "../../core/task/Task"
-import { safeWriteText } from "../../services/file-safety/safeWriteText"
+import { assertPublishWithinAuthorizedRoot, safeWriteText } from "../../services/file-safety/safeWriteText"
 
 import { DecorationController } from "./DecorationController"
 
@@ -1155,6 +1155,15 @@ export class DiffViewProvider {
 
 		// Get diagnostics before editing the file
 		this.preDiagnostics = vscode.languages.getDiagnostics()
+
+		// Reject an escape through an intermediate symlink before anything is
+		// created on disk: createDirectoriesForFile follows symlinks, so an
+		// approved inside path whose intermediate link points outside the
+		// workspace would otherwise create the outside directory before
+		// safeWriteText's authorizedRoot check rejected the publish. The same
+		// canonical check runs inside safeWriteText; running it here first keeps
+		// the allowlist decision free of filesystem side effects.
+		await assertPublishWithinAuthorizedRoot(this.cwd, absolutePath, absolutePath)
 
 		// Write the content directly to the file
 		await createDirectoriesForFile(absolutePath)
