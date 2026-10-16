@@ -22,7 +22,12 @@ import type { FileObservation } from "../../core/task/observationRegistry"
 import { versionTokenOfStat } from "../../utils/versionToken"
 import { withFileLock } from "../../utils/fileLock"
 import { resolveLockKey } from "../../services/file-safety/safeWriteText"
-import { guardedWrite, GuardRejectedError, type GuardedWriteKind } from "../../core/tools/guardedWrite"
+import {
+	guardedWrite,
+	GuardRejectedError,
+	replaceIfVersion,
+	type GuardedWriteKind,
+} from "../../core/tools/guardedWrite"
 
 import { DecorationController } from "./DecorationController"
 
@@ -1222,6 +1227,9 @@ export class DiffViewProvider {
 		const fileExists = this.editType === "modify"
 		const updatedDocument = this.activeDiffEditor.document
 		const absolutePath = path.resolve(this.cwd, this.relPath)
+		// Captured while narrowed: the CAS below runs after awaits inside the
+		// teardown closure.
+		const displayRelPath = this.relPath
 
 		// Stop tracking touches and cancel any pending scroll-to-diff before any
 		// programmatic editor activation below.
@@ -1237,26 +1245,27 @@ export class DiffViewProvider {
 				// before the rollback acts, and an unguarded restore or unlink would
 				// clobber or delete bytes this session never wrote.
 				await withFileLock(await resolveLockKey(absolutePath), async () => {
-					// Decide against the disk state under the lock: the rollback may overwrite
-					// or remove the file only while it still carries the token this session
-					// last wrote (the post-publish observation for a modify, the placeholder
-					// token for a create). A different token means a peer published in the
-					// settled window: preserve the peer's bytes, close this session's views,
-					// and report the conflict explicitly.
-					// The same token source the publish and adoption paths use, so the
-					// comparison is apples to apples with what this session recorded.
-					const diskStat = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
-					const diskToken = diskStat === undefined ? undefined : versionTokenOfStat(diskStat)
-					const oursToken = this.lastWrittenToken ?? (fileExists ? undefined : this.placeholderVersion)
-					if (diskToken !== undefined && oursToken !== undefined && diskToken !== oursToken) {
-						await this.closeAllDiffViews()
-						throw new RollbackConflictError(absolutePath, oursToken, diskToken)
-					}
 					if (!fileExists) {
-						if (updatedDocument.isDirty) {
-							await updatedDocument.save()
+						// Decide against the disk state under the lock: the rollback may
+						// remove the file only while it still carries the token this session
+						// left there (the post-publish observation or the placeholder token).
+						// A different token means a peer published in the settled window:
+						// preserve the peer's bytes, close this session's views, and report
+						// the conflict explicitly. The same token source the publish and
+						// adoption paths use, so the comparison is apples to apples with
+						// what this session recorded.
+						const diskStat = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+						const diskToken = diskStat === undefined ? undefined : versionTokenOfStat(diskStat)
+						const oursToken = this.lastWrittenToken ?? this.placeholderVersion
+						if (diskToken !== undefined && oursToken !== undefined && diskToken !== oursToken) {
+							await this.closeAllDiffViews()
+							throw new RollbackConflictError(absolutePath, oursToken, diskToken)
 						}
-
+						// No save before the delete: saving the diff buffer would publish the
+						// cancelled edit's content to disk immediately before deleting it -
+						// a write the rollback never intended, unbound to the placeholder
+						// check above, and a visible flash of cancelled content for anyone
+						// reading the path in that window.
 						await this.closeAllDiffViews()
 						// The file was newly created for this edit; close its transiently
 						// opened tab before deleting it from disk.
@@ -1267,40 +1276,91 @@ export class DiffViewProvider {
 						for (let i = this.createdDirs.length - 1; i >= 0; i--) {
 							await fs.rmdir(this.createdDirs[i])
 						}
-					} else {
-						// Revert document.
-						const edit = new vscode.WorkspaceEdit()
-
-						const fullRange = new vscode.Range(
-							updatedDocument.positionAt(0),
-							updatedDocument.positionAt(updatedDocument.getText().length),
-						)
-
-						edit.replace(updatedDocument.uri, fullRange, this.stripAllBOMs(this.originalContent ?? ""))
-
-						// Apply the edit and save, since contents shouldn't have changed
-						// this won't show in local history unless of course the user made
-						// changes and saved during the edit.
-						await vscode.workspace.applyEdit(edit)
-						await updatedDocument.save()
-
-						await this.closeAllDiffViews()
-
-						// Read auto-close preferences from state; fall back to defaults that
-						// preserve the existing behavior when unset.
-						const revertTask = this.taskRef.deref()
-						const revertState = await revertTask?.providerRef.deref()?.getState()
-
-						await this.keepOrCloseEditedFile(
-							absolutePath,
-							false,
-							revertState?.autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
-							revertState?.autoCloseZooOpenedFilesAfterUserEdited ??
-								DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
-							revertState?.autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
-						)
 					}
+					// The modify rollback publishes through replaceIfVersion below: it
+					// takes this same lock itself, and withFileLock is not reentrant.
 				})
+
+				if (fileExists) {
+					// Revert the existing file with an atomic guarded compare-and-swap
+					// publish: the original bytes reach the disk only while the path still
+					// carries the token this session last wrote, with the version check and
+					// the publish inside one acquisition of the shared advisory lock
+					// (replaceIfVersion). The old check-then-save applied the buffer through
+					// VS Code's save path without binding the publish to the checked
+					// version, so a peer publish landing after the check was silently
+					// overwritten. On a CAS rejection the peer's bytes stay on disk and the
+					// rollback reports the conflict.
+					const originalBytes = this.stripAllBOMs(this.originalContent ?? "")
+					const expectedToken = this.lastWrittenToken
+					// The CAS needs both sides of the comparison: the version this session
+					// left and the version the disk reports. The probe below only decides
+					// eligibility - replaceIfVersion re-reads the version under the lock,
+					// and that read is the authoritative check the publish is bound to.
+					const diskStat = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+					let casPublished = false
+					if (expectedToken !== undefined && diskStat !== undefined) {
+						try {
+							await replaceIfVersion(absolutePath, expectedToken, originalBytes, displayRelPath)
+							casPublished = true
+						} catch (error: unknown) {
+							if (error instanceof GuardRejectedError) {
+								// The CAS rejected: the peer's bytes are preserved. Report the
+								// conflict with the disk token the rejection is about.
+								const conflictStat = await fs
+									.stat(absolutePath, { bigint: true })
+									.catch(() => undefined)
+								const diskToken =
+									conflictStat === undefined ? "<absent>" : versionTokenOfStat(conflictStat)
+								await this.closeAllDiffViews()
+								throw new RollbackConflictError(absolutePath, expectedToken, diskToken)
+							}
+							throw error
+						}
+					}
+
+					// Restore the buffer to the original content.
+					const edit = new vscode.WorkspaceEdit()
+
+					const fullRange = new vscode.Range(
+						updatedDocument.positionAt(0),
+						updatedDocument.positionAt(updatedDocument.getText().length),
+					)
+
+					edit.replace(updatedDocument.uri, fullRange, originalBytes)
+					await vscode.workspace.applyEdit(edit)
+
+					if (casPublished) {
+						// The CAS published the original bytes outside VS Code's save path:
+						// reconcile the buffer with the disk - reverting reloads the published
+						// bytes and clears the dirty flag - instead of saving the buffer back
+						// over the disk through the unguarded path this rollback replaced.
+						await this.revertDocument(updatedDocument)
+					} else {
+						// No CAS: either this session never published to the path (no expected
+						// version exists) or the disk reported no version to compare against
+						// (absent or unreadable). Saving the restored buffer rewrites the
+						// bytes this session last knew, as it did before the guarded rollback
+						// existed; there was no version to bind the publish to.
+						await updatedDocument.save()
+					}
+
+					await this.closeAllDiffViews()
+
+					// Read auto-close preferences from state; fall back to defaults that
+					// preserve the existing behavior when unset.
+					const revertTask = this.taskRef.deref()
+					const revertState = await revertTask?.providerRef.deref()?.getState()
+
+					await this.keepOrCloseEditedFile(
+						absolutePath,
+						false,
+						revertState?.autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
+						revertState?.autoCloseZooOpenedFilesAfterUserEdited ??
+							DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
+						revertState?.autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
+					)
+				}
 			})
 		} catch (error) {
 			if (error instanceof RollbackConflictError) {
