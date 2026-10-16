@@ -1,0 +1,410 @@
+/**
+ * Guarded-write compare-and-swap core (upstream epic #1375, phase A4a).
+ *
+ * Wraps the S3 safeWriteText publish primitive behind version-token guards so
+ * that every write is deterministic:
+ *
+ * - an unobserved target may only be created when it is absent
+ *   (createIfAbsent);
+ * - an observed target is published only when the on-disk version token still
+ *   matches the token recorded at read time (replaceIfVersion);
+ * - an edit-style write requires a prior observation (unobservedEditGuard).
+ *
+ * A per-absolute-path FIFO chain of tail promises orders concurrent
+ * in-process writes to the same path: the first matching write wins, the rest
+ * fail stale. Observations come from the task's S2 ObservationRegistry and are
+ * captured at submission time; a successful publication re-observes the path
+ * with the published token so sequential writes from one task compare against
+ * the content that task published, not against its pre-write read.
+ *
+ * Check-to-publication window (CodeRabbit review, PRs #1405 / #1413): every
+ * guard predicate is enforced TWICE -- once at entry and once at publication
+ * time. The publication-time re-verification runs inside safeWriteText
+ * immediately before the atomic commit rename (its verifyBeforeCommit
+ * option), while the per-path FIFO chain holds the serialization across the
+ * whole verify+publish window, so the predicate is re-checked against the
+ * state the rename will actually replace and concurrent in-process writers
+ * stay fully ordered.
+ *
+ * Residual cross-process window: an external writer (another process) can
+ * still create or modify the target in the short interval between the
+ * pre-commit re-verification and the commit rename. A cross-platform atomic
+ * conditional publication would require an OS-level primitive beyond
+ * fs.promises (or a shared lock protocol every writer honors) and is tracked
+ * as a follow-up of epic #1375.
+ */
+
+import * as fs from "fs/promises"
+import * as path from "path"
+
+import { safeWriteText } from "../../services/file-safety/safeWriteText"
+import { computeVersionToken } from "../../utils/versionToken"
+import type { Task } from "../task/Task"
+
+// -- Types ------------------------------------------------------------------
+
+/** Write kind that drives guard selection. */
+export type GuardedWriteKind = "create" | "update" | "edit"
+
+/** Internal error thrown when a guard rejects a write. */
+class GuardRejectedError extends Error {
+	constructor(
+		message: string,
+		readonly path: string,
+	) {
+		super(message)
+		this.name = "GuardRejectedError"
+	}
+}
+
+// -- Per-path tail-promise chain --------------------------------------------
+
+/**
+ * Per-absolute-path FIFO chain of pending guarded writes (tail promise per
+ * path). Every write enqueues onto the current tail for its path, so
+ * concurrent writes to the same path run one at a time in submission order.
+ *
+ * The chain never leaks a rejection through itself: each link settles, a
+ * rejected link is skipped by the next writer (a failed write must not block
+ * later writes to the same path), and every caller receives its own link
+ * promise to handle.
+ *
+ * Settled entries are evicted (below), so a long-lived extension does not
+ * accumulate a map entry per distinct written path.
+ */
+const pendingChains = new Map<string, Promise<void>>()
+
+/**
+ * Enqueue a write operation on the per-path FIFO chain.
+ *
+ * Returns the promise for this link; it always settles. A prior link that
+ * rejected is skipped, not propagated. The map entry for this link is
+ * deleted once it settles — but only while it is still the current tail for
+ * the path, so a replacement enqueued in the meantime keeps ownership.
+ */
+function enqueue(pathKey: string, fn: () => Promise<void>): Promise<void> {
+	const prev = pendingChains.get(pathKey) ?? Promise.resolve()
+	const next = prev.then(fn, fn)
+	pendingChains.set(pathKey, next)
+	void next.then(
+		() => {
+			if (pendingChains.get(pathKey) === next) {
+				pendingChains.delete(pathKey)
+			}
+		},
+		() => {
+			if (pendingChains.get(pathKey) === next) {
+				pendingChains.delete(pathKey)
+			}
+		},
+	)
+	return next
+}
+
+// -- Guard primitives --------------------------------------------------------
+
+/**
+ * Extract a Node errno code (e.g. "ENOENT") from a thrown value, or
+ * undefined when the value carries none.
+ */
+function errorCode(error: unknown): string | undefined {
+	return typeof error === "object" && error !== null && "code" in error
+		? (error as { code?: string }).code
+		: undefined
+}
+
+/** True when the path is absent on disk (fs.access reports ENOENT). */
+async function fileIsAbsent(absolutePath: string): Promise<boolean> {
+	try {
+		await fs.access(absolutePath)
+		return false
+	} catch (error: unknown) {
+		return errorCode(error) === "ENOENT"
+	}
+}
+
+/** Build the read-first remediation error for an existing target. */
+function alreadyExistsError(absolutePath: string): GuardRejectedError {
+	return new GuardRejectedError(
+		"File already exists at " +
+			absolutePath +
+			" and was not read before this write -- read the file first, then retry.",
+		absolutePath,
+	)
+}
+
+/** Build the stale-version remediation error. */
+function staleVersionError(absolutePath: string, expectedVersion: string, currentVersion: string): GuardRejectedError {
+	return new GuardRejectedError(
+		"Stale version -- the file changed since you read it (expected " +
+			expectedVersion +
+			", current " +
+			currentVersion +
+			"); re-read the file, then retry.",
+		absolutePath,
+	)
+}
+
+/** Build the deleted-after-read remediation error. */
+function deletedAfterReadError(absolutePath: string, expectedVersion: string): GuardRejectedError {
+	return new GuardRejectedError(
+		"File was deleted after it was read -- the version recorded at read time (" +
+			expectedVersion +
+			") no longer exists; re-read the file, then retry.",
+		absolutePath,
+	)
+}
+
+/**
+ * Publish content only if the target file does not exist.
+ *
+ * The absence predicate is enforced at entry AND at publication time: the
+ * pre-commit re-check (verifyBeforeCommit, run by safeWriteText immediately
+ * before the commit rename) rejects with the same remediation when an
+ * external writer created the file in the check-to-rename window, instead of
+ * overwriting it.
+ *
+ * Rejects with a loud remediation error when the file already exists: the
+ * write was issued for a file that was never read, so the caller must read
+ * the file first, then retry.
+ */
+export async function createIfAbsent(absolutePath: string, content: string): Promise<void> {
+	try {
+		await fs.access(absolutePath)
+	} catch (error: unknown) {
+		if (errorCode(error) !== "ENOENT") {
+			// A real I/O failure (EACCES, EIO, ...) -- not a guard verdict.
+			throw error
+		}
+		// Absent at entry. safeWriteText re-verifies absence at the last
+		// moment before the commit rename (see verifyStillAbsent) so a writer
+		// that creates the file in the check-to-rename window is rejected,
+		// not overwritten.
+		await safeWriteText(absolutePath, content, {
+			verifyBeforeCommit: () => verifyStillAbsent(absolutePath),
+		})
+		return
+	}
+
+	throw alreadyExistsError(absolutePath)
+}
+
+/**
+ * Pre-commit absence check for createIfAbsent (publication-time re-
+ * verification): rejects with the standard read-first remediation when the
+ * target exists at publication time. ENOENT (still absent) passes; any other
+ * I/O error is rethrown verbatim (a real failure, not a guard verdict).
+ */
+async function verifyStillAbsent(absolutePath: string): Promise<void> {
+	try {
+		await fs.access(absolutePath)
+	} catch (error: unknown) {
+		if (errorCode(error) === "ENOENT") return
+		throw error
+	}
+	throw alreadyExistsError(absolutePath)
+}
+
+/**
+ * Publish content only if the current on-disk version token equals
+ * expectedVersion (the token observed at read time).
+ *
+ * The version predicate is enforced at entry AND at publication time: the
+ * pre-commit re-check (verifyBeforeCommit, run by safeWriteText immediately
+ * before the commit rename) rejects stale with the same remediation when an
+ * external writer modified the file in the check-to-rename window, instead
+ * of overwriting it.
+ *
+ * On a match the content is published via the S3 safeWriteText primitive; on
+ * a mismatch the write is rejected stale with a re-read-then-retry
+ * remediation suffix.
+ */
+export async function replaceIfVersion(absolutePath: string, expectedVersion: string, content: string): Promise<void> {
+	let currentVersion: string
+	try {
+		currentVersion = await computeVersionToken(absolutePath)
+	} catch (error: unknown) {
+		if (errorCode(error) === "ENOENT") {
+			// The observed file was deleted after the read: the version recorded
+			// at read time no longer exists on disk. Normalize the raw ENOENT
+			// into the guard's re-read-then-retry contract so the caller gets a
+			// remediation it can act on, not a raw errno.
+			throw deletedAfterReadError(absolutePath, expectedVersion)
+		}
+		// A real I/O failure (EACCES, EIO, ...) -- not a guard verdict.
+		throw error
+	}
+
+	if (currentVersion !== expectedVersion) {
+		throw staleVersionError(absolutePath, expectedVersion, currentVersion)
+	}
+
+	// Match at entry. safeWriteText re-verifies the token at the last moment
+	// before the commit rename (see verifyVersionUnchanged) so a writer that
+	// modifies the file in the check-to-rename window is rejected stale, not
+	// overwritten.
+	await safeWriteText(absolutePath, content, {
+		verifyBeforeCommit: () => verifyVersionUnchanged(absolutePath, expectedVersion),
+	})
+}
+
+/**
+ * Pre-commit version check for replaceIfVersion (publication-time re-
+ * verification): rejects with the standard stale / deleted-after-read
+ * remediation when the on-disk token no longer matches expectedVersion at
+ * publication time. Any other I/O error is rethrown verbatim (a real failure,
+ * not a guard verdict).
+ */
+async function verifyVersionUnchanged(absolutePath: string, expectedVersion: string): Promise<void> {
+	let currentVersion: string
+	try {
+		currentVersion = await computeVersionToken(absolutePath)
+	} catch (error: unknown) {
+		if (errorCode(error) === "ENOENT") {
+			throw deletedAfterReadError(absolutePath, expectedVersion)
+		}
+		throw error
+	}
+	if (currentVersion !== expectedVersion) {
+		throw staleVersionError(absolutePath, expectedVersion, currentVersion)
+	}
+}
+
+/**
+ * Unobserved-edit guard: an edit-style write without a prior observation is
+ * rejected before any I/O. The literal-match / patch logic stays with the
+ * tools in S4b; this guard only verifies that a read happened first.
+ *
+ * Returns Promise<never> because the rejection is total: this function
+ * never resolves.
+ */
+export async function unobservedEditGuard(absolutePath: string): Promise<never> {
+	throw new GuardRejectedError("File not read yet -- read the file, then retry.", absolutePath)
+}
+
+// -- Public API --------------------------------------------------------------
+
+/**
+ * Resolve a relative or absolute path against task.cwd.
+ *
+ * path.resolve also normalizes an already-absolute input (collapsing "." / ".."
+ * segments and trailing separators), so the key always matches the
+ * ObservationRegistry key recorded at read time (ReadFileTool observes under
+ * path.resolve(task.cwd, relPath)) and two spellings of one file share one
+ * FIFO chain.
+ */
+function resolveAbsolutePath(task: Task, relPathOrAbsolute: string): string {
+	return path.resolve(task.cwd, relPathOrAbsolute)
+}
+
+/**
+ * A queued guarded write reached the head of its path's chain after the task that
+ * issued it had already been aborted or disposed. Task.dispose() sets the same
+ * `abort` flag that abortTask() sets, so that flag is the disposal signal visible
+ * at this layer.
+ */
+export class CancelledTaskWriteError extends Error {
+	readonly path: string
+	constructor(absolutePath: string) {
+		super(
+			`Guarded write for ${absolutePath} was cancelled -- the task was aborted or disposed ` +
+				"before its turn in the per-path write queue; nothing was published.",
+		)
+		this.name = "CancelledTaskWriteError"
+		this.path = absolutePath
+	}
+}
+
+/**
+ * Guarded write entry point.
+ *
+ * 1. Resolves the absolute path against task.cwd.
+ * 2. Captures the task's S2 observation for the path at SUBMISSION time, not
+ *    when the queued link runs: the content being written was derived from
+ *    the read this observation records, so the CAS must compare against that
+ *    token even if the registry moves on - through a re-read or through this
+ *    task's own earlier write re-observing the path - while the link waits
+ *    behind another write. A queued write whose token no longer matches fails
+ *    stale and the caller re-reads; publishing it anyway would overwrite
+ *    content the submitted write never saw.
+ * 3. Consults the captured observation to pick the guard:
+ *    - unobserved + create/update: createIfAbsent (rejects if it exists);
+ *    - observed + create on a file that vanished after the read: recreate;
+ *    - observed otherwise: replaceIfVersion (CAS on the S1 version token);
+ *    - unobserved + edit: unobservedEditGuard.
+ *    The guard runs on the per-path FIFO chain so concurrent writes to the
+ *    same path are deterministically ordered. The chain holds the
+ *    serialization across the whole verify+publish window, and the guard's
+ *    publication-time re-verification (inside safeWriteText, immediately
+ *    before the commit rename) closes the check-to-rename window for writers
+ *    serialized by the chain.
+ * 4. After a successful publication the new on-disk token is recorded back
+ *    into the registry, so a follow-up write from the same task compares
+ *    against the content this write published instead of failing stale
+ *    against its own output (or treating a file it just created as
+ *    unobserved). The re-observation runs inside the chain link, before the
+ *    link settles, so the next queued link and the next submission both see
+ *    the refreshed token. A token failure after a successful publication is
+ *    swallowed: the write itself succeeded, and the registry keeps the
+ *    previous observation, which a follow-up write already handles.
+ */
+export async function guardedWrite(
+	task: Task,
+	relPathOrAbsolute: string,
+	content: string,
+	kind: GuardedWriteKind = "update",
+): Promise<void> {
+	const absolutePath = resolveAbsolutePath(task, relPathOrAbsolute)
+	// Submission-time capture - see step 2 above.
+	const obs = task.observationRegistry.get(absolutePath)
+
+	return enqueue(absolutePath, async () => {
+		// The link can reach the head of the queue long after the task that issued it is
+		// gone (panel closed, task switched, abort landed while another write held the
+		// path). Running it then would publish for a task that no longer serves requests
+		// and re-observe the path, so the write stops here instead.
+		if (task.abort) {
+			throw new CancelledTaskWriteError(absolutePath)
+		}
+
+		if (obs === undefined) {
+			// Edit-style writes require a prior read: no observation, no write.
+			if (kind === "edit") {
+				await unobservedEditGuard(absolutePath)
+			}
+			// Never read: only an absent target may be created. (The edit guard
+			// above rejects before reaching this line.)
+			await createIfAbsent(absolutePath, content)
+		} else if (kind === "create" && (await fileIsAbsent(absolutePath))) {
+			// A "create" on a file that vanished after the read recreates it.
+			// Observed "edit" and "update" writes never reach the existence probe -
+			// the condition short-circuits on kind - and take the CAS branch below.
+			await createIfAbsent(absolutePath, content)
+		} else {
+			// The version recorded at read time must still match the on-disk
+			// token: for "edit" and "update", and for "create" on a file that
+			// still exists.
+			await replaceIfVersion(absolutePath, obs.version, content)
+		}
+
+		// Re-observe the published version (step 4). A failure to compute the
+		// token after a successful publication must not turn the published
+		// write into a failed one, so it is swallowed here and the registry
+		// keeps the previous observation.
+		try {
+			const published = await computeVersionToken(absolutePath)
+			task.observationRegistry.observe(absolutePath, published)
+		} catch {
+			// Swallowed on purpose: the publication itself succeeded, and a
+			// follow-up write against the previous observation is the
+			// pre-existing contract (stale -> re-read).
+		}
+	})
+}
+
+/**
+ * Reset the per-path tail-promise chains (test hook).
+ */
+export function resetChain(): void {
+	pendingChains.clear()
+}
