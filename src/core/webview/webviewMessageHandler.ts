@@ -673,6 +673,11 @@ export const webviewMessageHandler = async (
 								// first listed profile) so the view adopts the shared choice; the
 								// global selection itself is left untouched.
 								await provider.saveViewState("currentApiConfigName", globalConfigName)
+								// The buffered overlay belongs to the profile that no longer
+								// resolves: drop it so getState() falls back to the settings of the
+								// re-pinned selection instead of serving the stale profile's
+								// provider, model, and keys to new tasks in this view.
+								await provider.saveViewState("apiConfiguration", undefined)
 								// Fall through: refresh listApiConfigMeta and post listApiConfig
 								// to this webview below.
 							} else {
@@ -2463,6 +2468,15 @@ export const webviewMessageHandler = async (
 
 					// Create a new configuration with the new name and old ID.
 					await provider.providerSettingsManager.saveConfig(newName, { ...message.apiConfiguration, id })
+
+					// Re-point live views pinned to the old name before it stops
+					// resolving: the rename keeps the id, so their pins should follow the
+					// record instead of dangling, and their overlays must serve the
+					// renamed settings rather than the pre-rename copy.
+					await provider.repointViewLocalStateAfterProfileRename(oldName, newName, {
+						...message.apiConfiguration,
+						id,
+					})
 
 					// Delete the old configuration.
 					await provider.providerSettingsManager.deleteConfig(oldName)
