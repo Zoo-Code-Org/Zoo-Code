@@ -665,7 +665,15 @@ export class ContextProxy {
 
 	public async setValues(values: RooCodeSettings) {
 		const entries = Object.entries(values) as [RooCodeSettingsKey, unknown][]
-		await Promise.all(entries.map(([key, value]) => this.setValue(key, value)))
+		// Settle every started write before rejecting: with Promise.all an early
+		// rejection would leave a sibling write in flight, and that write could land
+		// after a caller (e.g. API.setConfiguration) restored the prior values,
+		// re-persisting part of the failed configuration.
+		const results = await Promise.allSettled(entries.map(([key, value]) => this.setValue(key, value)))
+		const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected")
+		if (rejected) {
+			throw rejected.reason
+		}
 	}
 
 	/**

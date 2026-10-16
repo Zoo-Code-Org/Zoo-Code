@@ -713,6 +713,22 @@ describe("ContextProxy", () => {
 			expect(proxy.getSecret("openAiApiKey")).toBe("test-api-key")
 			expect(proxy.getGlobalState("apiModelId")).toBe("gpt-4")
 		})
+
+		it("settles every started write before rejecting", async () => {
+			const landed: string[] = []
+			vi.spyOn(proxy, "setValue").mockImplementation(async (key) => {
+				if (key === "mode") {
+					throw new Error("write failed")
+				}
+				await new Promise((resolve) => setTimeout(resolve, 20))
+				landed.push(String(key))
+			})
+
+			await expect(proxy.setValues({ mode: "ask", apiModelId: "gpt-4" })).rejects.toThrow("write failed")
+			// The sibling write must have landed before the rejection surfaced, so a
+			// caller restoring prior values cannot race an in-flight write.
+			expect(landed).toContain("apiModelId")
+		})
 	})
 
 	describe("setProviderSettings", () => {
