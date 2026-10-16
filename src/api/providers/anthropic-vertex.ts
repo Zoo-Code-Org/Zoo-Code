@@ -209,13 +209,6 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 
 					break
 				}
-				case "content_block_stop": {
-					// Block complete - no action needed for now.
-					// NativeToolCallParser handles tool call completion
-					// Note: Signature for multi-turn thinking would require using stream.finalMessage()
-					// after iteration completes, which requires restructuring the streaming approach.
-					break
-				}
 			}
 		}
 	}
