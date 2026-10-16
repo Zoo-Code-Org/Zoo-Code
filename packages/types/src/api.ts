@@ -90,7 +90,10 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 */
 	abandonSubtask(childTaskId: string): Promise<boolean>
 	/**
-	 * Sends a message to the current task.
+	 * Sends a message to the current task as conversational input.
+	 * If the task is busy the message is queued and becomes the next user
+	 * turn. Queued input never approves a pending or later tool, command, or
+	 * MCP ask; use approveCurrentAsk() for explicit approval.
 	 * @param message Optional message to send.
 	 * @param images Optional array of image data URIs (e.g., "data:image/webp;base64,...").
 	 */

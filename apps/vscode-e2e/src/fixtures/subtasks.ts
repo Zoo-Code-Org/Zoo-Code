@@ -16,6 +16,8 @@ const SUBTASK_APPROVAL_RESTORE_CHILD_MARKER = "SUBTASK_CHILD_APPROVAL_RESTORE"
 const SUBTASK_XPROFILE_PARENT_MARKER = "SUBTASK_PARENT_CROSS_PROFILE"
 const SUBTASK_XPROFILE_SAME_CHILD_MARKER = "SUBTASK_CHILD_SAME_PROFILE"
 const SUBTASK_XPROFILE_DIFFERENT_CHILD_MARKER = "SUBTASK_CHILD_DIFFERENT_PROFILE"
+export const SUBTASK_QUEUED_INPUT_PARENT_MARKER = "SUBTASK_PARENT_QUEUED_INPUT"
+export const SUBTASK_QUEUED_INPUT_CHILD_MARKER = "SUBTASK_CHILD_QUEUED_INPUT"
 
 const SUBTASK_CHILD_PROMPT = `${SUBTASK_CHILD_MARKER}: Ask the user exactly this follow-up question: What is the square root of 81? After the user answers, complete with only the answer.`
 export const SUBTASK_PARENT_PROMPT = `${SUBTASK_PARENT_MARKER}: Use the new_task tool exactly once. Create an ask-mode subtask with this exact message: "${SUBTASK_CHILD_PROMPT}" Do not answer directly.`
@@ -58,6 +60,14 @@ export const SUBTASK_XPROFILE_PARENT_PROMPT = `${SUBTASK_XPROFILE_PARENT_MARKER}
 export const SUBTASK_XPROFILE_SAME_CHILD_RESULT = "Same-profile child completed"
 export const SUBTASK_XPROFILE_DIFFERENT_CHILD_RESULT = "Different-profile child completed"
 export const SUBTASK_XPROFILE_PARENT_RESULT = "Sequential cross-profile parent resumed"
+
+const SUBTASK_QUEUED_INPUT_INITIAL_RESULT = "Child completed before queued input"
+export const SUBTASK_QUEUED_INPUT_MESSAGE = "Use the queued instruction before completing."
+export const SUBTASK_QUEUED_INPUT_CHILD_RESULT = "Child processed queued input"
+export const SUBTASK_QUEUED_INPUT_PARENT_RESULT = "Parent resumed after queued input"
+const SUBTASK_QUEUED_INPUT_CHILD_PROMPT = `${SUBTASK_QUEUED_INPUT_CHILD_MARKER}: Complete immediately with the exact result "${SUBTASK_QUEUED_INPUT_INITIAL_RESULT}".`
+export const SUBTASK_QUEUED_INPUT_PARENT_PROMPT = `${SUBTASK_QUEUED_INPUT_PARENT_MARKER}: Use the new_task tool exactly once. Create an ask-mode subtask with this exact message: "${SUBTASK_QUEUED_INPUT_CHILD_PROMPT}" Do not answer directly. When the subtask returns, complete with the exact result "${SUBTASK_QUEUED_INPUT_PARENT_RESULT}".`
+export const SUBTASK_QUEUED_INPUT_RESPONSE_LATENCY_MS = 2_000
 
 // Scheduler regression tests — exercises TaskScheduler + run() dispatch post-CodeRabbit fix.
 // Separate markers to avoid collisions with the other subtask fixtures.
@@ -174,6 +184,81 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 					name: "attempt_completion",
 					arguments: JSON.stringify({ result: "Restored parent resumed" }),
 					id: "call_subtasks_approval_restore_parent_completion_003",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			userMessage: new RegExp(SUBTASK_QUEUED_INPUT_PARENT_MARKER),
+			sequenceIndex: 0,
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "new_task",
+					arguments: JSON.stringify({
+						mode: "ask",
+						message: SUBTASK_QUEUED_INPUT_CHILD_PROMPT,
+					}),
+					id: "call_queued_input_parent_new_task_001",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				lastUserMessageContains(req, SUBTASK_QUEUED_INPUT_CHILD_MARKER) &&
+				!requestContains(req, [SUBTASK_QUEUED_INPUT_PARENT_MARKER]) &&
+				!requestContains(req, [SUBTASK_QUEUED_INPUT_MESSAGE]),
+		},
+		streamingProfile: { ttft: SUBTASK_QUEUED_INPUT_RESPONSE_LATENCY_MS },
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: SUBTASK_QUEUED_INPUT_INITIAL_RESULT }),
+					id: "call_queued_input_child_initial_completion_002",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				requestContains(req, [SUBTASK_QUEUED_INPUT_CHILD_MARKER, SUBTASK_QUEUED_INPUT_MESSAGE]) &&
+				!requestContains(req, [SUBTASK_QUEUED_INPUT_PARENT_MARKER]),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: SUBTASK_QUEUED_INPUT_CHILD_RESULT }),
+					id: "call_queued_input_child_revised_completion_003",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				requestContains(req, [
+					SUBTASK_QUEUED_INPUT_PARENT_MARKER,
+					SUBTASK_RESULT_INJECTION,
+					SUBTASK_QUEUED_INPUT_CHILD_RESULT,
+				]),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: SUBTASK_QUEUED_INPUT_PARENT_RESULT }),
+					id: "call_queued_input_parent_completion_004",
 				},
 			],
 		},

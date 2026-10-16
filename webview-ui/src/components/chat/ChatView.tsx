@@ -20,7 +20,15 @@ import { getCostBreakdownIfNeeded } from "@src/utils/costFormatting"
 import { batchNearby } from "@src/utils/batchNearby"
 import { isBoundary, isIgnorableBetweenTargets } from "@src/utils/chatBatchingPredicates"
 
-import type { ClineAsk, ClineSayTool, ClineMessage, ExtensionMessage, AudioType, SuggestionItem } from "@roo-code/types"
+import type {
+	ClineAsk,
+	ClineSayTool,
+	ClineMessage,
+	ExtensionMessage,
+	AudioType,
+	SuggestionItem,
+	QueuedMessage,
+} from "@roo-code/types"
 import { getCompletionCheckpoint, getSuggestionMode, hasUsableAnswer, isRetiredProvider } from "@roo-code/types"
 
 import { findLast } from "@roo/array"
@@ -640,7 +648,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	 * @param images - Array of image data URLs to send with the message
 	 */
 	const handleSendMessage = useCallback(
-		(text: string, images: string[]) => {
+		(text: string, images: string[], origin?: QueuedMessage["origin"]) => {
 			text = text.trim()
 
 			if (text || images.length > 0) {
@@ -664,7 +672,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				) {
 					try {
 						console.log("queueMessage", text, images)
-						vscode.postMessage({ type: "queueMessage", text, images })
+						vscode.postMessage({ type: "queueMessage", text, images, origin })
 						setInputValue("")
 						setSelectedImages([])
 					} catch (error) {
@@ -937,7 +945,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							handleChatReset()
 							break
 						case "sendMessage":
-							handleSendMessage(message.text ?? "", message.images ?? [])
+							handleSendMessage(message.text ?? "", message.images ?? [], message.origin)
 							break
 						case "setChatBoxMessage":
 							handleSetChatBoxMessage(message.text ?? "", message.images ?? [])

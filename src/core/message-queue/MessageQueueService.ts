@@ -4,6 +4,11 @@ import { v4 as uuidv4 } from "uuid"
 
 import { QueuedMessage } from "@roo-code/types"
 
+export interface AddMessageOptions {
+	/** Origin of the input. See {@link QueuedMessage.origin}. */
+	origin?: QueuedMessage["origin"]
+}
+
 export interface MessageQueueState {
 	messages: QueuedMessage[]
 	isProcessing: boolean
@@ -34,7 +39,7 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 		return { index, message: this._messages[index] }
 	}
 
-	public addMessage(text: string, images?: string[]): QueuedMessage | undefined {
+	public addMessage(text: string, images?: string[], options?: AddMessageOptions): QueuedMessage | undefined {
 		if (!text && !images?.length) {
 			return undefined
 		}
@@ -44,6 +49,7 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 			id: uuidv4(),
 			text,
 			images,
+			origin: options?.origin,
 		}
 
 		this._messages.push(message)

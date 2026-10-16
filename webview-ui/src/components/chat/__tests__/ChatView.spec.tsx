@@ -1228,6 +1228,66 @@ describe("ChatView - Message Queueing Tests", () => {
 		)
 	})
 
+	it("keeps api origin when an API sendMessage request is queued", async () => {
+		const { getByTestId } = renderChatView()
+
+		mockPostMessage({
+			clineMessages: [
+				{ type: "say", say: "task", ts: Date.now() - 2000, text: "Initial task" },
+				{
+					type: "say",
+					say: "api_req_started",
+					ts: Date.now(),
+					text: JSON.stringify({ apiProtocol: "anthropic" }), // No cost = still streaming
+				},
+			],
+		})
+
+		await waitFor(() => {
+			expect(getByTestId("chat-textarea")).toBeInTheDocument()
+		})
+		vscodePostMessageMock.cleanup()
+
+		await dispatchExtensionMessage({ type: "invoke", invoke: "sendMessage", text: "steer", origin: "api" })
+
+		await waitFor(() => {
+			expect(vscode.postMessage).toHaveBeenCalledWith({
+				type: "queueMessage",
+				text: "steer",
+				images: [],
+				origin: "api",
+			})
+		})
+	})
+
+	it("queues an image-only API sendMessage request with empty text", async () => {
+		const { getByTestId } = renderChatView()
+
+		mockPostMessage({
+			clineMessages: [
+				{ type: "say", say: "task", ts: Date.now() - 2000, text: "Initial task" },
+				{
+					type: "say",
+					say: "api_req_started",
+					ts: Date.now(),
+					text: JSON.stringify({ apiProtocol: "anthropic" }), // No cost = still streaming
+				},
+			],
+		})
+
+		await waitFor(() => {
+			expect(getByTestId("chat-textarea")).toBeInTheDocument()
+		})
+		vscodePostMessageMock.cleanup()
+
+		const images = ["data:image/png;base64,abc"]
+		await dispatchExtensionMessage({ type: "invoke", invoke: "sendMessage", images, origin: "api" })
+
+		await waitFor(() => {
+			expect(vscode.postMessage).toHaveBeenCalledWith({ type: "queueMessage", text: "", images, origin: "api" })
+		})
+	})
+
 	it("sends messages normally when API request is complete (cost present)", async () => {
 		const { getByTestId } = renderChatView()
 

@@ -51,6 +51,7 @@ describe("API - SendMessage Command", () => {
 		expect(mockPostMessageToWebview).toHaveBeenCalledWith({
 			type: "invoke",
 			invoke: "sendMessage",
+			origin: "api",
 			text: messageText,
 			images: undefined,
 		})
@@ -70,6 +71,7 @@ describe("API - SendMessage Command", () => {
 		expect(mockPostMessageToWebview).toHaveBeenCalledWith({
 			type: "invoke",
 			invoke: "sendMessage",
+			origin: "api",
 			text: messageText,
 			images,
 		})
@@ -88,6 +90,7 @@ describe("API - SendMessage Command", () => {
 		expect(mockPostMessageToWebview).toHaveBeenCalledWith({
 			type: "invoke",
 			invoke: "sendMessage",
+			origin: "api",
 			text: undefined,
 			images,
 		})
@@ -101,6 +104,7 @@ describe("API - SendMessage Command", () => {
 		expect(mockPostMessageToWebview).toHaveBeenCalledWith({
 			type: "invoke",
 			invoke: "sendMessage",
+			origin: "api",
 			text: undefined,
 			images: undefined,
 		})
@@ -127,6 +131,7 @@ describe("API - SendMessage Command", () => {
 		expect(mockPostMessageToWebview).toHaveBeenCalledWith({
 			type: "invoke",
 			invoke: "sendMessage",
+			origin: "api",
 			text: messageText,
 			images: undefined,
 		})
@@ -148,6 +153,7 @@ describe("API - SendMessage Command", () => {
 		expect(mockPostMessageToWebview).toHaveBeenCalledWith({
 			type: "invoke",
 			invoke: "sendMessage",
+			origin: "api",
 			text: messageText,
 			images,
 		})
