@@ -4,7 +4,7 @@ import { execFile } from "child_process"
 import type { ChildProcess } from "child_process"
 import * as path from "path"
 
-import { safeWriteText, type SafeWriteTextOptions } from "../safeWriteText"
+import { safeWriteText } from "../safeWriteText"
 
 // Full mock for fs/promises — all methods are vi.fn() stubs
 vi.mock("fs/promises", () => ({
