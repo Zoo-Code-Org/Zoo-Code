@@ -89,6 +89,7 @@ import WorkspaceTracker from "../../integrations/workspace/WorkspaceTracker"
 
 import { McpHub } from "../../services/mcp/McpHub"
 import { McpServerManager } from "../../services/mcp/McpServerManager"
+import { getZooRemoteControlAvailable } from "@roo-code/core"
 import { MarketplaceManager } from "../../services/marketplace"
 import { ShadowCheckpointService } from "../../services/checkpoints/ShadowCheckpointService"
 import { CodeIndexManagerRegistry } from "../../services/code-index/code-index-manager-registry"
@@ -2885,6 +2886,8 @@ export class ClineProvider
 				}
 			})(),
 			...zooCodeState,
+			remoteControlEnabled: this.context.globalState.get<boolean>("zooRemoteControl.sessionActive") === true,
+			remoteControlAvailable: getZooRemoteControlAvailable(),
 			platform: process.platform,
 			arch: process.arch,
 			debug: vscode.workspace.getConfiguration(Package.name).get<boolean>("debug", false),

@@ -19,7 +19,15 @@
 		"openUiHistory": "Abrir histórico da UI",
 		"backToParentTask": "Tarefa pai",
 		"waitingOnSubtask": "Aguardando subtarefa",
-		"goToSubtask": "Ir para subtarefa"
+		"goToSubtask": "Ir para subtarefa",
+		"steerRemotely": "Steer this task remotely",
+		"steerRemotelyHint": "Opens the Zoo dashboard so you can approve, reply, and continue this task from there.",
+		"steerRemotelyNeedsGateway": "Switch this profile to Zoo Gateway before you can steer the task remotely.",
+		"steerRemotelyOpenSettings": "Open settings",
+		"steerRemotelyActive": "Remote session is active, control this task from the Zoo dashboard.",
+		"steerRemotelyUnavailable": "Remote session is on, but the Zoo dashboard endpoint is unreachable. Retry shortly or check your connection.",
+		"openRemoteDashboard": "Open dashboard",
+		"endRemoteSession": "End remote session"
 	},
 	"unpin": "Desfixar",
 	"pin": "Fixar",

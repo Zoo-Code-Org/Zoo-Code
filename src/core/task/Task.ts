@@ -2464,6 +2464,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.handleWebviewAskResponse("noButtonClicked", text, images)
 	}
 
+	/** True while `ask()` is blocked waiting for a webview/remote response. */
+	public hasPendingAsk(): boolean {
+		if (this.askResponse !== undefined || this.abort) {
+			return false
+		}
+		const last = this.clineMessages.at(-1)
+		return Boolean(last && last.type === "ask" && !last.partial && last.ts === this.lastMessageTs)
+	}
+
 	public supersedePendingAsk(): void {
 		this.lastMessageTs = Date.now()
 	}

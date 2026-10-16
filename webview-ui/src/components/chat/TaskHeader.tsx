@@ -11,7 +11,7 @@ import {
 } from "lucide-react"
 import prettyBytes from "pretty-bytes"
 
-import type { ClineMessage } from "@roo-code/types"
+import { providerIdentifiers, type ClineMessage } from "@roo-code/types"
 
 import { getModelMaxOutputTokens } from "@roo/api"
 
@@ -63,13 +63,41 @@ const TaskHeader = ({
 	todos,
 }: TaskHeaderProps) => {
 	const { t } = useTranslation()
-	const { apiConfiguration, currentTaskItem } = useExtensionState()
+	const {
+		apiConfiguration,
+		currentTaskItem,
+		zooCodeIsAuthenticated,
+		zooCodeBaseUrl,
+		remoteControlEnabled,
+		remoteControlAvailable,
+	} = useExtensionState()
 	const { id: modelId, info: model } = useSelectedModel(apiConfiguration)
 	const [isTaskExpanded, setIsTaskExpanded] = useState(false)
 
 	const textContainerRef = useRef<HTMLDivElement>(null)
 	const textRef = useRef<HTMLDivElement>(null)
 	const contextWindow = model?.contextWindow || 1
+
+	const isZooGateway = apiConfiguration?.apiProvider === providerIdentifiers.zooGateway
+	const canShowRemoteSteer = Boolean(zooCodeIsAuthenticated && currentTaskItem)
+
+	const openRemoteDashboard = () => {
+		const base = (zooCodeBaseUrl || "https://www.zoocode.dev").replace(/\/$/, "")
+		vscode.postMessage({ type: "openExternal", url: `${base}/dashboard/agents/ide` })
+	}
+
+	const openProviderSettings = () => {
+		vscode.postMessage({ type: "switchTab", tab: "settings" })
+	}
+
+	const startRemoteSessionAndOpenDashboard = () => {
+		vscode.postMessage({ type: "startRemoteControlSession" })
+		openRemoteDashboard()
+	}
+
+	const endRemoteSession = () => {
+		vscode.postMessage({ type: "endRemoteControlSession" })
+	}
 
 	// Calculate maxTokens (reserved for output) once for reuse in percentage and tooltip
 	const maxTokens = useMemo(
@@ -140,6 +168,80 @@ const TaskHeader = ({
 						{t("chat:task.waitingOnSubtask")}
 						<ArrowRight className="size-3" />
 					</Button>
+				</div>
+			)}
+			{canShowRemoteSteer && isZooGateway && remoteControlEnabled && remoteControlAvailable && (
+				<div
+					className="mb-2 flex items-center justify-between gap-2 rounded border border-vscode-dropdown-border bg-vscode-badge-background/80 p-2 text-sm text-vscode-badge-foreground"
+					onClick={(e) => e.stopPropagation()}
+					data-testid="remote-steer-active">
+					<span>{t("chat:task.steerRemotelyActive")}</span>
+					<div className="flex shrink-0 items-center gap-2">
+						<button
+							type="button"
+							className="rounded px-2 py-0.5 text-xs font-medium underline-offset-2 hover:underline"
+							onClick={openRemoteDashboard}>
+							{t("chat:task.openRemoteDashboard")}
+						</button>
+						<button
+							type="button"
+							className="rounded px-2 py-0.5 text-xs font-medium underline-offset-2 hover:underline"
+							onClick={endRemoteSession}>
+							{t("chat:task.endRemoteSession")}
+						</button>
+					</div>
+				</div>
+			)}
+			{canShowRemoteSteer && isZooGateway && remoteControlEnabled && !remoteControlAvailable && (
+				<div
+					className="mb-2 flex items-center justify-between gap-2 rounded border border-vscode-dropdown-border bg-vscode-editor-background p-2 text-sm"
+					onClick={(e) => e.stopPropagation()}
+					data-testid="remote-steer-unavailable">
+					<span className="text-vscode-descriptionForeground">{t("chat:task.steerRemotelyUnavailable")}</span>
+					<div className="flex shrink-0 items-center gap-2">
+						<button
+							type="button"
+							className="rounded px-2 py-0.5 text-xs font-medium underline-offset-2 hover:underline"
+							onClick={openRemoteDashboard}>
+							{t("chat:task.openRemoteDashboard")}
+						</button>
+						<button
+							type="button"
+							className="rounded px-2 py-0.5 text-xs font-medium underline-offset-2 hover:underline"
+							onClick={endRemoteSession}>
+							{t("chat:task.endRemoteSession")}
+						</button>
+					</div>
+				</div>
+			)}
+			{canShowRemoteSteer && isZooGateway && !remoteControlEnabled && (
+				<div
+					className="mb-2 flex items-center justify-between gap-2 rounded border border-vscode-dropdown-border bg-vscode-editor-background p-2 text-sm"
+					onClick={(e) => e.stopPropagation()}
+					data-testid="remote-steer-offer">
+					<span className="text-vscode-descriptionForeground">{t("chat:task.steerRemotelyHint")}</span>
+					<button
+						type="button"
+						className="shrink-0 rounded bg-vscode-button-background px-2 py-1 text-xs font-medium text-vscode-button-foreground hover:bg-vscode-button-hoverBackground"
+						onClick={startRemoteSessionAndOpenDashboard}>
+						{t("chat:task.steerRemotely")}
+					</button>
+				</div>
+			)}
+			{canShowRemoteSteer && !isZooGateway && (
+				<div
+					className="mb-2 flex items-center justify-between gap-2 rounded border border-vscode-dropdown-border bg-vscode-editor-background p-2 text-sm"
+					onClick={(e) => e.stopPropagation()}
+					data-testid="remote-steer-needs-gateway">
+					<span className="text-vscode-descriptionForeground">
+						{t("chat:task.steerRemotelyNeedsGateway")}
+					</span>
+					<button
+						type="button"
+						className="shrink-0 rounded bg-vscode-button-background px-2 py-1 text-xs font-medium text-vscode-button-foreground hover:bg-vscode-button-hoverBackground"
+						onClick={openProviderSettings}>
+						{t("chat:task.steerRemotelyOpenSettings")}
+					</button>
 				</div>
 			)}
 			<div

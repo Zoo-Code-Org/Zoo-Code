@@ -431,6 +431,10 @@ export type ExtensionState = Pick<
 	zooCodeUserEmail?: string
 	zooCodeUserImage?: string
 	zooCodeBaseUrl?: string
+	/** True when the user has started a Zoo remote-control session from the task header. */
+	remoteControlEnabled?: boolean
+	/** True when the Zoo remote-control bridge is active and the remote endpoint is reachable. */
+	remoteControlAvailable?: boolean
 	deviceName?: string
 	debug?: boolean
 
@@ -524,6 +528,8 @@ export interface WebviewMessage {
 		| "updateVSCodeSetting"
 		| "getVSCodeSetting"
 		| "vsCodeSetting"
+		| "startRemoteControlSession"
+		| "endRemoteControlSession"
 		| "requestTerminalProfiles"
 		| "openTerminalProfilePicker"
 		| "updateCondensingPrompt"

@@ -35,12 +35,32 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 	VSCodeBadge: ({ children }: { children: React.ReactNode }) => <div data-testid="vscode-badge">{children}</div>,
 }))
 
+vi.mock("@src/components/common/DismissibleUpsell", () => ({
+	default: ({
+		children,
+		onClick,
+		upsellId,
+	}: {
+		children: React.ReactNode
+		onClick?: () => void
+		upsellId: string
+	}) => (
+		<button type="button" data-testid={`upsell-${upsellId}`} onClick={onClick}>
+			{children}
+		</button>
+	),
+}))
+
 // Create a variable to hold the mock state
 const mockExtensionState: {
 	apiConfiguration: ProviderSettings
 	currentTaskItem: { id: string } | null
 	clineMessages: any[]
 	taskHistory: any[]
+	zooCodeIsAuthenticated?: boolean
+	zooCodeBaseUrl?: string
+	remoteControlEnabled?: boolean
+	remoteControlAvailable?: boolean
 } = {
 	apiConfiguration: {
 		apiProvider: providerIdentifiers.anthropic,
@@ -50,6 +70,9 @@ const mockExtensionState: {
 	currentTaskItem: { id: "test-task-id" },
 	clineMessages: [],
 	taskHistory: [],
+	zooCodeIsAuthenticated: false,
+	remoteControlEnabled: false,
+	remoteControlAvailable: false,
 }
 
 // Mock the ExtensionStateContext
@@ -328,6 +351,119 @@ describe("TaskHeader", () => {
 			renderTaskHeader({ contextTokens: 250 })
 
 			expect(screen.getByText("25%")).toBeInTheDocument()
+		})
+	})
+
+	describe("remote steer control", () => {
+		beforeEach(() => {
+			mockPostMessage.mockClear()
+			mockExtensionState.apiConfiguration = {
+				apiProvider: providerIdentifiers.zooGateway,
+			} as ProviderSettings
+			mockExtensionState.zooCodeIsAuthenticated = true
+			mockExtensionState.remoteControlEnabled = false
+			mockExtensionState.remoteControlAvailable = false
+			mockExtensionState.zooCodeBaseUrl = undefined
+			mockExtensionState.currentTaskItem = { id: "test-task-id" }
+			mockExtensionState.clineMessages = [{ type: "say", say: "completion_result", ts: 1, text: "done" }]
+		})
+
+		afterEach(() => {
+			mockExtensionState.apiConfiguration = {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "test-api-key",
+				apiModelId: "claude-3-opus-20240229",
+			} as ProviderSettings
+			mockExtensionState.zooCodeIsAuthenticated = false
+			mockExtensionState.remoteControlEnabled = false
+			mockExtensionState.remoteControlAvailable = false
+			mockExtensionState.zooCodeBaseUrl = undefined
+			mockExtensionState.currentTaskItem = { id: "test-task-id" }
+			mockExtensionState.clineMessages = []
+		})
+
+		it("shows an immediate control to start a remote session, including on completed tasks", () => {
+			mockExtensionState.zooCodeBaseUrl = "https://www.zoocode.dev"
+			renderTaskHeader()
+			const offer = screen.getByTestId("remote-steer-offer")
+			expect(offer).toHaveTextContent("chat:task.steerRemotelyHint")
+			fireEvent.click(screen.getByRole("button", { name: "chat:task.steerRemotely" }))
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "startRemoteControlSession" })
+			expect(mockPostMessage).toHaveBeenCalledWith({
+				type: "openExternal",
+				url: "https://www.zoocode.dev/dashboard/agents/ide",
+			})
+		})
+
+		it("shows the active remote session strip with dashboard and end-session actions", () => {
+			mockExtensionState.remoteControlEnabled = true
+			mockExtensionState.remoteControlAvailable = true
+			mockExtensionState.zooCodeBaseUrl = "https://www.zoocode.dev"
+			renderTaskHeader()
+
+			expect(screen.getByTestId("remote-steer-active")).toHaveTextContent("chat:task.steerRemotelyActive")
+			fireEvent.click(screen.getByText("chat:task.openRemoteDashboard"))
+			expect(mockPostMessage).toHaveBeenCalledWith({
+				type: "openExternal",
+				url: "https://www.zoocode.dev/dashboard/agents/ide",
+			})
+			fireEvent.click(screen.getByText("chat:task.endRemoteSession"))
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "endRemoteControlSession" })
+		})
+
+		it("shows unavailable state when remote control is enabled but the bridge is down", () => {
+			mockExtensionState.remoteControlEnabled = true
+			mockExtensionState.remoteControlAvailable = false
+			renderTaskHeader()
+
+			expect(screen.getByTestId("remote-steer-unavailable")).toHaveTextContent(
+				"chat:task.steerRemotelyUnavailable",
+			)
+			expect(screen.queryByTestId("remote-steer-active")).not.toBeInTheDocument()
+		})
+
+		it("prompts to switch to Zoo Gateway when the active profile is not eligible", () => {
+			mockExtensionState.apiConfiguration = {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "test-api-key",
+				apiModelId: "claude-3-opus-20240229",
+			} as ProviderSettings
+			renderTaskHeader()
+
+			expect(screen.getByTestId("remote-steer-needs-gateway")).toHaveTextContent(
+				"chat:task.steerRemotelyNeedsGateway",
+			)
+			fireEvent.click(screen.getByRole("button", { name: "chat:task.steerRemotelyOpenSettings" }))
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "switchTab", tab: "settings" })
+		})
+
+		it("hides all remote-steer banners when unauthenticated or there is no current task", () => {
+			mockExtensionState.zooCodeIsAuthenticated = false
+			renderTaskHeader()
+			expect(screen.queryByTestId("remote-steer-offer")).not.toBeInTheDocument()
+			expect(screen.queryByTestId("remote-steer-active")).not.toBeInTheDocument()
+			expect(screen.queryByTestId("remote-steer-unavailable")).not.toBeInTheDocument()
+			expect(screen.queryByTestId("remote-steer-needs-gateway")).not.toBeInTheDocument()
+
+			mockExtensionState.zooCodeIsAuthenticated = true
+			mockExtensionState.currentTaskItem = null as never
+			renderTaskHeader()
+			expect(screen.queryByTestId("remote-steer-offer")).not.toBeInTheDocument()
+			expect(screen.queryByTestId("remote-steer-active")).not.toBeInTheDocument()
+			expect(screen.queryByTestId("remote-steer-unavailable")).not.toBeInTheDocument()
+			expect(screen.queryByTestId("remote-steer-needs-gateway")).not.toBeInTheDocument()
+		})
+
+		it("normalizes a trailing slash on the Zoo base URL for dashboard links", () => {
+			mockExtensionState.remoteControlEnabled = true
+			mockExtensionState.remoteControlAvailable = true
+			mockExtensionState.zooCodeBaseUrl = "https://www.zoocode.dev/"
+			renderTaskHeader()
+			fireEvent.click(screen.getByText("chat:task.openRemoteDashboard"))
+			expect(mockPostMessage).toHaveBeenCalledWith({
+				type: "openExternal",
+				url: "https://www.zoocode.dev/dashboard/agents/ide",
+			})
 		})
 	})
 })
