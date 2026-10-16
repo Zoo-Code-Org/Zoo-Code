@@ -1171,7 +1171,7 @@ export class DiffViewProvider {
 					: undefined
 			if (code !== "ENOENT") throw error
 		}
-		await safeWriteText(absolutePath, content)
+		await safeWriteText(absolutePath, content, { authorizedRoot: this.cwd })
 
 		// Open the document to ensure diagnostics are loaded
 		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory
