@@ -463,6 +463,31 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(saved).not.toHaveProperty("name")
 		})
 
+		test.each([
+			["reasoningEffort", "high"],
+			["modelMaxTokens", 4096],
+			["modelMaxThinkingTokens", 2048],
+			["awsCustomArn", "arn:aws:bedrock:us-east-1:123456789012:inference-profile/old"],
+			["awsCustomArnBaseModelId", "anthropic.claude-3-sonnet-20240229-v1:0"],
+			["awsModelContextWindow", 200000],
+		])("clears the reset-only key %s when the patch sets it to null", async (key, storedValue) => {
+			provider["providerSettingsManager"].getProfile = vi
+				.fn()
+				.mockResolvedValue({ ...storedProfile, [key]: storedValue })
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+				[key]: null,
+			})
+
+			const saveConfig = vi.mocked(provider["providerSettingsManager"].saveConfig)
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+			expect(saveConfig).toHaveBeenCalledTimes(1)
+			const saved = saveConfig.mock.calls[0][1]
+			expect(saved).toMatchObject({ openRouterModelId: "anthropic/claude" })
+			expect(saved).not.toHaveProperty(key)
+		})
+
 		test("rebuilds the current task API handler with the new model", async () => {
 			const mockTask = new Task({ ...defaultTaskOptions })
 			mockTask.api = {
