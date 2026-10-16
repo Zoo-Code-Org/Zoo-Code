@@ -429,6 +429,38 @@ describe("restoreLatestFile (B3c: forward direction)", () => {
 		expect(service.restoreFile).not.toHaveBeenCalled()
 	})
 
+	it("fails restore-latest on a corrupt final journal record without restoring", async () => {
+		// A committed write whose final journal record was truncated or
+		// corrupted must surface as an explicit failure: reporting a
+		// successful no-op would hide that rollback metadata is incomplete.
+		await seedJournal([{ path: "src/a.ts", operation: "update", checkpointId: "sha-1" }])
+		await fs.appendFile(journalPath(globalStorageDir, "task-rollback"), '{"path":"src/a.ts","ope')
+		const service = serviceWith("base-0")
+		mockedGetCheckpointService.mockResolvedValue(service)
+
+		const outcome = await restoreLatestFile(makeTask(), "src/a.ts")
+
+		expect(outcome.success).toBe(false)
+		expect(outcome.error).toContain("Corrupt change journal entry at line 2")
+		expect(service.restoreFile).not.toHaveBeenCalled()
+	})
+
+	it("fails rollbackFile and rollbackStep on a corrupt final journal record without restoring", async () => {
+		await seedJournal([{ path: "src/a.ts", operation: "update", checkpointId: "sha-1" }])
+		await fs.appendFile(journalPath(globalStorageDir, "task-rollback"), '{"path":"src/a.ts","ope')
+		const service = serviceWith("base-0")
+		mockedGetCheckpointService.mockResolvedValue(service)
+
+		const single = await rollbackFile(makeTask(), "sha-1", "src/a.ts")
+		expect(single.success).toBe(false)
+		expect(single.error).toContain("Corrupt change journal entry at line 2")
+
+		const step = await rollbackStep(makeTask(), ["src/a.ts"], "sha-1")
+		expect(step.files[0].success).toBe(false)
+		expect(step.files[0].error).toContain("Corrupt change journal entry at line 2")
+		expect(service.restoreFile).not.toHaveBeenCalled()
+	})
+
 	it("fails cleanly when checkpoints are not enabled", async () => {
 		mockedGetCheckpointService.mockResolvedValue(undefined)
 

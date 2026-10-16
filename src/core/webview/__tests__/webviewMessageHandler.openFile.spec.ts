@@ -323,6 +323,23 @@ describe("webviewMessageHandler - openFile markdown workspace containment", () =
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(cannotAccessPathError("./%2e%2e/%2e%2e/.env"))
 	})
 
+	it("rejects a double-encoded traversal posted by a change card", async () => {
+		// The single boundary decode left `./%2e%2e/%2e%2e/.env` inside the
+		// workspace as a literal; openFile's later decode would then escape
+		// to `../../.env`. Decoding to a fixed point at the containment
+		// boundary rejects the request before openFile ever runs.
+		await webviewMessageHandler(mockProvider, {
+			type: "openFile",
+			text: "./%252e%252e/%252e%252e/.env",
+			values: { fromChangeCard: true },
+		})
+
+		expect(openFile).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+			cannotAccessPathError("./%252e%252e/%252e%252e/.env"),
+		)
+	})
+
 	it("opens a change-card file whose name legitimately contains a percent sign", async () => {
 		// "100%.txt" is not a valid percent-encoding: the best-effort decode
 		// keeps the literal name (the same fallback openFile applies).

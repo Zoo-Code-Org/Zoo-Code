@@ -1587,13 +1587,21 @@ export const webviewMessageHandler = async (
 				}
 				filePath = decoded
 			} else if (fromChangeCard) {
-				try {
-					filePath = decodeURIComponent(rawPath)
-				} catch {
-					// Not a valid percent-encoding: a literal filesystem name
-					// (e.g. "100%.txt"). openFile applies the same fallback.
-					filePath = rawPath
+				// Change-card rows post raw workspace paths, but a path may
+				// still carry percent-escapes. Decode to a fixed point at the
+				// containment boundary (same rule as markdown) so openFile's
+				// later single decode cannot shift a validated path outside
+				// the workspace: a double-encoded request such as
+				// `./%252e%252e/%252e%252e/.env` passes containment as a
+				// literal and escapes only after that later decode. A bare
+				// `%` that is not a valid escape stays unchanged (literal
+				// names like "100%.txt"); a non-stabilizing encoding rejects.
+				const decoded = decodeUntrustedPathToStable(rawPath)
+				if (decoded === null) {
+					rejectOutsideWorkspace()
+					break
 				}
+				filePath = decoded
 			}
 			if (!path.isAbsolute(filePath)) {
 				const cwd = getCurrentCwd()

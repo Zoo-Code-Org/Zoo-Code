@@ -263,14 +263,15 @@ export async function loadChanges(globalStorageDir: string, taskId: string): Pro
 		try {
 			parsed = JSON.parse(lines[i])
 		} catch {
-			// Only the final line may be a torn tail from a crash mid-append;
-			// truncating it is verified recovery. A corrupt MIDDLE line means a
-			// write was lost from the history, so journal completeness is
-			// unknown and rollback must fail loudly instead of picking an
-			// older entry as the restore target.
-			if (i === lines.length - 1) {
-				break
-			}
+			// A parse failure anywhere - including the final line - means
+			// journal completeness is unknown. Silently dropping an
+			// unverified final record can report an incomplete history as
+			// valid: restore-latest would no-op over the lost write.
+			// Torn-tail repair is verified truncation and belongs to the
+			// append path (which re-terminates or truncates the tail before
+			// writing); a read must reject instead. A corrupt MIDDLE line
+			// means a write was lost from the history, so rollback must fail
+			// loudly instead of picking an older entry as the restore target.
 			throw new Error(`Corrupt change journal entry at line ${i + 1} of ${filePath}`)
 		}
 		// A parsed line that is not entry-shaped is malformed, not a torn
