@@ -420,7 +420,7 @@ async function _realpathNearestExisting(targetPath: string): Promise<string> {
  * caller's own approval flow covers outside-root writes, and this primitive has
  * no opinion about a root it was not asked to enforce.
  */
-async function _assertPublishWithinAuthorizedRoot(
+export async function assertPublishWithinAuthorizedRoot(
 	authorizedRoot: string,
 	requestedPath: string,
 	targetPath: string,
@@ -466,7 +466,7 @@ export async function safeWriteText(filePath: string, content: string, options?:
 	// Enforce the caller's authorized root before anything is created or written
 	// (the mkdir below can otherwise materialize an outside parent first).
 	if (options?.authorizedRoot !== undefined) {
-		await _assertPublishWithinAuthorizedRoot(options.authorizedRoot, absoluteFilePath, targetPath)
+		await assertPublishWithinAuthorizedRoot(options.authorizedRoot, absoluteFilePath, targetPath)
 	}
 
 	const dirPath = path.dirname(targetPath)
