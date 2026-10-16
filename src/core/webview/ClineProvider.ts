@@ -703,6 +703,42 @@ export class ClineProvider
 	}
 
 	/**
+	 * Re-points persisted view pins that reference a removed profile so views do not
+	 * rehydrate a missing profile name after a reload. Runs through the serialized
+	 * write queue like every other viewStates mutation.
+	 */
+	private async repointPersistedViewStates(
+		removedProfileName: string,
+		replacementProfileName: string,
+	): Promise<void> {
+		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			const states = this.getPersistedViewStates({ fresh: true })
+			let changed = false
+
+			for (const [viewId, entry] of Object.entries(states)) {
+				if (entry?.currentApiConfigName !== removedProfileName) {
+					continue
+				}
+
+				changed = true
+				const { currentApiConfigName: _removed, ...rest } = entry
+
+				if (rest.mode) {
+					states[viewId] = { ...rest, currentApiConfigName: replacementProfileName, updatedAt: Date.now() }
+				} else {
+					states[viewId] = { currentApiConfigName: replacementProfileName, updatedAt: Date.now() }
+				}
+			}
+
+			if (changed) {
+				await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+			}
+		})
+
+		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
+		await write
+	}
+	/**
 	 * Keeps only the most recently updated entries of the persisted view states map,
 	 * bounded by MAX_PERSISTED_VIEW_STATES so the global key cannot grow unboundedly.
 	 */
@@ -3032,6 +3068,10 @@ export class ClineProvider
 		newName: string,
 		renamedSettings: ProviderSettingsWithId | undefined,
 	): Promise<void> {
+		// Closed views keep their pin only in the persisted map: re-point those entries
+		// first so a view that launches after an intervening activation still follows the
+		// renamed profile instead of dangling at the deleted name.
+		await this.repointPersistedViewStates(oldName, newName)
 		const affected = ClineProvider.getAllInstances().filter((instance) => instance.pinnedProfileName === oldName)
 
 		if (affected.length === 0) {
