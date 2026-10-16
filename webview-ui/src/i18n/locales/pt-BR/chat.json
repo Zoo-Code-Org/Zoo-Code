@@ -488,6 +488,10 @@
 		"messageTemplate": "Você tem {{tools}} habilitadas via {{servers}}. Um número tão alto pode confundir o modelo e levar a erros. Tente mantê-lo abaixo de {{threshold}}.",
 		"openMcpSettings": "Abrir Configurações MCP"
 	},
+	"ignoredDisabledTools": {
+		"title": "Ferramenta desativada ignorada",
+		"messageTemplate": "As ferramentas a seguir não podem ser desativadas, portanto suas entradas em disabledTools foram ignoradas: {{tools}}."
+	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"
 	},

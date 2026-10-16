@@ -1,8 +1,17 @@
 import { z } from "zod"
 
 import type { ModelInfo } from "../model.js"
+import { openAiModelInfoSaneDefaults } from "./openai.js"
 
-export const vsCodeLmModelsMessageTypes = ["requestVsCodeLmModels", "vsCodeLmModels"] as const
+export const vsCodeLmModelsMessageTypes = [
+	"requestVsCodeLmModels",
+	"vsCodeLmModels",
+	"githubCopilotSignIn",
+	"githubCopilotReconnect",
+	"githubCopilotManageAccount",
+	"githubCopilotSignInResult",
+	"githubCopilotModels",
+] as const
 
 export const vsCodeLmModelsMessageTypeSchema = z.enum(vsCodeLmModelsMessageTypes)
 
@@ -10,16 +19,41 @@ export const VsCodeLmModelsMessageType = vsCodeLmModelsMessageTypeSchema.enum
 
 export type VsCodeLmModelsMessageType = z.infer<typeof vsCodeLmModelsMessageTypeSchema>
 
+const githubCopilotVendor = "copilot"
+
+/** Identifiers for the language models and sign-in flow GitHub Copilot contributes to VS Code. */
+export const githubCopilotLanguageModel = {
+	vendor: githubCopilotVendor,
+	/** Selector matching every model the Copilot extension contributes. */
+	selector: { vendor: githubCopilotVendor },
+	authProviderId: "github",
+	/** In Copilot Chat's own preference order, so Zoo recognizes the session Copilot actually uses. */
+	authScopeSets: [["user:email"], ["read:user"]],
+	chatExtensionId: "GitHub.copilot-chat",
+	/** Public Command Palette command; VS Code offers no API to sign out, so Zoo defers to this UI. */
+	manageAccountsCommandId: "workbench.action.manageAccounts",
+} as const
+
+/**
+ * Baseline for a model whose capabilities are not yet known. Unlike `openAiModelInfoSaneDefaults` it
+ * leaves vision unset, so a capability nobody reported is not mistaken for one that is unsupported.
+ */
+export const vscodeLlmBaselineModelInfo: ModelInfo = {
+	contextWindow: openAiModelInfoSaneDefaults.contextWindow,
+	supportsPromptCache: false,
+	inputPrice: 0,
+	outputPrice: 0,
+}
+
 export type VscodeLlmModelId = keyof typeof vscodeLlmModels
 
 export const vscodeLlmDefaultModelId: VscodeLlmModelId = "claude-sonnet-4.5"
 
-// Curated VS Code LM (GitHub Copilot) model catalog.
-// The API exposes only `maxInputTokens`; the UI and condense gate read that. `contextWindow` is
-// the advertised window, kept for rows where it diverges from the ceiling (e.g. claude-opus-4.8).
-// https://github.com/simurg79/Roo-Code/pull/13: sonnet-5 and gpt-5.6 limits were measured
-// by single-message binary search on VS Code 1.126.0 (2026-07-14). Opus-5 and gemini-3.6-flash
-// retain advertised, unverified limits from the Copilot model-picker cache (2026-07-26).
+// The UI and condense gate use maxInputTokens; contextWindow preserves the advertised window.
+// https://github.com/simurg79/Roo-Code/pull/13: sonnet-5 and gpt-5.6 were binary-searched.
+// https://github.com/simurg79/Roo-Code/pull/14: opus-5 and gemini-3.6-flash retain advertised
+// 935793 windows but conservatively reuse the 197897 ceiling measured on other models to avoid
+// request overflow; neither model's actual input ceiling has been measured.
 export const vscodeLlmModels = {
 	"claude-opus-5": {
 		contextWindow: 935793,
@@ -31,7 +65,7 @@ export const vscodeLlmModels = {
 		version: "claude-opus-5",
 		name: "Claude Opus 5",
 		supportsToolCalling: true,
-		maxInputTokens: 935793,
+		maxInputTokens: 197897,
 	},
 	"claude-opus-4.8": {
 		contextWindow: 679560,
@@ -247,7 +281,7 @@ export const vscodeLlmModels = {
 		version: "gemini-3.6-flash",
 		name: "Gemini 3.6 Flash",
 		supportsToolCalling: true,
-		maxInputTokens: 935793,
+		maxInputTokens: 197897,
 	},
 	"gemini-3.1-pro-preview": {
 		contextWindow: 197897,
