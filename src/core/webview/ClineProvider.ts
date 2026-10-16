@@ -2415,15 +2415,17 @@ export class ClineProvider
 		let previousRecord: ProviderSettingsWithId | undefined
 		let recordExisted: boolean | undefined
 		try {
-			const { name: _name, ...record } = await this.providerSettingsManager.getProfile({ name })
-			previousRecord = record as ProviderSettingsWithId
-			recordExisted = true
-		} catch (error: unknown) {
-			// A typed not-found proves the record is new; any other failure leaves the
-			// prior record unknown, and the restore must not delete what it cannot see.
-			if (error instanceof ProviderSettingsNotFoundError) {
-				recordExisted = false
+			// hasConfig distinguishes a confirmed absence from a read failure; the
+			// generic wrapper getProfile throws for a missing record cannot, because
+			// the manager does not type its not-found rejections.
+			recordExisted = await this.providerSettingsManager.hasConfig(name)
+			if (recordExisted) {
+				const { name: _name, ...record } = await this.providerSettingsManager.getProfile({ name })
+				previousRecord = record as ProviderSettingsWithId
 			}
+		} catch {
+			// Unreadable: the restore must not delete what it cannot see.
+			recordExisted = undefined
 		}
 		let previousCurrentProfileName: string | undefined
 		try {
