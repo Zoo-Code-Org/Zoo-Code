@@ -52,18 +52,13 @@ async function resolveCommandSymLink(symlinkPath: string, fileInfo: CommandFileI
 				// For symlinks to files, store the symlink path as original and target as resolved
 				fileInfo.push({ originalPath: symlinkPath, resolvedPath: resolvedTarget })
 			}
-		} else if (stats.isDirectory()) {
-			// Read the target directory and process its entries
-			const entries = await fs.readdir(resolvedTarget, { withFileTypes: true })
-			const directoryPromises: Promise<void>[] = []
-			for (const entry of entries) {
-				directoryPromises.push(resolveCommandDirectoryEntry(entry, resolvedTarget, fileInfo, depth + 1))
-			}
-			await Promise.all(directoryPromises)
 		} else if (stats.isSymbolicLink()) {
 			// Handle nested symlinks
 			await resolveCommandSymLink(resolvedTarget, fileInfo, depth + 1)
 		}
+		// Directory symlink targets are intentionally not descended into, so the
+		// listing surfaces exactly what getCommand() can execute: direct command
+		// files and file symlinks at the commands directory root.
 	} catch {
 		// Skip invalid symlinks
 	}
@@ -328,18 +323,15 @@ async function scanCommandDirectory(
 					commandContent = content.trim()
 				}
 
-				// Project commands override global ones
-				if (source === "project" || !commands.has(commandName)) {
-					commands.set(commandName, {
-						name: commandName,
-						content: commandContent,
-						source,
-						filePath: resolvedPath,
-						description,
-						argumentHint,
-						mode,
-					})
-				}
+				commands.set(commandName, {
+					name: commandName,
+					content: commandContent,
+					source,
+					filePath: resolvedPath,
+					description,
+					argumentHint,
+					mode,
+				})
 			} catch (error) {
 				console.warn(`Failed to read command file ${resolvedPath}:`, error)
 			}
