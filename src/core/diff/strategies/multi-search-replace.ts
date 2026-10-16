@@ -575,9 +575,32 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 						? distance(normalizeString(searchChunk), normalizeString(bestMatchContent))
 						: -1
 
+					// Only diagnose markers after matching fails: marker-like text can be valid file content.
+					const hintLines = searchChunk.split("\n")
+					const firstSearchLine = hintLines[0]?.trim() ?? ""
+					const separatorSwallowed = hintLines[1]?.trim() === "-------"
+					const malformedMarkerHint = /^(?::\s*\d{1,9}:?|:?\s*start[_-]?line\s*:?\s*\d{1,9}:?)$/i.test(
+						firstSearchLine,
+					)
+						? `\n- LIKELY CAUSE: the first line of your search content is "${firstSearchLine}", which looks like a malformed start-line marker and was therefore searched for as literal file text${separatorSwallowed ? ', together with the "-------" line after it' : ""}. The only recognized form is ":start_line:<number>" on the line immediately after "<<<<<<< SEARCH", optionally followed by a "-------" line. Remove or correct that line and retry.`
+						: ""
+
 					diffResults.push({
 						success: false,
-						error: `No sufficiently similar match found${lineRange} (${Math.floor(bestMatchScore * 100)}% similar, needs ${Math.floor(this.fuzzyThreshold * 100)}%)\n\nDebug Info:\n- Similarity Score: ${Math.floor(bestMatchScore * 100)}%\n- Required Threshold: ${Math.floor(this.fuzzyThreshold * 100)}%\n- Search Range: ${startLine ? `starting at line ${startLine}` : "start to end"}\n- Levenshtein Distance: ${levenDist >= 0 ? `${levenDist} characters` : "N/A"}\n- Search Length: ${searchChunk.length} characters\n- Best Match Length: ${bestMatchContent ? bestMatchContent.length : 0} characters\n- Tried both standard and aggressive line number stripping\n- Tip: Use the read_file tool to get the latest content of the file before attempting to use the apply_diff tool again, as the file content may have changed\n\nSearch Content:\n${searchChunk}${bestMatchSection}${originalContentSection}`,
+						error:
+							`No sufficiently similar match found${lineRange} ` +
+							`(${Math.floor(bestMatchScore * 100)}% similar, needs ${Math.floor(this.fuzzyThreshold * 100)}%)\n\n` +
+							`Debug Info:\n` +
+							`- Similarity Score: ${Math.floor(bestMatchScore * 100)}%\n` +
+							`- Required Threshold: ${Math.floor(this.fuzzyThreshold * 100)}%\n` +
+							`- Search Range: ${startLine ? `starting at line ${startLine}` : "start to end"}\n` +
+							`- Levenshtein Distance: ${levenDist >= 0 ? `${levenDist} characters` : "N/A"}\n` +
+							`- Search Length: ${searchChunk.length} characters\n` +
+							`- Best Match Length: ${bestMatchContent ? bestMatchContent.length : 0} characters\n` +
+							`- Tried both standard and aggressive line number stripping${malformedMarkerHint}\n` +
+							`- Tip: Use the read_file tool to get the latest content of the file before attempting ` +
+							`to use the apply_diff tool again, as the file content may have changed\n\n` +
+							`Search Content:\n${searchChunk}${bestMatchSection}${originalContentSection}`,
 					})
 					continue
 				}
