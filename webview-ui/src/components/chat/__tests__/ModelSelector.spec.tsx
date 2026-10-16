@@ -52,6 +52,19 @@ vi.mock("@/components/settings/utils/providerModelConfig", async (importOriginal
 	}
 })
 
+const selectedModelOverride = vi.hoisted(() => ({
+	value: undefined as { id: string; info?: { displayName?: string } } | undefined,
+}))
+
+vi.mock("@/components/ui/hooks/useSelectedModel", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/components/ui/hooks/useSelectedModel")>()
+	return {
+		...actual,
+		useSelectedModel: (...args: Parameters<typeof actual.useSelectedModel>) =>
+			selectedModelOverride.value ?? actual.useSelectedModel(...args),
+	}
+})
+
 import { vscode } from "@/utils/vscode"
 
 const base = { contextWindow: 1000, supportsPromptCache: false }
@@ -65,6 +78,7 @@ describe("ModelSelector", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		staticModelsOverride.value = undefined
+		selectedModelOverride.value = undefined
 		routerModelsResult.value = { data: undefined, isLoading: false }
 		routerModelsResult.calls = []
 		extensionState.organizationAllowList = { allowAll: true, providers: {} }
@@ -153,6 +167,51 @@ describe("ModelSelector", () => {
 			awsModelContextWindow: null,
 		})
 		expect(Object.values(patch)).not.toContain("")
+	})
+
+	describe("display names", () => {
+		const named = {
+			"model-a": { ...base, displayName: "Alpha Fast" },
+			"model-b": { ...base, displayName: "Beta Deep" },
+		}
+
+		test("shows the selected model's display name instead of its id on the trigger", () => {
+			selectedModelOverride.value = { id: "model-a", info: { displayName: "Alpha Fast" } }
+
+			render(<ModelSelector apiConfiguration={anthropicConfig} title="Select model" />)
+
+			const trigger = screen.getByTestId("model-selector-trigger")
+			expect(trigger).toHaveTextContent("Alpha Fast")
+			expect(trigger).not.toHaveTextContent("model-a")
+		})
+
+		test("lists display names and finds a model by searching its display name", () => {
+			staticModelsOverride.value = {
+				...named,
+				"model-c": { ...base, displayName: "Gamma" },
+				"model-d": { ...base, displayName: "Delta" },
+				"model-e": { ...base, displayName: "Epsilon" },
+				"model-f": { ...base, displayName: "Zeta" },
+				"model-g": { ...base, displayName: "Eta" },
+			}
+
+			render(
+				<ModelSelector apiConfiguration={{ ...anthropicConfig, apiModelId: "model-a" }} title="Select model" />,
+			)
+			fireEvent.click(screen.getByTestId("model-selector-trigger"))
+			expect(screen.getByText("Beta Deep")).toBeInTheDocument()
+
+			fireEvent.change(screen.getByTestId("model-search-input"), { target: { value: "Beta Deep" } })
+
+			const items = screen.getAllByTestId("model-selector-item")
+			expect(items).toHaveLength(1)
+			expect(items[0]).toHaveTextContent("Beta Deep")
+
+			fireEvent.click(items[0])
+			expect(vi.mocked(vscode.postMessage).mock.calls[0][0].values?.patch).toMatchObject({
+				apiModelId: "model-b",
+			})
+		})
 	})
 
 	test("hides the Bedrock custom-arn pseudo-model unless it is already selected", () => {
