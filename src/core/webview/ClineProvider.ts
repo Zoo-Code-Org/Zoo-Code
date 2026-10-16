@@ -3121,6 +3121,10 @@ export class ClineProvider
 		newName: string,
 		renamedSettings: ProviderSettingsWithId | undefined,
 	): Promise<void> {
+		// Closed views keep their pin only in the persisted map: re-point those entries
+		// first so a view that launches after an intervening activation still follows the
+		// renamed profile instead of dangling at the deleted name.
+		await this.repointPersistedViewStates(oldName, newName)
 		const affected = ClineProvider.getAllInstances().filter((instance) => instance.pinnedProfileName === oldName)
 
 		if (affected.length === 0) {
