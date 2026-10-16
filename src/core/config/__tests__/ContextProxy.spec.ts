@@ -90,6 +90,41 @@ describe("ContextProxy", () => {
 			expect(mockGlobalState.get).toHaveBeenCalledWith("customSupportPrompts")
 		})
 
+		it("relocates plaintext provider keys that moved to secret storage", async () => {
+			// A user configured mimoApiKey while it was still stored in plaintext
+			// global state; the key now lives in secret storage.
+			mockSecrets.get.mockImplementation(async (key: string) =>
+				key === "mimoApiKey" || key === "poeApiKey" ? undefined : "test-secret",
+			)
+			mockGlobalState.get.mockImplementation((key: string) => (key === "mimoApiKey" ? "legacy-mimo" : undefined))
+
+			const migrated = new ContextProxy(mockContext)
+			await migrated.initialize()
+
+			// The legacy value is readable as a secret and no longer kept in plaintext.
+			expect(migrated.getSecret("mimoApiKey")).toBe("legacy-mimo")
+			expect(mockSecrets.store).toHaveBeenCalledWith("mimoApiKey", "legacy-mimo")
+			expect(mockGlobalState.update).toHaveBeenCalledWith("mimoApiKey", undefined)
+			// poeApiKey has no legacy plaintext value: nothing is stored or cleared.
+			expect(mockSecrets.store).not.toHaveBeenCalledWith("poeApiKey", expect.anything())
+			expect(mockGlobalState.update).not.toHaveBeenCalledWith("poeApiKey", expect.anything())
+		})
+
+		it("keeps an existing secret when a stale plaintext copy exists", async () => {
+			mockSecrets.get.mockImplementation(async (key: string) =>
+				key === "mimoApiKey" ? "current-secret" : "test-secret",
+			)
+			mockGlobalState.get.mockImplementation((key: string) => (key === "mimoApiKey" ? "legacy-mimo" : undefined))
+
+			const migrated = new ContextProxy(mockContext)
+			await migrated.initialize()
+
+			// The secret wins; the migration must not overwrite it with the stale
+			// plaintext value.
+			expect(migrated.getSecret("mimoApiKey")).toBe("current-secret")
+			expect(mockSecrets.store).not.toHaveBeenCalledWith("mimoApiKey", expect.anything())
+		})
+
 		it("should initialize secret cache with all secret keys", () => {
 			expect(mockSecrets.get).toHaveBeenCalledTimes(SECRET_STATE_KEYS.length + GLOBAL_SECRET_KEYS.length)
 			for (const key of SECRET_STATE_KEYS) {

@@ -110,13 +110,25 @@ describe("API.setConfiguration", () => {
 	})
 
 	it("restores the shared values when the first shared write fails partway", async () => {
+		// The durable state visible to the caller once every write has settled.
+		const stored: Record<string, unknown> = {}
+		let sharedWriteCount = 0
 		const provider = Object.assign({} as ClineProvider, {
 			context: {},
 			on: vi.fn(),
 			getValue: vi.fn((key: string) => (key === "currentApiConfigName" ? "old-name" : undefined)),
 			// ContextProxy.setValues persists keys one at a time: a rejection here can
-			// mean a durable subset of the payload already landed.
-			setValues: vi.fn().mockRejectedValue(new Error("shared write failed")),
+			// mean a durable subset of the payload already landed. The first call
+			// durably persists currentApiConfigName before failing; the restoration
+			// call succeeds and its payload lands in `stored`.
+			setValues: vi.fn(async (values: Record<string, unknown>) => {
+				sharedWriteCount++
+				if (sharedWriteCount === 1) {
+					stored.currentApiConfigName = values.currentApiConfigName
+					throw new Error("shared write failed")
+				}
+				Object.assign(stored, values)
+			}),
 			contextProxy: {
 				setValues: vi.fn().mockResolvedValue(undefined),
 			},
@@ -147,6 +159,10 @@ describe("API.setConfiguration", () => {
 			apiProvider: undefined,
 		})
 		expect(provider.providerSettingsManager.saveConfig).not.toHaveBeenCalled()
+		// The restoration call succeeded: the field the failed write had persisted is
+		// back to the prior selection, and no other field of the failed payload
+		// remains stored.
+		expect(stored).toEqual({ currentApiConfigName: "old-name", apiProvider: undefined })
 		expect(provider.postStateToWebview).not.toHaveBeenCalled()
 	})
 })

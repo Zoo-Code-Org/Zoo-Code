@@ -123,6 +123,27 @@ export class ContextProxy {
 
 		await Promise.all(promises)
 
+		// Migration: provider keys that moved from plaintext global state to secret
+		// storage keep working for users who configured them before the move: the
+		// value is relocated to secret storage and the plaintext copy is dropped.
+		for (const key of ["mimoApiKey", "poeApiKey"] as const) {
+			try {
+				if (this.secretCache[key] === undefined) {
+					const legacyValue = this.originalContext.globalState.get<string>(key)
+					if (legacyValue !== undefined) {
+						await this.originalContext.secrets.store(key, legacyValue)
+						this.secretCache[key] = legacyValue
+						this.durableSecrets.set(key, legacyValue)
+						await this.originalContext.globalState.update(key, undefined)
+					}
+				}
+			} catch (error) {
+				logger.error(
+					`Error migrating legacy secret ${key}: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+		}
+
 		// Migration: Check for old nested image generation settings and migrate them
 		await this.migrateImageGenerationSettings()
 
