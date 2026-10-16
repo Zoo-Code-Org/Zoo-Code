@@ -1672,9 +1672,13 @@ describe("caller-supplied staging path", () => {
 		const stats = _fileStatsWithIdentity(42n, 7n)
 		vi.mocked(fs.lstat).mockResolvedValue(stats)
 
-		await expect(safeWriteText(targetPath, "data", { tempPath: targetPath, platform: "linux" })).rejects.toThrow(
-			StagingPathError,
-		)
+		// A convention-conforming name: only the identity guard can reject this alias
+		// of the target, so the assertion pins the identity message rather than the
+		// error class - a non-conforming name would be rejected by the name check for
+		// the wrong reason and the guard could be deleted without reddening this test.
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: "/tmp/test-dir/.new_alias_1.tmp", platform: "linux" }),
+		).rejects.toThrow("Staging file must not be the target itself")
 		expect(fsSync.openSync).not.toHaveBeenCalled()
 		expect(fs.rename).not.toHaveBeenCalled()
 		// The comparison is only sound when both stats are read as bigint: on NTFS/ReFS the file
