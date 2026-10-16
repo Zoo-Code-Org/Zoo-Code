@@ -70,6 +70,18 @@ vitest.mock("../fetchers/modelCache", () => ({
 				description: "Claude 4.5 Sonnet",
 				thinking: false,
 			},
+			"anthropic/claude-opus-4.8": {
+				maxTokens: 128000,
+				contextWindow: 1000000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				inputPrice: 5,
+				outputPrice: 25,
+				cacheWritesPrice: 6.25,
+				cacheReadsPrice: 0.5,
+				description: "Claude 4.8 Opus",
+				thinking: false,
+			},
 			"anthropic/claude-3.7-sonnet:thinking": {
 				maxTokens: 128000,
 				contextWindow: 200000,
@@ -339,6 +351,102 @@ describe("OpenRouterHandler", () => {
 				}),
 				{ headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } },
 			)
+		})
+
+		it("adds cache control for newly released Anthropic models using model metadata", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "anthropic/claude-opus-4.8",
+				}),
+			)
+
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "test-id",
+						choices: [{ delta: { content: "test response" } }],
+					},
+				]),
+			)
+			Object.defineProperty(OpenAI.prototype, "chat", {
+				configurable: true,
+				value: { completions: { create: mockCreate } },
+			})
+
+			await handler.createMessage("test system", [{ role: "user", content: "test message" }]).next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					messages: expect.arrayContaining([
+						expect.objectContaining({
+							role: "system",
+							content: expect.arrayContaining([
+								expect.objectContaining({ cache_control: { type: "ephemeral" } }),
+							]),
+						}),
+					]),
+				}),
+				{ headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } },
+			)
+		})
+
+		it("uses the task ID for OpenRouter cache session affinity", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "test-id",
+						choices: [{ delta: { content: "test response" } }],
+					},
+				]),
+			)
+			Object.defineProperty(OpenAI.prototype, "chat", {
+				configurable: true,
+				value: { completions: { create: mockCreate } },
+			})
+
+			await handler
+				.createMessage("test system", [{ role: "user", content: "test message" }], { taskId: "task-123" })
+				.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ session_id: "task-123" }), {
+				headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" },
+			})
+		})
+
+		it("reports OpenRouter cache reads and writes", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{
+						id: "test-id",
+						choices: [{ delta: {} }],
+						usage: {
+							prompt_tokens: 10,
+							completion_tokens: 2,
+							prompt_tokens_details: { cached_tokens: 6, cache_write_tokens: 4 },
+						},
+					},
+				]),
+			)
+			Object.defineProperty(OpenAI.prototype, "chat", {
+				configurable: true,
+				value: { completions: { create: mockCreate } },
+			})
+
+			const chunks = await collectStream(
+				handler.createMessage("test system", [{ role: "user", content: "test message" }]),
+			)
+
+			expect(chunks).toContainEqual({
+				type: "usage",
+				inputTokens: 10,
+				outputTokens: 2,
+				cacheReadTokens: 6,
+				cacheWriteTokens: 4,
+				totalCost: 0,
+			})
 		})
 
 		it("handles API errors and captures telemetry", async () => {
