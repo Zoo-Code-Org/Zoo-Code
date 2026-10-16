@@ -461,8 +461,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			const first = provider.activateProviderProfile({ name: "first-profile" })
 			const second = provider.activateProviderProfile({ name: "second-profile" })
 
-			await Promise.resolve()
-			expect(events).toEqual(["first:start"])
+			// The mutation now reads the manager selection snapshot before the
+			// manager write, so the first call lands a few microtasks later than a
+			// single tick would assume; wait for it deterministically instead.
+			await vi.waitFor(() => expect(events).toEqual(["first:start"]))
 
 			resolveFirst()
 			await first
