@@ -715,6 +715,7 @@ export const webviewMessageHandler = async (
 								// otherwise keep serving the deleted profile's provider and key under the global
 								// name. The shared provider keys already hold the global profile's settings.
 								await provider.saveViewState("apiConfiguration", undefined)
+								await provider.saveViewState("currentApiConfigName", globalConfigName)
 								// The state posted earlier in this flow still carried the missing pin, so push
 								// the corrected state; only listApiConfig is posted below.
 								await provider.postStateToWebview()
