@@ -52,13 +52,16 @@ export class VSCodeAPIWrapper {
 				: {}
 		const existingViewStateId = stateObject.viewStateId
 
-		// Mirror the ClineProvider.setViewStateId normalization so the webview never
-		// registers an id the extension would rewrite or reject: trim, replace unsafe
-		// characters, and drop whitespace-only and "__proto__" values.
+		// Mirror the ClineProvider.setViewStateId validation so the webview never
+		// registers an id the extension would reject: trim, replace unsafe
+		// characters, and drop whitespace-only values plus every Object.prototype
+		// member name. "__proto__" alone is not enough: ids like "constructor" or
+		// "toString" survive the host's normalization and would be refused there
+		// forever, stranding this view's pre-launch entry under the temporary id.
 		const normalizedViewStateId =
 			typeof existingViewStateId === "string" ? existingViewStateId.trim().replace(/[^A-Za-z0-9_-]/g, "_") : ""
 
-		if (normalizedViewStateId && normalizedViewStateId !== "__proto__") {
+		if (normalizedViewStateId && !Object.prototype.hasOwnProperty.call(Object.prototype, normalizedViewStateId)) {
 			return normalizedViewStateId
 		}
 
