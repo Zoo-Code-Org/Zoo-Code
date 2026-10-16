@@ -1,0 +1,1139 @@
+/**
+ * Tests for the guarded-write compare-and-swap core (upstream epic #1375,
+ * phase A4a).
+ *
+ * Covers guard selection through the S2 observation registry, version-token
+ * CAS, remediation messages, and the per-absolute-path FIFO chain: FIFO
+ * ordering, last-write-wins for same-task writes through the post-publish
+ * observation refresh, no wedge after a rejected link, and independence across
+ * paths.
+ */
+
+import * as fs from "fs/promises"
+import * as path from "path"
+
+import { describe, expect, it, beforeEach, vi } from "vitest"
+
+import { createIfAbsent, guardedWrite, replaceIfVersion, resetChain, GuardRejectedError } from "../guardedWrite"
+import { PostCommitDurabilityError, safeWriteText } from "../../../services/file-safety/safeWriteText"
+import { computeVersionToken } from "../../../utils/versionToken"
+import { withFileLock } from "../../../utils/fileLock"
+import { resolveLockKey, resolvePublishTarget } from "../../../services/file-safety/safeWriteText"
+import { ObservationRegistry } from "../../task/observationRegistry"
+import type { Task } from "../../task/Task"
+
+// -- Mocks -------------------------------------------------------------------
+
+vi.mock("fs/promises", () => ({
+	access: vi.fn(),
+	stat: vi.fn(),
+}))
+
+vi.mock("../../../utils/versionToken", () => ({
+	computeVersionToken: vi.fn(),
+}))
+
+vi.mock("../../../services/file-safety/safeWriteText", () => ({
+	safeWriteText: vi.fn(),
+	resolveLockKey: vi.fn(async (p: string) => p),
+	// The dual-identity lock takes this alias-entry key beside the referent
+	// key; the identity default folds both to one (a single lock, as every
+	// pre-existing test expects), and the sorted-order test overrides it.
+	resolveLinkPathLockKey: vi.fn(async (p: string) => p),
+	// The guard fixes the publish target inside the lock through this helper;
+	// the default identity keeps every other test's path unchanged.
+	resolvePublishTarget: vi.fn(async (p: string) => p),
+	// The guard only needs the error's identity to recognise a publish whose commit
+	// rename landed, and this spec replaces the whole module anyway, so the class is
+	// restated here with the real constructor shape rather than imported.
+	PostCommitDurabilityError: class PostCommitDurabilityError extends Error {
+		readonly targetPath: string
+
+		constructor(targetPath: string, cause: unknown) {
+			super("the rename committed but the parent directory could not be fsynced", { cause })
+			this.name = "PostCommitDurabilityError"
+			this.targetPath = targetPath
+		}
+	},
+}))
+
+vi.mock("../../../utils/fileLock", () => ({
+	withFileLock: vi.fn(),
+}))
+
+const mockedWithFileLock = vi.mocked(withFileLock)
+const mockedResolveLockKey = vi.mocked(resolveLockKey)
+const mockedResolvePublishTarget = vi.mocked(resolvePublishTarget)
+const mockedFsAccess = vi.mocked(fs.access)
+const mockedComputeVersionToken = vi.mocked(computeVersionToken)
+const mockedSafeWriteText = vi.mocked(safeWriteText)
+
+// -- Fixtures ----------------------------------------------------------------
+
+const WORKSPACE = "/test/workspace"
+
+/** Resolve a fixture path the same way guardedWrite resolves task.cwd-relative paths. */
+const abs = (relPath: string): string => path.resolve(WORKSPACE, relPath)
+
+interface MockTaskOptions {
+	cwd?: string
+	observationRegistry?: ObservationRegistry
+	abort?: boolean
+	// The guard re-runs the allowlist decision on the retained publish target;
+	// the default double allows everything, and the alias-binding tests supply a
+	// controller that denies the resolved target.
+	rooIgnoreController?: { validateAccess: (filePath: string) => boolean }
+}
+
+/**
+ * Minimal structural Task: guardedWrite only reads task.cwd and
+ * task.observationRegistry. The real Task constructor needs the full provider
+ * machinery, so a single documented double cast stands in for the class.
+ */
+function createMockTask(options: MockTaskOptions = {}): Task {
+	const task = {
+		cwd: options.cwd ?? WORKSPACE,
+		abort: options.abort ?? false,
+		observationRegistry: options.observationRegistry ?? new ObservationRegistry(),
+		...(options.rooIgnoreController ? { rooIgnoreController: options.rooIgnoreController } : {}),
+	}
+	return task as unknown as Task
+}
+
+// -- Tests -------------------------------------------------------------------
+
+describe("guardedWrite (S4a, epic #1375)", () => {
+	beforeEach(() => {
+		vi.resetAllMocks()
+		mockedWithFileLock.mockImplementation((filePath, operation) => operation(path.resolve(filePath)))
+		resetChain()
+	})
+
+	describe("unobserved create", () => {
+		it("succeeds when the file is absent and publishes via safeWriteText", async () => {
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1") // post-publish refresh
+			const task = createMockTask()
+
+			await guardedWrite(task, "new-file.txt", "hello", "create")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("new-file.txt"), "hello")
+		})
+
+		it("publishes caller-supplied bytes unchanged", async () => {
+			// The extension host hands over bytes already encoded by VS Code's
+			// codec; the guard must pass them to the publish primitive as they are.
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1") // post-publish refresh
+			const task = createMockTask()
+
+			await guardedWrite(task, "bytes.txt", Buffer.from([0x00, 0x68]), "create")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("bytes.txt"), Buffer.from([0x00, 0x68]))
+		})
+
+		it("publishes to the target fixed inside the lock, not to a retargeted alias", async () => {
+			// The allowlist decision covered the referent as it resolved when the
+			// guard ran. The alias can be retargeted afterwards - re-resolving it at
+			// publish time would follow the new referent to a file the version check
+			// never covered - so the version comparison and the publish must both
+			// act on the target fixed inside the lock.
+			const alias = path.resolve("/ws/foo.ts")
+			const referent = path.resolve("/ws/real/foo.ts")
+			mockedResolveLockKey.mockResolvedValue(referent)
+			mockedResolvePublishTarget.mockResolvedValue(referent)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+
+			await replaceIfVersion(alias, "v1", "bytes", "foo.ts")
+
+			expect(mockedComputeVersionToken).toHaveBeenCalledWith(referent)
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(referent, "bytes")
+		})
+
+		it("records an unobserved create as complete so a later full-file update is allowed", async () => {
+			// Nothing was read, so the model supplied the whole file: the post-publish
+			// refresh must record completeness, otherwise the next update would be
+			// rejected as a partial read.
+			const reg = new ObservationRegistry()
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "new-file.txt", "hello", "create")
+
+			expect(reg.get(abs("new-file.txt"))?.complete).toBe(true)
+		})
+
+		it("carries a caller-supplied completeness through the publish for a fresh destination", async () => {
+			// A move publishes content built from a view of another file. Recording the
+			// create as complete would hand the model authority over source lines it never
+			// read, so the caller's completeness has to survive the refresh.
+			const reg = new ObservationRegistry()
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "new-file.txt", "hello", "create", false)
+
+			expect(reg.get(abs("new-file.txt"))?.complete).toBe(false)
+		})
+
+		it("fails with the read-first remediation when the file exists - nothing published", async () => {
+			mockedFsAccess.mockResolvedValue(undefined)
+			const task = createMockTask()
+
+			await expect(guardedWrite(task, "existing.txt", "hello", "create")).rejects.toThrow(
+				"File already exists at " +
+					"existing.txt" +
+					" and was not read before this write -- read the file first, then retry.",
+			)
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("rethrows I/O errors that are not ENOENT verbatim (no guard verdict on access failure)", async () => {
+			const failures = [{ code: "EACCES" }, null, "volume offline", new Error("EIO-ish failure")]
+			for (const failure of failures) {
+				mockedFsAccess.mockRejectedValueOnce(failure)
+				await expect(createIfAbsent(abs("io-error.txt"), "x", "io-error.txt")).rejects.toBe(failure)
+			}
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("deleted-after-read target", () => {
+		it("normalizes an ENOENT from the version token into the re-read remediation", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("vanished.txt"), "v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			// The file was deleted after the read: the token computation fails
+			// with a raw ENOENT, which the guard must convert into the standard
+			// re-read-then-retry contract.
+			mockedComputeVersionToken.mockRejectedValue({ code: "ENOENT" })
+
+			await expect(guardedWrite(task, "vanished.txt", "next", "update")).rejects.toThrow(
+				"File was deleted after it was read",
+			)
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("rethrows non-ENOENT token failures verbatim from replaceIfVersion", async () => {
+			const failure = { code: "EACCES" }
+			mockedComputeVersionToken.mockRejectedValueOnce(failure)
+
+			await expect(replaceIfVersion(abs("locked.txt"), "v1", "next", "locked.txt")).rejects.toBe(failure)
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+	})
+	describe("unobserved update", () => {
+		it("succeeds when the file is absent (same create guard)", async () => {
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1") // post-publish refresh
+			const task = createMockTask()
+
+			await guardedWrite(task, "new-file.txt", "hello", "update")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("new-file.txt"), "hello")
+		})
+
+		it("fails with the read-first remediation when the file exists - nothing published", async () => {
+			mockedFsAccess.mockResolvedValue(undefined)
+			const task = createMockTask()
+
+			await expect(guardedWrite(task, "existing.txt", "hello", "update")).rejects.toThrow(
+				"File already exists at " +
+					"existing.txt" +
+					" and was not read before this write -- read the file first, then retry.",
+			)
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("observed create", () => {
+		it("recreates a file that vanished after the read", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("gone.txt"), "v1")
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1") // post-publish refresh
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "gone.txt", "back", "create")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("gone.txt"), "back")
+		})
+
+		it("goes through the version guard when the file still exists", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("kept.txt"), "v1")
+			mockedFsAccess.mockResolvedValue(undefined)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "kept.txt", "rewritten", "create")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("kept.txt"), "rewritten")
+		})
+
+		it("fails with the stale remediation suffix when the version moved", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("kept.txt"), "v1")
+			mockedFsAccess.mockResolvedValue(undefined)
+			mockedComputeVersionToken.mockResolvedValue("v2")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await expect(guardedWrite(task, "kept.txt", "rewritten", "create")).rejects.toThrow(
+				"Stale version -- the file changed since you read it (expected v1, current v2); re-read the file, then retry.",
+			)
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("defers to the version guard when the access check is denied (not ENOENT)", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("locked.txt"), "v1")
+			mockedFsAccess.mockRejectedValue({ code: "EACCES" })
+			mockedComputeVersionToken.mockResolvedValue("v2")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await expect(guardedWrite(task, "locked.txt", "rewritten", "create")).rejects.toThrow(
+				"Stale version -- the file changed since you read it (expected v1, current v2); re-read the file, then retry.",
+			)
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("observed update (version CAS)", () => {
+		it("publishes when the on-disk version matches the observation", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "doc.txt", "new content", "update")
+
+			expect(mockedComputeVersionToken).toHaveBeenCalledWith(abs("doc.txt"))
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "new content")
+		})
+
+		it("fails with the stale remediation suffix when the version moved - nothing published", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v2")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await expect(guardedWrite(task, "doc.txt", "new content", "update")).rejects.toThrow(
+				"Stale version -- the file changed since you read it (expected v1, current v2); re-read the file, then retry.",
+			)
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("observed update (read completeness, S4b follow-up #46)", () => {
+		it("rejects a full-file update when only a partial read observed the file - no I/O, nothing published", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1", false)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await expect(guardedWrite(task, "doc.txt", "new content", "update")).rejects.toThrow(
+				"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
+					"a full-file replacement needs the complete content; re-read the whole file, then retry.",
+			)
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+			expect(mockedComputeVersionToken).not.toHaveBeenCalled()
+			expect(mockedFsAccess).not.toHaveBeenCalled()
+		})
+
+		it("publishes a full-file update when the observation is complete and the version matches", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1", true)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "doc.txt", "new content", "update")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "new content")
+		})
+
+		it("leaves edit-kind publishes unaffected by a partial observation - the model saw the edited region", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1", false)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "doc.txt", "patched", "edit")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "patched")
+		})
+
+		it("keeps a partial observation partial after an edit so a later full replacement is rejected", async () => {
+			// The edit replaced only the region the model saw. Refreshing the
+			// observation to complete would let a following full-file write publish
+			// content built from the slice alone.
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1", false)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "doc.txt", "patched", "edit")
+
+			expect(reg.get(abs("doc.txt"))?.complete).toBe(false)
+
+			await expect(guardedWrite(task, "doc.txt", "full replacement", "update")).rejects.toThrow(
+				"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
+					"a full-file replacement needs the complete content; re-read the whole file, then retry.",
+			)
+		})
+
+		it("rejects a create-kind full-file overwrite of an existing file when only a partial read observed it", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1", false)
+			mockedFsAccess.mockResolvedValue(undefined) // target still on disk
+			const task = createMockTask({ observationRegistry: reg })
+
+			// A "create" whose target exists publishes through the same
+			// full-file replacement path as "update": a partial observation must
+			// not authorize dropping the content the model never read.
+			await expect(guardedWrite(task, "doc.txt", "created", "create")).rejects.toThrow(
+				"File was only partially read (line slice, range, truncated view, or indentation block) -- " +
+					"a full-file replacement needs the complete content; re-read the whole file, then retry.",
+			)
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+			expect(mockedComputeVersionToken).not.toHaveBeenCalled()
+		})
+
+		it("allows a create-kind recreate of a vanished file despite a partial observation - a fresh create needs no prior read", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1", false)
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" }) // target absent
+			mockedComputeVersionToken.mockResolvedValue("v1") // post-publish refresh
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "doc.txt", "created", "create")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "created")
+		})
+
+		it("publishes a create-kind overwrite of an existing file when the observation is complete", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1")
+			mockedFsAccess.mockResolvedValue(undefined) // target still on disk
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "doc.txt", "created", "create")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "created")
+		})
+	})
+
+	describe("observation refresh after publish (S4b review round)", () => {
+		it("refreshes the observation with the post-publish token so a consecutive edit does not fail stale", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1")
+			const task = createMockTask({ observationRegistry: reg })
+			// The first publish moves the on-disk token: edit 1's pre-write CAS
+			// sees v1, the post-publish refresh sees v2, and edit 2's CAS sees v2.
+			mockedComputeVersionToken.mockResolvedValueOnce("v1").mockResolvedValueOnce("v2").mockResolvedValue("v2")
+
+			await guardedWrite(task, "doc.txt", "first edit", "edit")
+			await guardedWrite(task, "doc.txt", "second edit", "edit")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
+			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("doc.txt"), "second edit")
+			// the observation now carries the post-publish token, complete
+			expect(reg.get(abs("doc.txt"))?.version).toBe("v2")
+			expect(reg.get(abs("doc.txt"))?.complete).toBe(true)
+		})
+
+		it("refreshes as a COMPLETE observation so a consecutive full-file update is not rejected partial", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1")
+			const task = createMockTask({ observationRegistry: reg })
+			mockedComputeVersionToken
+				.mockResolvedValueOnce("v1") // update 1 pre-write CAS
+				.mockResolvedValueOnce("v2") // update 1 post-publish refresh
+				.mockResolvedValue("v2") // update 2 pre-write CAS
+
+			await guardedWrite(task, "doc.txt", "first", "update")
+			await guardedWrite(task, "doc.txt", "second", "update")
+
+			// a refresh recorded as partial would have the second update
+			// rejected by the completeness gate
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
+			expect(reg.get(abs("doc.txt"))?.complete).toBe(true)
+		})
+		it("upgrades a partial observation to complete when the caller carries an explicit completeness", async () => {
+			// The move onto an existing target: the content was rebuilt from a complete view
+			// of the file taken outside the read path, so the publish must record completeness
+			// even though the registry entry came from a partial read. The default refresh
+			// keeps a partial observation partial (covered above); the explicit true is the
+			// only spelling that upgrades it, and it must survive the same refresh the
+			// default and the explicit false use.
+			const reg = new ObservationRegistry()
+			reg.observe(abs("moved-onto.txt"), "v1", false)
+			const task = createMockTask({ observationRegistry: reg })
+			mockedComputeVersionToken
+				.mockResolvedValueOnce("v1") // edit pre-write CAS
+				.mockResolvedValueOnce("v2") // post-publish refresh
+
+			await guardedWrite(task, "moved-onto.txt", "full content", "edit", true)
+
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
+			expect(reg.get(abs("moved-onto.txt"))?.version).toBe("v2")
+			expect(reg.get(abs("moved-onto.txt"))?.complete).toBe(true)
+		})
+
+		it("keeps the previous observation when the post-publish token cannot be computed (deletion race after publish)", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1")
+			const task = createMockTask({ observationRegistry: reg })
+			// The publish succeeded but the file was deleted before the refresh
+			// stat: the token computation rejects (ENOENT) and the guard's
+			// .catch normalizes it to undefined. The observation must keep the
+			// pre-publish version (the next write fails closed through the
+			// standard deleted/stale path) rather than a token-less record.
+			mockedComputeVersionToken
+				.mockResolvedValueOnce("v1") // edit 1 pre-write CAS
+				.mockRejectedValueOnce({ code: "ENOENT" }) // edit 1 post-publish refresh - file deleted
+				.mockResolvedValue("v1") // edit 2 pre-write CAS
+
+			await guardedWrite(task, "doc.txt", "first edit", "edit")
+			await guardedWrite(task, "doc.txt", "second edit", "edit")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
+			expect(reg.get(abs("doc.txt"))?.version).toBe("v1")
+		})
+	})
+
+	// The commit rename is the commit point: when it lands and only the
+	// parent-directory fsync after it fails, the bytes are already at the
+	// target. The observation has to follow the disk, or the next guarded write
+	// from this task is rejected stale against the version it published itself -
+	// and DiffViewProvider.saveDirectly() reaches guardedWrite with no
+	// reconciliation of its own to absorb that. The failure still has to reach
+	// the caller: a durability check that did not pass is not a successful save.
+	describe("post-commit durability failure", () => {
+		it("reconciles the observation to the landed token and still rejects with the durability error", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("a.txt"), "v1")
+			const task = createMockTask({ observationRegistry: reg })
+			const landed = new PostCommitDurabilityError(abs("a.txt"), new Error("EIO: i/o error"))
+			mockedComputeVersionToken
+				.mockResolvedValueOnce("v1") // the compare-and-swap read
+				.mockResolvedValueOnce("v2") // the post-publish read, under the same lock
+			mockedSafeWriteText.mockRejectedValueOnce(landed)
+
+			await expect(guardedWrite(task, "a.txt", "next", "update")).rejects.toBe(landed)
+
+			expect(reg.get(abs("a.txt"))?.version).toBe("v2")
+			// A full-file publish is complete: the model supplied the whole content.
+			expect(reg.get(abs("a.txt"))?.complete).toBe(true)
+		})
+
+		it("lets the next guarded write from the same task publish instead of failing stale", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("a.txt"), "v1")
+			const task = createMockTask({ observationRegistry: reg })
+			const landed = new PostCommitDurabilityError(abs("a.txt"), new Error("EIO: i/o error"))
+			mockedComputeVersionToken.mockResolvedValueOnce("v1").mockResolvedValueOnce("v2")
+			mockedSafeWriteText.mockRejectedValueOnce(landed)
+
+			await expect(guardedWrite(task, "a.txt", "next", "update")).rejects.toBe(landed)
+
+			// The disk now carries this write's bytes, so the follow-up write must be
+			// accepted against the landed token rather than rejected with the stale
+			// remediation it would otherwise get against "v1".
+			mockedComputeVersionToken.mockResolvedValue("v2")
+
+			await guardedWrite(task, "a.txt", "final", "update")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
+			expect(reg.get(abs("a.txt"))?.version).toBe("v2")
+		})
+
+		it("keeps a partial observation partial when an edit landed without durability", async () => {
+			// The reconciliation must not upgrade completeness: an edit is authorized
+			// by the view the model saw, and a later full-file replacement still has to
+			// be rejected until the whole file is read.
+			const reg = new ObservationRegistry()
+			reg.observe(abs("slice.txt"), "v1", false)
+			const task = createMockTask({ observationRegistry: reg })
+			const landed = new PostCommitDurabilityError(abs("slice.txt"), new Error("EIO: i/o error"))
+			mockedComputeVersionToken.mockResolvedValueOnce("v1").mockResolvedValueOnce("v2")
+			mockedSafeWriteText.mockRejectedValueOnce(landed)
+
+			await expect(guardedWrite(task, "slice.txt", "patched", "edit")).rejects.toBe(landed)
+
+			expect(reg.get(abs("slice.txt"))?.version).toBe("v2")
+			expect(reg.get(abs("slice.txt"))?.complete).toBe(false)
+		})
+
+		it("records an unobserved create that landed without durability as a complete observation", async () => {
+			const reg = new ObservationRegistry()
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			const task = createMockTask({ observationRegistry: reg })
+			const landed = new PostCommitDurabilityError(abs("new.txt"), new Error("EIO: i/o error"))
+			mockedComputeVersionToken.mockResolvedValueOnce("v9")
+			mockedSafeWriteText.mockRejectedValueOnce(landed)
+
+			await expect(guardedWrite(task, "new.txt", "hello", "create")).rejects.toBe(landed)
+
+			expect(reg.get(abs("new.txt"))?.version).toBe("v9")
+			expect(reg.get(abs("new.txt"))?.complete).toBe(true)
+		})
+
+		it("leaves the observation untouched when the publish failed before the commit point", async () => {
+			// Only a landed rename reconciles. Any other publish failure means the
+			// target still holds the pre-write content, so the observation must keep
+			// the token that describes it.
+			const reg = new ObservationRegistry()
+			reg.observe(abs("a.txt"), "v1")
+			const task = createMockTask({ observationRegistry: reg })
+			// The CAS read matches; any later token read would name a different version, so a
+			// reconciliation that fired here would be visible instead of coincidentally equal.
+			mockedComputeVersionToken.mockResolvedValueOnce("v1").mockResolvedValue("v2")
+			mockedSafeWriteText.mockRejectedValueOnce(new Error("EACCES: permission denied"))
+
+			await expect(guardedWrite(task, "a.txt", "next", "update")).rejects.toThrow("EACCES: permission denied")
+
+			expect(reg.get(abs("a.txt"))?.version).toBe("v1")
+		})
+
+		it("keeps the previous observation when the landed token cannot be read", async () => {
+			// Same rule as the success path: a failed stat skips the reconciliation,
+			// it does not change the error the caller receives.
+			const reg = new ObservationRegistry()
+			reg.observe(abs("a.txt"), "v1")
+			const task = createMockTask({ observationRegistry: reg })
+			const landed = new PostCommitDurabilityError(abs("a.txt"), new Error("EIO: i/o error"))
+			mockedComputeVersionToken
+				.mockResolvedValueOnce("v1")
+				.mockRejectedValueOnce(Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }))
+			mockedSafeWriteText.mockRejectedValueOnce(landed)
+
+			await expect(guardedWrite(task, "a.txt", "next", "update")).rejects.toBe(landed)
+
+			expect(reg.get(abs("a.txt"))?.version).toBe("v1")
+		})
+	})
+	describe("edit", () => {
+		it("fails read-first when the file was never observed - nothing published, no I/O", async () => {
+			const task = createMockTask()
+
+			await expect(guardedWrite(task, "any.txt", "patched", "edit")).rejects.toThrow(
+				"File not read yet -- read the file, then retry.",
+			)
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+			expect(mockedComputeVersionToken).not.toHaveBeenCalled()
+			expect(mockedFsAccess).not.toHaveBeenCalled()
+		})
+
+		it("publishes when the version matches the observation", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "doc.txt", "patched", "edit")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("doc.txt"), "patched")
+		})
+
+		it("fails with the stale remediation suffix when the version moved", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("doc.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v3")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await expect(guardedWrite(task, "doc.txt", "patched", "edit")).rejects.toThrow(
+				"Stale version -- the file changed since you read it (expected v1, current v3); re-read the file, then retry.",
+			)
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("concurrency: per-path FIFO chain", () => {
+		it("two concurrent updates on one path - serialized, both publish against the refreshed observation", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("shared.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			// The first publish changes the on-disk state (new token), and the
+			// guarded write refreshes the observation to it, so the second
+			// write CASes against v2 and publishes too: same-task writes are
+			// serialized last-write-wins in submission order, while a token that
+			// moves outside the task's own publish still fails stale.
+			mockedSafeWriteText.mockImplementation(async () => {
+				mockedComputeVersionToken.mockResolvedValue("v2")
+			})
+
+			const p1 = guardedWrite(task, "shared.txt", "first", "update")
+			const p2 = guardedWrite(task, "shared.txt", "second", "update")
+			const [r1, r2] = await Promise.allSettled([p1, p2])
+
+			expect(r1.status).toBe("fulfilled")
+			expect(r2.status).toBe("fulfilled")
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
+			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, abs("shared.txt"), "first")
+			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(2, abs("shared.txt"), "second")
+		})
+
+		it("observed-absent then two concurrent creates - the second publishes against the refreshed observation", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("absent.txt"), "v1") // read before, file later vanished
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			const task = createMockTask({ observationRegistry: reg })
+
+			let publishes = 0
+			mockedSafeWriteText.mockImplementation(async () => {
+				publishes += 1
+				if (publishes === 1) {
+					// After the first publish the file exists again under a new
+					// token, and the guarded write refreshes the observation to it.
+					mockedFsAccess.mockResolvedValue(undefined)
+					mockedComputeVersionToken.mockResolvedValue("v2")
+				}
+			})
+
+			const p1 = guardedWrite(task, "absent.txt", "first", "create")
+			const p2 = guardedWrite(task, "absent.txt", "second", "create")
+			const [r1, r2] = await Promise.allSettled([p1, p2])
+
+			// Both same-task creates serialize: the second CASes against the
+			// refreshed v2 observation and publishes its content last-write-wins.
+			expect(r1.status).toBe("fulfilled")
+			expect(r2.status).toBe("fulfilled")
+			expect(publishes).toBe(2)
+			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, abs("absent.txt"), "first")
+			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(2, abs("absent.txt"), "second")
+		})
+
+		it("the chain settles after a rejection - a later matching write still runs", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("settle.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v2") // already stale at v1
+			const task = createMockTask({ observationRegistry: reg })
+
+			const p1 = guardedWrite(task, "settle.txt", "first", "update")
+			await expect(p1).rejects.toThrow("Stale version")
+
+			// No resetChain: the rejected link must not wedge the chain. The
+			// caller re-reads the file (observation refreshed to v2) and retries.
+			reg.observe(abs("settle.txt"), "v2")
+			const p2 = guardedWrite(task, "settle.txt", "second", "update")
+			// The publish resolves with the token the guard read back under its lock.
+			await expect(p2).resolves.toBe("v2")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("settle.txt"), "second")
+		})
+
+		it("evicts settled chain entries - a later write still serializes in order", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("evict.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			// A first write settles; its chain entry is evicted with it.
+			const p1 = guardedWrite(task, "evict.txt", "first", "update")
+			await expect(p1).resolves.toBe("v1")
+
+			// Two rapid writes submitted after the eviction must still run one
+			// at a time in submission order (the eviction must not drop the
+			// chain for in-flight or just-enqueued links).
+			const order: (string | Uint8Array)[] = []
+			mockedSafeWriteText.mockImplementation(async (_path: string, content: string | Uint8Array) => {
+				order.push(content)
+			})
+			const p2 = guardedWrite(task, "evict.txt", "second", "update")
+			const p3 = guardedWrite(task, "evict.txt", "third", "update")
+			await Promise.all([p2, p3])
+
+			expect(order).toEqual(["second", "third"])
+			// Three publishes in total: the settled first write plus the two
+			// serialized rapid writes.
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(3)
+		})
+
+		it("writes on different paths are independent (no cross-path serialization)", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("a.txt"), "v1")
+			reg.observe(abs("b.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			const p1 = guardedWrite(task, "a.txt", "a", "update")
+			const p2 = guardedWrite(task, "b.txt", "b", "update")
+			await Promise.all([p1, p2])
+
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
+		})
+	})
+
+	describe("path resolution", () => {
+		it("resolves a relative path against task.cwd", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("sub/dir.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "sub/dir.txt", "content", "update")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("sub/dir.txt"), "content")
+		})
+
+		it("normalizes an already-absolute input (trailing separator) to the observation key", async () => {
+			const reg = new ObservationRegistry()
+			const canonical = abs("sub/dir.txt")
+			// ReadFileTool observes under path.resolve(task.cwd, relPath) — the
+			// canonical spelling. A write addressed with a trailing separator used
+			// to bypass the observation (isAbsolute passthrough) and fail
+			// "File already exists" / "File not read yet" for a file that was read.
+			reg.observe(canonical, "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, canonical + "/", "content", "update")
+
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(canonical, "content")
+		})
+
+		it("serializes two spellings of one file through a single chain key", async () => {
+			const reg = new ObservationRegistry()
+			const canonical = abs("shared2.txt")
+			reg.observe(canonical, "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			// The first publish changes the on-disk state (new token).
+			mockedSafeWriteText.mockImplementation(async () => {
+				mockedComputeVersionToken.mockResolvedValue("v2")
+			})
+
+			// Plain spelling vs the trailing-separator spelling: with one chain
+			// key they are strictly ordered. The first matches v1 and publishes;
+			// its post-publish refresh records v2, so the second CASes against
+			// v2 and publishes too (serialized same-task writes).
+			const p1 = guardedWrite(task, canonical, "first", "update")
+			const p2 = guardedWrite(task, canonical + "/", "second", "update")
+			const [r1, r2] = await Promise.allSettled([p1, p2])
+
+			expect(r1.status).toBe("fulfilled")
+			expect(r2.status).toBe("fulfilled")
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
+			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, canonical, "first")
+			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(2, canonical, "second")
+		})
+	})
+
+	describe("lock serialization with other writers", () => {
+		it("holds the shared advisory lock across the version check and the publish", async () => {
+			// The guard decision and the publish must be one operation under the same
+			// advisory lock that safeWriteJson and task-history deletion use, otherwise
+			// a lock-using writer can land between the check and the write.
+			const order: string[] = []
+			mockedWithFileLock.mockImplementation(async (filePath, operation) => {
+				order.push("lock")
+				const result = await operation(path.resolve(filePath))
+				order.push("release")
+				return result
+			})
+			mockedComputeVersionToken.mockImplementation(async () => {
+				order.push("check")
+				return "v1"
+			})
+			mockedSafeWriteText.mockImplementation(async () => {
+				order.push("publish")
+			})
+
+			await replaceIfVersion(abs("a.txt"), "v1", "content", "a.txt")
+
+			expect(order).toEqual(["lock", "check", "publish", "check", "release"])
+			expect(mockedWithFileLock).toHaveBeenCalledWith(abs("a.txt"), expect.any(Function))
+		})
+
+		it("holds the same lock across the absence check and the publish for an unobserved create", async () => {
+			const order: string[] = []
+			mockedWithFileLock.mockImplementation(async (filePath, operation) => {
+				order.push("lock")
+				const result = await operation(path.resolve(filePath))
+				order.push("release")
+				return result
+			})
+			mockedFsAccess.mockImplementation(async () => {
+				order.push("check")
+				throw { code: "ENOENT" }
+			})
+			mockedSafeWriteText.mockImplementation(async () => {
+				order.push("publish")
+			})
+
+			mockedComputeVersionToken.mockImplementation(async () => {
+				order.push("token")
+				return "v1"
+			})
+
+			await createIfAbsent(abs("new.txt"), "hello", "new.txt")
+
+			expect(order).toEqual(["lock", "check", "publish", "token", "release"])
+		})
+
+		it("locks the resolved publish target instead of the link path", async () => {
+			// proper-lockfile keys by the path it is given, so a symlink alias and its
+			// referent would take two locks for one file. The guard must lock the key
+			// every other writer to that file uses.
+			const referent = abs("real/file.txt")
+			mockedResolveLockKey.mockResolvedValue(referent)
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+
+			await createIfAbsent(abs("link.txt"), "hello", "link.txt")
+
+			expect(mockedResolveLockKey).toHaveBeenCalledWith(abs("link.txt"))
+			expect(mockedWithFileLock).toHaveBeenCalledWith(referent, expect.any(Function))
+		})
+
+		it("reads the post-publish token inside the lock, before releasing it", async () => {
+			// A peer lock-using writer can publish in the gap between the publish and
+			// a post-publish stat made after the lock is released, and the task would
+			// then record that peer's token as its own observation.
+			const order: string[] = []
+			mockedWithFileLock.mockImplementation(async (filePath, operation) => {
+				order.push("lock")
+				const result = await operation(path.resolve(filePath))
+				order.push("release")
+				return result
+			})
+			mockedComputeVersionToken.mockImplementation(async () => {
+				order.push("check")
+				return "v1"
+			})
+			mockedSafeWriteText.mockImplementation(async () => {
+				order.push("publish")
+				return undefined
+			})
+
+			const token = await replaceIfVersion(abs("a.txt"), "v1", "content", "a.txt")
+
+			expect(order).toEqual(["lock", "check", "publish", "check", "release"])
+			expect(token).toBe("v1")
+		})
+	})
+
+	describe("resetChain", () => {
+		it("detaches pending links so later writes start a fresh chain", async () => {
+			const reg = new ObservationRegistry()
+			reg.observe(abs("x.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "x.txt", "a", "update")
+			resetChain()
+			await guardedWrite(task, "x.txt", "b", "update")
+
+			expect(mockedSafeWriteText).toHaveBeenLastCalledWith(abs("x.txt"), "b")
+		})
+	})
+
+	it("does not run a queued write once the owning task is cancelled", async () => {
+		const task = createMockTask({ abort: true })
+		mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+
+		await expect(guardedWrite(task, "new-file.txt", "hello", "create")).rejects.toThrow(
+			"Task was cancelled before this write ran -- the queued publish is not performed.",
+		)
+
+		expect(mockedSafeWriteText).not.toHaveBeenCalled()
+	})
+
+	it("re-checks cancellation under the publish lock before writing", async () => {
+		// The dequeue check passed; the abort landed while the lock was being taken,
+		// so the guard must refuse before the publish rather than write for a task that
+		// is already gone.
+		const task = createMockTask()
+		mockedWithFileLock.mockImplementation(function (filePath, operation) {
+			task.abort = true
+			return operation(path.resolve(filePath))
+		})
+		mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+
+		await expect(guardedWrite(task, "new-file.txt", "hello", "create")).rejects.toThrow(
+			"Task was cancelled before this write published -- nothing was written.",
+		)
+
+		expect(mockedSafeWriteText).not.toHaveBeenCalled()
+	})
+
+	it("re-checks cancellation after the awaited preflight, before publication starts", async () => {
+		// The abort lands while the version token is being computed. The guard has to
+		// refuse on the way to the publish, not write for a task that is already gone.
+		mockedComputeVersionToken.mockImplementation(async () => {
+			task.abort = true
+			return "v1"
+		})
+		const reg = new ObservationRegistry()
+		reg.observe(abs("a.txt"), "v1", true)
+		const task = createMockTask({ observationRegistry: reg })
+
+		await expect(guardedWrite(task, "a.txt", "content", "update")).rejects.toThrow(
+			"Task was cancelled before this write published -- nothing was written.",
+		)
+
+		expect(mockedSafeWriteText).not.toHaveBeenCalled()
+	})
+
+	it("names the caller's path, not the resolved absolute path, in a model-facing rejection", async () => {
+		// The guard key stays absolute, but the message and the error field go to the
+		// model, so they must not carry a user-specific absolute path.
+		mockedFsAccess.mockResolvedValue(undefined)
+		const task = createMockTask()
+
+		let error: GuardRejectedError | undefined
+		await guardedWrite(task, "src/thing.ts", "hello", "create").catch((e: unknown) => {
+			if (e instanceof GuardRejectedError) {
+				error = e
+				return
+			}
+			throw e
+		})
+
+		expect(error?.message).toBe(
+			"File already exists at src/thing.ts and was not read before this write -- read the file first, then retry.",
+		)
+		expect(error?.path).toBe("src/thing.ts")
+		expect(mockedSafeWriteText).not.toHaveBeenCalled()
+	})
+	it("names the caller's path on a stale-version rejection as well", async () => {
+		// The stale branch is the most common rejection, so it has to follow the same rule
+		// as the create, delete and cancellation branches.
+		mockedFsAccess.mockResolvedValue(undefined)
+		mockedComputeVersionToken.mockResolvedValue("v2")
+		const reg = new ObservationRegistry()
+		reg.observe(abs("src/thing.ts"), "v1", true)
+		const task = createMockTask({ observationRegistry: reg })
+
+		let staleError: GuardRejectedError | undefined
+		await guardedWrite(task, "src/thing.ts", "hello", "update").catch((e: unknown) => {
+			if (e instanceof GuardRejectedError) {
+				staleError = e
+				return
+			}
+			throw e
+		})
+
+		expect(staleError?.message).toBe(
+			"Stale version -- the file changed since you read it (expected v1, current v2); re-read the file, then retry.",
+		)
+		expect(staleError?.path).toBe("src/thing.ts")
+		expect(mockedSafeWriteText).not.toHaveBeenCalled()
+	})
+
+	describe("allowlist binding to the retained publish target", () => {
+		// The tool layer validates the alias the caller named. The guard must
+		// re-run that decision on the retained target under the lock, and lock
+		// both the alias entry and the resolved referent, or a link retargeted
+		// after the tool's check sends the approved bytes to an ignored or
+		// external file.
+
+		it("replaceIfVersion stops when the retained target fails the allowlist, before the version comparison", async () => {
+			const authorize = vi.fn(() => {
+				throw new GuardRejectedError("denied", "alias.txt")
+			})
+			mockedResolvePublishTarget.mockResolvedValue(abs("outside/ref.txt"))
+
+			await expect(
+				replaceIfVersion(abs("alias.txt"), "v1", "hello", "alias.txt", undefined, authorize),
+			).rejects.toBeInstanceOf(GuardRejectedError)
+
+			// The decision runs on the retained target, not the alias, and it
+			// precedes the version comparison and the publish.
+			expect(authorize).toHaveBeenCalledWith(abs("outside/ref.txt"))
+			expect(mockedComputeVersionToken).not.toHaveBeenCalled()
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("replaceIfVersion publishes when the retained target passes the allowlist", async () => {
+			const authorize = vi.fn()
+			mockedFsAccess.mockResolvedValue(undefined)
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			mockedResolvePublishTarget.mockResolvedValue(abs("alias.txt"))
+
+			await replaceIfVersion(abs("alias.txt"), "v1", "hello", "alias.txt", undefined, authorize)
+
+			expect(authorize).toHaveBeenCalledWith(abs("alias.txt"))
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("alias.txt"), "hello")
+		})
+
+		it("createIfAbsent stops when the retained target fails the allowlist", async () => {
+			const authorize = vi.fn(() => {
+				throw new GuardRejectedError("denied", "alias.txt")
+			})
+			mockedResolvePublishTarget.mockResolvedValue(abs("outside/ref.txt"))
+
+			await expect(
+				createIfAbsent(abs("alias.txt"), "hello", "alias.txt", undefined, authorize),
+			).rejects.toBeInstanceOf(GuardRejectedError)
+
+			expect(authorize).toHaveBeenCalledWith(abs("outside/ref.txt"))
+			expect(mockedFsAccess).not.toHaveBeenCalled()
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("guardedWrite rejects when the alias passes the allowlist but the resolved target is ignored", async () => {
+			// The row's scenario: a symlink passes validateAccess while it points
+			// at an allowed file; the retained referent is outside the allowlist,
+			// and the guarded publish must not write there.
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			mockedResolvePublishTarget.mockResolvedValue(abs("ignored/secret.txt"))
+			const validateAccess = vi.fn((p: string) => p === abs("link.txt"))
+			const task = createMockTask({ rooIgnoreController: { validateAccess } })
+
+			await expect(guardedWrite(task, "link.txt", "hello", "create")).rejects.toBeInstanceOf(GuardRejectedError)
+
+			expect(validateAccess).toHaveBeenCalledWith(abs("ignored/secret.txt"))
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("guardedWrite publishes when the retained target passes the allowlist", async () => {
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			mockedResolvePublishTarget.mockResolvedValue(abs("ok.txt"))
+			const validateAccess = vi.fn().mockReturnValue(true)
+			const task = createMockTask({ rooIgnoreController: { validateAccess } })
+
+			await guardedWrite(task, "ok.txt", "hello", "create")
+
+			expect(validateAccess).toHaveBeenCalledWith(abs("ok.txt"))
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("ok.txt"), "hello")
+		})
+
+		it("takes both the alias and the referent lock in sorted order when they differ", async () => {
+			// A protocol writer that swaps the link itself holds the alias entry
+			// lock; a guarded write holding only the referent lock could publish
+			// through a link mid-swap. Distinct keys are taken in sorted order,
+			// the shared order safeWriteJson's dual-link path uses.
+			mockedResolveLockKey.mockResolvedValue(abs("aaa-referent.txt"))
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+
+			await guardedWrite(createMockTask(), "zzz-alias.txt", "hello", "create")
+
+			const keys = mockedWithFileLock.mock.calls.map((call) => String(call[0]))
+			expect(keys).toEqual([abs("aaa-referent.txt"), abs("zzz-alias.txt")])
+		})
+
+		it("takes a single lock when the alias and referent keys fold to one", async () => {
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			mockedComputeVersionToken.mockResolvedValue("v1")
+
+			await guardedWrite(createMockTask(), "plain.txt", "hello", "create")
+
+			expect(mockedWithFileLock).toHaveBeenCalledTimes(1)
+		})
+	})
+})
