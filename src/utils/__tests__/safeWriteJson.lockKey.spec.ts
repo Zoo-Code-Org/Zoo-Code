@@ -182,9 +182,6 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		mockedRealpath.mockImplementation(async () => {
 			throw eacces
 		})
-		mockedLstat.mockImplementation(
-			async () => ({ isSymbolicLink: () => false, isFile: () => true }) as unknown as BigIntStats,
-		)
 		await expect(resolveLockKey(file)).rejects.toBe(eacces)
 	})
 })
