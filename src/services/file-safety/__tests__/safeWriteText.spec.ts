@@ -36,6 +36,7 @@ vi.mock("fs", () => ({
 	fsyncSync: vi.fn(),
 	chmodSync: vi.fn(),
 	fchmodSync: vi.fn(),
+	fstatSync: vi.fn(),
 	statSync: vi.fn(),
 	Stats: class Stats {},
 }))
@@ -64,6 +65,9 @@ function _fileStats(isLink: boolean): fsSync.Stats {
 	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats
 	s.isSymbolicLink = () => isLink
 	s.isFile = () => !isLink
+	// Single name by default: the post-open verification rejects a staged file that
+	// has gained a second (hard-link) name.
+	s.nlink = 1
 	return s
 }
 // Directory stand-in: neither a symlink nor a regular file. The symlink double short-circuits
@@ -99,6 +103,8 @@ function mockDefaults(): void {
 	// Staged-file default: a regular file, not a link, so a caller-supplied
 	// tempPath passes the location and file-type check by default.
 	vi.mocked(fs.lstat).mockResolvedValue(_fileStats(false))
+	// Post-open default: the opened file is the same single-named regular file.
+	vi.mocked(fsSync.fstatSync).mockReturnValue(_fileStats(false))
 }
 function _stats(mode: number): fsSync.Stats {
 	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats
@@ -201,7 +207,7 @@ describe("safeWriteText", () => {
 
 		it("does not remove the staging directory when the caller supplies its own tempPath", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
-			const callerTemp = "/tmp/test-dir/caller-staged.txt"
+			const callerTemp = "/tmp/test-dir/.new_caller-staged.tmp"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 
@@ -335,7 +341,7 @@ describe("safeWriteText", () => {
 
 		it("does not remove a staging directory it did not create when a caller-staged write fails", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
-			const callerTemp = "/tmp/test-dir/caller-staged.txt"
+			const callerTemp = "/tmp/test-dir/.new_caller-staged.tmp"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 			vi.mocked(fs.rename).mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }))
@@ -1209,7 +1215,7 @@ describe("safeWriteText", () => {
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
 
-			const customTempPath = "/tmp/test-dir/custom-temp.tmp"
+			const customTempPath = "/tmp/test-dir/.new_custom-temp.tmp"
 
 			// platform:linux skips DACL entirely so this test focuses on tempPath only
 			await safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" })
@@ -1236,7 +1242,7 @@ describe("safeWriteText", () => {
 			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o600))
 			vi.mocked(fsSync.openSync).mockReturnValue(2)
 
-			const customTempPath = "/tmp/test-dir/custom-temp.tmp"
+			const customTempPath = "/tmp/test-dir/.new_custom-temp.tmp"
 
 			await safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" })
 
@@ -1256,7 +1262,7 @@ describe("safeWriteText", () => {
 			})
 			vi.mocked(fsSync.openSync).mockReturnValue(2)
 
-			const customTempPath = "/tmp/test-dir/custom-temp.tmp"
+			const customTempPath = "/tmp/test-dir/.new_custom-temp.tmp"
 
 			await safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" })
 
@@ -1274,7 +1280,7 @@ describe("safeWriteText", () => {
 			})
 			vi.mocked(fsSync.openSync).mockReturnValue(2)
 
-			const customTempPath = "/tmp/test-dir/custom-temp.tmp"
+			const customTempPath = "/tmp/test-dir/.new_custom-temp.tmp"
 
 			// A target that cannot be stat'd is not a fresh target: publishing with
 			// the default mode would widen a restrictive target through the rename.
@@ -1306,7 +1312,7 @@ describe("safeWriteText", () => {
 			vi.mocked(fsSync.statSync).mockReturnValue(_stats(0o444))
 			vi.mocked(fsSync.openSync).mockReturnValue(3)
 
-			const customTempPath = "/tmp/test-dir/custom-temp.tmp"
+			const customTempPath = "/tmp/test-dir/.new_custom-temp.tmp"
 
 			await safeWriteText(targetPath, "", { tempPath: customTempPath, platform: "linux" })
 
@@ -1681,6 +1687,36 @@ describe("caller-supplied staging path", () => {
 			expect(c[1]).toEqual({ bigint: true })
 		}
 		expect(fs.unlink).not.toHaveBeenCalled()
+	})
+
+	it("rejects a caller-staged file that does not carry the staging name convention", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		// An arbitrary regular file beside the target passes the location, file-type and
+		// target-identity checks, yet renaming it onto the target would publish an
+		// unrelated file's content and delete its original name. Only the staging name
+		// convention this library's own writers use may be published.
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: "/tmp/test-dir/credentials.json", platform: "linux" }),
+		).rejects.toThrow("Staging file must carry the staging name convention")
+		expect(fsSync.openSync).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("rejects a caller-staged file that gained a second hard link before the open", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		// Between the lstat check and the open, an attacker who can write the directory
+		// can replace the staging path with a hard link to another file in it: the
+		// opened inode then carries a second name, and the commit rename would publish
+		// that other file and delete its original name.
+		const linked = _fileStats(false)
+		linked.nlink = 2
+		vi.mocked(fsSync.fstatSync).mockReturnValue(linked)
+		await expect(
+			safeWriteText(targetPath, "data", { tempPath: "/tmp/test-dir/.new_x_1.tmp", platform: "linux" }),
+		).rejects.toThrow("Staging file changed between the check and the open")
+		expect(fs.rename).not.toHaveBeenCalled()
 	})
 
 	it("rejects when the target identity cannot be compared for a reason other than a missing target", async () => {

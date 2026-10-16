@@ -396,6 +396,18 @@ export async function safeWriteText(
 		) {
 			throw new StagingPathError("Staging file must not be the target itself", supplied)
 		}
+		// Ownership convention: a caller-staged file must carry the staging name this
+		// library's own writers use (.new_<ts>_<rand>.tmp). An arbitrary regular file
+		// beside the target (e.g. credentials.json) passes every check above, yet
+		// renaming it onto the target publishes an unrelated file's content and deletes
+		// its original name. Only files created under the staging convention may be
+		// published through this parameter.
+		if (!/^\.new_.*\.tmp$/.test(path.basename(supplied))) {
+			throw new StagingPathError(
+				`Staging file must carry the staging name convention .new_*.tmp, got ${path.basename(supplied)}`,
+				supplied,
+			)
+		}
 		// The caller's own path is used as given; only the check is canonical.
 		tempPath = options.tempPath
 	} else {
@@ -492,6 +504,21 @@ export async function safeWriteText(
 			}
 			const fd = fsSync.openSync(tempPath, "r+")
 			try {
+				// Prove the opened file is not a borrowed name: between the lstat check
+				// and this open, a local attacker who can write the directory can replace
+				// the staging path with a hard link to another file in it, and the commit
+				// rename would then publish that file and delete its original name. While
+				// the other name exists the inode carries a second link, so nlink === 1 on
+				// the opened fd rules the substitution out; a swap that first unlinks the
+				// other name can only stage content the attacker already had, not a file
+				// the caller still references.
+				const opened = fsSync.fstatSync(fd)
+				if (!opened.isFile() || opened.nlink !== 1) {
+					throw new StagingPathError(
+						`Staging file changed between the check and the open: ${tempPath}`,
+						tempPath,
+					)
+				}
 				if (targetMode !== null) {
 					fsSync.fchmodSync(fd, targetMode)
 				}
