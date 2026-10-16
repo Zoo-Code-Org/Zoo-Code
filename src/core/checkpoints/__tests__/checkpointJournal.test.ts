@@ -216,3 +216,39 @@ describe("checkpointSave change-journal wiring (B2)", () => {
 		)
 	})
 })
+
+describe("loadChanges entry-shape validation (B2)", () => {
+	let tmpStorageDir: string
+
+	beforeEach(async () => {
+		tmpStorageDir = await fs.mkdtemp(path.join(os.tmpdir(), "b2-journal-shape-"))
+	})
+
+	afterEach(async () => {
+		await fs.rm(tmpStorageDir, { recursive: true, force: true })
+	})
+
+	it("skips lines that are valid JSON but not entry-shaped", async () => {
+		const dir = path.join(tmpStorageDir, "tasks", TASK_ID, "checkpoints")
+		await fs.mkdir(dir, { recursive: true })
+		const valid = JSON.stringify({ path: "src/a.ts", operation: "create", checkpointId: "c1" })
+		await fs.writeFile(
+			path.join(dir, "changes.jsonl"),
+			[
+				// A torn append can leave valid JSON that is not an entry.
+				"1",
+				"null",
+				// Missing checkpointId.
+				JSON.stringify({ path: "src/b.ts", operation: "update" }),
+				// Unknown operation.
+				JSON.stringify({ path: "src/c.ts", operation: "rename", checkpointId: "c2" }),
+				// Non-string path.
+				JSON.stringify({ path: 42, operation: "create", checkpointId: "c3" }),
+				valid,
+			].join("\n") + "\n",
+		)
+
+		const entries = await loadChanges(tmpStorageDir, TASK_ID)
+		expect(entries).toEqual([{ path: "src/a.ts", operation: "create", checkpointId: "c1" }])
+	})
+})

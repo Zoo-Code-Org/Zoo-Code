@@ -72,6 +72,45 @@ describe("changeJournal", () => {
 			expect(raw.split("\n").filter((line) => line !== "")).toHaveLength(2)
 		})
 
+		it("syncs the parent directory after the first append creates the journal (POSIX)", async () => {
+			const platformDesc = Object.getOwnPropertyDescriptor(process, "platform")
+			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
+			const dirPath = path.dirname(journalPath(tmpRoot, taskId))
+			const realOpen = fs.open
+			const synced: string[] = []
+			const closed: string[] = []
+			// Windows cannot open directories, so the directory handle is doubled
+			// here: the code under test only opens it on non-win32 platforms.
+			const openSpy = vi.spyOn(fs, "open").mockImplementation(async (pathish, flags) => {
+				const openAs = realOpen as (p: string | URL, f?: string) => Promise<fs.FileHandle>
+				const p = typeof pathish === "string" ? pathish : String(pathish)
+				if (p === dirPath && flags === "r") {
+					return {
+						sync: async () => {
+							synced.push(p)
+						},
+						close: async () => {
+							closed.push(p)
+						},
+					} as unknown as fs.FileHandle
+				}
+				return openAs(p, flags as string | undefined)
+			})
+			try {
+				await appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
+				expect(synced).toEqual([dirPath])
+				expect(closed).toEqual([dirPath])
+				// Subsequent appends do not re-sync the directory.
+				await appendChange(tmpRoot, taskId, entry({ checkpointId: "second" }))
+				expect(synced).toHaveLength(1)
+			} finally {
+				openSpy.mockRestore()
+				if (platformDesc) Object.defineProperty(process, "platform", platformDesc)
+			}
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual(["first", "second"])
+		})
+
 		it("propagates a non-ENOENT tail-inspection failure instead of appending blind", async () => {
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "good" }))
 			const filePath = journalPath(tmpRoot, taskId)
