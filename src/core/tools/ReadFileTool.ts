@@ -341,6 +341,13 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				output += `\n\nIncluded ranges: ${rangeStr} (total: ${result.totalLines} lines)`
 			}
 
+			if (result.hasClippedLines) {
+				// A returned line can still be a partial view: clipping is reported
+				// separately from the omission notice, because the block may show
+				// every line it includes in truncated form.
+				output += `\nNote: Some lines in this view exceed ${MAX_LINE_LENGTH} characters and were clipped in this view.`
+			}
+
 			// Indentation mode returns semantic blocks: never a complete file view.
 			return { content: output, complete: false }
 		}

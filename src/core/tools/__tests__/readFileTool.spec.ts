@@ -1237,6 +1237,64 @@ describe("ReadFileTool", () => {
 			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("To read more"))
 		})
 
+		it("should show a clipping notice in indentation mode separately from the omission notice", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+			mockedReadWithIndentation.mockReturnValue({
+				content: "1 | block",
+				returnedLines: 10,
+				totalLines: 100,
+				wasTruncated: false,
+				hasClippedLines: true,
+				includedRanges: [[1, 10]],
+			})
+
+			await readFileTool.execute(
+				{
+					path: "test.ts",
+					mode: "indentation",
+					indentation: { anchor_line: 1 },
+				},
+				mockTask as unknown as Task,
+				callbacks,
+			)
+
+			const pushed = callbacks.pushToolResult.mock.calls[0][0] as string
+			expect(pushed).toContain("clipped in this view")
+			expect(pushed).not.toContain("File content truncated")
+		})
+
+		it("should report clipping alongside truncation in indentation mode", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+			mockedReadWithIndentation.mockReturnValue({
+				content: "1 | block",
+				returnedLines: 50,
+				totalLines: 200,
+				wasTruncated: true,
+				hasClippedLines: true,
+				includedRanges: [[1, 50]],
+			})
+
+			await readFileTool.execute(
+				{
+					path: "test.ts",
+					mode: "indentation",
+					indentation: { anchor_line: 1 },
+				},
+				mockTask as unknown as Task,
+				callbacks,
+			)
+
+			const pushed = callbacks.pushToolResult.mock.calls[0][0] as string
+			expect(pushed).toContain("File content truncated")
+			expect(pushed).toContain("clipped in this view")
+		})
+
 		it("should include range information in indentation mode when not truncated", async () => {
 			const mockTask = createMockTask()
 			const callbacks = createMockCallbacks()

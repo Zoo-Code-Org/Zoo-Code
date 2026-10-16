@@ -339,6 +339,45 @@ describe("readWithIndentation", () => {
 		expect(result.hasClippedLines).toBe(false)
 	})
 
+	it("flags a clipped line in the single-line limit case", () => {
+		// finalLimit === 1 returns only the anchor line, and formatWithLineNumbers
+		// clips it when it exceeds the cap: the flag must still be set.
+		const code = ["short()", `long(${"x".repeat(MAX_LINE_LENGTH + 5)})`, "tail()"].join("\n")
+		const result = readWithIndentation(code, { anchorLine: 2, limit: 1 })
+
+		expect(result.returnedLines).toBe(1)
+		expect(result.hasClippedLines).toBe(true)
+	})
+
+	it("keeps the single-line limit case unflagged when the line fits the cap", () => {
+		// Clipping is strictly-longer-than-cap, so a line at exactly the cap is
+		// shown in full and the read carries no clipping flag.
+		const code = ["short()", `fits(${"y".repeat(MAX_LINE_LENGTH - 6)})`, "tail()"].join("\n")
+		const result = readWithIndentation(code, { anchorLine: 2, limit: 1 })
+
+		expect(result.returnedLines).toBe(1)
+		expect(result.hasClippedLines).toBe(false)
+	})
+
+	it("flags a clipped line inside an expanded block", () => {
+		// The expansion returns every line of the block, but the long one is
+		// clipped in the returned view: the flag must be set even with no
+		// omission.
+		const code = ["start()", `long(${"x".repeat(MAX_LINE_LENGTH + 1)})`, "end()"].join("\n")
+		const result = readWithIndentation(code, { anchorLine: 2, limit: 10 })
+
+		expect(result.returnedLines).toBeGreaterThan(1)
+		expect(result.hasClippedLines).toBe(true)
+	})
+
+	it("keeps an expanded block unflagged when every line fits the cap", () => {
+		const code = ["start()", "mid()", "end()"].join("\n")
+		const result = readWithIndentation(code, { anchorLine: 2, limit: 10 })
+
+		expect(result.returnedLines).toBeGreaterThan(1)
+		expect(result.hasClippedLines).toBe(false)
+	})
+
 	describe("basic block extraction", () => {
 		it("should extract content around the anchor line", () => {
 			const result = readWithIndentation(PYTHON_CODE, {

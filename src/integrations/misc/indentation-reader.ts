@@ -279,6 +279,9 @@ export function readWithIndentation(content: string, options: IndentationReadOpt
 			totalLines,
 			returnedLines: 1,
 			wasTruncated: totalLines > 1,
+			// The single-line case is no exception to the clipping contract:
+			// formatWithLineNumbers clips this line when it exceeds the cap.
+			hasClippedLines: lines[anchorIdx].content.length > MAX_LINE_LENGTH,
 		}
 	}
 
@@ -361,6 +364,10 @@ export function readWithIndentation(content: string, options: IndentationReadOpt
 		totalLines,
 		returnedLines: result.length,
 		wasTruncated: wasTruncated && result.length < totalLines,
+		// The expansion path reports clipping like the slice path: a block can
+		// return every line it includes and still hide content behind the
+		// per-line length cap.
+		hasClippedLines: result.some((line) => line.content.length > MAX_LINE_LENGTH),
 	}
 }
 

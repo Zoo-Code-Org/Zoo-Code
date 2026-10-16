@@ -90,6 +90,8 @@ describe("Unicode clipping through the existing readers", () => {
 			totalLines: 3,
 			returnedLines: 1,
 			wasTruncated: true,
+			// The returned line is clipped, so the flag belongs to the result.
+			hasClippedLines: true,
 		})
 		expect(Buffer.from(result.content).toString("utf8")).toBe(result.content)
 	})
@@ -105,6 +107,8 @@ describe("Unicode clipping through the existing readers", () => {
 			totalLines: 5,
 			returnedLines: 3,
 			wasTruncated: false,
+			// The block shows every line it includes, but one is clipped.
+			hasClippedLines: true,
 		})
 		expect(Buffer.from(result.content).toString("utf8")).toBe(result.content)
 	})
