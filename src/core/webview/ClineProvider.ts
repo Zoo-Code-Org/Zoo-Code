@@ -2513,7 +2513,7 @@ export class ClineProvider
 		} catch {
 			// Best-effort: the selection restore is skipped when unreadable.
 		}
-		return { previousRecord: undefined, recordExisted: undefined, previousCurrentProfileName }
+		return { previousRecord: undefined, recordExisted: undefined, claimedCreate: false, previousCurrentProfileName }
 	}
 
 	/**
@@ -3111,7 +3111,7 @@ export class ClineProvider
 	public async repointViewLocalStateAfterProfileRename(
 		oldName: string,
 		newName: string,
-		renamedSettings: ProviderSettings | undefined,
+		renamedSettings: ProviderSettingsWithId | undefined,
 	): Promise<void> {
 		const affected = ClineProvider.getAllInstances().filter((instance) => instance.pinnedProfileName === oldName)
 

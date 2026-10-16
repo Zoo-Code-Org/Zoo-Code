@@ -3417,7 +3417,7 @@ describe("ClineProvider", () => {
 			const providerB = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
-				"tab",
+				"editor",
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
