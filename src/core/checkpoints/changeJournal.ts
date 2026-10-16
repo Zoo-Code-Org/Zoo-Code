@@ -88,6 +88,17 @@ function withTaskLock<T>(key: string, run: () => Promise<T>): Promise<T> {
  * Failures propagate: callers must not report a fully durable checkpoint
  * when the journal update did not complete.
  */
+/** True when a parsed JSON value is a complete journal record. */
+function isEntryShaped(value: unknown): value is ChangeJournalEntry {
+	return (
+		!!value &&
+		typeof value === "object" &&
+		typeof (value as ChangeJournalEntry).path === "string" &&
+		typeof (value as ChangeJournalEntry).checkpointId === "string" &&
+		["create", "update", "delete"].includes((value as ChangeJournalEntry).operation)
+	)
+}
+
 export async function appendChanges(
 	globalStorageDir: string,
 	taskId: string,
@@ -111,12 +122,21 @@ export async function appendChanges(
 				throw error
 			}
 		}
-		// Torn-tail repair: a crash can leave the final line unterminated - a
-		// fragment of a lost write. The replacement truncates that fragment
-		// instead of preserving it, so the journal only ever holds complete
-		// records and a later entry can never mask the lost one.
+		// Torn-tail repair: a crash can leave the final line unterminated. If
+		// that final line is a complete, entry-shaped JSON record it was fully
+		// written and only its newline was lost - keep it and re-terminate.
+		// Otherwise it is a fragment of a lost write and the replacement
+		// truncates it, so the journal only ever holds complete records and a
+		// later entry can never mask the lost one.
 		if (content && !content.endsWith("\n")) {
-			content = content.slice(0, content.lastIndexOf("\n") + 1)
+			const cut = content.lastIndexOf("\n") + 1
+			let tail: unknown
+			try {
+				tail = JSON.parse(content.slice(cut))
+			} catch {
+				tail = undefined
+			}
+			content = isEntryShaped(tail) ? content + "\n" : content.slice(0, cut)
 		}
 		const payload = entries.map((entry) => JSON.stringify(entry) + "\n").join("")
 		const tmpPath = path.join(dir, `${JOURNAL_FILENAME}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`)
@@ -136,16 +156,51 @@ export async function appendChanges(
 			} finally {
 				await handle.close()
 			}
-			await fs.rename(tmpPath, filePath)
+			// Windows can transiently reject a rename onto the existing journal
+			// (an antivirus or indexer holding the destination): retry with a
+			// short backoff before failing. The destination is never unlinked
+			// to make room, so atomicity is preserved on every failure.
+			const renameAttempts = process.platform === "win32" ? 5 : 1
+			for (let attempt = 1; ; attempt++) {
+				try {
+					await fs.rename(tmpPath, filePath)
+					break
+				} catch (error) {
+					const renameCode = (error as NodeJS.ErrnoException).code
+					if (
+						process.platform !== "win32" ||
+						attempt >= renameAttempts ||
+						!["EPERM", "EBUSY", "EACCES"].includes(renameCode ?? "")
+					) {
+						throw error
+					}
+					await new Promise((resolve) => setTimeout(resolve, 20 * attempt))
+				}
+			}
 			if (process.platform !== "win32") {
 				// The rename replaced the directory entry: on POSIX the
 				// directory itself must be synced for the new entry to
-				// survive a crash (Windows cannot open directories).
-				const dirHandle = await fs.open(dir, "r")
+				// survive a crash (Windows cannot open directories). The
+				// journal content is already in place at this point, so a
+				// sync failure means reduced crash durability, not a lost
+				// update: errnos that mean "fsync is unsupported on this
+				// mount" are tolerated and logged; any other failure still
+				// propagates.
 				try {
-					await dirHandle.sync()
-				} finally {
-					await dirHandle.close()
+					const dirHandle = await fs.open(dir, "r")
+					try {
+						await dirHandle.sync()
+					} finally {
+						await dirHandle.close()
+					}
+				} catch (error) {
+					const syncCode = (error as NodeJS.ErrnoException).code
+					if (!["EINVAL", "EISDIR", "EBADF", "ENOTSUP", "EOPNOTSUPP", "EPERM"].includes(syncCode ?? "")) {
+						throw error
+					}
+					console.warn(
+						`[changeJournal] directory sync unsupported after journal rename (${syncCode}); crash durability reduced`,
+					)
 				}
 			}
 		} catch (error) {
@@ -208,14 +263,8 @@ export async function loadChanges(globalStorageDir: string, taskId: string): Pro
 			// entry (a bare number, null, or a differently-shaped object).
 			// Consumers read path/checkpointId unguarded, so skip any line that
 			// is not entry-shaped instead of returning it as an entry.
-			if (
-				parsed &&
-				typeof parsed === "object" &&
-				typeof (parsed as ChangeJournalEntry).path === "string" &&
-				typeof (parsed as ChangeJournalEntry).checkpointId === "string" &&
-				["create", "update", "delete"].includes((parsed as ChangeJournalEntry).operation)
-			) {
-				entries.push(parsed as ChangeJournalEntry)
+			if (isEntryShaped(parsed)) {
+				entries.push(parsed)
 			}
 		} catch {
 			// A corrupt line before the final line (e.g. a partially flushed

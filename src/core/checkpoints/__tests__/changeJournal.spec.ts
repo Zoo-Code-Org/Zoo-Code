@@ -169,6 +169,128 @@ describe("changeJournal", () => {
 			expect(result.map((e) => e.checkpointId)).toEqual(["first", "second"])
 		})
 
+		it("preserves a complete final record that lost only its newline", async () => {
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "good" }))
+			// Simulate a crash that flushed a complete record but lost its
+			// terminating newline: the record is entry-shaped and parseable, so
+			// the repair must keep it and re-terminate instead of truncating.
+			const filePath = journalPath(tmpRoot, taskId)
+			const raw = await fs.readFile(filePath, "utf8")
+			await fs.writeFile(filePath, raw + JSON.stringify(entry({ checkpointId: "complete" })))
+
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "after" }))
+
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual(["good", "complete", "after"])
+		})
+
+		it("retries a Windows rename rejected with EPERM", async () => {
+			const platformDesc = Object.getOwnPropertyDescriptor(process, "platform")
+			Object.defineProperty(process, "platform", { value: "win32", configurable: true })
+			const realRename = fs.rename
+			let attempts = 0
+			const renameSpy = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+				attempts++
+				if (attempts === 1) {
+					throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+				}
+				await realRename(from as string | URL, to as string | URL)
+			})
+			try {
+				// An antivirus/indexer transiently holding the destination must
+				// not fail the append: the rename is retried with a short backoff.
+				await appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
+				expect(attempts).toBe(2)
+			} finally {
+				renameSpy.mockRestore()
+				if (platformDesc) Object.defineProperty(process, "platform", platformDesc)
+			}
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual(["first"])
+		})
+
+		it("does not retry a POSIX rename rejection", async () => {
+			const platformDesc = Object.getOwnPropertyDescriptor(process, "platform")
+			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
+			let attempts = 0
+			const renameSpy = vi.spyOn(fs, "rename").mockImplementation(async () => {
+				attempts++
+				throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+			})
+			try {
+				await expect(appendChange(tmpRoot, taskId, entry({ checkpointId: "x" }))).rejects.toMatchObject({
+					code: "EPERM",
+				})
+				expect(attempts).toBe(1)
+			} finally {
+				renameSpy.mockRestore()
+				if (platformDesc) Object.defineProperty(process, "platform", platformDesc)
+			}
+		})
+
+		it("tolerates an unsupported directory-sync errno after the rename (POSIX)", async () => {
+			const platformDesc = Object.getOwnPropertyDescriptor(process, "platform")
+			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
+			const dirPath = path.dirname(journalPath(tmpRoot, taskId))
+			const realOpen = fs.open
+			const openSpy = vi.spyOn(fs, "open").mockImplementation(async (pathish, flags) => {
+				const openAs = realOpen as (p: string | URL, f?: string) => Promise<fs.FileHandle>
+				const p = typeof pathish === "string" ? pathish : String(pathish)
+				if (p === dirPath && flags === "r") {
+					return {
+						sync: async () => {
+							throw Object.assign(new Error("EINVAL: invalid argument"), { code: "EINVAL" })
+						},
+						close: async () => {},
+					} as unknown as fs.FileHandle
+				}
+				return openAs(p, flags as string | undefined)
+			})
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			try {
+				// The rename already replaced the journal: an fsync-unsupported
+				// mount must not fail the update, only reduce crash durability.
+				await appendChange(tmpRoot, taskId, entry({ checkpointId: "kept" }))
+				expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("directory sync unsupported"))
+			} finally {
+				openSpy.mockRestore()
+				warnSpy.mockRestore()
+				if (platformDesc) Object.defineProperty(process, "platform", platformDesc)
+			}
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual(["kept"])
+		})
+
+		it("propagates a genuine directory-sync failure (POSIX)", async () => {
+			const platformDesc = Object.getOwnPropertyDescriptor(process, "platform")
+			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
+			const dirPath = path.dirname(journalPath(tmpRoot, taskId))
+			const realOpen = fs.open
+			const openSpy = vi.spyOn(fs, "open").mockImplementation(async (pathish, flags) => {
+				const openAs = realOpen as (p: string | URL, f?: string) => Promise<fs.FileHandle>
+				const p = typeof pathish === "string" ? pathish : String(pathish)
+				if (p === dirPath && flags === "r") {
+					return {
+						sync: async () => {
+							throw Object.assign(new Error("EIO: i/o error"), { code: "EIO" })
+						},
+						close: async () => {},
+					} as unknown as fs.FileHandle
+				}
+				return openAs(p, flags as string | undefined)
+			})
+			try {
+				// A real I/O failure is not an "unsupported" case: it still
+				// propagates so callers know durability is in doubt.
+				await expect(appendChange(tmpRoot, taskId, entry({ checkpointId: "x" }))).rejects.toMatchObject({
+					code: "EIO",
+				})
+			} finally {
+				openSpy.mockRestore()
+				if (platformDesc) Object.defineProperty(process, "platform", platformDesc)
+			}
+		})
+
 		it("serializes concurrent updates to the same task", async () => {
 			await Promise.all([
 				appendChange(tmpRoot, taskId, entry({ checkpointId: "c1" })),

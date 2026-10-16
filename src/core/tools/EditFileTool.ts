@@ -148,6 +148,7 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 		const { askApproval, handleError, pushToolResult } = callbacks
 		let relPathForErrorHandling: string | undefined
 		let operationPreviewForErrorHandling: string | undefined
+		let didWrite = false
 
 		const finalizePartialToolAskIfNeeded = async (relPath: string): Promise<void> => {
 			if (!this.didSendPartialToolAsk) {
@@ -458,13 +459,7 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 			}
 
 			task.didEditFile = true
-
-			// Get the formatted response message
-			const replacementInfo =
-				!isNewFile && expected_replacements > 1 ? ` (${expected_replacements} replacements)` : ""
-			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, isNewFile)
-
-			pushToolResult(message + replacementInfo)
+			didWrite = true
 
 			if (perWriteCheckpoints) {
 				// B2: the change-journal entry for this edit is appended inside
@@ -495,11 +490,16 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 				})
 			}
 
+			// Emitted only after checkpoint + journal persistence succeeded: a
+			// persistence failure must not report the edit as fully persisted.
+			const replacementInfo =
+				!isNewFile && expected_replacements > 1 ? ` (${expected_replacements} replacements)` : ""
+			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, isNewFile)
+
+			pushToolResult(message + replacementInfo)
+
 			await task.diffViewProvider.reset()
 			this.resetPartialState()
-
-			// Process any queued messages after file edit completes
-			task.processQueuedMessages()
 		} catch (error) {
 			if (relPathForErrorHandling) {
 				await finalizePartialToolAskIfNeeded(relPathForErrorHandling)
@@ -511,6 +511,13 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 			this.didSendPartialToolAsk = false
 			this.partialToolAskRelPath = undefined
 			this.resetPartialState()
+			// Hand off queued messages whenever the write itself succeeded -
+			// including when the post-write checkpoint/journal persistence then
+			// rejected (the write is real; upstream handed off after every
+			// successful write).
+			if (didWrite) {
+				task.processQueuedMessages()
+			}
 		}
 	}
 

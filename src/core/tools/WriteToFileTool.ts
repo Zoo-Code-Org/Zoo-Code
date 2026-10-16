@@ -97,6 +97,8 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			isProtected: isWriteProtected,
 		}
 
+		let didWrite = false
+
 		try {
 			task.consecutiveMistakeCount = 0
 
@@ -187,6 +189,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			}
 
 			task.didEditFile = true
+			didWrite = true
 
 			if (perWriteCheckpoints) {
 				// B2: the change-journal entry for this write is appended inside
@@ -228,14 +231,20 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			await task.diffViewProvider.reset()
 			this.resetPartialState()
 
-			task.processQueuedMessages()
-
 			return
 		} catch (error) {
 			await handleError("writing file", error as Error)
 			await task.diffViewProvider.reset()
 			this.resetPartialState()
 			return
+		} finally {
+			// Hand off queued messages whenever the write itself succeeded -
+			// including when the post-write checkpoint/journal persistence then
+			// rejected (the write is real; upstream handed off after every
+			// successful write).
+			if (didWrite) {
+				task.processQueuedMessages()
+			}
 		}
 	}
 
