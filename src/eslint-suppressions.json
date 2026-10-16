@@ -386,7 +386,7 @@
 	},
 	"api/providers/native-ollama.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 3
+			"count": 2
 		}
 	},
 	"api/providers/openai-codex.ts": {
