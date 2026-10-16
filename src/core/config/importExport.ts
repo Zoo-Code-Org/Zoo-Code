@@ -62,7 +62,7 @@ function sanitizeProviderConfig(configName: string, apiConfig: unknown): { confi
 	if (config.apiProvider !== undefined && !isProviderName(config.apiProvider)) {
 		const invalidProvider = config.apiProvider
 		// Return a new config object without the invalid apiProvider
-		const { apiProvider, ...restConfig } = config
+		const { apiProvider: _apiProvider, ...restConfig } = config
 		return {
 			config: restConfig,
 			warning: `Profile "${configName}": Invalid provider "${invalidProvider}" was removed. Please reconfigure this profile.`,
