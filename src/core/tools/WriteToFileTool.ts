@@ -182,15 +182,37 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 * still the empty file on disk and still owned. Remove it before reset() forgets the
 	 * ownership, or the empty file is stranded unowned: a later attempt would treat it as
 	 * the pre-existing target and a later denial's rollback would no longer delete it.
-	 * The dirty editor keeps the approved content for a manual save or retry. Failures
-	 * are logged, matching the other cleanup helpers in this file.
+	 * The dirty editor keeps the approved content for a manual save or retry. A removal
+	 * that fails (EPERM, EACCES) must not be swallowed: ownership is preserved (the
+	 * provider keeps placeholderPath when the unlink rejects) and the caller must skip
+	 * reset() - clearing the session would strand the placeholder unowned with no retry
+	 * path - and report the hazard instead. Returns whether the placeholder was removed.
 	 */
-	private async discardOwnedPlaceholderBeforeReset(task: Task): Promise<void> {
+	private async discardOwnedPlaceholderBeforeReset(task: Task): Promise<boolean> {
 		try {
 			await task.diffViewProvider.discardOwnedPlaceholder()
+			return true
 		} catch (placeholderError) {
 			console.error("Error removing the uncommitted write_to_file placeholder:", placeholderError)
+			return false
 		}
+	}
+
+	/**
+	 * Surface a placeholder this edit still owns but could not remove. Like the rollback
+	 * report, the hazard has to be visible in the chat: the empty file is still on disk,
+	 * still owned, and the diff session was left open for a retry instead of being reset.
+	 * A failing say must not abort the teardown, so its failure is logged only.
+	 */
+	private async reportPlaceholderStranded(task: Task): Promise<void> {
+		await task
+			.say(
+				"error",
+				"write_to_file: the placeholder created for this new file could not be removed after the failed write, so this edit still owns it and the diff session was left open for a retry instead of being reset.",
+			)
+			.catch((sayError) => {
+				console.error("Error reporting write_to_file stranded placeholder failure:", sayError)
+			})
 	}
 
 	private async finalizePartialToolAskAfterFailure(task: Task, text?: string): Promise<void> {
@@ -510,6 +532,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				// is the user's accepted edit -- keep it in the editor (dirty) so they can
 				// save it manually.
 				let reverted = true
+				let strandedPlaceholder = false
 				// Two independent stand-downs: the user approved this content, or the write is already
 				// durable. Either one makes a rollback undo something the user wanted rather than
 				// cleaning up this call's debris.
@@ -518,13 +541,19 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				} else if (writeApproved && !writeCommitted) {
 					// saveChanges() failed before its commit point: the write never persisted,
 					// so the owned empty placeholder must not be stranded unowned by reset().
-					await this.discardOwnedPlaceholderBeforeReset(task)
+					strandedPlaceholder = !(await this.discardOwnedPlaceholderBeforeReset(task))
 				}
-				await this.resetDiffViewAfterWrite(task)
+				if (!strandedPlaceholder) {
+					await this.resetDiffViewAfterWrite(task)
+				}
 				if (!reverted) {
 					// The restore failed, so the editor still holds content this task never approved.
 					// The error the user sees on this path is the write failure, not this one.
 					await this.reportRevertFailure(task)
+				} else if (strandedPlaceholder) {
+					// The placeholder is still on disk and still owned; reset() was skipped so
+					// the session keeps that ownership for a retry. Make the hazard visible.
+					await this.reportPlaceholderStranded(task)
 				}
 			}
 			return

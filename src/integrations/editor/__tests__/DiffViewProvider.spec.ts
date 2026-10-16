@@ -1251,6 +1251,18 @@ describe("DiffViewProvider", () => {
 			expect(diffViewProvider["placeholderPath"]).toBeUndefined()
 		})
 
+		it("discardOwnedPlaceholder() keeps ownership when the removal fails", async () => {
+			// An EPERM unlink must not release ownership: the placeholder is still on disk,
+			// and the caller needs the intact state to retry or to report the hazard.
+			diffViewProvider["placeholderPath"] = mockTargetPath
+			vi.mocked(fs.unlink).mockRejectedValueOnce(
+				Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" }),
+			)
+
+			await expect(diffViewProvider.discardOwnedPlaceholder()).rejects.toThrow("EPERM: operation not permitted")
+			expect(diffViewProvider["placeholderPath"]).toBe(mockTargetPath)
+		})
+
 		it("discardOwnedPlaceholder() is a no-op without ownership and tolerates a vanished file", async () => {
 			// An edit that never created a file must not unlink anything, and a placeholder
 			// that vanished externally is still a released ownership, not a new failure.

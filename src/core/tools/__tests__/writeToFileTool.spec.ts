@@ -1440,6 +1440,36 @@ describe("writeToFileTool", () => {
 			expect(order).toEqual(["discardPlaceholder", "reset"])
 		})
 
+		it("reports the stranded placeholder and skips the reset when its removal fails", async () => {
+			// Pre-commit save failure followed by an EPERM placeholder removal: the hazard
+			// must reach the user, and reset() must not run - it would clear the ownership
+			// and strand the empty placeholder unowned with no retry path.
+			mockCline.diffViewProvider.saveChanges.mockImplementationOnce(async () => {
+				throw new Error("Saving /test/path.txt was not confirmed; the write was not committed.")
+			})
+			mockCline.diffViewProvider.discardOwnedPlaceholder = vi
+				.fn()
+				.mockRejectedValue(Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" }))
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			try {
+				await executeWriteFileTool({}, { fileExists: false })
+
+				expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+				expect(mockCline.diffViewProvider.pushToolWriteResult).not.toHaveBeenCalled()
+				// The hazard is user-visible, not only a console line...
+				expect(mockCline.say).toHaveBeenCalledWith("error", expect.stringContaining("placeholder"))
+				// ...and ownership survives: reset() did not run to forget it.
+				expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"Error removing the uncommitted write_to_file placeholder:",
+					expect.any(Error),
+				)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
+
 		it("continues execute error cleanup when finalizing partial ask fails", async () => {
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 			try {
