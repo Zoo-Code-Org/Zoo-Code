@@ -5,7 +5,6 @@ import * as os from "os"
 
 import { PostCommitDurabilityError, StagingPathError } from "../../services/file-safety/safeWriteText"
 import { ConfinedPathEscapeError, safeWriteJson } from "../safeWriteJson"
-import * as lockfile from "proper-lockfile"
 import * as fileLockModule from "../fileLock"
 
 // Capture actual implementations before the vi.mock factory runs,
