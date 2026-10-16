@@ -172,12 +172,37 @@ describe("checkpointSave change-journal wiring (B2)", () => {
 		expect(entries.map((entry) => entry.operation)).toEqual(["create", "update", "delete"])
 	})
 
-	it("keeps the existing error-swallowing behavior and skips the journal on save failure", async () => {
+	it("keeps the existing error-swallowing behavior for non-write saves on failure", async () => {
+		// The legacy swallow (log + disable + resolve undefined) is reserved
+		// for checkpoint calls without write metadata, e.g. the task-start
+		// baseline: no file write has happened, so there is no orphaned write
+		// to report.
 		saveCheckpointSpy.mockRejectedValueOnce(new Error("git exploded"))
 
-		await expect(checkpointSave(mockTask as Task, false, true, write)).resolves.toBeUndefined()
+		await expect(checkpointSave(mockTask as Task)).resolves.toBeUndefined()
 		expect(mockTask.enableCheckpoints).toBe(false)
 		expect(await loadChanges(tmpStorageDir, TASK_ID)).toEqual([])
+	})
+
+	it("propagates a saveCheckpoint rejection for a write-metadata save", async () => {
+		// The file write already happened: swallowing the commit failure
+		// would report a tool success whose rollback metadata does not exist.
+		saveCheckpointSpy.mockRejectedValueOnce(new Error("git exploded"))
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+		await expect(checkpointSave(mockTask as Task, false, true, write)).rejects.toThrow(/no rollback metadata/)
+
+		// Checkpoints are still disabled on failure, and neither the journal
+		// nor the change card is written for a commit that never happened.
+		expect(mockTask.enableCheckpoints).toBe(false)
+		expect(await loadChanges(tmpStorageDir, TASK_ID)).toEqual([])
+		const cardCalls = vi.mocked(mockTask.say).mock.calls.filter((call) => call[0] === "change_card")
+		expect(cardCalls).toHaveLength(0)
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			expect.stringContaining("caught unexpected error"),
+			expect.anything(),
+		)
+		consoleErrorSpy.mockRestore()
 	})
 
 	it("does not write a journal entry when the checkpoint save is a no-op (empty commit)", async () => {

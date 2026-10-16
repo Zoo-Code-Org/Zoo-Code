@@ -1684,7 +1684,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.emit(RooCodeEventName.Message, { action: "created", message })
 		await this.saveClineMessages()
 
-		const shouldCaptureMessage = message.partial !== true && CloudService.isEnabled()
+		// Change cards embed raw unified diffs of approved writes (full
+		// detail mode): keep them local to the webview so task sync never
+		// uploads the content of secret-bearing files (.env, PII) to the
+		// cloud endpoint.
+		const shouldCaptureMessage =
+			message.partial !== true && CloudService.isEnabled() && message.say !== "change_card"
 
 		if (shouldCaptureMessage) {
 			CloudService.instance.captureEvent({
@@ -1734,8 +1739,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		await provider?.postMessageToWebview({ type: "messageUpdated", clineMessage: message })
 		this.emit(RooCodeEventName.Message, { action: "updated", message })
 
-		// Check if we should sync to cloud and haven't already synced this message
-		const shouldCaptureMessage = message.partial !== true && CloudService.isEnabled()
+		// Check if we should sync to cloud and haven't already synced this
+		// message. Change cards stay out of cloud capture (full diffs embed
+		// file content; see addToClineMessages) - the guard is repeated here
+		// because a card message is never tracked as synced.
+		const shouldCaptureMessage =
+			message.partial !== true && CloudService.isEnabled() && message.say !== "change_card"
 		const hasNotBeenSynced = !this.cloudSyncedMessageTimestamps.has(message.ts)
 
 		if (shouldCaptureMessage && hasNotBeenSynced) {
