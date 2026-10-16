@@ -40,6 +40,7 @@
 		"update_support_prompt": "Fehler beim Aktualisieren der Support-Nachricht",
 		"reset_support_prompt": "Fehler beim Zurücksetzen der Support-Nachricht",
 		"enhance_prompt": "Fehler beim Verbessern der Nachricht",
+		"commit_message_empty_response": "Das Modell hat eine leere Commit-Nachricht zurückgegeben.",
 		"get_system_prompt": "Fehler beim Abrufen der Systemnachricht",
 		"search_commits": "Fehler beim Suchen von Commits",
 		"save_api_config": "Fehler beim Speichern der API-Konfiguration",

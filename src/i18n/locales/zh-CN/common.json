@@ -45,6 +45,7 @@
 		"update_support_prompt": "更新支持消息失败",
 		"reset_support_prompt": "重置支持消息失败",
 		"enhance_prompt": "增强消息失败",
+		"commit_message_empty_response": "模型返回了空的提交信息。",
 		"get_system_prompt": "获取系统消息失败",
 		"search_commits": "搜索提交失败",
 		"save_api_config": "保存API配置失败",

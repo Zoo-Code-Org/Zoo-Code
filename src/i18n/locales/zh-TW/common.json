@@ -40,6 +40,7 @@
 		"update_support_prompt": "更新支援訊息失敗",
 		"reset_support_prompt": "重設支援訊息失敗",
 		"enhance_prompt": "增強訊息失敗",
+		"commit_message_empty_response": "模型回傳了空的提交訊息。",
 		"get_system_prompt": "取得系統訊息失敗",
 		"search_commits": "搜尋提交失敗",
 		"save_api_config": "儲存 API 設定失敗",
