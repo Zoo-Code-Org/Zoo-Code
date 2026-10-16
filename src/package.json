@@ -544,7 +544,7 @@
 		"zod": "3.25.76"
 	},
 	"devDependencies": {
-		"@ai-sdk/openai-compatible": "3.0.68",
+		"@ai-sdk/openai-compatible": "3.0.70",
 		"@roo-code/build": "workspace:^",
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
@@ -559,7 +559,7 @@
 		"@types/vscode": "1.100.0",
 		"@vitest/coverage-v8": "4.1.9",
 		"@vscode/vsce": "3.9.2",
-		"ai": "7.0.137",
+		"ai": "7.0.142",
 		"esbuild-wasm": "0.28.1",
 		"execa": "9.6.1",
 		"mkdirp": "3.0.1",
