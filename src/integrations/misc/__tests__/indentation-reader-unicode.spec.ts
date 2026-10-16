@@ -74,6 +74,7 @@ describe("Unicode clipping through the existing readers", () => {
 			totalLines: 3,
 			returnedLines: 1,
 			wasTruncated: true,
+			hasClippedLines: true,
 		})
 		expect(Buffer.from(result.content).toString("utf8")).toBe(result.content)
 	})
@@ -115,6 +116,7 @@ describe("Unicode clipping through the existing readers", () => {
 			totalLines: 1,
 			returnedLines: 1,
 			wasTruncated: false,
+			hasClippedLines: true,
 		})
 		expect(readWithSlice("")).toEqual({
 			content: "1 | ",
@@ -122,6 +124,7 @@ describe("Unicode clipping through the existing readers", () => {
 			totalLines: 1,
 			returnedLines: 1,
 			wasTruncated: false,
+			hasClippedLines: false,
 		})
 	})
 
@@ -132,6 +135,7 @@ describe("Unicode clipping through the existing readers", () => {
 			totalLines: 1,
 			returnedLines: 0,
 			wasTruncated: false,
+			hasClippedLines: false,
 		})
 		expect(readWithIndentation(longLine, { anchorLine: 0 })).toEqual({
 			content: "Error: anchor_line 0 is out of range (1-1)",
@@ -139,6 +143,7 @@ describe("Unicode clipping through the existing readers", () => {
 			totalLines: 1,
 			returnedLines: 0,
 			wasTruncated: false,
+			hasClippedLines: false,
 		})
 	})
 })
