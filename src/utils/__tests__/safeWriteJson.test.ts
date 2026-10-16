@@ -1108,19 +1108,23 @@ describe("safeWriteJson", () => {
 		const fsSyncMod = await import("fs")
 		const realOpen = fsSyncMod.openSync
 		const realFsync = fsSyncMod.fsyncSync
-		// A sentinel fd identifies the parent-directory open that safeWriteText
-		// performs after the commit rename; only that fsync fails.
-		const sentinel = 987654
+		// The parent-directory open that safeWriteText performs after the commit
+		// rename gets a REAL descriptor: safeWriteText closes it in its finally
+		// block, and a fabricated number would make closeSync fail with EBADF -
+		// a second failure behind the same wrapper, hiding which fsync broke.
+		const fsyncFailure = new Error("EIO fsync")
+		let dirFd: number | undefined
 		vi.spyOn(process, "platform", "get").mockReturnValue("linux")
 		vi.spyOn(fsSyncMod, "openSync").mockImplementation(((...args: unknown[]) => {
 			if (String(args[0]) === tempDir) {
-				return sentinel
+				dirFd = (realOpen as (p: string, f: string) => number)(tempDir, "r")
+				return dirFd
 			}
 			return (realOpen as (...a: unknown[]) => unknown)(...args)
 		}) as never)
 		vi.spyOn(fsSyncMod, "fsyncSync").mockImplementation(((fd: number) => {
-			if (fd === sentinel) {
-				throw new Error("EIO fsync")
+			if (fd === dirFd) {
+				throw fsyncFailure
 			}
 			return (realFsync as (f: number) => unknown)(fd)
 		}) as never)
@@ -1128,9 +1132,13 @@ describe("safeWriteJson", () => {
 		// Earlier tests in this file leave unlink history on the shared mock.
 		vi.mocked(fs.unlink).mockClear()
 
-		await expect(safeWriteJson(currentTestFilePath, { fresh: "content" })).rejects.toBeInstanceOf(
-			PostCommitDurabilityError,
+		const failure: unknown = await safeWriteJson(currentTestFilePath, { fresh: "content" }).then(
+			() => null,
+			(error: unknown) => error,
 		)
+		expect(failure).toBeInstanceOf(PostCommitDurabilityError)
+		// The wrapper must carry the injected fsync failure, not a cleanup error.
+		expect((failure as Error).cause).toBe(fsyncFailure)
 
 		// The rename committed: the target must still hold the new JSON, not be
 		// unlinked away by the catch cleanup of the consumed staging path.
