@@ -1939,7 +1939,7 @@ describe("ClineProvider", () => {
 			const sibling = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
-				"tab-2",
+				"editor",
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
