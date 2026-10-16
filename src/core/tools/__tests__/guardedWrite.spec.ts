@@ -365,6 +365,32 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
 
+		it("refuses a target whose leaf is a dangling symlink", async () => {
+			// realpath reports ENOENT for a dangling leaf exactly as for a missing
+			// file, and the ancestor walk then authorizes the lexical path. The
+			// publish resolves the name again - it could follow a referent the
+			// guard never checked - so a dangling leaf is refused before publish.
+			const leaf = path.join(path.resolve(WORKSPACE), "ghost.txt")
+			mockedFsRealpath.mockImplementation(async (p) => {
+				const s = String(p)
+				if (s === path.resolve(WORKSPACE)) return path.resolve(WORKSPACE)
+				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			})
+			mockedFsLstat.mockImplementation(async (p) => {
+				if (String(p) === leaf) {
+					return { isSymbolicLink: () => true } as never
+				}
+				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			})
+			const task = createMockTask()
+
+			await expect(guardedWrite(task, "ghost.txt", "data", "create")).rejects.toThrow(
+				"link that does not resolve",
+			)
+
+			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+		})
+
 		it("re-checks containment under the lock, after the wait on the FIFO chain", async () => {
 			// The path was inside the workspace when it was queued; a link is swapped in while the
 			// write waits. The publish must not follow the new link.
