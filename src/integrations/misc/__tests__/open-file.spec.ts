@@ -171,6 +171,30 @@ describe("openFile", () => {
 			expect(vscode.workspace.openTextDocument).toHaveBeenCalled()
 			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
 		})
+
+		it("should not decode a validated path when skipDecode is set", async () => {
+			// Change-card paths are filesystem paths: a file literally named
+			// "a%20b.ts" must open as named, not decoded to "a b.ts".
+			const literalPath = "./src/a%20b.ts"
+			// Structural double: the mock Uri.file returns plain {fsPath} objects,
+			// matching the documented test-double style of this file.
+			const mockDocument = { uri: { fsPath: literalPath } } as unknown as vscode.TextDocument
+
+			vi.mocked(vscode.workspace.fs.stat).mockResolvedValue({
+				type: vscode.FileType.File,
+				ctime: 0,
+				mtime: 0,
+				size: 0,
+			})
+			vi.mocked(vscode.workspace.openTextDocument).mockResolvedValue(mockDocument)
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue({} as vscode.TextEditor)
+
+			await openFile(literalPath, { skipDecode: true })
+
+			expect(vscode.Uri.file).toHaveBeenCalledWith(expect.stringContaining("a%20b.ts"))
+			expect(vscode.Uri.file).not.toHaveBeenCalledWith(expect.stringContaining("a b.ts"))
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("error handling", () => {

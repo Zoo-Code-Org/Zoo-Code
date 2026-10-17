@@ -268,11 +268,9 @@ describe("checkpointSave change-journal wiring (B2)", () => {
 		// Documented contract: user-disabled checkpoints means the absence of
 		// rollback metadata is the user's choice, so the save must not fail the
 		// write tool (no journal entry, no change card, no throw). Genuine
-		// init-failure coverage lives in checkpointSave.spec.ts. The
-		// persisted setting agrees the user disabled checkpoints (an unset
-		// setting would mean an earlier failure flipped the task flag).
+		// init-failure coverage lives in checkpointSave.spec.ts. No
+		// checkpointsDisabledByFailure flag is set: the flip is a user choice.
 		mockTask.enableCheckpoints = false
-		mockProvider.getState = vi.fn().mockResolvedValue({ enableCheckpoints: false })
 
 		await expect(checkpointSave(mockTask as Task, false, true, write)).resolves.toBeUndefined()
 		expect(saveCheckpointSpy).not.toHaveBeenCalled()
@@ -410,7 +408,7 @@ describe("loadChanges entry-shape validation (B2)", () => {
 		await fs.rm(tmpStorageDir, { recursive: true, force: true })
 	})
 
-	it("skips lines that are valid JSON but not entry-shaped", async () => {
+	it("rejects middle lines that are valid JSON but not entry-shaped", async () => {
 		const dir = path.join(tmpStorageDir, "tasks", TASK_ID, "checkpoints")
 		await fs.mkdir(dir, { recursive: true })
 		const valid = JSON.stringify({ path: "src/a.ts", operation: "create", checkpointId: "c1" })

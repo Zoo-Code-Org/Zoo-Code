@@ -1677,21 +1677,15 @@ export const webviewMessageHandler = async (
 				}
 				filePath = decoded
 			} else if (fromChangeCard) {
-				// Change-card rows post raw workspace paths, but a path may
-				// still carry percent-escapes. Decode to a fixed point at the
-				// containment boundary (same rule as markdown) so openFile's
-				// later single decode cannot shift a validated path outside
-				// the workspace: a double-encoded request such as
-				// `./%252e%252e/%252e%252e/.env` passes containment as a
-				// literal and escapes only after that later decode. A bare
-				// `%` that is not a valid escape stays unchanged (literal
-				// names like "100%.txt"); a non-stabilizing encoding rejects.
-				const decoded = decodeUntrustedPathToStable(rawPath)
-				if (decoded === null) {
-					rejectOutsideWorkspace()
-					break
-				}
-				filePath = decoded
+				// Change-card rows post raw filesystem paths, not URL targets:
+				// validate the raw path and stop openFile from decoding it
+				// (skipDecode below), so a literal percent escape in a filename
+				// (`src/a%20b.ts`) opens the file it names. Decoding here would
+				// shift the path after containment and open the wrong file; a
+				// percent-encoded traversal (`%2e%2e`) stays a literal directory
+				// name, stays inside the workspace, and never shifts after
+				// validation because nothing decodes it afterwards.
+				filePath = rawPath
 			}
 			if (!path.isAbsolute(filePath)) {
 				const cwd = getCurrentCwd()
@@ -1719,13 +1713,28 @@ export const webviewMessageHandler = async (
 			}
 			await openFile(
 				filePath,
-				message.values as {
-					create?: boolean
-					content?: string
-					line?: number
-					fromMarkdown?: boolean
-					fromChangeCard?: boolean
-				},
+				// Change-card paths were validated raw above: openFile must not
+				// decode them afterwards. Other callers keep the historical
+				// best-effort decode (markdown reached a fixed point at the
+				// boundary, so its later decode is a no-op).
+				fromChangeCard && message.values
+					? {
+							...(message.values as {
+								create?: boolean
+								content?: string
+								line?: number
+								fromMarkdown?: boolean
+								fromChangeCard?: boolean
+							}),
+							skipDecode: true,
+						}
+					: (message.values as {
+							create?: boolean
+							content?: string
+							line?: number
+							fromMarkdown?: boolean
+							fromChangeCard?: boolean
+						}),
 			)
 			break
 		}

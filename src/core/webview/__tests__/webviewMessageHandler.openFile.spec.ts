@@ -284,7 +284,10 @@ describe("webviewMessageHandler - openFile markdown workspace containment", () =
 			values: { fromChangeCard: true },
 		})
 
-		expect(openFile).toHaveBeenCalledWith(nodePath.join(MOCK_CWD, "src/a.ts"), { fromChangeCard: true })
+		expect(openFile).toHaveBeenCalledWith(nodePath.join(MOCK_CWD, "src/a.ts"), {
+			fromChangeCard: true,
+			skipDecode: true,
+		})
 		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
 	})
 
@@ -310,46 +313,71 @@ describe("webviewMessageHandler - openFile markdown workspace containment", () =
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(cannotAccessPathError(OUTSIDE_ABS))
 	})
 
-	it("rejects a percent-encoded traversal posted by a change card", async () => {
-		// openFile decodes after containment, so the card path is decoded once
-		// at the boundary first: "%2e%2e" must not survive into a traversal.
+	it("treats percent-encoded dots in a change-card path as literal names", async () => {
+		// Change-card rows are filesystem paths, not URL targets: "%2e%2e" is
+		// a literal directory name, stays inside the workspace, and nothing
+		// decodes it after containment (skipDecode), so it can never shift
+		// into a traversal.
 		await webviewMessageHandler(mockProvider, {
 			type: "openFile",
 			text: "./%2e%2e/%2e%2e/.env",
 			values: { fromChangeCard: true },
 		})
 
-		expect(openFile).not.toHaveBeenCalled()
-		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(cannotAccessPathError("./%2e%2e/%2e%2e/.env"))
+		expect(openFile).toHaveBeenCalledWith(nodePath.join(MOCK_CWD, "%2e%2e", "%2e%2e", ".env"), {
+			fromChangeCard: true,
+			skipDecode: true,
+		})
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
 	})
 
-	it("rejects a double-encoded traversal posted by a change card", async () => {
-		// The single boundary decode left `./%2e%2e/%2e%2e/.env` inside the
-		// workspace as a literal; openFile's later decode would then escape
-		// to `../../.env`. Decoding to a fixed point at the containment
-		// boundary rejects the request before openFile ever runs.
+	it("treats a double-encoded change-card path as a literal name", async () => {
+		// Nothing decodes a change-card path after containment, so a
+		// double-encoded traversal stays a literal directory name: it cannot
+		// escape the workspace in a later decode step.
 		await webviewMessageHandler(mockProvider, {
 			type: "openFile",
 			text: "./%252e%252e/%252e%252e/.env",
 			values: { fromChangeCard: true },
 		})
 
-		expect(openFile).not.toHaveBeenCalled()
-		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-			cannotAccessPathError("./%252e%252e/%252e%252e/.env"),
-		)
+		expect(openFile).toHaveBeenCalledWith(nodePath.join(MOCK_CWD, "%252e%252e", "%252e%252e", ".env"), {
+			fromChangeCard: true,
+			skipDecode: true,
+		})
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
 	})
 
 	it("opens a change-card file whose name legitimately contains a percent sign", async () => {
-		// "100%.txt" is not a valid percent-encoding: the best-effort decode
-		// keeps the literal name (the same fallback openFile applies).
+		// "100%.txt" is a literal filesystem name: the raw path is validated
+		// and opened without any decode.
 		await webviewMessageHandler(mockProvider, {
 			type: "openFile",
 			text: "./100%.txt",
 			values: { fromChangeCard: true },
 		})
 
-		expect(openFile).toHaveBeenCalledWith(nodePath.join(MOCK_CWD, "100%.txt"), { fromChangeCard: true })
+		expect(openFile).toHaveBeenCalledWith(nodePath.join(MOCK_CWD, "100%.txt"), {
+			fromChangeCard: true,
+			skipDecode: true,
+		})
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+	})
+
+	it("opens a change-card file whose name contains a literal percent escape", async () => {
+		// A file literally named "a%20b.ts" must open as named: decoding it
+		// (the old boundary behavior) would open "a b.ts" instead - the wrong
+		// file when both exist, or a failure when only the literal exists.
+		await webviewMessageHandler(mockProvider, {
+			type: "openFile",
+			text: "./src/a%20b.ts",
+			values: { fromChangeCard: true },
+		})
+
+		expect(openFile).toHaveBeenCalledWith(nodePath.join(MOCK_CWD, "src", "a%20b.ts"), {
+			fromChangeCard: true,
+			skipDecode: true,
+		})
 		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
 	})
 

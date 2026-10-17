@@ -345,7 +345,7 @@ describe("changeJournal", () => {
 			expect(leftovers).toEqual([])
 		})
 
-		it("recovers after a crash left a stale temp file and a torn tail", async () => {
+		it("recovers after a crash left a stale temp file", async () => {
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "before" }))
 			const dir = path.dirname(journalPath(tmpRoot, taskId))
 			// A crash between the temp write and the rename leaves an orphan temp

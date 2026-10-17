@@ -511,6 +511,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	checkpointTimeout: number
 	checkpointService?: RepoPerTaskCheckpointService
 	checkpointServiceInitializing = false
+	// Set when checkpoints were disabled by a failure (init, save, restore,
+	// or diff), so checkpointSave can distinguish an earlier failure from a
+	// user who never enabled checkpoints, without inferring it from live
+	// settings (which can change after the task started).
+	checkpointsDisabledByFailure = false
 
 	// Message Queue Service
 	public readonly messageQueueService: MessageQueueService

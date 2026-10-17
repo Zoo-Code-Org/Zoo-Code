@@ -28,6 +28,16 @@ function sendCheckpointInitWarn(task: Task, type?: "WAIT_TIMEOUT" | "INIT_TIMEOU
 	})
 }
 
+// Every checkpoint disable in this module is failure-driven (init, save,
+// restore, or diff). Route the flip through this helper so checkpointSave
+// can tell an earlier failure apart from a user who never enabled
+// checkpoints: the persisted setting cannot make that distinction (it can
+// change after the task started).
+function disableCheckpointsAfterFailure(task: Task): void {
+	task.enableCheckpoints = false
+	task.checkpointsDisabledByFailure = true
+}
+
 export async function getCheckpointService(task: Task, { interval = 250 }: { interval?: number } = {}) {
 	if (!task.enableCheckpoints) {
 		return undefined
@@ -59,7 +69,7 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 
 		if (!workspaceDir) {
 			log("[Task#getCheckpointService] workspace folder not found, disabling checkpoints")
-			task.enableCheckpoints = false
+			disableCheckpointsAfterFailure(task)
 			return undefined
 		}
 
@@ -67,7 +77,7 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 
 		if (!globalStorageDir) {
 			log("[Task#getCheckpointService] globalStorageDir not found, disabling checkpoints")
-			task.enableCheckpoints = false
+			disableCheckpointsAfterFailure(task)
 			return undefined
 		}
 
@@ -101,7 +111,7 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 			)
 			if (!task?.checkpointService) {
 				sendCheckpointInitWarn(task, "INIT_TIMEOUT", task.checkpointTimeout)
-				task.enableCheckpoints = false
+				disableCheckpointsAfterFailure(task)
 				return undefined
 			} else {
 				sendCheckpointInitWarn(task)
@@ -126,7 +136,7 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 			sendCheckpointInitWarn(task, "INIT_TIMEOUT", task.checkpointTimeout)
 		}
 		log(`[Task#getCheckpointService] ${err.message}`)
-		task.enableCheckpoints = false
+		disableCheckpointsAfterFailure(task)
 		task.checkpointServiceInitializing = false
 		return undefined
 	}
@@ -143,7 +153,7 @@ async function checkGitInstallation(
 
 		if (!gitInstalled) {
 			log("[Task#getCheckpointService] Git is not installed, disabling checkpoints")
-			task.enableCheckpoints = false
+			disableCheckpointsAfterFailure(task)
 			task.checkpointServiceInitializing = false
 
 			// Show user-friendly notification
@@ -192,7 +202,7 @@ async function checkGitInstallation(
 			} catch (err) {
 				log("[Task#getCheckpointService] caught unexpected error in on('checkpoint'), disabling checkpoints")
 				console.error(err)
-				task.enableCheckpoints = false
+				disableCheckpointsAfterFailure(task)
 			}
 		})
 
@@ -202,12 +212,12 @@ async function checkGitInstallation(
 			await service.initShadowGit()
 		} catch (err) {
 			log(`[Task#getCheckpointService] initShadowGit -> ${err.message}`)
-			task.enableCheckpoints = false
+			disableCheckpointsAfterFailure(task)
 		}
 	} catch (err) {
 		log(`[Task#getCheckpointService] Unexpected error during Git check: ${err.message}`)
 		console.error("Git check error:", err)
-		task.enableCheckpoints = false
+		disableCheckpointsAfterFailure(task)
 		task.checkpointServiceInitializing = false
 	}
 }
@@ -276,27 +286,31 @@ export async function checkpointSave(
 	// the user expects checkpoints" (throw).
 	const checkpointsRequested = task.enableCheckpoints
 
-	const service = await getCheckpointService(task)
+	let service = await getCheckpointService(task)
 
 	if (!service) {
-		let requested = checkpointsRequested
-		if (hasWriteMetadata && !requested) {
-			// The task flag also flips off when an EARLIER failure disabled
-			// checkpoints (a failed service init, or the save-failure handlers
-			// below). The persisted setting still carries the user's intent
-			// (unset defaults to enabled, matching Task construction), so a
-			// write-metadata save after such a failure must throw too instead
-			// of silently proceeding with no rollback metadata. Only a user who
-			// disabled checkpoints in settings resolves silently.
-			const state = await task.providerRef.deref()?.getState()
-			requested = state?.enableCheckpoints ?? true
+		if (hasWriteMetadata && !checkpointsRequested && task.checkpointsDisabledByFailure) {
+			// An earlier failure (init or save) disabled checkpoints while the
+			// user never turned them off. Attempt one recovery so a single
+			// transient failure (e.g. index.lock contention) does not
+			// permanently fail every later write in the task: reuse a live
+			// service handle when one exists (a save failure does not
+			// invalidate the handle), otherwise retry initialization once. The
+			// persisted setting cannot make this decision - it can change
+			// after the task started, and enabling checkpoints mid-task must
+			// not retroactively fail writes that were never promised a
+			// checkpoint.
+			task.enableCheckpoints = true
+			service = task.checkpointService ?? (await getCheckpointService(task))
 		}
-		if (hasWriteMetadata && requested) {
-			throw new Error(
-				"Checkpoint save with write metadata could not initialize the checkpoint service; the write has no rollback metadata.",
-			)
+		if (!service) {
+			if (hasWriteMetadata && (checkpointsRequested || task.checkpointsDisabledByFailure)) {
+				throw new Error(
+					"Checkpoint save with write metadata could not initialize the checkpoint service; the write has no rollback metadata.",
+				)
+			}
+			return
 		}
-		return
 	}
 
 	TelemetryService.instance.captureCheckpointCreated(task.taskId)
@@ -339,7 +353,7 @@ export async function checkpointSave(
 				result = await savePromise
 			} catch (err) {
 				console.error("[Task#checkpointSave] caught unexpected error, disabling checkpoints", err)
-				task.enableCheckpoints = false
+				disableCheckpointsAfterFailure(task)
 				throw new Error(
 					`Checkpoint save failed after a file write; the write has no rollback metadata: ${err instanceof Error ? err.message : String(err)}`,
 					{ cause: err },
@@ -348,7 +362,7 @@ export async function checkpointSave(
 		} else {
 			result = await savePromise.catch((err) => {
 				console.error("[Task#checkpointSave] caught unexpected error, disabling checkpoints", err)
-				task.enableCheckpoints = false
+				disableCheckpointsAfterFailure(task)
 			})
 		}
 		// Paths excluded from the shadow repository (node_modules, build
@@ -528,7 +542,7 @@ export async function checkpointRestore(
 		provider?.cancelTask()
 	} catch {
 		provider?.log("[checkpointRestore] disabling checkpoints for this task")
-		task.enableCheckpoints = false
+		disableCheckpointsAfterFailure(task)
 	}
 }
 
@@ -618,6 +632,6 @@ export async function checkpointDiff(task: Task, { commitHash, mode }: Checkpoin
 	} catch {
 		const provider = task.providerRef.deref()
 		provider?.log("[checkpointDiff] disabling checkpoints for this task")
-		task.enableCheckpoints = false
+		disableCheckpointsAfterFailure(task)
 	}
 }
