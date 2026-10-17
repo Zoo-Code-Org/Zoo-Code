@@ -21,6 +21,8 @@ overrides:
   '@types/react-dom': 18.3.7
   csstype: 3.2.3
   zod: 4.6.7
+  '@lmstudio/sdk>zod': 3.25.76
+  knip>zod: 3.25.76
   katex: 0.18.2
 
 importers:
@@ -392,9 +394,6 @@ importers:
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.0)(@types/node@22.20.1)(@vitest/coverage-v8@4.1.9)(@vitest/ui@4.1.9)(jsdom@26.1.0)(vite@8.1.0(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
-      zod-to-json-schema:
-        specifier: 3.25.2
-        version: 3.25.2(zod@4.6.7)
 
   packages/vscode-shim:
     devDependencies:
@@ -8902,6 +8901,9 @@ packages:
     peerDependencies:
       zod: 4.6.7
 
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
   zod@4.6.7:
     resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
@@ -10263,8 +10265,8 @@ snapshots:
       '@lmstudio/lms-isomorphic': 0.4.6
       chalk: 4.1.2
       jsonschema: 1.5.0
-      zod: 4.6.7
-      zod-to-json-schema: 3.25.2(zod@4.6.7)
+      zod: 3.25.76
+      zod-to-json-schema: 3.25.2(zod@3.25.76)
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -14771,8 +14773,8 @@ snapshots:
       smol-toml: 1.7.0
       strip-json-comments: 5.0.2
       typescript: 5.9.3
-      zod: 4.6.7
-      zod-validation-error: 3.5.4(zod@4.6.7)
+      zod: 3.25.76
+      zod-validation-error: 3.5.4(zod@3.25.76)
 
   koa-compose@4.1.0: {}
 
@@ -17974,13 +17976,19 @@ snapshots:
       compress-commons: 4.1.2
       readable-stream: 3.6.2
 
+  zod-to-json-schema@3.25.2(zod@3.25.76):
+    dependencies:
+      zod: 3.25.76
+
   zod-to-json-schema@3.25.2(zod@4.6.7):
     dependencies:
       zod: 4.6.7
 
-  zod-validation-error@3.5.4(zod@4.6.7):
+  zod-validation-error@3.5.4(zod@3.25.76):
     dependencies:
-      zod: 4.6.7
+      zod: 3.25.76
+
+  zod@3.25.76: {}
 
   zod@4.6.7: {}
 

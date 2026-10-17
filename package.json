@@ -80,6 +80,8 @@
 			"@types/react-dom": "18.3.7",
 			"csstype": "3.2.3",
 			"zod": "4.6.7",
+			"@lmstudio/sdk>zod": "3.25.76",
+			"knip>zod": "3.25.76",
 			"katex": "0.18.2"
 		}
 	}
