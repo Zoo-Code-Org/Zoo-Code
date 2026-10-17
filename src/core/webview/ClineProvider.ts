@@ -2695,12 +2695,22 @@ export class ClineProvider
 			)
 		}
 		try {
-			// Restore the exact pre-activation map through the serialized view-state
-			// queue, last so it wins over the overlay restore's own pin write: a
-			// sibling the activation's pruning evicted comes back with its original
-			// entry metadata.
+			// Restore pruned siblings through the serialized view-state queue, last
+			// so it lands after the overlay restore's own pin write: a sibling the
+			// activation's pruning evicted comes back with its original entry
+			// metadata. Merge, do not replace: the mutation queue is per-instance,
+			// so sibling views keep writing to the durable map while an activation
+			// group is in flight, and replaying the snapshot would silently revert
+			// those newer writes.
 			const restore = ClineProvider.persistedViewStateWriteQueue.then(async () => {
-				await this.contextProxy.setValue("viewStates", { ...snapshot.viewStates })
+				const current = this.getPersistedViewStates({ fresh: true })
+				const merged = { ...current }
+				for (const [viewId, entry] of Object.entries(snapshot.viewStates)) {
+					if (!(viewId in merged)) {
+						merged[viewId] = entry
+					}
+				}
+				await this.contextProxy.setValue("viewStates", merged)
 			})
 			ClineProvider.persistedViewStateWriteQueue = restore.catch(() => {})
 			await restore
@@ -3363,7 +3373,8 @@ export class ClineProvider
 
 			const activationSnapshot = this._snapshotProfileActivationState()
 			try {
-				await Promise.all([
+				// `allSettled` so the compensation below never races a write still in flight.
+				const activationResults = await Promise.allSettled([
 					this.contextProxy.setValue("listApiConfigMeta", listApiConfigMeta),
 					// Route through setValue so the in-memory viewLocalState buffer tracks the
 					// activated profile: a plain ContextProxy write would leave a stale loaded
@@ -3376,6 +3387,11 @@ export class ClineProvider
 					// new settings in getState().
 					this._saveViewLocalStateFromMutation({ apiConfiguration: undefined }),
 				])
+				const failedActivation = activationResults.find(
+					(result): result is PromiseRejectedResult => result.status === `rejected`,
+				)
+
+				if (failedActivation) throw failedActivation.reason
 			} catch (error) {
 				// Compensate every write that may have landed before the failure,
 				// including the manager selection written by activateProfile.
