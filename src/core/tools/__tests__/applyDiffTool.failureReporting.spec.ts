@@ -325,6 +325,27 @@ describe("ApplyDiffTool failure reporting", () => {
 			expect(output).not.toContain("re-apply")
 		})
 
+		it.each(["\n", "\r\n"])(
+			"counts only unescaped line-level SEARCH markers with %j endings",
+			async (lineEnding) => {
+				const diff = [
+					"<<<<<<< SEARCH>  ",
+					"\\<<<<<<< SEARCH",
+					"inline <<<<<<< SEARCH",
+					"<<<<<<< SEARCHING",
+					"=======",
+					"replacement",
+					">>>>>>> REPLACE",
+					buildDiffContent(1),
+				]
+					.join("\n")
+					.replace(/\n/g, lineEnding)
+				const output = await runApplyDiff(partialResult(makeFailureSet(1)), 2, diff)
+
+				expect(output).toContain("Applied 1 of 2 diff blocks")
+			},
+		)
+
 		it("states how many blocks did not apply", async () => {
 			const output = await runApplyDiff(partialResult(makeFailureSet(2)), 3)
 

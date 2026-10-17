@@ -234,8 +234,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 			// Used to determine if we should wait for busy terminal to update before sending api request
 			task.didEditFile = true
 
-			// Literal SEARCH markers inside content can inflate this advisory count.
-			const searchBlocks = (diffContent.match(/<<<<<<< SEARCH/g) || []).length
+			const searchBlocks = (diffContent.match(/^<<<<<<< SEARCH>?[^\S\r\n]*\r?$/gm) || []).length
 			const unappliedParts = diffResult.failParts?.filter((part) => !part.success) ?? []
 			let partFailHint = ""
 
