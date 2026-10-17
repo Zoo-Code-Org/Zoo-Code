@@ -1,6 +1,8 @@
 // npx vitest run core/task/__tests__/Task.run-shadow.spec.ts
 
+import * as vscode from "vscode"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
+import { TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { makeExtensionContext, makeUri } from "../../../test-utils/vscode"
@@ -11,10 +13,13 @@ import { initialRunState } from "../run-state/runState"
 vi.mock("../../../i18n", () => ({ t: (key: string) => key }))
 vi.mock("../../ignore/RooIgnoreController")
 
-function makeTask(): Task {
+function makeTask(extensionMode = vscode.ExtensionMode.Production): Task {
 	const provider = {
 		log: vi.fn(),
-		context: makeExtensionContext({ globalStorageUri: makeUri("/mock/global-storage") }),
+		context: makeExtensionContext({
+			globalStorageUri: makeUri("/mock/global-storage"),
+			extensionMode,
+		}),
 	}
 	// Double cast: the constructor reads only these provider members.
 	return new Task({
@@ -127,5 +132,73 @@ describe("Task run-state write helpers", () => {
 		expect(task.abortReason).toBe("user_cancelled")
 		expect(task.runState.latches.reason).toBe("user_cancelled")
 		expect(task.runRejections).toEqual([])
+	})
+})
+
+describe("Task run-state divergence report", () => {
+	let warn: ReturnType<typeof vi.spyOn>
+	let captureEvent: ReturnType<typeof vi.spyOn>
+
+	const divergenceMetrics = () =>
+		captureEvent.mock.calls.filter(
+			([name]: unknown[]) =>
+				name === TelemetryEventName.RUN_STATE_DIVERGENCE || name === TelemetryEventName.RUN_STATE_KNOWN_RACE,
+		)
+
+	const divergenceWarnings = () =>
+		warn.mock.calls.filter(([message]: unknown[]) => message === "[RunState] divergence")
+
+	beforeEach(() => {
+		if (!TelemetryService.hasInstance()) {
+			TelemetryService.createInstance([])
+		}
+		warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+		captureEvent = vi.spyOn(TelemetryService.instance, "captureEvent").mockImplementation(() => {})
+	})
+
+	afterEach(() => {
+		vi.restoreAllMocks()
+	})
+
+	it("logs and counts a rejected event once when the check is enabled", () => {
+		const task = makeTask(vscode.ExtensionMode.Test)
+
+		task.requestAbandon()
+
+		expect(divergenceWarnings()).toHaveLength(1)
+		expect(divergenceWarnings()[0][1]).toMatchObject({
+			taskId: task.taskId,
+			kind: "rejection",
+			event: { tag: "abandonRequested" },
+			state: initialRunState,
+			mismatched: [],
+		})
+		expect(divergenceMetrics()).toEqual([
+			[
+				TelemetryEventName.RUN_STATE_DIVERGENCE,
+				expect.objectContaining({ taskId: task.taskId, kind: "rejection", eventTag: "abandonRequested" }),
+			],
+		])
+	})
+
+	it("reports a repeated rejection of the same event once per task", () => {
+		const task = makeTask(vscode.ExtensionMode.Test)
+
+		task.requestAbandon()
+		task.requestAbandon()
+
+		expect(task.runRejections).toHaveLength(2)
+		expect(divergenceWarnings()).toHaveLength(1)
+		expect(divergenceMetrics()).toHaveLength(1)
+	})
+
+	it("stays silent for a production build on the stable channel", () => {
+		const task = makeTask(vscode.ExtensionMode.Production)
+
+		task.requestAbandon()
+
+		expect(task.runRejections).toHaveLength(1)
+		expect(divergenceWarnings()).toHaveLength(0)
+		expect(divergenceMetrics()).toHaveLength(0)
 	})
 })

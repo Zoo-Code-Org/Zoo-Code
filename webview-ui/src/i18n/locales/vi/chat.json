@@ -113,6 +113,15 @@
 	},
 	"selectMode": "Chọn chế độ tương tác",
 	"selectApiConfig": "Chọn cấu hình API",
+	"selectModel": "Chọn mô hình",
+	"modelSelector": {
+		"title": "Mô hình",
+		"settings": "Cài đặt mô hình",
+		"description": "Chọn mô hình được dùng cho cấu hình API này.",
+		"searchPlaceholder": "Tìm kiếm mô hình...",
+		"unsupportedTooltip": "Mô hình của nhà cung cấp này được cấu hình trong Cài đặt",
+		"loading": "Đang tải mô hình..."
+	},
 	"lockApiConfigAcrossModes": "Khóa cấu hình API cho tất cả chế độ trong workspace này",
 	"unlockApiConfigAcrossModes": "Cấu hình API đã bị khóa cho tất cả chế độ trong workspace này (nhấn để mở khóa)",
 	"enhancePrompt": "Nâng cao yêu cầu với ngữ cảnh bổ sung",
@@ -344,10 +353,10 @@
 		"title": "Zoo Code {{version}} đã phát hành",
 		"support": "Hãy ủng hộ Zoo Code bằng cách tặng sao cho chúng tôi trên <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Có gì mới trong Zoo Code v3.88.0",
-			"highlight1": "✨ Hỗ trợ provider và model: Dùng Grok Build và hỗ trợ model tùy chỉnh đã được cải thiện. Bản phát hành này cũng sửa các giới hạn model Bedrock và gửi cài đặt verbosity của Codex.",
-			"highlight2": "🧭 Độ tin cậy của task: Bản phát hành này sửa cách xử lý hủy, việc tiếp tục lượt tool và việc lưu message task.",
-			"highlight3": "⚡ Chỉnh sửa và chat nhanh hơn: Ghi file mặc định không còn dùng độ trễ nhân tạo. Message chat mang ít dữ liệu file hơn, và code action đến được chat hoạt động gần nhất."
+			"heading": "Có gì mới trong Zoo Code v3.90.0",
+			"highlight1": "✨ Provider và model: GitHub Copilot giờ là một provider: đăng nhập và Zoo Code tải model Copilot của bạn. IO Intelligence là provider với API key riêng. Gemini 4 Argon có trên Gemini và Vertex. GPT-6 Luna có trên OpenCode Go. Gemini 4 Argon và GPT-6 Luna cũng có trên Zoo Gateway.",
+			"highlight2": "🧭 Thực thi tool: Lặp lại cùng một tool call sẽ có cảnh báo, rồi Zoo Code dừng vòng lặp đó. Tắt attempt_completion không còn để task không thể hoàn thành. Tin nhắn trong hàng đợi chạy cùng kiểm tra bảo vệ lệnh như lệnh bạn gửi trực tiếp.",
+			"highlight3": "⚡ Suy luận và streaming: Adaptive thinking của Anthropic hiện trong chat và thinking token được đếm. Công tắc R1 giữ suy luận từ llama.cpp, Ollama và LM Studio. Codex giữ suy luận đã mã hóa cùng bản tóm tắt bạn thấy. Stream language model của VS Code dùng guarded recovery khi stream lỗi."
 		},
 		"cloudAgents": {
 			"heading": "Mới trên Cloud:",
