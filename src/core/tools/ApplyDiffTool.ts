@@ -242,8 +242,9 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				const appliedBlocks = Math.max(0, searchBlocks - unappliedParts.length)
 				partFailHint =
 					`Applied ${appliedBlocks} of ${searchBlocks} diff blocks to ${absolutePath}. ` +
-					`The other ${unappliedParts.length} did NOT apply, so those changes are NOT in the file. ` +
-					`Fix the failures below and resend ONLY the blocks that failed; the blocks that already applied will no longer match.\n\n` +
+					`The other ${unappliedParts.length} did NOT apply. ` +
+					`Inspect the saved file before retrying, since an earlier block may already contain the intended change. ` +
+					`Then resend ONLY the failed blocks that are still needed; the blocks that already applied will no longer match.\n\n` +
 					`<error_details>\n${this.formatFailedParts(unappliedParts)}\n</error_details>\n\n`
 			}
 

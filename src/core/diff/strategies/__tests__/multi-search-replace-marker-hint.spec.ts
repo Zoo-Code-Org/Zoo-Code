@@ -104,7 +104,7 @@ describe("MultiSearchReplaceDiffStrategy malformed start-line marker hint", () =
 		if (!result.success) {
 			throw new Error("Expected marker-like file content to match")
 		}
-		expect(result.content).toContain("BETA")
+		expect(result.content).toBe(["alpha", ":3", "BETA", "gamma"].join("\n"))
 		expect(result.content).not.toContain("LIKELY CAUSE")
 		expect(result.failParts ?? []).toHaveLength(0)
 	})

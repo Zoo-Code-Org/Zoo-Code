@@ -316,7 +316,7 @@ describe("ApplyDiffTool failure reporting", () => {
 
 			expect(output).toContain("Applied 1 of 2")
 			expect(output).toContain("FAILURE-MARKER-1")
-			expect(output).toContain("resend ONLY the blocks that failed")
+			expect(output).toContain("resend ONLY the failed blocks that are still needed")
 		})
 
 		it("does not tell the model to use read_file to re-apply the diffs", async () => {
@@ -350,7 +350,10 @@ describe("ApplyDiffTool failure reporting", () => {
 			const output = await runApplyDiff(partialResult(makeFailureSet(2)), 3)
 
 			expect(output).toContain(`Applied 1 of 3 diff blocks to ${path.resolve("/workspace", testFilePath)}. `)
-			expect(output).toContain("The other 2 did NOT apply, so those changes are NOT in the file. ")
+			expect(output).toContain(
+				"The other 2 did NOT apply. Inspect the saved file before retrying, since an earlier block may already contain the intended change. ",
+			)
+			expect(output).not.toContain("NOT in the file")
 		})
 
 		it("tolerates a successful result without failParts or SEARCH markers", async () => {
