@@ -18,6 +18,7 @@ describe("API - configuration", () => {
 		const provider = {
 			context: {},
 			on: vi.fn(),
+			setValues,
 			contextProxy: { setValues },
 			providerSettingsManager: { saveConfig, setModeConfig },
 			postStateToWebview,
@@ -51,6 +52,7 @@ describe("API - configuration", () => {
 		const provider = {
 			context: {},
 			on: vi.fn(),
+			setValues,
 			contextProxy: { setValues },
 			providerSettingsManager: { saveConfig, setModeConfig },
 			postStateToWebview,
