@@ -18,7 +18,7 @@ import { arePathsEqual, getReadablePath } from "../../utils/path"
 import { formatResponse } from "../../core/prompts/responses"
 import { diagnosticsToProblemsString, getNewDiagnostics } from "../diagnostics"
 import { Task } from "../../core/task/Task"
-import { guardedWrite, type GuardedWriteKind } from "../../core/tools/guardedWrite"
+import { assertWithinCanonicalRoot, guardedWrite, type GuardedWriteKind } from "../../core/tools/guardedWrite"
 
 import { DecorationController } from "./DecorationController"
 
@@ -341,7 +341,31 @@ export class DiffViewProvider {
 		const editedContent = updatedDocument.getText()
 
 		if (updatedDocument.isDirty) {
-			await updatedDocument.save()
+			// Publish through the S4b guarded-write API (epic #1375, #1400): the
+			// legacy diff-editor save path must pass the same CAS guard as the
+			// plain-diff path; saving the editor buffer directly would overwrite
+			// changes the model never re-read.
+			const guardTask = this.taskRef.deref()
+			if (!guardTask) {
+				// Fail closed: without the owning task the observation registry is
+				// unreachable and the write cannot be guarded.
+				throw new Error("Cannot guard the write: the owning task is no longer available")
+			}
+			let guardError: unknown
+			try {
+				await guardedWrite(guardTask, this.relPath, editedContent, "update")
+			} catch (error: unknown) {
+				guardError = error
+			}
+			// The guard published the buffer's bytes (or rejected): resync the buffer
+			// to the file either way. On success the revert is content-preserving
+			// (the guard wrote these bytes); on failure it rolls the buffer back to
+			// the untouched on-disk content so no unsaved buffer survives a rejected
+			// publish. The revert writes nothing itself.
+			await updatedDocument.revert({ save: false })
+			if (guardError) {
+				throw guardError
+			}
 		}
 
 		// Stop tracking touches and cancel any pending scroll-to-diff before any
@@ -1171,6 +1195,10 @@ export class DiffViewProvider {
 			// unreachable and the write cannot be guarded.
 			throw new Error("Cannot guard the write: the owning task is no longer available")
 		}
+		// Fail closed on an escaped target before creating directories for it:
+		// mkdir -p through a symlinked ancestor would materialize directories
+		// outside the working directory before the guard's own check could run.
+		await assertWithinCanonicalRoot(task.cwd, absolutePath)
 		await createDirectoriesForFile(absolutePath)
 		await guardedWrite(task, relPath, content, writeKind)
 

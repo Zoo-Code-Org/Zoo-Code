@@ -492,6 +492,49 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			)
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
+		it("re-checks the working directory under the lock before the commit rename (update)", async () => {
+			const reg = new ObservationRegistry()
+			const target = abs("sub/dir.txt")
+			reg.observe(target, "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			await guardedWrite(task, "sub/dir.txt", "content", "update")
+
+			// The mocked publish captured the verifier the guard hands safeWriteText;
+			// it runs under the write lock immediately before the commit rename. Swap
+			// the ancestor now - after the entry check already ran - and the verifier
+			// must reject the rename instead of following the new link.
+			const verify = mockedSafeWriteText.mock.calls[0]![2]!.preCommitVerify!
+			vi.mocked(fs.realpath).mockImplementation(async (p) => {
+				const text = String(p)
+				if (text === abs("sub") || text === target) {
+					return path.join("/external", path.basename(text))
+				}
+				return text
+			})
+
+			await expect(verify(target)).rejects.toThrow("outside the working directory")
+		})
+
+		it("re-checks the working directory under the lock before the commit rename (create)", async () => {
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			const task = createMockTask()
+
+			await guardedWrite(task, "sub/new.txt", "content", "create")
+
+			const target = abs("sub/new.txt")
+			const verify = mockedSafeWriteText.mock.calls[0]![2]!.preCommitVerify!
+			vi.mocked(fs.realpath).mockImplementation(async (p) => {
+				const text = String(p)
+				if (text === abs("sub") || text === target) {
+					return path.join("/external", path.basename(text))
+				}
+				return text
+			})
+
+			await expect(verify(target)).rejects.toThrow("outside the working directory")
+		})
 
 		it("normalizes an already-absolute input (trailing separator) to the observation key", async () => {
 			const reg = new ObservationRegistry()

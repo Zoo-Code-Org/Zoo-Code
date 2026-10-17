@@ -151,7 +151,10 @@ async function fileIsAbsent(absolutePath: string): Promise<boolean> {
  * write was issued for a file that was never read, so the caller must read
  * the file first, then retry.
  */
-export async function createIfAbsent(absolutePath: string, content: string): Promise<string> {
+// authorizedRoot (when supplied) is re-verified under the write lock immediately
+// before the commit rename: an ancestor swapped to an outside link after the
+// caller-side check is caught before the rename follows it.
+export async function createIfAbsent(absolutePath: string, content: string, authorizedRoot?: string): Promise<string> {
 	return withWriteLock(absolutePath, async () => {
 		try {
 			await fs.access(absolutePath)
@@ -169,6 +172,9 @@ export async function createIfAbsent(absolutePath: string, content: string): Pro
 			// one that appears after verification returns can still be overwritten.
 			await safeWriteText(absolutePath, content, {
 				preCommitVerify: async (targetPath) => {
+					if (authorizedRoot !== undefined) {
+						await assertWithinCanonicalRoot(authorizedRoot, targetPath)
+					}
 					try {
 						await fs.access(targetPath)
 					} catch (error: unknown) {
@@ -212,6 +218,7 @@ export async function replaceIfVersion(
 	absolutePath: string,
 	expectedVersion: string,
 	content: string,
+	authorizedRoot?: string,
 ): Promise<string> {
 	return withWriteLock(absolutePath, async () => {
 		let currentVersion: string
@@ -245,6 +252,9 @@ export async function replaceIfVersion(
 			// overwritten, so this narrows the race rather than closing it.
 			await safeWriteText(absolutePath, content, {
 				preCommitVerify: async (targetPath) => {
+					if (authorizedRoot !== undefined) {
+						await assertWithinCanonicalRoot(authorizedRoot, targetPath)
+					}
 					let verifiedVersion: string
 					try {
 						verifiedVersion = await computeVersionToken(targetPath)
@@ -325,7 +335,7 @@ function resolveAbsolutePath(task: Task, relPathOrAbsolute: string): string {
  * result to sit under the canonical working directory. A workspace opened
  * through a symlink matches the lexical root too, so inside paths keep working.
  */
-async function assertWithinCanonicalRoot(cwd: string, absolutePath: string): Promise<void> {
+export async function assertWithinCanonicalRoot(cwd: string, absolutePath: string): Promise<void> {
 	let root: string
 	try {
 		root = await fs.realpath(cwd)
@@ -420,17 +430,17 @@ export async function guardedWrite(
 			}
 			// Never read: only an absent target may be created. (The edit guard
 			// above rejects before reaching this line.)
-			publishedVersion = await createIfAbsent(absolutePath, content)
+			publishedVersion = await createIfAbsent(absolutePath, content, task.cwd)
 		} else if (kind === "edit") {
-			publishedVersion = await replaceIfVersion(absolutePath, obs.version, content)
+			publishedVersion = await replaceIfVersion(absolutePath, obs.version, content, task.cwd)
 		} else if (kind === "create" && (await fileIsAbsent(absolutePath))) {
 			// kind is "create" or "update": a "create" on a file that vanished
 			// after the read recreates it.
-			publishedVersion = await createIfAbsent(absolutePath, content)
+			publishedVersion = await createIfAbsent(absolutePath, content, task.cwd)
 		} else {
 			// Otherwise the version recorded at read time must still match the
 			// on-disk token.
-			publishedVersion = await replaceIfVersion(absolutePath, obs.version, content)
+			publishedVersion = await replaceIfVersion(absolutePath, obs.version, content, task.cwd)
 		}
 
 		// The file on disk is now what this write published. Record that token: a
