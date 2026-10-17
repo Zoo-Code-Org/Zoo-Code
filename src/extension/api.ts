@@ -612,13 +612,18 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			}
 		} catch (error) {
 			// The save landed: roll back every domain this mutation touched - the
-			// profile record, the complete settings round trip (global values,
-			// view-local state, and sibling overlays), the shared provider
-			// settings, and the mode mappings. Each restore is independent and
-			// logged; the original failure is what the caller sees.
+			// profile record, the sibling overlays pinned to it, the complete
+			// settings round trip (global values, view-local state, and sibling
+			// overlays), the shared provider settings, and the mode mappings.
+			// Each restore is independent and logged; the original failure is
+			// what the caller sees.
+			let previousSettings: ProviderSettings | undefined
+			if (previousRecord) {
+				const { name: _previousName, id: _previousId, ...rest } = previousRecord
+				previousSettings = rest
+			}
 			try {
-				if (recordExisted && previousRecord) {
-					const { name: _previousName, id: _previousId, ...previousSettings } = previousRecord
+				if (recordExisted && previousSettings) {
 					await manager.saveConfig(savedProfileName, previousSettings)
 				} else {
 					await manager.deleteConfig(savedProfileName)
@@ -626,6 +631,24 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			} catch (restoreError) {
 				this.log(
 					`[setConfiguration] failed to restore the profile record '${savedProfileName}': ` +
+						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+				)
+			}
+			// The successful setValues refreshed the sibling overlays
+			// pinned to the saved profile with the new settings; replay the
+			// restored record to those overlays too, so no sibling keeps
+			// serving settings the restored (or deleted) profile does not
+			// contain. An absent prior profile restores an empty overlay.
+			try {
+				await this.sidebarProvider.refreshViewLocalStateForUpdatedProfile(
+					savedProfileName,
+					previousSettings ?? {},
+				)
+			} catch (restoreError) {
+				this.log(
+					"[setConfiguration] failed to refresh the overlays pinned to '" +
+						savedProfileName +
+						"': " +
 						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
 				)
 			}

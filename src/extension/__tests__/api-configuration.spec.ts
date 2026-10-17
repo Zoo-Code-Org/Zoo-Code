@@ -163,9 +163,14 @@ describe("API - configuration", () => {
 		expect(postStateToWebview).not.toHaveBeenCalled()
 	})
 	it("restores the previous record when rolling back a save over an existing profile", async () => {
-		const setValues = vi.fn().mockRejectedValue(new Error("refresh down"))
+		// The shared refresh succeeds and the mode fan-out fails: the overlays
+		// pinned to the saved profile already hold the new settings, so rollback
+		// must replay the restored record to those overlays as well.
+		const setValues = vi.fn().mockResolvedValue(undefined)
 		const saveConfig = vi.fn().mockResolvedValue("pinned-id")
 		const deleteConfig = vi.fn().mockResolvedValue(undefined)
+		const setModeConfig = vi.fn().mockRejectedValue(new Error("mode write failed"))
+		const refreshSpy = vi.fn().mockResolvedValue(undefined)
 		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
 		const previousRecord = {
 			name: "pinned",
@@ -186,23 +191,29 @@ describe("API - configuration", () => {
 				getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.anthropic }),
 				setProviderSettings: vi.fn().mockResolvedValue(undefined),
 			},
+			refreshViewLocalStateForUpdatedProfile: refreshSpy,
 			providerSettingsManager: {
 				saveConfig,
 				deleteConfig,
 				getProfile: vi.fn().mockResolvedValue(previousRecord),
-				setModeConfig: vi.fn().mockResolvedValue(undefined),
+				setModeConfig,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
 		const api = new API(outputChannel, provider, makeClineProviderFactory())
 
-		await expect(api.setConfiguration({ currentApiConfigName: "pinned" })).rejects.toThrow("refresh down")
+		await expect(
+			api.setConfiguration({ currentApiConfigName: "pinned", modeApiConfigs: { code: "new-code-config" } }),
+		).rejects.toThrow("mode write failed")
 
 		// Rollback restores the prior record (minus name/id bookkeeping) instead of
-		// deleting the profile that existed before the call.
+		// deleting the profile that existed before the call, and replays it to the
+		// sibling overlays pinned to the saved profile.
 		expect(saveConfig).toHaveBeenLastCalledWith("pinned", expect.objectContaining({ apiKey: "old-key" }))
 		expect(deleteConfig).not.toHaveBeenCalled()
+		expect(refreshSpy).toHaveBeenCalledWith("pinned", expect.objectContaining({ apiKey: "old-key" }))
 		expect(postStateToWebview).not.toHaveBeenCalled()
 	})
 
@@ -225,6 +236,7 @@ describe("API - configuration", () => {
 				getProviderSettings: vi.fn().mockReturnValue(sharedBefore),
 				setProviderSettings,
 			},
+			refreshViewLocalStateForUpdatedProfile: vi.fn().mockResolvedValue(undefined),
 			providerSettingsManager: {
 				saveConfig,
 				deleteConfig,
@@ -253,6 +265,8 @@ describe("API - configuration", () => {
 		})
 		expect(setProviderSettings).toHaveBeenCalledWith(sharedBefore)
 		expect(deleteConfig).toHaveBeenCalledWith("pinned")
+		// The profile did not exist before: its overlay is restored to empty.
+		expect(provider["refreshViewLocalStateForUpdatedProfile"]).toHaveBeenCalledWith("pinned", {})
 		expect(setModeConfig).toHaveBeenLastCalledWith("code", undefined)
 		expect(postStateToWebview).not.toHaveBeenCalled()
 	})

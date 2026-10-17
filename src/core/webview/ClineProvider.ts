@@ -3373,10 +3373,7 @@ export class ClineProvider
 	 * settings in its getState() until its own next mutation. The originating
 	 * view refreshes its buffer at the mutation site itself.
 	 */
-	private async refreshViewLocalStateForUpdatedProfile(
-		name: string,
-		providerSettings: ProviderSettings,
-	): Promise<void> {
+	async refreshViewLocalStateForUpdatedProfile(name: string, providerSettings: ProviderSettings): Promise<void> {
 		const affected = ClineProvider.getAllInstances().filter(
 			(instance) => instance !== this && instance.pinnedProfileName === name,
 		)
