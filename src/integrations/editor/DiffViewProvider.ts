@@ -15,6 +15,7 @@ import {
 
 import { createDirectoriesForFile } from "../../utils/fs"
 import { arePathsEqual, getReadablePath } from "../../utils/path"
+import { computeVersionToken } from "../../utils/versionToken"
 import { formatResponse } from "../../core/prompts/responses"
 import { diagnosticsToProblemsString, getNewDiagnostics } from "../diagnostics"
 import { Task } from "../../core/task/Task"
@@ -133,6 +134,15 @@ export class DiffViewProvider {
 		// Make sure the file exists before we open it.
 		if (!fileExists) {
 			await fs.writeFile(absolutePath, "")
+		}
+		// The diff view is the read for the guarded-write contract (epic #1375,
+		// #1400): record the on-disk version token for exactly what the user is
+		// about to review, so saveChanges' guarded publish CAS-checks against it.
+		// A change between opening the diff and accepting it fails the guard as
+		// stale instead of silently overwriting the newer content.
+		const openTask = this.taskRef.deref()
+		if (openTask) {
+			openTask.observationRegistry.observe(absolutePath, await computeVersionToken(absolutePath))
 		}
 
 		// If the file was already open, close it (must happen after showing the

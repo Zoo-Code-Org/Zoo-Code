@@ -1044,6 +1044,33 @@ describe("DiffViewProvider", () => {
 					diffViewProvider["restorePreviewTabs"] = vi.fn().mockResolvedValue(undefined)
 					return { document, replace }
 				}
+				// Stub the VS Code surface open() needs so the diff editor resolves
+				// immediately: the visible editor list, showTextDocument, and the
+				// document/editor change events the open-wait polls.
+				const stubDiffEditorOpen = (fsPath: string) => {
+					const editor = {
+						document: {
+							uri: { fsPath, scheme: "file" },
+							getText: vi.fn().mockReturnValue(""),
+							lineCount: 0,
+						},
+						selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+						edit: vi.fn().mockResolvedValue(true),
+						revealRange: vi.fn(),
+					}
+					// Structural test doubles for the visible-editor surface; the repo's
+					// vscode.d.ts has no constructor to build real editors from.
+					vi.mocked(vscode.window).visibleTextEditors = [editor as unknown as vscode.TextEditor]
+					vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor as unknown as vscode.TextEditor)
+					vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+						setTimeout(
+							() => callback({ uri: { fsPath, scheme: "file" } } as unknown as vscode.TextDocument),
+							0,
+						)
+						return { dispose: vi.fn() }
+					})
+					vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+				}
 
 				it("publishes the dirty buffer through the guarded write and resyncs without a second write", async () => {
 					const { document, replace } = setupDirtyDoc()
@@ -1124,6 +1151,50 @@ describe("DiffViewProvider", () => {
 					expect(document.save).not.toHaveBeenCalled()
 				})
 
+				it("records the on-disk version token when the diff opens (the read for the CAS)", async () => {
+					mockTask.observationRegistry.clear()
+					diffViewProvider.editType = "modify"
+					vi.mocked(computeVersionToken).mockResolvedValue("tok-open")
+
+					stubDiffEditorOpen(`${mockCwd}/test.ts`)
+					await diffViewProvider.open("test.ts")
+
+					expect(mockTask.observationRegistry.get(`${mockCwd}/test.ts`)?.version).toBe("tok-open")
+				})
+
+				it("publishes a diff-flow-created file through the CAS (regression: e2e write_to_file)", async () => {
+					mockTask.observationRegistry.clear()
+					diffViewProvider.editType = "create"
+					vi.mocked(computeVersionToken).mockResolvedValue("tok-empty")
+
+					stubDiffEditorOpen(`${mockCwd}/test.ts`)
+					await diffViewProvider.open("test.ts")
+					const { document, replace } = setupDirtyDoc()
+
+					await diffViewProvider.saveChanges(false, 0)
+
+					expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {
+						preCommitVerify: expect.any(Function),
+					})
+					expect(replace).not.toHaveBeenCalled()
+					expect(document.save).not.toHaveBeenCalled()
+				})
+
+				it("fails as stale when the file changed between opening the diff and accepting it", async () => {
+					mockTask.observationRegistry.clear()
+					diffViewProvider.editType = "modify"
+					vi.mocked(computeVersionToken).mockResolvedValueOnce("tok-open").mockResolvedValueOnce("tok-newer")
+
+					stubDiffEditorOpen(`${mockCwd}/test.ts`)
+					await diffViewProvider.open("test.ts")
+					const { document, replace } = setupDirtyDoc()
+
+					await expect(diffViewProvider.saveChanges(false, 0)).rejects.toThrow("Stale version")
+
+					expect(safeWriteText).not.toHaveBeenCalled()
+					expect(replace).toHaveBeenCalledWith(expect.anything(), "disk content")
+					expect(document.save).not.toHaveBeenCalled()
+				})
 				it("fails closed when the owning task has been collected", async () => {
 					setupDirtyDoc()
 					diffViewProvider["taskRef"] = { deref: () => undefined } as unknown as WeakRef<Task>
