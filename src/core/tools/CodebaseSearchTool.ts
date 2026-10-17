@@ -1,5 +1,4 @@
 import * as vscode from "vscode"
-import path from "path"
 
 import { Task } from "../task/Task"
 import { CodeIndexManagerRegistry } from "../../services/code-index/code-index-manager-registry"

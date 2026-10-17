@@ -34,6 +34,10 @@ describe("getProviderDefaultModelId", () => {
 		expect(getProviderDefaultModelId(providerIdentifiers.vscodeLm)).toBe(vscodeLlmDefaultModelId)
 	})
 
+	it("gives GitHub Copilot the same default as the VS Code LM provider", () => {
+		expect(getProviderDefaultModelId(providerIdentifiers.githubCopilot)).toBe(vscodeLlmDefaultModelId)
+	})
+
 	it("uses the canonical OpenAI Native default model", () => {
 		expect(getProviderDefaultModelId(providerIdentifiers.openaiNative)).toBe(openAiNativeDefaultModelId)
 	})

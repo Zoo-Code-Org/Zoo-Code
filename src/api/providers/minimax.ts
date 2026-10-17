@@ -1,5 +1,4 @@
 import { Anthropic } from "@anthropic-ai/sdk"
-import { Stream as AnthropicStream } from "@anthropic-ai/sdk/streaming"
 import { CacheControlEphemeral } from "@anthropic-ai/sdk/resources"
 import OpenAI from "openai"
 
@@ -289,7 +288,7 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 		}
 	}
 
-	async completePrompt(prompt: string, options?: CompletePromptOptions) {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions) {
 		const { id: model, temperature } = this.getModel()
 
 		const message = await this.client.messages.create({

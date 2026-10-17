@@ -19,6 +19,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 
 import { Mode, modes } from "../../shared/modes"
 import { buildApiHandler } from "../../api"
+import { disposeApiHandler } from "../../api/dispose-api-handler"
 import { downgradeLegacyRooConfig } from "./routerRemoval"
 
 // Type-safe model migrations mapping
@@ -273,7 +274,7 @@ export class ProviderSettingsManager {
 
 	private async migrateConsecutiveMistakeLimit(providerProfiles: ProviderProfiles) {
 		try {
-			for (const [name, apiConfig] of Object.entries(providerProfiles.apiConfigs)) {
+			for (const [, apiConfig] of Object.entries(providerProfiles.apiConfigs)) {
 				if (apiConfig.consecutiveMistakeLimit == null) {
 					apiConfig.consecutiveMistakeLimit = DEFAULT_CONSECUTIVE_MISTAKE_LIMIT
 				}
@@ -595,8 +596,9 @@ export class ProviderSettingsManager {
 					}
 
 					// Try to build an API handler to get model information
+					let apiHandler: ReturnType<typeof buildApiHandler> | undefined
 					try {
-						const apiHandler = buildApiHandler(configs[name])
+						apiHandler = buildApiHandler(configs[name])
 						const modelInfo = apiHandler.getModel().info
 
 						// Check if the model supports reasoning budgets
@@ -619,6 +621,12 @@ export class ProviderSettingsManager {
 						// If we can't build the API handler or get model info, skip filtering
 						// to avoid accidental data loss from incomplete configurations
 						console.warn(`Skipping token field filtering for config '${name}': ${error}`)
+					} finally {
+						try {
+							disposeApiHandler(apiHandler)
+						} catch (error) {
+							console.warn(`Could not release the API handler for config '${name}': ${error}`)
+						}
 					}
 				}
 				return profiles
@@ -731,7 +739,7 @@ export class ProviderSettingsManager {
 			)
 			// Return a new config object without the invalid apiProvider
 			// This effectively resets the profile so the user can select a valid provider
-			const { apiProvider, ...restConfig } = config
+			const { apiProvider: _apiProvider, ...restConfig } = config
 			return restConfig
 		}
 

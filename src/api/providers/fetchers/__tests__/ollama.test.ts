@@ -238,7 +238,7 @@ describe("Ollama Fetcher", () => {
 		it("should return an empty list if the initial /api/tags call fails", async () => {
 			const baseUrl = "http://localhost:11434"
 			mockedAxios.get.mockRejectedValueOnce(new Error("Network error"))
-			const consoleInfoSpy = vi.spyOn(console, "error").mockImplementation(function () {}) // Spy and suppress output
+			vi.spyOn(console, "error").mockImplementation(function () {}) // Spy and suppress output
 
 			const result = await getOllamaModels(baseUrl)
 

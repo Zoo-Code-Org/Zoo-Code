@@ -68,16 +68,6 @@ const OpenRouterErrorResponseSchema = z.object({
 		.optional(),
 })
 
-// OpenRouter error structure that may include error.metadata.raw with actual upstream error
-// This is for caught exceptions which have the error wrapped in an "error" property
-interface OpenRouterErrorResponse {
-	error?: {
-		message?: string
-		code?: number
-		metadata?: { raw?: string }
-	}
-}
-
 // Direct error object structure (for streaming errors passed directly)
 interface OpenRouterError {
 	message?: string
@@ -170,7 +160,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		return { urlScoped: false, keyScoped: false, authScoped: false }
 	}
 
-	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+	async fetchModels(_options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
 		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
 		return getOpenRouterModels(undefined, ...fetchOpts)
 	}
@@ -603,7 +593,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		return { id, info, topP: isDeepSeekR1 ? 0.95 : undefined, ...params }
 	}
 
-	async completePrompt(prompt: string, options?: CompletePromptOptions) {
+	async completePrompt(prompt: string, _options?: CompletePromptOptions) {
 		const { id: modelId, maxTokens, temperature, reasoning } = await this.fetchModel()
 
 		const completionParams: OpenRouterChatCompletionParams = {
