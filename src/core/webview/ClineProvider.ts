@@ -237,6 +237,18 @@ function claimProfileCreate(name: string): void {
 	profileCreateClaims.set(name, (profileCreateClaims.get(name) ?? 0) + 1)
 }
 
+/**
+ * Names whose create claim has already landed: a failed create must not
+ * delete the record a successful sibling create saved, even when it settles
+ * last.
+ */
+const profileCreatesSucceeded = new Set<string>()
+
+/** Records that a create for this name landed, so failed siblings spare the record. */
+function markProfileCreateSucceeded(name: string): void {
+	profileCreatesSucceeded.add(name)
+}
+
 /** Drops one claim and reports whether the caller was the last claimant. */
 function releaseProfileCreate(name: string): boolean {
 	const remaining = (profileCreateClaims.get(name) ?? 1) - 1
@@ -341,13 +353,21 @@ export class ClineProvider
 		options: { runToCompletion?: boolean } = {},
 	): Promise<T> {
 		const controller = new AbortController()
+		// Set when the caller's timeout fires while this mutation is still queued behind a
+		// longer-running one: the callback must not start after its caller already saw a
+		// timeout, or the mutation would change state while reporting failure.
+		let callerTimedOut = false
 		// Run fn after either outcome so a rejected mutation never poisons the queue.
-		const run = this.providerProfileMutationQueue.then(
-			() => fn(controller.signal),
-			() => fn(controller.signal),
-		)
+		const start = () => {
+			if (callerTimedOut) {
+				return Promise.reject(new Error("Provider profile mutation timed out while queued"))
+			}
+			return fn(controller.signal)
+		}
+		const run = this.providerProfileMutationQueue.then(start, start)
 		const callerResult = this.withProviderProfileMutationTimeout(run, () => {
 			if (options.runToCompletion) {
+				callerTimedOut = true
 				this.log("Provider profile mutation timed out; waiting for it to finish before the next mutation")
 				return
 			}
@@ -435,6 +455,13 @@ export class ClineProvider
 	 * when running in parallel (multi-tab) mode.
 	 */
 	private viewLocalState: Partial<ExtensionState> = {}
+
+	/**
+	 * View ids evicted from the durable viewStates map by this instance's writes
+	 * since the last activation snapshot: the rollback restores exactly these
+	 * entries, so a sibling's intentional pin clear is never resurrected.
+	 */
+	private prunedViewIdsDuringActivation: string[] = []
 
 	/**
 	 * This view's pinned profile name from the view-local buffer. Exposed for
@@ -689,8 +716,14 @@ export class ClineProvider
 				wroteEntry = true
 			}
 
+			const pruned = this.prunePersistedViewStates(states)
+			const evicted = Object.keys(states).filter((viewId) => !(viewId in pruned))
+			if (evicted.length > 0) {
+				this.prunedViewIdsDuringActivation.push(...evicted)
+			}
+
 			try {
-				await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+				await this.contextProxy.setValue("viewStates", pruned)
 			} catch (error) {
 				// updateGlobalState applies the new map to the in-memory cache before
 				// the durable write, so a rejected write leaves the cache claiming an
@@ -778,8 +811,14 @@ export class ClineProvider
 			}
 
 			if (changed) {
+				const pruned = this.prunePersistedViewStates(states)
+				const evicted = Object.keys(states).filter((viewId) => !(viewId in pruned))
+				if (evicted.length > 0) {
+					this.prunedViewIdsDuringActivation.push(...evicted)
+				}
+
 				try {
-					await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+					await this.contextProxy.setValue("viewStates", pruned)
 				} catch (error) {
 					// updateGlobalState applies the new map to the in-memory cache
 					// before the durable write: restore the cache to the value durable
@@ -846,8 +885,14 @@ export class ClineProvider
 				states[nextViewStateId] = previous
 			}
 
+			const pruned = this.prunePersistedViewStates(states)
+			const evicted = Object.keys(states).filter((viewId) => !(viewId in pruned))
+			if (evicted.length > 0) {
+				this.prunedViewIdsDuringActivation.push(...evicted)
+			}
+
 			try {
-				await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+				await this.contextProxy.setValue("viewStates", pruned)
 			} catch (error) {
 				// updateGlobalState applies the new map to the in-memory cache before
 				// the durable write, so a rejected re-key would leave the cache serving
@@ -2512,6 +2557,8 @@ export class ClineProvider
 	 * concurrent write group so a failure can compensate the writes that landed.
 	 */
 	private _snapshotProfileActivationState(): ProfileActivationSnapshot {
+		// The rollback may only restore entries this activation's own writes evict.
+		this.prunedViewIdsDuringActivation = []
 		// Capture only the provider-settings keys. getValues() returns the whole
 		// global state, and restoring that copy would write unrelated keys
 		// (viewStates, mode, taskHistory, ...) back over changes that legitimately
@@ -2580,18 +2627,20 @@ export class ClineProvider
 			)
 		}
 		try {
-			// Restore pruned siblings through the serialized view-state queue, last
-			// so it lands after the overlay restore's own pin write: a sibling the
-			// activation's pruning evicted comes back with its original entry
-			// metadata. Merge, do not replace: the mutation queue is per-instance,
-			// so sibling views keep writing to the durable map while an activation
-			// group is in flight, and replaying the snapshot would silently revert
-			// those newer writes.
+			// Restore the siblings the activation's pruning evicted, last, so it
+			// lands after the overlay restore's own pin write, with their original
+			// entry metadata. Only tracked evictions are restored: an entry a
+			// sibling deleted on purpose after the snapshot is newer than the
+			// snapshot too, and resurrecting it would undo the sibling's clear on
+			// reload. The mutation queue is per-instance, so sibling views keep
+			// writing to the durable map while an activation group is in flight;
+			// merge, never replace, to leave those newer writes alone.
 			const restore = ClineProvider.persistedViewStateWriteQueue.then(async () => {
 				const current = this.getPersistedViewStates({ fresh: true })
 				const merged = { ...current }
-				for (const [viewId, entry] of Object.entries(snapshot.viewStates)) {
-					if (!(viewId in merged)) {
+				for (const viewId of this.prunedViewIdsDuringActivation) {
+					const entry = snapshot.viewStates[viewId]
+					if (entry && !(viewId in merged)) {
 						merged[viewId] = entry
 					}
 				}
@@ -2674,7 +2723,12 @@ export class ClineProvider
 				// and succeeded, and the record belongs to that save.
 				const lastClaimant = snapshot.claimedCreate ? releaseProfileCreate(name) : true
 				if (lastClaimant) {
-					await this.providerSettingsManager.deleteConfig(name)
+					// A successful claimant owns the record: delete only when no claimant
+					// succeeded, and clear the bookkeeping either way.
+					const anySucceeded = profileCreatesSucceeded.delete(name)
+					if (!anySucceeded) {
+						await this.providerSettingsManager.deleteConfig(name)
+					}
 				}
 			}
 		} catch (error) {
@@ -2850,9 +2904,13 @@ export class ClineProvider
 		}
 
 		if (signal.aborted) {
-			// The record landed; the create is complete, so the claim is spent.
+			// The record landed; the create is complete, so the claim is spent and
+			// the outcome recorded: a failed sibling create must spare the record.
 			if (managerSnapshot.claimedCreate) {
-				releaseProfileCreate(name)
+				markProfileCreateSucceeded(name)
+				if (releaseProfileCreate(name)) {
+					profileCreatesSucceeded.delete(name)
+				}
 			}
 			return id
 		}
@@ -2958,9 +3016,13 @@ export class ClineProvider
 
 			await this.postStateToWebview()
 			// The create completed: the claim is spent and later rollbacks of
-			// other creates must see this one as finished.
+			// other creates must see this one as finished - and spare the record
+			// it saved.
 			if (managerSnapshot.claimedCreate) {
-				releaseProfileCreate(name)
+				markProfileCreateSucceeded(name)
+				if (releaseProfileCreate(name)) {
+					profileCreatesSucceeded.delete(name)
+				}
 			}
 			return id
 		} catch (error) {

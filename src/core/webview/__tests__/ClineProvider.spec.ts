@@ -3619,6 +3619,67 @@ describe("ClineProvider", () => {
 			await providerB.dispose()
 		})
 
+		it("keeps the record when a sibling create succeeded before this create failed", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			for (const instance of [providerA, providerB]) {
+				vi.spyOn(instance.providerSettingsManager, "hasConfig").mockResolvedValue(false)
+				vi.spyOn(instance.providerSettingsManager, "getCurrentProfileName").mockResolvedValue(undefined)
+				vi.spyOn(instance.providerSettingsManager, "listConfig").mockResolvedValue([])
+				vi.spyOn(instance.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+				vi.spyOn(instance.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+				vi.spyOn(instance.providerSettingsManager, "saveConfig").mockResolvedValue("b-id")
+				vi.spyOn(instance.providerSettingsManager, "getProfile").mockResolvedValue({
+					name: "dup-profile",
+					id: "b-id",
+					apiProvider: providerIdentifiers.openai,
+				})
+				vi.spyOn(instance.providerSettingsManager, "activateProfile").mockResolvedValue({
+					name: "dup-profile",
+					id: "b-id",
+					apiProvider: providerIdentifiers.openai,
+				})
+				vi.spyOn(instance, "postStateToWebview").mockResolvedValue(undefined)
+			}
+			const deleteSpyA = vi.spyOn(providerA.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
+
+			// A confirms the name is absent and claims the create.
+			const snapshotA = await providerA["_snapshotProviderManagerState"]("dup-profile")
+			expect(snapshotA.claimedCreate).toBe(true)
+
+			// B creates the same profile successfully: its claim is spent and the
+			// record belongs to B's save.
+			await expect(
+				providerB.upsertProviderProfile("dup-profile", { apiProvider: providerIdentifiers.openai }, true),
+			).resolves.toBe("b-id")
+
+			// A's activation group fails after B already landed: deleting would
+			// discard the profile B saved.
+			await providerA["_restoreProviderManagerRecord"]("dup-profile", snapshotA)
+			expect(deleteSpyA).not.toHaveBeenCalled()
+
+			// The bookkeeping is cleared once the last claimant settles: a later
+			// failed create for the same name owns its deletion again.
+			const snapshotA2 = await providerA["_snapshotProviderManagerState"]("dup-profile")
+			await providerA["_restoreProviderManagerRecord"]("dup-profile", snapshotA2)
+			expect(deleteSpyA).toHaveBeenCalledWith("dup-profile")
+
+			await providerA.dispose()
+			await providerB.dispose()
+		})
+
 		it("spends the create claim when the profile save itself fails", async () => {
 			const provider = new ClineProvider(
 				mockContext,
@@ -3914,6 +3975,63 @@ describe("ClineProvider", () => {
 			// sibling's newer entry.
 			const restored = provider.contextProxy.getValue("viewStates") as Record<string, unknown>
 			expect(restored["sibling-view"]).toEqual({ mode: "architect", updatedAt: 99 })
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("old-profile")
+			await provider.dispose()
+		})
+
+		it("does not resurrect a sibling pin cleared after the activation snapshot", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-clear-view")
+			await provider.contextProxy.setValue("viewStates", {
+				"sibling-view": { currentApiConfigName: "sibling-profile", updatedAt: 5 },
+				"old-view": { mode: "code", updatedAt: 1 },
+			})
+			await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("new-id")
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("old-mode-id")
+			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "new-profile",
+				id: "rec-id",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			vi.spyOn(provider.providerSettingsManager, "getCurrentProfileName").mockResolvedValue("old-profile")
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "old-profile",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			// Mid-group, after the rollback snapshot, the sibling intentionally clears
+			// its only persisted selection: the deletion is newer than the snapshot and
+			// must survive the rollback.
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockImplementation(async () => {
+				const current = (provider.contextProxy.getValue("viewStates") ?? {}) as Record<
+					string,
+					{ mode?: string; currentApiConfigName?: string; updatedAt?: number }
+				>
+				delete current["sibling-view"]
+				await provider.contextProxy.setValue("viewStates", { ...current })
+				return []
+			})
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockRejectedValue(
+				new Error("mode write failed"),
+			)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			// The outer upsert catch converts the failure into an undefined id.
+			await expect(
+				provider.upsertProviderProfile("new-profile", { apiProvider: providerIdentifiers.anthropic }, true),
+			).resolves.toBeUndefined()
+
+			const restored = provider.contextProxy.getValue("viewStates") as Record<string, unknown>
+			// The rollback must not treat the sibling's clear as activation pruning.
+			expect(restored["sibling-view"]).toBeUndefined()
+			expect(restored["old-view"]).toEqual({ mode: "code", updatedAt: 1 })
 			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("old-profile")
 			await provider.dispose()
 		})

@@ -889,6 +889,55 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "second-profile")
 		})
 
+		test("an activation that times out while queued behind another never starts", async () => {
+			vi.useFakeTimers()
+			let releaseFirst!: () => void
+			const firstActivation = new Promise<void>((resolve) => {
+				releaseFirst = resolve
+			})
+			provider["providerSettingsManager"].activateProfile = vi
+				.fn()
+				.mockImplementationOnce(async () => {
+					await firstActivation
+					return {
+						name: "first-profile",
+						id: "first-id",
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openai/gpt-4",
+					}
+				})
+				.mockResolvedValueOnce({
+					name: "second-profile",
+					id: "second-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4.1-mini",
+				})
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
+
+			try {
+				// The first activation outlives the second call's timeout window: the
+				// second caller rejects while its callback is still queued.
+				const first = provider.activateProviderProfile({ name: "first-profile" })
+				const firstResult = expect(first).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(1000)
+				const second = provider.activateProviderProfile({ name: "second-profile" })
+				const secondResult = expect(second).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				await firstResult
+				await secondResult
+
+				// The first activation settles and the queue advances: the second must
+				// not start after its caller already saw a timeout, or it would change
+				// the selected profile while reporting failure.
+				releaseFirst()
+				await vi.advanceTimersByTimeAsync(0)
+				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(1)
+				expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "second-profile")
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
 		test("timed-out activations run to completion and hold the queue", async () => {
 			vi.useFakeTimers()
 			const logSpy = vi.spyOn(provider, "log")
@@ -935,6 +984,9 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(2)
 				expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "first-profile")
 				expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "second-profile")
+				// The final shared selection is the second profile: no late write puts
+				// the first profile back on top.
+				expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("second-profile")
 				expect(logSpy).toHaveBeenCalledWith(
 					"Provider profile mutation timed out; waiting for it to finish before the next mutation",
 				)
