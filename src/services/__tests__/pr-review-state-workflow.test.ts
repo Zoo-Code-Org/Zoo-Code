@@ -2176,7 +2176,9 @@ describe("PR review-state workflow", () => {
 			expect(resolution.prNumbers()).toEqual([1437])
 
 			// The trusted follow-up shard writes the label the read-only run
-			// computed but could not write.
+			// computed but could not write. The reconcile script reads the PR
+			// from the matrix number and ignores the workflow_run name and
+			// event, so the default workflow_run payload is enough here.
 			const result = await runWorkflow({ eventName: "workflow_run", fork: true })
 
 			expect(result.addLabels).toHaveBeenCalledWith(
@@ -2200,6 +2202,18 @@ describe("PR review-state workflow", () => {
 				expect(resolution.getPullRequest).not.toHaveBeenCalled()
 				expect(resolution.prNumbers()).toEqual([])
 			}
+		})
+
+		it("does not apply the self-run guard to other workflows that report event workflow_run", async () => {
+			// Only the 'Label PR review state' name is guarded. A listed CI
+			// workflow with event 'workflow_run' must still resolve its PR.
+			const resolution = await runResolve({
+				eventName: "workflow_run",
+				workflowRunName: "Code QA Roo Code",
+				workflowRunEvent: "workflow_run",
+			})
+
+			expect(resolution.prNumbers()).toEqual([1437])
 		})
 
 		it("stops the self workflow_run chain after one hop", async () => {

@@ -40,7 +40,14 @@ on:
     # after one hop. The privileged follow-up takes no artifact input and never
     # checks out code, so no untrusted PR code or artifacts are touched.
     workflow_run:
-        workflows: ["Code QA Roo Code", "E2E Tests (Mocked)", "Webview Visual Regression", "CodeQL Advanced", "Label PR review state"]
+        workflows:
+            [
+                "Code QA Roo Code",
+                "E2E Tests (Mocked)",
+                "Webview Visual Regression",
+                "CodeQL Advanced",
+                "Label PR review state",
+            ]
         types: [completed]
 
 permissions:
