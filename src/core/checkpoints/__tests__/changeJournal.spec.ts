@@ -70,6 +70,26 @@ describe("changeJournal", () => {
 			expect(after).toBe(raw + '{"path":"src/half.ts","operation":"upd')
 		})
 
+		it("rejects an append when a malformed final record kept its newline", async () => {
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "good" }))
+			// A final line of valid JSON that is not an entry (a bare null) is the
+			// same hazard with or without its newline: accepting it here would
+			// demote it to a skipped middle line after the append, so loadChanges
+			// would report an incomplete rollback history as valid and
+			// restore-latest could pick an older entry for the same file.
+			const filePath = journalPath(tmpRoot, taskId)
+			const raw = await fs.readFile(filePath, "utf8")
+			await fs.writeFile(filePath, raw + "null\n")
+
+			await expect(appendChange(tmpRoot, taskId, entry({ checkpointId: "after" }))).rejects.toThrow(
+				/final record is not a complete entry/,
+			)
+
+			// The journal is left untouched for an explicit recovery.
+			const after = await fs.readFile(filePath, "utf8")
+			expect(after).toBe(raw + "null\n")
+		})
+
 		it("does not insert a blank line when the journal ends cleanly", async () => {
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "a" }))
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "b" }))

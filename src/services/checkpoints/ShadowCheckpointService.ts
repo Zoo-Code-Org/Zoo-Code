@@ -407,6 +407,38 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 		}
 	}
 
+	/**
+	 * Whether `filePath` (workspace-relative or absolute) is excluded from the
+	 * shadow repository by its local exclude rules (.git/info/exclude, which
+	 * mirrors the workspace ignore configuration). Excluded paths are never
+	 * tracked by the shadow repo, so they must not enter the change journal.
+	 */
+	public async isPathIgnored(filePath: string): Promise<boolean> {
+		if (!this.git) {
+			return false
+		}
+		const resolved = path.resolve(this.workspaceDir, filePath)
+		const gitPath = path.relative(this.workspaceDir, resolved).split(path.sep).join("/")
+		if (!gitPath || gitPath.startsWith("..")) {
+			return false
+		}
+		try {
+			// --no-index evaluates the exclude rules alone: index or commit
+			// membership is irrelevant to "the shadow repo never tracks this".
+			// The verdict comes from the -v output, not from the promise
+			// settling: simple-git's raw() resolves (rather than rejects) on a
+			// silent non-zero exit, so "not ignored" (exit 1, no output) arrives
+			// as an empty success here. An ignored path prints its matching rule
+			// line.
+			const match = await this.git.raw(["check-ignore", "--no-index", "-v", "--", gitPath])
+			return match.trim().length > 0
+		} catch {
+			// A git fatal (corrupt repo) leaves the path unproven-ignored;
+			// callers keep their historical behavior for that case.
+			return false
+		}
+	}
+
 	public async getDiff({ from, to }: { from?: string; to?: string }): Promise<CheckpointDiff[]> {
 		if (!this.git) {
 			throw new Error("Shadow git repo not initialized")

@@ -60,6 +60,7 @@ const COMMIT = "test-commit-hash"
 interface ServiceLike {
 	isInitialized: boolean
 	saveCheckpoint: (...args: unknown[]) => Promise<unknown>
+	isPathIgnored: (filePath: string) => Promise<boolean>
 }
 
 interface ProviderLike {
@@ -105,7 +106,13 @@ describe("checkpointSave change-journal wiring (B2)", () => {
 		mockTask = {
 			taskId: TASK_ID,
 			enableCheckpoints: true,
-			checkpointService: { isInitialized: true, saveCheckpoint: saveCheckpointSpy },
+			checkpointService: {
+				isInitialized: true,
+				saveCheckpoint: saveCheckpointSpy,
+				// Default: nothing is excluded from the shadow repo, so journaling
+				// behavior is unchanged unless a test overrides this.
+				isPathIgnored: vi.fn().mockResolvedValue(false),
+			},
 			checkpointServiceInitializing: false,
 			providerRef: { deref: () => mockProvider },
 			// B3a: the card emission calls task.say; a resolved double keeps the
@@ -136,6 +143,38 @@ describe("checkpointSave change-journal wiring (B2)", () => {
 		const journalFile = path.join(tmpStorageDir, "tasks", TASK_ID, "checkpoints", "changes.jsonl")
 		const raw = await fs.readFile(journalFile, "utf8")
 		expect(raw.split("\n").filter((line) => line !== "")).toHaveLength(1)
+	})
+
+	it("keeps shadow-repo-excluded paths out of the journal and the card", async () => {
+		// Excluded paths are absent from the shadow commit by design; journaling
+		// them would route a later rollback into restoreFile's delete branch and
+		// remove the user's live file. They must not appear in the journal, must
+		// not be advertised by the card, and a step whose writes are ALL excluded
+		// must produce neither a journal update nor a card.
+		mockTask.checkpointService.isPathIgnored = vi
+			.fn()
+			.mockImplementation(async (p: string) => p.startsWith("node_modules/"))
+
+		await checkpointSave(mockTask as Task, false, true, [
+			{ path: "src/kept.ts", operation: "create", diffStats: { additions: 1, deletions: 0 } },
+			{ path: "node_modules/pkg/index.js", operation: "create", diffStats: { additions: 1, deletions: 0 } },
+		])
+
+		let entries = await loadChanges(tmpStorageDir, TASK_ID)
+		expect(entries.map((e) => e.path)).toEqual(["src/kept.ts"])
+		const sayMock = mockTask.say as Mock
+		expect(sayMock).toHaveBeenCalledTimes(1)
+		expect(String(sayMock.mock.calls[0][1])).not.toContain("node_modules")
+
+		// A step whose every write is excluded journals nothing and emits no card.
+		await checkpointSave(mockTask as Task, false, true, {
+			path: "node_modules/pkg/other.js",
+			operation: "create",
+			diffStats: { additions: 1, deletions: 0 },
+		})
+		entries = await loadChanges(tmpStorageDir, TASK_ID)
+		expect(entries.map((e) => e.path)).toEqual(["src/kept.ts"])
+		expect(sayMock).toHaveBeenCalledTimes(1)
 	})
 
 	it("omits diffStats in the journal entry when not provided", async () => {
