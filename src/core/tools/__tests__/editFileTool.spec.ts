@@ -4,6 +4,7 @@ import fs from "fs/promises"
 import type { MockedFunction } from "vitest"
 
 import { fileExistsAtPath } from "../../../utils/fs"
+import { ObservationRegistry } from "../../task/observationRegistry"
 import { isPathOutsideWorkspace } from "../../../utils/pathUtils"
 import { getReadablePath } from "../../../utils/path"
 import { ToolUse, ToolResponse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
@@ -12,12 +13,23 @@ import { editFileTool } from "../EditFileTool"
 vi.mock("fs/promises", () => ({
 	default: {
 		readFile: vi.fn().mockResolvedValue(""),
+		stat: vi.fn().mockResolvedValue({
+			dev: 7n,
+			ino: 4242n,
+			size: 1234n,
+			mtimeNs: 1700000000123456789n,
+			ctimeNs: 1700000000789999999n,
+		}),
 	},
 }))
 
 vi.mock("path", async () => {
 	const originalPath = await vi.importActual("path")
-	return {
+	// The default import must be the mocked object too: the tools read path through
+	// `import path from "path"`, and spreading originalPath alone left the default
+	// import on the REAL module - production then resolved against the runner's cwd
+	// (drive-dependent on Windows) instead of the mocked resolve.
+	const mocked = {
 		...originalPath,
 		resolve: vi.fn().mockImplementation((...args) => {
 			const separator = process.platform === "win32" ? "\\" : "/"
@@ -28,6 +40,7 @@ vi.mock("path", async () => {
 			return to
 		}),
 	}
+	return { ...mocked, default: mocked }
 })
 
 vi.mock("delay", () => ({
@@ -84,6 +97,7 @@ describe("editFileTool", () => {
 	const mockedFsReadFile = fs.readFile as unknown as MockedFunction<
 		(path: string, encoding: string) => Promise<string>
 	>
+	const mockedFsStat = fs.stat as unknown as MockedFunction<(path: string, options?: unknown) => Promise<unknown>>
 	const mockedIsPathOutsideWorkspace = isPathOutsideWorkspace as MockedFunction<typeof isPathOutsideWorkspace>
 	const mockedGetReadablePath = getReadablePath as MockedFunction<typeof getReadablePath>
 	const mockedPathResolve = path.resolve as MockedFunction<typeof path.resolve>
@@ -145,6 +159,9 @@ describe("editFileTool", () => {
 		mockTask.fileContextTracker = {
 			trackFileContext: vi.fn().mockResolvedValue(undefined),
 		}
+		// Real registry: the regression test asserts which version token the tool's own
+		// read leaves behind, so a stub would only restate the call.
+		mockTask.observationRegistry = new ObservationRegistry()
 		mockTask.say = vi.fn().mockResolvedValue(undefined)
 		mockTask.ask = vi.fn().mockResolvedValue(undefined)
 		mockTask.recordToolError = vi.fn()
@@ -168,6 +185,7 @@ describe("editFileTool", () => {
 			fileContent?: string
 			isPartial?: boolean
 			accessAllowed?: boolean
+			experiments?: Record<string, boolean>
 		} = {},
 	): Promise<ToolResponse | undefined> {
 		const fileExists = options.fileExists ?? true
@@ -178,6 +196,13 @@ describe("editFileTool", () => {
 		mockedFileExistsAtPath.mockResolvedValue(fileExists)
 		mockedFsReadFile.mockResolvedValue(fileContent)
 		mockTask.rooIgnoreController.validateAccess.mockReturnValue(accessAllowed)
+		mockTask.providerRef.deref.mockReturnValue({
+			getState: vi.fn().mockResolvedValue({
+				diagnosticsEnabled: true,
+				writeDelayMs: 1000,
+				experiments: options.experiments ?? {},
+			}),
+		})
 
 		const nativeArgs: Record<string, unknown> = {
 			file_path: testFilePath,
@@ -687,6 +712,263 @@ describe("editFileTool", () => {
 			await executeEditFileTool()
 
 			expect(mockTask.fileContextTracker.trackFileContext).toHaveBeenCalledWith(testFilePath, "roo_edited")
+		})
+	})
+
+	describe("guarded write (S4b, epic #1375)", () => {
+		const focusDisruption = { preventFocusDisruption: true }
+
+		// A saveDirectly double that applies guardedWrite's own rule instead of being told what
+		// to throw: an "edit" publish with no observation for the target is rejected as
+		// unobserved. Injecting the expected error by hand would pass whether or not the tool's
+		// own read left an observation behind, so it proves nothing about the read.
+		const authorizeGuardedPublish = () => {
+			mockTask.diffViewProvider.saveDirectly.mockImplementation(
+				async (
+					_relPath: string,
+					_content: string,
+					_isNewFile: boolean,
+					_diagnosticsEnabled: boolean,
+					_writeDelayMs: number,
+					kind: string,
+				) => {
+					if (kind === "edit" && !mockTask.observationRegistry.get(absoluteFilePath)) {
+						throw new Error("File not read yet -- read the file, then retry.")
+					}
+				},
+			)
+		}
+
+		it("publishes an existing-file edit through saveDirectly with edit kind", async () => {
+			const result = await executeEditFileTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(mockTask.diffViewProvider.saveDirectly).toHaveBeenCalledWith(
+				testFilePath,
+				"Line 1\nModified Line 2\nLine 3",
+				false,
+				true,
+				1000,
+				"edit",
+			)
+			expect(mockTask.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockTask.didEditFile).toBe(true)
+			expect(result).toContain("Tool result message")
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("records the version its own read saw so the guarded edit is authorized", async () => {
+			// No prior read_file observation exists for this path. The tool's own read
+			// must leave the observation that authorizes saveDirectly("edit"), or the
+			// guarded publish rejects with "File not read yet".
+			authorizeGuardedPublish()
+			const result = await executeEditFileTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(mockTask.observationRegistry.get(absoluteFilePath)?.version).toBe(
+				"7:4242:1234:1700000000123456789:1700000000789999999",
+			)
+			expect(mockTask.diffViewProvider.saveDirectly).toHaveBeenCalledWith(
+				testFilePath,
+				"Line 1\nModified Line 2\nLine 3",
+				false,
+				true,
+				1000,
+				"edit",
+			)
+			expect(result).toContain("Tool result message")
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("publishes new-file creation through saveDirectly with create kind", async () => {
+			await executeEditFileTool(
+				{ old_string: "", new_string: "New file content" },
+				{ fileExists: false, experiments: focusDisruption },
+			)
+
+			expect(mockTask.diffViewProvider.saveDirectly).toHaveBeenCalledWith(
+				testFilePath,
+				"New file content",
+				true,
+				true,
+				1000,
+				"create",
+			)
+			expect(mockTask.didEditFile).toBe(true)
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it.each(["pre-read", "post-read"])(
+			"records no observation when the %s stat fails, and the guard rejects the edit",
+			async (which) => {
+				// A stat failure is neither evidence that the file changed nor a reason to abort
+				// the read, but it leaves the version unknown, so nothing may be observed. The
+				// publish that follows is then rejected by the guard's own rule.
+				const stable = {
+					dev: 7n,
+					ino: 4242n,
+					size: 1234n,
+					mtimeNs: 1700000000123456789n,
+					ctimeNs: 1700000000789999999n,
+				}
+				const failure = new Error("EACCES: permission denied")
+				if (which === "pre-read") {
+					mockedFsStat.mockRejectedValueOnce(failure).mockResolvedValueOnce(stable)
+				} else {
+					mockedFsStat.mockResolvedValueOnce(stable).mockRejectedValueOnce(failure)
+				}
+				authorizeGuardedPublish()
+
+				const result = await executeEditFileTool(
+					{ old_string: "Line 2", new_string: "Modified Line 2" },
+					{ fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+				)
+
+				// The read still happened: a stat failure never fails the read itself.
+				expect(mockedFsReadFile).toHaveBeenCalledWith(absoluteFilePath, "utf8")
+				// Both queued stats were consumed, so no one-time value leaks into the next
+				// test - vi.clearAllMocks() clears call history, not queued values.
+				expect(mockedFsStat).toHaveBeenCalledTimes(2)
+				// A read whose version is unknown may not be observed...
+				expect(mockTask.observationRegistry.get(absoluteFilePath)).toBeUndefined()
+				// ...and the publish it leaves unauthorized is reported as an error, not a save.
+				expect(mockHandleError).toHaveBeenCalledWith(
+					"edit_file",
+					expect.objectContaining({ message: "File not read yet -- read the file, then retry." }),
+				)
+				expect(result).toBeUndefined()
+				expect(mockTask.diffViewProvider.reset).toHaveBeenCalled()
+				expect(mockTask.didEditFile).toBe(false)
+				expect(mockTask.didToolFailInCurrentTurn).toBe(true)
+			},
+		)
+
+		it("records no observation when the pre- and post-read tokens disagree, and the guard rejects the edit", async () => {
+			// The file changed underneath the read: old_string was matched against content that
+			// neither token fully describes, so observing either one would authorize a publish
+			// against a version this tool never saw.
+			mockedFsStat
+				.mockResolvedValueOnce({ dev: 7n, ino: 4242n, size: 1234n, mtimeNs: 1n, ctimeNs: 2n })
+				.mockResolvedValueOnce({ dev: 7n, ino: 4242n, size: 9999n, mtimeNs: 3n, ctimeNs: 4n })
+			authorizeGuardedPublish()
+
+			const result = await executeEditFileTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(mockedFsReadFile).toHaveBeenCalledWith(absoluteFilePath, "utf8")
+			expect(mockedFsStat).toHaveBeenCalledTimes(2)
+			expect(mockTask.observationRegistry.get(absoluteFilePath)).toBeUndefined()
+			expect(mockHandleError).toHaveBeenCalledWith(
+				"edit_file",
+				expect.objectContaining({ message: "File not read yet -- read the file, then retry." }),
+			)
+			expect(result).toBeUndefined()
+			expect(mockTask.didEditFile).toBe(false)
+			expect(mockTask.didToolFailInCurrentTurn).toBe(true)
+		})
+		it("surfaces the unobserved edit remediation as a tool error and publishes nothing", async () => {
+			const guardError = new Error("File not read yet -- read the file, then retry.")
+			mockTask.diffViewProvider.saveDirectly.mockRejectedValue(guardError)
+
+			const result = await executeEditFileTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(mockHandleError).toHaveBeenCalledWith("edit_file", guardError)
+			expect(result).toBeUndefined()
+			expect(mockTask.diffViewProvider.reset).toHaveBeenCalled()
+			expect(mockTask.didToolFailInCurrentTurn).toBe(true)
+			expect(mockTask.didEditFile).toBe(false)
+		})
+
+		it("surfaces the stale-version remediation as a tool error and publishes nothing", async () => {
+			const guardError = new Error(
+				"Stale version -- the file changed since you read it (expected v1, current v2); re-read the file, then retry.",
+			)
+			mockTask.diffViewProvider.saveDirectly.mockRejectedValue(guardError)
+
+			const result = await executeEditFileTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(mockHandleError).toHaveBeenCalledWith("edit_file", guardError)
+			expect(result).toBeUndefined()
+			expect(mockTask.diffViewProvider.reset).toHaveBeenCalled()
+			expect(mockTask.didEditFile).toBe(false)
+		})
+
+		it("still fails a literal mismatch with the existing message before the guard runs", async () => {
+			const result = await executeEditFileTool(
+				{ old_string: "NonExistent", new_string: "Whatever" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(result).toContain("No match found")
+			expect(result).toContain("<error_details>")
+			expect(mockTask.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("leaves the registry empty when old_string does not match", async () => {
+			// The read happened but the edit failed. The token must not stay in the
+			// task-wide registry, or a later write_to_file could spend this read's token
+			// on a full-file overwrite of content the model never received.
+			const result = await executeEditFileTool(
+				{ old_string: "NonExistent", new_string: "Whatever" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(result).toContain("No match found")
+			expect(mockTask.observationRegistry.get(absoluteFilePath)).toBeUndefined()
+		})
+
+		it("leaves the registry empty when an empty old_string hits an existing file", async () => {
+			// The reproduction from review: edit_file with an empty old_string records the
+			// read, then returns "use write_to_file instead". The registry must stay empty
+			// so the write_to_file that follows still needs a read of its own.
+			const result = await executeEditFileTool(
+				{ old_string: "", new_string: "New file content" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(result).toContain("File already exists")
+			expect(mockTask.observationRegistry.get(absoluteFilePath)).toBeUndefined()
+		})
+
+		it("leaves the registry empty when the user rejects the edit", async () => {
+			// A rejection publishes nothing, so the read's token must not authorize a
+			// later write either.
+			mockAskApproval.mockResolvedValueOnce(false)
+
+			const result = await executeEditFileTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(result).toContain("Changes were rejected by the user.")
+			expect(mockTask.observationRegistry.get(absoluteFilePath)).toBeUndefined()
+		})
+
+		it("leaves the registry empty after the diff-view save", async () => {
+			// The diff-view branch saves through saveChanges(), which never consults the
+			// registry, so this tool's read must not leave a token behind for a later
+			// write_to_file to spend on an unrelated overwrite.
+			const result = await executeEditFileTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3" },
+			)
+
+			expect(result).toContain("Tool result message")
+			expect(mockTask.diffViewProvider.saveChanges).toHaveBeenCalled()
+			expect(mockTask.observationRegistry.get(absoluteFilePath)).toBeUndefined()
 		})
 	})
 
