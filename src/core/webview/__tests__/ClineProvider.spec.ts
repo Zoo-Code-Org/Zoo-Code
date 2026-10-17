@@ -4201,6 +4201,60 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	it("drops the sibling overlay snapshot when the sibling re-pins before the commit", async () => {
+		const sibling = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"editor",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		await sibling["setViewStateId"]("repin-view")
+		await sibling.saveViewState("currentApiConfigName", "pinned-profile")
+		vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		vi.spyOn(sibling.providerSettingsManager, "activateProfile").mockResolvedValue({
+			name: "other-profile",
+			apiProvider: providerIdentifiers.anthropic,
+		})
+		vi.spyOn(sibling.providerSettingsManager, "listConfig").mockResolvedValue([])
+		vi.spyOn(sibling.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+		vi.spyOn(sibling.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+		// The sibling activates a different profile while the snapshot's profile
+		// read is in flight: the captured overlay must not land on the new pin.
+		let flipped = false
+		vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async () => {
+			const settings = {
+				name: "pinned-profile",
+				id: "pinned-id",
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "pinned-key",
+			}
+			if (!flipped) {
+				flipped = true
+				await sibling.activateProviderProfile({ name: "other-profile" })
+			}
+			return settings
+		})
+
+		await provider.setValues({ apiProvider: providerIdentifiers.anthropic, apiKey: "caller-key" })
+
+		// The commit-time pin re-check skipped the stale snapshot: the sibling
+		// keeps serving the profile it activated, not the captured overlay.
+		expect(sibling["viewLocalState"].apiConfiguration).toBeUndefined()
+		expect(sibling["pinnedProfileName"]).toBe("other-profile")
+
+		await sibling.dispose()
+		await provider.dispose()
+	})
+
 	describe("persisted view state", () => {
 		it("should persist setValue mutations for view-local mode", async () => {
 			const provider = new ClineProvider(

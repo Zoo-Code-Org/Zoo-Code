@@ -568,10 +568,11 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	public async setConfiguration(values: RooCodeSettings) {
-		await this.sidebarProvider.setValues(values, {
-			savedProfileName: typeof values.currentApiConfigName === "string" ? values.currentApiConfigName : "default",
-		})
-		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
+		// Derive the saved profile name once so the sibling refresh and the save
+		// agree on the empty-string fallback.
+		const savedProfileName = values.currentApiConfigName || "default"
+		await this.sidebarProvider.setValues(values, { savedProfileName })
+		await this.sidebarProvider.providerSettingsManager.saveConfig(savedProfileName, values)
 		if (values.modeApiConfigs) {
 			await Promise.all(
 				Object.entries(values.modeApiConfigs).map(([mode, configId]) =>

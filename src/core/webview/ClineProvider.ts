@@ -3120,9 +3120,23 @@ export class ClineProvider
 					const { name: _siblingPinName, ...settings } = await this.providerSettingsManager.getProfile({
 						name: pinName,
 					})
-					// Direct private access: compile-time safe across sibling instances.
-					await instance._saveViewLocalStateFromMutation({ apiConfiguration: settings as ProviderSettings })
-					await instance.postStateToWebview()
+					// Commit through the sibling's own mutation queue with a pin re-check at
+					// commit time: the sibling may have activated a different profile (or
+					// gained a newer overlay) while this snapshot was in flight, and the
+					// captured settings must never land on top of a newer pin. Direct
+					// private access: compile-time safe across sibling instances.
+					await instance["enqueueProviderProfileMutation"](async () => {
+						if (
+							instance.pinnedProfileName !== pinName ||
+							instance.viewLocalState.apiConfiguration !== undefined
+						) {
+							return
+						}
+						await instance._saveViewLocalStateFromMutation({
+							apiConfiguration: settings as ProviderSettings,
+						})
+						await instance.postStateToWebview()
+					})
 				} catch (error) {
 					// If the pinned profile cannot be resolved, leave the overlay as is:
 					// the deletion path re-points such views, and a wrong snapshot is
