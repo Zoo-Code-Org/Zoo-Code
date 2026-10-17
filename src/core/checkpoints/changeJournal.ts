@@ -234,11 +234,6 @@ export async function appendChanges(
 	})
 }
 
-/** Append a single entry; see appendChanges for the durability contract. */
-export async function appendChange(globalStorageDir: string, taskId: string, entry: ChangeJournalEntry): Promise<void> {
-	await appendChanges(globalStorageDir, taskId, [entry])
-}
-
 /**
  * Load all change-journal entries for a task.
  *
@@ -250,6 +245,7 @@ export async function appendChange(globalStorageDir: string, taskId: string, ent
  * or empty journal returns [] — but only an ABSENT file. Any other read
  * failure (permissions, I/O) is rethrown: a journal that cannot be read must
  * not be indistinguishable from one that is legitimately empty.
+ * @internal Wired by a later unit in the split chain; remove when the chain completes.
  */
 export async function loadChanges(globalStorageDir: string, taskId: string): Promise<ChangeJournalEntry[]> {
 	const filePath = journalPath(globalStorageDir, taskId)
