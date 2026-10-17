@@ -1058,7 +1058,21 @@ export class ClineProvider
 			}
 
 			if (changed) {
-				await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+				try {
+					await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+				} catch (error) {
+					// updateGlobalState applies the new map to the in-memory cache
+					// before the durable write: restore the cache to the value durable
+					// storage actually holds so closed-view pins cannot serve re-pointed
+					// names that never reached disk, then let the caller compensate.
+					try {
+						await this.contextProxy.setValue("viewStates", this.context.globalState.get("viewStates"))
+					} catch {
+						// The cache is updated before the durable attempt: it matches the
+						// durable value regardless of whether this restore write landed.
+					}
+					throw error
+				}
 			}
 		})
 
