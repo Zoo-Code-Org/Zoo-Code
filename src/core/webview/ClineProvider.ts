@@ -717,7 +717,7 @@ export class ClineProvider
 			}
 
 			const pruned = this.prunePersistedViewStates(states)
-			const evicted = Object.keys(states).filter((viewId) => !(viewId in pruned))
+			const evicted = Object.keys(states).filter((viewId) => !Object.hasOwn(pruned, viewId))
 			if (evicted.length > 0) {
 				this.prunedViewIdsDuringActivation.push(...evicted)
 			}
@@ -812,7 +812,7 @@ export class ClineProvider
 
 			if (changed) {
 				const pruned = this.prunePersistedViewStates(states)
-				const evicted = Object.keys(states).filter((viewId) => !(viewId in pruned))
+				const evicted = Object.keys(states).filter((viewId) => !Object.hasOwn(pruned, viewId))
 				if (evicted.length > 0) {
 					this.prunedViewIdsDuringActivation.push(...evicted)
 				}
@@ -886,7 +886,7 @@ export class ClineProvider
 			}
 
 			const pruned = this.prunePersistedViewStates(states)
-			const evicted = Object.keys(states).filter((viewId) => !(viewId in pruned))
+			const evicted = Object.keys(states).filter((viewId) => !Object.hasOwn(pruned, viewId))
 			if (evicted.length > 0) {
 				this.prunedViewIdsDuringActivation.push(...evicted)
 			}
@@ -2640,7 +2640,7 @@ export class ClineProvider
 				const merged = { ...current }
 				for (const viewId of this.prunedViewIdsDuringActivation) {
 					const entry = snapshot.viewStates[viewId]
-					if (entry && !(viewId in merged)) {
+					if (entry && !Object.hasOwn(merged, viewId)) {
 						merged[viewId] = entry
 					}
 				}
