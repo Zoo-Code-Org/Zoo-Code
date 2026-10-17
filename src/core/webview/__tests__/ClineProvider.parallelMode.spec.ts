@@ -841,6 +841,11 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		it("refreshes a sibling overlay when the profile is saved without activation", async () => {
 			viewB["viewLocalState"].currentApiConfigName = "profile-a"
 			const saved: ProfileFixture = { ...activated, zooSessionToken: "fresh-token" }
+			// The overlay refresh reads the stored record back (saveConfig normalization
+			// contract): serve what saveConfig wrote, as the real manager round-trips.
+			getProfile.mockImplementation(async (args: { name?: string }) =>
+				args.name === "profile-a" ? saved : pinnedElsewhere,
+			)
 
 			await viewA.upsertProviderProfile("profile-a", saved, false)
 
@@ -855,6 +860,11 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				apiConfiguration: { ...activated, zooSessionToken: "stale-token" },
 			}
 			const saved: ProfileFixture = { ...activated, zooSessionToken: "fresh-token" }
+			// The overlay refresh reads the stored record back (saveConfig normalization
+			// contract): serve what saveConfig wrote, as the real manager round-trips.
+			getProfile.mockImplementation(async (args: { name?: string }) =>
+				args.name === "profile-a" ? saved : pinnedElsewhere,
+			)
 
 			await viewA.upsertProviderProfile("profile-a", saved, false)
 
