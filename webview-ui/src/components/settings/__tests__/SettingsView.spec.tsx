@@ -833,7 +833,6 @@ describe("SettingsView - Duplicate Commands", () => {
 	})
 })
 
-
 describe("SettingsView - Experimental Settings", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
