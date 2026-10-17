@@ -900,8 +900,13 @@ describe("OpencodeGoHandler", () => {
 			// request; the conversion must run inside the same cleanup scope
 			// as the Anthropic and Responses branches so an unstringifiable
 			// tool input does not leave the bridged listener attached.
-			const circularInput: Record<string, unknown> = {}
-			circularInput.self = circularInput
+			// A throwing value getter fails the conversion deterministically
+			// without depending on cycle detection in sanitizeSurrogatesDeep.
+			const failingInput: Record<string, unknown> = {
+				get value(): never {
+					throw new Error("unstringifiable tool input")
+				},
+			}
 
 			const handler = new OpencodeGoHandler(mockOptions)
 			const controller = new AbortController()
@@ -914,7 +919,7 @@ describe("OpencodeGoHandler", () => {
 					{ role: "user", content: "hi" },
 					{
 						role: "assistant",
-						content: [{ type: "tool_use", id: "tu_1", name: "calc", input: circularInput }],
+						content: [{ type: "tool_use", id: "tu_1", name: "calc", input: failingInput }],
 					},
 				],
 				makeCreateMessageMetadata({ abortSignal: controller.signal }),
@@ -927,7 +932,7 @@ describe("OpencodeGoHandler", () => {
 			// The conversion failure propagates unchanged (the signal never
 			// aborted) and the bridge listener is detached by reference.
 			expect(error).toBeInstanceOf(Error)
-			expect((error as Error).message).toMatch(/circular/i)
+			expect((error as Error).message).toMatch(/unstringifiable tool input/)
 			const abortAddCalls = addEventListenerSpy.mock.calls.filter(([event]) => event === "abort")
 			const addedListener = abortAddCalls[abortAddCalls.length - 1]?.[1]
 			expect(typeof addedListener).toBe("function")
