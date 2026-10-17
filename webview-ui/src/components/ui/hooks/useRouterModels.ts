@@ -14,12 +14,19 @@ type UseRouterModelsOptions = {
 	enabled?: boolean // gate fetching entirely
 }
 
-export const fetchRouterModels = async (provider?: string) =>
+export const fetchRouterModels = async (provider?: string, signal?: AbortSignal) =>
 	new Promise<RouterModels>((resolve, reject) => {
 		const cleanup = () => {
+			signal?.removeEventListener("abort", onAbort)
 			if (typeof window !== "undefined") {
 				window.removeEventListener("message", handler)
 			}
+		}
+
+		const onAbort = () => {
+			clearTimeout(timeout)
+			cleanup()
+			reject(new DOMException("Router models request aborted", "AbortError"))
 		}
 
 		const timeout = setTimeout(() => {
@@ -50,6 +57,12 @@ export const fetchRouterModels = async (provider?: string) =>
 			}
 		}
 
+		if (signal?.aborted) {
+			onAbort()
+			return
+		}
+
+		signal?.addEventListener("abort", onAbort, { once: true })
 		window.addEventListener("message", handler)
 		if (provider) {
 			vscode.postMessage({ type: RouterModelsMessageType.requestRouterModels, values: { provider } })
@@ -62,7 +75,7 @@ export const useRouterModels = (opts: UseRouterModelsOptions = {}) => {
 	const provider = opts.provider || undefined
 	return useQuery({
 		queryKey: [RouterModelsMessageType.routerModels, provider || allRouterModelsProvider],
-		queryFn: () => fetchRouterModels(provider),
+		queryFn: ({ signal }) => fetchRouterModels(provider, signal),
 		enabled: opts.enabled !== false,
 	})
 }

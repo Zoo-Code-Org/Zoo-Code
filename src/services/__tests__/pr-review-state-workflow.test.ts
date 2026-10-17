@@ -980,6 +980,35 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
 	})
 
+	// Regression: GitHub transiently reports mergeable: null / "unknown" after
+	// each push while it recomputes mergeability. With CI passing, the final
+	// reconcile must keep an existing has-conflicts label instead of stripping
+	// it with the other state labels — the label previously flapped off until
+	// a later run restored it. Each operand of the unknown check counts alone.
+	it.each([
+		{ mergeable: null, mergeableState: "unknown" },
+		{ mergeable: null, mergeableState: "clean" },
+		{ mergeable: true, mergeableState: "unknown" },
+	])(
+		"keeps has-conflicts while mergeability is unknown ($mergeable, $mergeableState) and required CI passes (#2045)",
+		async ({ mergeable, mergeableState }) => {
+			const result = await runWorkflow({ mergeable, mergeableState, labels: ["has-conflicts"] })
+
+			expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+			expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+			expect(result.addLabels).toHaveBeenCalledWith(
+				expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+			)
+		},
+	)
+
+	it("strips has-conflicts when mergeability is known clean and required CI passes", async () => {
+		const result = await runWorkflow({ labels: ["has-conflicts"] })
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+	})
+
 	it("keeps has-conflicts while mergeability is unknown and required CI is missing (#2025)", async () => {
 		// A conflicting PR gets no merge-ref CI run, so its required checks are
 		// missing. Unknown mergeability must not read that as a reason to strip
