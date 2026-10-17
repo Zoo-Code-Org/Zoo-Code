@@ -41,10 +41,6 @@ const modelRouterBaseModelSchema = z.object({
 
 export type OpenRouterBaseModel = z.infer<typeof modelRouterBaseModelSchema>
 
-/**
- * OpenRouterModel
- */
-
 export const openRouterModelSchema = modelRouterBaseModelSchema.extend({
 	id: z.string(),
 	architecture: openRouterArchitectureSchema.optional(),
@@ -52,10 +48,8 @@ export const openRouterModelSchema = modelRouterBaseModelSchema.extend({
 	supported_parameters: z.array(z.string()).optional(),
 })
 
-export type OpenRouterModel = z.infer<typeof openRouterModelSchema>
-
 /**
- * OpenRouterModelEndpoint
+ * @internal
  */
 
 export const openRouterModelEndpointSchema = modelRouterBaseModelSchema.extend({
@@ -63,7 +57,9 @@ export const openRouterModelEndpointSchema = modelRouterBaseModelSchema.extend({
 	tag: z.string().optional(),
 })
 
-export type OpenRouterModelEndpoint = z.infer<typeof openRouterModelEndpointSchema>
+/**
+ * @internal
+ */
 
 /**
  * OpenRouterModelsResponse
