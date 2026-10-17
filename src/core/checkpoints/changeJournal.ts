@@ -122,12 +122,17 @@ export async function appendChanges(
 				throw error
 			}
 		}
-		// Torn-tail repair: a crash can leave the final line unterminated. If
-		// that final line is a complete, entry-shaped JSON record it was fully
-		// written and only its newline was lost - keep it and re-terminate.
-		// Otherwise it is a fragment of a lost write and the replacement
-		// truncates it, so the journal only ever holds complete records and a
-		// later entry can never mask the lost one.
+		// Torn-tail handling: a crash can leave the final line unterminated.
+		// If that final line is a complete, entry-shaped JSON record it was
+		// fully written and only its newline was lost - verified recovery:
+		// keep it and re-terminate. An unparseable or non-entry-shaped tail
+		// is NOT verified recovery material: it may be the truncated journal
+		// record of a committed write, and silently truncating it would let
+		// this append succeed while the rollback history is already
+		// incomplete (a later rollback could then resolve the file to the
+		// wrong checkpoint or lose the lost write's metadata). Reject the
+		// append instead; torn-tail repair is a separately verified recovery
+		// operation, not a side effect of the next write.
 		if (content && !content.endsWith("\n")) {
 			const cut = content.lastIndexOf("\n") + 1
 			let tail: unknown
@@ -136,7 +141,12 @@ export async function appendChanges(
 			} catch {
 				tail = undefined
 			}
-			content = isEntryShaped(tail) ? content + "\n" : content.slice(0, cut)
+			if (!isEntryShaped(tail)) {
+				throw new Error(
+					`Cannot append to change journal ${filePath}: unterminated final record is not a complete entry (torn-tail recovery requires explicit repair)`,
+				)
+			}
+			content = content + "\n"
 		}
 		const payload = entries.map((entry) => JSON.stringify(entry) + "\n").join("")
 		const tmpPath = path.join(dir, `${JOURNAL_FILENAME}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`)
