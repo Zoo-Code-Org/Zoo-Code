@@ -354,11 +354,13 @@ jobs:
                         }
                       }
 
-                      // Strips stateLabels from a PR, optionally keeping one.
+                      // Strips stateLabels from a PR, optionally keeping one desired label
+                      // plus any labels in keepLabels (e.g. has-conflicts while mergeability
+                      // is unknown — kept, never added, per the hoisted check below).
                       // Also removes stale-awaiting-author when not keeping awaiting-author.
                       // Only skipped when this run's own token is read-only (see isReadOnlyRun) —
                       // schedule/workflow_dispatch runs reconcile fork PRs normally.
-                      async function reconcileLabels(pr, desiredLabel) {
+                      async function reconcileLabels(pr, desiredLabel, keepLabels = []) {
                         if (isReadOnlyRun && isForkPR(pr)) {
                           core.info(`PR #${pr.number}: fork PR on a read-only run — skipping label mutation`);
                           return;
@@ -379,7 +381,7 @@ jobs:
                           }
                         }
                         for (const label of stateLabels) {
-                          if (label !== desiredLabel && currentLabels.has(label)) {
+                          if (label !== desiredLabel && !keepLabels.includes(label) && currentLabels.has(label)) {
                             try {
                               await github.rest.issues.removeLabel({
                                 owner, repo, issue_number: pr.number, name: label,
@@ -752,6 +754,26 @@ jobs:
                             continue;
                           }
 
+                          // Unknown mergeability is handled once here, ahead of every
+                          // branch that reconciles labels (issue #2045). GitHub recomputes
+                          // mergeability asynchronously after each push and transiently
+                          // reports `mergeable: null` / `mergeable_state: "unknown"` while
+                          // the background job runs, so unknown says nothing about
+                          // conflicts: an existing has-conflicts label is kept through
+                          // reconciliation — unknown is not evidence the conflicts went
+                          // away — and it is never added, since unknown is not evidence
+                          // of conflicts either. Known-dirty never reaches here (the
+                          // conflict check above handles it first); known-clean keeps the
+                          // strip. The awaiting-maintainer branch below still refetches
+                          // mergeability before the maintainer handoff, because a push
+                          // between this fetch and labeling can change the answer.
+                          // A kept has-conflicts label can sit next to other state labels
+                          // until mergeability is known. This is intended.
+                          const mergeabilityUnknown =
+                            prDetail.mergeable === null || prDetail.mergeable_state === 'unknown';
+                          const keepHasConflicts = mergeabilityUnknown &&
+                            pr.labels.some(label => label.name === 'has-conflicts');
+
                           // Check CI status for required checks on the PR's head commit only.
                           // Scoping to required checks avoids advisory checks (e.g. codecov/patch)
                           // incorrectly blocking label assignment on otherwise-ready PRs.
@@ -851,16 +873,10 @@ jobs:
                           // Exception (issue #2025): while GitHub is still computing
                           // mergeability, a missing required check can simply mean a
                           // conflicting PR got no merge-ref CI run — not that its
-                          // conflicts went away. Keep an existing has-conflicts label
-                          // through this branch instead of stripping it with the other
-                          // state labels. Known-clean mergeability keeps the strip, and
-                          // known-dirty never reaches here (the conflict check above
-                          // handles it first).
+                          // conflicts went away. keepHasConflicts (computed once above)
+                          // keeps an existing has-conflicts label through this branch
+                          // instead of stripping it with the other state labels.
                           if (ciPending || ciFailed) {
-                            const mergeabilityUnknown =
-                              prDetail.mergeable === null || prDetail.mergeable_state === 'unknown';
-                            const keepHasConflicts = mergeabilityUnknown &&
-                              pr.labels.some(label => label.name === 'has-conflicts');
                             core.info(
                               `PR #${pr.number}: CI ${ciPending ? 'pending' : 'failed'} — stripping state labels` +
                               (keepHasConflicts ? ' (keeping has-conflicts while mergeability is unknown)' : '')
@@ -1133,6 +1149,7 @@ jobs:
 
                           core.info(
                             `PR #${pr.number}: CI passing, reviews=${latest.size}, ` +
+                            `mergeable=${prDetail.mergeable}, mergeable_state=${prDetail.mergeable_state}, ` +
                             `coderabbit=${freshCodeRabbitReview?.state ?? (codeRabbitEligibleAuthor ? 'pending' : 'optional')}, ` +
                             `maintainer=${maintainerApproval?.state ?? 'pending'}, blockers=${maintainerBlockers.size} → ${desiredLabel ?? '(none)'}`
                           );
@@ -1153,7 +1170,7 @@ jobs:
                           if (recyclingActiveLabel) {
                             await updateReviewGuide(pr, phase, existingGuide);
                           }
-                          await reconcileLabels(pr, desiredLabel);
+                          await reconcileLabels(pr, desiredLabel, keepHasConflicts ? ['has-conflicts'] : []);
                           await reconcileCommunityApproval(pr, communityDecision);
                           if (readyForMaintainer) {
                             await updateReviewGate(pr, phase, true);
