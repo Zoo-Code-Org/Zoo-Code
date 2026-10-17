@@ -3203,8 +3203,15 @@ export class ClineProvider
 			skipCurrentTaskRebuild?: boolean
 		},
 	) {
-		return this.enqueueProviderProfileMutation((signal) =>
-			this.activateProviderProfileUnlocked(args, options, signal),
+		return this.enqueueProviderProfileMutation(
+			(signal) => this.activateProviderProfileUnlocked(args, options, signal),
+			{
+				// The queue stays owned until this run - including its compensation - settles:
+				// a group write that hangs past the mutation timeout must not let a later
+				// activation complete before this rollback, or the late restore would
+				// overwrite the later activation's selection and settings.
+				runToCompletion: true,
+			},
 		)
 	}
 
