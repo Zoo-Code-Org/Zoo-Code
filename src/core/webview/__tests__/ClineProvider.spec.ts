@@ -2746,6 +2746,11 @@ describe("ClineProvider", () => {
 			}
 			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("fresh-id")
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([profile])
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "fresh-profile",
+				id: "fresh-id",
+				apiProvider: providerIdentifiers.openrouter,
+			})
 			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			await provider.setValue("currentApiConfigName", "stale-profile")
@@ -2786,6 +2791,207 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("fails the upsert and compensates the record when the post-save read-back fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// The pre-save snapshot sees the prior record; the post-save read-back
+			// fails: the raw caller payload must never stand in for the validated
+			// stored record.
+			let saved = false
+			const saveSpy = vi.spyOn(provider.providerSettingsManager, "saveConfig").mockImplementation(async () => {
+				saved = true
+				return "p-id"
+			})
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async () => {
+				if (saved) {
+					throw new Error("read-back down")
+				}
+				return {
+					name: "p",
+					id: "p-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "prior-key",
+				}
+			})
+			vi.spyOn(provider.providerSettingsManager, "getCurrentProfileName").mockResolvedValue("p")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
+
+			await expect(
+				provider["persistProviderProfile"](
+					"p",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "raw-key" },
+					true,
+					new AbortController().signal,
+				),
+			).rejects.toThrow("could not be read back")
+
+			// The landed save was compensated with the prior record, and no
+			// activation write carried the raw payload into the shared store.
+			expect(saveSpy).toHaveBeenLastCalledWith("p", expect.objectContaining({ apiKey: "prior-key" }))
+			expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "p")
+
+			await provider.dispose()
+		})
+
+		it("restores the manager record and shared state when a post-delete write fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const oldProfile: ProviderSettingsEntry = {
+				name: "old-profile",
+				id: "old-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+			await provider.setValue("currentApiConfigName", "old-profile")
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (params) => {
+				if ("name" in params && params.name === "old-profile") {
+					return {
+						name: "old-profile",
+						id: "old-id",
+						apiProvider: providerIdentifiers.openrouter,
+						apiKey: "old-key",
+					}
+				}
+				return {
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "keeper-key",
+				}
+			})
+			vi.spyOn(provider.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
+			const saveSpy = vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("x")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// The first write after the committed manager delete fails: the
+			// deletion must be compensated, not left half-applied.
+			vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key) => {
+				if (key === "listApiConfigMeta") {
+					throw new Error("state write down")
+				}
+			})
+
+			await expect(provider.deleteProviderProfile(oldProfile)).rejects.toThrow("state write down")
+
+			// The secrets-backed record was restored with its pre-delete settings.
+			expect(saveSpy).toHaveBeenCalledWith("old-profile", expect.objectContaining({ apiKey: "old-key" }))
+
+			await provider.dispose()
+		})
+
+		it("keeps the mutation queue owned by a mode switch past its timeout", async () => {
+			vi.useFakeTimers()
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			let release!: () => void
+			const gate = new Promise<void>((resolve) => {
+				release = resolve
+			})
+			// Bracket access: handleModeSwitchUnlocked is private; the double
+			// assertion is the only way to install the gate on the prototype.
+			const proto = ClineProvider.prototype as unknown as {
+				handleModeSwitchUnlocked: (...args: unknown[]) => Promise<void>
+			}
+			const switchSpy = vi.spyOn(proto, "handleModeSwitchUnlocked").mockReturnValue(gate)
+
+			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+			// The caller-side timeout rejection is expected: runToCompletion only
+			// keeps the QUEUE waiting for the run, it does not silence the caller.
+			const switchSettled = provider.handleModeSwitch("programmer").catch(() => undefined)
+			await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS + 1000)
+
+			// The queue tail is still the mode switch: a later mutation must
+			// not start while the switch's writes are still in flight.
+			let secondStarted = false
+			void provider["enqueueProviderProfileMutation"](async () => {
+				secondStarted = true
+			})
+			await vi.advanceTimersByTimeAsync(0)
+			expect(secondStarted).toBe(false)
+
+			release()
+			await switchSettled
+			await vi.advanceTimersByTimeAsync(0)
+			expect(secondStarted).toBe(true)
+
+			switchSpy.mockRestore()
+			vi.useRealTimers()
+			await provider.dispose()
+		})
+
+		it("does not resurrect a pruned sibling entry that the sibling cleared mid-window", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-tomb-view")
+			// A full 50-entry map: the activation write evicts the oldest entry (the
+			// sibling's), the sibling then clears it mid-window, and the tombstone
+			// must outrank the tracked eviction during rollback.
+			const seeded: Record<string, { mode?: string; currentApiConfigName?: string; updatedAt?: number }> = {
+				"sibling-view": { currentApiConfigName: "sibling-profile", updatedAt: 0 },
+			}
+			for (let i = 0; i < 49; i++) {
+				seeded["filler-" + i] = { currentApiConfigName: "filler-profile", updatedAt: i + 1 }
+			}
+			await provider.contextProxy.setValue("viewStates", seeded)
+			await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("new-id")
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("old-mode-id")
+			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "new-profile",
+				id: "rec-id",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			vi.spyOn(provider.providerSettingsManager, "getCurrentProfileName").mockResolvedValue("old-profile")
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "old-profile",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+			// After the activation write evicted the oldest entry, the sibling
+			// intentionally clears it; the rollback must leave it absent.
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockImplementation(async () => {
+				await provider["clearPersistedViewState"]("sibling-view")
+				throw new Error("mode write failed")
+			})
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await expect(
+				provider.upsertProviderProfile("new-profile", { apiProvider: providerIdentifiers.anthropic }, true),
+			).resolves.toBeUndefined()
+
+			const restored = provider.contextProxy.getValue("viewStates") as Record<string, unknown>
+			expect(restored["sibling-view"]).toBeUndefined()
+			expect(restored["filler-0"]).toBeDefined()
+			await provider.dispose()
+		})
 		it("should swallow only the typed not-found signal when pruning a stale profile entry", async () => {
 			const provider = new ClineProvider(
 				mockContext,
@@ -3274,6 +3480,11 @@ describe("ClineProvider", () => {
 			// Typed spies on the real manager (instance-scoped): the upsert-activate path
 			// reads only these methods, so no manager replacement is needed.
 			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("profile-b-id")
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "profile-b",
+				id: "profile-b-id",
+				apiProvider: providerIdentifiers.anthropic,
+			})
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ name: "profile-b", id: "profile-b-id", apiProvider: providerIdentifiers.anthropic },
 			])
@@ -3536,6 +3747,12 @@ describe("ClineProvider", () => {
 			})
 
 			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("pinned-id")
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "pinned-profile",
+				id: "pinned-id",
+				apiProvider: providerIdentifiers.zooGateway,
+				zooSessionToken: "new-token",
+			})
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ name: "pinned-profile", id: "pinned-id", apiProvider: providerIdentifiers.zooGateway },
 			])
@@ -5934,13 +6151,22 @@ describe("ClineProvider", () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
+		const savedForReadBack1: Record<string, Record<string, unknown>> = {}
 		;(provider as any).providerSettingsManager = {
 			listConfig: vi
 				.fn()
 				.mockResolvedValue([
 					{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 				]),
-			saveConfig: vi.fn().mockResolvedValue("test-id"),
+			saveConfig: vi.fn(async (name: string, settings: Record<string, unknown>) => {
+				savedForReadBack1[name] = settings
+				return "test-id"
+			}),
+			getProfile: vi.fn(async ({ name }: { name: string }) => ({
+				name,
+				id: "test-id",
+				...savedForReadBack1[name],
+			})),
 			setModeConfig: vi.fn(),
 		} as any
 
@@ -6712,9 +6938,18 @@ describe("ClineProvider", () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
+			const savedForReadBack2: Record<string, Record<string, unknown>> = {}
 			;(provider as any).providerSettingsManager = {
 				setModeConfig: vi.fn(),
-				saveConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn(async (name: string, settings: Record<string, unknown>) => {
+					savedForReadBack2[name] = settings
+					return undefined
+				}),
+				getProfile: vi.fn(async ({ name }: { name: string }) => ({
+					name,
+					id: undefined,
+					...savedForReadBack2[name],
+				})),
 				listConfig: vi
 					.fn()
 					.mockResolvedValue([
@@ -6757,9 +6992,18 @@ describe("ClineProvider", () => {
 			;(buildApiHandler as any).mockImplementationOnce(() => {
 				throw new Error("API handler error")
 			})
+			const savedForReadBack3: Record<string, Record<string, unknown>> = {}
 			;(provider as any).providerSettingsManager = {
 				setModeConfig: vi.fn(),
-				saveConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn(async (name: string, settings: Record<string, unknown>) => {
+					savedForReadBack3[name] = settings
+					return undefined
+				}),
+				getProfile: vi.fn(async ({ name }: { name: string }) => ({
+					name,
+					id: undefined,
+					...savedForReadBack3[name],
+				})),
 				listConfig: vi
 					.fn()
 					.mockResolvedValue([
@@ -6800,9 +7044,18 @@ describe("ClineProvider", () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
+			const savedForReadBack4: Record<string, Record<string, unknown>> = {}
 			;(provider as any).providerSettingsManager = {
 				setModeConfig: vi.fn(),
-				saveConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn(async (name: string, settings: Record<string, unknown>) => {
+					savedForReadBack4[name] = settings
+					return undefined
+				}),
+				getProfile: vi.fn(async ({ name }: { name: string }) => ({
+					name,
+					id: undefined,
+					...savedForReadBack4[name],
+				})),
 				listConfig: vi
 					.fn()
 					.mockResolvedValue([
@@ -9452,8 +9705,12 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("saved-id")
 				vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
-				vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
-
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+					name: "saved-profile",
+					id: "saved-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "new-key",
+				})
 				await provider.upsertProviderProfile(
 					"saved-profile",
 					{ apiProvider: providerIdentifiers.anthropic, apiKey: "new-key" },
@@ -9495,6 +9752,13 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("saved-id")
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
 			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "saved-profile",
+				id: "saved-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "new-key",
+			})
 
 			await provider.upsertProviderProfile(
 				"saved-profile",
