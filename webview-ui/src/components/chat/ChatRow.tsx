@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import React, { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useSize } from "react-use"
 import { useTranslation, Trans } from "react-i18next"
 import deepEqual from "fast-deep-equal"
@@ -58,7 +58,6 @@ import {
 	Eye,
 	FileDiff,
 	ListTree,
-	User,
 	Edit,
 	Trash2,
 	MessageCircleQuestionMark,
@@ -67,7 +66,6 @@ import {
 	PocketKnife,
 	FolderTree,
 	SquareTerminal,
-	MessageCircle,
 	Repeat2,
 	Split,
 	ArrowRight,
@@ -198,6 +196,7 @@ export const ChatRowContent = ({
 		enableCheckpoints,
 	} = useExtensionState()
 	const { info: model } = useSelectedModel(apiConfiguration)
+	const editDescriptionId = useId()
 	const [isEditing, setIsEditing] = useState(false)
 	const [editedContent, setEditedContent] = useState("")
 	const [editMode, setEditMode] = useState<Mode>(mode || "code")
@@ -1207,38 +1206,41 @@ export const ChatRowContent = ({
 					return null // we should never see this message type
 				case "text":
 					return (
-						<div className="group">
-							<div style={headerStyle}>
-								<MessageCircle className="w-4 shrink-0" aria-label="Speech bubble icon" />
-								<span style={{ fontWeight: "bold" }}>{t("chat:text.rooSaid")}</span>
-								<div style={{ flexGrow: 1 }} />
-								<OpenMarkdownPreviewButton markdown={message.text} />
-							</div>
-							<div className="pl-6">
-								<Markdown markdown={message.text} partial={message.partial} />
-								{message.images && message.images.length > 0 && (
-									<div style={{ marginTop: "10px" }}>
-										{message.images.map((image, index) => (
-											<ImageBlock key={index} imageData={image} />
-										))}
-									</div>
-								)}
+						<div className="group" role="group" aria-label={t("chat:text.rooSaid")}>
+							<span className="sr-only">{t("chat:text.rooSaid")}</span>
+							<div className="pl-6 relative">
+								<div className="absolute top-0 right-0 z-10">
+									<OpenMarkdownPreviewButton markdown={message.text} />
+								</div>
+								<div className="pr-10">
+									<Markdown markdown={message.text} partial={message.partial} />
+									{message.images && message.images.length > 0 && (
+										<div style={{ marginTop: "10px" }}>
+											{message.images.map((image, index) => (
+												<ImageBlock key={index} imageData={image} />
+											))}
+										</div>
+									)}
+								</div>
 							</div>
 						</div>
 					)
 				case "user_feedback":
 					return (
-						<div className="group">
-							<div style={headerStyle}>
-								<User className="w-4 shrink-0" aria-label="User icon" />
-								<span style={{ fontWeight: "bold" }}>{t("chat:feedback.youSaid")}</span>
-							</div>
+						<div
+							className="group w-fit max-w-[70%] ml-auto flex flex-col items-end gap-1"
+							role="group"
+							aria-label={t("chat:feedback.youSaid")}>
+							<span className="sr-only">{t("chat:feedback.youSaid")}</span>
+							<span id={editDescriptionId} className="sr-only">
+								{t("chat:queuedMessages.clickToEdit")}
+							</span>
 							<div
 								className={cn(
-									"ml-6 border rounded-sm overflow-hidden whitespace-pre-wrap",
+									"border rounded-sm overflow-hidden whitespace-pre-wrap",
 									isEditing
 										? "bg-vscode-editor-background text-vscode-editor-foreground"
-										: "cursor-text p-1 bg-vscode-editor-foreground/70 text-vscode-editor-background",
+										: "cursor-text p-1 bg-vscode-list-hoverBackground text-vscode-foreground",
 								)}>
 								{isEditing ? (
 									<div className="flex flex-col gap-2">
@@ -1261,50 +1263,69 @@ export const ChatRowContent = ({
 										/>
 									</div>
 								) : (
-									<div className="flex justify-between">
-										<div
-											className="flex-grow px-2 py-1 wrap-anywhere rounded-lg transition-colors"
-											onClick={(e) => {
-												e.stopPropagation()
-												if (!isStreaming) {
-													handleEditClick()
-												}
-											}}
-											title={t("chat:queuedMessages.clickToEdit")}>
-											<Mention text={message.text} withShadow />
-										</div>
-										<div className="flex gap-2 pr-1">
-											<div
-												className="cursor-pointer shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-												style={{ visibility: isStreaming ? "hidden" : "visible" }}
-												onClick={(e) => {
-													e.stopPropagation()
-													handleEditClick()
-												}}>
-												<Edit className="w-4 shrink-0" aria-label="Edit message icon" />
-											</div>
-											<div
-												className="cursor-pointer shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-												style={{ visibility: isStreaming ? "hidden" : "visible" }}
-												onClick={(e) => {
-													e.stopPropagation()
-													vscode.postMessage({ type: "deleteMessage", value: message.ts })
-												}}>
-												<Trash2 className="w-4 shrink-0" aria-label="Delete message icon" />
-											</div>
-										</div>
+									<div
+										className="px-2 py-1 wrap-anywhere rounded-lg transition-colors"
+										role="button"
+										tabIndex={isStreaming ? -1 : 0}
+										aria-disabled={isStreaming || undefined}
+										aria-label={message.text ? undefined : t("common:confirmation.editMessage")}
+										aria-describedby={editDescriptionId}
+										onClick={(e) => {
+											e.stopPropagation()
+											if (!isStreaming) {
+												handleEditClick()
+											}
+										}}
+										onKeyDown={(e) => {
+											if (isStreaming) {
+												return
+											}
+											if (e.key === "Enter" || e.key === " ") {
+												e.preventDefault()
+												handleEditClick()
+											}
+										}}
+										title={t("chat:queuedMessages.clickToEdit")}>
+										<Mention text={message.text} withShadow />
 									</div>
 								)}
 								{!isEditing && message.images && message.images.length > 0 && (
 									<Thumbnails images={message.images} style={{ marginTop: "8px" }} />
 								)}
 							</div>
+							{!isEditing && (
+								<div className="flex gap-2 pr-1">
+									<button
+										type="button"
+										className="cursor-pointer shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity rounded-sm focus-visible:outline focus-visible:outline-1 focus-visible:outline-vscode-focusBorder"
+										style={{ visibility: isStreaming ? "hidden" : "visible" }}
+										aria-label={t("common:confirmation.editMessage")}
+										onClick={(e) => {
+											e.stopPropagation()
+											handleEditClick()
+										}}>
+										<Edit className="w-4 shrink-0" aria-hidden="true" />
+									</button>
+									<button
+										type="button"
+										className="cursor-pointer shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity rounded-sm focus-visible:outline focus-visible:outline-1 focus-visible:outline-vscode-focusBorder"
+										style={{ visibility: isStreaming ? "hidden" : "visible" }}
+										aria-label={t("common:confirmation.deleteMessage")}
+										onClick={(e) => {
+											e.stopPropagation()
+											vscode.postMessage({ type: "deleteMessage", value: message.ts })
+										}}>
+										<Trash2 className="w-4 shrink-0" aria-hidden="true" />
+									</button>
+								</div>
+							)}
 						</div>
 					)
 				case "user_feedback_diff":
 					const tool = safeJsonParse<ClineSayTool>(message.text)
 					return (
-						<div style={{ marginTop: -10, width: "100%" }}>
+						<div className="max-w-[70%] ml-auto" style={{ marginTop: -10, width: "100%" }}>
+							<span className="sr-only">{t("chat:feedback.youSaid")}</span>
 							<CodeAccordion
 								code={tool?.diff}
 								language="diff"
