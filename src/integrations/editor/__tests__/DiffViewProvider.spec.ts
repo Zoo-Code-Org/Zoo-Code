@@ -1097,9 +1097,24 @@ describe("DiffViewProvider", () => {
 					expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content with user tweak", {
 						preCommitVerify: expect.any(Function),
 					})
-					expect(result.userEdits).toBeDefined()
+					expect(result.userEdits).toContain("new content with user tweak")
 				})
 
+				it("exposes rolled-back user edits in the rejection remediation", async () => {
+					setupDirtyDoc("new content with user tweak")
+					mockTask.observationRegistry.clear()
+
+					const error = await diffViewProvider.saveChanges(false, 0).then(
+						() => undefined,
+						(e: unknown) => e as Error,
+					)
+
+					expect(error?.message).toContain("File already exists at /mock/cwd/test.ts")
+					// The rollback discards the buffer's user edits, so the remediation
+					// must carry them for the retry to merge.
+					expect(error?.message).toContain("user edits")
+					expect(error?.message).toContain("new content with user tweak")
+				})
 				it("rejects an unobserved saveChanges to an existing file and rolls the buffer back", async () => {
 					const { document, replace } = setupDirtyDoc()
 					mockTask.observationRegistry.clear()

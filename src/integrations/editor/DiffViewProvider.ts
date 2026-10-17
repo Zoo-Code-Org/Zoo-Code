@@ -366,8 +366,21 @@ export class DiffViewProvider {
 			} catch (error: unknown) {
 				// The guard rejected the publish: roll the editor buffer back to the
 				// content the diff started from - the file on disk is untouched - so no
-				// unsaved buffer survives a rejected publish, then surface the
-				// remediation to the tool layer.
+				// unsaved buffer survives a rejected publish (a retry's open() would
+				// otherwise save a dirty buffer through an unguarded save). The user's
+				// buffer edits are exposed in the rejection remediation BEFORE the
+				// rollback clears them, so the retry can merge them back in.
+				const newContentEOL = this.newContent.includes("\r\n") ? "\r\n" : "\n"
+				const normalizedEditedContent = editedContent.replace(/\r\n|\n/g, newContentEOL)
+				const normalizedNewContent = this.newContent.replace(/\r\n|\n/g, newContentEOL)
+				const lostUserEdits =
+					normalizedEditedContent === normalizedNewContent
+						? undefined
+						: formatResponse.createPrettyPatch(
+								this.relPath.toPosix(),
+								normalizedNewContent,
+								normalizedEditedContent,
+							)
 				const editor = this.activeDiffEditor
 				const rollback = this.originalContent ?? ""
 				const fullRange = updatedDocument.validateRange(
@@ -378,7 +391,13 @@ export class DiffViewProvider {
 				await editor.edit((builder) => {
 					builder.replace(fullRange, rollback)
 				})
-				throw error
+				const guardMessage = error instanceof Error ? error.message : String(error)
+				throw new Error(
+					lostUserEdits
+						? `${guardMessage}\n\nThe rolled-back buffer carried user edits; merge them into the retry:` +
+								`\n${lostUserEdits}`
+						: guardMessage,
+				)
 			}
 			// Deliberately no updatedDocument.save() here: the guarded publish
 			// replaced the file through an atomic rename, so the file changed
