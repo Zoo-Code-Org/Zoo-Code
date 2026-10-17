@@ -1053,9 +1053,10 @@ describe("DiffViewProvider", () => {
 					expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {
 						preCommitVerify: expect.any(Function),
 					})
-					// The guard wrote the buffer bytes; save() only re-syncs the dirty
-					// flag over identical content, and no rollback edit is made.
-					expect(document.save).toHaveBeenCalled()
+					// The guard wrote the buffer bytes through an atomic rename; calling
+					// save() over that external change would raise the save-conflict
+					// confirmation, so the publish path must not save the document.
+					expect(document.save).not.toHaveBeenCalled()
 					expect(replace).not.toHaveBeenCalled()
 					// Clean save: no userEdits behavior change.
 					expect(result.userEdits).toBeUndefined()
@@ -1109,19 +1110,18 @@ describe("DiffViewProvider", () => {
 				})
 
 				it("creates an unobserved file when the saveChanges target is absent", async () => {
-					setupDirtyDoc()
+					const { document } = setupDirtyDoc()
 					mockTask.observationRegistry.clear()
 					vi.mocked(fs.access).mockRejectedValue(
 						Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
 					)
 
-					const { document } = setupDirtyDoc()
 					await diffViewProvider.saveChanges(false, 0)
 
 					expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {
 						preCommitVerify: expect.any(Function),
 					})
-					expect(document.save).toHaveBeenCalled()
+					expect(document.save).not.toHaveBeenCalled()
 				})
 
 				it("fails closed when the owning task has been collected", async () => {

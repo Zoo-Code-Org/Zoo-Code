@@ -370,10 +370,12 @@ export class DiffViewProvider {
 				})
 				throw error
 			}
-			// The guarded publish already wrote the buffer's bytes; save() only
-			// re-syncs the editor's dirty flag over identical content - it carries
-			// the guard's verdict, it does not bypass the guard.
-			await updatedDocument.save()
+			// Deliberately no updatedDocument.save() here: the guarded publish
+			// replaced the file through an atomic rename, so the file changed
+			// externally and a save would raise VS Code's save-conflict
+			// confirmation (which hangs unattended flows). The buffer and the file
+			// hold the same bytes, so the editor's external-change reconciliation
+			// clears the dirty flag on its own.
 		}
 
 		// Stop tracking touches and cancel any pending scroll-to-diff before any
