@@ -60,6 +60,13 @@ import {
 } from "./rulesMessageHandler"
 import { changeLanguage, t } from "../../i18n"
 import { Package } from "../../shared/package"
+import {
+	type CommandListInspection,
+	commandListConfiguration,
+	readCommandListScopes,
+	resolveWorkspaceWriteTarget,
+	splitCommandListScopes,
+} from "../auto-approval/commandScope"
 import { type RouterName, toRouterName } from "../../shared/api"
 import { MessageEnhancer } from "./messageEnhancer"
 
@@ -763,26 +770,110 @@ export const webviewMessageHandler = async (
 					if (key === "language") {
 						newValue = value ?? "en"
 						changeLanguage(newValue as Language)
-					} else if (key === "allowedCommands") {
+					} else if (key === "allowedCommands" || key === "deniedCommands") {
 						const commands = value ?? []
 
-						newValue = Array.isArray(commands)
+						const incoming = Array.isArray(commands)
 							? commands.filter((cmd) => typeof cmd === "string" && cmd.trim().length > 0)
 							: []
 
-						await vscode.workspace
-							.getConfiguration(Package.name)
-							.update("allowedCommands", newValue, vscode.ConfigurationTarget.Global)
-					} else if (key === "deniedCommands") {
-						const commands = value ?? []
+						// The webview always sends the full merged list (it displays
+						// the union of the global-state and workspace-scope layers).
+						// Splitting that list by origin scope needs the workspace
+						// layer, the write target, and the rollback value to describe
+						// the SAME configuration state, so they are all derived from
+						// one inspect() snapshot taken before any write. Without a
+						// snapshot the key's save is aborted rather than guessed at:
+						// reading the workspace layer as empty would classify a
+						// workspace-scoped entry as brand new and re-copy it into
+						// global settings.
+						// Only the snapshot read is guarded: a failing
+						// commandListConfiguration() lookup propagates instead of being
+						// downgraded to a per-key save failure.
+						const config = commandListConfiguration()
+						let inspection: CommandListInspection | undefined
+						let inspectionFailure: string | undefined
+						try {
+							inspection = config.inspect<string[]>(key)
+						} catch (error) {
+							inspectionFailure = error instanceof Error ? error.message : String(error)
+						}
+						if (inspection === undefined) {
+							// No snapshot: the workspace layer could only be guessed
+							// at, and a guessed-empty layer re-copies workspace entries
+							// into global settings, so this key's save is abandoned
+							// while the remaining keys of the payload persist normally.
+							vscode.window.showErrorMessage(
+								`Failed to save ${key}: ${inspectionFailure ?? "the configuration value could not be read"}`,
+							)
+							continue
+						}
 
-						newValue = Array.isArray(commands)
-							? commands.filter((cmd) => typeof cmd === "string" && cmd.trim().length > 0)
-							: []
+						const currentScopes = readCommandListScopes(key, getGlobalState(key), inspection)
+						const { globalWrite, workspaceWrite } = splitCommandListScopes(
+							incoming,
+							currentScopes.workspace,
+							currentScopes.global,
+						)
+						const workspaceTarget = resolveWorkspaceWriteTarget(key, inspection)
 
-						await vscode.workspace
-							.getConfiguration(Package.name)
-							.update("deniedCommands", newValue, vscode.ConfigurationTarget.Global)
+						// The two configuration writes below are not atomic, so the raw
+						// previous workspace value comes from the same snapshot the split
+						// used, taken from the target that owns the workspace layer: a
+						// failed global write rewinds that target to exactly what it held
+						// beforehand, including the entries this save drops. The raw
+						// inspected value is used rather than the sanitized layer so the
+						// rewind reproduces the file contents instead of a cleaned-up
+						// approximation of them.
+						const previousWorkspaceValue =
+							workspaceTarget === vscode.ConfigurationTarget.WorkspaceFolder
+								? inspection.workspaceFolderValue
+								: inspection.workspaceValue
+						let workspaceWriteApplied = false
+						try {
+							// Write the workspace layer first, at the target that owns it.
+							// When no workspace layer exists the write is skipped entirely
+							// so saving never materializes one; when entries were deleted
+							// the `[]` write clears them at that scope.
+							if (workspaceTarget !== undefined) {
+								await config.update(key, workspaceWrite, workspaceTarget)
+								workspaceWriteApplied = true
+							}
+
+							await config.update(key, globalWrite, vscode.ConfigurationTarget.Global)
+						} catch (error) {
+							const failure = error instanceof Error ? error.message : String(error)
+
+							// A failed workspace write leaves nothing changed, so only a
+							// global-write failure has a changed workspace layer to rewind,
+							// and the rewind goes to the same target the write used.
+							if (workspaceWriteApplied) {
+								try {
+									await config.update(key, previousWorkspaceValue, workspaceTarget)
+								} catch (restoreError) {
+									// The rewind itself failed: the configuration keeps the
+									// partially written values and the extension global-state
+									// write is skipped, so stored state never reflects a save
+									// that did not complete. The user hears about both failures.
+									vscode.window.showErrorMessage(
+										`Failed to save ${key}: ${failure}. The workspace-scoped restore also failed: ${restoreError}. Review the command lists in your user and workspace settings.`,
+									)
+									continue
+								}
+							}
+
+							// Only this key's save is abandoned; the remaining keys of the
+							// payload persist normally.
+							vscode.window.showErrorMessage(`Failed to save ${key}: ${failure}`)
+							continue
+						}
+
+						// Extension global state keeps only the global layer:
+						// enforcement re-adds the workspace layer through
+						// readCommandListScopes, so storing the merged list here
+						// would double-home workspace entries and re-leak them on the
+						// next save.
+						newValue = globalWrite
 					} else if (key === "allowedReadFiles" || key === "allowedWriteFiles") {
 						const patterns = value ?? []
 
@@ -1854,38 +1945,6 @@ export const webviewMessageHandler = async (
 			// Cancel any pending auto-approval timeout for the current task
 			provider.getCurrentTask()?.cancelAutoApprovalTimeout()
 			break
-		case "allowedCommands": {
-			// Validate and sanitize the commands array
-			const commands = message.commands ?? []
-			const validCommands = Array.isArray(commands)
-				? commands.filter((cmd) => typeof cmd === "string" && cmd.trim().length > 0)
-				: []
-
-			await updateGlobalState("allowedCommands", validCommands)
-
-			// Also update workspace settings.
-			await vscode.workspace
-				.getConfiguration(Package.name)
-				.update("allowedCommands", validCommands, vscode.ConfigurationTarget.Global)
-
-			break
-		}
-		case "deniedCommands": {
-			// Validate and sanitize the commands array
-			const commands = message.commands ?? []
-			const validCommands = Array.isArray(commands)
-				? commands.filter((cmd) => typeof cmd === "string" && cmd.trim().length > 0)
-				: []
-
-			await updateGlobalState("deniedCommands", validCommands)
-
-			// Also update workspace settings.
-			await vscode.workspace
-				.getConfiguration(Package.name)
-				.update("deniedCommands", validCommands, vscode.ConfigurationTarget.Global)
-
-			break
-		}
 		case "openCustomModesSettings": {
 			const customModesFilePath = await provider.customModesManager.getCustomModesFilePath()
 
