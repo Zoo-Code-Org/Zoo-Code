@@ -49,18 +49,25 @@ describe("changeJournal", () => {
 			expect(raw.split("\n").filter((line) => line !== "")).toHaveLength(2)
 		})
 
-		it("repairs a torn tail before appending so both entries load", async () => {
+		it("rejects an append when the final record is torn instead of truncating it", async () => {
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "good" }))
 			// Simulate a crash that tore the last append mid-write: the file now
-			// ends with an unterminated JSON fragment.
+			// ends with an unterminated JSON fragment. That fragment may be the
+			// truncated journal record of a committed write, so the append must
+			// not silently truncate it away and continue as if the history
+			// were complete.
 			const filePath = journalPath(tmpRoot, taskId)
 			const raw = await fs.readFile(filePath, "utf8")
 			await fs.writeFile(filePath, raw + '{"path":"src/half.ts","operation":"upd')
 
-			await appendChange(tmpRoot, taskId, entry({ checkpointId: "after" }))
+			await expect(appendChange(tmpRoot, taskId, entry({ checkpointId: "after" }))).rejects.toThrow(
+				/torn-tail recovery requires explicit repair/,
+			)
 
-			const result = await loadChanges(tmpRoot, taskId)
-			expect(result.map((e) => e.checkpointId)).toEqual(["good", "after"])
+			// The journal is left untouched for an explicit recovery: neither
+			// the fragment was dropped nor the new entry added.
+			const after = await fs.readFile(filePath, "utf8")
+			expect(after).toBe(raw + '{"path":"src/half.ts","operation":"upd')
 		})
 
 		it("does not insert a blank line when the journal ends cleanly", async () => {

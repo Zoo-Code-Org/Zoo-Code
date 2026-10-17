@@ -415,6 +415,53 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 	 * If the file did not exist at `commitHash`, it is removed from the
 	 * working tree instead — rolling a file back to before it was created.
 	 */
+	// Real-path containment for restoreFile targets. The lexical prefix check
+	// cannot see through a symlinked ancestor: a link inside the workspace
+	// pointing outside it passes the prefix check while the real target
+	// resolves elsewhere. Validate containment on real paths for every
+	// target, not only existing ones: the checkout branch writes through a
+	// symlinked ancestor even when the target itself does not exist. Walk up
+	// to the deepest ancestor that has a directory entry (lstat, so a
+	// dangling symlink counts as present and is then rejected by realpath
+	// instead of being skipped by an exists()-style check, which would
+	// validate the root and let the checkout report a false success).
+	// Resolving both sides keeps a legitimate symlinked workspace root
+	// working. Called before the Git lookups AND again immediately before
+	// each filesystem mutation: a concurrent process can replace an existing
+	// ancestor with a symlink while the Git calls are awaited (TOCTOU),
+	// redirecting the delete or the checkout outside the workspace.
+	private async assertRestoreContainment(resolvedTarget: string, filePath: string): Promise<void> {
+		const realWorkspaceRoot = await fs.realpath(this.workspaceDir)
+		const realRoot = realWorkspaceRoot.endsWith(path.sep) ? realWorkspaceRoot : realWorkspaceRoot + path.sep
+		let realCandidate = resolvedTarget
+		while (true) {
+			try {
+				await fs.lstat(realCandidate)
+				break
+			} catch (err) {
+				const code = (err as NodeJS.ErrnoException).code
+				if (code !== "ENOENT" && code !== "ENOTDIR") throw err
+			}
+			const parent = path.dirname(realCandidate)
+			if (parent === realCandidate) {
+				throw new Error(`restoreFile target resolves outside the workspace: ${filePath}`)
+			}
+			realCandidate = parent
+		}
+		let realChecked: string
+		try {
+			realChecked = await fs.realpath(realCandidate)
+		} catch (err) {
+			if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+				throw new Error(`restoreFile target resolves through a dangling link: ${filePath}`)
+			}
+			throw err
+		}
+		if (realChecked !== realWorkspaceRoot && !realChecked.startsWith(realRoot)) {
+			throw new Error(`restoreFile target resolves outside the workspace: ${filePath}`)
+		}
+	}
+
 	public async restoreFile(commitHash: string, filePath: string): Promise<void> {
 		try {
 			this.log(`[${this.constructor.name}#restoreFile] restoring ${filePath} from ${commitHash}`)
@@ -436,46 +483,10 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 				throw new Error(`restoreFile target is outside the workspace: ${filePath}`)
 			}
 
-			// The lexical check cannot see through a symlinked ancestor: a link
-			// inside the workspace pointing outside it passes the prefix check
-			// while the real target resolves elsewhere. Validate containment on
-			// real paths for every target, not only existing ones: the checkout
-			// branch writes through a symlinked ancestor even when the target
-			// itself does not exist. Walk up to the deepest ancestor that has a
-			// directory entry (lstat, so a dangling symlink counts as present and
-			// is then rejected by realpath instead of being skipped by an
-			// exists()-style check, which would validate the root and let the
-			// checkout report a false success). Resolving both sides keeps a
-			// legitimate symlinked workspace root working.
-			const realWorkspaceRoot = await fs.realpath(this.workspaceDir)
-			const realRoot = realWorkspaceRoot.endsWith(path.sep) ? realWorkspaceRoot : realWorkspaceRoot + path.sep
-			let realCandidate = resolvedTarget
-			while (true) {
-				try {
-					await fs.lstat(realCandidate)
-					break
-				} catch (err) {
-					const code = (err as NodeJS.ErrnoException).code
-					if (code !== "ENOENT" && code !== "ENOTDIR") throw err
-				}
-				const parent = path.dirname(realCandidate)
-				if (parent === realCandidate) {
-					throw new Error(`restoreFile target resolves outside the workspace: ${filePath}`)
-				}
-				realCandidate = parent
-			}
-			let realChecked: string
-			try {
-				realChecked = await fs.realpath(realCandidate)
-			} catch (err) {
-				if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-					throw new Error(`restoreFile target resolves through a dangling link: ${filePath}`)
-				}
-				throw err
-			}
-			if (realChecked !== realWorkspaceRoot && !realChecked.startsWith(realRoot)) {
-				throw new Error(`restoreFile target resolves outside the workspace: ${filePath}`)
-			}
+			// Real-path containment (symlinked ancestors, dangling links); see
+			// assertRestoreContainment. Re-checked below, immediately before
+			// each filesystem mutation.
+			await this.assertRestoreContainment(resolvedTarget, filePath)
 
 			// Git pathspecs are always POSIX, but the path handed to git must be
 			// the same path containment just validated. Deriving it from the raw
@@ -513,12 +524,21 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 				if (mode !== "100644" && mode !== "100755") {
 					throw new Error(`restoreFile target is not a regular file in the checkpoint: ${filePath}`)
 				}
+				// TOCTOU guard: a concurrent process can replace an ancestor with
+				// a symlink while the Git lookups above are awaited, and the
+				// checkout would then write through the swapped link. Re-check
+				// containment immediately before the mutation.
+				await this.assertRestoreContainment(resolvedTarget, filePath)
 				// The checkout pathspec must be literal too: a filename containing
 				// glob characters ([a].ts, foo?bar.ts) would otherwise match - or
 				// miss - other files, restoring more (or the wrong file) than the
 				// single requested path.
 				await this.git.checkout([commitHash, "--", `:(literal)${gitPath}`])
 			} else {
+				// TOCTOU guard: same race as above - without this re-check the
+				// delete could remove a file the swapped link now points at
+				// outside the workspace.
+				await this.assertRestoreContainment(resolvedTarget, filePath)
 				// Use the validated path, not a re-join of the raw request: the
 				// delete branch must remove exactly what containment approved.
 				await fs.rm(resolvedTarget, { force: true })

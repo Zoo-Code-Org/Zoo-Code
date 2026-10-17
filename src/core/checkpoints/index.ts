@@ -260,9 +260,21 @@ export async function checkpointSave(
 	suppressMessage = false,
 	write?: CheckpointWriteInfo | CheckpointWriteInfo[],
 ) {
+	// A save that carries write metadata must end with rollback metadata
+	// existing: every failure below (service unavailable, no commit, no
+	// journal location, journal write failure) surfaces explicitly instead
+	// of resolving to a tool success over an orphaned write.
+	const journalWrites = write === undefined ? undefined : Array.isArray(write) ? write : [write]
+	const hasWriteMetadata = !!journalWrites && journalWrites.length > 0
+
 	const service = await getCheckpointService(task)
 
 	if (!service) {
+		if (hasWriteMetadata) {
+			throw new Error(
+				"Checkpoint save with write metadata could not initialize the checkpoint service; the write has no rollback metadata.",
+			)
+		}
 		return
 	}
 
@@ -281,8 +293,6 @@ export async function checkpointSave(
 	// provider reference disappearing while the Git save is awaited. Without
 	// a location at all, fail before committing so the tool reports an
 	// explicit failure instead of a checkpoint nobody can roll back.
-	const journalWrites = write === undefined ? undefined : Array.isArray(write) ? write : [write]
-	const hasWriteMetadata = !!journalWrites && journalWrites.length > 0
 	if (hasWriteMetadata && !globalStorageDir) {
 		throw new Error(
 			"Checkpoint save with write metadata requires a stable journal location, but the provider reference or global storage path is unavailable.",
@@ -319,6 +329,15 @@ export async function checkpointSave(
 				console.error("[Task#checkpointSave] caught unexpected error, disabling checkpoints", err)
 				task.enableCheckpoints = false
 			})
+		}
+		// A save that resolves without a commit (e.g. a write to a Git-ignored
+		// file the shadow repository never stages) produced no rollback point:
+		// journaling is skipped and a later restore reports no entry. With
+		// write metadata that is a partial persistence, not a success.
+		if (hasWriteMetadata && !result?.commit) {
+			throw new Error(
+				"Checkpoint save with write metadata did not produce a commit; the write has no rollback metadata.",
+			)
 		}
 		// B2: record successful file writes in the per-task change journal.
 		// Only a real commit produces an entry (an empty or failed save

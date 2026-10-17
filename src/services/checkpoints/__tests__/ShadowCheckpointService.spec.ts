@@ -431,6 +431,89 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				expect(await fileExistsAtPath(path.join(innerDir, "newfile.txt"))).toBe(false)
 			})
 
+			it("re-validates containment before the delete when an ancestor link is swapped mid-lookup", async () => {
+				// TOCTOU: containment passes while `sub` is a real directory, but
+				// a concurrent process replaces it with a link into an outside
+				// dir while the Git existence lookup is awaited. Without a
+				// re-check immediately before the mutation, fs.rm would delete
+				// the outside file the swapped link now points at.
+				await fs.writeFile(testFile, "Ahoy, world!")
+				const innerDir = path.join(service.workspaceDir, "sub")
+				await fs.mkdir(innerDir)
+				const commit1 = await service.saveCheckpoint("First checkpoint")
+				expect(commit1?.commit).toBeTruthy()
+				// Untracked after the commit: the delete branch applies.
+				await fs.writeFile(path.join(innerDir, "victim.txt"), "v1")
+
+				const outsideDir = path.join(tmpDir, `outside-${Date.now()}`)
+				await fs.mkdir(outsideDir, { recursive: true })
+				const outsideFile = path.join(outsideDir, "victim.txt")
+				await fs.writeFile(outsideFile, "outside")
+
+				// Structural view of the private lookup so the race can be injected
+				// mid-call without a double assertion (AGENTS.md).
+				const proto = Object.getPrototypeOf(service) as {
+					fileExistsInCommit: (...args: unknown[]) => Promise<boolean>
+				}
+				const original = proto.fileExistsInCommit
+				const swapSpy = vi.spyOn(proto, "fileExistsInCommit").mockImplementation(async function (
+					this: unknown,
+					...args: unknown[]
+				) {
+					// The concurrent ancestor replacement lands mid-lookup.
+					await fs.rm(innerDir, { recursive: true, force: true })
+					await fs.symlink(outsideDir, innerDir, "junction")
+					return original.apply(this, args)
+				})
+
+				await expect(service.restoreFile(commit1!.commit, path.join("sub", "victim.txt"))).rejects.toThrow(
+					/resolves outside the workspace/,
+				)
+				swapSpy.mockRestore()
+
+				// The outside file survives: the delete never followed the link.
+				expect(await fileExistsAtPath(outsideFile)).toBe(true)
+				expect(await fs.readFile(outsideFile, "utf-8")).toBe("outside")
+			})
+
+			it("re-validates containment before the checkout when an ancestor link is swapped mid-lookup", async () => {
+				// Same race on the checkout branch: the swap lands while the
+				// lookups are awaited, so a checkout without a pre-mutation
+				// re-check would write the committed file through the link into
+				// the outside dir.
+				const innerDir = path.join(service.workspaceDir, "sub")
+				await fs.mkdir(innerDir)
+				await fs.writeFile(path.join(innerDir, "keep.txt"), "v1")
+				const commit1 = await service.saveCheckpoint("First checkpoint")
+				expect(commit1?.commit).toBeTruthy()
+
+				const outsideDir = path.join(tmpDir, `outside-${Date.now()}`)
+				await fs.mkdir(outsideDir, { recursive: true })
+
+				// Structural view of the private lookup so the race can be injected
+				// mid-call without a double assertion (AGENTS.md).
+				const proto = Object.getPrototypeOf(service) as {
+					fileExistsInCommit: (...args: unknown[]) => Promise<boolean>
+				}
+				const original = proto.fileExistsInCommit
+				const swapSpy = vi.spyOn(proto, "fileExistsInCommit").mockImplementation(async function (
+					this: unknown,
+					...args: unknown[]
+				) {
+					await fs.rm(innerDir, { recursive: true, force: true })
+					await fs.symlink(outsideDir, innerDir, "junction")
+					return original.apply(this, args)
+				})
+
+				await expect(service.restoreFile(commit1!.commit, path.join("sub", "keep.txt"))).rejects.toThrow(
+					/resolves outside the workspace/,
+				)
+				swapSpy.mockRestore()
+
+				// The checkout never wrote through the swapped link.
+				expect(await fileExistsAtPath(path.join(outsideDir, "keep.txt"))).toBe(false)
+			})
+
 			it("rejects restoring the workspace root as a single file", async () => {
 				// "." passes the lexical and realpath guards (it IS the workspace)
 				// but as a pathspec it would recursively restore the entire tree
