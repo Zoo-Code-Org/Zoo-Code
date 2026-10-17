@@ -25,6 +25,34 @@ export function assertValidTransition(from: HistoryItemStatus | undefined, to: H
 }
 
 /**
+ * Reactivates a task only through the explicit user-resume path. This is kept
+ * outside VALID_TASK_STATUS_TRANSITIONS so generic stale writes cannot revive
+ * an interrupted task.
+ */
+export function resumeInterruptedTask(task: HistoryItem, expectedParentTaskId?: string): HistoryItem {
+	if (task.status !== "interrupted") {
+		throw new LifecycleTransitionError(`Cannot resume task ${task.id} with status ${task.status ?? "active"}`)
+	}
+	if (task.parentTaskId !== expectedParentTaskId) {
+		throw new LifecycleTransitionError(`Cannot resume task ${task.id}: parent linkage changed`)
+	}
+	return { ...task, status: "active" }
+}
+
+/**
+ * Resumes an interrupted child through its parent's authoritative delegation
+ * pointer. The parent check must run under the parent record's lock so a
+ * competing host cannot re-delegate the parent between the check and the
+ * child activation.
+ */
+export function resumeInterruptedChild(parent: HistoryItem, child: HistoryItem): HistoryItem {
+	if (parent.status !== "delegated" || parent.awaitingChildId !== child.id) {
+		throw new LifecycleTransitionError(`Cannot resume task ${child.id}: parent ${parent.id} no longer awaits it`)
+	}
+	return resumeInterruptedTask(child, parent.id)
+}
+
+/**
  * Settles the pending create_subtask action whose delegation the authoritative
  * parent record rejected (#1714). Only the exact matching action ID is cleared;
  * status, lineage, accounting, and unrelated fields are preserved. A replaced

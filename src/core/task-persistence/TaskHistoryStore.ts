@@ -10,7 +10,14 @@ import { GlobalFileNames } from "../../shared/globalFileNames"
 import { LOCK_STALE_MS, withFileLock } from "../../utils/fileLock"
 import { safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
-import { assertValidTransition, settleRejectedCreateSubtaskAction, type HistoryItemStatus } from "./taskLifecycle"
+import {
+	assertValidTransition,
+	LifecycleTransitionError,
+	resumeInterruptedChild,
+	resumeInterruptedTask as resumeInterruptedTaskRecord,
+	settleRejectedCreateSubtaskAction,
+	type HistoryItemStatus,
+} from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
 
 export { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
@@ -22,6 +29,18 @@ export { DeltaRejectedError } from "./taskStoreConcurrency"
  */
 function mergeWithDisk(delta: Partial<HistoryItem>): (existing: unknown, incoming: unknown) => unknown {
 	return (existing, incoming) => mergeHistoryDelta(existing, incoming as HistoryItem, delta)
+}
+
+/**
+ * Copy a history item without its parent and root links. A preserve-lineage
+ * write persists this copy, so the write carries no lineage in its delta or
+ * payload and cannot overwrite or resurrect the authoritative disk links.
+ */
+function withoutLineage(item: HistoryItem): HistoryItem {
+	const copy: HistoryItem = { ...item }
+	delete copy.parentTaskId
+	delete copy.rootTaskId
+	return copy
 }
 
 /**
@@ -197,6 +216,20 @@ export class TaskHistoryStore {
 	}
 
 	/**
+	 * Insert or update a history item whose parent and root links are not
+	 * authoritative. Message saves from rehydrated interrupted tasks use
+	 * this: the in-memory lineage may be stale after another host detached
+	 * or deleted the record. The write never carries lineage into the delta
+	 * or the written payload, so the locked disk state stays authoritative.
+	 * A linked record keeps its links, a detached record stays detached, and
+	 * a deleted record is recreated without links. Lifecycle operations that
+	 * legitimately set lineage must use `upsert` instead.
+	 */
+	async upsertPreservingLineage(item: HistoryItem): Promise<HistoryItem[]> {
+		return this.withLock(() => this.upsertCore(item, { preserveLineage: true }))
+	}
+
+	/**
 	 * Core upsert logic — must only be called from within `withLock`.
 	 *
 	 * Enforces state-machine transition rules when `item.status` changes.
@@ -205,44 +238,52 @@ export class TaskHistoryStore {
 	 */
 	private async upsertCore(
 		item: HistoryItem,
-		options: { skipTransitionCheck?: boolean } = {},
+		options: { skipTransitionCheck?: boolean; preserveLineage?: boolean } = {},
 	): Promise<HistoryItem[]> {
-		const existing = this.cache.get(item.id)
+		// A preserve-lineage write owns no lineage. Strip the links before the
+		// cache merge and the delta are built, so omission can neither retain
+		// stale cached links in the written payload nor resurrect them when
+		// the disk record is missing or unparseable.
+		const incoming = options.preserveLineage ? withoutLineage(item) : item
+		const existing = this.cache.get(incoming.id)
 
 		// Enforce transition validity at the write boundary so that any caller
 		// (including fire-and-forget saves) cannot silently stomp a terminal status.
 		// Skip when there is no existing record — first insert has no prior state to transition from.
 		// Normalize existing.status (undefined = legacy "active") before comparing so that writing
 		// status: "active" onto a legacy item without a status field is not treated as a transition.
-		if (!options.skipTransitionCheck && existing && item.status !== undefined) {
+		if (!options.skipTransitionCheck && existing && incoming.status !== undefined) {
 			const normalizedExisting: HistoryItemStatus = existing.status ?? "active"
-			if (item.status !== normalizedExisting) {
+			if (incoming.status !== normalizedExisting) {
 				try {
-					assertValidTransition(existing.status, item.status)
+					assertValidTransition(existing.status, incoming.status)
 				} catch (cacheError) {
 					// Cache may be stale from a peer write. Re-read disk
 					// under the store lock before rejecting the transition.
-					const diskItem = await this.readTaskFile(item.id)
+					const diskItem = await this.readTaskFile(incoming.id)
 					if (!diskItem) {
 						throw cacheError
 					}
-					assertValidTransition(diskItem.status, item.status)
+					assertValidTransition(diskItem.status, incoming.status)
 				}
 			}
 		}
 
-		// Merge: preserve existing metadata unless explicitly overwritten
-		const merged = existing ? { ...existing, ...item } : item
+		// Merge: preserve existing metadata unless explicitly overwritten.
+		// A preserve-lineage write also owns no cached lineage: the merged
+		// payload keeps no links, so a missing or unparseable disk record is
+		// written without them instead of resurrecting stale cached links.
+		const merged = existing && !options.preserveLineage ? { ...existing, ...incoming } : incoming
 
-		const delta = existing ? this.buildDelta(item.id, existing, item) : { ...item }
+		const delta = existing ? this.buildDelta(incoming.id, existing, incoming) : { ...incoming }
 		let written: HistoryItem
 		try {
 			written = await this.writeTaskFile(merged, delta)
 		} catch (error) {
 			if (error instanceof DeltaRejectedError) {
-				const diskItem = await this.readTaskFile(item.id)
+				const diskItem = await this.readTaskFile(incoming.id)
 				if (diskItem) {
-					this.cache.set(item.id, diskItem)
+					this.cache.set(incoming.id, diskItem)
 				}
 				throw error
 			}
@@ -792,6 +833,30 @@ export class TaskHistoryStore {
 		})
 	}
 
+	/**
+	 * Read one task's lifecycle status from its validated on-disk record inside
+	 * the record file's advisory lock. Throws `LifecycleTransitionError` when
+	 * the record is missing, malformed, or persisted under a different task ID,
+	 * so callers can fail closed instead of restoring over unknown disk state.
+	 * The cache is not consulted and not refreshed. Callers must not already
+	 * hold this record file's advisory lock.
+	 */
+	public async readValidatedDiskStatus(taskId: string): Promise<HistoryItemStatus> {
+		const filePath = await this.getTaskFilePath(taskId)
+		// A missing file cannot be locked, so the existence check runs first
+		// and maps the missing record to the same typed failure as the
+		// validated read below.
+		try {
+			await fs.stat(filePath)
+		} catch {
+			throw new LifecycleTransitionError(`[TaskHistoryStore] task ${taskId} has no valid disk record`)
+		}
+		return withFileLock(filePath, async () => {
+			const item = await this.readValidatedTaskFile(taskId)
+			return item.status ?? "active"
+		})
+	}
+
 	// ────────────────────────────── Migration ──────────────────────────────
 
 	/**
@@ -894,6 +959,28 @@ export class TaskHistoryStore {
 		} catch {
 			return null
 		}
+	}
+
+	/**
+	 * Read the canonical on-disk record for one task, failing closed with a
+	 * typed lifecycle error when the record is missing, malformed, or
+	 * persisted under a different task ID. Locked authoritative transitions
+	 * call this before they write, so a cached record never replaces unknown
+	 * disk state.
+	 */
+	private async readValidatedTaskFile(taskId: string): Promise<HistoryItem> {
+		const filePath = await this.getTaskFilePath(taskId)
+		let parsed: unknown
+		try {
+			parsed = JSON.parse(await fs.readFile(filePath, "utf8"))
+		} catch {
+			throw new LifecycleTransitionError(`[TaskHistoryStore] task ${taskId} has no valid disk record`)
+		}
+		const result = historyItemSchema.safeParse(parsed)
+		if (!result.success || result.data.id !== taskId) {
+			throw new LifecycleTransitionError(`[TaskHistoryStore] task ${taskId} has no valid disk record`)
+		}
+		return result.data as HistoryItem
 	}
 
 	// ────────────────────────────── Private: fs.watch ──────────────────────────────
@@ -1070,6 +1157,149 @@ export class TaskHistoryStore {
 				await this.onWrite(all)
 			}
 			return all
+		})
+	}
+
+	/**
+	 * Disk-authoritative transition used only after the user accepts a resume
+	 * prompt. Generic writes intentionally reject interrupted → active so stale
+	 * task snapshots cannot revive cancelled work. Failures for a missing
+	 * cache entry or an invalid disk record throw `LifecycleTransitionError`
+	 * so callers can settle the failed task without deleting its history.
+	 */
+	public async resumeInterruptedTask(taskId: string, expectedParentTaskId?: string): Promise<HistoryItem> {
+		return this.withLock(async () => {
+			const cached = this.cache.get(taskId)
+			if (!cached) {
+				throw new LifecycleTransitionError(
+					`[TaskHistoryStore] resumeInterruptedTask: task ${taskId} not found in cache`,
+				)
+			}
+
+			const filePath = await this.getTaskFilePath(taskId)
+			let authoritative: HistoryItem = cached
+			const activate = async (parent?: HistoryItem): Promise<void> => {
+				await safeWriteJson(filePath, cached, {
+					merge: (existing) => {
+						const parsed = historyItemSchema.safeParse(existing)
+						if (!parsed.success || parsed.data.id !== taskId) {
+							this.cache.delete(taskId)
+							this.taskFileMtimes.delete(taskId)
+							throw new LifecycleTransitionError(
+								`[TaskHistoryStore] resumeInterruptedTask: task ${taskId} has no valid disk record`,
+							)
+						}
+
+						// Abandonment commits child detachment before releasing
+						// the parent. Compare the caller's linkage under this
+						// same child-file lock. The caller still holds the
+						// parent-file lock when a parent record is provided.
+						this.cache.set(taskId, existing as HistoryItem)
+						authoritative =
+							parent !== undefined
+								? resumeInterruptedChild(parent, existing as HistoryItem)
+								: resumeInterruptedTaskRecord(existing as HistoryItem, undefined)
+						return authoritative
+					},
+				})
+			}
+
+			if (expectedParentTaskId === undefined) {
+				await activate()
+			} else {
+				const parentFilePath = await this.getTaskFilePath(expectedParentTaskId)
+				await withFileLock(parentFilePath, async () => {
+					const parent = await this.readValidatedTaskFile(expectedParentTaskId)
+					await activate(parent)
+				})
+			}
+
+			this.cache.set(taskId, authoritative)
+			if (this.onWrite) {
+				await this.onWrite(this.getAll())
+			}
+			return authoritative
+		})
+	}
+
+	/**
+	 * Disk-authoritative delegation write for the provider's delegation flow.
+	 * The builder runs against the on-disk parent record inside the parent
+	 * file's advisory lock, so a competing host cannot change the parent or
+	 * its awaited child between validation and commit. When the disk parent is
+	 * delegated, its awaited child's on-disk record must still be interrupted.
+	 * A host with a stale cache cannot re-delegate over a child another host
+	 * has already resumed. First delegation from an active parent commits
+	 * through the same lock-held window.
+	 */
+	public async atomicUpdateParentDelegation(
+		parentTaskId: string,
+		build: (diskParent: HistoryItem, awaitedChildDiskStatus: HistoryItemStatus | undefined) => HistoryItem,
+	): Promise<HistoryItem> {
+		return this.withLock(async () => {
+			const cached = this.cache.get(parentTaskId)
+			if (!cached) {
+				throw new LifecycleTransitionError(
+					`[TaskHistoryStore] atomicUpdateParentDelegation: task ${parentTaskId} not found in cache`,
+				)
+			}
+
+			const parentFilePath = await this.getTaskFilePath(parentTaskId)
+			return withFileLock(parentFilePath, async () => {
+				const diskParent = await this.readValidatedTaskFile(parentTaskId)
+				let awaitedChildDiskStatus: HistoryItemStatus | undefined
+				if (diskParent.status === "delegated") {
+					const awaitedChildId = diskParent.awaitingChildId
+					if (!awaitedChildId) {
+						throw new LifecycleTransitionError(
+							`[TaskHistoryStore] atomicUpdateParentDelegation: delegated task ${parentTaskId} has no awaited child`,
+						)
+					}
+					if (awaitedChildId === parentTaskId) {
+						// The lock below is not reentrant, so a self-await
+						// would deadlock instead of failing closed.
+						throw new LifecycleTransitionError(
+							`[TaskHistoryStore] atomicUpdateParentDelegation: delegated task ${parentTaskId} awaits itself`,
+						)
+					}
+					// Read under the child record's advisory lock, in the
+					// same parent-before-child order as
+					// resumeInterruptedTask. A peer safeWriteJson renames
+					// the target to its backup before the commit rename,
+					// and an unlocked read inside that window rejects a
+					// valid delegation with a missing-record error.
+					const awaitedChild = await withFileLock(await this.getTaskFilePath(awaitedChildId), () =>
+						this.readValidatedTaskFile(awaitedChildId),
+					)
+					awaitedChildDiskStatus = awaitedChild.status
+					if (awaitedChildDiskStatus !== "interrupted") {
+						throw new LifecycleTransitionError(
+							`[TaskHistoryStore] atomicUpdateParentDelegation: awaited child ${awaitedChildId} of task ${parentTaskId} is ${awaitedChildDiskStatus ?? "active"}, not interrupted`,
+						)
+					}
+				}
+
+				const next = build(diskParent, awaitedChildDiskStatus)
+				if (next.id !== parentTaskId) {
+					throw new Error(
+						`[TaskHistoryStore] atomicUpdateParentDelegation: builder changed task id from ${parentTaskId} to ${next.id}`,
+					)
+				}
+
+				// Diff against the locked disk record, not the stale cache: a
+				// field whose new value equals the stale cached value would
+				// otherwise be dropped from the delta, and mergeHistoryDelta
+				// would keep the disk value for it.
+				const delta = this.buildDelta(parentTaskId, diskParent, next)
+				const merged = mergeHistoryDelta(diskParent, next, delta)
+				await safeWriteJson(parentFilePath, merged, { assumeLockHeld: true })
+
+				this.cache.set(parentTaskId, merged)
+				if (this.onWrite) {
+					await this.onWrite(this.getAll())
+				}
+				return merged
+			})
 		})
 	}
 

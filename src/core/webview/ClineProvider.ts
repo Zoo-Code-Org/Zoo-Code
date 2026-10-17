@@ -609,7 +609,7 @@ export class ClineProvider
 	}
 
 	private async cleanupFailedHistoryTask(task: Task, error: unknown): Promise<void> {
-		if (!(error instanceof PendingActionSettlementError)) {
+		if (!(error instanceof PendingActionSettlementError || error instanceof LifecycleTransitionError)) {
 			return
 		}
 
@@ -633,6 +633,14 @@ export class ClineProvider
 				`[cleanupFailedHistoryTask] dispose() failed for ${task.taskId}.${task.instanceId}: ${error instanceof Error ? error.message : String(error)}`,
 			)
 		}
+
+		if (error instanceof LifecycleTransitionError) {
+			void vscode.window.showErrorMessage(error.message)
+		}
+
+		// The registry already dropped the task. Post fresh state so the webview
+		// stops showing the removed task after a rejected resume or settlement.
+		await this.postStateToWebview()
 	}
 
 	/**
@@ -763,6 +771,31 @@ export class ClineProvider
 			this.recentTasksCache = undefined
 		}
 		return cleared
+	}
+
+	public async resumeInterruptedTask(taskId: string, parentTaskId?: string): Promise<void> {
+		const resume = async () => {
+			if (parentTaskId) {
+				// A peer write holds the parent file during its rename. The
+				// unlocked cache read can then miss a valid parent and reject a
+				// resume the user already accepted. Do not gate here. The store
+				// re-reads the parent under the parent file lock, and that
+				// locked check alone decides the resume.
+				await this.taskHistoryStore.invalidate(parentTaskId)
+			}
+
+			const resumed = await this.taskHistoryStore.resumeInterruptedTask(taskId, parentTaskId)
+			this.recentTasksCache = undefined
+			if (this.isViewLaunched) {
+				await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: resumed })
+			}
+		}
+
+		if (parentTaskId) {
+			await this.runDelegationTransition(parentTaskId, resume)
+		} else {
+			await resume()
+		}
 	}
 
 	// Pending Edit Operations Management
@@ -3095,12 +3128,20 @@ export class ClineProvider
 	 *
 	 * @param item The history item to update or add
 	 * @param options.broadcast Whether to broadcast the updated history to the webview (default: true)
+	 * @param options.preserveLineage When true, the item's parent and root links are not
+	 * authoritative: the on-disk lineage is kept as is and stale in-memory links are never
+	 * written or resurrected. Use only for message saves from rehydrated interrupted tasks.
 	 * @returns The updated task history array
 	 */
-	async updateTaskHistory(item: HistoryItem, options: { broadcast?: boolean } = {}): Promise<HistoryItem[]> {
-		const { broadcast = true } = options
+	async updateTaskHistory(
+		item: HistoryItem,
+		options: { broadcast?: boolean; preserveLineage?: boolean } = {},
+	): Promise<HistoryItem[]> {
+		const { broadcast = true, preserveLineage = false } = options
 
-		const history = await this.taskHistoryStore.upsert(item)
+		const history = preserveLineage
+			? await this.taskHistoryStore.upsertPreservingLineage(item)
+			: await this.taskHistoryStore.upsert(item)
 		this.recentTasksCache = undefined
 
 		// Broadcast the updated history to the webview if requested.
@@ -3912,41 +3953,39 @@ export class ClineProvider
 		})
 
 		// 5) Persist parent delegation metadata BEFORE the child starts writing.
-		//    atomicReadAndUpdate reads from the in-memory cache and writes back within a
-		//    single lock acquisition — no concurrent writer can slip between the read and
-		//    write, and the pure updater cannot re-enter the lock (no deadlock).
-		//    Broadcast and cache invalidation happen outside the lock after it releases.
+		//    atomicUpdateParentDelegation reads the on-disk parent record and
+		//    writes back within a single parent-file lock acquisition. The
+		//    builder runs inside that lock, so no host can change the parent or
+		//    its awaited child between validation and commit. Broadcast and
+		//    cache invalidation happen outside the lock after it releases.
 		//
 		//    If the parent is already "delegated" to a previous interrupted child (the user
 		//    navigated back to the parent and continued working), we implicitly sever the old
 		//    link here (delegated → active → delegated) so no explicit Abandon step is needed.
-		//    The old awaited child's status is re-read INSIDE the updater (which runs
-		//    synchronously under the store lock) so a concurrent abandon or completion cannot
-		//    slip between the status snapshot and the write. An active child must never be
+		//    The store re-reads the old awaited child's status from disk INSIDE the
+		//    lock, so a concurrent resume, abandon, or completion cannot slip between
+		//    the status snapshot and the write. An active child must never be
 		//    silently detached.
 		try {
-			await this.taskHistoryStore.atomicReadAndUpdate(parentTaskId, (historyItem) => {
-				if (pendingActionId && historyItem.pendingAction?.actionId !== pendingActionId) {
-					throw new Error(
-						`[delegateParentAndOpenChild] Pending action mismatch for parent ${parentTaskId}: expected ${pendingActionId}, found ${historyItem.pendingAction?.actionId}`,
-					)
-				}
-				const awaitedChildStatus = historyItem.awaitingChildId
-					? this.taskHistoryStore.get(historyItem.awaitingChildId)?.status
-					: undefined
-				const delegated = delegateTaskToChild(historyItem, child.taskId, awaitedChildStatus)
-				return {
-					...delegated,
-					pendingAction:
-						delegated.pendingAction?.actionId === pendingActionId ? undefined : delegated.pendingAction,
-				}
-			})
+			const updatedItem = await this.taskHistoryStore.atomicUpdateParentDelegation(
+				parentTaskId,
+				(diskParent, awaitedChildDiskStatus) => {
+					if (pendingActionId && diskParent.pendingAction?.actionId !== pendingActionId) {
+						throw new Error(
+							`[delegateParentAndOpenChild] Pending action mismatch for parent ${parentTaskId}: expected ${pendingActionId}, found ${diskParent.pendingAction?.actionId}`,
+						)
+					}
+					const delegated = delegateTaskToChild(diskParent, child.taskId, awaitedChildDiskStatus)
+					return {
+						...delegated,
+						pendingAction:
+							delegated.pendingAction?.actionId === pendingActionId ? undefined : delegated.pendingAction,
+					}
+				},
+			)
 			this.recentTasksCache = undefined
-			if (this.isViewLaunched) {
-				const updatedItem = this.taskHistoryStore.get(parentTaskId)
-				if (updatedItem) {
-					await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
-				}
+			if (this.isViewLaunched && updatedItem) {
+				await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
 			}
 		} catch (err) {
 			this.log(

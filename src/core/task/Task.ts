@@ -116,8 +116,12 @@ import { ClineProvider } from "../webview/ClineProvider"
 import { MultiSearchReplaceDiffStrategy } from "../diff/strategies/multi-search-replace"
 import {
 	type ApiMessage,
+	createResumeHistoryRecoveryCopy,
 	ensureMessageIdentifiers,
 	readApiMessages,
+	removeResumeHistoryRecoveryCopy,
+	restoreApiMessagesIfUnchanged,
+	type ResumeHistoryRestoreResult,
 	saveApiMessages,
 	readTaskMessages,
 	saveTaskMessages,
@@ -1386,19 +1390,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	static create(options: TaskOptions): [Task, Promise<void>] {
 		const instance = new Task({ ...options, startTask: false })
 		const { images, task, historyItem } = options
-		let promise
-
-		instance.startIdleTelemetryCheck()
-
-		if (images || task) {
-			promise = instance.startTask(task, images)
-		} else if (historyItem) {
-			promise = instance.resumeTaskFromHistory()
-		} else {
+		if (!images && !task && !historyItem) {
 			throw new Error("Either historyItem or task/images must be provided")
 		}
 
-		return [instance, promise]
+		return [instance, instance.run()]
 	}
 
 	// API Messages
@@ -1411,8 +1407,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	/**
 	 * Appends an API turn and records whether an assistant turn reached persistent storage.
 	 * If the message resolves a pending action, retries the save on initial failure before clearing the action.
+	 * Returns whether the turn reached persistent storage, so a caller that must not run before a
+	 * durable result can stop instead of ignoring the save outcome.
 	 */
-	private async addToApiConversationHistory(message: Anthropic.MessageParam, reasoning?: string): Promise<void> {
+	private async addToApiConversationHistory(message: Anthropic.MessageParam, reasoning?: string): Promise<boolean> {
 		const resolvesPendingAction =
 			this.pendingAction &&
 			message.role === "user" &&
@@ -1448,6 +1446,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.assistantMessageSavedToHistory = saved
 			this.resolveAssistantMessagePersistence(saved)
 		}
+		return saved
 	}
 
 	/** Cancels the current persistence generation before creating the next assistant-turn boundary. */
@@ -1506,12 +1505,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// For API requests, consecutive same-role messages are merged via mergeConsecutiveApiMessages()
 	// so rewind/edit behavior can still reference original message boundaries.
 
-	/** Replaces the entire API conversation history and persists the new state. */
-	async overwriteApiConversationHistory(newHistory: ApiMessage[], persist = true) {
+	/**
+	 * Replaces the entire API conversation history and persists the new state.
+	 * Returns false when the requested disk write failed. The in-memory
+	 * history always reflects `newHistory` after the call, so a caller that
+	 * must not keep an unpersisted rewrite restores it explicitly.
+	 */
+	async overwriteApiConversationHistory(newHistory: ApiMessage[], persist = true): Promise<boolean> {
 		this.hydrateApiConversationHistory(newHistory)
-		if (persist) {
-			await this.saveApiConversationHistory(false)
+		if (!persist) {
+			return true
 		}
+		return this.saveApiConversationHistory(false)
 	}
 
 	/**
@@ -1816,7 +1821,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			const provider = this.providerRef.deref()
 			const existingStatus = provider?.taskHistoryStore.get(this.taskId)?.status
-			await provider?.updateTaskHistory(existingStatus ? { ...historyItem, status: existingStatus } : historyItem)
+			const persistedHistoryItem = existingStatus ? { ...historyItem, status: existingStatus } : historyItem
+			if (this.initialStatus === "interrupted") {
+				// A rehydrated task's links may have been severed by another host.
+				// Only lifecycle operations own lineage after interruption, not
+				// message saves. The in-memory links stay out of the write: the
+				// store preserves the on-disk lineage and never resurrects the
+				// stale links, even when the disk record was deleted.
+				await provider?.updateTaskHistory(persistedHistoryItem, { preserveLineage: true })
+			} else {
+				await provider?.updateTaskHistory(persistedHistoryItem)
+			}
 		} catch (error) {
 			// The message array was persisted above; a metadata or task-history failure must
 			// not mask that write (see the method docs). The next saveClineMessages() call
@@ -3243,6 +3258,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.isInitialized = true
 
 			const { response, text, images } = await this.ask(askType) // Calls `postStateToWebview`.
+			if (this.abort || this.abandoned || (response !== "yesButtonClicked" && response !== "messageResponse")) {
+				return
+			}
 
 			let responseText: string | undefined
 			let responseImages: string[] | undefined
@@ -3254,7 +3272,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 
 			// Make sure that the api conversation history can be resumed by the API,
-			// even if it goes out of sync with cline messages.
+			// even if it goes out of sync with cline messages. This read and the
+			// derivation below are fallible. They run before the activation
+			// commit, so a failure leaves the record interrupted and retryable.
 			const existingApiConversationHistory: ApiMessage[] = await this.getSavedApiConversationHistory()
 
 			// Tool blocks are always preserved; native tool calling only.
@@ -3383,7 +3403,68 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				})
 			}
 
-			await this.overwriteApiConversationHistory(modifiedApiConversationHistory)
+			// Preserve the authoritative history durably before the destructive
+			// preparation write, so a failed preparation or restore can never
+			// lose the original across a restart.
+			const recoveryCopyPath = await createResumeHistoryRecoveryCopy({
+				taskId: this.taskId,
+				globalStoragePath: this.globalStoragePath,
+				messages: existingApiConversationHistory,
+			})
+
+			const persisted = await this.overwriteApiConversationHistory(modifiedApiConversationHistory)
+			if (!persisted) {
+				// The failed write leaves the disk file with the authoritative
+				// history or its safeWriteJson backup. Keep the recovery copy so
+				// the original stays recoverable on disk either way. Put the
+				// original back in memory so no later save from this instance
+				// can persist the unverified slice.
+				this.hydrateApiConversationHistory(existingApiConversationHistory)
+				throw new Error(
+					`[Task#resumeTaskFromHistory] Failed to persist the prepared API conversation history for task ${this.taskId}. The resume stopped before activation, the record stays interrupted, and the original history is preserved at ${recoveryCopyPath}.`,
+				)
+			}
+
+			// All fallible resume preparation is complete. Activate the
+			// interrupted record last, so a preparation failure never consumes
+			// the one interrupted → active resume.
+			if (this.abort || this.abandoned) {
+				await this.restorePreparedResumeHistory(
+					recoveryCopyPath,
+					existingApiConversationHistory,
+					modifiedApiConversationHistory,
+				)
+				return
+			}
+			if (this.initialStatus === "interrupted") {
+				const provider = this.providerRef.deref()
+				if (!provider) {
+					await this.restorePreparedResumeHistory(
+						recoveryCopyPath,
+						existingApiConversationHistory,
+						modifiedApiConversationHistory,
+					)
+					throw new Error(`[Task#resumeTaskFromHistory] Provider unavailable for task ${this.taskId}`)
+				}
+				try {
+					await provider.resumeInterruptedTask(this.taskId, this.parentTaskId)
+				} catch (error) {
+					// The record stays interrupted when the locked commit rejects.
+					// Put the authoritative history back so a retry resumes from
+					// it. The restore never runs when the disk record is already
+					// active, because that attempt belongs to another writer.
+					await this.restorePreparedResumeHistory(
+						recoveryCopyPath,
+						existingApiConversationHistory,
+						modifiedApiConversationHistory,
+					)
+					throw error
+				}
+			}
+
+			// The resume committed, so the prepared history is the accepted
+			// state and the pre-resume copy is no longer needed.
+			await removeResumeHistoryRecoveryCopy(recoveryCopyPath)
 
 			// Task resuming from history item.
 			await this.initiateTaskLoop(newUserContent)
@@ -3394,6 +3475,95 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				return
 			}
 			throw error
+		}
+	}
+
+	/**
+	 * Restores the authoritative API history after the resume persisted
+	 * prepared history but never activated the record. The interrupted record
+	 * stays retryable, so the disk history must keep its pre-resume content.
+	 * The status gate, the content compare, and the write commit run under one
+	 * advisory lock on the API-history file, so a lock-honoring writer cannot
+	 * slip a newer history between the compare and the commit. The gate fails
+	 * closed: the restore runs only while the persisted record still shows the
+	 * status this resume started from, and an active record always keeps the
+	 * prepared history. Every skipped, rejected, or failed outcome keeps the
+	 * pre-resume recovery copy on disk, so the original history stays
+	 * recoverable after a restart.
+	 */
+	private async restorePreparedResumeHistory(
+		recoveryCopyPath: string,
+		original: ApiMessage[],
+		prepared: ApiMessage[],
+	): Promise<void> {
+		this.hydrateApiConversationHistory(original)
+
+		const provider = this.providerRef.deref()
+		if (!provider) {
+			console.error(
+				`[Task#${this.taskId}] restorePreparedResumeHistory: no provider is available, so the authoritative record status is unknown. The restore did not run and the original history is preserved at ${recoveryCopyPath}.`,
+			)
+			return
+		}
+
+		let result: ResumeHistoryRestoreResult
+		try {
+			result = await restoreApiMessagesIfUnchanged({
+				taskId: this.taskId,
+				globalStoragePath: this.globalStoragePath,
+				expected: prepared,
+				replacement: original,
+				verifyCanRestore: async () => {
+					const diskStatus = await provider.taskHistoryStore.readValidatedDiskStatus(this.taskId)
+					if (diskStatus === "active") {
+						return "committed_elsewhere"
+					}
+					return diskStatus === (this.initialStatus ?? "active") ? "proceed" : "abort"
+				},
+			})
+		} catch (error) {
+			console.error(
+				`[Task#${this.taskId}] restorePreparedResumeHistory: partial failure. The restore write failed, so the disk keeps the prepared history. The original history is preserved at ${recoveryCopyPath} and in this Task memory, and the record stays resumable.`,
+				error,
+			)
+			return
+		}
+
+		switch (result.outcome) {
+			case "restored":
+				await removeResumeHistoryRecoveryCopy(recoveryCopyPath)
+				return
+			case "committed_elsewhere":
+				// The active status alone does not prove this instance's prepared
+				// history is the one on disk: another writer can prepare different
+				// content and activate between our write and this gate. The copy
+				// stays, so this attempt's original history stays recoverable.
+				console.error(
+					`[Task#${this.taskId}] restorePreparedResumeHistory: the record is active on disk, so no restore ran and this attempt's prepared history is not proven accepted. The original history is preserved at ${recoveryCopyPath}.`,
+				)
+				return
+			case "record_state_unknown":
+				console.error(
+					`[Task#${this.taskId}] restorePreparedResumeHistory: the authoritative record status is unreadable, so the restore failed closed and no restore ran. The original history is preserved at ${recoveryCopyPath}.`,
+					result.error,
+				)
+				return
+			case "record_state_conflict":
+				console.error(
+					`[Task#${this.taskId}] restorePreparedResumeHistory: the record status on disk no longer matches the status this resume started from, so the restore failed closed and no restore ran. The original history is preserved at ${recoveryCopyPath}.`,
+				)
+				return
+			case "foreign_write":
+				console.warn(
+					`[Task#${this.taskId}] restorePreparedResumeHistory: the disk API history changed after preparation, so no restore ran. The original history is preserved at ${recoveryCopyPath}.`,
+				)
+				return
+			case "unreadable":
+				console.error(
+					`[Task#${this.taskId}] restorePreparedResumeHistory: the disk API history is missing or unreadable, so the restore failed closed and no restore ran. The original history is preserved at ${recoveryCopyPath}.`,
+					result.error,
+				)
+				return
 		}
 	}
 
@@ -3450,13 +3620,44 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		const deniedContent = text ? formatResponse.toolDeniedWithFeedback(text) : formatResponse.toolDenied()
-		await this.initiateTaskLoop([
+		const denialUserContent: Anthropic.Messages.ContentBlockParam[] = [
 			{
 				type: "tool_result",
 				tool_use_id: action.actionId,
 				content: formatResponse.toolResult(deniedContent, images),
 			},
-		])
+		]
+
+		// A denied pending action still starts the task loop. For an
+		// interrupted record the denial result is persisted before the one
+		// interrupted → active commit, so a failed save cannot leave an active
+		// record whose API history never shows the denial. Approval paths
+		// above return early and run their own transitions.
+		if (this.initialStatus === "interrupted") {
+			const persisted = await this.addToApiConversationHistory({ role: "user", content: denialUserContent })
+			if (!persisted) {
+				// Drop the unpersisted append so no later save from this
+				// instance can persist it, and stop before activation. The
+				// record stays interrupted with its durable pending action, so
+				// the replay stays retryable.
+				this.apiConversationHistory.pop()
+				throw new Error(
+					`[Task#resumePendingTaskAction] Failed to persist the denial result for task ${this.taskId}. The resume stopped before activation, the record stays interrupted, and the pending action stays replayable.`,
+				)
+			}
+			// An activation rejection, for example a stale parent linkage,
+			// leaves the record interrupted with the denial durable and the
+			// action settled, so a replay proceeds from the committed denial.
+			// No API-history restore runs: the denial is a committed user
+			// decision, not an unaccepted prepared slice.
+			await provider.resumeInterruptedTask(this.taskId, this.parentTaskId)
+			// The denial result is already persisted, so the loop must not
+			// append it again.
+			await this.initiateTaskLoop(denialUserContent, { userContentAlreadyPersisted: true })
+			return
+		}
+
+		await this.initiateTaskLoop(denialUserContent)
 	}
 
 	/**
@@ -3835,7 +4036,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	// Task Loop
 
-	private async initiateTaskLoop(userContent: Anthropic.Messages.ContentBlockParam[]): Promise<void> {
+	private async initiateTaskLoop(
+		userContent: Anthropic.Messages.ContentBlockParam[],
+		options: { userContentAlreadyPersisted?: boolean } = {},
+	): Promise<void> {
 		// Kicks off the checkpoints initialization process in the background.
 		// `getCheckpointService` wraps its full body in a try/catch and returns
 		// `undefined` on failure (see src/core/checkpoints/index.ts), so the
@@ -3848,8 +4052,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		this.emit(RooCodeEventName.TaskStarted)
 
+		let firstTurnOptions: typeof options | undefined = options
 		while (!this.abort) {
-			const didEndLoop = await this.recursivelyMakeClineRequests(nextUserContent, includeFileDetails)
+			const didEndLoop = await this.recursivelyMakeClineRequests(
+				nextUserContent,
+				includeFileDetails,
+				firstTurnOptions,
+			)
+			firstTurnOptions = undefined
 			includeFileDetails = false // We only need file details the first time.
 
 			// The way this agentic loop works is that cline will be given a
@@ -3876,15 +4086,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	public async recursivelyMakeClineRequests(
 		userContent: Anthropic.Messages.ContentBlockParam[],
 		includeFileDetails: boolean = false,
+		options: { userContentAlreadyPersisted?: boolean } = {},
 	): Promise<boolean> {
 		interface StackItem {
 			userContent: Anthropic.Messages.ContentBlockParam[]
 			includeFileDetails: boolean
 			retryAttempt?: number
 			userMessageWasRemoved?: boolean // Track if user message was removed due to empty response
+			userContentAlreadyPersisted?: boolean // First turn of a denial replay: the content was persisted before activation
 		}
 
-		const stack: StackItem[] = [{ userContent, includeFileDetails, retryAttempt: 0 }]
+		const stack: StackItem[] = [
+			{
+				userContent,
+				includeFileDetails,
+				retryAttempt: 0,
+				userContentAlreadyPersisted: options.userContentAlreadyPersisted,
+			},
+		]
 
 		while (stack.length > 0) {
 			const currentItem = stack.pop()!
@@ -4012,11 +4231,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const finalUserContent = [...contentWithoutEnvDetails, { type: "text" as const, text: environmentDetails }]
 			// See shouldAddUserMessageToHistory for the full add/skip rules (retry/empty/removed).
 			const isEmptyUserContent = currentUserContent.length === 0
-			const shouldAddUserMessage = shouldAddUserMessageToHistory({
-				retryAttempt: currentItem.retryAttempt,
-				isEmptyUserContent,
-				userMessageWasRemoved: currentItem.userMessageWasRemoved,
-			})
+			// A persisted denial replay must not append its first turn again,
+			// so the already-persisted flag suppresses the history write and
+			// the empty-response removal that keys off it.
+			const shouldAddUserMessage =
+				!currentItem.userContentAlreadyPersisted &&
+				shouldAddUserMessageToHistory({
+					retryAttempt: currentItem.retryAttempt,
+					isEmptyUserContent,
+					userMessageWasRemoved: currentItem.userMessageWasRemoved,
+				})
 			if (shouldAddUserMessage) {
 				await this.addToApiConversationHistory({ role: "user", content: finalUserContent })
 				this.messageCounts.user++

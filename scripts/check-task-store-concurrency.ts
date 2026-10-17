@@ -23,6 +23,7 @@ type OperationId =
 	| "complete-a"
 	| "redelegate-b"
 	| "stale-save-a"
+	| "preserve-save-a"
 	| "abandon-b"
 	| "reject-a"
 type RecordMap = Partial<Record<TaskId, HistoryItem>>
@@ -113,6 +114,22 @@ const semanticLandmarks = {
 		state.commits.filter((entry) => entry.operationId === "complete-a").length === 1 &&
 		state.caches.A["child-a"]?.status === "completed" &&
 		state.caches.A.parent?.status === "delegated",
+	"preserve-save-commits-after-detachment": (state: ModelState) => {
+		const detachIndex = state.commits.findIndex(
+			(entry) =>
+				entry.operationId === "abandon-b" &&
+				entry.taskId === "child-a" &&
+				entry.next.parentTaskId === undefined &&
+				entry.next.rootTaskId === undefined,
+		)
+		if (detachIndex < 0) return false
+		const preserveIndex = state.commits.findIndex(
+			(entry) => entry.operationId === "preserve-save-a" && entry.taskId === "child-a",
+		)
+		if (preserveIndex <= detachIndex) return false
+		const disk = state.disk["child-a"]
+		return Boolean(disk && disk.parentTaskId === undefined && disk.rootTaskId === undefined)
+	},
 } satisfies Record<string, (state: ModelState) => boolean>
 
 function item(id: TaskId, overrides: Partial<HistoryItem> = {}): HistoryItem {
@@ -233,6 +250,23 @@ const operationSpecs: Record<OperationId, OperationSpec> = {
 			return [{ ...stale, tokensOut: stale.tokensOut + 1 }]
 		},
 	},
+	"preserve-save-a": {
+		id: "preserve-save-a",
+		host: "A",
+		externalSnapshot: true,
+		allowRefreshAfterRead: true,
+		buildWrites: (snapshot) => {
+			const stale = getRequired(snapshot, "child-a")
+			// A rehydrated interrupted task's message save declares its
+			// in-memory lineage non-authoritative. The preserve-lineage
+			// write owner strips parent and root links from the payload
+			// and delta before anything is written.
+			const stripped: HistoryItem = { ...stale, tokensOut: stale.tokensOut + 1 }
+			delete stripped.parentTaskId
+			delete stripped.rootTaskId
+			return [stripped]
+		},
+	},
 	"abandon-b": {
 		id: "abandon-b",
 		host: "B",
@@ -263,8 +297,11 @@ function prepareWrites(state: ModelState, spec: OperationSpec, operation: Operat
 		const cached = state.caches[spec.host][taskId]
 		// Task.saveClineMessages rebuilds lineage from the live Task but preserves the
 		// store's current status before upsert, so stale lineage is not accompanied by
-		// a stale status transition.
-		const incoming = spec.id === "stale-save-a" && cached?.status ? { ...built, status: cached.status } : built
+		// a stale status transition. The preserve-lineage save follows the same rule,
+		// so a save that commits after a peer's detachment never models a stale
+		// interrupted → active delta that the real store would never send.
+		const preservesStoreStatus = spec.id === "stale-save-a" || spec.id === "preserve-save-a"
+		const incoming = preservesStoreStatus && cached?.status ? { ...built, status: cached.status } : built
 		return {
 			taskId,
 			incoming,
@@ -680,6 +717,39 @@ const scenarios: Scenario[] = [
 			],
 		},
 		check: () => [],
+	},
+	{
+		name: "preserve save keeps detachment",
+		operations: [operationSpecs["preserve-save-a"], operationSpecs["abandon-b"]],
+		check: (state) => {
+			// Monotonic detachment for the preserve-lineage write owner:
+			// once the detach commit lands, no preserve-save commit may
+			// reintroduce the child's parent or root links.
+			for (const commit of state.commits) {
+				if (commit.operationId !== "preserve-save-a" || commit.taskId !== "child-a" || !commit.previous) {
+					continue
+				}
+				if (commit.previous.parentTaskId === undefined && commit.next.parentTaskId !== undefined) {
+					return ["preserve-lineage save restored a detached parent link"]
+				}
+				if (commit.previous.rootTaskId === undefined && commit.next.rootTaskId !== undefined) {
+					return ["preserve-lineage save restored a detached root link"]
+				}
+			}
+			if (state.operations["abandon-b"]?.phase === "done") {
+				const disk = state.disk["child-a"]
+				if (!disk) return ["preserve save dropped the detached child record"]
+				if (disk.parentTaskId !== undefined || disk.rootTaskId !== undefined) {
+					return ["preserve-lineage save left reattached lineage after abandonment"]
+				}
+			}
+			// The production save carries the store's current status, so it
+			// never models a status delta and is never rejected.
+			if (state.operations["preserve-save-a"]?.phase === "rejected") {
+				return ["preserve-lineage save was rejected for a stale status delta"]
+			}
+			return []
+		},
 	},
 ]
 

@@ -21,6 +21,7 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import { attemptCompletionTool, type AttemptCompletionCallbacks } from "../../tools/AttemptCompletionTool"
 import type { AttemptCompletionToolUse } from "../../../shared/tools"
+import { LifecycleTransitionError } from "../../task-persistence/taskLifecycle"
 
 type TaskPersistenceAccess = {
 	addToApiConversationHistory: (message: Anthropic.MessageParam) => Promise<void>
@@ -31,6 +32,7 @@ type TaskPersistenceAccess = {
 	resumePendingTaskAction: (action: PendingTaskAction) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
 	initiateTaskLoop: (userContent: Anthropic.Messages.ContentBlockParam[]) => Promise<void>
+	retrySaveApiConversationHistory: () => Promise<boolean>
 }
 
 function getTaskPersistenceAccess(task: Task): TaskPersistenceAccess {
@@ -54,6 +56,9 @@ const {
 	mockReadTaskMessages,
 	mockTaskMetadata,
 	mockPWaitFor,
+	mockCreateResumeHistoryRecoveryCopy,
+	mockRemoveResumeHistoryRecoveryCopy,
+	mockRestoreApiMessagesIfUnchanged,
 } = vi.hoisted(() => ({
 	mockSaveApiMessages: vi.fn().mockResolvedValue(undefined),
 	mockSaveTaskMessages: vi.fn().mockResolvedValue(undefined),
@@ -71,6 +76,11 @@ const {
 		},
 	}),
 	mockPWaitFor: vi.fn().mockResolvedValue(undefined),
+	mockCreateResumeHistoryRecoveryCopy: vi
+		.fn()
+		.mockResolvedValue("/mock/tasks/test-id/api_conversation_history.json.pre-resume-mock"),
+	mockRemoveResumeHistoryRecoveryCopy: vi.fn().mockResolvedValue(undefined),
+	mockRestoreApiMessagesIfUnchanged: vi.fn().mockResolvedValue({ outcome: "restored" }),
 }))
 
 // ─── Module mocks ────────────────────────────────────────────────────────────
@@ -116,16 +126,22 @@ vi.mock("../../task-persistence", async (importOriginal) => {
 		readApiMessages: mockReadApiMessages,
 		readTaskMessages: mockReadTaskMessages,
 		taskMetadata: mockTaskMetadata,
+		createResumeHistoryRecoveryCopy: mockCreateResumeHistoryRecoveryCopy,
+		removeResumeHistoryRecoveryCopy: mockRemoveResumeHistoryRecoveryCopy,
+		restoreApiMessagesIfUnchanged: mockRestoreApiMessagesIfUnchanged,
 		TaskHistoryStore: vi.fn().mockImplementation(function () {
 			return {
 				initialize: vi.fn().mockResolvedValue(undefined),
 				dispose: vi.fn(),
 				get: vi.fn(),
 				getAll: vi.fn().mockReturnValue([]),
+				invalidate: vi.fn().mockResolvedValue(undefined),
+				readValidatedDiskStatus: vi.fn().mockResolvedValue("interrupted"),
 				upsert: vi.fn().mockResolvedValue([]),
 				delete: vi.fn().mockResolvedValue(undefined),
 				deleteMany: vi.fn().mockResolvedValue(undefined),
 				reconcile: vi.fn().mockResolvedValue(undefined),
+				resumeInterruptedTask: vi.fn().mockResolvedValue({ id: "test-id", status: "active" }),
 				initialized: Promise.resolve(),
 			}
 		}),
@@ -299,6 +315,7 @@ describe("Task persistence", () => {
 		mockProvider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
 		mockProvider.postStateToWebviewWithoutTaskHistory = vi.fn().mockResolvedValue(undefined)
 		mockProvider.updateTaskHistory = vi.fn().mockResolvedValue(undefined)
+		mockProvider.resumeInterruptedTask = vi.fn().mockResolvedValue(undefined)
 		mockProvider.log = vi.fn()
 	})
 
@@ -1100,6 +1117,8 @@ describe("Task persistence", () => {
 					status: "completed",
 					tokensIn: 10,
 				}),
+				// The interrupted rehydrated task declares its lineage non-authoritative.
+				{ preserveLineage: true },
 			)
 		})
 	})
@@ -1163,7 +1182,7 @@ describe("Task persistence", () => {
 				},
 				startTask: false,
 			})
-			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" })
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" })
 
 			mockReadApiMessages.mockResolvedValue([
 				{
@@ -1203,6 +1222,189 @@ describe("Task persistence", () => {
 	// ── resumeTaskFromHistory — interrupted tool calls must be recorded as errors ──
 
 	describe("resumeTaskFromHistory interrupted tool calls", () => {
+		it.each(["noButtonClicked", "unexpected"])(
+			"does not activate or run after resume response %s",
+			async (response) => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					startTask: false,
+					initialStatus: "interrupted",
+				})
+				const answer: Awaited<ReturnType<Task["ask"]>> = { response: "noButtonClicked" }
+				// Model an unvalidated response arriving across the webview boundary.
+				Reflect.set(answer, "response", response)
+				mockProvider.taskHistoryStore.get = vi.fn().mockReturnValue({ id: task.taskId, status: "interrupted" })
+				vi.spyOn(task, "ask").mockResolvedValue(answer)
+				const loop = vi.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop").mockResolvedValue(undefined)
+				await task["resumeTaskFromHistory"]()
+				expect(mockProvider.resumeInterruptedTask).not.toHaveBeenCalled()
+				expect(loop).not.toHaveBeenCalled()
+			},
+		)
+
+		it.each(["noButtonClicked", "unexpected"])(
+			"does not resume a completed task after a declined %s resume_completed_task response",
+			async (response) => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					startTask: false,
+					initialStatus: "completed",
+				})
+				const answer: Awaited<ReturnType<Task["ask"]>> = { response: "noButtonClicked" }
+				// Model an unvalidated response arriving across the webview boundary.
+				Reflect.set(answer, "response", response)
+				vi.spyOn(task, "ask").mockResolvedValue(answer)
+				const loop = vi.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop").mockResolvedValue(undefined)
+				await task["resumeTaskFromHistory"]()
+
+				expect(task.ask).toHaveBeenCalledWith("resume_completed_task")
+				expect(mockProvider.resumeInterruptedTask).not.toHaveBeenCalled()
+				expect(mockProvider.updateTaskHistory).not.toHaveBeenCalled()
+				expect(loop).not.toHaveBeenCalled()
+			},
+		)
+
+		it("resumes an accepted completed task through the task loop without a store transition", async () => {
+			mockReadTaskMessages.mockResolvedValue([
+				{ ts: 1, type: "say" as const, say: "text" as const, text: "Original task" },
+			])
+			mockReadApiMessages.mockResolvedValue([
+				{ role: "user", content: [{ type: "text", text: "Original task" }] },
+			])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				startTask: false,
+				initialStatus: "completed",
+			})
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" })
+			const loop = vi.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop").mockResolvedValue(undefined)
+			await task["resumeTaskFromHistory"]()
+
+			expect(task.ask).toHaveBeenCalledWith("resume_completed_task")
+			expect(loop).toHaveBeenCalledTimes(1)
+			// Non-interrupted semantics: an accepted completed-task resume never
+			// moves the store record or calls the interrupted-resume path.
+			expect(mockProvider.resumeInterruptedTask).not.toHaveBeenCalled()
+			expect(mockProvider.updateTaskHistory).not.toHaveBeenCalled()
+		})
+
+		it("does not restore stale lineage through repeated message saves after rejected resume", async () => {
+			// The accepted resume completes its fallible api history preparation
+			// before the activation commit, so the harness must serve a readable
+			// api history for the rejection to come from the activation path.
+			mockReadApiMessages.mockResolvedValue([{ role: "user", content: "Continue" }])
+			const history = {
+				id: "detached",
+				number: 1,
+				ts: 1,
+				task: "Detached",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				status: "interrupted" as const,
+				parentTaskId: "parent",
+				rootTaskId: "root",
+			}
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				startTask: false,
+				historyItem: history,
+			})
+			mockProvider.taskHistoryStore.get = vi
+				.fn()
+				.mockReturnValue({ ...history, parentTaskId: undefined, rootTaskId: undefined })
+			mockProvider.resumeInterruptedTask = vi
+				.fn()
+				.mockRejectedValue(new LifecycleTransitionError("parent linkage changed"))
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" })
+			const loop = vi.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop").mockResolvedValue(undefined)
+			await expect(task["resumeTaskFromHistory"]()).rejects.toThrow("parent linkage changed")
+			mockTaskMetadata.mockResolvedValueOnce({ historyItem: { ...history }, tokenUsage: {} })
+			mockTaskMetadata.mockResolvedValueOnce({ historyItem: { ...history }, tokenUsage: {} })
+			await task["saveClineMessages"]()
+			await task["saveClineMessages"]()
+			expect(loop).not.toHaveBeenCalled()
+			expect(mockProvider.updateTaskHistory).toHaveBeenCalledTimes(2)
+			for (const [saved, options] of vi.mocked(mockProvider.updateTaskHistory).mock.calls) {
+				// The stale rehydrated links must be declared non-authoritative so
+				// the store keeps the persisted lineage and never restores these.
+				expect(options).toEqual({ preserveLineage: true })
+				expect(saved.status).toBe("interrupted")
+			}
+		})
+
+		it("keeps the interrupted record retryable when the api history read fails after acceptance", async () => {
+			// The first read hydrates the task. The second read runs after the
+			// user accepts, and the activation commit must wait for it. A failed
+			// read then leaves the record interrupted, so the user can retry.
+			mockReadTaskMessages.mockResolvedValue([])
+			mockReadApiMessages
+				.mockResolvedValueOnce([{ role: "user", content: "Continue" }])
+				.mockRejectedValueOnce(new Error("api history read failed"))
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				startTask: false,
+				initialStatus: "interrupted",
+			})
+			mockProvider.taskHistoryStore.get = vi.fn().mockReturnValue({ id: task.taskId, status: "interrupted" })
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" })
+			const loop = vi.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop").mockResolvedValue(undefined)
+
+			await expect(task["resumeTaskFromHistory"]()).rejects.toThrow("api history read failed")
+
+			expect(mockProvider.resumeInterruptedTask).not.toHaveBeenCalled()
+			expect(mockProvider.updateTaskHistory).not.toHaveBeenCalled()
+			expect(loop).not.toHaveBeenCalled()
+		})
+
+		it("resumes a Task.create history task only once when run is also called", async () => {
+			mockReadTaskMessages.mockResolvedValue([])
+			mockReadApiMessages.mockResolvedValue([{ role: "user", content: "Continue" }])
+			mockProvider.taskHistoryStore.get = vi.fn().mockReturnValue({
+				id: "interrupted-child-resume",
+				status: "interrupted",
+			})
+			const acceptance = createDeferred<{ response: "yesButtonClicked" }>()
+			const initiateTaskLoop = vi.fn().mockResolvedValue(undefined)
+			const [task, createdRun] = Task.create({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "interrupted-child-resume",
+					number: 1,
+					ts: 1,
+					task: "Interrupted child",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					status: "interrupted",
+					parentTaskId: "parent",
+				},
+				onCreated: (instance) => {
+					vi.spyOn(instance, "ask").mockReturnValue(acceptance.promise)
+					vi.spyOn(getTaskPersistenceAccess(instance), "initiateTaskLoop").mockImplementation(
+						initiateTaskLoop,
+					)
+				},
+			})
+			const scheduledRun = task.run()
+			expect(mockProvider.resumeInterruptedTask).not.toHaveBeenCalled()
+			acceptance.resolve({ response: "yesButtonClicked" })
+			await Promise.all([createdRun, scheduledRun])
+
+			expect(scheduledRun).toBe(createdRun)
+			expect(task.run()).toBe(createdRun)
+			expect(task.ask).toHaveBeenCalledOnce()
+			expect(mockProvider.resumeInterruptedTask).toHaveBeenCalledOnce()
+			expect(mockProvider.resumeInterruptedTask).toHaveBeenCalledWith("interrupted-child-resume", "parent")
+			expect(initiateTaskLoop).toHaveBeenCalledOnce()
+		})
+
 		const interruptedToolResultContent = "Task was interrupted before this tool call could be completed."
 
 		it("marks synthetic tool_results from an interrupted assistant turn as errors", async () => {
@@ -1226,7 +1428,7 @@ describe("Task persistence", () => {
 			const initiateTaskLoopSpy = vi
 				.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop")
 				.mockResolvedValue(undefined)
-			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" })
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" })
 
 			// The persisted history ends with an assistant turn whose tool calls
 			// (attempt_completion) were never answered because the task was
@@ -1289,7 +1491,7 @@ describe("Task persistence", () => {
 			const initiateTaskLoopSpy = vi
 				.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop")
 				.mockResolvedValue(undefined)
-			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" })
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "messageResponse", text: "Continue" })
 
 			// The persisted history ends with a user turn that only answered the
 			// first of two parallel tool calls.
@@ -1405,6 +1607,61 @@ describe("Task persistence", () => {
 				expect.arrayContaining([expect.objectContaining({ text: pendingAction.approvalText })]),
 			)
 			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+		})
+
+		it("activates an interrupted child before a denied pending-action replay starts the loop", async () => {
+			// A denied finish action still feeds the task loop. The record must
+			// leave interrupted through the authoritative resume before that
+			// loop starts, exactly as a generic accepted resume does.
+			mockReadTaskMessages.mockResolvedValue([
+				{ ts: 1, type: "say", say: "text", text: "Child" },
+				{ ts: 2, type: "ask", ask: "tool", text: pendingAction.approvalText },
+			])
+			mockReadApiMessages.mockResolvedValue([
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "finish-action", name: "attempt_completion", input: {} }],
+				},
+			])
+			// Restart settlement refreshes the record and re-reads the pending
+			// action from it, so the refreshed record must still carry the action.
+			mockProvider.taskHistoryStore.reconcile = vi.fn().mockResolvedValue(undefined)
+			mockProvider.taskHistoryStore.get = vi.fn().mockReturnValue({
+				id: "child-1",
+				status: "interrupted",
+				pendingAction,
+			})
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "child-1",
+					number: 1,
+					ts: 1,
+					task: "Child",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					status: "interrupted",
+					parentTaskId: "parent-1",
+					pendingAction,
+				},
+				startTask: false,
+				initialStatus: "interrupted",
+			})
+			const activate = vi.fn<(taskId: string, parentTaskId?: string) => Promise<void>>()
+			activate.mockResolvedValue(undefined)
+			mockProvider.resumeInterruptedTask = activate
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" })
+			const loop = vi.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop").mockResolvedValue(undefined)
+
+			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+
+			expect(task.ask).toHaveBeenCalledWith("tool", pendingAction.approvalText, false)
+			expect(activate).toHaveBeenCalledOnce()
+			expect(activate).toHaveBeenCalledWith("child-1", "parent-1")
+			expect(loop).toHaveBeenCalledOnce()
+			expect(activate.mock.invocationCallOrder[0]).toBeLessThan(loop.mock.invocationCallOrder[0])
 		})
 
 		it("replays a create-subtask action for an active historical task without restart settlement", async () => {
@@ -2160,7 +2417,7 @@ describe("Task persistence", () => {
 					role: "user",
 					content: [{ type: "tool_result", tool_use_id: "finish-action", content: "Denied" }],
 				}),
-			).resolves.toBeUndefined()
+			).resolves.toBe(true)
 
 			expect((task as unknown as { pendingAction?: PendingTaskAction }).pendingAction).toEqual(pendingAction)
 			expect(consoleError).toHaveBeenCalledWith(
@@ -2215,6 +2472,239 @@ describe("Task persistence", () => {
 			expect(mockSaveApiMessages).toHaveBeenCalled()
 			expect(mockProvider.clearPendingTaskAction).toHaveBeenCalledWith("child-1", sanitizedActionId)
 			expect(persist.mock.invocationCallOrder[0]).toBeLessThan(initiate.mock.invocationCallOrder[0])
+		})
+	})
+
+	// ── resumeTaskFromHistory — prepared api history persistence gate and rollback ──
+
+	describe("resumeTaskFromHistory api-history persistence gate and rollback", () => {
+		function makeResumeTask(): Task {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				startTask: false,
+				initialStatus: "interrupted",
+			})
+			mockProvider.taskHistoryStore.get = vi.fn().mockReturnValue({ id: task.taskId, status: "interrupted" })
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" })
+			vi.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop").mockResolvedValue(undefined)
+			return task
+		}
+
+		/**
+		 * Mirrors the production gate handling inside the real conditional
+		 * restore, so the tests exercise the gate the Task passes into the
+		 * lock scope.
+		 */
+		function runGateInsideRestore(): void {
+			mockRestoreApiMessagesIfUnchanged.mockImplementationOnce(
+				async (options: { verifyCanRestore: () => Promise<"proceed" | "committed_elsewhere" | "abort"> }) => {
+					try {
+						const gate = await options.verifyCanRestore()
+						return { outcome: gate === "proceed" ? "restored" : gate }
+					} catch (error) {
+						return { outcome: "record_state_unknown", error }
+					}
+				},
+			)
+		}
+
+		it("stops before activation when the prepared api history fails to persist", async () => {
+			mockReadTaskMessages.mockResolvedValue([])
+			mockReadApiMessages.mockResolvedValue([{ role: "user", content: "Continue" }])
+			mockSaveApiMessages.mockRejectedValueOnce(new Error("disk full"))
+
+			const task = makeResumeTask()
+			const loop = vi.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop")
+
+			await expect(task["resumeTaskFromHistory"]()).rejects.toThrow(
+				"Failed to persist the prepared API conversation history",
+			)
+
+			expect(mockProvider.resumeInterruptedTask).not.toHaveBeenCalled()
+			expect(loop).not.toHaveBeenCalled()
+			// Only the failed preparation write ran. The disk file never changed.
+			expect(mockSaveApiMessages).toHaveBeenCalledTimes(1)
+			// The durable pre-resume copy exists and stays, because the
+			// safeWriteJson rollback that restored the original on disk may
+			// itself have failed.
+			expect(mockCreateResumeHistoryRecoveryCopy).toHaveBeenCalledTimes(1)
+			expect(mockRemoveResumeHistoryRecoveryCopy).not.toHaveBeenCalled()
+			// The in-memory history holds the authoritative content again, so no
+			// later save from this instance can persist the unverified slice.
+			expect(task.apiConversationHistory).toEqual([
+				{ role: "user", content: "Continue", messageId: expect.any(String) },
+			])
+		})
+
+		it("restores the authoritative api history through the locked conditional restore when the resume rejects a stale parent", async () => {
+			mockReadTaskMessages.mockResolvedValue([])
+			// Reads: hydration and the post-acceptance derivation. The restore
+			// compares inside its own lock scope and reads the disk directly.
+			mockReadApiMessages
+				.mockResolvedValueOnce([{ role: "user", content: "Continue" }])
+				.mockResolvedValueOnce([{ role: "user", content: "Continue" }])
+			mockProvider.resumeInterruptedTask = vi
+				.fn()
+				.mockRejectedValue(new LifecycleTransitionError("parent linkage changed"))
+			runGateInsideRestore()
+
+			const task = makeResumeTask()
+			const loop = vi.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop")
+
+			await expect(task["resumeTaskFromHistory"]()).rejects.toThrow("parent linkage changed")
+
+			expect(mockProvider.resumeInterruptedTask).toHaveBeenCalledTimes(1)
+			expect(loop).not.toHaveBeenCalled()
+			// The preparation slice is the only content that reached the disk layer.
+			const savedMessages = vi.mocked(mockSaveApiMessages).mock.calls.map((call) => call[0].messages)
+			expect(savedMessages).toEqual([[]])
+			// The restore compared against the prepared slice and carried the
+			// authoritative history as its replacement.
+			expect(mockRestoreApiMessagesIfUnchanged).toHaveBeenCalledTimes(1)
+			const restoreOptions = vi.mocked(mockRestoreApiMessagesIfUnchanged).mock.calls[0][0]
+			expect(restoreOptions.expected).toEqual([])
+			expect(restoreOptions.replacement).toEqual([
+				{ role: "user", content: "Continue", messageId: expect.any(String) },
+			])
+			// The restore succeeded, so the pre-resume copy was removed.
+			expect(mockRemoveResumeHistoryRecoveryCopy).toHaveBeenCalledTimes(1)
+		})
+
+		it("reports a partial failure and keeps the recovery copy when the restore write fails", async () => {
+			mockReadTaskMessages.mockResolvedValue([])
+			mockReadApiMessages
+				.mockResolvedValueOnce([{ role: "user", content: "Continue" }])
+				.mockResolvedValueOnce([{ role: "user", content: "Continue" }])
+			// The preparation write lands. The locked restore write then fails.
+			mockSaveApiMessages.mockResolvedValueOnce(undefined)
+			mockRestoreApiMessagesIfUnchanged.mockRejectedValueOnce(new Error("restore disk full"))
+			mockProvider.resumeInterruptedTask = vi
+				.fn()
+				.mockRejectedValue(new LifecycleTransitionError("parent linkage changed"))
+
+			const task = makeResumeTask()
+			const loop = vi.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop")
+			const retry = vi
+				.spyOn(getTaskPersistenceAccess(task), "retrySaveApiConversationHistory")
+				.mockResolvedValue(false)
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await expect(task["resumeTaskFromHistory"]()).rejects.toThrow("parent linkage changed")
+
+			expect(loop).not.toHaveBeenCalled()
+			// The restore write runs inside the lock scope and does not retry
+			// through the Task save helper.
+			expect(retry).not.toHaveBeenCalled()
+			// The prepared slice is the last content that reached the disk layer.
+			const savedMessages = vi.mocked(mockSaveApiMessages).mock.calls.map((call) => call[0].messages)
+			expect(savedMessages).toEqual([[]])
+			const recoveryCopyPath = await mockCreateResumeHistoryRecoveryCopy.mock.results[0].value
+			// The partial-failure log names the durable recovery copy, so the
+			// original history stays identifiable on disk after a restart.
+			expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("partial failure"), expect.anything())
+			expect(consoleError).toHaveBeenCalledWith(expect.stringContaining(recoveryCopyPath), expect.anything())
+			expect(mockRemoveResumeHistoryRecoveryCopy).not.toHaveBeenCalled()
+			consoleError.mockRestore()
+		})
+
+		it("fails closed without a restore when the record status is unreadable", async () => {
+			mockReadTaskMessages.mockResolvedValue([])
+			mockReadApiMessages
+				.mockResolvedValueOnce([{ role: "user", content: "Continue" }])
+				.mockResolvedValueOnce([{ role: "user", content: "Continue" }])
+			mockProvider.resumeInterruptedTask = vi
+				.fn()
+				.mockRejectedValue(new LifecycleTransitionError("parent linkage changed"))
+			mockProvider.taskHistoryStore.readValidatedDiskStatus = vi
+				.fn()
+				.mockRejectedValue(new LifecycleTransitionError("no valid disk record"))
+			runGateInsideRestore()
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			const task = makeResumeTask()
+
+			await expect(task["resumeTaskFromHistory"]()).rejects.toThrow("parent linkage changed")
+
+			expect(mockRestoreApiMessagesIfUnchanged).toHaveBeenCalledTimes(1)
+			// The gate rejected inside the lock scope, so the restore never
+			// compared or wrote, and the recovery copy stays on disk.
+			expect(mockSaveApiMessages).toHaveBeenCalledTimes(1)
+			expect(mockRemoveResumeHistoryRecoveryCopy).not.toHaveBeenCalled()
+			expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("failed closed"), expect.anything())
+			consoleError.mockRestore()
+		})
+
+		it("keeps the prepared history and the recovery copy when the record is already active", async () => {
+			mockReadTaskMessages.mockResolvedValue([])
+			mockReadApiMessages
+				.mockResolvedValueOnce([{ role: "user", content: "Continue" }])
+				.mockResolvedValueOnce([{ role: "user", content: "Continue" }])
+			mockProvider.resumeInterruptedTask = vi
+				.fn()
+				.mockRejectedValue(new LifecycleTransitionError("parent linkage changed"))
+			mockProvider.taskHistoryStore.readValidatedDiskStatus = vi.fn().mockResolvedValue("active")
+			runGateInsideRestore()
+			const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			const task = makeResumeTask()
+
+			await expect(task["resumeTaskFromHistory"]()).rejects.toThrow("parent linkage changed")
+
+			expect(mockProvider.resumeInterruptedTask).toHaveBeenCalledTimes(1)
+			// The active status alone does not prove this attempt's prepared
+			// history was the one accepted, so the recovery copy stays and the
+			// partial-failure log names its path.
+			expect(mockRemoveResumeHistoryRecoveryCopy).not.toHaveBeenCalled()
+			const recoveryCopyPath = await mockCreateResumeHistoryRecoveryCopy.mock.results[0].value
+			expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("active on disk"))
+			expect(consoleError).toHaveBeenCalledWith(expect.stringContaining(recoveryCopyPath))
+			consoleError.mockRestore()
+		})
+
+		it("keeps the recovery copy when the disk history changed after preparation", async () => {
+			mockReadTaskMessages.mockResolvedValue([])
+			mockReadApiMessages
+				.mockResolvedValueOnce([{ role: "user", content: "Continue" }])
+				.mockResolvedValueOnce([{ role: "user", content: "Continue" }])
+			mockProvider.resumeInterruptedTask = vi
+				.fn()
+				.mockRejectedValue(new LifecycleTransitionError("parent linkage changed"))
+			mockRestoreApiMessagesIfUnchanged.mockResolvedValueOnce({ outcome: "foreign_write" })
+			const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			const task = makeResumeTask()
+
+			await expect(task["resumeTaskFromHistory"]()).rejects.toThrow("parent linkage changed")
+
+			expect(mockRestoreApiMessagesIfUnchanged).toHaveBeenCalledTimes(1)
+			// The newer disk content is never clobbered, and the original stays
+			// recoverable in the copy.
+			expect(mockRemoveResumeHistoryRecoveryCopy).not.toHaveBeenCalled()
+			const recoveryCopyPath = await mockCreateResumeHistoryRecoveryCopy.mock.results[0].value
+			expect(consoleWarn).toHaveBeenCalledWith(expect.stringContaining(recoveryCopyPath))
+			consoleWarn.mockRestore()
+		})
+
+		it("removes the recovery copy when the resume activates and starts the loop", async () => {
+			mockReadTaskMessages.mockResolvedValue([])
+			mockReadApiMessages
+				.mockResolvedValueOnce([{ role: "user", content: "Continue" }])
+				.mockResolvedValueOnce([{ role: "user", content: "Continue" }])
+
+			const task = makeResumeTask()
+			const loop = vi.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop")
+
+			await task["resumeTaskFromHistory"]()
+
+			expect(mockProvider.resumeInterruptedTask).toHaveBeenCalledTimes(1)
+			expect(loop).toHaveBeenCalledTimes(1)
+			expect(mockRestoreApiMessagesIfUnchanged).not.toHaveBeenCalled()
+			expect(mockRemoveResumeHistoryRecoveryCopy).toHaveBeenCalledTimes(1)
+			// The copy is removed only after the activation commit landed.
+			expect(mockRemoveResumeHistoryRecoveryCopy.mock.invocationCallOrder[0]).toBeLessThan(
+				loop.mock.invocationCallOrder[0],
+			)
 		})
 	})
 

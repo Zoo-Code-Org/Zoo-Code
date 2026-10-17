@@ -2541,7 +2541,7 @@ describe("Cline", () => {
 				newContextTokens: 1,
 				condenseId: "condense-id",
 			})
-			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(true)
 			vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
 
 			await expect(task.condenseContext()).resolves.toBeUndefined()
@@ -5978,7 +5978,7 @@ describe("Cline", () => {
 			// the aborted task's post-overwrite say from throwing before the
 			// summarize/overwrite assertions can report a regression.
 			vi.spyOn(task, "say").mockResolvedValue(undefined)
-			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(true)
 			// The summarizeConversation module mock is never cleared, so pin the
 			// call count this condense starts from.
 			const summarizeCallsBefore = vi.mocked(summarizeConversation).mock.calls.length
@@ -6030,7 +6030,7 @@ describe("Cline", () => {
 			// the aborted task's post-overwrite say from throwing before the
 			// overwrite assertion can report the regression.
 			const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined)
-			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(true)
 			// The summarizeConversation module mock is never cleared, so pin the
 			// call count this condense starts from.
 			const summarizeCallsBefore = vi.mocked(summarizeConversation).mock.calls.length
@@ -6080,7 +6080,7 @@ describe("Cline", () => {
 			]
 			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
 			vi.spyOn(task, "say").mockResolvedValue(undefined)
-			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(true)
 			// Suspend inside the collector so the abort lands while the
 			// summarization request cannot have started yet.
 			let releaseEnvDetails!: (value: string) => void
@@ -6127,7 +6127,7 @@ describe("Cline", () => {
 			]
 			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
 			vi.spyOn(task, "say").mockResolvedValue(undefined)
-			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(true)
 			let releaseFilesRead!: (value: string[] | undefined) => void
 			const filesReadGate = new Promise<string[] | undefined>((resolve) => {
 				releaseFilesRead = resolve

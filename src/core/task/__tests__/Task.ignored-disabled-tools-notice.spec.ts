@@ -102,6 +102,16 @@ vi.mock("delay", () => ({
 	default: vi.fn().mockResolvedValue(undefined),
 }))
 
+// The resume path persists the prepared API history through the real
+// task-persistence module. Stub the two disk-writing recovery helpers so the
+// in-memory fixture never touches a real storage path. Every other export
+// stays real.
+vi.mock("../../task-persistence", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../task-persistence")>()),
+	createResumeHistoryRecoveryCopy: vi.fn().mockResolvedValue("/mock/pre-resume-copy"),
+	removeResumeHistoryRecoveryCopy: vi.fn().mockResolvedValue(undefined),
+}))
+
 type StartTaskAccess = {
 	startTask: (task?: string, images?: string[]) => Promise<void>
 	resumeTaskFromHistory: () => Promise<void>
@@ -255,7 +265,7 @@ async function resumeTaskWithDisabledTools(disabledTools: string[] | undefined) 
 		{ role: "user", content: [{ type: "text", text: "historical task" }], ts: historyItem.ts },
 		{ role: "assistant", content: [{ type: "text", text: "Working on it." }], ts: historyItem.ts + 1 },
 	])
-	vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+	vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(true)
 	const initiateLoopSpy = vi.spyOn(taskAccess, "initiateTaskLoop").mockResolvedValue(undefined)
 
 	await taskAccess.resumeTaskFromHistory()

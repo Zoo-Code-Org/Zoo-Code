@@ -212,6 +212,73 @@ describe("Task pending action replay", () => {
 		])
 	})
 
+	it("persists the denial result before activating an interrupted record", async () => {
+		const provider = { resumeInterruptedTask: vi.fn().mockResolvedValue(undefined) }
+		const task = createTask(provider)
+		const state = task as unknown as {
+			initialStatus?: string
+			apiConversationHistory: unknown[]
+			addToApiConversationHistory: ReturnType<typeof vi.fn>
+		}
+		state.initialStatus = "interrupted"
+		state.apiConversationHistory = []
+		state.addToApiConversationHistory = vi.fn().mockResolvedValue(true)
+		task.ask = vi.fn().mockResolvedValue({ response: "noButtonClicked" })
+		const initiateTaskLoop = (task as unknown as { initiateTaskLoop: ReturnType<typeof vi.fn> }).initiateTaskLoop
+
+		await getPendingActionAccess(task).resumePendingTaskAction(createAction)
+
+		expect(state.addToApiConversationHistory).toHaveBeenCalledWith({
+			role: "user",
+			content: [
+				{
+					type: "tool_result",
+					tool_use_id: "create-action",
+					content: JSON.stringify({ status: "denied", message: "The user denied this operation." }),
+				},
+			],
+		})
+		expect(provider.resumeInterruptedTask).toHaveBeenCalledWith("task-1", undefined)
+		expect(initiateTaskLoop).toHaveBeenCalledWith(
+			[expect.objectContaining({ type: "tool_result", tool_use_id: "create-action" })],
+			{ userContentAlreadyPersisted: true },
+		)
+		const add = vi.mocked(state.addToApiConversationHistory)
+		const resume = vi.mocked(provider.resumeInterruptedTask)
+		expect(add.mock.invocationCallOrder[0]).toBeLessThan(resume.mock.invocationCallOrder[0])
+		expect(resume.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(initiateTaskLoop).mock.invocationCallOrder[0])
+	})
+
+	it("stops before activation when the denial result fails to persist", async () => {
+		const provider = { resumeInterruptedTask: vi.fn().mockResolvedValue(undefined) }
+		const task = createTask(provider)
+		const persistedHistory = [{ role: "user", content: "prior turn" }]
+		const state = task as unknown as {
+			initialStatus?: string
+			apiConversationHistory: unknown[]
+			addToApiConversationHistory: ReturnType<typeof vi.fn>
+		}
+		state.initialStatus = "interrupted"
+		state.apiConversationHistory = persistedHistory
+		state.addToApiConversationHistory = vi.fn().mockImplementation(async (message: unknown) => {
+			state.apiConversationHistory.push(message)
+			return false
+		})
+		task.ask = vi.fn().mockResolvedValue({ response: "noButtonClicked" })
+		const initiateTaskLoop = (task as unknown as { initiateTaskLoop: ReturnType<typeof vi.fn> }).initiateTaskLoop
+
+		await expect(getPendingActionAccess(task).resumePendingTaskAction(createAction)).rejects.toThrow(
+			"Failed to persist the denial result",
+		)
+
+		expect(provider.resumeInterruptedTask).not.toHaveBeenCalled()
+		expect(initiateTaskLoop).not.toHaveBeenCalled()
+		// The unpersisted append is dropped, so the in-memory history matches
+		// the disk again and no later save can persist the denial from here.
+		expect(state.apiConversationHistory).toEqual(persistedHistory)
+		expect(state.apiConversationHistory).toHaveLength(1)
+	})
+
 	it("fails clearly when the provider is unavailable", async () => {
 		const task = createTask()
 

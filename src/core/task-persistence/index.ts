@@ -2,7 +2,14 @@ export {
 	type ApiMessage,
 	ApiMessagesReadError,
 	type ApiMessagesReadErrorKind,
+	createResumeHistoryRecoveryCopy,
+	getApiConversationHistoryFilePath,
 	readApiMessages,
+	removeResumeHistoryRecoveryCopy,
+	restoreApiMessagesIfUnchanged,
+	type ResumeHistoryRestoreOutcome,
+	type ResumeHistoryRestoreResult,
+	type ResumeRestoreStatusGate,
 	saveApiMessages,
 } from "./apiMessages"
 export {
@@ -21,6 +28,7 @@ export {
 	delegateTaskToChild,
 	interruptDelegatedChild,
 	LifecycleTransitionError,
+	resumeInterruptedChild,
 	settleRejectedCreateSubtaskAction,
 	type HistoryItemStatus,
 	VALID_TASK_STATUS_TRANSITIONS,

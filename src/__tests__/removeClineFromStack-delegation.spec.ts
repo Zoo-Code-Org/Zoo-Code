@@ -1,9 +1,11 @@
 // npx vitest run __tests__/removeClineFromStack-delegation.spec.ts
 
 import { describe, it, expect, vi } from "vitest"
+import * as vscode from "vscode"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { TaskRegistry } from "../core/task/TaskRegistry"
 import { PendingActionSettlementError, type Task } from "../core/task/Task"
+import { LifecycleTransitionError } from "../core/task-persistence/taskLifecycle"
 import { makeProviderStub } from "./helpers/provider-stub"
 
 type PrivateClineProviderMethods = {
@@ -172,7 +174,7 @@ describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation
 })
 
 describe("ClineProvider failed history restoration cleanup", () => {
-	it("removes the failed task, its listeners, and its resources without saving stale history", async () => {
+	function buildCleanupProvider() {
 		const cleanupListener = vi.fn()
 		const task = {
 			taskId: "failed-history-task",
@@ -187,7 +189,46 @@ describe("ClineProvider failed history restoration cleanup", () => {
 			taskRegistry,
 			taskEventListeners,
 			log: vi.fn(),
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
 		} as unknown as ClineProvider
+		return { provider, task, taskRegistry, taskEventListeners, cleanupListener }
+	}
+
+	it.each([new PendingActionSettlementError("settlement failed"), new LifecycleTransitionError("resume rejected")])(
+		"removes the failed task without saving stale history after %s",
+		async (error) => {
+			const { provider, task, taskRegistry, taskEventListeners, cleanupListener } = buildCleanupProvider()
+
+			await privateClineProvider.cleanupFailedHistoryTask.call(provider, task, error)
+
+			expect(taskRegistry.getById(task.taskId)).toBeUndefined()
+			expect(taskRegistry.current).toBeUndefined()
+			expect(cleanupListener).toHaveBeenCalledOnce()
+			expect(taskEventListeners.has(task)).toBe(false)
+			expect(task.dispose).toHaveBeenCalledOnce()
+			// The webview must drop the removed task instead of keeping a
+			// stale chat view for an unregistered instance.
+			expect(provider.postStateToWebview).toHaveBeenCalledOnce()
+		},
+	)
+
+	it("shows the rejection reason for a lifecycle resume failure", async () => {
+		const showErrorMessage = vi.spyOn(vscode.window, "showErrorMessage").mockResolvedValue(undefined)
+		const { provider, task } = buildCleanupProvider()
+
+		await privateClineProvider.cleanupFailedHistoryTask.call(
+			provider,
+			task,
+			new LifecycleTransitionError("resume rejected"),
+		)
+
+		expect(showErrorMessage).toHaveBeenCalledWith("resume rejected")
+		showErrorMessage.mockRestore()
+	})
+
+	it("does not show a message for a pending action settlement failure", async () => {
+		const showErrorMessage = vi.spyOn(vscode.window, "showErrorMessage").mockResolvedValue(undefined)
+		const { provider, task } = buildCleanupProvider()
 
 		await privateClineProvider.cleanupFailedHistoryTask.call(
 			provider,
@@ -195,11 +236,8 @@ describe("ClineProvider failed history restoration cleanup", () => {
 			new PendingActionSettlementError("settlement failed"),
 		)
 
-		expect(taskRegistry.getById(task.taskId)).toBeUndefined()
-		expect(taskRegistry.current).toBeUndefined()
-		expect(cleanupListener).toHaveBeenCalledOnce()
-		expect(taskEventListeners.has(task)).toBe(false)
-		expect(task.dispose).toHaveBeenCalledOnce()
+		expect(showErrorMessage).not.toHaveBeenCalled()
+		showErrorMessage.mockRestore()
 	})
 
 	it("keeps the task active after an unrelated history resume failure", async () => {
@@ -217,6 +255,7 @@ describe("ClineProvider failed history restoration cleanup", () => {
 			taskRegistry,
 			taskEventListeners,
 			log: vi.fn(),
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
 		} as unknown as ClineProvider
 
 		await privateClineProvider.cleanupFailedHistoryTask.call(provider, task, new Error("history read failed"))
@@ -226,6 +265,7 @@ describe("ClineProvider failed history restoration cleanup", () => {
 		expect(cleanupListener).not.toHaveBeenCalled()
 		expect(taskEventListeners.has(task)).toBe(true)
 		expect(task.dispose).not.toHaveBeenCalled()
+		expect(provider.postStateToWebview).not.toHaveBeenCalled()
 	})
 })
 

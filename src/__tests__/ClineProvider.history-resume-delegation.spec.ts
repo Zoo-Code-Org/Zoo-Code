@@ -5,7 +5,7 @@ import * as vscode from "vscode"
 import { providerIdentifiers, RooCodeEventName } from "@roo-code/types"
 import type { ClineMessage, HistoryItem } from "@roo-code/types"
 
-import type { ApiMessage } from "../core/task-persistence"
+import type { ApiMessage, HistoryItemStatus } from "../core/task-persistence"
 import type { Task } from "../core/task/Task"
 
 /* vscode mock for Task/Provider imports */
@@ -120,6 +120,22 @@ function makeStatefulTaskHistoryStore(...items: HistoryItem[]) {
 			itemMap.set(id, updated)
 			return [updated]
 		}),
+		atomicUpdateParentDelegation: vi.fn(
+			async (
+				id: string,
+				build: (diskParent: HistoryItem, awaitedChildDiskStatus: HistoryItemStatus | undefined) => HistoryItem,
+			) => {
+				const item = itemMap.get(id)
+				if (!item) throw new Error(`Missing history item: ${id}`)
+				const awaitedChildDiskStatus =
+					item.status === "delegated" && item.awaitingChildId
+						? (itemMap.get(item.awaitingChildId)?.status ?? undefined)
+						: undefined
+				const updated = build(item, awaitedChildDiskStatus)
+				itemMap.set(id, updated)
+				return updated
+			},
+		),
 	}
 }
 
@@ -1265,14 +1281,14 @@ describe("History resume delegation - parent metadata transitions", () => {
 		await Promise.resolve()
 		expect(removeParentB).not.toHaveBeenCalled()
 		expect(createChildC2).not.toHaveBeenCalled()
-		expect(taskHistoryStore.atomicReadAndUpdate).not.toHaveBeenCalled()
+		expect(taskHistoryStore.atomicUpdateParentDelegation).not.toHaveBeenCalled()
 
 		const continuationRun = runScheduledContinuation()
 		await vi.waitFor(() => expect(parentInstanceA.resumeAfterDelegation).toHaveBeenCalledTimes(1))
 		await expect(providerBTransition).resolves.toBe(childC2)
 		expect(removeParentB).toHaveBeenCalledTimes(1)
 		expect(createChildC2).toHaveBeenCalledTimes(1)
-		expect(taskHistoryStore.atomicReadAndUpdate).toHaveBeenCalledTimes(1)
+		expect(taskHistoryStore.atomicUpdateParentDelegation).toHaveBeenCalledTimes(1)
 		expect(taskHistoryStore.get(parentItem.id)).toMatchObject({
 			status: "delegated",
 			awaitingChildId: "child-c2",

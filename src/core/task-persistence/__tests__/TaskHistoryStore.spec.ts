@@ -577,6 +577,51 @@ describe("TaskHistoryStore", () => {
 		})
 	})
 
+	describe("readValidatedDiskStatus()", () => {
+		it("returns the validated disk status instead of the cache value", async () => {
+			const item = makeHistoryItem({ id: "status-task", status: "interrupted" })
+			await store.upsert(item)
+
+			// A competing host moved the record on disk; the cache still holds
+			// the interrupted snapshot.
+			const filePath = path.join(tmpDir, "tasks", "status-task", GlobalFileNames.historyItem)
+			await fs.writeFile(filePath, JSON.stringify({ ...item, status: "active" }))
+
+			await expect(store.readValidatedDiskStatus("status-task")).resolves.toBe("active")
+		})
+
+		it("normalizes a legacy record without a status to active", async () => {
+			const item = makeHistoryItem({ id: "status-legacy" })
+			const { status: _status, ...legacyItem } = item
+			await store.upsert(legacyItem)
+
+			await expect(store.readValidatedDiskStatus("status-legacy")).resolves.toBe("active")
+		})
+
+		it("throws for a missing record", async () => {
+			await expect(store.readValidatedDiskStatus("status-missing")).rejects.toThrow("no valid disk record")
+		})
+
+		it("throws for a malformed record", async () => {
+			const taskDir = path.join(tmpDir, "tasks", "status-malformed")
+			await fs.mkdir(taskDir, { recursive: true })
+			await fs.writeFile(path.join(taskDir, GlobalFileNames.historyItem), "not json")
+
+			await expect(store.readValidatedDiskStatus("status-malformed")).rejects.toThrow("no valid disk record")
+		})
+
+		it("throws for a record persisted under a different task id", async () => {
+			const taskDir = path.join(tmpDir, "tasks", "status-wrong-id")
+			await fs.mkdir(taskDir, { recursive: true })
+			await fs.writeFile(
+				path.join(taskDir, GlobalFileNames.historyItem),
+				JSON.stringify(makeHistoryItem({ id: "status-other-id" })),
+			)
+
+			await expect(store.readValidatedDiskStatus("status-wrong-id")).rejects.toThrow("no valid disk record")
+		})
+	})
+
 	describe("atomicUpdatePair()", () => {
 		it("updates both records and both files are written before lock releases", async () => {
 			await store.initialize()

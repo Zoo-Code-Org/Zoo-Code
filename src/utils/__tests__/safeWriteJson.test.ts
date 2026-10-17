@@ -435,8 +435,8 @@ describe("safeWriteJson", () => {
 	})
 
 	// Test for rollback failure scenario
-	test("should log error and re-throw original if rollback fails", async () => {
-		const initialData = { message: "Initial, should be lost if rollback fails" }
+	test("should preserve the backup and report partial failure when both renames fail", async () => {
+		const initialData = { message: "Initial, must stay recoverable" }
 		const newData = { message: "New content" }
 
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
@@ -465,6 +465,20 @@ describe("safeWriteJson", () => {
 			expect.stringContaining("Failed to restore backup"),
 			expect.objectContaining({ message: "Rollback rename failed" }),
 		)
+
+		// The backup survives: with the target gone and the rollback failed,
+		// it holds the only copy of the previous record. The partial failure
+		// names the recovery path instead of erasing the record.
+		const leftoverFiles = (await fs.readdir(tempDir)).filter((name) => name.includes(".bak_"))
+		expect(leftoverFiles).toHaveLength(1)
+		const backupContent = JSON.parse(await fs.readFile(path.join(tempDir, leftoverFiles[0]!), "utf-8"))
+		expect(backupContent).toEqual(initialData)
+		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Partial write failure"))
+		// The partial-failure report names the surviving backup file.
+		const partialFailureCall = consoleErrorSpy.mock.calls
+			.map((call) => String(call[0]))
+			.find((text) => text.includes("Partial write failure"))
+		expect(partialFailureCall).toContain(leftoverFiles[0]!)
 
 		consoleErrorSpy.mockRestore()
 	})

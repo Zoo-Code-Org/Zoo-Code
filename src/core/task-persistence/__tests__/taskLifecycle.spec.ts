@@ -6,6 +6,8 @@ import {
 	delegateTaskToChild,
 	interruptDelegatedChild,
 	LifecycleTransitionError,
+	resumeInterruptedChild,
+	resumeInterruptedTask,
 	settleRejectedCreateSubtaskAction,
 } from "../taskLifecycle"
 
@@ -57,6 +59,66 @@ describe("task lifecycle transitions", () => {
 			awaitingChildId: "new-child",
 			childIds: ["old-child", "new-child"],
 		})
+	})
+
+	it("allows an explicitly resumed interrupted child to delegate without weakening generic transitions", () => {
+		const interruptedChild = item("child", { status: "interrupted", parentTaskId: "parent" })
+
+		expect(() => delegateTaskToChild(interruptedChild, "grandchild")).toThrow(
+			"Invalid task status transition: interrupted → delegated",
+		)
+		expect(delegateTaskToChild(resumeInterruptedTask(interruptedChild, "parent"), "grandchild")).toMatchObject({
+			status: "delegated",
+			parentTaskId: "parent",
+			awaitingChildId: "grandchild",
+			delegatedToId: "grandchild",
+		})
+	})
+
+	it("rejects explicit resume for a task that is no longer interrupted", () => {
+		expect(() => resumeInterruptedTask(item("child"))).toThrow(LifecycleTransitionError)
+	})
+
+	it("resumes an interrupted child only while its parent still awaits it", () => {
+		const parent = item("parent", {
+			status: "delegated",
+			awaitingChildId: "child",
+			delegatedToId: "child",
+			childIds: ["child"],
+		})
+		const child = item("child", { status: "interrupted", parentTaskId: "parent" })
+
+		expect(resumeInterruptedChild(parent, child)).toMatchObject({ status: "active", parentTaskId: "parent" })
+	})
+
+	it("rejects the parent-locked resume after the parent re-delegates elsewhere", () => {
+		const redelegatedParent = item("parent", {
+			status: "delegated",
+			awaitingChildId: "new-child",
+			delegatedToId: "new-child",
+			childIds: ["child", "new-child"],
+		})
+		const child = item("child", { status: "interrupted", parentTaskId: "parent" })
+
+		expect(() => resumeInterruptedChild(redelegatedParent, child)).toThrow(LifecycleTransitionError)
+		expect(() => resumeInterruptedChild(redelegatedParent, child)).toThrow(/no longer awaits/)
+	})
+
+	it("rejects the parent-locked resume when the parent released the delegation", () => {
+		const activeParent = item("parent")
+		const child = item("child", { status: "interrupted", parentTaskId: "parent" })
+
+		expect(() => resumeInterruptedChild(activeParent, child)).toThrow(/no longer awaits/)
+	})
+
+	it("rejects the parent-locked resume when an active parent retains a stale awaited pointer", () => {
+		// Completion accepts an active parent with a surviving awaited pointer.
+		// The status check must reject the resume on its own, without help from
+		// the awaited-pointer check.
+		const activeParent = item("parent", { awaitingChildId: "child", delegatedToId: "child" })
+		const child = item("child", { status: "interrupted", parentTaskId: "parent" })
+
+		expect(() => resumeInterruptedChild(activeParent, child)).toThrow(/no longer awaits/)
 	})
 
 	it("interrupts a child without clearing the parent's ownership", () => {

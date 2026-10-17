@@ -18,6 +18,15 @@ export interface SafeWriteJsonOptions {
 	prettyPrint?: boolean
 
 	/**
+	 * Skip advisory-lock acquisition because the caller already holds the
+	 * shared advisory lock for this exact path through `acquireFileLock` or
+	 * `withFileLock`. `proper-lockfile` cannot re-enter a lock it already
+	 * holds, so only callers that acquired that lock for this path may set
+	 * this option.
+	 */
+	assumeLockHeld?: boolean
+
+	/**
 	 * When provided, the current file is read under the advisory lock
 	 * and passed to this function along with the incoming data. The
 	 * return value replaces `data` for the write. This turns a blind
@@ -69,7 +78,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// remains a no-op, so the finally block in the main file operations
 	// try-catch-finally won't try to release an unacquired lock if this
 	// path is taken.
-	releaseLock = await acquireFileLock(absoluteFilePath)
+	releaseLock = options?.assumeLockHeld ? async () => {} : await acquireFileLock(absoluteFilePath)
 
 	// Variables to hold the actual paths of temp files if they are created.
 	let actualTempNewFilePath: string | null = null
@@ -177,16 +186,14 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			}
 		}
 
-		// Cleanup the .bak file if it still needs to be (i.e., wasn't successfully restored)
+		// A surviving backup holds the only copy of the previous record: the
+		// commit rename removed the target and the rollback rename failed.
+		// Never delete it. Report the recovery path so the record stays
+		// recoverable and the failure is not mistaken for a clean rollback.
 		if (actualTempBackupFilePath) {
-			try {
-				await fs.unlink(actualTempBackupFilePath)
-			} catch (cleanupError) {
-				console.error(
-					`[Catch] Failed to clean up temporary backup file ${actualTempBackupFilePath}:`,
-					cleanupError,
-				)
-			}
+			console.error(
+				`[Catch] Partial write failure for ${absoluteFilePath}: the previous record is preserved at ${actualTempBackupFilePath} and must be recovered manually.`,
+			)
 		}
 		throw originalError // This MUST be the error that rejects the promise.
 	} finally {
