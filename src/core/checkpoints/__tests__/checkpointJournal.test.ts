@@ -177,6 +177,26 @@ describe("checkpointSave change-journal wiring (B2)", () => {
 		expect(sayMock).toHaveBeenCalledTimes(1)
 	})
 
+	it("resolves an all-excluded write when the checkpoint produces no commit", async () => {
+		// An excluded path is never staged, so an all-excluded step has nothing
+		// to commit: the save must resolve (the write succeeded and no rollback
+		// metadata is expected) instead of failing on the no-commit rejection,
+		// whose outcome would otherwise depend on unrelated workspace changes.
+		saveCheckpointSpy.mockResolvedValueOnce(undefined)
+		mockTask.checkpointService.isPathIgnored = vi.fn().mockResolvedValue(true)
+
+		await expect(
+			checkpointSave(mockTask as Task, false, true, {
+				path: "node_modules/pkg/index.js",
+				operation: "create",
+				diffStats: { additions: 1, deletions: 0 },
+			}),
+		).resolves.toBeUndefined()
+
+		expect(await loadChanges(tmpStorageDir, TASK_ID)).toEqual([])
+		expect(mockTask.say as Mock).not.toHaveBeenCalled()
+	})
+
 	it("omits diffStats in the journal entry when not provided", async () => {
 		await checkpointSave(mockTask as Task, false, true, { path: "src/bar.ts", operation: "update" })
 
@@ -248,8 +268,11 @@ describe("checkpointSave change-journal wiring (B2)", () => {
 		// Documented contract: user-disabled checkpoints means the absence of
 		// rollback metadata is the user's choice, so the save must not fail the
 		// write tool (no journal entry, no change card, no throw). Genuine
-		// init-failure coverage lives in checkpointSave.spec.ts.
+		// init-failure coverage lives in checkpointSave.spec.ts. The
+		// persisted setting agrees the user disabled checkpoints (an unset
+		// setting would mean an earlier failure flipped the task flag).
 		mockTask.enableCheckpoints = false
+		mockProvider.getState = vi.fn().mockResolvedValue({ enableCheckpoints: false })
 
 		await expect(checkpointSave(mockTask as Task, false, true, write)).resolves.toBeUndefined()
 		expect(saveCheckpointSpy).not.toHaveBeenCalled()

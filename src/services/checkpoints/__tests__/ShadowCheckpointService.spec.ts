@@ -222,6 +222,19 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				expect(await fileExistsAtPath(ignoredFile)).toBe(true)
 			})
 
+			it("treats a negation rule as not-ignored in isPathIgnored", async () => {
+				// A negation rule re-includes a path matched by an earlier rule
+				// (".env*" then "!.env.example"). check-ignore -v prints the negation
+				// match and would misclassify the file as ignored; without -v only
+				// genuinely ignored paths print, so isPathIgnored must agree with
+				// what the shadow repo actually stages.
+				const excludesPath = path.join(service.checkpointsDir, ".git", "info", "exclude")
+				await fs.appendFile(excludesPath, "\n.env*\n!.env.example\n")
+
+				expect(await service.isPathIgnored(".env")).toBe(true)
+				expect(await service.isPathIgnored(".env.example")).toBe(false)
+			})
+
 			it("accepts a native backslashed path on Windows (git pathspecs are POSIX)", async () => {
 				if (process.platform !== "win32") {
 					// Off-Windows the journal paths are already POSIX, so there is
