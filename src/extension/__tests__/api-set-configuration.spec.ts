@@ -29,6 +29,13 @@ describe("API.setConfiguration", () => {
 		const provider = Object.assign({} as ClineProvider, {
 			context: {},
 			on: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([
+				{
+					name: "default",
+					id: "default-id",
+				},
+			]),
+			getValues: vi.fn().mockReturnValue({}),
 			setValues: vi.fn().mockResolvedValue(undefined),
 			contextProxy: {
 				setValues: vi.fn().mockResolvedValue(undefined),
@@ -36,7 +43,11 @@ describe("API.setConfiguration", () => {
 			},
 			providerSettingsManager: {
 				saveConfig: vi.fn().mockResolvedValue("default-id"),
-				getProfile: vi.fn().mockRejectedValue(new Error("profile absent")),
+				getProfile: vi.fn().mockResolvedValue({
+					name: "default",
+					id: "default-id",
+					apiProvider: providerIdentifiers.bedrock,
+				}),
 			},
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),
 		})

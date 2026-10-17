@@ -571,22 +571,37 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		// Derive the saved profile name once so the sibling refresh and the save
 		// agree on the empty-string fallback.
 		const savedProfileName = values.currentApiConfigName || "default"
-		// Persist the profile record before the shared/sibling refresh: saveConfig
-		// validates before storing, so a rejected save must not leave shared
-		// settings or sibling overlays serving settings the stored profile does
-		// not contain.
 		const manager = this.sidebarProvider.providerSettingsManager
+		// Distinguish an existing profile synchronously: getProfile throws for a
+		// missing profile AND for transient load/lock failures, so its outcome
+		// must not decide whether rollback deletes - a read failure must never
+		// turn an existing profile into a deleted one.
+		const recordExisted = this.sidebarProvider
+			.getProviderProfileEntries()
+			.some(({ name }) => name === savedProfileName)
+		const previousValues = this.getConfiguration()
 		const previousSharedSettings = this.sidebarProvider.contextProxy.getProviderSettings()
+		// Fail closed BEFORE any write: an existing record that cannot be read
+		// aborts the call while nothing has been mutated.
 		let previousRecord: Awaited<ReturnType<typeof manager.getProfile>> | undefined
-		let recordExisted = false
-		try {
+		if (recordExisted) {
 			previousRecord = await manager.getProfile({ name: savedProfileName })
-			recordExisted = true
-		} catch {
-			// Absent record: compensation deletes a record this call creates.
 		}
+		// Capture the prior mapping of every mode this payload touches, so a
+		// partial mode fan-out rolls back completely - including mappings this
+		// call creates for the first time (an undefined prior id restores the
+		// no-mapping semantics getModeConfigId reports).
+		const previousModeConfigs: Array<[Mode, string | undefined]> = []
+		if (values.modeApiConfigs) {
+			for (const mode of Object.keys(values.modeApiConfigs)) {
+				previousModeConfigs.push([mode as Mode, await manager.getModeConfigId(mode as Mode)])
+			}
+		}
+		// Persist the profile record before the shared/sibling refresh: saveConfig
+		// validates before storing, so a rejected save leaves every domain
+		// untouched and no rollback is needed.
+		await manager.saveConfig(savedProfileName, values)
 		try {
-			await manager.saveConfig(savedProfileName, values)
 			await this.sidebarProvider.setValues(values, { savedProfileName })
 			if (values.modeApiConfigs) {
 				await Promise.all(
@@ -596,11 +611,11 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				)
 			}
 		} catch (error) {
-			// The round trip is one transaction: undo the stored profile AND the
-			// shared settings it may have left half-applied, so the API never
-			// rejects with the stored profile updated while the active shared
-			// settings are still old. Each restore is independent and logged; the
-			// original failure is what the caller sees.
+			// The save landed: roll back every domain this mutation touched - the
+			// profile record, the complete settings round trip (global values,
+			// view-local state, and sibling overlays), the shared provider
+			// settings, and the mode mappings. Each restore is independent and
+			// logged; the original failure is what the caller sees.
 			try {
 				if (recordExisted && previousRecord) {
 					const { name: _previousName, id: _previousId, ...previousSettings } = previousRecord
@@ -615,6 +630,15 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				)
 			}
 			try {
+				const previousProfileName = previousValues.currentApiConfigName || "default"
+				await this.sidebarProvider.setValues(previousValues, { savedProfileName: previousProfileName })
+			} catch (restoreError) {
+				this.log(
+					"[setConfiguration] failed to restore the previous configuration values: " +
+						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+				)
+			}
+			try {
 				await this.sidebarProvider.contextProxy.setProviderSettings(previousSharedSettings)
 			} catch (restoreError) {
 				this.log(
@@ -622,11 +646,20 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
 				)
 			}
+			try {
+				await Promise.all(
+					previousModeConfigs.map(([mode, configId]) => manager.setModeConfig(mode, configId as string)),
+				)
+			} catch (restoreError) {
+				this.log(
+					"[setConfiguration] failed to restore the mode API config mappings: " +
+						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+				)
+			}
 			throw error
 		}
 		await this.sidebarProvider.postStateToWebview()
 	}
-
 	public setTerminalProfile(name: string | undefined): void {
 		const previousProfile = Terminal.getTerminalProfile()
 		Terminal.setTerminalProfile(name)
