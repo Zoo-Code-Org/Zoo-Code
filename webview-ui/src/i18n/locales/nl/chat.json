@@ -113,6 +113,15 @@
 	},
 	"selectMode": "Selecteer modus voor interactie",
 	"selectApiConfig": "Selecteer API-configuratie",
+	"selectModel": "Model selecteren",
+	"modelSelector": {
+		"title": "Modellen",
+		"settings": "Modelinstellingen",
+		"description": "Kies het model dat voor deze API-configuratie wordt gebruikt.",
+		"searchPlaceholder": "Modellen zoeken...",
+		"unsupportedTooltip": "Het model van deze provider wordt in de Instellingen geconfigureerd",
+		"loading": "Modellen laden..."
+	},
 	"lockApiConfigAcrossModes": "API-configuratie vergrendelen voor alle modi in deze werkruimte",
 	"unlockApiConfigAcrossModes": "API-configuratie is vergrendeld voor alle modi in deze werkruimte (klik om te ontgrendelen)",
 	"enhancePrompt": "Prompt verbeteren met extra context",
@@ -316,10 +325,10 @@
 		"title": "Zoo Code {{version}} uitgebracht",
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Wat is nieuw in Zoo Code v3.88.0",
-			"highlight1": "✨ Provider- en modelondersteuning: Gebruik Grok Build en verbeterde ondersteuning voor aangepaste modellen. Deze release herstelt ook Bedrock-modellimieten en verstuurt de Codex-verbosity-instelling.",
-			"highlight2": "🧭 Betrouwbaarheid van taken: Deze release herstelt de afhandeling van annuleringen, het voortzetten van tool-turns en het opslaan van taakberichten.",
-			"highlight3": "⚡ Sneller bewerken en chatten: Bestandsschrijfbewerkingen gebruiken standaard geen kunstmatige vertragingen meer. Chatberichten bevatten minder bestandsgegevens, en codeacties bereiken de laatst actieve chat."
+			"heading": "Wat is nieuw in Zoo Code v3.90.0",
+			"highlight1": "✨ Providers en modellen: GitHub Copilot is nu een provider: meld je aan en Zoo Code laadt je Copilot-modellen. IO Intelligence is een provider met een eigen API-sleutel. Gemini 4 Argon staat op Gemini en Vertex. GPT-6 Luna staat op OpenCode Go. Gemini 4 Argon en GPT-6 Luna staan ook op Zoo Gateway.",
+			"highlight2": "🧭 Tool-uitvoering: Dezelfde tool-aanroep herhalen geeft een waarschuwing, daarna stopt Zoo Code die lus. attempt_completion uitschakelen laat een taak niet langer onafgemaakt. Berichten in de wachtrij doorlopen dezelfde command-protection-controles als opdrachten die je direct verstuurt.",
+			"highlight3": "⚡ Redeneren en streaming: Adaptief denken van Anthropic verschijnt in de chat en thinking tokens worden geteld. De R1-schakelaar bewaart redenering van llama.cpp, Ollama en LM Studio. Codex bewaart versleutelde redenering bij de samenvatting die je ziet. VS Code language-model-streams gebruiken guarded recovery als een stream mislukt."
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",

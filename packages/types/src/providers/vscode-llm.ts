@@ -1,14 +1,49 @@
 import { z } from "zod"
 
 import type { ModelInfo } from "../model.js"
+import { openAiModelInfoSaneDefaults } from "./openai.js"
 
-export const vsCodeLmModelsMessageTypes = ["requestVsCodeLmModels", "vsCodeLmModels"] as const
+export const vsCodeLmModelsMessageTypes = [
+	"requestVsCodeLmModels",
+	"vsCodeLmModels",
+	"githubCopilotSignIn",
+	"githubCopilotReconnect",
+	"githubCopilotManageAccount",
+	"githubCopilotSignInResult",
+	"githubCopilotModels",
+] as const
 
 export const vsCodeLmModelsMessageTypeSchema = z.enum(vsCodeLmModelsMessageTypes)
 
 export const VsCodeLmModelsMessageType = vsCodeLmModelsMessageTypeSchema.enum
 
 export type VsCodeLmModelsMessageType = z.infer<typeof vsCodeLmModelsMessageTypeSchema>
+
+const githubCopilotVendor = "copilot"
+
+/** Identifiers for the language models and sign-in flow GitHub Copilot contributes to VS Code. */
+export const githubCopilotLanguageModel = {
+	vendor: githubCopilotVendor,
+	/** Selector matching every model the Copilot extension contributes. */
+	selector: { vendor: githubCopilotVendor },
+	authProviderId: "github",
+	/** In Copilot Chat's own preference order, so Zoo recognizes the session Copilot actually uses. */
+	authScopeSets: [["user:email"], ["read:user"]],
+	chatExtensionId: "GitHub.copilot-chat",
+	/** Public Command Palette command; VS Code offers no API to sign out, so Zoo defers to this UI. */
+	manageAccountsCommandId: "workbench.action.manageAccounts",
+} as const
+
+/**
+ * Baseline for a model whose capabilities are not yet known. Unlike `openAiModelInfoSaneDefaults` it
+ * leaves vision unset, so a capability nobody reported is not mistaken for one that is unsupported.
+ */
+export const vscodeLlmBaselineModelInfo: ModelInfo = {
+	contextWindow: openAiModelInfoSaneDefaults.contextWindow,
+	supportsPromptCache: false,
+	inputPrice: 0,
+	outputPrice: 0,
+}
 
 export type VscodeLlmModelId = keyof typeof vscodeLlmModels
 
