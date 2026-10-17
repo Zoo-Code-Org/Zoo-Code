@@ -6991,6 +6991,31 @@ describe("Cline", () => {
 			await loopPromise
 			expect(requestSpy).toHaveBeenCalled()
 		})
+
+		it("continues task startup when the baseline checkpoint fails", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "baseline failure task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const boom = new Error("baseline boom")
+			vi.spyOn(task, "checkpointSave").mockRejectedValue(boom)
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
+			const requestSpy = vi.spyOn(task, "recursivelyMakeClineRequests").mockResolvedValue(true)
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			// The baseline runs before TaskStarted: a checkpoint error must not
+			// abort task startup (startTask rethrows non-abort errors from
+			// initiateTaskLoop). The loop must still be entered.
+			await taskAccess.initiateTaskLoop([])
+
+			expect(requestSpy).toHaveBeenCalled()
+			expect(consoleErrorSpy).toHaveBeenCalledWith("[Task] task-start checkpoint baseline failed:", boom)
+			consoleErrorSpy.mockRestore()
+		})
 	})
 
 	describe("start()", () => {
