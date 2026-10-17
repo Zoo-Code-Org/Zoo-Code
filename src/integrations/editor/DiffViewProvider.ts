@@ -641,6 +641,10 @@ export class DiffViewProvider {
 		const placeholderPath = this.placeholderPath
 
 		let editorFailure: unknown
+		// A refused save of the restored placeholder stops the rollback outright (below):
+		// the artifacts must stay in place with the ownership, so the catch must not
+		// run the artifact cleanup for that failure.
+		let stopBeforeArtifacts = false
 		// open() creates the directories and the empty placeholder BEFORE it assigns
 		// activeDiffEditor (openDiffEditor() can reject on its 10s timeout or a failed
 		// vscode.diff call), so an abandoned create can leave artifacts on disk with no
@@ -675,8 +679,17 @@ export class DiffViewProvider {
 						// Only the emptied placeholder is ever saved: this edit created that file, and
 						// closing a dirty tab would prompt. A modify is never saved here - a modify's
 						// restore is an in-memory revert, and saving it would write to a file the user
-						// never approved (see the method comment).
-						await document.save()
+						// never approved (see the method comment). A false save leaves the buffer dirty
+						// over the placeholder: closeAllDiffViews() would skip the dirty tab and the
+						// unlink would delete the file underneath it, leaving the buffer one save away
+						// from recreating it - the same hazard revertChanges() refuses, so the rollback
+						// stops here with the placeholder still owned and the session still retryable.
+						if (!(await document.save())) {
+							stopBeforeArtifacts = true
+							throw new Error(
+								`Rollback could not save the restored buffer for ${this.relPath}; its clean state is unconfirmed, so the cleanup stopped before closing tabs or deleting the placeholder.`,
+							)
+						}
 					}
 				}
 
@@ -687,6 +700,11 @@ export class DiffViewProvider {
 				await this.closeAllDiffViews()
 				await this.closeFileTab(absolutePath)
 			} catch (error) {
+				// A refused save of the restored placeholder must leave the artifacts exactly
+				// as they are - owned, on disk - for the retry, so it bypasses the sweep below.
+				if (stopBeforeArtifacts) {
+					throw error
+				}
 				// Do NOT stop here: the placeholder and the created directories still have
 				// to go. The original failure is re-thrown once the artifacts are dealt with,
 				// so the caller still reports the rollback hazard instead of a silent success.

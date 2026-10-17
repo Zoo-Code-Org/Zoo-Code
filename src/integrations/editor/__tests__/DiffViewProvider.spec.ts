@@ -2588,6 +2588,8 @@ describe("DiffViewProvider", () => {
 			uri: { fsPath: mockTargetPath, path: mockTargetPath },
 			save: vi.fn(async () => {
 				callOrder.push("save")
+				// A confirmed save: the discard treats an unconfirmed one as a rollback failure.
+				return true
 			}),
 		})
 
@@ -2691,6 +2693,52 @@ describe("DiffViewProvider", () => {
 			// The artifacts still have to go: the caller runs reset() next, which drops
 			// placeholderPath/createdDirs and leaves nothing else able to remove them.
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("mock-target-file.ts"))
+		})
+
+		it("stops the cleanup and keeps placeholder ownership when the save is not confirmed", async () => {
+			// document.save() resolving false leaves the emptied buffer dirty over the
+			// placeholder: closeAllDiffViews() would skip the dirty tab and the unlink would
+			// delete the file underneath it, leaving the buffer one save away from recreating
+			// the file from a denied write. The discard stops before the close and the delete,
+			// keeping ownership so the caller skips reset() and the session stays retryable.
+			const callOrder: string[] = []
+			const document = makeAbandonedDocument(callOrder)
+			document.save = vi.fn(async () => {
+				callOrder.push("save")
+				return false
+			})
+			const closeAllDiffViews = vi.fn(async () => {
+				callOrder.push("closeDiffViews")
+			})
+			const closeFileTab = vi.fn(async () => {
+				callOrder.push("closeFileTab")
+			})
+			Object.assign(diffViewProvider, {
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: { document },
+				editType: "create",
+				createdDirs: [`${mockCwd}/new-dir`],
+				placeholderPath: `${mockCwd}/mock-target-file.ts`,
+				closeAllDiffViews,
+				closeFileTab,
+			})
+			vi.mocked(vscode.workspace.applyEdit).mockImplementation(async () => {
+				callOrder.push("applyEdit")
+				return true
+			})
+
+			await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow(
+				/could not save the restored buffer/i,
+			)
+
+			// The restore was attempted and the save refused; nothing closes and nothing deletes.
+			expect(callOrder).toEqual(["applyEdit", "save"])
+			expect(closeAllDiffViews).not.toHaveBeenCalled()
+			expect(closeFileTab).not.toHaveBeenCalled()
+			expect(fs.unlink).not.toHaveBeenCalled()
+			expect(fs.rmdir).not.toHaveBeenCalled()
+			// Ownership is preserved: the placeholder is still on disk and still ours.
+			expect(diffViewProvider["placeholderPath"] as string | undefined).toBe(`${mockCwd}/mock-target-file.ts`)
 		})
 
 		it("removes the directories this edit created in reverse order, after the placeholder unlink", async () => {
@@ -2962,6 +3010,7 @@ describe("DiffViewProvider", () => {
 				save: vi.fn(async () => {
 					callOrder.push("save")
 					document.isDirty = false
+					return true
 				}),
 			}
 			const diffTab = {

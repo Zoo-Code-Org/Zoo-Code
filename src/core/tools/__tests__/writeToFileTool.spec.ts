@@ -1533,6 +1533,43 @@ describe("writeToFileTool", () => {
 			}
 		})
 
+		it("keeps the session unreset when the denied rollback cannot confirm the placeholder save", async () => {
+			// A refused document.save() (resolves false) is a rollback failure, not a success:
+			// both rollback helpers stop with the placeholder still owned, so reset() must be
+			// skipped - it would forget the ownership and leave the dirty buffer one save away
+			// from recreating the denied file - and the hazard must be reported.
+			mockAskApproval.mockResolvedValue(false)
+			mockCline.diffViewProvider.revertChanges = vi
+				.fn()
+				.mockRejectedValue(
+					new Error(
+						"Rollback could not save the restored buffer for test/path.txt; its clean state is unconfirmed.",
+					),
+				)
+			mockCline.diffViewProvider.discardUnapprovedStream = vi
+				.fn()
+				.mockRejectedValue(
+					new Error(
+						"Rollback could not save the restored buffer for test/path.txt; its clean state is unconfirmed, so the cleanup stopped before closing tabs or deleting the placeholder.",
+					),
+				)
+			// The refused save left the placeholder on disk: the provider still owns it.
+			mockCline.diffViewProvider.ownsPlaceholder = true
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			try {
+				await executeWriteFileTool({}, { fileExists: false })
+
+				expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+				// Ownership survives: reset() did not run to forget it...
+				expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
+				// ...the rollback hazard and the stranded placeholder are both user-visible.
+				expect(mockCline.say).toHaveBeenCalledWith("error", expect.stringContaining("placeholder"))
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
+
 		it("still completes the teardown when the stranded-placeholder report itself rejects", async () => {
 			// The hazard report must not abort the cleanup: a failing say is logged and the
 			// error path completes - the session stays unreset so the placeholder ownership
