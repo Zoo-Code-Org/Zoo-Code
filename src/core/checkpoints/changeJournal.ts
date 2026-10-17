@@ -110,6 +110,7 @@ export async function appendChange(globalStorageDir: string, taskId: string, ent
  * entry-shaped (non-object, missing string path/checkpointId, or an
  * unknown operation) are skipped for the same reason.  The rest of the file is returned in order.  An absent
  * or empty journal returns [].
+ * @internal Wired by a later unit in the split chain; remove when the chain completes.
  */
 export async function loadChanges(globalStorageDir: string, taskId: string): Promise<ChangeJournalEntry[]> {
 	const filePath = journalPath(globalStorageDir, taskId)
