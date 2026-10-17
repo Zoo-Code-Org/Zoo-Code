@@ -88,7 +88,7 @@ export class Bm25Ranker implements Ranker {
 function tokenize(value: string): string[] {
 	return value
 		.toLowerCase()
-		.split(/[\W_]+/)
+		.split(/[^\p{L}\p{N}]+/u)
 		.filter(Boolean)
 }
 

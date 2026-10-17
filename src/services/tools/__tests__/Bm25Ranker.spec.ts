@@ -59,6 +59,14 @@ describe("Bm25Ranker", () => {
 		expect(new Bm25Ranker().rank("create issue", [nonMatching, matching], 10)).toEqual([matching])
 	})
 
+	it("preserves Unicode letters and numbers in tokens", () => {
+		const russian = tool("погода-сервер", "прогноз", "Прогноз погоды")
+		const arabic = tool("أدوات", "مقياس", "يدعم ٣ بروتوكولات")
+
+		expect(new Bm25Ranker().rank("погода", [arabic, russian], 10)).toEqual([russian])
+		expect(new Bm25Ranker().rank("٣", [russian, arabic], 10)).toEqual([arabic])
+	})
+
 	it("handles tools with empty descriptions", () => {
 		const item = tool("GitHub", "listRepos", "")
 
