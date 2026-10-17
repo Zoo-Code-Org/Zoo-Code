@@ -633,6 +633,12 @@ describe("API task controls - registry identity, listener wiring, and mode-switc
 			// An allowed key with a valid value still works.
 			await api.setGlobalState("mode", "ask")
 			expect(update).toHaveBeenCalledWith("mode", "ask")
+			// Non-strict object schemas strip unknown fields only in the parsed
+			// value: the API must persist the parsed data, not the raw payload.
+			await api.setGlobalState("viewStates", {
+				"view-a": { mode: "debug", apiKey: "stray-secret" },
+			} as never)
+			expect(update).toHaveBeenLastCalledWith("viewStates", { "view-a": { mode: "debug" } })
 		})
 	})
 

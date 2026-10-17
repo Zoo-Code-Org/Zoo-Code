@@ -237,6 +237,7 @@ type ProfileActivationSnapshot = {
 	viewCurrentApiConfigName: string | undefined
 	providerSettings: RooCodeSettings
 	viewApiConfiguration: ProviderSettings | undefined
+	viewStates: Record<string, PersistedViewState>
 }
 
 type ProviderManagerSnapshot = {
@@ -2612,6 +2613,10 @@ export class ClineProvider
 			viewCurrentApiConfigName: this.viewLocalState?.currentApiConfigName,
 			providerSettings,
 			viewApiConfiguration: this.viewLocalState?.apiConfiguration,
+			// The activation's pin write merges into and prunes the durable map: the
+			// rollback needs the exact pre-activation map to bring back any sibling the
+			// pruning evicted, entry metadata included.
+			viewStates: this.getPersistedViewStates({ fresh: true }),
 		}
 	}
 
@@ -2657,6 +2662,21 @@ export class ClineProvider
 		} catch (error) {
 			this.log(
 				`[ClineProvider] profile-activation rollback failed for the view-local overlay: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+		try {
+			// Restore the exact pre-activation map through the serialized view-state
+			// queue, last so it wins over the overlay restore's own pin write: a
+			// sibling the activation's pruning evicted comes back with its original
+			// entry metadata.
+			const restore = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+				await this.contextProxy.setValue("viewStates", { ...snapshot.viewStates })
+			})
+			ClineProvider.persistedViewStateWriteQueue = restore.catch(() => {})
+			await restore
+		} catch (error) {
+			this.log(
+				`[ClineProvider] profile-activation rollback failed for the durable viewStates map: ${error instanceof Error ? error.message : String(error)}`,
 			)
 		}
 	}
@@ -2793,6 +2813,25 @@ export class ClineProvider
 					return id
 				}
 
+				// saveConfig normalizes the record (schema parse, legacy downgrades):
+				// read the stored copy back and use it for every activation write,
+				// sibling refresh, overlay, and task-handler update below, so raw
+				// webview fields the profile schema strips cannot enter the shared
+				// store, sibling view state, or task configuration. When the read-back
+				// fails the caller's settings are kept: the record landed, and the
+				// next load re-reads the stored copy.
+				let normalizedSettings = providerSettings
+				try {
+					const {
+						name: _savedName,
+						id: _savedId,
+						...storedRecord
+					} = await this.providerSettingsManager.getProfile({ name })
+					normalizedSettings = storedRecord as ProviderSettings
+				} catch {
+					// Best-effort read-back; see the comment above.
+				}
+
 				let activationMode: Mode | undefined
 				let priorModeConfigId: string | undefined
 				try {
@@ -2830,7 +2869,7 @@ export class ClineProvider
 							// currentApiConfigName shadowing the new value in getValues().
 							this.setValue("currentApiConfigName", name),
 							this.providerSettingsManager.setModeConfig(mode, id),
-							this.contextProxy.setProviderSettings(providerSettings),
+							this.contextProxy.setProviderSettings(normalizedSettings),
 							// setProviderSettings writes the shared store directly, bypassing the
 							// view-local mutation path: clear this view's buffered apiConfiguration
 							// overlay (if any) so a stale loaded profile cannot keep shadowing the
@@ -2841,11 +2880,11 @@ export class ClineProvider
 						// Other live views may have buffered this profile's settings earlier;
 						// refresh them so their getState() cannot report the updated profile's
 						// name with stale settings.
-						await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
+						await this.refreshViewLocalStateForUpdatedProfile(name, normalizedSettings)
 
 						// Change the provider for the current task.
 						// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
-						this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+						this.updateTaskApiHandlerIfNeeded(normalizedSettings, { forceRebuild: true })
 
 						// Keep the current task's sticky provider profile in sync with the newly-activated profile.
 						await this.persistStickyProviderProfileToCurrentTask(name)
@@ -2859,16 +2898,16 @@ export class ClineProvider
 						// (and this one when it is the pinned view) or their getState() keeps
 						// serving the settings captured before the save under the same name.
 						if (this.pinnedProfileName === name) {
-							await this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
+							await this._saveViewLocalStateFromMutation({ apiConfiguration: normalizedSettings })
 							// Only rebuild when the task actually runs under the saved profile: a
 							// view pinned to this profile can hold a task that follows a different
 							// sticky profile, and the forced rebuild would silently switch that
 							// conversation to the saved profile's settings.
 							if (this.getCurrentTask()?.taskApiConfigName === name) {
-								this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+								this.updateTaskApiHandlerIfNeeded(normalizedSettings, { forceRebuild: true })
 							}
 						}
-						await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
+						await this.refreshViewLocalStateForUpdatedProfile(name, normalizedSettings)
 					}
 
 					await this.postStateToWebview()

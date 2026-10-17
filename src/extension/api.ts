@@ -872,16 +872,21 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		const valueSchema = (
 			globalSettingsSchema.shape as Record<
 				string,
-				{ safeParse: (value: unknown) => { success: boolean } } | undefined
+				{ safeParse: (value: unknown) => { success: boolean; data: unknown } } | undefined
 			>
 		)[String(key)]
 		if (!valueSchema) {
 			throw new Error(`setGlobalState received a key without a value schema: ${String(key)}`)
 		}
-		if (!valueSchema.safeParse(value).success) {
+		const parsedValue = valueSchema.safeParse(value)
+		if (!parsedValue.success) {
 			throw new Error(`setGlobalState received an invalid value for key: ${String(key)}`)
 		}
-		await this.context.globalState.update(key, value)
+		// Persist the parsed value: the object schemas in the settings map are
+		// non-strict, so the raw payload can carry extra credential- or PII-shaped
+		// fields that the schema strips; storing parsed data keeps unknown fields
+		// out of durable global state.
+		await this.context.globalState.update(key, parsedValue.data as GlobalState[K])
 	}
 
 	public setTerminalProfile(name: string | undefined): void {
