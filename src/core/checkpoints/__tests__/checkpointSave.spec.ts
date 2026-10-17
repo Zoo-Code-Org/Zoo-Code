@@ -25,7 +25,12 @@ vi.mock("@roo-code/telemetry", () => ({
  * (journal dir + setting state), and say. Structural cast at the boundary,
  * matching the documented test-double style of the tool specs.
  */
-function makeTask(options: { saveCheckpoint?: unknown; state?: Record<string, unknown>; enableCheckpoints?: boolean }) {
+function makeTask(options: {
+	saveCheckpoint?: unknown
+	state?: Record<string, unknown>
+	enableCheckpoints?: boolean
+	storageDir?: string | null
+}) {
 	const say = vi.fn().mockResolvedValue(undefined)
 	// An explicit `saveCheckpoint: undefined` (a checkpoint that produced no
 	// commit) must be preserved as-is; only an omitted option falls back to
@@ -33,8 +38,12 @@ function makeTask(options: { saveCheckpoint?: unknown; state?: Record<string, un
 	const saveCheckpoint = vi
 		.fn()
 		.mockResolvedValue("saveCheckpoint" in options ? options.saveCheckpoint : { commit: "sha-card-1" })
+	// `storageDir: null` simulates a checkpoint-service init failure: the
+	// service lookup dereferences globalStorageUri, throws, and resolves to
+	// no service while the task still expects checkpoints (enableCheckpoints
+	// stays true until the failed lookup flips it).
 	const providerDeref = {
-		context: { globalStorageUri: { fsPath: globalStorageDir } },
+		context: { globalStorageUri: options.storageDir === null ? undefined : { fsPath: globalStorageDir } },
 		getState: vi.fn().mockResolvedValue(options.state ?? {}),
 	}
 
@@ -42,10 +51,9 @@ function makeTask(options: { saveCheckpoint?: unknown; state?: Record<string, un
 		taskId: "task-card",
 		cwd: "/workspace",
 		enableCheckpoints: options.enableCheckpoints ?? true,
-		checkpointService: {
-			saveCheckpoint,
-			isInitialized: true,
-		},
+		// With `storageDir: null` there is no preset service either, so the
+		// lookup runs for real and fails on the missing storage dir.
+		checkpointService: options.storageDir === null ? undefined : { saveCheckpoint, isInitialized: true },
 		providerRef: { deref: vi.fn().mockReturnValue(providerDeref) },
 		say,
 	} as unknown as Task
@@ -208,8 +216,25 @@ describe("checkpointSave change-card emission (B3a)", () => {
 		expect(cardCalls).toHaveLength(0)
 	})
 
-	it("fails a write-metadata save when checkpoints are disabled for the task and emits no card", async () => {
-		const { task, say } = makeTask({ enableCheckpoints: false })
+	it("resolves a write-metadata save when checkpoints are disabled for the task and emits no card", async () => {
+		// Documented contract: user-disabled checkpoints means the absence of
+		// rollback metadata is the user's choice, so the save must not fail the
+		// write tool.
+		const { task, say, saveCheckpoint } = makeTask({ enableCheckpoints: false })
+
+		await expect(
+			checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" }),
+		).resolves.toBeUndefined()
+
+		expect(saveCheckpoint).not.toHaveBeenCalled()
+		expect(say).not.toHaveBeenCalled()
+	})
+
+	it("fails a write-metadata save when the checkpoint-service lookup fails and emits no card", async () => {
+		// Documented contract: with checkpoints requested (enableCheckpoints
+		// true) a failed service lookup is a genuine init-failure - the write
+		// would be orphaned, so the save must surface it.
+		const { task, say } = makeTask({ storageDir: null })
 
 		await expect(
 			checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" }),
