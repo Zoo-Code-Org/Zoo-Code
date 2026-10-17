@@ -47,11 +47,11 @@ Zoo Code, Roo Code'un oluşturduğu temel üzerine inşa ediliyor ve bu temeli �
 - **Daha güvenilir terminal ve düzenleme iş akışları** — terminalin erken tamamlanması, görev durumu yarış koşulları, bağlam yönetimi, diff düzenleme ve sağlayıcıya özel araç kullanımı için düzeltmeler.
 - **Çalışma alanın üzerinde daha fazla kontrol** — kural yönetimi, mod başına MCP kısıtlamaları, çok köklü yol denetimleri, model reasoning seçenekleri ve tamamlanan değişiklikleri inceleme eylemleri.
 
-## v3.88.0'daki Yenilikler
+## v3.90.0'daki Yenilikler
 
-- ✨ **Sağlayıcı ve model desteği:** Grok Build'i kullan ve geliştirilmiş özel model desteğinden yararlan. Bu sürüm ayrıca Bedrock model sınırlarını düzeltir ve Codex verbosity ayarını gönderir.
-- 🧭 **Görev güvenilirliği:** Bu sürüm iptal işlemeyi, araç turu devam ettirmeyi ve görev mesajı kaydetmeyi düzeltir.
-- ⚡ **Daha hızlı düzenleme ve sohbet:** Dosya yazmaları varsayılan olarak yapay gecikmeler kullanmaz. Sohbet mesajları daha az dosya verisi taşır ve kod eylemleri en son etkin sohbete ulaşır.
+- ✨ **Sağlayıcılar ve modeller:** GitHub Copilot artık bir sağlayıcı: oturum aç, Zoo Code Copilot modellerini yükler. IO Intelligence kendi API anahtarı olan bir sağlayıcıdır. Gemini 4 Argon, Gemini ve Vertex'tedir. GPT-6 Luna, OpenCode Go'dadır. Gemini 4 Argon ve GPT-6 Luna Zoo Gateway'de de vardır.
+- 🧭 **Araç yürütme:** Aynı araç çağrısını yinelemek bir uyarı verir, sonra Zoo Code bu döngüyü durdurur. `attempt_completion` kapatmak artık bir görevi bitiremez halde bırakmaz. Kuyruktaki mesajlar, doğrudan gönderdiğin komutlarla aynı komut koruması kontrollerinden geçer.
+- ⚡ **Akıl yürütme ve akış:** Anthropic adaptive thinking sohbette görünür ve thinking token'lar sayılır. R1 anahtarı llama.cpp, Ollama ve LM Studio akıl yürütmesini tutar. Codex, gördüğün özete ek olarak şifreli akıl yürütmeyi saklar. VS Code dil modeli akışları, akış başarısız olunca guarded recovery kullanır.
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 

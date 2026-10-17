@@ -145,6 +145,12 @@ import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
 import { initialRunState, type Ask, type RunEvent, type RunState } from "./run-state/runState"
 import { applyRunEvent, type RunRejection } from "./run-state/runStateShadow"
+import {
+	divergenceKey,
+	findDivergences,
+	isDivergenceCheckEnabled,
+	reportDivergence,
+} from "./run-state/runStateDivergence"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
@@ -408,6 +414,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	runState: RunState = initialRunState
 	readonly runRejections: RunRejection[] = []
+	private readonly divergenceCheckEnabled: boolean
+	private readonly reportedDivergences = new Set<string>()
 
 	// API
 	apiConfiguration: ProviderSettings
@@ -753,6 +761,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		)
 		this.providerRef = new WeakRef(provider)
 		this.globalStoragePath = provider.context.globalStorageUri.fsPath
+		this.divergenceCheckEnabled = isDivergenceCheckEnabled(Package.releaseChannel, provider.context.extensionMode)
 		this.diffViewProvider = new DiffViewProvider(this.cwd, this)
 		this.enableCheckpoints = enableCheckpoints
 		this.checkpointTimeout = checkpointTimeout
@@ -3535,7 +3544,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	private driveRunEvent(event: RunEvent): void {
-		this.runState = applyRunEvent(this.runState, event, this.runRejections)
+		const { state, rejected } = applyRunEvent(this.runState, event, this.runRejections)
+		this.runState = state
+
+		if (this.divergenceCheckEnabled) {
+			const fields = {
+				abort: this.abort,
+				abandoned: this.abandoned,
+				abortReason: this.abortReason,
+				isInitialized: this.isInitialized,
+				isStreaming: this.isStreaming,
+				didFinishAbortingStream: this.didFinishAbortingStream,
+			}
+			for (const divergence of findDivergences({ event, state, fields, rejected })) {
+				if (this.reportedDivergences.has(divergenceKey(divergence))) {
+					continue
+				}
+				this.reportedDivergences.add(divergenceKey(divergence))
+				reportDivergence(this.taskId, divergence)
+			}
+		}
 	}
 
 	public abortTask(isAbandoned = false): Promise<void> {

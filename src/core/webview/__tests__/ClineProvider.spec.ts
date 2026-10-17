@@ -10047,6 +10047,7 @@ describe("ClineProvider - Router Models", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
@@ -10082,6 +10083,7 @@ describe("ClineProvider - Router Models", () => {
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm fail
 			.mockResolvedValueOnce(mockModels) // opencode-go (public endpoint)
 			.mockResolvedValueOnce(mockModels) // kenari (public endpoint)
+			.mockResolvedValueOnce(mockModels) // io-intelligence (public endpoint)
 			.mockResolvedValueOnce(mockModels) // nanogpt (public endpoint)
 
 		await messageHandler({ type: "requestRouterModels" })
@@ -10103,6 +10105,7 @@ describe("ClineProvider - Router Models", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
@@ -10208,6 +10211,7 @@ describe("ClineProvider - Router Models", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
