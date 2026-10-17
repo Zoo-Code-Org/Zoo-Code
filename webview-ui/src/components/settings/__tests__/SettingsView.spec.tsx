@@ -2,6 +2,7 @@
 
 import { renderWithExtensionState, screen, fireEvent, within, waitFor } from "@/utils/test-utils"
 import { act } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import { vscode } from "@/utils/vscode"
 import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, type ProviderSettings } from "@roo-code/types"
@@ -482,6 +483,78 @@ describe("SettingsView - Sound Settings", () => {
 						checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 						terminalShellIntegrationTimeout: 30_000,
 					}),
+				}),
+			),
+		)
+	})
+
+	it("saves the changeCardDetail full selection on save", async () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({
+			settingsImportedAt: new Date().toISOString(),
+		})
+
+		activateTab("checkpoints")
+		const content = getSettingsContent()
+		const checkbox = await within(content).findByTestId("change-card-detail-checkbox")
+		expect(checkbox).not.toBeChecked()
+
+		const user = userEvent.setup()
+		await user.click(checkbox)
+		await user.click(screen.getByTestId("save-button"))
+
+		await waitFor(() =>
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "updateSettings",
+					updatedSettings: expect.objectContaining({ changeCardDetail: "full" }),
+				}),
+			),
+		)
+	})
+
+	it("saves the changeCardDetail summary default when the value is unset", async () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({
+			settingsImportedAt: new Date().toISOString(),
+		})
+
+		activateTab("checkpoints")
+		const content = getSettingsContent()
+		const checkbox = await within(content).findByTestId("change-card-detail-checkbox")
+		expect(checkbox).not.toBeChecked()
+
+		const user = userEvent.setup()
+		await user.click(screen.getByTestId("save-button"))
+
+		await waitFor(() =>
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "updateSettings",
+					updatedSettings: expect.objectContaining({ changeCardDetail: "summary" }),
+				}),
+			),
+		)
+	})
+
+	it("reflects the saved changeCardDetail full value in the checkbox and saves summary when unchecked", async () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({
+			changeCardDetail: "full",
+			settingsImportedAt: new Date().toISOString(),
+		})
+
+		activateTab("checkpoints")
+		const content = getSettingsContent()
+		const checkbox = await within(content).findByTestId("change-card-detail-checkbox")
+		await waitFor(() => expect(checkbox).toBeChecked())
+
+		const user = userEvent.setup()
+		await user.click(checkbox)
+		await user.click(screen.getByTestId("save-button"))
+
+		await waitFor(() =>
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "updateSettings",
+					updatedSettings: expect.objectContaining({ changeCardDetail: "summary" }),
 				}),
 			),
 		)
