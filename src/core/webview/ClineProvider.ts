@@ -3723,19 +3723,6 @@ export class ClineProvider
 	}
 
 	async deleteProviderProfile(profileToDelete: ProviderSettingsEntry) {
-		// Deletion snapshots and compensates the same durable stores that upsert,
-		// activation, and mode switch mutate, so it has to run serialized against them:
-		// an overlapping mutation could otherwise land between the snapshot and the
-		// rollback, and the compensation would restore a stale copy over the newer write.
-		return this.enqueueProviderProfileMutation((signal) =>
-			this.deleteProviderProfileUnlocked(profileToDelete, signal),
-		)
-	}
-
-	private async deleteProviderProfileUnlocked(
-		profileToDelete: ProviderSettingsEntry,
-		signal: AbortSignal,
-	): Promise<void> {
 		const globalSettings = this.contextProxy.getValues()
 		let profileToActivate: string | undefined = globalSettings.currentApiConfigName
 
@@ -3764,6 +3751,7 @@ export class ClineProvider
 			}
 		}
 		const previousEntries = this.getProviderProfileEntries()
+		const previousSelection = globalSettings.currentApiConfigName
 		const previousSharedSettings = this.contextProxy.getProviderSettings()
 		const previousViewStates = this.getPersistedViewStates({ fresh: true })
 
@@ -3783,40 +3771,6 @@ export class ClineProvider
 		// delete the last remaining configuration) propagates. Matching message text
 		// instead would let a profile whose name contains "not found" swallow an
 		// unrelated failure.
-		// The settings-store commit and the profile-list write below are two separate
-		// durable writes. Capture the settings first so a failure after the commit can be
-		// compensated: without them the stored profile list would name a profile whose
-		// settings no longer exist, and a later selection or load could not recover them.
-		let deletedProfile: ProviderSettingsWithId | undefined
-		try {
-			const { name: _deletedName, ...profile } = await this.providerSettingsManager.getProfile({
-				name: profileToDelete.name,
-			})
-			deletedProfile = profile as ProviderSettingsWithId
-		} catch (error: unknown) {
-			if (!(error instanceof ProviderSettingsNotFoundError)) {
-				// Abort BEFORE the destructive delete. Without the captured settings there is no
-				// way to put them back if a later durable write fails, so continuing here would
-				// turn a transient read error into permanent profile loss while the persisted list
-				// still named the profile.
-				this.log(
-					`deleteProviderProfile: could not read the settings for '${profileToDelete.name}'; aborting before the deletion because a later failure could not be compensated. ${
-						error instanceof Error ? error.message : String(error)
-					}`,
-				)
-				throw error
-			}
-			// A typed not-found is the idempotent case: the secret is already gone, so there is
-			// nothing to compensate and the stale list entry is still pruned below.
-		}
-
-		if (signal.aborted) {
-			// Queue contract: check the signal before the first destructive write, so a
-			// deletion that timed out while queued behind another mutation does not destroy
-			// settings that no caller is waiting for any more.
-			throw new Error("Profile deletion was cancelled before the settings commit")
-		}
-
 		try {
 			await this.providerSettingsManager.deleteConfig(profileToDelete.name)
 		} catch (error) {
@@ -3828,31 +3782,6 @@ export class ClineProvider
 			)
 		}
 
-		// Snapshot every durable store this method is about to change, so a failure after the
-		// settings commit can be rolled back store by store instead of only re-saving the
-		// settings: a later failed write would otherwise leave the persisted list, the shared
-		// selection, or this view's own pin pointing at a profile that no longer exists.
-		const previousGlobalSelection = globalSettings.currentApiConfigName
-		const previousViewPin = this.viewLocalState.currentApiConfigName
-		const previousViewOverlay = this.viewLocalState.apiConfiguration
-		// Which writes have actually landed: only those need compensation.
-		let listWriteLanded = false
-		let selectionWriteLanded = false
-		let viewPinWriteLanded = false
-		let providerSettingsWriteLanded = false
-		let persistedRepointLanded = false
-		const entries = previousEntries.filter(({ name }) => name !== profileToDelete.name)
-
-		// Write only the profile list back: replaying the full settings snapshot
-		// captured above would also rewrite unrelated keys (including viewStates,
-		// which ClineProvider mutates directly in storage for concurrent views)
-		// with this view's stale cached copy.
-		// Assigned inside the write group below but read after it: the activation completion block
-		// runs once the deletion has committed and must know whether this deletion displaced the
-		// profile this view or the shared selection was using.
-		let viewWasPinnedToDeleted = false
-		let deletedWasGlobal = false
-
 		try {
 			const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
 
@@ -3861,7 +3790,6 @@ export class ClineProvider
 			// which ClineProvider mutates directly in storage for concurrent views)
 			// with this view's stale cached copy.
 			await this.contextProxy.setValue("listApiConfigMeta", entries)
-			listWriteLanded = true
 
 			// Two views in this extension host share the ContextProxy while their provider queues
 			// and their settings-manager locks stay per instance, so a sibling view can move the
@@ -3875,24 +3803,13 @@ export class ClineProvider
 			// writes below - needs a lock spanning ProviderSettingsManager instances, which is
 			// tracked as its own unit rather than widened into this method.
 			const selectionAfterDelete = this.contextProxy.getValues().currentApiConfigName
-			deletedWasGlobal = profileToDelete.name === selectionAfterDelete
-
-			// Stopping here is still deliberate, but for a different reason than before the queue
-			// was chained: throwing routes through the compensation below, which now always runs,
-			// so the deletion is rolled back rather than left half-applied. Continuing into the
-			// rewrites below would spend writes on a caller that has already been released.
-			if (signal.aborted) {
-				this.log(
-					`deleteProviderProfile: cancelled before the selection/settings rewrite; the deletion stopped with the profile list already updated.`,
-				)
-				throw new Error("Profile deletion was cancelled before the selection and settings rewrite")
-			}
+			const deletedWasGlobal = profileToDelete.name === selectionAfterDelete
 
 			// Capture this view's pin before any rewrite: a view pinned to the
 			// deleted profile while the global selection points elsewhere must still be
 			// reconfigured, or getState() would keep the deleted profile's settings under
 			// the surviving profile's name.
-			viewWasPinnedToDeleted = this.viewLocalState.currentApiConfigName === profileToDelete.name
+			const viewWasPinnedToDeleted = this.viewLocalState.currentApiConfigName === profileToDelete.name
 
 			// Whether anything is actually going to be re-pointed at the survivor: this view's
 			// own pin, the shared selection, a live sibling's pin, or a closed view's
@@ -3939,14 +3856,11 @@ export class ClineProvider
 				// survivor to the shared store, which covers the deleted-was-global case
 				// for every other view as well as this one.
 				await this.setValue("currentApiConfigName", profileToActivate)
-				selectionWriteLanded = true
-				viewPinWriteLanded = true
 			} else if (deletedWasGlobal) {
 				// The shared selection changed, but this view's own pin still names a
 				// surviving profile: update the shared store only, leaving the
 				// view-local pin untouched.
 				await this.contextProxy.setValue("currentApiConfigName", profileToActivate)
-				selectionWriteLanded = true
 			}
 
 			if ((deletedWasGlobal || viewWasPinnedToDeleted) && survivingSettings) {
@@ -3954,7 +3868,6 @@ export class ClineProvider
 				// the shared provider keys still carry its settings; replace them so
 				// getState() reports the surviving profile's configuration.
 				await this.contextProxy.setProviderSettings(survivingSettings)
-				providerSettingsWriteLanded = true
 
 				if (viewWasPinnedToDeleted) {
 					// This view's nested overlay (viewLocalState.apiConfiguration, seeded
@@ -3962,7 +3875,6 @@ export class ClineProvider
 					// replace it with the survivor's so the re-pointed pin serves matching
 					// settings. A view pinned to another profile keeps its own overlay.
 					await this._saveViewLocalStateFromMutation({ apiConfiguration: survivingSettings })
-					viewPinWriteLanded = true
 				}
 			}
 
@@ -4051,89 +3963,9 @@ export class ClineProvider
 					`[deleteProviderProfile] failed to restore the profile list: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
 				)
 			}
-
-			// Compensate every store that already landed, each awaited on its own so one
-			// failing restore cannot skip the next one. The deletion simply did not happen:
-			// the settings, the profile list, the shared selection, and this view's pin must
-			// all agree again before the original failure is surfaced.
-			const compensationFailures: string[] = []
-			const describeFailure = (e: unknown) => (e instanceof Error ? e.message : String(e))
-
-			if (persistedRepointLanded) {
-				try {
-					const restoreViewStates = ClineProvider.persistedViewStateWriteQueue.then(async () => {
-						await this.contextProxy.setValue("viewStates", { ...previousPersistedViewStates })
-					})
-					ClineProvider.persistedViewStateWriteQueue = restoreViewStates.catch(() => {})
-					await restoreViewStates
-				} catch (compensationError: unknown) {
-					compensationFailures.push(`durable viewStates pins: ${describeFailure(compensationError)}`)
-				}
-			}
-
-			if (deletedProfile) {
-				try {
-					await this.providerSettingsManager.saveConfig(profileToDelete.name, deletedProfile)
-				} catch (compensationError: unknown) {
-					compensationFailures.push(`settings for the deleted profile: ${describeFailure(compensationError)}`)
-				}
-			}
-
-			if (listWriteLanded) {
-				try {
-					// Restore only what this deletion owned. The mutation queue serializes
-					// provider-profile mutations across views, but profile-list writes that bypass
-					// the queue - the saveApiConfiguration, renameApiConfiguration, and
-					// getListApiConfiguration handler paths, and the launch-time listApiConfigMeta
-					// sync - can still land while this one waits on the survivor lookup; replaying
-					// the whole snapshot would silently drop such a newer entry while its settings
-					// stayed saved. Put the deleted profile back where it was and keep everything
-					// that arrived since.
-					const currentEntries = this.getProviderProfileEntries()
-					if (!currentEntries.some(({ id }) => id === profileToDelete.id)) {
-						const restoreAt = previousEntries.findIndex(({ id }) => id === profileToDelete.id)
-						const restored = [...currentEntries]
-						restored.splice(Math.max(0, Math.min(restoreAt, restored.length)), 0, profileToDelete)
-						await this.contextProxy.setValue("listApiConfigMeta", restored)
-					}
-				} catch (compensationError: unknown) {
-					compensationFailures.push(`profile list: ${describeFailure(compensationError)}`)
-				}
-			}
-
-			if (providerSettingsWriteLanded) {
-				try {
-					await this.contextProxy.setProviderSettings(previousSharedSettings)
-				} catch (compensationError: unknown) {
-					compensationFailures.push(`shared provider settings: ${describeFailure(compensationError)}`)
-				}
-			}
-
-			if (selectionWriteLanded) {
-				try {
-					await this.contextProxy.setValue("currentApiConfigName", previousGlobalSelection)
-				} catch (compensationError: unknown) {
-					compensationFailures.push(`shared selection: ${describeFailure(compensationError)}`)
-				}
-			}
-
-			if (viewPinWriteLanded) {
-				try {
-					// Restoring the pin and its nested overlay together returns this view to its
-					// exact pre-deletion state; a view with no pre-deletion pin gets the pin the
-					// deletion created cleared again instead of left holding the survivor.
-					await this._saveViewLocalStateFromMutation({
-						currentApiConfigName: previousViewPin,
-						apiConfiguration: previousViewOverlay,
-					})
-				} catch (compensationError: unknown) {
-					compensationFailures.push(`view pin: ${describeFailure(compensationError)}`)
-				}
-			}
-
-			if (compensationFailures.length > 0) {
-				// A partially repaired deletion is worse than a reported one: surface it as its
-				// own inconsistent-state error so the caller cannot read it as a clean rollback.
+			try {
+				await this.contextProxy.setValue("currentApiConfigName", previousSelection)
+			} catch (restoreError) {
 				this.log(
 					`[deleteProviderProfile] failed to restore the shared selection: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
 				)
@@ -4177,52 +4009,6 @@ export class ClineProvider
 			}
 			throw error
 		}
-
-		// The deletion has already committed at this point: these writes must not roll it back,
-		// the same placement activateProviderProfileUnlocked gives its rebuild. deleteConfig above
-		// only drops the record, so the manager store's own currentApiConfigName and the current
-		// mode's profile mapping would keep naming the deleted profile and no ProviderProfileChanged
-		// would reach the consumers that listen for it. The acting view's own handler rebuild and
-		// sticky re-point already ran inside the write group above, under the same
-		// taskApiConfigName guard, so they are deliberately not repeated here.
-		if (deletedWasGlobal || viewWasPinnedToDeleted) {
-			let activationFailed = false
-			let activationError: unknown
-			try {
-				const {
-					id: survivingId,
-					name: _activatedName,
-					...activatedSettings
-				} = await this.providerSettingsManager.activateProfile({ name: profileToActivate })
-				if (survivingId) {
-					const { mode } = await this.getState()
-					await this.providerSettingsManager.setModeConfig(mode, survivingId)
-				}
-				if (activatedSettings.apiProvider) {
-					this.emit(RooCodeEventName.ProviderProfileChanged, {
-						name: profileToActivate,
-						provider: activatedSettings.apiProvider,
-					})
-				}
-			} catch (error: unknown) {
-				// The deletion is already committed: post the committed state first, then surface a
-				// distinct error so the caller cannot report a successful deletion as a failed one.
-				activationFailed = true
-				activationError = error
-				this.log(
-					`deleteProviderProfile: deletion committed but activation of '${profileToActivate}' failed: ${
-						error instanceof Error ? error.message : String(error)
-					}`,
-				)
-			}
-
-			if (activationFailed) {
-				await this.postStateToWebview()
-				throw new ProfileDeletionActivationError(profileToActivate, activationError)
-			}
-		}
-
-		await this.postStateToWebview()
 	}
 
 	private async persistStickyProviderProfileToCurrentTask(
