@@ -43,11 +43,11 @@ Zoo Code 以 Roo Code 建立的基礎持續擴充，新增了：
 - **更可靠的終端機與編輯工作流程** — 修正終端機過早完成、工作狀態競爭、上下文管理、差異更新編輯和供應商專用工具使用等問題。
 - **更完整的工作區控制** — 支援規則管理、依模式限制 MCP、多根工作區路徑控制、模型推理選項，以及完成後的變更檢閱操作。
 
-## v3.88.0 新功能
+## v3.90.0 新功能
 
-- ✨ **Provider 與模型支援：** 使用 Grok Build 與改進後的自訂模型支援。本版本也修正了 Bedrock 模型上限，並傳送 Codex verbosity 設定。
-- 🧭 **工作可靠性：** 本版本修正了取消處理、tool turn 續行與工作訊息保存。
-- ⚡ **更快的編輯與聊天：** 檔案寫入預設不再使用人為延遲。聊天訊息攜帶更少的檔案資料，程式碼動作會送達最近活動的聊天。
+- ✨ **Provider 與模型：** GitHub Copilot 現在是一個 provider：登入後，Zoo Code 會載入您的 Copilot 模型。IO Intelligence 是使用自己 API 金鑰的 provider。Gemini 4 Argon 在 Gemini 和 Vertex 上。GPT-6 Luna 在 OpenCode Go 上。Gemini 4 Argon 和 GPT-6 Luna 也在 Zoo Gateway 上。
+- 🧭 **工具執行：** 重複同一次工具呼叫會先警告，然後 Zoo Code 停止這個迴圈。關閉 `attempt_completion` 不再讓工作無法結束。佇列訊息會經過與直接送出的命令相同的命令保護檢查。
+- ⚡ **推理與串流：** Anthropic adaptive thinking 會顯示在聊天中，並統計 thinking tokens。R1 開關會保留 llama.cpp、Ollama 和 LM Studio 的推理。Codex 會把加密推理和您看到的摘要一起保留。VS Code 語言模型串流在串流失敗時使用 guarded recovery。
 
 ## Zoo Code 能為您做什麼？
 

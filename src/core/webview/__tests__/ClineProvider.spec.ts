@@ -597,6 +597,48 @@ describe("ClineProvider", () => {
 		expect(provider.isViewVisible).toBe(false)
 	})
 
+	describe("instance registry", () => {
+		let originalInstances: Set<ClineProvider>
+
+		beforeEach(() => {
+			originalInstances = ClineProvider["activeInstances"]
+			ClineProvider["activeInstances"] = new Set()
+		})
+
+		afterEach(() => {
+			ClineProvider["activeInstances"] = originalInstances
+		})
+
+		const newProvider = () =>
+			new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				provider.webviewFocusTracker,
+			)
+
+		it("lists a provider from the moment it is constructed, so extension-wide broadcasts reach it", () => {
+			const created = newProvider()
+			expect(ClineProvider.getAllInstances()).toEqual([created])
+		})
+
+		it("lists every provider that is open, in the sidebar or an editor tab", () => {
+			const first = newProvider()
+			const second = newProvider()
+			expect(ClineProvider.getAllInstances()).toEqual([first, second])
+		})
+
+		it("stops listing a provider once it is disposed, so broadcasts do not reach a closed view", async () => {
+			const kept = newProvider()
+			const closed = newProvider()
+
+			await closed.dispose()
+
+			expect(ClineProvider.getAllInstances()).toEqual([kept])
+		})
+	})
+
 	describe("Add to Context destination", () => {
 		let originalInstances: Set<ClineProvider>
 		let tabProvider: ClineProvider
@@ -4621,6 +4663,7 @@ describe("ClineProvider - Router Models", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
@@ -4656,6 +4699,7 @@ describe("ClineProvider - Router Models", () => {
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm fail
 			.mockResolvedValueOnce(mockModels) // opencode-go (public endpoint)
 			.mockResolvedValueOnce(mockModels) // kenari (public endpoint)
+			.mockResolvedValueOnce(mockModels) // io-intelligence (public endpoint)
 			.mockResolvedValueOnce(mockModels) // nanogpt (public endpoint)
 
 		await messageHandler({ type: "requestRouterModels" })
@@ -4677,6 +4721,7 @@ describe("ClineProvider - Router Models", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
@@ -4782,6 +4827,7 @@ describe("ClineProvider - Router Models", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},

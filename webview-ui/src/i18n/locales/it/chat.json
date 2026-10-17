@@ -113,6 +113,15 @@
 	},
 	"selectMode": "Seleziona modalità di interazione",
 	"selectApiConfig": "Seleziona la configurazione API",
+	"selectModel": "Seleziona modello",
+	"modelSelector": {
+		"title": "Modelli",
+		"settings": "Impostazioni del modello",
+		"description": "Scegli il modello da usare per questa configurazione API.",
+		"searchPlaceholder": "Cerca modelli...",
+		"unsupportedTooltip": "Il modello di questo provider si configura nelle Impostazioni",
+		"loading": "Caricamento dei modelli..."
+	},
 	"lockApiConfigAcrossModes": "Blocca la configurazione API per tutte le modalità in questo workspace",
 	"unlockApiConfigAcrossModes": "La configurazione API è bloccata per tutte le modalità in questo workspace (clicca per sbloccare)",
 	"enhancePrompt": "Migliora prompt con contesto aggiuntivo",
@@ -343,10 +352,10 @@
 		"title": "Rilasciato Zoo Code {{version}}",
 		"support": "Sostieni Zoo Code lasciandoci una stella su <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Novità di Zoo Code v3.88.0",
-			"highlight1": "✨ Supporto per provider e modelli: Usa Grok Build e un supporto migliorato per i modelli personalizzati. Questa versione corregge anche i limiti dei modelli Bedrock e invia l'impostazione di verbosità di Codex.",
-			"highlight2": "🧭 Affidabilità delle attività: Questa versione corregge la gestione degli annullamenti, la continuazione dei turni dei tool e il salvataggio dei messaggi delle attività.",
-			"highlight3": "⚡ Modifica e chat più veloci: Le scritture dei file non usano più ritardi artificiali per impostazione predefinita. I messaggi della chat trasportano meno dati dei file, e le azioni del codice raggiungono l'ultima chat attiva."
+			"heading": "Novità di Zoo Code v3.90.0",
+			"highlight1": "✨ Provider e modelli: GitHub Copilot ora è un provider: accedi e Zoo Code carica i tuoi modelli Copilot. IO Intelligence è un provider con la propria chiave API. Gemini 4 Argon è su Gemini e Vertex. GPT-6 Luna è su OpenCode Go. Gemini 4 Argon e GPT-6 Luna sono anche su Zoo Gateway.",
+			"highlight2": "🧭 Esecuzione dei tool: Ripetere la stessa chiamata di tool mostra un avviso, poi Zoo Code ferma quel ciclo. Disattivare attempt_completion non lascia più un'attività incapace di finire. I messaggi in coda eseguono gli stessi controlli di protezione dei comandi dei comandi che invii direttamente.",
+			"highlight3": "⚡ Ragionamento e streaming: Il pensiero adattivo di Anthropic compare in chat e i thinking token vengono contati. L'interruttore R1 conserva il ragionamento di llama.cpp, Ollama e LM Studio. Codex conserva il ragionamento cifrato insieme al riepilogo che vedi. Gli stream del language model di VS Code usano il guarded recovery quando uno stream fallisce."
 		},
 		"cloudAgents": {
 			"heading": "Novità nel Cloud:",

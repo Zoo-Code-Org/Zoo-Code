@@ -47,11 +47,11 @@ Zoo Code baut auf dem von Roo Code geschaffenen Fundament auf und erweitert es f
 - **Zuverlässigere Terminal- und Bearbeitungsabläufe** — Korrekturen für vorzeitige Terminalabschlüsse, Race Conditions beim Aufgabenstatus, Kontextverwaltung, diff-Bearbeitung und anbieterspezifische Tool-Nutzung.
 - **Mehr Kontrolle über deinen Workspace** — Regelverwaltung, MCP-Beschränkungen pro Modus, Pfadsteuerung für Multi-Root-Workspaces, Reasoning-Optionen für Modelle und Aktionen zur Prüfung von Änderungen nach Abschluss.
 
-## Neu in v3.88.0
+## Neu in v3.90.0
 
-- ✨ **Provider- und Modellunterstützung:** Nutze Grok Build und eine verbesserte Unterstützung für eigene Modelle. Diese Version behebt außerdem Bedrock-Modellgrenzen und sendet die Codex-Verbosity-Einstellung.
-- 🧭 **Zuverlässigkeit von Aufgaben:** Diese Version behebt die Behandlung von Abbrüchen, die Fortsetzung von Tool-Turns und das Speichern von Aufgabennachrichten.
-- ⚡ **Schnelleres Bearbeiten und Chatten:** Datei-Schreibvorgänge verwenden standardmäßig keine künstlichen Verzögerungen mehr. Chat-Nachrichten enthalten weniger Dateidaten, und Code-Aktionen erreichen den zuletzt aktiven Chat.
+- ✨ **Provider und Modelle:** GitHub Copilot ist jetzt ein Provider: Melde dich an, und Zoo Code lädt deine Copilot-Modelle. IO Intelligence ist ein Provider mit eigenem API-Schlüssel. Gemini 4 Argon gibt es bei Gemini und Vertex. GPT-6 Luna gibt es bei OpenCode Go. Gemini 4 Argon und GPT-6 Luna gibt es auch im Zoo Gateway.
+- 🧭 **Tool-Ausführung:** Wiederholst du denselben Tool-Aufruf, kommt eine Warnung, danach stoppt Zoo Code diese Schleife. `attempt_completion` auszuschalten lässt eine Aufgabe nicht mehr unfertig stecken. Nachrichten in der Warteschlange durchlaufen dieselben Befehlsschutzprüfungen wie Befehle, die du direkt sendest.
+- ⚡ **Reasoning und Streaming:** Adaptives Anthropic-Thinking erscheint im Chat, und Thinking-Tokens werden gezählt. Der R1-Schalter behält das Reasoning von llama.cpp, Ollama und LM Studio. Codex behält verschlüsseltes Reasoning zusammen mit der Zusammenfassung, die du siehst. VS-Code-Language-Model-Streams nutzen guarded recovery, wenn ein Stream fehlschlägt.
 
 ## Was kann Zoo Code für DICH tun?
 
