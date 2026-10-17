@@ -4,7 +4,12 @@ import path from "path"
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { appendChange, appendChanges, journalPath, loadChanges, type ChangeJournalEntry } from "../changeJournal"
+import { appendChanges, journalPath, loadChanges, type ChangeJournalEntry } from "../changeJournal"
+
+// appendChange (single-entry wrapper) is production code only in B2; these
+// units journal batch writes, so the spec keeps a local helper.
+const appendChange = (globalStorageDir: string, taskId: string, entry: ChangeJournalEntry) =>
+	appendChanges(globalStorageDir, taskId, [entry])
 
 describe("changeJournal", () => {
 	const taskId = "test-task"

@@ -8,7 +8,7 @@ import type { Task } from "../../task/Task"
 import type { ChangeJournalEntry } from "../changeJournal"
 import { getCheckpointService } from "../index"
 import * as changeJournal from "../changeJournal"
-import { appendChange, journalPath } from "../changeJournal"
+import { appendChanges, journalPath } from "../changeJournal"
 import { restoreLatestFile, rollbackFile, rollbackStep } from "../rollback"
 
 vi.mock("../index", () => ({
@@ -37,7 +37,7 @@ function serviceWith(baseHash: string | undefined) {
 
 async function seedJournal(entries: ChangeJournalEntry[]): Promise<void> {
 	for (const entry of entries) {
-		await appendChange(globalStorageDir, "task-rollback", entry)
+		await appendChanges(globalStorageDir, "task-rollback", [entry])
 	}
 }
 
