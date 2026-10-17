@@ -3406,6 +3406,53 @@ describe("ClineProvider", () => {
 			expect(activateProfileSpy).toHaveBeenCalledWith({ name: "old-profile" })
 			await provider.dispose()
 		})
+		it("rolls back the direct activation writes when one concurrent write fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// Seed the prior shared selection so the rollback restores a real state.
+			await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				{ name: "old-profile", id: "old-id", apiProvider: providerIdentifiers.anthropic },
+			])
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				activateProfile: vi.fn().mockResolvedValue({
+					name: "new-profile",
+					id: "new-id",
+					apiProvider: providerIdentifiers.openai,
+				}),
+				listConfig: vi
+					.fn()
+					.mockResolvedValue([
+						{ name: "new-profile", id: "new-id", apiProvider: providerIdentifiers.openai },
+					]),
+				getCurrentProfileName: vi.fn().mockResolvedValue("old-profile"),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+			}
+			vi.spyOn(provider.contextProxy, "setProviderSettings").mockRejectedValue(
+				new Error("shared settings write failed"),
+			)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await expect(provider.activateProviderProfile({ name: "new-profile" })).rejects.toThrow(
+				"shared settings write failed",
+			)
+
+			// The compensation waits for every group write to settle before restoring:
+			// the selection and the profile list return to the prior state even though
+			// the shared settings write rejected mid-group.
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("old-profile")
+			const restoredEntries = (provider.contextProxy.getValue("listApiConfigMeta") ?? []).map(
+				(entry) => entry.name,
+			)
+			expect(restoredEntries).toEqual(["old-profile"])
+			await provider.dispose()
+		})
 		it("re-points closed views' persisted pins onto the surviving profile after a deletion", async () => {
 			const provider = new ClineProvider(
 				mockContext,
@@ -3817,6 +3864,57 @@ describe("ClineProvider", () => {
 			// pruning evicted is back with its original metadata.
 			const restored = provider.contextProxy.getValue("viewStates") as Record<string, unknown>
 			expect(restored["view-1"]).toEqual({ mode: "code", updatedAt: 1 })
+			await provider.dispose()
+		})
+		it("keeps sibling viewStates writes that land during an activation rollback", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-merge-view")
+			await provider.contextProxy.setValue("viewStates", { "old-view": { mode: "code", updatedAt: 1 } })
+			await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("new-id")
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("old-mode-id")
+			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "new-profile",
+				id: "rec-id",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			vi.spyOn(provider.providerSettingsManager, "getCurrentProfileName").mockResolvedValue("old-profile")
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "old-profile",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			// A sibling instance persists its own entry while the activation group is
+			// in flight; the rollback must not replay the stale snapshot over it.
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockImplementation(async () => {
+				const current = (provider.contextProxy.getValue("viewStates") ?? {}) as Record<string, unknown>
+				await provider.contextProxy.setValue("viewStates", {
+					...current,
+					"sibling-view": { mode: "architect", updatedAt: 99 },
+				})
+				return []
+			})
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockRejectedValue(
+				new Error("mode write failed"),
+			)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			// The outer upsert catch converts the failure into an undefined id.
+			await expect(
+				provider.upsertProviderProfile("new-profile", { apiProvider: providerIdentifiers.anthropic }, true),
+			).resolves.toBeUndefined()
+
+			// The rollback restores what the activation pruned without erasing the
+			// sibling's newer entry.
+			const restored = provider.contextProxy.getValue("viewStates") as Record<string, unknown>
+			expect(restored["sibling-view"]).toEqual({ mode: "architect", updatedAt: 99 })
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("old-profile")
 			await provider.dispose()
 		})
 
