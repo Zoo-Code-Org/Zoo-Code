@@ -930,7 +930,9 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				// not start after its caller already saw a timeout, or it would change
 				// the selected profile while reporting failure.
 				releaseFirst()
-				await vi.advanceTimersByTimeAsync(0)
+				// The queue tail settles only after the second run has been evaluated.
+				await provider["providerProfileMutationQueue"].catch(() => undefined)
+				expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("first-profile")
 				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(1)
 				expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "second-profile")
 			} finally {
