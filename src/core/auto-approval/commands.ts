@@ -202,7 +202,16 @@ export function isAutoDeniedSingleCommand(
 }
 
 /**
- * Command approval decision types
+ * Command approval decision types.
+ *
+ * `malformed_command` is the fail-closed outcome: the parser could not fully account
+ * for the command's structure (an unterminated quote or heredoc, an expansion
+ * delimiter -- $(, ${, backtick, <( or >( -- or an arithmetic expression ($(( or
+ * $[) opened but never closed, a stray ")" or "}" with no opener, a raw NUL byte,
+ * or substitution nesting beyond the re-scan depth cap), so no approval may rest
+ * on a partial decomposition.
+ * Unbalanced delimiters inside quoted regions do not qualify: a shell never parses
+ * them there.
  */
 export type CommandDecision = "auto_approve" | "auto_deny" | "ask_user" | "malformed_command"
 
@@ -224,7 +233,13 @@ export type CommandDecision = "auto_approve" | "auto_deny" | "ask_user" | "malfo
  * - `"auto_approve"`: All sub-commands are explicitly allowed and no dangerous patterns detected
  * - `"auto_deny"`: At least one sub-command is explicitly denied
  * - `"ask_user"`: Mixed or no matches found, requires user decision, or contains dangerous patterns
- * - `"malformed_command"`: Command contains an unterminated quote -- a shell syntax error that must not be auto-approved
+ * - `"malformed_command"`: The parser cannot fully account for the command's structure -- an
+ *   unterminated quote or heredoc, an expansion delimiter ($(...), ${...}, backtick, <( or >())
+ *   or arithmetic expression ($(( or $[) opened but never closed, a stray ")" or "}" with no
+ *   opener, a raw NUL byte, or substitution
+ *   nesting beyond the parser's re-scan depth cap. A command whose structure is unproven must
+ *   never be approved on a partial decomposition. Delimiter characters inside quoted regions are
+ *   exempt: a shell never parses them there, so unbalanced ones stay parseable.
  *
  * **Examples:**
  * ```typescript
@@ -302,14 +317,17 @@ export function getCommandDecisionDetailed(
 	}
 
 	// Parse into sub-commands (split by &&, ||, ;, |). parseCommand also
-	// detects shell syntax errors (unterminated quotes, unclosed heredocs) and
+	// detects unaccountable input -- unterminated quotes or heredocs, expansion
+	// delimiters ($(), ${}, backticks, <( , >() or arithmetic expressions
+	// ($(( , $[) opened but never closed, a stray closer, a raw NUL byte, or
+	// too-deep substitution nesting) -- and
 	// returns a non-null parseError in that case.
 	const { commands: subCommands, parseError } = parseCommand(command)
 
-	// Reject commands with a shell syntax error. An unterminated quote means
-	// the shell would report a parse error; in a compound command it may
-	// partially execute the well-formed prefix before aborting. Returning a
-	// distinct decision lets callers surface a useful message to the agent
+	// Reject commands whose structure the parser could not fully account for.
+	// The shell would report a parse error on such input; in a compound command
+	// it may partially execute the well-formed prefix before aborting. Returning
+	// a distinct decision lets callers surface a useful message to the agent
 	// rather than silently presenting the command for user approval.
 	if (parseError !== null) {
 		return { decision: "malformed_command", offendingCommand: command, parseError: parseError.message }

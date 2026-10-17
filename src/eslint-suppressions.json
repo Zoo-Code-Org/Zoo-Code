@@ -1619,11 +1619,6 @@
 			"count": 1
 		}
 	},
-	"shared/parse-command.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"shared/support-prompt.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 5

@@ -175,4 +175,26 @@ describe("extractPatternsFromCommand", () => {
 			expect(patterns).not.toContain("hello")
 		})
 	})
+
+	it("should extract patterns from a command substitution segment", () => {
+		const patterns = extractPatternsFromCommand("echo $(whoami)")
+		expect(patterns).toContain("echo")
+		expect(patterns).toContain("whoami")
+	})
+
+	it("should extract only the leading command from an unclosed command substitution", () => {
+		// Fail-closed: when the parser cannot close a $( … ) it opened, the whole
+		// input stays one opaque token, so nothing interior to the malformed
+		// expansion can surface as an auto-approvable pattern.
+		const patterns = extractPatternsFromCommand("echo $(date\nfoo")
+		expect(patterns).toEqual(["echo"])
+		expect(patterns).not.toContain("date")
+		expect(patterns).not.toContain("foo")
+	})
+
+	it("should extract patterns from a process substitution segment", () => {
+		const patterns = extractPatternsFromCommand("diff <(sort a)")
+		expect(patterns).toContain("diff")
+		expect(patterns).toContain("sort")
+	})
 })
