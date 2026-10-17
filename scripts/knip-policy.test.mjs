@@ -12,7 +12,7 @@ const config = JSON.parse(readFileSync(path.join(root, "knip.json"), "utf8"))
 
 // Exercise the installed analyzer and the repository's extension graph, rather
 // than asserting that a configuration flag merely appears in a JSON file.
-function fixture(files, run) {
+function fixture(files, run, includeWebview = false) {
 	const directory = mkdtempSync(path.join(tmpdir(), "zoo-knip-policy-"))
 	try {
 		const write = (name, contents) => {
@@ -21,7 +21,7 @@ function fixture(files, run) {
 			writeFileSync(filename, contents)
 		}
 		write("package.json", JSON.stringify({ name: "knip-policy-fixture", private: true }))
-		write("pnpm-workspace.yaml", "packages:\n  - src\n")
+		write("pnpm-workspace.yaml", `packages:\n  - src\n${includeWebview ? "  - webview-ui\n" : ""}`)
 		write(
 			"src/package.json",
 			JSON.stringify({
@@ -30,7 +30,20 @@ function fixture(files, run) {
 				devDependencies: { vitest: "4.1.11" },
 			}),
 		)
-		write("knip.json", JSON.stringify({ ...config, workspaces: { src: config.workspaces.src } }))
+		write(
+			"knip.json",
+			JSON.stringify({
+				...config,
+				workspaces: {
+					src: config.workspaces.src,
+					...(includeWebview ? { "webview-ui": config.workspaces["webview-ui"] } : {}),
+				},
+			}),
+		)
+		if (includeWebview) {
+			write("webview-ui/package.json", JSON.stringify({ name: "fixture-webview", private: true }))
+			write("webview-ui/src/index.tsx", 'console.log("application entry")\n')
+		}
 		write("src/extension.ts", 'import { live } from "./helper"\nconsole.log(live)\n')
 		write("src/helper.ts", "export const live = 1\n")
 		write(
@@ -154,5 +167,27 @@ test("unlisted runtime dependencies remain errors", () => {
 				assert.ok(reported(result, "unlisted", "unlisted-knip-policy-dependency"))
 			}
 		},
+	)
+})
+
+test("visual entries cannot hide helpers unused by the production application", () => {
+	fixture(
+		{
+			"webview-ui/src/scene.visual.tsx": 'import { sceneOnly } from "./scene-helper"\nconsole.log(sceneOnly)\n',
+			"webview-ui/src/scene-helper.ts": 'export const sceneOnly = "scene"\n',
+			"webview-ui/src/scene.visual.fixture.tsx":
+				'import { fixtureOnly } from "./fixture-helper"\nconsole.log(fixtureOnly)\n',
+			"webview-ui/src/fixture-helper.ts": 'export const fixtureOnly = "fixture"\n',
+		},
+		(knip) => {
+			const development = knip()
+			assert.equal(development.status, 0, JSON.stringify(development.report))
+			const production = knip("--production")
+			assert.equal(production.status, 1)
+			assert.ok(production.report.files.includes("webview-ui/src/scene-helper.ts"))
+			assert.ok(production.report.files.includes("webview-ui/src/fixture-helper.ts"))
+			assert.ok(!production.report.files.some((file) => file.includes(".visual.")))
+		},
+		true,
 	)
 })
