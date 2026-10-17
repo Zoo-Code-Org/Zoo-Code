@@ -205,10 +205,43 @@ describe("checkpointSave change-journal wiring (B2)", () => {
 		consoleErrorSpy.mockRestore()
 	})
 
-	it("does not write a journal entry when the checkpoint save is a no-op (empty commit)", async () => {
+	it("fails a write-metadata save when the checkpoint service is unavailable", async () => {
+		// A checkpoint initialization failure (missing Git or global storage)
+		// leaves the service unavailable; a write-metadata save must surface
+		// an explicit failure instead of a tool success over an orphaned
+		// write with no journal entry and no change card.
+		mockTask.enableCheckpoints = false
+
+		await expect(checkpointSave(mockTask as Task, false, true, write)).rejects.toThrow(/checkpoint service/)
+		expect(saveCheckpointSpy).not.toHaveBeenCalled()
+		expect(await loadChanges(tmpStorageDir, TASK_ID)).toEqual([])
+	})
+
+	it("keeps non-write saves a no-op when the checkpoint service is unavailable", async () => {
+		// The task-start baseline tolerates an unavailable service: no write
+		// metadata, no rollback expectation, historical behavior preserved.
+		mockTask.enableCheckpoints = false
+
+		await expect(checkpointSave(mockTask as Task)).resolves.toBeUndefined()
+		expect(saveCheckpointSpy).not.toHaveBeenCalled()
+	})
+
+	it("keeps non-write saves succeeding when the checkpoint produces no commit", async () => {
+		// The task-start baseline tolerates an empty shadow repository: no
+		// write metadata means no rollback expectation.
 		saveCheckpointSpy.mockResolvedValueOnce(undefined)
 
-		await checkpointSave(mockTask as Task, false, true, write)
+		await expect(checkpointSave(mockTask as Task)).resolves.toBeUndefined()
+	})
+
+	it("fails a write-metadata save on an empty checkpoint without disabling checkpoints", async () => {
+		// A no-op checkpoint resolves without a commit: with write metadata
+		// there is no rollback point, so the save fails explicitly - but an
+		// empty checkpoint is not a service failure, so checkpoints stay
+		// enabled for later writes.
+		saveCheckpointSpy.mockResolvedValueOnce(undefined)
+
+		await expect(checkpointSave(mockTask as Task, false, true, write)).rejects.toThrow(/did not produce a commit/)
 
 		expect(await loadChanges(tmpStorageDir, TASK_ID)).toEqual([])
 		expect(mockTask.enableCheckpoints).toBe(true)

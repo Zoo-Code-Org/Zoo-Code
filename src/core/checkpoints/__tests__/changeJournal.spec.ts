@@ -49,24 +49,25 @@ describe("changeJournal", () => {
 			expect(raw.split("\n").filter((line) => line !== "")).toHaveLength(2)
 		})
 
-		it("repairs a torn tail before appending so both entries load", async () => {
+		it("rejects an append when the final record is torn instead of truncating it", async () => {
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "good" }))
 			// Simulate a crash that tore the last append mid-write: the file now
-			// ends with an unterminated JSON fragment.
+			// ends with an unterminated JSON fragment. That fragment may be the
+			// truncated journal record of a committed write, so the append must
+			// not silently truncate it away and continue as if the history
+			// were complete.
 			const filePath = journalPath(tmpRoot, taskId)
 			const raw = await fs.readFile(filePath, "utf8")
 			await fs.writeFile(filePath, raw + '{"path":"src/half.ts","operation":"upd')
 
-			await appendChange(tmpRoot, taskId, entry({ checkpointId: "after" }))
+			await expect(appendChange(tmpRoot, taskId, entry({ checkpointId: "after" }))).rejects.toThrow(
+				/torn-tail recovery requires explicit repair/,
+			)
 
-			const result = await loadChanges(tmpRoot, taskId)
-			expect(result.map((e) => e.checkpointId)).toEqual(["good", "after"])
-
-			// The lost fragment is truncated away, not preserved (a later
-			// strict reader must never see it.
-			const repaired = await fs.readFile(filePath, "utf8")
-			expect(repaired).not.toContain("half.ts")
-			expect(repaired).not.toContain("half.ts")
+			// The journal is left untouched for an explicit recovery: neither
+			// the fragment was dropped nor the new entry added.
+			const after = await fs.readFile(filePath, "utf8")
+			expect(after).toBe(raw + '{"path":"src/half.ts","operation":"upd')
 		})
 
 		it("does not insert a blank line when the journal ends cleanly", async () => {
@@ -324,14 +325,27 @@ describe("changeJournal", () => {
 			expect(leftovers).toEqual([])
 		})
 
-		it("recovers after a crash left a stale temp file and a torn tail", async () => {
+		it("rejects the append when a crash left a stale temp file and a torn tail", async () => {
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "before" }))
 			const dir = path.dirname(journalPath(tmpRoot, taskId))
 			// A crash between the temp write and the rename leaves an orphan temp
-			// file; a crash mid-write can also leave the tail unterminated.
+			// file; a crash mid-write can also leave the tail unterminated. The
+			// torn tail must reject the append - verified recovery is explicit.
 			await fs.writeFile(path.join(dir, "changes.jsonl.4242.orphan.tmp"), "partial")
 			const raw = await fs.readFile(journalPath(tmpRoot, taskId), "utf8")
 			await fs.writeFile(journalPath(tmpRoot, taskId), raw + '{"path":"src/half.ts","operation":"upd')
+
+			await expect(appendChange(tmpRoot, taskId, entry({ checkpointId: "after" }))).rejects.toThrow(
+				/torn-tail recovery requires explicit repair/,
+			)
+		})
+
+		it("recovers after a crash left a stale temp file with a clean tail", async () => {
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "before" }))
+			const dir = path.dirname(journalPath(tmpRoot, taskId))
+			// An orphan temp file alone is harmless: the rename never happened,
+			// and the journal tail is complete, so the append proceeds.
+			await fs.writeFile(path.join(dir, "changes.jsonl.4242.orphan.tmp"), "partial")
 
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "after" }))
 

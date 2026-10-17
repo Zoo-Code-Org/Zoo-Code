@@ -184,10 +184,12 @@ describe("checkpointSave change-card emission (B3a)", () => {
 		expect(cardCalls).toHaveLength(0)
 	})
 
-	it("emits no change card when the checkpoint produced no commit", async () => {
+	it("fails a write-metadata save when the checkpoint produced no commit and emits no card", async () => {
 		const { task, say } = makeTask({ saveCheckpoint: undefined })
 
-		await checkpointSave(task, false, true, { path: "src/a.ts", operation: "create" })
+		await expect(checkpointSave(task, false, true, { path: "src/a.ts", operation: "create" })).rejects.toThrow(
+			/did not produce a commit/,
+		)
 
 		const cardCalls = say.mock.calls.filter(([type]) => type === "change_card")
 		expect(cardCalls).toHaveLength(0)
@@ -206,10 +208,12 @@ describe("checkpointSave change-card emission (B3a)", () => {
 		expect(cardCalls).toHaveLength(0)
 	})
 
-	it("emits no change card when checkpoints are disabled for the task", async () => {
+	it("fails a write-metadata save when checkpoints are disabled for the task and emits no card", async () => {
 		const { task, say } = makeTask({ enableCheckpoints: false })
 
-		await checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" })
+		await expect(
+			checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" }),
+		).rejects.toThrow(/could not initialize the checkpoint service/)
 
 		expect(say).not.toHaveBeenCalled()
 	})
