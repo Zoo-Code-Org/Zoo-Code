@@ -126,8 +126,8 @@ function fixture(
 		async cleanup() {
 			cleaned = true
 		},
-		async writeVerdict(verdict) {
-			written.push(verdict)
+		async writeArtifact(fileName, value) {
+			if (fileName === "verdict.json") written.push(value as SmokeVerdict)
 		},
 		onInterrupt(listener) {
 			interrupt = listener

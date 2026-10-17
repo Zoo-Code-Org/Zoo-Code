@@ -11,6 +11,12 @@ const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.ur
 const driver = fs.readFileSync(new URL("./solheim-smoke/driver.mts", import.meta.url), "utf8")
 const recorder = fs.readFileSync(new URL("./solheim-smoke/record.sh", import.meta.url), "utf8")
 const smokePkg = JSON.parse(fs.readFileSync(new URL("./solheim-smoke/package.json", import.meta.url), "utf8"))
+const runner = fs.readFileSync(new URL("./agent-evals/runner.ts", import.meta.url), "utf8")
+const launcher = fs.readFileSync(new URL("./agent-evals/launcher.ts", import.meta.url), "utf8")
+const registry = fs.readFileSync(new URL("./agent-evals/registry.ts", import.meta.url), "utf8")
+const fixture = fs.readFileSync(new URL("./solheim-smoke/fixture.ts", import.meta.url), "utf8")
+const trace = fs.readFileSync(new URL("./agent-evals/trace.ts", import.meta.url), "utf8")
+const evalsPkg = JSON.parse(fs.readFileSync(new URL("./agent-evals/package.json", import.meta.url), "utf8"))
 
 describe("Project A provider smoke workflow", () => {
 	it("runs smoke TypeScript as ESM without requiring compiled workspace packages", () => {
@@ -58,7 +64,7 @@ describe("Project A provider smoke workflow", () => {
 		assert.match(workflow, /timeout-minutes: 8/)
 		assert.match(workflow, /^ {8}timeout-minutes: 25$/m)
 	})
-	it("uploads only the verdict and video, never host logs or storage", () => {
+	it("uploads only the verdict, the structured trace, and video, never host logs or storage", () => {
 		const paths = workflow.split("path: |\n")[1]?.split("                  if-no-files-found:")[0]
 		assert.deepEqual(
 			paths
@@ -67,6 +73,7 @@ describe("Project A provider smoke workflow", () => {
 				.map((line) => line.trim()),
 			[
 				"${{ runner.temp }}/solheim-provider-smoke/verdict.json",
+				"${{ runner.temp }}/solheim-provider-smoke/trace.json",
 				"${{ runner.temp }}/solheim-provider-smoke/smoke.mp4",
 			],
 		)
@@ -87,13 +94,45 @@ describe("Project A provider smoke workflow", () => {
 		assert.match(workflow, /retention-days: 7/)
 	})
 	it("keeps Code QA and package commands focused on smoke contracts", () => {
-		for (const command of ["test:solheim-smoke:unit", "test:solheim-smoke-ci", "solheim-smoke:check-types"])
+		for (const command of [
+			"test:solheim-smoke:unit",
+			"test:solheim-smoke-ci",
+			"solheim-smoke:check-types",
+			"test:agent-evals:unit",
+			"agent-evals:check-types",
+		])
 			assert.ok(codeQa.includes(command))
 		assert.ok(!codeQa.includes("model-qualification"))
 		assert.ok(!Object.keys(pkg.scripts).some((name) => name.includes("model-qualification")))
 		assert.ok(!codeQa.includes("final-smoke"))
 		assert.equal(pkg.scripts["solheim:smoke"], "node --import tsx scripts/solheim-smoke/driver.mts")
+		assert.equal(pkg.scripts["test:agent-evals:unit"], "node --import tsx --test scripts/agent-evals/*.test.ts")
+		assert.equal(pkg.scripts["agent-evals:check-types"], "tsc -p scripts/agent-evals/tsconfig.json")
 		assert.ok(!fs.existsSync(new URL("../.github/workflows/final-vscode-review-smoke.yml", import.meta.url)))
+	})
+	it("keeps the shared controller free of smoke, provider, and solution knowledge", () => {
+		assert.equal(evalsPkg.type, "module")
+		assert.equal(evalsPkg.private, true)
+		assert.ok(!/solheim/i.test(runner))
+		assert.ok(!/smoke/i.test(runner))
+		assert.ok(!runner.includes("SOLHEIM_API_KEY"))
+		assert.ok(!/solheim/i.test(trace))
+		assert.ok(trace.includes("traceSchemaVersion"))
+	})
+	it("registers fixtures only through the validated in-memory registry", () => {
+		assert.ok(!registry.includes("import("))
+		assert.ok(!registry.includes("fetch("))
+		assert.ok(!registry.includes("readdir"))
+		assert.ok(fixture.includes("registerFixture"))
+	})
+	it("keeps VS Code launch isolation in one shared launcher with an atomic artifact writer", () => {
+		assert.ok(driver.includes("createHostRuntime"))
+		assert.ok(!driver.includes("spawn("))
+		assert.ok(!driver.includes("downloadAndUnzipVSCode"))
+		assert.ok(launcher.includes("downloadAndUnzipVSCode"))
+		assert.ok(launcher.includes("buildChildEnvironment"))
+		assert.ok(launcher.includes("await fs.rename(pending"))
+		assert.ok(launcher.includes("process.kill(-child.pid"))
 	})
 })
 

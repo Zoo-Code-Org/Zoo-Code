@@ -4,6 +4,13 @@ Infrastructure validation only: a real VS Code extension activates, accepts a co
 receives output from Solheim's OpenAI-compatible provider, and produces a completion result.
 It does not read a PR, assess an answer's meaning, select checks, find defects, or post to GitHub.
 
+The smoke is the first registered fixture of the shared substrate in
+[`scripts/agent-evals`](../agent-evals/README.md). That substrate owns the fixture contract, the
+trusted registry, the single VS Code launcher, startup correlation, bounded teardown, and the
+metadata-only structured trace. [`run.ts`](./run.ts) is a thin adapter: it maps the shared
+controller result onto the smoke evidence gates and verdict. The generic controller knows nothing
+about Solheim, the prompt, or the expected completion.
+
 The active workflow is `.github/workflows/solheim-provider-smoke.yml`. It is manual-only, restricted to
 `refs/heads/main`, and checks out the exact triggering SHA. It builds trusted extension code before the
 single credential-bearing step. There is one job, no PR input or approval gate, no review/posting job,
@@ -31,13 +38,16 @@ Teardown escalates through close, terminate, and kill within independent five-se
 completion and actual output-token usage must belong to the accepted task. Activation alone cannot pass.
 The driver never approves dialogs or tool execution; it closes the task during teardown.
 
-The action uploads `verdict.json` (fixed failure code, boolean gates, duration and provider/model names)
-and `smoke.mp4`, a 1280×720, 12 fps screen recording of the fresh CI virtual display. It records up to
+The action uploads `verdict.json` (fixed failure code, boolean gates, duration and provider/model names),
+`trace.json` (versioned metadata-only structured trace from the shared substrate; see
+[`scripts/agent-evals/README.md`](../agent-evals/README.md) for its accounting limits), and `smoke.mp4`,
+a 1280×720, 12 fps screen recording of the fresh CI virtual display. It records up to
 eight minutes / approximately 120 MiB, with bounded shutdown and seven-day artifact retention. Video
-contains the visible smoke UI, potentially including the fixed prompt and model answer; unlike the verdict,
-it is not text-redacted. No settings screen is opened, and no host logs, storage, task configuration or
-credential files are uploaded. Fragmented MP4 preserves completed fragments on abrupt interruption.
-Ordinary success and failure runs upload both artifacts; cancellation may prevent finalization/upload.
+contains the visible smoke UI, potentially including the fixed prompt and model answer; unlike the verdict
+and the trace, it is not text-redacted. No settings screen is opened, and no host logs, storage, task
+configuration or credential files are uploaded. Fragmented MP4 preserves completed fragments on abrupt
+interruption. Ordinary success and failure runs upload all three artifacts; cancellation may prevent
+finalization/upload.
 
 Checks, without a provider key or network calls:
 
@@ -58,3 +68,8 @@ established the underlying integration, not this refactor's live status. Review 
 after the frozen Stage 1B pilot produced zero incremental verified defects. Its research harness and
 receipts are archived outside this smoke-only change; the chronology, results, caveats and preservation
 details are recorded in [tracking issue #1896](https://github.com/Zoo-Code-Org/Zoo-Code/issues/1896).
+
+Planned follow-ups on top of the shared substrate, in order: five frozen real coding tasks, independent
+credential-free graders, paired exact trusted commit comparisons, repeated runs with uncertainty
+reporting, then advisory release integration aligned to the actual release workflows. They are tracked
+in [`scripts/agent-evals/README.md`](../agent-evals/README.md).

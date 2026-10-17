@@ -55,6 +55,7 @@ jobs:
                   name: solheim-provider-smoke-${{ github.sha }}
                   path: |
                       ${{ runner.temp }}/solheim-provider-smoke/verdict.json
+                      ${{ runner.temp }}/solheim-provider-smoke/trace.json
                       ${{ runner.temp }}/solheim-provider-smoke/smoke.mp4
                   if-no-files-found: error
                   retention-days: 7
