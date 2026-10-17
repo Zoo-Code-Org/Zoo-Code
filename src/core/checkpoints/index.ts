@@ -279,7 +279,19 @@ export async function checkpointSave(
 	const service = await getCheckpointService(task)
 
 	if (!service) {
-		if (hasWriteMetadata && checkpointsRequested) {
+		let requested = checkpointsRequested
+		if (hasWriteMetadata && !requested) {
+			// The task flag also flips off when an EARLIER failure disabled
+			// checkpoints (a failed service init, or the save-failure handlers
+			// below). The persisted setting still carries the user's intent
+			// (unset defaults to enabled, matching Task construction), so a
+			// write-metadata save after such a failure must throw too instead
+			// of silently proceeding with no rollback metadata. Only a user who
+			// disabled checkpoints in settings resolves silently.
+			const state = await task.providerRef.deref()?.getState()
+			requested = state?.enableCheckpoints ?? true
+		}
+		if (hasWriteMetadata && requested) {
 			throw new Error(
 				"Checkpoint save with write metadata could not initialize the checkpoint service; the write has no rollback metadata.",
 			)
@@ -335,10 +347,36 @@ export async function checkpointSave(
 		})
 	}
 
-	// A save that resolves without a commit (e.g. a write to a Git-ignored
-	// file the shadow repository never stages) produced no rollback point:
-	// journaling is skipped and a later restore reports no entry. With
-	// write metadata that is a partial persistence, not a success.
+	// Paths excluded from the shadow repository (node_modules, build
+	// output, .gitignore'd files) never enter the journal: the shadow
+	// commit cannot contain them, so a journal entry would route a later
+	// rollback into restoreFile's delete branch, where absence from the
+	// commit would delete the user's live file. Skipping excluded paths
+	// at journaling time keeps rollback metadata honest and removes
+	// excluded-path noise from the journal and the change card. The
+	// filter runs BEFORE the no-commit rejection below: an all-excluded
+	// step stages nothing, so requiring a commit would make the tool's
+	// outcome depend on unrelated workspace changes.
+	const writes: CheckpointWriteInfo[] = []
+	if (hasWriteMetadata) {
+		for (const w of journalWrites ?? []) {
+			if (await service.isPathIgnored(w.path)) {
+				continue
+			}
+			writes.push(w)
+		}
+		if (writes.length === 0) {
+			// Every write landed on an excluded path: nothing to journal and
+			// nothing to show, and no rollback metadata is expected - the save
+			// resolves whether or not unrelated changes produced a commit.
+			return result
+		}
+	}
+
+	// A save that resolves without a commit despite non-excluded writes
+	// produced no rollback point: journaling is skipped and a later
+	// restore reports no entry. With write metadata that is a partial
+	// persistence, not a success.
 	if (hasWriteMetadata && !result?.commit) {
 		throw new Error(
 			"Checkpoint save with write metadata did not produce a commit; the write has no rollback metadata.",
@@ -352,25 +390,6 @@ export async function checkpointSave(
 	// changes can still produce a commit, and emitting a card for it would
 	// show a change card with zero files. The checkpoint itself still runs.
 	if (result?.commit && hasWriteMetadata) {
-		// Paths excluded from the shadow repository (node_modules, build
-		// output, .gitignore'd files) never enter the journal: the shadow
-		// commit cannot contain them, so a journal entry would route a later
-		// rollback into restoreFile's delete branch, where absence from the
-		// commit would delete the user's live file. Skipping excluded paths
-		// at journaling time keeps rollback metadata honest and removes
-		// excluded-path noise from the journal and the change card.
-		const writes: CheckpointWriteInfo[] = []
-		for (const w of journalWrites ?? []) {
-			if (await service.isPathIgnored(w.path)) {
-				continue
-			}
-			writes.push(w)
-		}
-		if (writes.length === 0) {
-			// Every write landed on an excluded path: nothing to journal and
-			// nothing to show; the checkpoint commit itself still ran.
-			return result
-		}
 		if (!journalDir) {
 			// Defensive: the pre-commit guard above normally makes this
 			// unreachable. If the location is nonetheless gone while the commit

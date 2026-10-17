@@ -223,7 +223,12 @@ describe("checkpointSave change-card emission (B3a)", () => {
 		// Documented contract: user-disabled checkpoints means the absence of
 		// rollback metadata is the user's choice, so the save must not fail the
 		// write tool.
-		const { task, say, saveCheckpoint } = makeTask({ enableCheckpoints: false })
+		const { task, say, saveCheckpoint } = makeTask({
+			enableCheckpoints: false,
+			// The persisted setting agrees the user disabled checkpoints; an unset or
+			// true setting would mean an earlier failure flipped the task flag.
+			state: { enableCheckpoints: false },
+		})
 
 		await expect(
 			checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" }),
@@ -238,6 +243,20 @@ describe("checkpointSave change-card emission (B3a)", () => {
 		// true) a failed service lookup is a genuine init-failure - the write
 		// would be orphaned, so the save must surface it.
 		const { task, say } = makeTask({ storageDir: null })
+
+		await expect(
+			checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" }),
+		).rejects.toThrow(/could not initialize the checkpoint service/)
+
+		expect(say).not.toHaveBeenCalled()
+	})
+
+	it("fails a write-metadata save when an earlier failure flipped the task flag", async () => {
+		// getCheckpointService and the save-failure handlers flip
+		// task.enableCheckpoints off; the persisted setting still says the user
+		// wants checkpoints, so a later write-metadata save must throw too
+		// instead of silently proceeding with no rollback metadata.
+		const { task, say } = makeTask({ enableCheckpoints: false, state: { enableCheckpoints: true } })
 
 		await expect(
 			checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" }),

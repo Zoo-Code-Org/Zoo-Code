@@ -425,12 +425,15 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 		try {
 			// --no-index evaluates the exclude rules alone: index or commit
 			// membership is irrelevant to "the shadow repo never tracks this".
-			// The verdict comes from the -v output, not from the promise
-			// settling: simple-git's raw() resolves (rather than rejects) on a
-			// silent non-zero exit, so "not ignored" (exit 1, no output) arrives
-			// as an empty success here. An ignored path prints its matching rule
-			// line.
-			const match = await this.git.raw(["check-ignore", "--no-index", "-v", "--", gitPath])
+			// No -v: verbose mode prints a line for ANY matching rule, and a
+			// negation rule (e.g. "!.env.example" after ".env*") means the path
+			// is NOT ignored - under -v it would be misclassified as ignored.
+			// Without -v only genuinely ignored paths print a line. The verdict
+			// still comes from the output, not from the promise settling:
+			// simple-git's raw() resolves (rather than rejects) on a silent
+			// non-zero exit, so "not ignored" (exit 1, no output) arrives as an
+			// empty success here.
+			const match = await this.git.raw(["check-ignore", "--no-index", "--", gitPath])
 			return match.trim().length > 0
 		} catch {
 			// A git fatal (corrupt repo) leaves the path unproven-ignored;
