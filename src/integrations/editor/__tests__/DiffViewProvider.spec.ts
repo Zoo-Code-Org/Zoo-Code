@@ -1018,36 +1018,45 @@ describe("DiffViewProvider", () => {
 
 			describe("guarded saveChanges publish (S4b, #1400)", () => {
 				const setupDirtyDoc = (text = "new content") => {
+					const replace = vi.fn()
 					const document = {
 						getText: vi.fn().mockReturnValue(text),
 						isDirty: true,
 						save: vi.fn().mockResolvedValue(undefined),
-						revert: vi.fn().mockResolvedValue(undefined),
+						lineCount: 1,
+						validateRange: vi.fn((r: unknown) => r),
 					}
 					diffViewProvider["relPath"] = "test.ts"
 					diffViewProvider["newContent"] = "new content"
+					diffViewProvider["originalContent"] = "disk content"
 					// Structural double: saveChanges only reaches the document's
-					// getText/isDirty/save/revert members.
-					diffViewProvider["activeDiffEditor"] = { document } as unknown as vscode.TextEditor
+					// getText/isDirty/save/lineCount/validateRange members and the editor's edit.
+					diffViewProvider["activeDiffEditor"] = {
+						document,
+						edit: vi.fn(async (cb: (b: { replace: typeof replace }) => void) => {
+							cb({ replace })
+							return true
+						}),
+					} as unknown as vscode.TextEditor
 					diffViewProvider["preDiagnostics"] = []
-					diffViewProvider.closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
-					diffViewProvider.keepOrCloseEditedFile = vi.fn().mockResolvedValue(undefined)
-					diffViewProvider.restorePreviewTabs = vi.fn().mockResolvedValue(undefined)
-					return document
+					diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
+					diffViewProvider["keepOrCloseEditedFile"] = vi.fn().mockResolvedValue(undefined)
+					diffViewProvider["restorePreviewTabs"] = vi.fn().mockResolvedValue(undefined)
+					return { document, replace }
 				}
 
 				it("publishes the dirty buffer through the guarded write and resyncs without a second write", async () => {
-					const document = setupDirtyDoc()
+					const { document, replace } = setupDirtyDoc()
 
 					const result = await diffViewProvider.saveChanges(false, 0)
 
 					expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {
 						preCommitVerify: expect.any(Function),
 					})
-					// The guard wrote the buffer bytes; the buffer is resynced with a no-write
-					// revert instead of a second unguarded document save.
-					expect(document.revert).toHaveBeenCalledWith({ save: false })
-					expect(document.save).not.toHaveBeenCalled()
+					// The guard wrote the buffer bytes; save() only re-syncs the dirty
+					// flag over identical content, and no rollback edit is made.
+					expect(document.save).toHaveBeenCalled()
+					expect(replace).not.toHaveBeenCalled()
 					// Clean save: no userEdits behavior change.
 					expect(result.userEdits).toBeUndefined()
 				})
@@ -1064,25 +1073,27 @@ describe("DiffViewProvider", () => {
 				})
 
 				it("rejects an unobserved saveChanges to an existing file and rolls the buffer back", async () => {
-					const document = setupDirtyDoc()
+					const { document, replace } = setupDirtyDoc()
 					mockTask.observationRegistry.clear()
 
 					await expect(diffViewProvider.saveChanges(false, 0)).rejects.toThrow(
 						"File already exists at /mock/cwd/test.ts and was not read before this write -- read the file first, then retry.",
 					)
 					expect(safeWriteText).not.toHaveBeenCalled()
-					// The rejected publish leaves no unsaved buffer and no unguarded save.
-					expect(document.revert).toHaveBeenCalledWith({ save: false })
+					// The rejected publish rolls the buffer back to the pre-diff content
+					// (the untouched file) and never saves the rejected bytes.
+					expect(replace).toHaveBeenCalledWith(expect.anything(), "disk content")
 					expect(document.save).not.toHaveBeenCalled()
 				})
 
 				it("rejects a stale saveChanges and rolls the editor buffer back", async () => {
-					const document = setupDirtyDoc()
+					const { document, replace } = setupDirtyDoc()
 					vi.mocked(computeVersionToken).mockResolvedValue("v2")
 
 					await expect(diffViewProvider.saveChanges(false, 0)).rejects.toThrow("Stale version")
 					expect(safeWriteText).not.toHaveBeenCalled()
-					expect(document.revert).toHaveBeenCalledWith({ save: false })
+					expect(replace).toHaveBeenCalledWith(expect.anything(), "disk content")
+					expect(document.save).not.toHaveBeenCalled()
 				})
 
 				it("fails a deleted-after-read saveChanges with the re-read remediation", async () => {
@@ -1104,11 +1115,13 @@ describe("DiffViewProvider", () => {
 						Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
 					)
 
+					const { document } = setupDirtyDoc()
 					await diffViewProvider.saveChanges(false, 0)
 
 					expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", {
 						preCommitVerify: expect.any(Function),
 					})
+					expect(document.save).toHaveBeenCalled()
 				})
 
 				it("fails closed when the owning task has been collected", async () => {

@@ -351,21 +351,29 @@ export class DiffViewProvider {
 				// unreachable and the write cannot be guarded.
 				throw new Error("Cannot guard the write: the owning task is no longer available")
 			}
-			let guardError: unknown
 			try {
 				await guardedWrite(guardTask, this.relPath, editedContent, "update")
 			} catch (error: unknown) {
-				guardError = error
+				// The guard rejected the publish: roll the editor buffer back to the
+				// content the diff started from - the file on disk is untouched - so no
+				// unsaved buffer survives a rejected publish, then surface the
+				// remediation to the tool layer.
+				const editor = this.activeDiffEditor
+				const rollback = this.originalContent ?? ""
+				const fullRange = updatedDocument.validateRange(
+					// Whole-document range: lineCount is one past the last line, so this
+					// covers every byte the buffer holds.
+					new vscode.Range(0, 0, updatedDocument.lineCount, 0),
+				)
+				await editor.edit((builder) => {
+					builder.replace(fullRange, rollback)
+				})
+				throw error
 			}
-			// The guard published the buffer's bytes (or rejected): resync the buffer
-			// to the file either way. On success the revert is content-preserving
-			// (the guard wrote these bytes); on failure it rolls the buffer back to
-			// the untouched on-disk content so no unsaved buffer survives a rejected
-			// publish. The revert writes nothing itself.
-			await updatedDocument.revert({ save: false })
-			if (guardError) {
-				throw guardError
-			}
+			// The guarded publish already wrote the buffer's bytes; save() only
+			// re-syncs the editor's dirty flag over identical content - it carries
+			// the guard's verdict, it does not bypass the guard.
+			await updatedDocument.save()
 		}
 
 		// Stop tracking touches and cancel any pending scroll-to-diff before any
