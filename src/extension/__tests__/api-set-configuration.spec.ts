@@ -32,9 +32,11 @@ describe("API.setConfiguration", () => {
 			setValues: vi.fn().mockResolvedValue(undefined),
 			contextProxy: {
 				setValues: vi.fn().mockResolvedValue(undefined),
+				getProviderSettings: vi.fn().mockReturnValue({}),
 			},
 			providerSettingsManager: {
 				saveConfig: vi.fn().mockResolvedValue("default-id"),
+				getProfile: vi.fn().mockRejectedValue(new Error("profile absent")),
 			},
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),
 		})
