@@ -261,16 +261,25 @@ export async function checkpointSave(
 	write?: CheckpointWriteInfo | CheckpointWriteInfo[],
 ) {
 	// A save that carries write metadata must end with rollback metadata
-	// existing: every failure below (service unavailable, no commit, no
+	// existing: every failure below (service init-failure, no commit, no
 	// journal location, journal write failure) surfaces explicitly instead
-	// of resolving to a tool success over an orphaned write.
+	// of resolving to a tool success over an orphaned write. A user-disabled
+	// checkpoint setting is NOT such a failure: absence of rollback metadata
+	// is then the user's explicit choice, so the save resolves silently
+	// (documented contract, see PR description).
 	const journalWrites = write === undefined ? undefined : Array.isArray(write) ? write : [write]
 	const hasWriteMetadata = !!journalWrites && journalWrites.length > 0
+
+	// Captured before the lookup: getCheckpointService flips the flag off when
+	// initialization fails, so reading it after the call cannot distinguish
+	// "user disabled checkpoints" (resolve silently) from "init failed while
+	// the user expects checkpoints" (throw).
+	const checkpointsRequested = task.enableCheckpoints
 
 	const service = await getCheckpointService(task)
 
 	if (!service) {
-		if (hasWriteMetadata) {
+		if (hasWriteMetadata && checkpointsRequested) {
 			throw new Error(
 				"Checkpoint save with write metadata could not initialize the checkpoint service; the write has no rollback metadata.",
 			)

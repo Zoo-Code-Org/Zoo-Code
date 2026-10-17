@@ -205,14 +205,14 @@ describe("checkpointSave change-journal wiring (B2)", () => {
 		consoleErrorSpy.mockRestore()
 	})
 
-	it("fails a write-metadata save when the checkpoint service is unavailable", async () => {
-		// A checkpoint initialization failure (missing Git or global storage)
-		// leaves the service unavailable; a write-metadata save must surface
-		// an explicit failure instead of a tool success over an orphaned
-		// write with no journal entry and no change card.
+	it("resolves a write-metadata save when the user disabled checkpoints", async () => {
+		// Documented contract: user-disabled checkpoints means the absence of
+		// rollback metadata is the user's choice, so the save must not fail the
+		// write tool (no journal entry, no change card, no throw). Genuine
+		// init-failure coverage lives in checkpointSave.spec.ts.
 		mockTask.enableCheckpoints = false
 
-		await expect(checkpointSave(mockTask as Task, false, true, write)).rejects.toThrow(/checkpoint service/)
+		await expect(checkpointSave(mockTask as Task, false, true, write)).resolves.toBeUndefined()
 		expect(saveCheckpointSpy).not.toHaveBeenCalled()
 		expect(await loadChanges(tmpStorageDir, TASK_ID)).toEqual([])
 	})
