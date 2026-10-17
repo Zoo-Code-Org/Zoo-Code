@@ -2937,13 +2937,15 @@ export class ClineProvider
 			// fails the caller's settings are kept: the record landed, and the
 			// next load re-reads the stored copy.
 			let normalizedSettings = providerSettings
+			// The overlay refresh stores the record in the same shape the reload path
+			// stores it (id and name included), so a refreshed overlay cannot be
+			// distinguished from a reloaded one in a pinned view's getState().
+			let refreshedRecord: ProviderSettings & { id?: string; name?: string } = providerSettings
 			try {
-				const {
-					name: _savedName,
-					id: _savedId,
-					...storedRecord
-				} = await this.providerSettingsManager.getProfile({ name })
-				normalizedSettings = storedRecord as ProviderSettings
+				const storedRecord = await this.providerSettingsManager.getProfile({ name })
+				const { name: _savedName, id: _savedId, ...storedFields } = storedRecord
+				normalizedSettings = storedFields as ProviderSettings
+				refreshedRecord = storedRecord
 			} catch {
 				// Best-effort read-back; see the comment above.
 			}
@@ -2994,7 +2996,7 @@ export class ClineProvider
 				// The stored profile changed without an activation. Neither this view nor a sibling
 				// had its overlay cleared, so every view pinned to the saved profile - including
 				// the acting one - has to be refreshed.
-				await this.refreshViewLocalStateForUpdatedProfile(name, normalizedSettings, true)
+				await this.refreshViewLocalStateForUpdatedProfile(name, refreshedRecord, true)
 			}
 		} catch (error: unknown) {
 			await this.compensateProfileActivation(snapshot, landed, "upsertProviderProfile", error, false)
