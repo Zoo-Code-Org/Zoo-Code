@@ -3876,6 +3876,7 @@ export class ClineProvider
 					// settings. A view pinned to another profile keeps its own overlay.
 					await this._saveViewLocalStateFromMutation({ apiConfiguration: survivingSettings })
 				}
+			}
 
 			// The acting view's own conversation may be running the deleted profile's
 			// handler: re-pointing the pin and the shared store does not touch a live
