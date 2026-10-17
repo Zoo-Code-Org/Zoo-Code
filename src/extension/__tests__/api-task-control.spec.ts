@@ -186,17 +186,6 @@ describe("API task controls", () => {
 			)
 		})
 
-		it("fails task creation when the view state is not ready within the readiness bound", async () => {
-			// A readiness promise that never settles: the bound must reject task creation
-			// instead of letting createTask run against stale shared defaults.
-			sidebarProvider.viewStateReadiness = new Promise<void>(() => {})
-
-			await expect(api.startNewTask({ configuration, text: "new task" })).rejects.toThrow(
-				"Timed out waiting for the view state to become ready",
-			)
-			expect(sidebarProvider.createTask).not.toHaveBeenCalled()
-		})
-
 		it("cancels the readiness timeout when the view becomes ready within the bound", async () => {
 			// Fake timers pin the exact timer surface: a global clearTimeout spy would
 			// also fire for the flush sleep and library internals, so it could not
@@ -257,6 +246,8 @@ describe("API task controls", () => {
 
 			try {
 				await settled
+				// The bound rejected before createTask could run against stale defaults.
+				expect(sidebarProvider.createTask).not.toHaveBeenCalled()
 			} finally {
 				vi.useRealTimers()
 			}
