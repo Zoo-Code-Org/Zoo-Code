@@ -346,6 +346,17 @@ describe("ApplyDiffTool failure reporting", () => {
 			},
 		)
 
+		it("prefers the parser-reported block count over the raw marker count", async () => {
+			const output = await runApplyDiff(
+				{ success: true, content: "updated content", failParts: makeFailureSet(1), blockCount: 2 },
+				1,
+				buildDiffContent(1),
+			)
+
+			expect(output).toContain("Applied 1 of 2 diff blocks")
+			expect(output).toContain("The other 1 did NOT apply.")
+		})
+
 		it("states how many blocks did not apply", async () => {
 			const output = await runApplyDiff(partialResult(makeFailureSet(2)), 3)
 

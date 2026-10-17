@@ -109,6 +109,20 @@ describe("MultiSearchReplaceDiffStrategy malformed start-line marker hint", () =
 		expect(result.failParts ?? []).toHaveLength(0)
 	})
 
+	it("reports the parsed block count when repair splits an inline SEARCH marker", async () => {
+		const original = ["alpha", "beta"].join("\n")
+		const diffContent = "<<<<<<< SEARCH\nalpha\n=======\nALPHA x <<<<<<< SEARCH\nmissing\n>>>>>>> REPLACE"
+
+		const result = await strategy.applyDiff(original, diffContent)
+
+		expect(result.success).toBe(true)
+		if (!result.success) {
+			throw new Error("Expected the first repaired block to apply")
+		}
+		expect(result.blockCount).toBe(2)
+		expect(result.failParts?.filter((part) => !part.success)).toHaveLength(1)
+	})
+
 	it("omits the hint for ordinary non-matching content but keeps the file-changed tip", async () => {
 		const diffContent = buildDiff("completely unrelated content\nsecond line", "replacement")
 		const result = await strategy.applyDiff(nonMatchingFile, diffContent)

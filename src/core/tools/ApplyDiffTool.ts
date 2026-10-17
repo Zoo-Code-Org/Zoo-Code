@@ -234,7 +234,9 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 			// Used to determine if we should wait for busy terminal to update before sending api request
 			task.didEditFile = true
 
-			const searchBlocks = (diffContent.match(/^<<<<<<< SEARCH>?[^\S\r\n]*\r?$/gm) || []).length
+			// Prefer the parser's count: truncation repair can split inline markers into extra blocks.
+			const searchBlocks =
+				diffResult.blockCount ?? (diffContent.match(/^<<<<<<< SEARCH>?[^\S\r\n]*\r?$/gm) || []).length
 			const unappliedParts = diffResult.failParts?.filter((part) => !part.success) ?? []
 			let partFailHint = ""
 

@@ -666,6 +666,7 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 			success: true,
 			content: finalContent,
 			failParts: diffResults,
+			blockCount: matches.length,
 		}
 	}
 
