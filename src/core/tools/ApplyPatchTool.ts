@@ -190,6 +190,19 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				}
 			}
 		} catch (error) {
+			// A later file operation can reject outright (e.g. the approval
+			// stream dies) after earlier handlers succeeded. This catch skips
+			// both checkpoint branches above, but the finally block still
+			// hands off queued messages, so persist an explicit partial-state
+			// checkpoint here (same default-on semantics as the branches
+			// above) instead of letting the queued turn start with the
+			// retained writes carried forward without rollback metadata.
+			if (handoffPending) {
+				const perWriteCheckpoints = (await task.providerRef?.deref()?.getState())?.perWriteCheckpoints
+				if (perWriteCheckpoints !== false) {
+					await checkpointSave(task, false, true).catch(() => {})
+				}
+			}
 			await handleError("apply patch", error as Error)
 			await task.diffViewProvider.reset()
 		} finally {
