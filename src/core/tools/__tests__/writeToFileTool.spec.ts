@@ -619,18 +619,18 @@ describe("writeToFileTool", () => {
 			})
 		})
 
-		it("omits diff stats from the checkpoint write when the approval diff is empty", async () => {
+		it("skips the checkpoint when an existing file's content is unchanged", async () => {
 			// Writing identical content to an existing file produces an empty
-			// approval diff, so the checkpoint write carries no diffStats.
+			// approval diff: the shadow repository has nothing to stage, so a
+			// checkpoint would resolve without a commit and the write-metadata
+			// rejection would report failure for a write that succeeded. The
+			// write result is still pushed.
 			vi.mocked(formatResponse.createPrettyPatch).mockReturnValueOnce("")
 
 			await executeWriteFileTool({}, { fileExists: true })
 
-			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
-			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockCline, false, true, {
-				path: testFilePath,
-				operation: "update",
-			})
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+			expect(mockPushToolResult).toHaveBeenCalled()
 		})
 
 		it("threads autoApproved into the checkpoint write for auto-approved steps", async () => {

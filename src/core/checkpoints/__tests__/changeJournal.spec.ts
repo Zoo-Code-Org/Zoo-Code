@@ -160,6 +160,22 @@ describe("changeJournal", () => {
 			expect(result.map((e) => e.checkpointId)).toEqual(["good", "after"])
 		})
 
+		it("propagates a non-ENOENT failure from loadChanges instead of reporting an empty history", async () => {
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "good" }))
+			// A transient read failure is not an empty rollback history: a
+			// restore that saw [] would report a no-op success without ever
+			// reading the real entries (appendChanges already propagates
+			// non-ENOENT errors; the loader must agree).
+			const readSpy = vi
+				.spyOn(fs, "readFile")
+				.mockRejectedValueOnce(Object.assign(new Error("simulated I/O error"), { code: "EIO" }))
+			try {
+				await expect(loadChanges(tmpRoot, taskId)).rejects.toMatchObject({ code: "EIO" })
+			} finally {
+				readSpy.mockRestore()
+			}
+		})
+
 		it("writes the full record when the underlying write completes partially", async () => {
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
 			const realOpen = fs.open
