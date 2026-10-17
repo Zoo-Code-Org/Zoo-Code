@@ -889,7 +889,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "second-profile")
 		})
 
-		test("timed-out mutations abort before writing state and advance the queue", async () => {
+		test("timed-out activations run to completion and hold the queue", async () => {
 			vi.useFakeTimers()
 			const logSpy = vi.spyOn(provider, "log")
 			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
@@ -921,20 +921,23 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
 				await firstResult
 
-				// Queue advanced immediately on timeout — second enqueues now.
+				// The queue stays owned until the hung activation settles: the second
+				// activation waits, so the late rollback cannot land on top of it.
 				const second = provider.activateProviderProfile({ name: "second-profile" })
-				// activateProfile not yet called for second (it runs in the next microtask).
+				await vi.advanceTimersByTimeAsync(0)
 				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(1)
 
-				// Resolve the first activation's inner promise so its in-flight mock can return.
-				// The aborted signal prevents it from writing any state.
+				// The first activation was not aborted: it completes its writes before
+				// the queue advances to the second.
 				resolveFirst()
+				await vi.advanceTimersByTimeAsync(0)
 				await expect(second).resolves.toBeUndefined()
 				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(2)
-				// Aborted first activation wrote nothing; only second profile is set.
-				expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "first-profile")
+				expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "first-profile")
 				expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "second-profile")
-				expect(logSpy).toHaveBeenCalledWith("Provider profile mutation timed out; aborting in-flight mutation")
+				expect(logSpy).toHaveBeenCalledWith(
+					"Provider profile mutation timed out; waiting for it to finish before the next mutation",
+				)
 			} finally {
 				vi.useRealTimers()
 			}
