@@ -1901,7 +1901,7 @@ describe("PR review-state workflow", () => {
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
 	})
 
-	it("attempts every stale label removal when one cleanup fails", async () => {
+	it("attempts every state label removal when one cleanup fails and leaves stale labels to the stale step", async () => {
 		const result = await runWorkflow({
 			permissionErrorStatus: 500,
 			labels: ["awaiting-coderabbit", "awaiting-maintainer", "stale-awaiting-author"],
@@ -1910,7 +1910,7 @@ describe("PR review-state workflow", () => {
 
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-coderabbit" }))
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
-		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "stale-awaiting-author" }))
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "stale-awaiting-author" }))
 		expect(result.setFailed).toHaveBeenCalledWith(expect.stringContaining("could not clear review metadata"))
 	})
 
