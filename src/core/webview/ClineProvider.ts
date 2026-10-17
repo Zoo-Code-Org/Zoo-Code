@@ -1907,14 +1907,24 @@ export class ClineProvider
 		// path (e.g. the trailing postStateToWebview in handleModeSwitchUnlocked gates the next
 		// turn after a mode switch). Message ordering is enforced by the message seq, not the ack.
 		// Promise.resolve() normalizes non-promise returns (e.g. test doubles) before the catch.
-		void Promise.resolve(webview.postMessage(omitOriginalContentFromExtensionMessage(message))).catch((error) => {
-			// Swallow: postMessage rejects when the webview is disposed in flight.
+		// A disposed webview can also throw synchronously from postMessage itself, before
+		// any promise exists to attach the catch to: route that path through the same
+		// log so fire-and-forget callers never surface an unhandled rejection.
+		const logDropped = (error: unknown) => {
+			// Swallow: postMessage rejects (or throws) when the webview is disposed.
 			// Log the dropped message type so a wedged webview channel is diagnosable
 			// instead of silently losing state updates.
 			this.log(
 				`[postMessageToWebview] dropped message type=${message.type}: ${error instanceof Error ? error.message : String(error)}`,
 			)
-		})
+		}
+		try {
+			void Promise.resolve(webview.postMessage(omitOriginalContentFromExtensionMessage(message))).catch(
+				logDropped,
+			)
+		} catch (error) {
+			logDropped(error)
+		}
 	}
 
 	public requestWebviewThemeFixture(timeoutMs = 5_000): Promise<WebviewThemeFixture> {

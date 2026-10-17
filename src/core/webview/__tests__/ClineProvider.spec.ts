@@ -1322,6 +1322,23 @@ describe("ClineProvider", () => {
 		await expect(provider.postMessageToWebview(message)).resolves.toBeUndefined()
 	})
 
+	test("postMessageToWebview logs a synchronous postMessage throw", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		const logSpy = vi.spyOn(provider, "log").mockImplementation(() => {})
+		// A disposed webview can throw synchronously from postMessage, before any
+		// promise exists to attach the rejection handler to: the call site must handle
+		// it so fire-and-forget callers never see an unhandled rejection.
+		mockPostMessage.mockImplementationOnce(() => {
+			throw new Error("Webview is disposed")
+		})
+		const message: ExtensionMessage = { type: "action", action: "chatButtonClicked" }
+		await expect(provider.postMessageToWebview(message)).resolves.toBeUndefined()
+		expect(logSpy).toHaveBeenCalledWith(
+			expect.stringContaining("[postMessageToWebview] dropped message type=action"),
+		)
+		logSpy.mockRestore()
+	})
+
 	test("postMessageToWebview does not await the webview ack", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 
