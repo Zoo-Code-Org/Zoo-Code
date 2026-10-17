@@ -767,6 +767,8 @@ jobs:
                           // strip. The awaiting-maintainer branch below still refetches
                           // mergeability before the maintainer handoff, because a push
                           // between this fetch and labeling can change the answer.
+                          // A kept has-conflicts label can sit next to other state labels
+                          // until mergeability is known. This is intended.
                           const mergeabilityUnknown =
                             prDetail.mergeable === null || prDetail.mergeable_state === 'unknown';
                           const keepHasConflicts = mergeabilityUnknown &&
