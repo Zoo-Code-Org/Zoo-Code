@@ -2168,7 +2168,6 @@ describe("ClineProvider", () => {
 		expect(state.destructiveCommandGuardEnabled).toBe(false)
 	})
 
-
 	test("getStateToPostToWebview returns the saved dynamicThinkingEffort experiment when enabled", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		await provider.contextProxy.setValue("experiments", {
