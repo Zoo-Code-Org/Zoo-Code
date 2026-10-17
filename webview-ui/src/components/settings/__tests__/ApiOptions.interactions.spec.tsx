@@ -111,6 +111,7 @@ vi.mock("../providers", () => {
 		VercelAiGateway: provider("provider-vercel-ai-gateway"),
 		OpenCodeGo: provider("provider-opencode-go"),
 		Kenari: provider("provider-kenari"),
+		IOIntelligence: provider("provider-io-intelligence"),
 		NanoGPT: provider("provider-nanogpt"),
 		ZooGateway: provider("provider-zoo-gateway"),
 		MiniMax: provider("provider-minimax"),
@@ -243,6 +244,14 @@ describe("ApiOptions interactions", () => {
 				expectedMessage: { type: "requestVsCodeLmModels" },
 			},
 			{
+				provider: providerIdentifiers.githubCopilot,
+				configuration: {},
+				expectedMessage: {
+					type: "requestVsCodeLmModels",
+					apiConfiguration: { apiProvider: providerIdentifiers.githubCopilot },
+				},
+			},
+			{
 				provider: providerIdentifiers.litellm,
 				configuration: { litellmBaseUrl: "http://litellm:4000", litellmApiKey: "litellm-key" },
 				expectedMessage: {
@@ -372,6 +381,7 @@ describe("ApiOptions interactions", () => {
 		providerIdentifiers.vercelAiGateway,
 		providerIdentifiers.opencodeGo,
 		providerIdentifiers.kenari,
+		providerIdentifiers.ioIntelligence,
 		providerIdentifiers.nanogpt,
 		providerIdentifiers.zooGateway,
 		providerIdentifiers.fireworks,

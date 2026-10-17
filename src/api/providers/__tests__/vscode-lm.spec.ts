@@ -62,8 +62,27 @@ vi.mock("vscode", () => {
 		LanguageModelTextPart: MockLanguageModelTextPart,
 		LanguageModelToolCallPart: MockLanguageModelToolCallPart,
 		LanguageModelToolResultPart: MockLanguageModelToolResultPart,
+		LanguageModelDataPart: class {
+			constructor(
+				public data: Uint8Array,
+				public mimeType: string,
+			) {}
+			static image(data: Uint8Array, mimeType: string) {
+				return new this(data, mimeType)
+			}
+		},
 		lm: {
 			selectChatModels: vi.fn(),
+		},
+		authentication: {
+			getSession: vi.fn(),
+		},
+		extensions: {
+			getExtension: vi.fn(),
+		},
+		commands: {
+			getCommands: vi.fn(),
+			executeCommand: vi.fn(),
 		},
 	}
 })
@@ -71,6 +90,7 @@ vi.mock("vscode", () => {
 import * as vscode from "vscode"
 import {
 	VsCodeLmHandler,
+	getVsCodeLmModels,
 	extractLeakedToolCalls,
 	trailingPartialToolMarkerLength,
 	middleOutTruncate,
@@ -141,6 +161,41 @@ describe("VsCodeLmHandler", () => {
 			// The constructor triggers initializeClient which calls selectChatModels
 			expect(vscode.lm.selectChatModels).toHaveBeenCalled()
 		})
+
+		describe("when the initial model lookup fails", () => {
+			let deferred: VsCodeLmHandler
+
+			beforeEach(() => {
+				vi.spyOn(console, "error").mockImplementation(() => {})
+				vi.spyOn(console, "debug").mockImplementation(() => {})
+				;(vscode.lm.selectChatModels as Mock).mockRejectedValueOnce(new Error("models not ready"))
+				deferred = new VsCodeLmHandler(defaultOptions)
+			})
+
+			afterEach(() => {
+				deferred.dispose()
+				vi.restoreAllMocks()
+			})
+
+			it("does not throw from the constructor and logs that setup is deferred", async () => {
+				expect(deferred["client"]).toBeNull()
+				await vi.waitFor(() =>
+					expect(console.debug).toHaveBeenCalledWith(
+						"Zoo Code <Language Model API>: Initial client setup failed; retrying on first use:",
+						expect.objectContaining({ message: expect.stringContaining("models not ready") }),
+					),
+				)
+				expect(deferred["client"]).toBeNull()
+			})
+
+			it("creates the client on first use once the lookup succeeds", async () => {
+				await vi.waitFor(() => expect(console.debug).toHaveBeenCalled())
+				;(vscode.lm.selectChatModels as Mock).mockResolvedValue([{ ...mockLanguageModelChat }])
+
+				await expect(deferred["getClient"]()).resolves.toMatchObject({ id: mockLanguageModelChat.id })
+				expect(deferred["client"]).not.toBeNull()
+			})
+		})
 	})
 
 	describe("createClient", () => {
@@ -169,6 +224,28 @@ describe("VsCodeLmHandler", () => {
 			expect(client).toBeDefined()
 			expect(client.id).toBe("default-lm")
 			expect(client.vendor).toBe("vscode")
+		})
+
+		it("gives the placeholder client a working stream, text and token counter", async () => {
+			;(vscode.lm.selectChatModels as Mock).mockResolvedValueOnce([])
+			const client = await handler["createClient"]({})
+
+			const response = await client.sendRequest([], {}, new vscode.CancellationTokenSource().token)
+			const streamed: unknown[] = []
+			for await (const part of response.stream) streamed.push(part)
+			const text: string[] = []
+			for await (const chunk of response.text) text.push(chunk)
+
+			expect(streamed).toHaveLength(1)
+			expect(streamed[0]).toBeInstanceOf(vscode.LanguageModelTextPart)
+			expect(text.join("")).toContain("functionality is limited")
+			await expect(client.countTokens("anything")).resolves.toBe(0)
+		})
+
+		it("counts nothing for input that is neither text nor a chat message", async () => {
+			handler["client"] = mockLanguageModelChat
+			await expect(handler["internalCountTokens"]({} as never)).resolves.toBe(0)
+			expect(mockLanguageModelChat.countTokens).not.toHaveBeenCalled()
 		})
 
 		it("should throw a Zoo Code branded error when selectChatModels fails", async () => {
@@ -4449,5 +4526,53 @@ describe("context-window tool_result truncation", () => {
 			expect(parts[0].type).toBe("text")
 			expect(String(parts[0].text)).toContain("characters truncated")
 		})
+	})
+})
+
+describe("getVsCodeLmModels", () => {
+	const liveModel = (overrides: Record<string, unknown> = {}) => ({
+		...mockLanguageModelChat,
+		id: "listed-model",
+		vendor: "copilot",
+		family: "listed-family",
+		...overrides,
+	})
+
+	beforeEach(() => vi.clearAllMocks())
+
+	it("returns the host's models as they are, with no added capability data", async () => {
+		const model = liveModel({ capabilities: { supportsImageToText: true } })
+		vi.mocked(vscode.lm.selectChatModels).mockResolvedValue([model] as never)
+
+		await expect(getVsCodeLmModels()).resolves.toEqual([model])
+	})
+
+	it("asks the host for every model, whatever the vendor", async () => {
+		vi.mocked(vscode.lm.selectChatModels).mockResolvedValue([])
+		await getVsCodeLmModels()
+		expect(vscode.lm.selectChatModels).toHaveBeenCalledWith({})
+	})
+
+	it("omits models that can never work", async () => {
+		vi.mocked(vscode.lm.selectChatModels).mockResolvedValue([
+			liveModel({ id: "claude-3.7-sonnet" }),
+			liveModel({ id: "kept" }),
+		] as never)
+
+		expect((await getVsCodeLmModels()).map((model) => model.id)).toEqual(["kept"])
+	})
+
+	it("reports a host that has no models as an empty list", async () => {
+		vi.mocked(vscode.lm.selectChatModels).mockResolvedValue(undefined as never)
+		await expect(getVsCodeLmModels()).resolves.toEqual([])
+	})
+
+	it("keeps its long-standing behaviour of answering a failed lookup with an empty list", async () => {
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+		vi.mocked(vscode.lm.selectChatModels).mockRejectedValue(new Error("host unavailable"))
+
+		await expect(getVsCodeLmModels()).resolves.toEqual([])
+		expect(logged).toHaveBeenCalledWith(expect.stringContaining("host unavailable"))
+		logged.mockRestore()
 	})
 })
