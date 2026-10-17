@@ -112,6 +112,15 @@ export const MAX_CHECKPOINT_TIMEOUT_SECONDS = 60
 export const DEFAULT_CHECKPOINT_TIMEOUT_SECONDS = 15
 
 /**
+ * Persisted non-secret selections for a stable webview instance.
+ */
+export const viewStateSchema = z.object({
+	mode: z.string().optional(),
+	currentApiConfigName: z.string().optional(),
+	updatedAt: z.number().optional(),
+})
+
+/**
  * GlobalSettings
  */
 
@@ -119,6 +128,7 @@ export const globalSettingsSchema = z.object({
 	currentApiConfigName: z.string().optional(),
 	listApiConfigMeta: z.array(providerSettingsEntrySchema).optional(),
 	pinnedApiConfigs: z.record(z.string(), z.boolean()).optional(),
+	viewStates: z.record(z.string(), viewStateSchema).optional(),
 
 	lastShownAnnouncementId: z.string().optional(),
 	customInstructions: z.string().optional(),
@@ -364,6 +374,8 @@ export const SECRET_STATE_KEYS = [
 	"ioIntelligenceApiKey",
 	"nanoGptApiKey",
 	"basetenApiKey",
+	"mimoApiKey",
+	"poeApiKey",
 ] as const
 
 // Global secrets that are part of GlobalSettings (not ProviderSettings)
@@ -382,6 +394,26 @@ export type SecretState = Pick<ProviderSettings, Extract<ProviderSecretKey, keyo
 
 export const isSecretStateKey = (key: string): key is Keys<SecretState> =>
 	SECRET_STATE_KEYS.includes(key as ProviderSecretKey) || GLOBAL_SECRET_KEYS.includes(key as GlobalSecretKey)
+
+/**
+ * Credential-bearing provider settings that do not use an *ApiKey name shape:
+ * header maps that can carry Authorization values, session tokens, service
+ * account JSON, and credential-file paths. They must be excluded from every
+ * flattened configuration surface alongside SECRET_STATE_KEYS.
+ */
+export const SENSITIVE_PROVIDER_CONFIG_KEYS = [
+	"openAiHeaders",
+	"vertexKeyFile",
+	"vertexJsonCredentials",
+	"zooSessionToken",
+	"mimoApiKey",
+	"poeApiKey",
+	"qwenCodeOauthPath",
+	"geminiCliOAuthPath",
+] as const
+
+export const isSensitiveProviderConfigKey = (key: string): boolean =>
+	(SENSITIVE_PROVIDER_CONFIG_KEYS as readonly string[]).includes(key)
 
 /**
  * GlobalState
