@@ -988,13 +988,28 @@ export class ClineProvider
 			}
 
 			if (changed) {
-				await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+				try {
+					await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+				} catch (error) {
+					// updateGlobalState applies the new map to the in-memory cache
+					// before the durable write: restore the cache to the value durable
+					// storage actually holds so closed-view pins cannot serve re-pointed
+					// names that never reached disk, then let the caller compensate.
+					try {
+						await this.contextProxy.setValue("viewStates", this.context.globalState.get("viewStates"))
+					} catch {
+						// The cache is updated before the durable attempt: it matches the
+						// durable value regardless of whether this restore write landed.
+					}
+					throw error
+				}
 			}
 		})
 
 		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
 		await write
 	}
+
 	/**
 	 * Keeps only the most recently updated entries of the persisted view states map,
 	 * bounded by MAX_PERSISTED_VIEW_STATES so the global key cannot grow unboundedly.
@@ -3825,6 +3840,7 @@ export class ClineProvider
 		let selectionWriteLanded = false
 		let viewPinWriteLanded = false
 		let providerSettingsWriteLanded = false
+		let persistedRepointLanded = false
 		const entries = previousEntries.filter(({ name }) => name !== profileToDelete.name)
 
 		// Write only the profile list back: replaying the full settings snapshot
@@ -4042,6 +4058,18 @@ export class ClineProvider
 			// all agree again before the original failure is surfaced.
 			const compensationFailures: string[] = []
 			const describeFailure = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+			if (persistedRepointLanded) {
+				try {
+					const restoreViewStates = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+						await this.contextProxy.setValue("viewStates", { ...previousPersistedViewStates })
+					})
+					ClineProvider.persistedViewStateWriteQueue = restoreViewStates.catch(() => {})
+					await restoreViewStates
+				} catch (compensationError: unknown) {
+					compensationFailures.push(`durable viewStates pins: ${describeFailure(compensationError)}`)
+				}
+			}
 
 			if (deletedProfile) {
 				try {
