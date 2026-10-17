@@ -191,7 +191,15 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			task.didEditFile = true
 			didWrite = true
 
-			if (perWriteCheckpoints) {
+			// A write whose approval diff is empty leaves the shadow repository
+			// nothing to stage: the per-write checkpoint would resolve without
+			// a commit and the write-metadata rejection would report failure
+			// for a write that succeeded. Skip the checkpoint for that no-op
+			// (the write result is still pushed), mirroring EditFileTool's
+			// unchanged-content early return.
+			const contentUnchanged = fileExists && approvalDiff === ""
+
+			if (perWriteCheckpoints && !contentUnchanged) {
 				// B2: the change-journal entry for this write is appended inside
 				// checkpointSave (the hook stays a single call site), keyed by the
 				// checkpoint commit that call produces. Await so the checkpoint

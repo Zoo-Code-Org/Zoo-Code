@@ -2,7 +2,7 @@ import fs from "fs/promises"
 import os from "os"
 import path from "path"
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest"
 
 import type { Task } from "../../task/Task"
 import { journalPath } from "../changeJournal"
@@ -251,17 +251,60 @@ describe("checkpointSave change-card emission (B3a)", () => {
 		expect(say).not.toHaveBeenCalled()
 	})
 
-	it("fails a write-metadata save when an earlier failure flipped the task flag", async () => {
-		// getCheckpointService and the save-failure handlers flip
-		// task.enableCheckpoints off; the persisted setting still says the user
-		// wants checkpoints, so a later write-metadata save must throw too
-		// instead of silently proceeding with no rollback metadata.
-		const { task, say } = makeTask({ enableCheckpoints: false, state: { enableCheckpoints: true } })
+	it("recovers the next write-metadata save after a transient save failure", async () => {
+		// A failed save flips the task flag (checkpointsDisabledByFailure).
+		// The next write-metadata save must attempt recovery - reusing the
+		// live service handle - instead of failing every later write in the
+		// task with a misleading init-failure error.
+		const { task } = makeTask({})
+		const svc = task.checkpointService as unknown as { saveCheckpoint: Mock }
+		svc.saveCheckpoint = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("index.lock contention"))
+			.mockResolvedValue({ commit: "sha-recovered-1" })
+
+		await expect(
+			checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" }),
+		).rejects.toThrow(/Checkpoint save failed after a file write/)
+		expect(task.checkpointsDisabledByFailure).toBe(true)
+
+		await expect(
+			checkpointSave(task, false, true, { path: "src/b.ts", operation: "create", diff: "+y" }),
+		).resolves.toBeDefined()
+		expect(task.enableCheckpoints).toBe(true)
+		const journalRaw = await fs.readFile(journalPath(globalStorageDir, "task-card"), "utf8")
+		expect(journalRaw).toContain("src/b.ts")
+	})
+
+	it("fails a write-metadata save when recovery after an earlier failure cannot re-initialize", async () => {
+		// No live handle to reuse and initialization fails again: the write
+		// has no rollback metadata and must surface the failure.
+		const { task, say } = makeTask({ storageDir: null })
+		task.enableCheckpoints = false
+		task.checkpointsDisabledByFailure = true
 
 		await expect(
 			checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" }),
 		).rejects.toThrow(/could not initialize the checkpoint service/)
 
+		expect(say).not.toHaveBeenCalled()
+	})
+
+	it("resolves silently when checkpoints were off for the task and no failure occurred", async () => {
+		// Enabling checkpoints in settings mid-task does not retroactively
+		// fail writes: the task was constructed without checkpoints and no
+		// failure flipped the flag, so the absence of rollback metadata is
+		// the construction-time user choice.
+		const { task, say, saveCheckpoint } = makeTask({
+			enableCheckpoints: false,
+			state: { enableCheckpoints: true },
+		})
+
+		await expect(
+			checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" }),
+		).resolves.toBeUndefined()
+
+		expect(saveCheckpoint).not.toHaveBeenCalled()
 		expect(say).not.toHaveBeenCalled()
 	})
 
