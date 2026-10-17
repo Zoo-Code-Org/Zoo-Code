@@ -26,7 +26,10 @@
 				"!vitest.setup.ts!",
 				"!utils/vitest-verbosity.ts!",
 				"!utils/TaskSemaphore.ts!",
-				"!utils/WorkspacePathResolver.ts!"
+				"!utils/WorkspacePathResolver.ts!",
+				"!test-utils/**!",
+				"!utils/versionToken.ts!",
+				"!core/tools/helpers/toolResultFormatting.ts!"
 			],
 			"ignoreDependencies": [
 				"@roo-code/config-typescript",
@@ -39,7 +42,7 @@
 			]
 		},
 		"webview-ui": {
-			"entry": ["src/index.tsx!", "src/**/*.visual.tsx!"],
+			"entry": ["src/index.tsx!", "src/**/*.visual.tsx!", "src/**/*.visual.{fixture,i18n}.{ts,tsx}"],
 			"project": [
 				"src/**/*.{ts,tsx}!",
 				"../src/shared/*.ts!",

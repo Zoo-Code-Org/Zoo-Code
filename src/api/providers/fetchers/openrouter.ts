@@ -51,7 +51,6 @@ export const openRouterModelSchema = modelRouterBaseModelSchema.extend({
 /**
  * @internal
  */
-export type OpenRouterModel = z.infer<typeof openRouterModelSchema>
 
 export const openRouterModelEndpointSchema = modelRouterBaseModelSchema.extend({
 	provider_name: z.string(),
@@ -61,7 +60,6 @@ export const openRouterModelEndpointSchema = modelRouterBaseModelSchema.extend({
 /**
  * @internal
  */
-export type OpenRouterModelEndpoint = z.infer<typeof openRouterModelEndpointSchema>
 
 /**
  * OpenRouterModelsResponse

@@ -135,6 +135,8 @@ export async function extractTextFromFile(filePath: string): Promise<string> {
 /**
  * Extracts formatted text exclusively from supplied bytes, without pathname I/O.
  * filePath is only format/diagnostic metadata, never a source of file contents.
+ *
+ * @internal Exported for focused implementation tests.
  */
 export async function extractTextFromBuffer(source: Buffer, filePath: string): Promise<string> {
 	const fileExtension = path.extname(filePath).toLowerCase()
