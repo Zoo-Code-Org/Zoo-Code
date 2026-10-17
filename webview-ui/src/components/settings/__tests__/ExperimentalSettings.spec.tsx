@@ -32,4 +32,20 @@ describe("ExperimentalSettings", () => {
 		expect(screen.getByText("settings:experimental.CUSTOM_TOOLS.name")).toBeInTheDocument()
 		expect(screen.queryByText("settings:experimental.PARALLEL_TOOL_EXECUTION.name")).not.toBeInTheDocument()
 	})
+
+	it("hides the dynamic thinking effort toggle until the set_thinking_effort tool is registered", () => {
+		// The flag persists and round-trips, but the tool is not in getNativeTools()
+		// yet, so the toggle must not render - not even when the flag is enabled.
+		const { unmount } = render(
+			<ExperimentalSettings
+				{...defaultProps}
+				experiments={{ ...experimentDefault, dynamicThinkingEffort: true }}
+			/>,
+		)
+		expect(screen.queryByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name")).not.toBeInTheDocument()
+		unmount()
+
+		render(<ExperimentalSettings {...defaultProps} />)
+		expect(screen.queryByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name")).not.toBeInTheDocument()
+	})
 })
