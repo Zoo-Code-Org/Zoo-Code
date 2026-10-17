@@ -255,4 +255,112 @@ describe("API.setConfiguration", () => {
 		expect(stored).toEqual({ currentApiConfigName: "old-name", apiProvider: undefined })
 		expect(provider.postStateToWebview).not.toHaveBeenCalled()
 	})
+	it("serializes overlapping calls so snapshots cannot compensate each other", async () => {
+		const calls: string[] = []
+		let releaseSave: (() => void) | undefined
+		const provider = Object.assign({} as ClineProvider, {
+			context: {},
+			on: vi.fn(),
+			getValue: vi.fn(),
+			setValues: vi.fn().mockResolvedValue(undefined),
+			contextProxy: { setValues: vi.fn().mockResolvedValue(undefined) },
+			providerSettingsManager: {
+				getProfile: vi.fn().mockImplementation(async () => {
+					calls.push("snapshot")
+					throw new Error("profile not found")
+				}),
+				hasConfig: vi.fn().mockResolvedValue(false),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockImplementation(async () => {
+					calls.push("save")
+					await new Promise<void>((resolve) => {
+						releaseSave = resolve
+					})
+					return "default-id"
+				}),
+			},
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		})
+		const api = new API(
+			Object.assign({} as OutputChannel, { appendLine: vi.fn() }),
+			provider,
+			makeClineProviderFactory(),
+		)
+
+		const first = api.setConfiguration({
+			currentApiConfigName: "default",
+			apiProvider: providerIdentifiers.anthropic,
+		})
+		await vi.waitFor(() => expect(calls).toEqual(["snapshot", "save"]))
+		const second = api.setConfiguration({
+			currentApiConfigName: "default",
+			apiProvider: providerIdentifiers.openai,
+		})
+		// The second call must wait for the first to settle before taking its snapshot:
+		// unserialized calls snapshot and compensate against each other's writes.
+		await new Promise((resolve) => setImmediate(resolve))
+		expect(calls).toEqual(["snapshot", "save"])
+		releaseSave!()
+		// The second call now parks in its own save; release it too.
+		await vi.waitFor(() => expect(calls).toEqual(["snapshot", "save", "snapshot", "save"]))
+		releaseSave!()
+		await Promise.all([first, second])
+		expect(calls).toEqual(["snapshot", "save", "snapshot", "save"])
+	})
+
+	it("awaits every mode write before compensating the landed mappings", async () => {
+		const calls: string[] = []
+		let landArchitect: (() => void) | undefined
+		const provider = Object.assign({} as ClineProvider, {
+			context: {},
+			on: vi.fn(),
+			getValue: vi.fn(),
+			setValues: vi.fn().mockResolvedValue(undefined),
+			contextProxy: { setValues: vi.fn().mockResolvedValue(undefined) },
+			providerSettingsManager: {
+				getProfile: vi.fn().mockRejectedValue(new Error("profile not found")),
+				hasConfig: vi.fn().mockResolvedValue(false),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue("default-id"),
+				getModeConfigId: vi
+					.fn()
+					.mockImplementation(async (mode: string) =>
+						mode === "code" ? "old-code" : mode === "architect" ? "old-architect" : undefined,
+					),
+				setModeConfig: vi.fn().mockImplementation(async (mode: string, configId: string) => {
+					if (configId === "new-code") {
+						calls.push("write:code")
+						throw new Error("mode write failed")
+					}
+					if (configId === "new-architect") {
+						calls.push("write:architect")
+						await new Promise<void>((resolve) => {
+							landArchitect = resolve
+						})
+						calls.push("landed:architect")
+						return
+					}
+					calls.push(`restore:${mode}`)
+				}),
+			},
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		})
+		const api = new API(
+			Object.assign({} as OutputChannel, { appendLine: vi.fn() }),
+			provider,
+			makeClineProviderFactory(),
+		)
+
+		const pending = api.setConfiguration({
+			currentApiConfigName: "default",
+			modeApiConfigs: { code: "new-code", architect: "new-architect" },
+		})
+		await vi.waitFor(() => expect(calls).toContain("write:architect"))
+		landArchitect!()
+		await expect(pending).rejects.toThrow("mode write failed")
+		await new Promise((resolve) => setImmediate(resolve))
+		// The in-flight architect write settled before the compensation restored the
+		// mappings, so no mode write can land after its own restore.
+		expect(calls.indexOf("landed:architect")).toBeLessThan(calls.indexOf("restore:code"))
+	})
 })

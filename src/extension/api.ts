@@ -808,7 +808,20 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		return configuration
 	}
 
-	public async setConfiguration(values: RooCodeSettings) {
+	// Serializes setConfiguration calls; see the method comment.
+	private configurationWriteQueue: Promise<unknown> = Promise.resolve()
+
+	public async setConfiguration(values: RooCodeSettings): Promise<void> {
+		// Overlapping calls snapshot and compensate against each other's writes:
+		// the whole snapshot/write/compensate group runs through a per-instance queue
+		// so each call sees the settled result of the previous one.
+		const run = this.configurationWriteQueue.then(() => this.applyConfiguration(values))
+		// The queue must survive failures: chain the settled-only view of this run.
+		this.configurationWriteQueue = run.catch(() => {})
+		return run
+	}
+
+	private async applyConfiguration(values: RooCodeSettings): Promise<void> {
 		// The writes below are sequential, not transactional. Snapshot what each write
 		// overwrites so a later failure can compensate the writes that already landed;
 		// the original error is what callers see.
@@ -874,13 +887,17 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		}
 
 		if (values.modeApiConfigs) {
-			try {
-				await Promise.all(
-					Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
-						this.sidebarProvider.providerSettingsManager.setModeConfig(mode as Mode, configId),
-					),
-				)
-			} catch (error) {
+			// Await every mode write before compensating: with Promise.all the
+			// first rejection would start the restore while a sibling write was
+			// still in flight, and that write could land after its own restore.
+			const modeWriteResults = await Promise.allSettled(
+				Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
+					this.sidebarProvider.providerSettingsManager.setModeConfig(mode as Mode, configId),
+				),
+			)
+			const failedModeWrite = modeWriteResults.find((result) => result.status === "rejected")
+			if (failedModeWrite) {
+				const error = (failedModeWrite as PromiseRejectedResult).reason
 				// Undo every write that landed, each restore independently so one failed
 				// restore cannot strand the others: mode mappings, then the profile
 				// save, then the shared values.
@@ -978,16 +995,21 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		const valueSchema = (
 			globalSettingsSchema.shape as Record<
 				string,
-				{ safeParse: (value: unknown) => { success: boolean } } | undefined
+				{ safeParse: (value: unknown) => { success: boolean; data: unknown } } | undefined
 			>
 		)[String(key)]
 		if (!valueSchema) {
 			throw new Error(`setGlobalState received a key without a value schema: ${String(key)}`)
 		}
-		if (!valueSchema.safeParse(value).success) {
+		const parsedValue = valueSchema.safeParse(value)
+		if (!parsedValue.success) {
 			throw new Error(`setGlobalState received an invalid value for key: ${String(key)}`)
 		}
-		await this.context.globalState.update(key, value)
+		// Persist the parsed value: the object schemas in the settings map are
+		// non-strict, so the raw payload can carry extra credential- or PII-shaped
+		// fields that the schema strips; storing parsed data keeps unknown fields
+		// out of durable global state.
+		await this.context.globalState.update(key, parsedValue.data as GlobalState[K])
 	}
 
 	public setTerminalProfile(name: string | undefined): void {

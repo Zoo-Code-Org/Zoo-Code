@@ -355,7 +355,12 @@ describe("API task controls", () => {
 			// The per-task TaskStarted listener re-emits the event on the API and records it
 			// through fileLog: spy on the prototype so the message content is observable
 			// (fileLog is a no-op without the enableLogging flag).
-			const fileLogSpy = vi.spyOn(API.prototype, "fileLog" as keyof API).mockResolvedValue(undefined)
+			// fileLog is private: target the spy on the prototype shape directly; the
+			// `"fileLog" as keyof API` cast pushes the spyOn overload union past the
+			// compiler complexity ceiling after the setConfiguration queue landed.
+			const fileLogSpy = vi
+				.spyOn(API.prototype as unknown as { fileLog: (message: string) => Promise<void> }, "fileLog")
+				.mockResolvedValue(undefined)
 			const task = createTask("task-to-start")
 			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
 
@@ -596,6 +601,12 @@ describe("API task controls - per-view review fixes", () => {
 			// An allowed key with a valid value still works.
 			await api.setGlobalState("mode", "ask")
 			expect(update).toHaveBeenCalledWith("mode", "ask")
+			// Non-strict object schemas strip unknown fields only in the parsed
+			// value: the API must persist the parsed data, not the raw payload.
+			await api.setGlobalState("viewStates", {
+				"view-a": { mode: "debug", apiKey: "stray-secret" },
+			} as never)
+			expect(update).toHaveBeenLastCalledWith("viewStates", { "view-a": { mode: "debug" } })
 		})
 	})
 
