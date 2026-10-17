@@ -571,8 +571,12 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		// Derive the saved profile name once so the sibling refresh and the save
 		// agree on the empty-string fallback.
 		const savedProfileName = values.currentApiConfigName || "default"
-		await this.sidebarProvider.setValues(values, { savedProfileName })
+		// Persist the profile record before the shared/sibling refresh: saveConfig
+		// validates before storing, so a rejected save must not leave shared
+		// settings or sibling overlays serving settings the stored profile does
+		// not contain.
 		await this.sidebarProvider.providerSettingsManager.saveConfig(savedProfileName, values)
+		await this.sidebarProvider.setValues(values, { savedProfileName })
 		if (values.modeApiConfigs) {
 			await Promise.all(
 				Object.entries(values.modeApiConfigs).map(([mode, configId]) =>

@@ -68,4 +68,28 @@ describe("API - configuration", () => {
 		expect(setModeConfig).not.toHaveBeenCalled()
 		expect(postStateToWebview).toHaveBeenCalledOnce()
 	})
+	it("does not refresh shared settings or sibling overlays when the profile save rejects", async () => {
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const saveConfig = vi.fn().mockRejectedValue(new Error("invalid profile"))
+		const setModeConfig = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			setValues,
+			contextProxy: { setValues },
+			providerSettingsManager: { saveConfig, setModeConfig },
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(api.setConfiguration({ currentApiConfigName: "pinned" })).rejects.toThrow("invalid profile")
+
+		// saveConfig validates before storing: a rejected save must leave the
+		// shared settings and the sibling overlays pinned to the profile
+		// untouched, so no sibling serves settings the stored profile lacks.
+		expect(setValues).not.toHaveBeenCalled()
+		expect(postStateToWebview).not.toHaveBeenCalled()
+	})
 })
