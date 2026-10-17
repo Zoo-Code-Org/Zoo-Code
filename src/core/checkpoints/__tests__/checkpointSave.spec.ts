@@ -53,7 +53,10 @@ function makeTask(options: {
 		enableCheckpoints: options.enableCheckpoints ?? true,
 		// With `storageDir: null` there is no preset service either, so the
 		// lookup runs for real and fails on the missing storage dir.
-		checkpointService: options.storageDir === null ? undefined : { saveCheckpoint, isInitialized: true },
+		checkpointService:
+			options.storageDir === null
+				? undefined
+				: { saveCheckpoint, isInitialized: true, isPathIgnored: vi.fn().mockResolvedValue(false) },
 		providerRef: { deref: vi.fn().mockReturnValue(providerDeref) },
 		say,
 	} as unknown as Task

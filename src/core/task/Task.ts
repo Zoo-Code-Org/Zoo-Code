@@ -3863,13 +3863,21 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// save would only add latency to a task that is being disposed.
 		if (!this.taskStartBaselineDone && !this._isHistoryTask && !this.abort) {
 			this.taskStartBaselineDone = true
-			const baselineEnabled = (await this.providerRef.deref()?.getState())?.perWriteCheckpoints
-			// Cancellation can arrive while the state lookup is pending; recheck
-			// before the save so a canceled task performs no checkpoint work.
-			if (baselineEnabled !== false && !this.abort) {
-				// allowEmpty=true so a clean workspace still produces the baseline
-				// commit; awaited so the first per-write checkpoint cannot interleave.
-				await this.checkpointSave(true, true)
+			try {
+				const baselineEnabled = (await this.providerRef.deref()?.getState())?.perWriteCheckpoints
+				// Cancellation can arrive while the state lookup is pending; recheck
+				// before the save so a canceled task performs no checkpoint work.
+				if (baselineEnabled !== false && !this.abort) {
+					// allowEmpty=true so a clean workspace still produces the baseline
+					// commit; awaited so the first per-write checkpoint cannot interleave.
+					await this.checkpointSave(true, true)
+				}
+			} catch (error) {
+				// The baseline is best-effort and runs before TaskStarted: a rejected
+				// state lookup or a checkpoint error must not abort task startup
+				// (startTask rethrows non-abort errors from initiateTaskLoop). Log
+				// and continue; per-write saves still report their own failures.
+				console.error("[Task] task-start checkpoint baseline failed:", error)
 			}
 		}
 

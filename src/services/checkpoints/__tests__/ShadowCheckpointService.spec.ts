@@ -202,6 +202,26 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				expect(await fs.readFile(testFile, "utf-8")).toBe("Ahoy, world!")
 			})
 
+			it("rejects deleting an ignored live file that the checkpoint never tracked", async () => {
+				await fs.writeFile(testFile, "Ahoy, world!")
+				const commit1 = await service.saveCheckpoint("First checkpoint")
+				expect(commit1?.commit).toBeTruthy()
+
+				// An ignored path (.log is excluded by the default shadow-repo
+				// rules) reaches restoreFile only from a journal written before the
+				// skip-when-journaling fix. Its absence from the commit is not
+				// evidence of a deletion: the delete branch must fail loudly
+				// instead of removing a live file the shadow repo never tracked.
+				const ignoredFile = path.join(service.workspaceDir, "live.log")
+				await fs.writeFile(ignoredFile, "live log content")
+
+				await expect(service.restoreFile(commit1!.commit, "live.log")).rejects.toThrow(
+					/excluded from the shadow repository/,
+				)
+
+				expect(await fileExistsAtPath(ignoredFile)).toBe(true)
+			})
+
 			it("accepts a native backslashed path on Windows (git pathspecs are POSIX)", async () => {
 				if (process.platform !== "win32") {
 					// Off-Windows the journal paths are already POSIX, so there is

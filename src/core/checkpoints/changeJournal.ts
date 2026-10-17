@@ -122,31 +122,43 @@ export async function appendChanges(
 				throw error
 			}
 		}
-		// Torn-tail handling: a crash can leave the final line unterminated.
-		// If that final line is a complete, entry-shaped JSON record it was
-		// fully written and only its newline was lost - verified recovery:
-		// keep it and re-terminate. An unparseable or non-entry-shaped tail
-		// is NOT verified recovery material: it may be the truncated journal
-		// record of a committed write, and silently truncating it would let
-		// this append succeed while the rollback history is already
-		// incomplete (a later rollback could then resolve the file to the
-		// wrong checkpoint or lose the lost write's metadata). Reject the
-		// append instead; torn-tail repair is a separately verified recovery
-		// operation, not a side effect of the next write.
-		if (content && !content.endsWith("\n")) {
-			const cut = content.lastIndexOf("\n") + 1
-			let tail: unknown
-			try {
-				tail = JSON.parse(content.slice(cut))
-			} catch {
-				tail = undefined
+		// Torn-tail handling: the FINAL record must be complete and
+		// entry-shaped whether or not it ends with a newline. A crash can
+		// leave the final line unterminated; if that line is a complete,
+		// entry-shaped JSON record it was fully written and only its newline
+		// was lost - verified recovery: keep it and re-terminate. An
+		// unparseable or non-entry-shaped final record is NOT verified
+		// recovery material: it may be the truncated journal record of a
+		// committed write, and silently truncating it would let this append
+		// succeed while the rollback history is already incomplete (a later
+		// rollback could then resolve the file to the wrong checkpoint or
+		// lose the lost write's metadata). A malformed final record that
+		// still ends with its newline (e.g. "null\n") is the same hazard:
+		// accepting it here would demote it to a skipped middle line after
+		// the append, reporting an incomplete history as valid. Reject the
+		// append in both cases; torn-tail repair is a separately verified
+		// recovery operation, not a side effect of the next write.
+		if (content) {
+			const unterminated = !content.endsWith("\n")
+			const body = unterminated ? content : content.slice(0, -1)
+			const cut = body.lastIndexOf("\n") + 1
+			const tailText = body.slice(cut)
+			if (tailText !== "") {
+				let tail: unknown
+				try {
+					tail = JSON.parse(tailText)
+				} catch {
+					tail = undefined
+				}
+				if (!isEntryShaped(tail)) {
+					throw new Error(
+						`Cannot append to change journal ${filePath}: ${unterminated ? "unterminated " : ""}final record is not a complete entry (torn-tail recovery requires explicit repair)`,
+					)
+				}
 			}
-			if (!isEntryShaped(tail)) {
-				throw new Error(
-					`Cannot append to change journal ${filePath}: unterminated final record is not a complete entry (torn-tail recovery requires explicit repair)`,
-				)
+			if (unterminated) {
+				content = content + "\n"
 			}
-			content = content + "\n"
 		}
 		const payload = entries.map((entry) => JSON.stringify(entry) + "\n").join("")
 		const tmpPath = path.join(dir, `${JOURNAL_FILENAME}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`)

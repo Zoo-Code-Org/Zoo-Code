@@ -356,7 +356,25 @@ export async function checkpointSave(
 		// changes can still produce a commit, and emitting a card for it would
 		// show a change card with zero files. The checkpoint itself still runs.
 		if (result?.commit && hasWriteMetadata) {
-			const writes = journalWrites ?? []
+			// Paths excluded from the shadow repository (node_modules, build
+			// output, .gitignore'd files) never enter the journal: the shadow
+			// commit cannot contain them, so a journal entry would route a later
+			// rollback into restoreFile's delete branch, where absence from the
+			// commit would delete the user's live file. Skipping excluded paths
+			// at journaling time keeps rollback metadata honest and removes
+			// excluded-path noise from the journal and the change card.
+			const writes: CheckpointWriteInfo[] = []
+			for (const w of journalWrites ?? []) {
+				if (await service.isPathIgnored(w.path)) {
+					continue
+				}
+				writes.push(w)
+			}
+			if (writes.length === 0) {
+				// Every write landed on an excluded path: nothing to journal and
+				// nothing to show; the checkpoint commit itself still ran.
+				return result
+			}
 			if (!globalStorageDir) {
 				// Defensive: the pre-commit guard above normally makes this
 				// unreachable. If the location is nonetheless gone while the
