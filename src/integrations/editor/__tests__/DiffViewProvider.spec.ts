@@ -1332,6 +1332,63 @@ describe("DiffViewProvider", () => {
 			await expect(diffViewProvider.revertChanges()).rejects.toThrow("EBUSY")
 		})
 
+		it("revertChanges() keeps placeholder ownership when the unlink fails", async () => {
+			// A rollback that cannot remove the placeholder must leave it OWNED: the caller
+			// skips reset() on that signal and keeps a retry path, instead of the empty file
+			// being stranded unowned for the next attempt to mistake for an existing file.
+			Object.assign(diffViewProvider, {
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "create",
+				createdDirs: [],
+				placeholderPath: mockTargetPath,
+			})
+			vi.mocked(fs.unlink).mockRejectedValueOnce(
+				Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" }),
+			)
+
+			await expect(diffViewProvider.revertChanges()).rejects.toThrow("EPERM: operation not permitted")
+			expect(diffViewProvider["placeholderPath"]).toBe(mockTargetPath)
+			expect(diffViewProvider.ownsPlaceholder).toBe(true)
+		})
+
+		it("revertChanges() releases placeholder ownership once the unlink succeeded even if a directory removal fails", async () => {
+			// Ownership tracks the file, not the whole rollback: after the unlink lands, the
+			// ownership is released before the directory loop, so a later EBUSY cannot strand
+			// an ownership whose file no longer exists.
+			Object.assign(diffViewProvider, {
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "create",
+				createdDirs: [`${mockCwd}/new-parent`],
+				placeholderPath: mockTargetPath,
+			})
+			vi.mocked(fs.rmdir).mockRejectedValueOnce(Object.assign(new Error("EBUSY"), { code: "EBUSY" }))
+
+			await expect(diffViewProvider.revertChanges()).rejects.toThrow("EBUSY")
+			expect(fs.unlink).toHaveBeenCalledWith(mockTargetPath)
+			expect(diffViewProvider["placeholderPath"]).toBeUndefined()
+		})
+
+		it("discardUnapprovedStream() keeps placeholder ownership when the unlink fails", async () => {
+			// Same discipline as revertChanges(): the abandoned-stream cleanup runs even with
+			// no editor, and a failed unlink must leave the placeholder owned so the caller
+			// can skip reset() and keep a retry path instead of stranding it unowned.
+			Object.assign(diffViewProvider, {
+				relPath: "mock-target-file.ts",
+				activeDiffEditor: undefined,
+				editType: "create",
+				createdDirs: [],
+				placeholderPath: mockTargetPath,
+			})
+			vi.mocked(fs.unlink).mockRejectedValueOnce(
+				Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" }),
+			)
+
+			await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow("EPERM: operation not permitted")
+			expect(diffViewProvider["placeholderPath"]).toBe(mockTargetPath)
+		})
+
 		it("revertChanges() after reset() does not unlink a file this edit never created", async () => {
 			// reset() used to leave relPath behind with editType cleared, which is exactly the state
 			// that sends the NEXT rollback down the new-file branch: fs.unlink on whatever file this

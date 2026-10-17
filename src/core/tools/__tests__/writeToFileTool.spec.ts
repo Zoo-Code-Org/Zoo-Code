@@ -642,6 +642,40 @@ describe("writeToFileTool", () => {
 			expect(mockCline.finalizePartialToolAsk).not.toHaveBeenCalled()
 		})
 
+		it("releases the per-task stream state when the filesystem probe rejects during a partial delta", async () => {
+			// The probe looks like a read and is an await into the filesystem, registered
+			// after this task's entry and its TaskAborted listener. A rejection here reaches
+			// neither the streaming block nor execute()'s teardown, so the outer boundary must
+			// release them and rethrow - the singleton must not keep the task.
+			const probeFailure = Object.assign(new Error("EPERM: could not probe the target path"), {
+				code: "EPERM",
+			})
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(1)
+			const abortListener = mockCline.once.mock.calls.find(
+				([event]: unknown[]) => event === RooCodeEventName.TaskAborted,
+			)?.[1]
+			expect(abortListener).toBeInstanceOf(Function)
+			// The earlier deltas set editType from the probe; clear it so the failing delta
+			// actually reaches fileExistsAtPath() again.
+			mockCline.diffViewProvider.editType = undefined
+			mockedFileExistsAtPath.mockRejectedValueOnce(probeFailure)
+			mockCline.diffViewProvider.open.mockClear()
+			mockCline.diffViewProvider.discardUnapprovedStream.mockClear()
+			mockHandleError.mockClear()
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(writeToFileTool["taskPartialStreamState"].size).toBe(0)
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortListener)
+			// Releasing the state must not swallow the failure: BaseTool.handle() still reports it.
+			expect(mockHandleError).toHaveBeenCalledTimes(1)
+			expect(mockHandleError).toHaveBeenCalledWith("handling partial write_to_file", probeFailure)
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.discardUnapprovedStream).not.toHaveBeenCalled()
+		})
+
 		it("does not run a second cleanup when the task aborts while open() is in flight and open() then rejects", async () => {
 			// openDiffEditor() has command-failure and timeout rejection paths, so a cancellation can
 			// land while open() is pending and open() can then reject. The TaskAborted teardown already
@@ -1463,6 +1497,62 @@ describe("writeToFileTool", () => {
 				expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
 				expect(consoleErrorSpy).toHaveBeenCalledWith(
 					"Error removing the uncommitted write_to_file placeholder:",
+					expect.any(Error),
+				)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
+
+		it("keeps the placeholder owned and skips the reset when a denied new-file rollback cannot remove it", async () => {
+			// A denial rolls the new file back; if the rollback cannot remove the placeholder
+			// (refused restore, EPERM unlink) the provider still owns it. reset() would forget
+			// that ownership and strand the empty file unowned, so it must be skipped and the
+			// hazard reported - the same discipline as the pre-commit save-failure path.
+			mockAskApproval.mockResolvedValue(false)
+			mockCline.diffViewProvider.revertChanges = vi
+				.fn()
+				.mockRejectedValue(Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" }))
+			mockCline.diffViewProvider.discardUnapprovedStream = vi
+				.fn()
+				.mockRejectedValue(Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" }))
+			// The rollback left the placeholder on disk: the provider still owns it.
+			mockCline.diffViewProvider.ownsPlaceholder = true
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			try {
+				await executeWriteFileTool({}, { fileExists: false })
+
+				expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+				// Ownership survives: reset() did not run to forget it...
+				expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
+				// ...and the hazard is user-visible, not only a console line.
+				expect(mockCline.say).toHaveBeenCalledWith("error", expect.stringContaining("placeholder"))
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
+
+		it("still completes the teardown when the stranded-placeholder report itself rejects", async () => {
+			// The hazard report must not abort the cleanup: a failing say is logged and the
+			// error path completes - the session stays unreset so the placeholder ownership
+			// survives for a retry.
+			mockCline.diffViewProvider.saveChanges.mockImplementationOnce(async () => {
+				throw new Error("Saving /test/path.txt was not confirmed; the write was not committed.")
+			})
+			mockCline.diffViewProvider.discardOwnedPlaceholder = vi
+				.fn()
+				.mockRejectedValue(Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" }))
+			mockCline.say = vi.fn().mockRejectedValue(new Error("webview is gone"))
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			try {
+				await executeWriteFileTool({}, { fileExists: false })
+
+				expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+				expect(mockCline.diffViewProvider.reset).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"Error reporting write_to_file stranded placeholder failure:",
 					expect.any(Error),
 				)
 			} finally {

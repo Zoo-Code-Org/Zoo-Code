@@ -538,6 +538,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				// cleaning up this call's debris.
 				if (!writeApproved && !writeCommitted) {
 					reverted = await this.discardUnapprovedStreamBeforeReset(task)
+					// A denial whose rollback could not remove the placeholder (refused restore,
+					// EPERM unlink) leaves it owned: reset() would forget that ownership and
+					// strand the empty file unowned, so it is skipped and the hazard reported -
+					// the same discipline as the pre-commit save-failure path below.
+					strandedPlaceholder = !reverted && task.diffViewProvider.ownsPlaceholder
 				} else if (writeApproved && !writeCommitted) {
 					// saveChanges() failed before its commit point: the write never persisted,
 					// so the owned empty placeholder must not be stranded unowned by reset().
@@ -550,7 +555,8 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					// The restore failed, so the editor still holds content this task never approved.
 					// The error the user sees on this path is the write failure, not this one.
 					await this.reportRevertFailure(task)
-				} else if (strandedPlaceholder) {
+				}
+				if (strandedPlaceholder) {
 					// The placeholder is still on disk and still owned; reset() was skipped so
 					// the session keeps that ownership for a retry. Make the hazard visible.
 					await this.reportPlaceholderStranded(task)

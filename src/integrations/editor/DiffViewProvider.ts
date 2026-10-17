@@ -575,6 +575,16 @@ export class DiffViewProvider {
 	}
 
 	/**
+	 * Whether this edit still owns a placeholder file that cleanup must remove.
+	 * True from the moment open() creates the file until a rollback or commit removes
+	 * it; a failed removal leaves it true so the caller can keep the session (and the
+	 * retry path) instead of resetting the ownership away.
+	 */
+	get ownsPlaceholder(): boolean {
+		return this.placeholderPath !== undefined
+	}
+
+	/**
 	 * Release the placeholder this edit owns when the approved write never committed:
 	 * saveChanges() threw before its commit point, so the file on disk is still the empty
 	 * placeholder open() created. Leaving it behind unowned would make a later attempt
@@ -625,10 +635,10 @@ export class DiffViewProvider {
 		// then the only chance to remove what the abandoned edit left on disk.
 		const createdDirs = this.createdDirs
 		this.createdDirs = []
-		// Same reason for the placeholder: an await below may reject and the caller then runs
-		// reset(), which drops this field too.
+		// Same snapshot for the placeholder, but the ownership stays set until the unlink
+		// actually succeeds: a failed removal (EPERM) must leave the file owned so the
+		// caller can keep the session and a retry path instead of stranding it unowned.
 		const placeholderPath = this.placeholderPath
-		this.placeholderPath = undefined
 
 		let editorFailure: unknown
 		// open() creates the directories and the empty placeholder BEFORE it assigns
@@ -693,6 +703,7 @@ export class DiffViewProvider {
 				// The helpers carry the ENOENT tolerance: open() creates the placeholder,
 				// and if it is already gone there is nothing left to remove.
 				await this.removeCreatedFile(placeholderPath)
+				this.placeholderPath = undefined
 			}
 
 			// Remove only the directories this edit created, in reverse order.
@@ -722,10 +733,10 @@ export class DiffViewProvider {
 		// Only the placeholder THIS edit owns may be deleted. A stale session (a prior reset()
 		// whose close failed) can carry relPath onto the next call, and the path derived from
 		// it may name a file this edit never created - e.g. the previously approved write.
-		// Snapshot the ownership and clear the field before any await, so a mid-flight
-		// rejection cannot leave it for a later discard to act on twice.
-		const placeholderPath = this.placeholderPath
-		this.placeholderPath = undefined
+		// Ownership is released only once the unlink succeeds: a rollback that fails partway
+		// (refused restore, EPERM unlink) must leave the placeholder OWNED so the caller can
+		// skip reset() and keep a retry path, instead of stranding the empty file unowned.
+		// A double unlink from a later discard is safe - removeCreatedFile tolerates ENOENT.
 
 		// Stop tracking touches and cancel any pending scroll-to-diff before any
 		// programmatic editor activation below.
@@ -777,8 +788,11 @@ export class DiffViewProvider {
 				}
 			}
 
-			if (placeholderPath) {
-				await this.removeCreatedFile(placeholderPath)
+			if (this.placeholderPath) {
+				await this.removeCreatedFile(this.placeholderPath)
+				// The file is gone: release ownership before the directory loop, so a later
+				// failure there cannot strand an ownership that no longer has a file.
+				this.placeholderPath = undefined
 			}
 
 			// Remove only the directories we created, in reverse order.
