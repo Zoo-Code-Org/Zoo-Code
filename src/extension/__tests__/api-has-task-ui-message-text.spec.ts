@@ -3,12 +3,13 @@ import * as vscode from "vscode"
 
 import { API } from "../api"
 import { ClineProvider } from "../../core/webview/ClineProvider"
-import { readTaskMessages } from "../../core/task-persistence/taskMessages"
+import { readTaskMessages, TaskMessagesReadError } from "../../core/task-persistence/taskMessages"
 import { makeClineProviderFactory } from "../../test-utils/provider"
 
 vi.mock("vscode")
 vi.mock("../../core/webview/ClineProvider")
-vi.mock("../../core/task-persistence/taskMessages", () => ({
+vi.mock("../../core/task-persistence/taskMessages", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../core/task-persistence/taskMessages")>()),
 	readTaskMessages: vi.fn(),
 }))
 
@@ -30,6 +31,7 @@ describe("API#hasTaskUiMessageText", () => {
 			context: {} as vscode.ExtensionContext,
 			contextProxy: { globalStorageUri: { fsPath: "/mock/global/storage" } },
 			taskHistoryStore: { get: vi.fn() },
+			getTaskWithId: vi.fn().mockResolvedValue({}),
 			on: vi.fn(),
 		} as unknown as ClineProvider
 
@@ -51,10 +53,36 @@ describe("API#hasTaskUiMessageText", () => {
 		await expect(api.hasTaskUiMessageText("task-1", "RESTART_PERSISTENCE_MARKER")).resolves.toBe(false)
 	})
 
-	it("returns false instead of throwing while ui_messages.json is missing or unreadable", async () => {
-		// The completion write may not have landed yet; callers poll until it does.
-		vi.mocked(readTaskMessages).mockRejectedValue(new Error("Failed to read task messages (code: ENOENT)"))
+	it("finds the text in a later message and skips messages without text", async () => {
+		vi.mocked(readTaskMessages).mockResolvedValue([
+			{ ts: 1, type: "say", say: "api_req_started" },
+			{ ts: 2, type: "say", say: "text", text: "unrelated" },
+			{ ts: 3, type: "say", say: "completion_result", text: "done RESTART_PERSISTENCE_MARKER" },
+		])
+
+		await expect(api.hasTaskUiMessageText("task-1", "RESTART_PERSISTENCE_MARKER")).resolves.toBe(true)
+	})
+
+	it("returns false when only messages without text exist", async () => {
+		vi.mocked(readTaskMessages).mockResolvedValue([{ ts: 1, type: "say", say: "api_req_started" }])
 
 		await expect(api.hasTaskUiMessageText("task-1", "RESTART_PERSISTENCE_MARKER")).resolves.toBe(false)
+	})
+
+	it.each(["not_found", "invalid", "io_error"] as const)(
+		"returns false instead of throwing on a %s read failure",
+		async (kind) => {
+			// The completion write may not have landed yet; callers poll until it does.
+			vi.mocked(readTaskMessages).mockRejectedValue(new TaskMessagesReadError(kind, `read failed: ${kind}`))
+
+			await expect(api.hasTaskUiMessageText("task-1", "RESTART_PERSISTENCE_MARKER")).resolves.toBe(false)
+		},
+	)
+
+	it("returns false without reading disk for a task id that is not in history", async () => {
+		vi.mocked(mockProvider.getTaskWithId).mockRejectedValue(new Error("Task not found"))
+
+		await expect(api.hasTaskUiMessageText("../../escape", "RESTART_PERSISTENCE_MARKER")).resolves.toBe(false)
+		expect(readTaskMessages).not.toHaveBeenCalled()
 	})
 })

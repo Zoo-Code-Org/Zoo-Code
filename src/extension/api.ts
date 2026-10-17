@@ -310,6 +310,8 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	public async hasTaskUiMessageText(taskId: string, text: string): Promise<boolean> {
 		let uiMessages: Awaited<ReturnType<typeof readTaskMessages>>
 		try {
+			// Reject unknown ids first: readTaskMessages creates the task directory.
+			await this.sidebarProvider.getTaskWithId(taskId)
 			uiMessages = await readTaskMessages({
 				taskId,
 				globalStoragePath: this.sidebarProvider.contextProxy.globalStorageUri.fsPath,

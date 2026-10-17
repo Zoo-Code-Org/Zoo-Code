@@ -169,24 +169,7 @@ describe("taskMessages.readTaskMessages", () => {
 		expect(hoisted.readFileMock).toHaveBeenCalledTimes(2)
 	})
 
-	it("keeps retrying a file that only appears after several late-write windows", async () => {
-		// Fault injection: the file is missing at read time and stays missing
-		// past the first retry, appearing only once the racing writer lands it.
-		vi.spyOn(Math, "random").mockReturnValue(0)
-		const missing = Object.assign(new Error("missing"), { code: "ENOENT" })
-		hoisted.readFileMock
-			.mockRejectedValueOnce(missing)
-			.mockRejectedValueOnce(missing)
-			.mockRejectedValueOnce(missing)
-			.mockResolvedValueOnce("[]")
-
-		await expect(readTaskMessages({ taskId: "task-late-write", globalStoragePath: tmpBaseDir })).resolves.toEqual(
-			[],
-		)
-		expect(hoisted.readFileMock).toHaveBeenCalledTimes(4)
-	})
-
-	it("throws with the underlying error code when all missing-file retries are exhausted", async () => {
+	it("throws with the underlying error code when the missing-file retry also fails", async () => {
 		vi.spyOn(Math, "random").mockReturnValue(0)
 		const missing = Object.assign(new Error("missing"), { code: "ENOENT" })
 		hoisted.readFileMock.mockRejectedValue(missing)
@@ -194,10 +177,12 @@ describe("taskMessages.readTaskMessages", () => {
 		const error = await readTaskMessages({ taskId: "task-still-missing", globalStoragePath: tmpBaseDir }).catch(
 			(caught: unknown) => caught,
 		)
-		expect(error).toMatchObject({ kind: "not_found" })
-		expect((error as Error).message).toContain("(code: ENOENT)")
-		// 1 initial attempt plus the bounded ENOENT retries.
-		expect(hoisted.readFileMock).toHaveBeenCalledTimes(5)
+		expect(error).toMatchObject({
+			kind: "not_found",
+			originalError: missing,
+			message: expect.stringContaining("(code: ENOENT)"),
+		})
+		expect(hoisted.readFileMock).toHaveBeenCalledTimes(2)
 	})
 
 	it("does not retry non-ENOENT read failures and surfaces the underlying code", async () => {

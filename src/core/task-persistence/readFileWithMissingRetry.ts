@@ -1,13 +1,10 @@
 import * as fs from "fs/promises"
 
-// A file that is about to be written by a still-running writer (for example
-// the final task-messages save racing an extension-host shutdown) can be
-// missing for longer than a single 1-10ms retry window. Retry a bounded
-// number of times with a jittered delay so reads cover late writes, while
-// keeping genuinely-missing files fast enough (worst case ~4 x 100ms).
-const READ_RETRY_ATTEMPTS = 4
-const READ_RETRY_MIN_MS = 10
-const READ_RETRY_MAX_MS = 100
+// safeWriteJson replaces a file in two renames (target to backup, new file to
+// target) because a single rename over an open file fails with EPERM on
+// Windows. A reader can see ENOENT between the two renames, so retry once.
+const READ_RETRY_MIN_MS = 1
+const READ_RETRY_MAX_MS = 10
 const READ_RETRY_RANGE_MS = READ_RETRY_MAX_MS - READ_RETRY_MIN_MS + 1
 
 export function getErrorCode(error: unknown): string | undefined {
@@ -35,19 +32,15 @@ export function formatErrorDetail(error: unknown): string {
 }
 
 export async function readFileWithMissingRetry(filePath: string): Promise<string> {
-	let retriesLeft = READ_RETRY_ATTEMPTS
-
-	while (true) {
-		try {
-			return await fs.readFile(filePath, "utf8")
-		} catch (error) {
-			if (getErrorCode(error) !== "ENOENT" || retriesLeft <= 0) {
-				throw error
-			}
-
-			retriesLeft -= 1
-			const retryDelay = READ_RETRY_MIN_MS + Math.floor(Math.random() * READ_RETRY_RANGE_MS)
-			await new Promise((resolve) => setTimeout(resolve, retryDelay))
+	try {
+		return await fs.readFile(filePath, "utf8")
+	} catch (error) {
+		if (getErrorCode(error) !== "ENOENT") {
+			throw error
 		}
+
+		const retryDelay = READ_RETRY_MIN_MS + Math.floor(Math.random() * READ_RETRY_RANGE_MS)
+		await new Promise((resolve) => setTimeout(resolve, retryDelay))
+		return fs.readFile(filePath, "utf8")
 	}
 }
