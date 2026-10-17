@@ -46,11 +46,11 @@ Zoo Code phát triển trên nền tảng do Roo Code tạo ra và tiếp tục 
 - **Workflow terminal và chỉnh sửa đáng tin cậy hơn** — sửa lỗi terminal hoàn tất quá sớm, xung đột trạng thái tác vụ, quản lý ngữ cảnh, chỉnh sửa diff và sử dụng công cụ riêng của từng provider.
 - **Kiểm soát workspace tốt hơn** — quản lý quy tắc, giới hạn MCP theo từng chế độ, kiểm soát đường dẫn multi-root, tùy chọn reasoning của model và thao tác xem lại thay đổi khi hoàn tất.
 
-## Điểm mới trong v3.86.0
+## Điểm mới trong v3.90.0
 
-- ✨ **Hỗ trợ model mới:** Dùng GPT-6.1 Sol, tận dụng giới hạn đầu ra đã sửa của Claude Opus 5.5 và chọn DeepSeek V4.1 Flash trên OpenCode Go.
-- 🧭 **Hủy và gián đoạn task đáng tin cậy:** Giữ nguyên lý do hủy đầu tiên, đặt lại trạng thái hủy stream cho từng request và ngăn task bị gián đoạn chạy lại các subtask đã bị từ chối.
-- 🛠️ **Tool, Prompt và truyền luồng UI đáng tin cậy:** Giữ nguyên vẹn tham số tool được truyền theo luồng, thực thi chính sách tool MCP, ngăn số dòng bịa đặt và giúp cập nhật chat mượt mà hơn.
+- ✨ **Provider và model:** GitHub Copilot giờ là một provider: đăng nhập và Zoo Code tải model Copilot của bạn. IO Intelligence là provider với API key riêng. Gemini 4 Argon có trên Gemini và Vertex. GPT-6 Luna có trên OpenCode Go. Gemini 4 Argon và GPT-6 Luna cũng có trên Zoo Gateway.
+- 🧭 **Thực thi tool:** Lặp lại cùng một tool call sẽ có cảnh báo, rồi Zoo Code dừng vòng lặp đó. Tắt `attempt_completion` không còn để task không thể hoàn thành. Tin nhắn trong hàng đợi chạy cùng kiểm tra bảo vệ lệnh như lệnh bạn gửi trực tiếp.
+- ⚡ **Suy luận và streaming:** Adaptive thinking của Anthropic hiện trong chat và thinking token được đếm. Công tắc R1 giữ suy luận từ llama.cpp, Ollama và LM Studio. Codex giữ suy luận đã mã hóa cùng bản tóm tắt bạn thấy. Stream language model của VS Code dùng guarded recovery khi stream lỗi.
 
 ## Zoo Code có thể làm gì cho BẠN?
 

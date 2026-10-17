@@ -113,6 +113,15 @@
 	},
 	"selectMode": "Etkileşim modunu seçin",
 	"selectApiConfig": "API yapılandırmasını seçin",
+	"selectModel": "Model seç",
+	"modelSelector": {
+		"title": "Modeller",
+		"settings": "Model Ayarları",
+		"description": "Bu API yapılandırması için kullanılacak modeli seçin.",
+		"searchPlaceholder": "Model ara...",
+		"unsupportedTooltip": "Bu sağlayıcının modeli Ayarlar'da yapılandırılır",
+		"loading": "Modeller yükleniyor..."
+	},
 	"lockApiConfigAcrossModes": "Bu çalışma alanındaki tüm modlarda API yapılandırmasını kilitle",
 	"unlockApiConfigAcrossModes": "Bu çalışma alanındaki tüm modlarda API yapılandırması kilitli (kilidi açmak için tıkla)",
 	"enhancePrompt": "Ek bağlamla istemi geliştir",
@@ -344,10 +353,10 @@
 		"title": "Zoo Code {{version}} yayınlandı",
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
-			"heading": "Yenilikler:",
-			"highlight1": "✨ Yeni model desteği: GPT-6.1 Sol kullan, Claude Opus 5.5'in düzeltilmiş çıktı sınırından yararlan ve OpenCode Go'da DeepSeek V4.1 Flash'ı seç.",
-			"highlight2": "🧭 Güvenilir görev iptalleri ve kesintiler: İlk iptal nedenini koru, her istek için akış iptal durumunu sıfırla ve kesintiye uğrayan görevlerin reddedilen alt görevleri yeniden çalıştırmasını önle.",
-			"highlight3": "🛠️ Güvenilir araçlar, Prompt'lar ve arayüz akışı: Akışla gelen araç argümanlarını eksiksiz koru, MCP araç politikasını uygula, uydurma satır numaralarını önle ve sohbet güncellemelerini akıcı hâle getir."
+			"heading": "Zoo Code v3.90.0'daki yenilikler",
+			"highlight1": "✨ Sağlayıcılar ve modeller: GitHub Copilot artık bir sağlayıcı: oturum aç, Zoo Code Copilot modellerini yükler. IO Intelligence kendi API anahtarı olan bir sağlayıcıdır. Gemini 4 Argon, Gemini ve Vertex'tedir. GPT-6 Luna, OpenCode Go'dadır. Gemini 4 Argon ve GPT-6 Luna Zoo Gateway'de de vardır.",
+			"highlight2": "🧭 Araç yürütme: Aynı araç çağrısını yinelemek bir uyarı verir, sonra Zoo Code bu döngüyü durdurur. attempt_completion kapatmak artık bir görevi bitiremez halde bırakmaz. Kuyruktaki mesajlar, doğrudan gönderdiğin komutlarla aynı komut koruması kontrollerinden geçer.",
+			"highlight3": "⚡ Akıl yürütme ve akış: Anthropic adaptive thinking sohbette görünür ve thinking token'lar sayılır. R1 anahtarı llama.cpp, Ollama ve LM Studio akıl yürütmesini tutar. Codex, gördüğün özete ek olarak şifreli akıl yürütmeyi saklar. VS Code dil modeli akışları, akış başarısız olunca guarded recovery kullanır."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",
@@ -488,6 +497,10 @@
 		"serversPart_other": "{{count}} MCP sunucusu",
 		"messageTemplate": "{{servers}} üzerinden {{tools}} etkinleştirilmiş durumda. Bu kadar fazlası modeli kafası karışabilir ve hatalara neden olabilir. {{threshold}} altında tutmaya çalış.",
 		"openMcpSettings": "MCP Ayarlarını Aç"
+	},
+	"ignoredDisabledTools": {
+		"title": "Devre dışı bırakılan araç yok sayıldı",
+		"messageTemplate": "Aşağıdaki araçlar devre dışı bırakılamaz; bu nedenle ilgili disabledTools girdileri yok sayıldı: {{tools}}."
 	},
 	"readCommandOutput": {
 		"title": "Zoo read command output"

@@ -47,11 +47,11 @@ Zoo Code bouwt voort op het fundament van Roo Code en breidt dit verder uit met:
 - **Betrouwbaardere terminal- en bewerkingsworkflows** — oplossingen voor voortijdige terminalvoltooiing, race conditions in taakstatussen, contextbeheer, diff-bewerking en providerspecifiek toolgebruik.
 - **Meer controle over je workspace** — regelbeheer, MCP-beperkingen per modus, padbeheer voor multi-root-workspaces, reasoning-opties voor modellen en acties om wijzigingen bij voltooiing te beoordelen.
 
-## Nieuw in v3.86.0
+## Nieuw in v3.90.0
 
-- ✨ **Ondersteuning voor nieuwe modellen:** Gebruik GPT-6.1 Sol, profiteer van de gecorrigeerde uitvoerlimiet van Claude Opus 5.5 en selecteer DeepSeek V4.1 Flash op OpenCode Go.
-- 🧭 **Betrouwbaar afbreken en onderbreken van taken:** Bewaar de eerste afbreekreden, reset de afbreekstatus van de stream bij elk verzoek en voorkom dat onderbroken taken afgewezen subtaken opnieuw uitvoeren.
-- 🛠️ **Betrouwbare tools, prompts en UI-streaming:** Houd gestreamde toolargumenten intact, handhaaf het MCP-toolbeleid, voorkom verzonnen regelnummers en maak chatupdates vloeiender.
+- ✨ **Providers en modellen:** GitHub Copilot is nu een provider: meld je aan en Zoo Code laadt je Copilot-modellen. IO Intelligence is een provider met een eigen API-sleutel. Gemini 4 Argon staat op Gemini en Vertex. GPT-6 Luna staat op OpenCode Go. Gemini 4 Argon en GPT-6 Luna staan ook op Zoo Gateway.
+- 🧭 **Tool-uitvoering:** Dezelfde tool-aanroep herhalen geeft een waarschuwing, daarna stopt Zoo Code die lus. `attempt_completion` uitschakelen laat een taak niet langer onafgemaakt. Berichten in de wachtrij doorlopen dezelfde command-protection-controles als opdrachten die je direct verstuurt.
+- ⚡ **Redeneren en streaming:** Adaptief denken van Anthropic verschijnt in de chat en thinking tokens worden geteld. De R1-schakelaar bewaart redenering van llama.cpp, Ollama en LM Studio. Codex bewaart versleutelde redenering bij de samenvatting die je ziet. VS Code language-model-streams gebruiken guarded recovery als een stream mislukt.
 
 ## Wat kan Zoo Code voor JOU doen?
 

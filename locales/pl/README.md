@@ -45,11 +45,11 @@ Zoo Code rozwija fundament stworzony przez Roo Code i stale rozszerza go o:
 - **Bardziej niezawodne workflow terminala i edycji** — poprawki przedwczesnego kończenia poleceń terminala, race condition stanu zadań, zarządzania kontekstem, edycji diff i użycia narzędzi właściwych dla providerów.
 - **Większą kontrolę nad workspace** — zarządzanie regułami, ograniczenia MCP dla poszczególnych trybów, kontrolę ścieżek multi-root, opcje reasoning modeli i akcje przeglądu zmian po ukończeniu.
 
-## Nowości w v3.86.0
+## Nowości w v3.90.0
 
-- ✨ **Obsługa nowych modeli:** Korzystaj z GPT-6.1 Sol, poprawionego limitu wyjściowego Claude Opus 5.5 i wybierz DeepSeek V4.1 Flash w OpenCode Go.
-- 🧭 **Niezawodne przerywanie i wstrzymywanie zadań:** Zachowaj pierwszy powód przerwania, resetuj stan przerwania strumienia przy każdym żądaniu i zapobiegaj ponownemu uruchamianiu odrzuconych podzadań przez przerwane zadania.
-- 🛠️ **Niezawodne narzędzia, prompty i strumieniowanie interfejsu:** Zachowaj argumenty narzędzi przesyłane strumieniowo w całości, egzekwuj zasady używania narzędzi MCP, zapobiegaj zmyślonym numerom linii i usprawnij aktualizacje czatu.
+- ✨ **Dostawcy i modele:** GitHub Copilot jest teraz dostawcą: zaloguj się, a Zoo Code wczyta twoje modele Copilot. IO Intelligence to dostawca z własnym kluczem API. Gemini 4 Argon jest w Gemini i Vertex. GPT-6 Luna jest w OpenCode Go. Gemini 4 Argon i GPT-6 Luna są też w Zoo Gateway.
+- 🧭 **Wykonywanie narzędzi:** Powtórzenie tego samego wywołania narzędzia daje ostrzeżenie, a potem Zoo Code zatrzymuje tę pętlę. Wyłączenie `attempt_completion` nie zostawia już zadania, które nie może się zakończyć. Wiadomości w kolejce przechodzą te same kontrole ochrony poleceń co polecenia wysyłane bezpośrednio.
+- ⚡ **Rozumowanie i streaming:** Adaptacyjne myślenie Anthropic widać na czacie, a thinking tokeny są liczone. Przełącznik R1 zachowuje rozumowanie z llama.cpp, Ollama i LM Studio. Codex zachowuje zaszyfrowane rozumowanie razem z podsumowaniem, które widzisz. Strumienie modelu językowego VS Code używają guarded recovery, gdy strumień się nie powiedzie.
 
 ## Co Zoo Code może zrobić dla CIEBIE?
 

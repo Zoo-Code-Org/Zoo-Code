@@ -46,11 +46,11 @@ Zoo Code, Roo Code की बनाई नींव पर आगे बढ़�
 - **ज़्यादा भरोसेमंद terminal और editing workflows** — terminal के समय से पहले पूरा होने, task-state race conditions, context management, diff editing और provider-specific tool use से जुड़ी समस्याओं के fixes।
 - **अपने workspace पर ज़्यादा control** — rules management, हर mode के लिए MCP restrictions, multi-root path controls, model reasoning options और completion changes की review actions।
 
-## v3.86.0 में नया क्या है
+## v3.90.0 में नया क्या है
 
-- ✨ **नए models का समर्थन:** GPT-6.1 Sol इस्तेमाल करें, Claude Opus 5.5 की सही की गई output limit का लाभ लें और OpenCode Go पर DeepSeek V4.1 Flash चुनें।
-- 🧭 **भरोसेमंद task abort और interruption:** पहली abort वजह सुरक्षित रखें, हर request पर stream-abort state रीसेट करें और interrupted tasks को अस्वीकार की गई subtasks दोबारा चलाने से रोकें।
-- 🛠️ **भरोसेमंद tools, prompts और UI streaming:** Stream किए गए tool arguments सही-सलामत रखें, MCP tool policy लागू करें, मनगढ़ंत line numbers रोकें और chat updates को सहज बनाएं।
+- ✨ **Provider और model:** GitHub Copilot अब एक provider है: sign in करें और Zoo Code आपके Copilot models लोड करता है। IO Intelligence अपना API key वाला provider है। Gemini 4 Argon, Gemini और Vertex पर है। GPT-6 Luna, OpenCode Go पर है। Gemini 4 Argon और GPT-6 Luna Zoo Gateway पर भी हैं।
+- 🧭 **Tool execution:** वही tool call दोहराने पर warning मिलती है, फिर Zoo Code वह loop रोक देता है। `attempt_completion` बंद करने से task अब अधूरी नहीं रहती। Queued messages उन्हीं command-protection checks से गुज़रते हैं जो सीधे भेजे commands से गुज़रते हैं।
+- ⚡ **Reasoning और streaming:** Anthropic adaptive thinking chat में दिखता है, और thinking tokens गिने जाते हैं। R1 toggle llama.cpp, Ollama और LM Studio का reasoning रखता है। Codex encrypted reasoning को उस summary के साथ रखता है जो आप देखते हैं। VS Code language-model streams stream fail होने पर guarded recovery इस्तेमाल करते हैं।
 
 ## Zoo Code आपके लिए क्या कर सकता है?
 
