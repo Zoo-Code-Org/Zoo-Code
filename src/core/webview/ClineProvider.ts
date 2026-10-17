@@ -679,7 +679,23 @@ export class ClineProvider
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
 			const states = this.getPersistedViewStates({ fresh: true })
 			delete states[viewStateId]
-			await this.contextProxy.setValue("viewStates", states)
+			try {
+				await this.contextProxy.setValue("viewStates", states)
+			} catch (error) {
+				// updateGlobalState applies the new map to the in-memory cache before
+				// the durable write, so a rejected write leaves the cache missing an
+				// entry that durable storage still holds. Restore the cache to the
+				// value storage actually holds (undefined when the key was never
+				// written); the cache update lands even if this compensating write
+				// also fails, so readers cannot observe the loss either way.
+				try {
+					await this.contextProxy.setValue("viewStates", this.context.globalState.get("viewStates"))
+				} catch {
+					// The cache is updated before the durable attempt: it matches the
+					// durable value regardless of whether this restore write landed.
+				}
+				throw error
+			}
 		})
 
 		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
@@ -715,13 +731,28 @@ export class ClineProvider
 			}
 
 			if (changed) {
-				await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+				try {
+					await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+				} catch (error) {
+					// updateGlobalState applies the new map to the in-memory cache
+					// before the durable write: restore the cache to the value durable
+					// storage actually holds so closed-view pins cannot serve re-pointed
+					// names that never reached disk, then let the caller compensate.
+					try {
+						await this.contextProxy.setValue("viewStates", this.context.globalState.get("viewStates"))
+					} catch {
+						// The cache is updated before the durable attempt: it matches the
+						// durable value regardless of whether this restore write landed.
+					}
+					throw error
+				}
 			}
 		})
 
 		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
 		await write
 	}
+
 	/**
 	 * Keeps only the most recently updated entries of the persisted view states map,
 	 * bounded by MAX_PERSISTED_VIEW_STATES so the global key cannot grow unboundedly.
@@ -2773,6 +2804,25 @@ export class ClineProvider
 						throw new Error("Profile upsert was cancelled after the profile-record write")
 					}
 
+					// saveConfig normalizes the record (schema parse, legacy downgrades):
+					// read the stored copy back and use it for every activation write,
+					// sibling refresh, overlay, and task-handler update below, so raw
+					// webview fields the profile schema strips cannot enter the shared
+					// store, sibling view state, or task configuration. When the read-back
+					// fails the caller's settings are kept: the record landed, and the
+					// next load re-reads the stored copy.
+					let normalizedSettings = providerSettings
+					try {
+						const {
+							name: _savedName,
+							id: _savedId,
+							...storedRecord
+						} = await this.providerSettingsManager.getProfile({ name })
+						normalizedSettings = storedRecord as ProviderSettings
+					} catch {
+						// Best-effort read-back; see the comment above.
+					}
+
 					await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
 					landed.profileList = true
 
@@ -2796,7 +2846,7 @@ export class ClineProvider
 						// Marked before the await: setProviderSettings fans out to several globalState
 						// keys, so a rejection partway through the fan-out still has to be rolled back.
 						landed.sharedProviderSettings = true
-						await this.contextProxy.setProviderSettings(providerSettings)
+						await this.contextProxy.setProviderSettings(normalizedSettings)
 
 						// setProviderSettings writes the shared store directly, bypassing the
 						// view-local mutation path: clear this view's buffered apiConfiguration
@@ -2809,11 +2859,11 @@ export class ClineProvider
 						// refresh them so their getState() cannot report the updated profile's
 						// name with stale settings. Sibling buffers this call already rewrote are
 						// restored by the refresh itself before it rejects.
-						await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
+						await this.refreshViewLocalStateForUpdatedProfile(name, normalizedSettings)
 
 						// Change the provider for the current task.
 						// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
-						this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+						this.updateTaskApiHandlerIfNeeded(normalizedSettings, { forceRebuild: true })
 
 						// Keep the current task's sticky provider profile in sync with the newly-activated profile.
 						await this.persistStickyProviderProfileToCurrentTask(name)
@@ -2823,16 +2873,16 @@ export class ClineProvider
 						// (and this one when it is the pinned view) or their getState() keeps
 						// serving the settings captured before the save under the same name.
 						if (this.pinnedProfileName === name) {
-							await this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
+							await this._saveViewLocalStateFromMutation({ apiConfiguration: normalizedSettings })
 							// Only rebuild when the task actually runs under the saved profile: a
 							// view pinned to this profile can hold a task that follows a different
 							// sticky profile, and the forced rebuild would silently switch that
 							// conversation to the saved profile's settings.
 							if (this.getCurrentTask()?.taskApiConfigName === name) {
-								this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+								this.updateTaskApiHandlerIfNeeded(normalizedSettings, { forceRebuild: true })
 							}
 						}
-						await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
+						await this.refreshViewLocalStateForUpdatedProfile(name, normalizedSettings)
 					}
 				} catch (error: unknown) {
 					await this.compensateProfileActivation(snapshot, landed, "upsertProviderProfile", error, false)
@@ -2956,11 +3006,16 @@ export class ClineProvider
 		// leaving the survivor's provider keys in place, i.e. the restored profile's name paired
 		// with another profile's configuration.
 		const previousSharedProviderSettings = this.contextProxy.getProviderSettings()
+		// The durable viewStates map is another store the re-point below rewrites:
+		// closed views' pins naming the deleted profile must follow the survivor,
+		// and a failed deletion must put the exact pre-deletion map back.
+		const previousPersistedViewStates = { ...this.getPersistedViewStates({ fresh: true }) }
 		// Which writes have actually landed: only those need compensation.
 		let listWriteLanded = false
 		let selectionWriteLanded = false
 		let viewPinWriteLanded = false
 		let providerSettingsWriteLanded = false
+		let persistedRepointLanded = false
 		const entries = previousEntries.filter(({ name }) => name !== profileToDelete.name)
 
 		// Write only the profile list back: replaying the full settings snapshot
@@ -3048,6 +3103,11 @@ export class ClineProvider
 			// buffer and durable viewStates entry would otherwise keep serving the
 			// deleted profile's name and configuration.
 			await this.rePinViewLocalStateForDeletedProfile(profileToDelete.name, profileToActivate, survivingSettings)
+			// Closed views keep their durable viewStates entry after disposal: a pin
+			// naming the deleted profile would rehydrate a missing profile name on
+			// the next load. Re-point those persisted pins to the survivor too.
+			await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
+			persistedRepointLanded = true
 		} catch (error: unknown) {
 			// A cancelled (timed-out) deletion still compensates. The queue is chained to this run,
 			// so no later mutation can have written these stores in the meantime: holding the queue
@@ -3061,6 +3121,18 @@ export class ClineProvider
 			// all agree again before the original failure is surfaced.
 			const compensationFailures: string[] = []
 			const describeFailure = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+			if (persistedRepointLanded) {
+				try {
+					const restoreViewStates = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+						await this.contextProxy.setValue("viewStates", { ...previousPersistedViewStates })
+					})
+					ClineProvider.persistedViewStateWriteQueue = restoreViewStates.catch(() => {})
+					await restoreViewStates
+				} catch (compensationError: unknown) {
+					compensationFailures.push(`durable viewStates pins: ${describeFailure(compensationError)}`)
+				}
+			}
 
 			if (deletedProfile) {
 				try {
