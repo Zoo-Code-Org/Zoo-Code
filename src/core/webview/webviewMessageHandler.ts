@@ -2495,8 +2495,21 @@ export const webviewMessageHandler = async (
 						break
 					}
 
-					// Load the old configuration to get its ID.
-					const { id } = await provider.providerSettingsManager.getProfile({ name: oldName })
+					// The webview's name validation treats a case-only difference from the
+					// current profile as the current profile, so a case-only collision reaches
+					// here as a rename onto an existing record. Reject it instead of
+					// overwriting that profile: the rollback below would otherwise delete a
+					// record the rename never owned.
+					if (await provider.providerSettingsManager.hasConfig(newName)) {
+						throw new Error(`A profile named '${newName}' already exists`)
+					}
+
+					// Load the old configuration to get its ID, and keep its full stored
+					// record: a rollback must re-point views to the settings oldName actually
+					// persists, not to the payload the rename attempted.
+					const { name: _previousName, ...previousRecord } =
+						await provider.providerSettingsManager.getProfile({ name: oldName })
+					const { id } = previousRecord
 
 					// Create a new configuration with the new name and old ID.
 					await provider.providerSettingsManager.saveConfig(newName, { ...message.apiConfiguration, id })
@@ -2504,27 +2517,65 @@ export const webviewMessageHandler = async (
 					// saveConfig normalizes the record (legacy downgrades, schema parse): hand
 					// the stored copy to the views and task handlers instead of the raw
 					// webview payload, so unvalidated fields cannot bypass the profile-schema
-					// normalization on the way into view state.
-					const { name: _renamedName, ...normalizedRenamed } =
-						await provider.providerSettingsManager.getProfile({ name: newName })
+					// normalization on the way into view state. When the read-back fails the
+					// rename cannot proceed on a trustworthy record: remove the new record
+					// before reporting so the failed rename cannot leave both names resolving
+					// to the same id.
+					let normalizedRenamed: typeof previousRecord
+					try {
+						const { name: _renamedName, ...renamedRecord } =
+							await provider.providerSettingsManager.getProfile({ name: newName })
+						normalizedRenamed = renamedRecord
+					} catch (error) {
+						try {
+							await provider.providerSettingsManager.deleteConfig(newName)
+						} catch (cleanupError) {
+							provider.log(
+								`Rename rollback failed to remove '${newName}': ${JSON.stringify(cleanupError, Object.getOwnPropertyNames(cleanupError), 2)}`,
+							)
+						}
+						throw error
+					}
 
 					// Re-point live views pinned to the old name before it stops
 					// resolving: the rename keeps the id, so their pins should follow the
 					// record instead of dangling, and their overlays must serve the
-					// renamed settings rather than the pre-rename copy.
-					await provider.repointViewLocalStateAfterProfileRename(oldName, newName, normalizedRenamed)
+					// renamed settings rather than the pre-rename copy. A failed re-point can
+					// leave views already following newName, so undo this rename's own
+					// durable write before reporting: the reverse re-point returns the views
+					// that moved (the others never left oldName) and the new record goes
+					// away, leaving the pre-rename state intact.
+					try {
+						await provider.repointViewLocalStateAfterProfileRename(oldName, newName, normalizedRenamed)
+					} catch (error) {
+						try {
+							await provider.repointViewLocalStateAfterProfileRename(newName, oldName, previousRecord)
+							await provider.providerSettingsManager.deleteConfig(newName)
+						} catch (compensationError) {
+							provider.log(
+								`Rename compensation failed after re-point rejection: ${JSON.stringify(compensationError, Object.getOwnPropertyNames(compensationError), 2)}`,
+							)
+						}
+						throw error
+					}
 
 					// Delete the old configuration. A failure here would leave both names
 					// resolving and every live view pinned to the new name: undo the re-point
-					// and drop the new record so the pre-rename state survives intact.
+					// with the previously stored record - not the attempted payload, which was
+					// never persisted under the old name - and drop the new record so the
+					// pre-rename state survives intact. A failed compensation is logged: both
+					// names can then remain stored, and the log is the only trace of that
+					// inconsistency.
 					try {
 						await provider.providerSettingsManager.deleteConfig(oldName)
 					} catch (error) {
 						try {
-							await provider.repointViewLocalStateAfterProfileRename(newName, oldName, normalizedRenamed)
+							await provider.repointViewLocalStateAfterProfileRename(newName, oldName, previousRecord)
 							await provider.providerSettingsManager.deleteConfig(newName)
-						} catch {
-							// Best-effort compensation; the original failure is what callers see.
+						} catch (compensationError) {
+							provider.log(
+								`Rename compensation failed after delete rejection: ${JSON.stringify(compensationError, Object.getOwnPropertyNames(compensationError), 2)}`,
+							)
 						}
 						throw error
 					}
