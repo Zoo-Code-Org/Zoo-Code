@@ -322,4 +322,69 @@ describe("API - configuration", () => {
 		expect(refreshSpy.mock.invocationCallOrder[0]).toBeGreaterThan(setValues.mock.invocationCallOrder[1])
 		expect(refreshSpy).toHaveBeenCalledWith("pinned", expect.objectContaining({ apiKey: "old-key" }))
 	})
+	it("preserves credentials in overlays pinned to a different previous profile", async () => {
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const saveConfig = vi.fn().mockResolvedValue("pinned-id")
+		const deleteConfig = vi.fn().mockResolvedValue(undefined)
+		const setModeConfig = vi.fn().mockRejectedValue(new Error("mode write failed"))
+		const refreshSpy = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const pinnedRecord = {
+			name: "pinned",
+			id: "pinned-id",
+			apiProvider: providerIdentifiers.anthropic,
+			apiKey: "pinned-old-key",
+		}
+		const oldProfileRecord = {
+			name: "old-profile",
+			id: "old-id",
+			apiProvider: providerIdentifiers.openrouter,
+			apiKey: "old-profile-key",
+		}
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([{ name: "pinned", id: "pinned-id" }]),
+			// The mutation switched profiles: siblings pinned to the previous
+			// profile were refreshed from non-secret values by the restore and
+			// must be replayed from the previous profile's complete record.
+			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "old-profile" }),
+			setValues,
+			contextProxy: {
+				setValues,
+				getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.anthropic }),
+				setProviderSettings: vi.fn().mockResolvedValue(undefined),
+			},
+			refreshViewLocalStateForUpdatedProfile: refreshSpy,
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				getProfile: vi
+					.fn()
+					.mockImplementation(({ name }: { name: string }) =>
+						name === "pinned"
+							? Promise.resolve(pinnedRecord)
+							: name === "old-profile"
+								? Promise.resolve(oldProfileRecord)
+								: Promise.reject(new Error("profile absent")),
+					),
+				setModeConfig,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(
+			api.setConfiguration({ currentApiConfigName: "pinned", modeApiConfigs: { code: "new-code-config" } }),
+		).rejects.toThrow("mode write failed")
+
+		// Both pinned groups end on complete records: the saved profile's
+		// overlays from the restored record, the previous profile's overlays from
+		// its own stored record - not the credential-less non-secret snapshot.
+		expect(refreshSpy).toHaveBeenCalledWith("pinned", expect.objectContaining({ apiKey: "pinned-old-key" }))
+		expect(refreshSpy).toHaveBeenCalledWith("old-profile", expect.objectContaining({ apiKey: "old-profile-key" }))
+		expect(postStateToWebview).not.toHaveBeenCalled()
+	})
 })

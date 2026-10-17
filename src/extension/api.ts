@@ -634,8 +634,8 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
 				)
 			}
+			const previousProfileName = previousValues.currentApiConfigName || "default"
 			try {
-				const previousProfileName = previousValues.currentApiConfigName || "default"
 				await this.sidebarProvider.setValues(previousValues, { savedProfileName: previousProfileName })
 			} catch (restoreError) {
 				this.log(
@@ -661,6 +661,28 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 						"': " +
 						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
 				)
+			}
+			// When the mutation switched profiles, the configuration restore above
+			// refreshed siblings pinned to the previous profile from non-secret
+			// values; replay that profile's complete stored record so those
+			// overlays keep their credentials. A previous profile that cannot be
+			// read keeps the restore's non-secret refresh.
+			if (previousProfileName !== savedProfileName) {
+				try {
+					const previousProfileRecord = await manager.getProfile({ name: previousProfileName })
+					const { name: _ppName, id: _ppId, ...previousProfileSettings } = previousProfileRecord
+					await this.sidebarProvider.refreshViewLocalStateForUpdatedProfile(
+						previousProfileName,
+						previousProfileSettings,
+					)
+				} catch (restoreError) {
+					this.log(
+						"[setConfiguration] failed to refresh the overlays pinned to '" +
+							previousProfileName +
+							"': " +
+							(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+					)
+				}
 			}
 			try {
 				await this.sidebarProvider.contextProxy.setProviderSettings(previousSharedSettings)
