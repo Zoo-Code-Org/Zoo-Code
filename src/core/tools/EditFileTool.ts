@@ -1,7 +1,7 @@
 import fs from "fs/promises"
 import path from "path"
 
-import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
+import { type ClineSayTool, DEFAULT_PER_WRITE_CHECKPOINTS, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 
 import { getReadablePath } from "../../utils/path"
 import { isPathOutsideWorkspace } from "../../utils/pathUtils"
@@ -11,6 +11,8 @@ import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { fileExistsAtPath } from "../../utils/fs"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { sanitizeUnifiedDiff, computeDiffStats } from "../diff/stats"
+import { checkpointSave } from "../../core/checkpoints"
+import { checkAutoApproval } from "../auto-approval"
 import type { ToolUse } from "../../shared/tools"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
@@ -146,6 +148,7 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 		const { askApproval, handleError, pushToolResult } = callbacks
 		let relPathForErrorHandling: string | undefined
 		let operationPreviewForErrorHandling: string | undefined
+		let didWrite = false
 
 		const finalizePartialToolAskIfNeeded = async (relPath: string): Promise<void> => {
 			if (!this.didSendPartialToolAsk) {
@@ -392,6 +395,7 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 			const state = await provider?.getState()
 			const diagnosticsEnabled = state?.diagnosticsEnabled ?? true
 			const writeDelayMs = state?.writeDelayMs ?? DEFAULT_WRITE_DELAY_MS
+			const perWriteCheckpoints = state?.perWriteCheckpoints ?? DEFAULT_PER_WRITE_CHECKPOINTS
 			const isPreventFocusDisruptionEnabled = experiments.isEnabled(
 				state?.experiments ?? {},
 				EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION,
@@ -455,8 +459,39 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 			}
 
 			task.didEditFile = true
+			didWrite = true
 
-			// Get the formatted response message
+			if (perWriteCheckpoints) {
+				// B2: the change-journal entry for this edit is appended inside
+				// checkpointSave (the hook stays a single call site), keyed by the
+				// checkpoint commit that call produces. B3a threads the approval
+				// diff (for the change card) and whether the step was auto-
+				// approved (auto-approved steps always get the compact card).
+				const autoApproved =
+					(
+						await checkAutoApproval({
+							state,
+							cwd: task.cwd,
+							ask: "tool",
+							text: completeMessage,
+							isProtected: isWriteProtected,
+						})
+					).decision === "approve"
+				// Awaited: a later tool block must not interleave with this edit's
+				// staging/commit/journal/change-card work. checkpointSave rejects with a
+				// CheckpointPartialPersistenceError when a committed checkpoint's
+				// journal update fails; the catch below reports it.
+				await checkpointSave(task, false, true, {
+					path: relPath,
+					operation: isNewFile ? "create" : "update",
+					diffStats: diffStats ? { additions: diffStats.added, deletions: diffStats.removed } : undefined,
+					...(sanitizedDiff ? { diff: sanitizedDiff } : {}),
+					...(autoApproved ? { autoApproved: true } : {}),
+				})
+			}
+
+			// Emitted only after checkpoint + journal persistence succeeded: a
+			// persistence failure must not report the edit as fully persisted.
 			const replacementInfo =
 				!isNewFile && expected_replacements > 1 ? ` (${expected_replacements} replacements)` : ""
 			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, isNewFile)
@@ -465,9 +500,6 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 
 			await task.diffViewProvider.reset()
 			this.resetPartialState()
-
-			// Process any queued messages after file edit completes
-			task.processQueuedMessages()
 		} catch (error) {
 			if (relPathForErrorHandling) {
 				await finalizePartialToolAskIfNeeded(relPathForErrorHandling)
@@ -479,6 +511,13 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 			this.didSendPartialToolAsk = false
 			this.partialToolAskRelPath = undefined
 			this.resetPartialState()
+			// Hand off queued messages whenever the write itself succeeded -
+			// including when the post-write checkpoint/journal persistence then
+			// rejected (the write is real; upstream handed off after every
+			// successful write).
+			if (didWrite) {
+				task.processQueuedMessages()
+			}
 		}
 	}
 
