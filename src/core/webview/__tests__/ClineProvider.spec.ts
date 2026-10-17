@@ -10304,6 +10304,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				// A save that does not activate still rewrites the profile; the pinned
 				// sibling must not keep serving the pre-save snapshot.
 				expect(sibling["viewLocalState"].apiConfiguration).toEqual({
+					name: "saved-profile",
 					apiProvider: providerIdentifiers.anthropic,
 					apiKey: "new-key",
 				})
@@ -10378,6 +10379,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 
 				// The pinned view's overlay still catches up with the saved settings...
 				expect(sibling["viewLocalState"].apiConfiguration).toEqual({
+					name: "saved-profile",
 					apiProvider: providerIdentifiers.anthropic,
 					apiKey: "new-key",
 				})
@@ -10428,6 +10430,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			)
 
 			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				name: "saved-profile",
 				apiProvider: providerIdentifiers.anthropic,
 				apiKey: "new-key",
 			})

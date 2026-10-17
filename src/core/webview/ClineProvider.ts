@@ -3197,15 +3197,20 @@ export class ClineProvider
 				}
 			}
 
+			// Closed views keep their durable viewStates entry after disposal: a pin
+			// naming the deleted profile would rehydrate a missing profile name on
+			// the next load. Re-point those persisted pins to the survivor too.
+			// Order matters: the durable re-point runs before the live re-pin, so a
+			// rejected re-point leaves every live sibling untouched - the
+			// compensation below restores the shared stores only, and an already
+			// re-pointed sibling buffer would keep serving the survivor until its
+			// next mutation.
+			await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
+			persistedRepointLanded = true
 			// Re-pin other live views still buffered on the deleted profile: their
 			// buffer and durable viewStates entry would otherwise keep serving the
 			// deleted profile's name and configuration.
 			await this.rePinViewLocalStateForDeletedProfile(profileToDelete.name, profileToActivate, survivingSettings)
-			// Closed views keep their durable viewStates entry after disposal: a pin
-			// naming the deleted profile would rehydrate a missing profile name on
-			// the next load. Re-point those persisted pins to the survivor too.
-			await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
-			persistedRepointLanded = true
 		} catch (error: unknown) {
 			// The queue stays owned until this run settles (see enqueueProviderProfileMutation),
 			// so a cancelled deletion compensates the same way a rejected write does: no later
@@ -3556,7 +3561,15 @@ export class ClineProvider
 				// sticky profile, and the forced rebuild would silently switch that
 				// conversation to the saved profile's settings.
 				if (pinned === name && instance.getCurrentTask()?.taskApiConfigName === name) {
-					instance.updateTaskApiHandlerIfNeeded(settings, { forceRebuild: true })
+					// The handler takes provider settings, not the stored record: the
+					// overlay above keeps the record's identity fields, the rebuilt
+					// handler must not see them.
+					const {
+						name: _recordName,
+						id: _recordId,
+						...taskSettings
+					} = settings as ProviderSettings & { name?: string; id?: string }
+					instance.updateTaskApiHandlerIfNeeded(taskSettings, { forceRebuild: true })
 				}
 				await instance.postStateToWebview()
 			}),
