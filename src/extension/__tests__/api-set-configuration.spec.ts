@@ -52,7 +52,7 @@ describe("API.setConfiguration", () => {
 
 		await api.setConfiguration(configuration)
 
-		expect(provider.setValues).toHaveBeenCalledWith(configuration)
+		expect(provider.setValues).toHaveBeenCalledWith(configuration, { savedProfileName: "default" })
 		expect(provider.contextProxy.setValues).not.toHaveBeenCalled()
 		expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith("default", configuration)
 		expect(provider.postStateToWebview).toHaveBeenCalled()

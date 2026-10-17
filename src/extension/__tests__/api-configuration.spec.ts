@@ -37,6 +37,9 @@ describe("API - configuration", () => {
 				currentApiConfigName: "default",
 				modeApiConfigs: expect.anything(),
 			}),
+			// The payload saves this profile: siblings pinned to it are refreshed
+			// from the payload instead of pinned to a pre-save snapshot.
+			{ savedProfileName: "default" },
 		)
 		expect(setModeConfig).toHaveBeenCalledTimes(2)
 		expect(setModeConfig).toHaveBeenCalledWith("code", "code-config")
