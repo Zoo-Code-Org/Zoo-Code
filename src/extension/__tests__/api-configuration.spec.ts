@@ -270,4 +270,56 @@ describe("API - configuration", () => {
 		expect(setModeConfig).toHaveBeenLastCalledWith("code", undefined)
 		expect(postStateToWebview).not.toHaveBeenCalled()
 	})
+	it("replays the restored overlay after the configuration restore for the active profile", async () => {
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const saveConfig = vi.fn().mockResolvedValue("pinned-id")
+		const deleteConfig = vi.fn().mockResolvedValue(undefined)
+		const setModeConfig = vi.fn().mockRejectedValue(new Error("mode write failed"))
+		const refreshSpy = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const previousRecord = {
+			name: "pinned",
+			id: "pinned-id",
+			apiProvider: providerIdentifiers.anthropic,
+			apiKey: "old-key",
+		}
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([{ name: "pinned", id: "pinned-id" }]),
+			// The saved profile is also the active profile: the configuration
+			// restore refreshes the same pinned siblings, with non-secret values.
+			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "pinned" }),
+			setValues,
+			contextProxy: {
+				setValues,
+				getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.anthropic }),
+				setProviderSettings: vi.fn().mockResolvedValue(undefined),
+			},
+			refreshViewLocalStateForUpdatedProfile: refreshSpy,
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				getProfile: vi.fn().mockResolvedValue(previousRecord),
+				setModeConfig,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(
+			api.setConfiguration({ currentApiConfigName: "pinned", modeApiConfigs: { code: "new-code-config" } }),
+		).rejects.toThrow("mode write failed")
+
+		// The configuration restore refreshes the same pinned siblings with
+		// non-secret values, so the overlay replay must run after it and be the
+		// last refresh, ending the overlays on the restored record's settings.
+		expect(setValues).toHaveBeenLastCalledWith(expect.objectContaining({ currentApiConfigName: "pinned" }), {
+			savedProfileName: "pinned",
+		})
+		expect(refreshSpy.mock.invocationCallOrder[0]).toBeGreaterThan(setValues.mock.invocationCallOrder[1])
+		expect(refreshSpy).toHaveBeenCalledWith("pinned", expect.objectContaining({ apiKey: "old-key" }))
+	})
 })

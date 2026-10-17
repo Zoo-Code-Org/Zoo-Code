@@ -634,11 +634,21 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
 				)
 			}
-			// The successful setValues refreshed the sibling overlays
-			// pinned to the saved profile with the new settings; replay the
-			// restored record to those overlays too, so no sibling keeps
-			// serving settings the restored (or deleted) profile does not
-			// contain. An absent prior profile restores an empty overlay.
+			try {
+				const previousProfileName = previousValues.currentApiConfigName || "default"
+				await this.sidebarProvider.setValues(previousValues, { savedProfileName: previousProfileName })
+			} catch (restoreError) {
+				this.log(
+					"[setConfiguration] failed to restore the previous configuration values: " +
+						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+				)
+			}
+			// Replay the restored record to the sibling overlays pinned to the
+			// saved profile AFTER the configuration restore: when the saved profile
+			// is also the active profile, the restore above refreshes the same
+			// siblings with non-secret values, and this replay must be the last
+			// refresh so the overlays end on the restored record's settings. An
+			// absent prior profile restores an empty overlay.
 			try {
 				await this.sidebarProvider.refreshViewLocalStateForUpdatedProfile(
 					savedProfileName,
@@ -649,15 +659,6 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 					"[setConfiguration] failed to refresh the overlays pinned to '" +
 						savedProfileName +
 						"': " +
-						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
-				)
-			}
-			try {
-				const previousProfileName = previousValues.currentApiConfigName || "default"
-				await this.sidebarProvider.setValues(previousValues, { savedProfileName: previousProfileName })
-			} catch (restoreError) {
-				this.log(
-					"[setConfiguration] failed to restore the previous configuration values: " +
 						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
 				)
 			}
