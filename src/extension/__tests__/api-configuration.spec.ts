@@ -19,7 +19,7 @@ describe("API - configuration", () => {
 			context: {},
 			on: vi.fn(),
 			setValues,
-			contextProxy: { setValues },
+			contextProxy: { setValues, getProviderSettings: vi.fn().mockReturnValue({}) },
 			providerSettingsManager: { saveConfig, setModeConfig },
 			postStateToWebview,
 		} as unknown as ClineProvider
@@ -56,7 +56,7 @@ describe("API - configuration", () => {
 			context: {},
 			on: vi.fn(),
 			setValues,
-			contextProxy: { setValues },
+			contextProxy: { setValues, getProviderSettings: vi.fn().mockReturnValue({}) },
 			providerSettingsManager: { saveConfig, setModeConfig },
 			postStateToWebview,
 		} as unknown as ClineProvider
@@ -77,7 +77,7 @@ describe("API - configuration", () => {
 			context: {},
 			on: vi.fn(),
 			setValues,
-			contextProxy: { setValues },
+			contextProxy: { setValues, getProviderSettings: vi.fn().mockReturnValue({}) },
 			providerSettingsManager: { saveConfig, setModeConfig },
 			postStateToWebview,
 		} as unknown as ClineProvider
@@ -90,6 +90,46 @@ describe("API - configuration", () => {
 		// shared settings and the sibling overlays pinned to the profile
 		// untouched, so no sibling serves settings the stored profile lacks.
 		expect(setValues).not.toHaveBeenCalled()
+		expect(postStateToWebview).not.toHaveBeenCalled()
+	})
+	it("restores the stored profile and shared settings when the refresh fails after the save", async () => {
+		const setValues = vi.fn().mockRejectedValue(new Error("refresh down"))
+		const saveConfig = vi.fn().mockResolvedValue("pinned-id")
+		const deleteConfig = vi.fn().mockResolvedValue(undefined)
+		const setModeConfig = vi.fn().mockResolvedValue(undefined)
+		const setProviderSettings = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const sharedBefore = { currentApiConfigName: "old-shared" }
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			setValues,
+			contextProxy: {
+				setValues,
+				getProviderSettings: vi.fn().mockReturnValue(sharedBefore),
+				setProviderSettings,
+			},
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				setModeConfig,
+				// The profile did not exist before this call: compensation must
+				// delete the record the save created, not restore an old one.
+				getProfile: vi.fn().mockRejectedValue(new Error("profile absent")),
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(api.setConfiguration({ currentApiConfigName: "pinned" })).rejects.toThrow("refresh down")
+
+		// The save landed but the shared/sibling refresh rejected: the round trip
+		// is one transaction, so the created record is deleted and the shared
+		// provider settings are restored before the caller sees the failure.
+		expect(saveConfig).toHaveBeenCalledWith("pinned", expect.objectContaining({ currentApiConfigName: "pinned" }))
+		expect(deleteConfig).toHaveBeenCalledWith("pinned")
+		expect(setProviderSettings).toHaveBeenCalledWith(sharedBefore)
 		expect(postStateToWebview).not.toHaveBeenCalled()
 	})
 })

@@ -575,14 +575,54 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		// validates before storing, so a rejected save must not leave shared
 		// settings or sibling overlays serving settings the stored profile does
 		// not contain.
-		await this.sidebarProvider.providerSettingsManager.saveConfig(savedProfileName, values)
-		await this.sidebarProvider.setValues(values, { savedProfileName })
-		if (values.modeApiConfigs) {
-			await Promise.all(
-				Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
-					this.sidebarProvider.providerSettingsManager.setModeConfig(mode as Mode, configId),
-				),
-			)
+		const manager = this.sidebarProvider.providerSettingsManager
+		const previousSharedSettings = this.sidebarProvider.contextProxy.getProviderSettings()
+		let previousRecord: Awaited<ReturnType<typeof manager.getProfile>> | undefined
+		let recordExisted = false
+		try {
+			previousRecord = await manager.getProfile({ name: savedProfileName })
+			recordExisted = true
+		} catch {
+			// Absent record: compensation deletes a record this call creates.
+		}
+		try {
+			await manager.saveConfig(savedProfileName, values)
+			await this.sidebarProvider.setValues(values, { savedProfileName })
+			if (values.modeApiConfigs) {
+				await Promise.all(
+					Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
+						manager.setModeConfig(mode as Mode, configId),
+					),
+				)
+			}
+		} catch (error) {
+			// The round trip is one transaction: undo the stored profile AND the
+			// shared settings it may have left half-applied, so the API never
+			// rejects with the stored profile updated while the active shared
+			// settings are still old. Each restore is independent and logged; the
+			// original failure is what the caller sees.
+			try {
+				if (recordExisted && previousRecord) {
+					const { name: _previousName, id: _previousId, ...previousSettings } = previousRecord
+					await manager.saveConfig(savedProfileName, previousSettings)
+				} else {
+					await manager.deleteConfig(savedProfileName)
+				}
+			} catch (restoreError) {
+				this.log(
+					`[setConfiguration] failed to restore the profile record '${savedProfileName}': ` +
+						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+				)
+			}
+			try {
+				await this.sidebarProvider.contextProxy.setProviderSettings(previousSharedSettings)
+			} catch (restoreError) {
+				this.log(
+					"[setConfiguration] failed to restore the shared provider settings: " +
+						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+				)
+			}
+			throw error
 		}
 		await this.sidebarProvider.postStateToWebview()
 	}
