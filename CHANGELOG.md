@@ -1,5 +1,69 @@
 # Zoo Code Changelog
 
+## [3.90.0]
+
+- ✨ **Providers and models:** GitHub Copilot is now a provider: sign in and Zoo Code loads your Copilot models. IO Intelligence is a provider with its own API key. Gemini 4 Argon is on Gemini and Vertex. GPT-6 Luna is on OpenCode Go. Gemini 4 Argon and GPT-6 Luna are on Zoo Gateway as well.
+- 🧭 **Tool execution:** Repeating the same tool call gets a warning, then Zoo Code stops that loop. Disabling `attempt_completion` no longer leaves a task unable to finish. Queued messages run the same command-protection checks as commands you send directly.
+- ⚡ **Reasoning and streaming:** Anthropic adaptive thinking shows in chat, and thinking tokens are counted. The R1 toggle keeps reasoning from llama.cpp, Ollama, and LM Studio. Codex keeps encrypted reasoning with the summary you see. VS Code language-model streams use guarded recovery when a stream fails.
+
+### Providers and Models
+
+- Add a GitHub Copilot provider with sign-in and live model capabilities (#1971 by @KarthickMahalingam, PR #1969 by @KarthickMahalingam)
+- Add the IO Intelligence provider (PR #1758 by @smiraldr)
+- Add Gemini 4 Argon to the Gemini and Vertex AI providers (PR #2043 by @app/zoomote)
+- Add GPT-6 Luna support for OpenCode Go (#1979 by @AntzCode, PR #2003 by @AntzCode)
+- Port six Copilot model entries to the VS Code language model provider (PR #2032 by @simurg79)
+- Complete the Copilot model port with safe input ceilings (PR #2052 by @simurg79)
+- Always send the OpenCode Go session header from a per-instance session id (#1511 by @404CN, PR #1710 by @myk1yt)
+- Show sane defaults for custom OpenAI-compatible models (#1866 by @p12tic, PR #1848 by @p12tic)
+- Fetch model lists through the ApiHandler interface (PR #1906 by @p12tic)
+
+### Safer Tool Execution
+
+- Add tiered tool-repetition detection with a soft warning and a hard stop (#771 by @p12tic, PR #1829 by @p12tic)
+- Validate tools against the request's policy snapshot instead of live settings (#1642 by @DaubnerF, PR #1749 by @DaubnerF)
+- Keep attempt completion available when it is listed in disabled tools (#1640 by @DaubnerF, PR #1751 by @DaubnerF)
+- Apply command protection checks when draining queued messages (#1170 by @edelauna, PR #1699 by @myk1yt)
+- Scope tool state to each tool call (#373 by @edelauna, PR #2015 by @edelauna)
+- Warn that apply_diff search blocks must be whole lines (#868 by @lowlight-ua, PR #1712 by @myk1yt)
+- Discover skills inside a symlinked container directory (#1842 by @p12tic, PR #1843 by @p12tic)
+
+### Reasoning and Streaming
+
+- Surface adaptive thinking display and thinking tokens for Anthropic models (#1326 by @easonLiangWorldedtech, PR #1327 by @easonLiangWorldedtech)
+- Preserve reasoning for local OpenAI-compatible models with the R1 toggle (#1118 by @ch405canova-sudo, PR #1119 by @ch405canova-sudo)
+- Preserve encrypted Codex reasoning alongside visible summaries (PR #1966 by @WebMad)
+- Integrate guarded recovery into VS Code language-model streaming (PR #1608 by @simurg79)
+- Abort in-flight OpenAI Codex requests (PR #1290 by @easonLiangWorldedtech)
+- Resolve shared AI SDK tool-call deduplication and error handling gaps (PR #799 by @easonLiangWorldedtech)
+
+### Task Lifecycle and Maintenance
+
+- Add the run-state field, write helpers, and projection (RSK-04) (#1794 by @edelauna, PR #1985 by @edelauna)
+- Decode documents from required buffers (PR #2002 by @WebMad)
+- Remove redundant captureException calls that double-count errors (PR #1702 by @myk1yt)
+- Write contributor docs and templates in Simplified Technical English (#1986 by @zoomote, PR #1987 by @app/zoomote)
+- Add a typed-test checklist to the ESLint suppressions guidance (#1419 by @coderabbitai, PR #1420 by @easonLiangWorldedtech)
+- Key the label-review workflow concurrency group per pull request (#1707 by @zoomote, PR #1739 by @app/zoomote)
+- Keep a pull request awaiting the author when a third party re-requests review (#2026 by @edelauna, PR #2027 by @app/zoomote)
+- Keep the has-conflicts label when mergeability is unknown (#2025 by @edelauna, PR #2028 by @app/zoomote)
+- Turn off unused-variable linting in src and remove dead code (PR #2038 by @app/zoomote)
+
+### Dependencies
+
+- Update undici to v6.28.1 (PR #1874 by @app/renovate)
+- Update axios to v1.20.0 (PR #1875 by @app/renovate)
+- Update shell-quote to v1.11.0 (PR #1973 by @app/renovate)
+- Update @modelcontextprotocol/sdk to v1.31.0 (PR #1974 by @app/renovate)
+- Update @ai-sdk/openai-compatible to v3 (PR #1899 by @app/renovate)
+- Update ai to v7 (PR #1907 by @app/renovate)
+- Update pretty-bytes to v7.2.0 (PR #1880 by @app/renovate)
+- Update react-i18next to v15.7.4 (PR #1887 by @app/renovate)
+
+### Housekeeping
+
+- Merge the **previous v3.88.0 release preparation** after its publication; this is prior-release housekeeping, not a v3.90.0 feature (PR #1980 by @edelauna)
+
 ## [3.88.0]
 
 - ✨ **Provider and model support:** Use Grok Build and improved custom-model support. This release also fixes Bedrock model limits and sends the Codex verbosity setting.
