@@ -840,6 +840,23 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "test-id", name: "saved-profile", apiProvider: providerIdentifiers.bedrock },
 			])
+
+			// The activation write is built from the stored record (saveConfig normalization
+			// contract): repoint getProfile at what saveConfig wrote, mirroring the real
+			// manager's round-trip.
+			const savedRecords = new Map<string, Record<string, unknown>>()
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockImplementation(async (configName, config) => {
+				savedRecords.set(configName, { name: configName, id: "test-id", ...config })
+				return "test-id"
+			})
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(
+				async (args: { name?: string; id?: string }) => {
+					const record = savedRecords.get(String(args.name))
+					return (record ?? { name: args.name, id: "test-id" }) as unknown as Awaited<
+						ReturnType<typeof provider.providerSettingsManager.getProfile>
+					>
+				},
+			)
 			const saveViewStateSpy = vi.spyOn(provider, "saveViewState")
 			provider["viewLocalState"] = {
 				currentApiConfigName: "stale-profile",
@@ -1389,7 +1406,22 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				zaiApiLine: "international_api" as const,
 				apiModelId: "glm-5.1",
 			}
-			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("zai-profile-id")
+			// Repoint the manager round-trip: the activation write reads the stored
+			// record back after saveConfig (normalization contract), so getProfile must
+			// serve what saveConfig wrote.
+			const savedRecords = new Map<string, Record<string, unknown>>()
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockImplementation(async (configName, config) => {
+				savedRecords.set(configName, { name: configName, id: "zai-profile-id", ...config })
+				return "zai-profile-id"
+			})
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(
+				async (args: { name?: string; id?: string }) => {
+					const record = savedRecords.get(String(args.name))
+					return (record ?? { name: args.name, id: "zai-profile-id" }) as unknown as Awaited<
+						ReturnType<typeof provider.providerSettingsManager.getProfile>
+					>
+				},
+			)
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ name: "default", id: "zai-profile-id", apiProvider: providerIdentifiers.zai },
 			])
