@@ -1717,10 +1717,16 @@ describe("caller-supplied staging path", () => {
 		const linked = _fileStats(false)
 		linked.nlink = 2
 		vi.mocked(fsSync.fstatSync).mockReturnValue(linked)
+		vi.mocked(fsSync.openSync).mockReturnValue(7)
 		await expect(
 			safeWriteText(targetPath, "data", { tempPath: "/tmp/test-dir/.new_x_1.tmp", platform: "linux" }),
 		).rejects.toThrow("Staging file changed between the check and the open")
 		expect(fs.rename).not.toHaveBeenCalled()
+		// The rejection lands after the open: the descriptor must be closed and the
+		// borrowed alias unlinked, so the failed write leaves no open handle and no
+		// leftover at the staging path.
+		expect(fsSync.closeSync).toHaveBeenCalledWith(7)
+		expect(fs.unlink).toHaveBeenCalledWith("/tmp/test-dir/.new_x_1.tmp")
 	})
 
 	it("rejects when the target identity cannot be compared for a reason other than a missing target", async () => {
