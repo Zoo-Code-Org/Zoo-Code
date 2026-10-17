@@ -4713,12 +4713,11 @@ export class ClineProvider
 
 		await this.contextProxy.resetAllState()
 
-		// Clear view-local state cache so getState() falls back to ContextProxy defaults.
-		this._clearViewLocalState()
-
-		// Clear this view's persisted entry too, so the reset selections are not
-		// re-applied from the durable viewStates pin after a reload.
-		await this.clearPersistedViewState()
+		// Per-view state (this view's buffer and durable entry) is cleared by the
+		// broadcast below: it clears the durable map once through the serialized
+		// write queue and every live buffer, and only rethrows after that work, so
+		// a per-view clear here would only add a failure point that can strand the
+		// reset between the shared and provider resets.
 
 		await this.providerSettingsManager.resetAllConfigs()
 		await this.customModesManager.resetCustomModes()
