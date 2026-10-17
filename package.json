@@ -31,7 +31,9 @@
 		"code-server:install": "node scripts/code-server.js",
 		"changeset:version": "cp CHANGELOG.md src/CHANGELOG.md && changeset version && cp -vf src/CHANGELOG.md .",
 		"knip": "knip",
-		"npm:publish:types": "pnpm --filter @roo-code/types npm:publish"
+		"npm:publish:types": "pnpm --filter @roo-code/types npm:publish",
+		"knip:production": "knip --production",
+		"test:knip-policy": "node --test scripts/knip-policy.test.mjs"
 	},
 	"devDependencies": {
 		"@changesets/cli": "2.31.0",
