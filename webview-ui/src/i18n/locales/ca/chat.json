@@ -113,6 +113,15 @@
 	},
 	"selectMode": "Selecciona el mode d'interacció",
 	"selectApiConfig": "Seleccioneu la configuració de l'API",
+	"selectModel": "Selecciona el model",
+	"modelSelector": {
+		"title": "Models",
+		"settings": "Configuració del model",
+		"description": "Tria el model que s'utilitzarà per a aquesta configuració d'API.",
+		"searchPlaceholder": "Cerca models...",
+		"unsupportedTooltip": "El model d'aquest proveïdor es configura a Configuració",
+		"loading": "Carregant models..."
+	},
 	"lockApiConfigAcrossModes": "Bloqueja la configuració de l'API a tots els modes en aquest espai de treball",
 	"unlockApiConfigAcrossModes": "La configuració de l'API està bloquejada a tots els modes en aquest espai de treball (fes clic per desbloquejar)",
 	"enhancePrompt": "Millora la sol·licitud amb context addicional",
@@ -343,10 +352,10 @@
 		"title": "S'ha publicat Zoo Code {{version}}",
 		"support": "Dona suport a Zoo Code fent-nos una estrella a <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Què hi ha de nou al Zoo Code v3.88.0",
-			"highlight1": "✨ Suport de proveïdors i models: Fes servir Grok Build i un suport millorat de models personalitzats. Aquesta versió també corregeix els límits de models de Bedrock i envia la configuració de verbositat de Codex.",
-			"highlight2": "🧭 Fiabilitat de les tasques: Aquesta versió corregeix la gestió de les cancel·lacions, la continuació dels torns d'eines i el desat dels missatges de tasca.",
-			"highlight3": "⚡ Edició i xat més ràpids: Les escriptures de fitxers ja no utilitzen retards artificials per defecte. Els missatges del xat porten menys dades de fitxers, i les accions de codi arriben a l'últim xat actiu."
+			"heading": "Què hi ha de nou al Zoo Code v3.90.0",
+			"highlight1": "✨ Proveïdors i models: GitHub Copilot ara és un proveïdor: inicia la sessió i Zoo Code carrega els teus models de Copilot. IO Intelligence és un proveïdor amb la seva pròpia clau d'API. Gemini 4 Argon és a Gemini i Vertex. GPT-6 Luna és a OpenCode Go. Gemini 4 Argon i GPT-6 Luna també són a Zoo Gateway.",
+			"highlight2": "🧭 Execució d'eines: Repetir la mateixa crida d'eina mostra un avís i després Zoo Code atura aquest bucle. Desactivar attempt_completion ja no deixa una tasca sense poder acabar. Els missatges en cua passen les mateixes comprovacions de protecció d'ordres que les ordres que envies directament.",
+			"highlight3": "⚡ Raonament i streaming: El pensament adaptatiu d'Anthropic es mostra al xat i es compten els thinking tokens. L'interruptor R1 conserva el raonament de llama.cpp, Ollama i LM Studio. Codex conserva el raonament xifrat amb el resum que veus. Els streams del model de llenguatge de VS Code fan servir recuperació protegida quan un stream falla."
 		},
 		"cloudAgents": {
 			"heading": "Novetats al núvol:",

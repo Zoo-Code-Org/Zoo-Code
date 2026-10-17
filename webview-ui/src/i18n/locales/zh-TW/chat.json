@@ -140,6 +140,15 @@
 	},
 	"selectMode": "選擇互動模式",
 	"selectApiConfig": "選取 API 設定",
+	"selectModel": "選擇模型",
+	"modelSelector": {
+		"title": "模型",
+		"settings": "模型設定",
+		"description": "選擇此 API 設定使用的模型。",
+		"searchPlaceholder": "搜尋模型...",
+		"unsupportedTooltip": "此供應商的模型需在設定中配置",
+		"loading": "正在載入模型..."
+	},
 	"lockApiConfigAcrossModes": "鎖定此工作區所有模式的 API 設定",
 	"unlockApiConfigAcrossModes": "此工作區所有模式的 API 設定已鎖定（點擊解鎖）",
 	"enhancePrompt": "使用額外內容強化提示詞",
@@ -365,10 +374,10 @@
 		"title": "Zoo Code {{version}} 已發布",
 		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
 		"release": {
-			"heading": "Zoo Code v3.88.0 新功能",
-			"highlight1": "✨ Provider 與模型支援：使用 Grok Build 與改進後的自訂模型支援。本版本也修正了 Bedrock 模型上限，並傳送 Codex verbosity 設定。",
-			"highlight2": "🧭 工作可靠性：本版本修正了取消處理、tool turn 續行與工作訊息保存。",
-			"highlight3": "⚡ 更快的編輯與聊天：檔案寫入預設不再使用人為延遲。聊天訊息攜帶更少的檔案資料，程式碼動作會送達最近活動的聊天。"
+			"heading": "Zoo Code v3.90.0 新功能",
+			"highlight1": "✨ Provider 與模型：GitHub Copilot 現在是一個 provider：登入後，Zoo Code 會載入您的 Copilot 模型。IO Intelligence 是使用自己 API 金鑰的 provider。Gemini 4 Argon 在 Gemini 和 Vertex 上。GPT-6 Luna 在 OpenCode Go 上。Gemini 4 Argon 和 GPT-6 Luna 也在 Zoo Gateway 上。",
+			"highlight2": "🧭 工具執行：重複同一次工具呼叫會先警告，然後 Zoo Code 停止這個迴圈。關閉 attempt_completion 不再讓工作無法結束。佇列訊息會經過與直接送出的命令相同的命令保護檢查。",
+			"highlight3": "⚡ 推理與串流：Anthropic adaptive thinking 會顯示在聊天中，並統計 thinking tokens。R1 開關會保留 llama.cpp、Ollama 和 LM Studio 的推理。Codex 會把加密推理和您看到的摘要一起保留。VS Code 語言模型串流在串流失敗時使用 guarded recovery。"
 		},
 		"cloudAgents": {
 			"heading": "雲端的新功能：",

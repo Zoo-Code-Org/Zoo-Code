@@ -1361,6 +1361,11 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			expect.objectContaining({ provider: providerIdentifiers.kenari }),
 			expect.anything(),
 		)
+		// IO Intelligence's /models catalog is public and may optionally be scoped by a key.
+		expect(mockGetModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.ioIntelligence, apiKey: undefined },
+			expect.anything(),
+		)
 		// NanoGPT's detailed catalog is public and may optionally be scoped by a key.
 		expect(mockGetModels).toHaveBeenCalledWith(
 			{ provider: providerIdentifiers.nanogpt, apiKey: undefined },
@@ -1384,6 +1389,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
@@ -1658,6 +1664,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
@@ -1685,6 +1692,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm
 			.mockResolvedValueOnce(mockModels) // opencode-go
 			.mockResolvedValueOnce(mockModels) // kenari
+			.mockResolvedValueOnce(mockModels) // io-intelligence
 			.mockResolvedValueOnce(mockModels) // nanogpt
 
 		await webviewMessageHandler(mockClineProvider, {
@@ -1723,6 +1731,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 			},
@@ -3328,5 +3337,46 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		view.getMcpHub = launchSuiteSnapshot.getMcpHub
 		view.providerSettingsManager = launchSuiteSnapshot.providerSettingsManager
 		view.getStateToPostToWebview = launchSuiteSnapshot.getStateToPostToWebview
+	})
+})
+
+describe("updateProfileModel", () => {
+	let updateProfileModel: Mock<ClineProvider["updateProfileModel"]>
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		updateProfileModel = vi.fn<ClineProvider["updateProfileModel"]>().mockResolvedValue(undefined)
+		mockClineProvider.updateProfileModel = updateProfileModel
+	})
+
+	it("delegates a valid message to the provider", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateProfileModel",
+			text: "my-profile",
+			values: {
+				expectedProvider: providerIdentifiers.openrouter,
+				patch: { openRouterModelId: "a/b", reasoningEffort: null },
+			},
+		})
+
+		expect(updateProfileModel).toHaveBeenCalledWith("my-profile", providerIdentifiers.openrouter, {
+			openRouterModelId: "a/b",
+			reasoningEffort: null,
+		})
+	})
+
+	it.each([
+		["missing profile name", { values: { expectedProvider: providerIdentifiers.openrouter, patch: {} } }],
+		["missing expectedProvider", { text: "p", values: { patch: {} } }],
+		["non-object patch", { text: "p", values: { expectedProvider: providerIdentifiers.openrouter, patch: "x" } }],
+		["array patch", { text: "p", values: { expectedProvider: providerIdentifiers.openrouter, patch: [] } }],
+		["missing values", { text: "p" }],
+	])("ignores a malformed message: %s", async (_label, partial) => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateProfileModel",
+			...partial,
+		} as unknown as Parameters<typeof webviewMessageHandler>[1])
+
+		expect(updateProfileModel).not.toHaveBeenCalled()
 	})
 })
