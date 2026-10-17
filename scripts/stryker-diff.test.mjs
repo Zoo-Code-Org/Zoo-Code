@@ -260,7 +260,6 @@ describe("buildManifest", () => {
 		// (stryker-mutator/stryker-js#6144, #6209); see the entry comment in stryker-diff.mjs.
 		assert.equal(extension.discoverRelatedTests, false)
 		assert.equal(extension.vitestRelated, true)
-
 		const types = manifest.packages.find(({ id }) => id === "types")
 		assert.equal(types.discoverRelatedTests, undefined)
 		assert.equal(types.vitestRelated, undefined)
