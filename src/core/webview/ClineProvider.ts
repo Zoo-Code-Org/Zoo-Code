@@ -143,10 +143,6 @@ import { PendingEditOperationStore, type PendingEditOperationInput } from "./Pen
  * https://github.com/KumarVariable/vscode-extension-sidebar-html/blob/master/src/customSidebarViewProvider.ts
  */
 
-export type ClineProviderEvents = {
-	clineCreated: [cline: Task]
-}
-
 type DelegatedChildContext = TaskExecutionContext
 
 function runDelegationTransition<T>(

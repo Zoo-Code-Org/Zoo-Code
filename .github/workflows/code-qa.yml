@@ -76,8 +76,12 @@ jobs:
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
             - name: Setup Node.js and pnpm
               uses: ./.github/actions/setup-node-pnpm
+            - name: Verify Knip guardrails
+              run: pnpm test:knip-policy
             - name: Run knip checks
               run: pnpm knip
+            - name: Run production Knip checks
+              run: pnpm knip:production
 
     compile:
         runs-on: ubuntu-latest
