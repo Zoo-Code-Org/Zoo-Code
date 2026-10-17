@@ -119,6 +119,7 @@ describe("MultiSearchReplaceDiffStrategy malformed start-line marker hint", () =
 		if (!result.success) {
 			throw new Error("Expected the first repaired block to apply")
 		}
+		expect(result.content).toBe(["ALPHA x", "beta"].join("\n"))
 		expect(result.blockCount).toBe(2)
 		expect(result.failParts?.filter((part) => !part.success)).toHaveLength(1)
 	})
