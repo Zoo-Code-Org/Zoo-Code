@@ -267,15 +267,9 @@ export async function loadChanges(globalStorageDir: string, taskId: string): Pro
 
 	const entries: ChangeJournalEntry[] = []
 	for (let i = 0; i < lines.length; i++) {
+		let parsed: unknown
 		try {
-			const parsed: unknown = JSON.parse(lines[i])
-			// A torn append or manual edit can leave valid JSON that is not an
-			// entry (a bare number, null, or a differently-shaped object).
-			// Consumers read path/checkpointId unguarded, so skip any line that
-			// is not entry-shaped instead of returning it as an entry.
-			if (isEntryShaped(parsed)) {
-				entries.push(parsed)
-			}
+			parsed = JSON.parse(lines[i])
 		} catch {
 			// A corrupt line before the final line (e.g. a partially flushed
 			// append) must not hide the valid entries after it. The final
@@ -288,6 +282,20 @@ export async function loadChanges(globalStorageDir: string, taskId: string): Pro
 				throw new Error(`Corrupt change journal entry at line ${i + 1} of ${filePath}`)
 			}
 			continue
+		}
+		// A torn append or manual edit can leave valid JSON that is not an
+		// entry (a bare number, null, or a differently-shaped object).
+		// Consumers read path/checkpointId unguarded, so skip any line that
+		// is not entry-shaped instead of returning it as an entry. A final
+		// line that parses but is not entry-shaped is the same
+		// unverified-tail hazard as an unparseable one: silently dropping it
+		// reports an incomplete rollback history as valid and lets
+		// restore-latest pick an older entry for the same file, so it
+		// rejects like the corrupt case; middle lines keep the skip.
+		if (isEntryShaped(parsed)) {
+			entries.push(parsed)
+		} else if (i === lines.length - 1) {
+			throw new Error(`Malformed change journal entry at line ${i + 1} of ${filePath}`)
 		}
 	}
 

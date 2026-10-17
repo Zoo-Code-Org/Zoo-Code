@@ -451,6 +451,37 @@ describe("changeJournal", () => {
 			expect(result).toHaveLength(1)
 			expect(result[0].checkpointId).toBe("after")
 		})
+		it("rejects a final line that parses but is not entry-shaped", async () => {
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "good" }))
+			// A final line of valid JSON that is not an entry (a bare null, a
+			// bare number, a differently-shaped object) is the same
+			// unverified-tail hazard as an unparseable one: silently dropping
+			// it reports an incomplete rollback history as valid and lets
+			// restore-latest pick an older entry for the same file.
+			const filePath = journalPath(tmpRoot, taskId)
+			const raw = await fs.readFile(filePath, "utf8")
+			await fs.writeFile(filePath, raw + "null\n")
+
+			await expect(loadChanges(tmpRoot, taskId)).rejects.toThrow(/Malformed change journal entry at line 2/)
+		})
+
+		it("skips a middle line that parses but is not entry-shaped", async () => {
+			// Lineage: a wrong-shaped line before the final line is skipped so
+			// later valid entries stay readable; only the final line rejects.
+			const filePath = journalPath(tmpRoot, taskId)
+			await fs.mkdir(path.dirname(filePath), { recursive: true })
+			await fs.writeFile(
+				filePath,
+				JSON.stringify(entry({ checkpointId: "a" })) +
+					"\n" +
+					"null\n" +
+					JSON.stringify(entry({ checkpointId: "b" })) +
+					"\n",
+			)
+
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual(["a", "b"])
+		})
 
 		it("rejects a journal whose only record is torn", async () => {
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
