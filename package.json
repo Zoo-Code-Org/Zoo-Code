@@ -34,7 +34,7 @@
 		"npm:publish:types": "pnpm --filter @roo-code/types npm:publish"
 	},
 	"devDependencies": {
-		"@changesets/cli": "2.31.0",
+		"@changesets/cli": "2.31.1",
 		"@roo-code/config-typescript": "workspace:^",
 		"@stryker-mutator/core": "10.0.0",
 		"@stryker-mutator/vitest-runner": "10.0.0",
