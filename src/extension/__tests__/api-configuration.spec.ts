@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
 import type * as vscode from "vscode"
 
+import { providerIdentifiers } from "@roo-code/types"
+
 import { API } from "../api"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
 import { makeClineProviderFactory } from "../../test-utils/provider"
@@ -18,8 +20,15 @@ describe("API - configuration", () => {
 		const provider = {
 			context: {},
 			on: vi.fn(),
-			contextProxy: { setValues },
-			providerSettingsManager: { saveConfig, setModeConfig },
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({}),
+			setValues,
+			contextProxy: { setValues, getProviderSettings: vi.fn().mockReturnValue({}) },
+			providerSettingsManager: {
+				saveConfig,
+				setModeConfig,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+			},
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -36,6 +45,9 @@ describe("API - configuration", () => {
 				currentApiConfigName: "default",
 				modeApiConfigs: expect.anything(),
 			}),
+			// The payload saves this profile: siblings pinned to it are refreshed
+			// from the payload instead of pinned to a pre-save snapshot.
+			{ savedProfileName: "default" },
 		)
 		expect(setModeConfig).toHaveBeenCalledTimes(2)
 		expect(setModeConfig).toHaveBeenCalledWith("code", "code-config")
@@ -51,8 +63,15 @@ describe("API - configuration", () => {
 		const provider = {
 			context: {},
 			on: vi.fn(),
-			contextProxy: { setValues },
-			providerSettingsManager: { saveConfig, setModeConfig },
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({}),
+			setValues,
+			contextProxy: { setValues, getProviderSettings: vi.fn().mockReturnValue({}) },
+			providerSettingsManager: {
+				saveConfig,
+				setModeConfig,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+			},
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -62,5 +81,179 @@ describe("API - configuration", () => {
 
 		expect(setModeConfig).not.toHaveBeenCalled()
 		expect(postStateToWebview).toHaveBeenCalledOnce()
+	})
+	it("does not refresh shared settings or sibling overlays when the profile save rejects", async () => {
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const saveConfig = vi.fn().mockRejectedValue(new Error("invalid profile"))
+		const deleteConfig = vi.fn().mockResolvedValue(undefined)
+		const setModeConfig = vi.fn().mockResolvedValue(undefined)
+		const setProviderSettings = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({}),
+			setValues,
+			contextProxy: {
+				setValues,
+				getProviderSettings: vi.fn().mockReturnValue({}),
+				setProviderSettings,
+			},
+			providerSettingsManager: { saveConfig, deleteConfig, setModeConfig },
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(api.setConfiguration({ currentApiConfigName: "pinned" })).rejects.toThrow("invalid profile")
+
+		// saveConfig validates before storing: a rejected save must leave the
+		// shared settings and the sibling overlays pinned to the profile
+		// untouched, so no sibling serves settings the stored profile lacks.
+		expect(setValues).not.toHaveBeenCalled()
+		// saveConfig validates before storing: a rejected save wrote nothing, so
+		// rollback must not run at all - no delete, no shared-settings restore.
+		expect(deleteConfig).not.toHaveBeenCalled()
+		expect(setProviderSettings).not.toHaveBeenCalled()
+		expect(postStateToWebview).not.toHaveBeenCalled()
+	})
+	it("restores the stored profile and shared settings when the refresh fails after the save", async () => {
+		const setValues = vi.fn().mockRejectedValue(new Error("refresh down"))
+		const saveConfig = vi.fn().mockResolvedValue("pinned-id")
+		const deleteConfig = vi.fn().mockResolvedValue(undefined)
+		const setModeConfig = vi.fn().mockResolvedValue(undefined)
+		const setProviderSettings = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		// Real provider-setting keys: getProviderSettings only returns
+		// PROVIDER_SETTINGS_KEYS, so the restore assertion must use provider keys.
+		const sharedBefore = { apiProvider: providerIdentifiers.anthropic, apiModelId: "model-old" }
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({}),
+			setValues,
+			contextProxy: {
+				setValues,
+				getProviderSettings: vi.fn().mockReturnValue(sharedBefore),
+				setProviderSettings,
+			},
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				setModeConfig,
+				// The profile did not exist before this call: compensation must
+				// delete the record the save created, not restore an old one.
+				getProfile: vi.fn().mockRejectedValue(new Error("profile absent")),
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(api.setConfiguration({ currentApiConfigName: "pinned" })).rejects.toThrow("refresh down")
+
+		// The save landed but the shared/sibling refresh rejected: the round trip
+		// is one transaction, so the created record is deleted and the shared
+		// provider settings are restored before the caller sees the failure.
+		expect(saveConfig).toHaveBeenCalledWith("pinned", expect.objectContaining({ currentApiConfigName: "pinned" }))
+		expect(deleteConfig).toHaveBeenCalledWith("pinned")
+		expect(setProviderSettings).toHaveBeenCalledWith(sharedBefore)
+		expect(postStateToWebview).not.toHaveBeenCalled()
+	})
+	it("restores the previous record when rolling back a save over an existing profile", async () => {
+		const setValues = vi.fn().mockRejectedValue(new Error("refresh down"))
+		const saveConfig = vi.fn().mockResolvedValue("pinned-id")
+		const deleteConfig = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const previousRecord = {
+			name: "pinned",
+			id: "pinned-id",
+			apiProvider: providerIdentifiers.anthropic,
+			apiKey: "old-key",
+		}
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			// The profile entry exists before the call: rollback must restore the
+			// prior record, never delete the profile.
+			getProviderProfileEntries: vi.fn().mockReturnValue([{ name: "pinned", id: "pinned-id" }]),
+			getValues: vi.fn().mockReturnValue({}),
+			setValues,
+			contextProxy: {
+				setValues,
+				getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.anthropic }),
+				setProviderSettings: vi.fn().mockResolvedValue(undefined),
+			},
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				getProfile: vi.fn().mockResolvedValue(previousRecord),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(api.setConfiguration({ currentApiConfigName: "pinned" })).rejects.toThrow("refresh down")
+
+		// Rollback restores the prior record (minus name/id bookkeeping) instead of
+		// deleting the profile that existed before the call.
+		expect(saveConfig).toHaveBeenLastCalledWith("pinned", expect.objectContaining({ apiKey: "old-key" }))
+		expect(deleteConfig).not.toHaveBeenCalled()
+		expect(postStateToWebview).not.toHaveBeenCalled()
+	})
+
+	it("rolls back the complete mutation when a mode mapping write fails", async () => {
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const saveConfig = vi.fn().mockResolvedValue("pinned-id")
+		const deleteConfig = vi.fn().mockResolvedValue(undefined)
+		const setModeConfig = vi.fn().mockRejectedValue(new Error("mode write failed"))
+		const setProviderSettings = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const sharedBefore = { apiProvider: providerIdentifiers.anthropic, apiModelId: "model-old" }
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "old-profile" }),
+			setValues,
+			contextProxy: {
+				setValues,
+				getProviderSettings: vi.fn().mockReturnValue(sharedBefore),
+				setProviderSettings,
+			},
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				setModeConfig,
+				// The code mode had no mapping before: rollback must clear the
+				// mapping this call created rather than leave it pointing at the
+				// config the failed fan-out chose.
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(
+			api.setConfiguration({ currentApiConfigName: "pinned", modeApiConfigs: { code: "new-code-config" } }),
+		).rejects.toThrow("mode write failed")
+
+		// The shared refresh had already succeeded when the mode write failed, so
+		// rollback re-applies the complete prior configuration (global values,
+		// view-local state, and sibling overlays), the shared provider settings,
+		// deletes the record the save created, and restores the prior mode
+		// mapping (undefined clears the mapping this call created).
+		expect(setValues).toHaveBeenLastCalledWith(expect.objectContaining({ currentApiConfigName: "old-profile" }), {
+			savedProfileName: "old-profile",
+		})
+		expect(setProviderSettings).toHaveBeenCalledWith(sharedBefore)
+		expect(deleteConfig).toHaveBeenCalledWith("pinned")
+		expect(setModeConfig).toHaveBeenLastCalledWith("code", undefined)
+		expect(postStateToWebview).not.toHaveBeenCalled()
 	})
 })
