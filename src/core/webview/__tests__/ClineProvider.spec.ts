@@ -3488,9 +3488,13 @@ describe("ClineProvider", () => {
 				id: "keeper-id",
 				apiProvider: providerIdentifiers.anthropic,
 			}
+			// The record restore must not resurrect the deleted profile: a
+			// saveConfig call here would put the committed deletion back.
+			const saveSpy = vi.fn().mockResolvedValue("doomed-id")
 			// @ts-ignore - Replace providerSettingsManager with a test double whose activation fails.
 			provider.providerSettingsManager = {
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: saveSpy,
 				getProfile: vi.fn().mockImplementation(({ name }: { name: string }) =>
 					Promise.resolve(
 						name === "doomed-profile"
@@ -3520,6 +3524,8 @@ describe("ClineProvider", () => {
 			expect(postSpy).toHaveBeenCalled()
 			// The committed deletion is not rolled back by the failed activation.
 			expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledTimes(1)
+			// The outer write-group restore must not resurrect the deleted record.
+			expect(saveSpy).not.toHaveBeenCalled()
 			await provider.dispose()
 		})
 
@@ -5394,6 +5400,7 @@ describe("ClineProvider", () => {
 			saveConfig,
 			getProfile: vi
 				.fn()
+				.mockResolvedValueOnce({ name: "doomed-profile", ...doomedSettings })
 				.mockResolvedValueOnce({ name: "doomed-profile", ...doomedSettings })
 				.mockResolvedValueOnce({ name: "keeper-profile", ...keeperSettings }),
 		}

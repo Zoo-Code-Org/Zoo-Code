@@ -3104,6 +3104,10 @@ export class ClineProvider
 		const previousSelection = globalSettings.currentApiConfigName
 		const previousSharedSettings = this.contextProxy.getProviderSettings()
 		const previousViewStates = this.getPersistedViewStates({ fresh: true })
+		// Tracks whether the scoped activation compensation inside the try
+		// already ran, so the outer write-group restore does not run a second,
+		// conflicting compensation.
+		let innerCompensationRan = false
 
 		// Remove the profile from the settings store (context.secrets) so it cannot be
 		// resurrected by a later listApiConfigMeta sync. A not-found rejection means
@@ -3289,6 +3293,9 @@ export class ClineProvider
 					survivingSettings,
 				)
 			} catch (error: unknown) {
+				// This scoped compensation is authoritative for the stores it
+				// covers; the outer write-group restore must not run again below.
+				innerCompensationRan = true
 				// A cancelled (timed-out) deletion still compensates. The queue is chained to this run,
 				// so no later mutation can have written these stores in the meantime: holding the queue
 				// until the run settles is exactly what makes the rollback safe again. Skipping it would
@@ -3444,6 +3451,13 @@ export class ClineProvider
 
 			await this.postStateToWebview()
 		} catch (error) {
+			// Two failures must NOT be compensated here: a replacement activation
+			// failure after the deletion committed (documented contract: the
+			// deletion stands), and any failure whose scoped compensation
+			// already ran inside the try.
+			if (error instanceof ProfileDeletionActivationError || innerCompensationRan) {
+				throw error
+			}
 			// The manager delete committed but a later write failed: restore the
 			// deleted record first, then the shared metadata, selection, and shared
 			// settings the deletion had rewritten, and finally merge the affected
