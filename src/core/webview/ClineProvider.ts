@@ -3095,7 +3095,9 @@ export class ClineProvider
 	 * unpinned siblings follow the shared slot, where name and settings move
 	 * together.
 	 */
-	private async snapshotSiblingOverlaysBeforeSharedSettingsWrite(activatedProfileName: string): Promise<void> {
+	private async snapshotSiblingOverlaysBeforeSharedSettingsWrite(
+		activatedProfileName: string | undefined,
+	): Promise<void> {
 		const affected = ClineProvider.getAllInstances().filter(
 			(instance) =>
 				instance !== this &&
@@ -4552,7 +4554,7 @@ export class ClineProvider
 		return { ...this.contextProxy.getValues(), ...this.viewLocalState }
 	}
 
-	public async setValues(values: RooCodeSettings) {
+	public async setValues(values: RooCodeSettings, options?: { savedProfileName?: string }) {
 		const sanitizedValues = { ...values }
 
 		if (sanitizedValues.mode !== undefined) {
@@ -4571,6 +4573,19 @@ export class ClineProvider
 				this.log(`[ClineProvider#setValues] Ignoring invalid mode "${String(sanitizedValues.mode)}"`)
 				delete sanitizedValues.mode
 			}
+		}
+
+		// A flat provider write replaces the shared store: a sibling pinned to a
+		// profile whose settings are not part of this payload would serve the
+		// caller's provider, model, or credentials on its next task, so pin its
+		// overlay before the shared write (the protection the activation paths
+		// take). When the caller saves a profile with this payload, siblings
+		// pinned to that profile must not be pinned to the pre-save snapshot:
+		// the write carries their profile's new settings, and their overlays are
+		// refreshed from the payload after the write instead.
+		const touchesProviderKeys = PROVIDER_SETTINGS_KEYS.some((key) => key in sanitizedValues)
+		if (touchesProviderKeys) {
+			await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(options?.savedProfileName)
 		}
 
 		const previousSharedValues = Object.fromEntries(
@@ -4592,6 +4607,18 @@ export class ClineProvider
 			// persistence layers cannot diverge, then surface the original failure.
 			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues)
 			throw error
+		}
+
+		if (touchesProviderKeys && options?.savedProfileName !== undefined) {
+			// Siblings pinned to the profile this payload saves: the shared store now
+			// carries the saved settings; refresh their overlays so they serve the
+			// fresh copy instead of a pre-save snapshot.
+			const savedSettings = Object.fromEntries(
+				PROVIDER_SETTINGS_KEYS.map((key) => [key, sanitizedValues[key]]).filter(
+					([, value]) => value !== undefined,
+				),
+			) as ProviderSettings
+			await this.refreshViewLocalStateForUpdatedProfile(options.savedProfileName, savedSettings)
 		}
 	}
 

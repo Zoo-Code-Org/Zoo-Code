@@ -568,7 +568,9 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	public async setConfiguration(values: RooCodeSettings) {
-		await this.sidebarProvider.setValues(values)
+		await this.sidebarProvider.setValues(values, {
+			savedProfileName: typeof values.currentApiConfigName === "string" ? values.currentApiConfigName : "default",
+		})
 		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
 		if (values.modeApiConfigs) {
 			await Promise.all(

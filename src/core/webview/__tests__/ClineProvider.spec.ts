@@ -4118,6 +4118,87 @@ describe("ClineProvider", () => {
 
 			await provider.dispose()
 		})
+
+		it("pins a sibling's overlay before a flat provider write in setValues", async () => {
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await sibling["setViewStateId"]("flat-write-view")
+			await sibling.saveViewState("currentApiConfigName", "pinned-profile")
+			const siblingPostSpy = vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "pinned-profile",
+				id: "pinned-id",
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "pinned-key",
+			})
+
+			await provider.setValues({ apiProvider: providerIdentifiers.anthropic, apiKey: "caller-key" })
+
+			// The sibling keeps serving its own profile's credentials instead of
+			// reading the caller's flat write back from the shared store.
+			expect(sibling["viewLocalState"].apiConfiguration).toMatchObject({
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "pinned-key",
+			})
+			expect(siblingPostSpy).toHaveBeenCalled()
+
+			await sibling.dispose()
+			await provider.dispose()
+		})
+
+		it("refreshes siblings pinned to the profile a setValues payload saves", async () => {
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await sibling["setViewStateId"]("saved-profile-view")
+			await sibling.saveViewState("currentApiConfigName", "saved-profile")
+			await sibling.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "stale-key",
+			})
+			const siblingPostSpy = vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			await provider.setValues(
+				{ apiProvider: providerIdentifiers.anthropic, apiKey: "fresh-key" },
+				{ savedProfileName: "saved-profile" },
+			)
+
+			// The payload saves the sibling's own profile: the sibling serves the
+			// fresh copy rather than a snapshot of the pre-save settings.
+			expect(sibling["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "fresh-key",
+			})
+			expect(siblingPostSpy).toHaveBeenCalled()
+
+			await sibling.dispose()
+			await provider.dispose()
+		})
 	})
 
 	describe("persisted view state", () => {
