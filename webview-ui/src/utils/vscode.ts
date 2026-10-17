@@ -3,6 +3,13 @@ import type { WebviewApi } from "vscode-webview"
 import { WebviewMessage } from "@roo/WebviewMessage"
 
 /**
+ * Mirrors ClineProvider.MAX_VIEW_STATE_ID_LENGTH: the extension host refuses ids
+ * longer than this, so the webview regenerates instead of reusing a stored id the
+ * host would reject on every handoff.
+ */
+const MAX_VIEW_STATE_ID_LENGTH = 64
+
+/**
  * A utility wrapper around the acquireVsCodeApi() function, which enables
  * message passing and state management between the webview and extension
  * contexts.
@@ -58,10 +65,17 @@ export class VSCodeAPIWrapper {
 		// member name. "__proto__" alone is not enough: ids like "constructor" or
 		// "toString" survive the host's normalization and would be refused there
 		// forever, stranding this view's pre-launch entry under the temporary id.
+		// The host also caps the id length: a stored id beyond the cap must be
+		// regenerated, or every setViewStateId handoff is refused and the entry stays
+		// stranded under the temporary id.
 		const normalizedViewStateId =
 			typeof existingViewStateId === "string" ? existingViewStateId.trim().replace(/[^A-Za-z0-9_-]/g, "_") : ""
 
-		if (normalizedViewStateId && !Object.prototype.hasOwnProperty.call(Object.prototype, normalizedViewStateId)) {
+		if (
+			normalizedViewStateId &&
+			normalizedViewStateId.length <= MAX_VIEW_STATE_ID_LENGTH &&
+			!Object.prototype.hasOwnProperty.call(Object.prototype, normalizedViewStateId)
+		) {
 			return normalizedViewStateId
 		}
 

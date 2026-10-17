@@ -73,6 +73,23 @@ describe("VSCodeAPIWrapper", () => {
 		expect(JSON.parse(storage.getItem("vscodeState")!)).toMatchObject({ viewStateId: "generated-view" })
 	})
 
+	it("regenerates a persisted viewStateId longer than the host's accepted limit", () => {
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: { randomUUID: vi.fn(() => "generated-view") },
+		})
+		// The extension host refuses ids longer than MAX_VIEW_STATE_ID_LENGTH: reusing
+		// such a stored id would strand every setViewStateId handoff.
+		const storage = createMockStorage({ vscodeState: JSON.stringify({ viewStateId: "a".repeat(65) }) })
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+		expect(wrapper.getViewStateId()).toBe("generated-view")
+		expect(JSON.parse(storage.getItem("vscodeState")!)).toMatchObject({ viewStateId: "generated-view" })
+	})
+
 	it("creates and persists a new viewStateId when storage has been cleared", () => {
 		Object.defineProperty(globalThis, "crypto", {
 			configurable: true,
