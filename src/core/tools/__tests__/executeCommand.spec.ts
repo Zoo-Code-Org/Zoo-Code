@@ -52,7 +52,7 @@ describe("executeCommand", () => {
 				deref: vitest.fn().mockResolvedValue(mockProvider),
 			},
 			say: vitest.fn().mockResolvedValue(undefined),
-			terminalProcess: undefined,
+			terminalProcesses: new Map(),
 		}
 
 		// Create mock process that resolves immediately
@@ -103,6 +103,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "echo test",
 				terminalShellIntegrationDisabled: false,
 			}
@@ -143,6 +144,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "echo test",
 				terminalShellIntegrationDisabled: false,
 			}
@@ -175,6 +177,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "echo test",
 				terminalShellIntegrationDisabled: true, // Forces ExecaTerminal
 			}
@@ -204,6 +207,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "echo test",
 				customCwd,
 				terminalShellIntegrationDisabled: false,
@@ -233,6 +237,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "echo test",
 				customCwd: relativeCwd,
 				terminalShellIntegrationDisabled: false,
@@ -255,6 +260,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "echo test",
 				customCwd: nonExistentCwd,
 				terminalShellIntegrationDisabled: false,
@@ -283,6 +289,7 @@ describe("executeCommand", () => {
 
 			await executeCommandInTerminal(mockTask, {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "echo test",
 				terminalShellIntegrationDisabled: false,
 			})
@@ -306,6 +313,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "echo test",
 				terminalShellIntegrationDisabled: false,
 			}
@@ -328,6 +336,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "echo test",
 				terminalShellIntegrationDisabled: true,
 			}
@@ -341,6 +350,48 @@ describe("executeCommand", () => {
 	})
 
 	describe("Command Execution States", () => {
+		it("keeps a separate terminal process per tool call id and aborts only the timed-out one", async () => {
+			vitest.useFakeTimers()
+			const makePendingProcess = () =>
+				Object.assign(new Promise<void>(() => {}), { continue: vitest.fn(), abort: vitest.fn() })
+			const processA = makePendingProcess()
+			const processB = makePendingProcess()
+			mockTerminal.runCommand.mockReturnValueOnce(processA).mockReturnValueOnce(processB)
+
+			const executionA = executeCommandInTerminal(mockTask, {
+				executionId: "exec-a",
+				toolCallId: "call-a",
+				command: "sleep 10",
+				terminalShellIntegrationDisabled: false,
+				commandExecutionTimeout: 1_000,
+			})
+			await vitest.advanceTimersByTimeAsync(0)
+			const executionB = executeCommandInTerminal(mockTask, {
+				executionId: "exec-b",
+				toolCallId: "call-b",
+				command: "sleep 20",
+				terminalShellIntegrationDisabled: false,
+				commandExecutionTimeout: 5_000,
+			})
+			await vitest.advanceTimersByTimeAsync(0)
+
+			expect(mockTask.terminalProcesses.get("call-a")).toBe(processA)
+			expect(mockTask.terminalProcesses.get("call-b")).toBe(processB)
+
+			await vitest.advanceTimersByTimeAsync(1_000)
+			await executionA
+
+			expect(processA.abort).toHaveBeenCalled()
+			expect(processB.abort).not.toHaveBeenCalled()
+			expect(mockTask.terminalProcesses.has("call-a")).toBe(false)
+			expect(mockTask.terminalProcesses.get("call-b")).toBe(processB)
+
+			await vitest.advanceTimersByTimeAsync(4_000)
+			await executionB
+
+			expect(mockTask.terminalProcesses.size).toBe(0)
+		})
+
 		it("posts timeout status when command execution exceeds the user limit", async () => {
 			vitest.useFakeTimers()
 			const pendingProcess = Object.assign(new Promise<void>(() => {}), {
@@ -351,6 +402,7 @@ describe("executeCommand", () => {
 
 			const executionPromise = executeCommandInTerminal(mockTask, {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "sleep 10",
 				terminalShellIntegrationDisabled: false,
 				commandExecutionTimeout: 1_000,
@@ -381,6 +433,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "echo success",
 				terminalShellIntegrationDisabled: false,
 			}
@@ -406,6 +459,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "exit 1",
 				terminalShellIntegrationDisabled: false,
 			}
@@ -439,6 +493,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "long-running-command",
 				terminalShellIntegrationDisabled: false,
 			}
@@ -480,6 +535,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "cd src && pwd",
 				terminalShellIntegrationDisabled: false,
 			}
