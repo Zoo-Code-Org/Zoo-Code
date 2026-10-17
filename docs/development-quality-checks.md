@@ -41,7 +41,9 @@ Do not annotate a new scaffold just to make the checks pass.
 
 Entry patterns describe real runtime entry points. Browser component fixtures are
 development entries because Playwright loads them outside the normal application
-graph. Shared `src/test-utils` files are excluded only in production mode.
+graph. They are excluded from the production project so their imports cannot make
+otherwise unused application helpers appear reachable. Shared `src/test-utils`
+files are excluded only in production mode.
 
 Two existing source files have explicit production-only exceptions:
 

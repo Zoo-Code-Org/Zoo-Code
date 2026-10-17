@@ -42,12 +42,14 @@
 			]
 		},
 		"webview-ui": {
-			"entry": ["src/index.tsx!", "src/**/*.visual.tsx!", "src/**/*.visual.{fixture,i18n}.{ts,tsx}"],
+			"entry": ["src/index.tsx!", "src/**/*.visual.tsx", "src/**/*.visual.{fixture,i18n}.{ts,tsx}"],
 			"project": [
 				"src/**/*.{ts,tsx}!",
 				"../src/shared/*.ts!",
 				"!src/utils/test-utils.tsx!",
-				"!src/vite-plugins/**!"
+				"!src/vite-plugins/**!",
+				"!src/**/*.visual.tsx!",
+				"!src/**/*.visual.{fixture,i18n}.{ts,tsx}!"
 			],
 			"ignoreDependencies": [
 				"@roo-code/config-typescript",
