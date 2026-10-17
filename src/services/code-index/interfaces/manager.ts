@@ -9,10 +9,3 @@ export type EmbedderProvider =
 	| "bedrock"
 	| "openrouter"
 	| "semble"
-
-export interface IndexProgressUpdate {
-	systemStatus: IndexingState
-	message?: string
-	processedBlockCount?: number
-	totalBlockCount?: number
-}
