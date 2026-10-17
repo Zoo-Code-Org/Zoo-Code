@@ -6824,6 +6824,200 @@ describe("Cline", () => {
 		})
 	})
 
+	describe("task-start baseline (B1 perWriteCheckpoints)", () => {
+		it("records one suppressed baseline checkpoint per Task instance at loop start", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "baseline task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const saveSpy = vi.spyOn(task, "checkpointSave").mockResolvedValue(undefined)
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
+
+			// End the loop after the first request; abort stays false so the
+			// baseline block (not the loop) is what the save spy observes.
+			vi.spyOn(task, "recursivelyMakeClineRequests").mockResolvedValue(true)
+
+			await taskAccess.initiateTaskLoop([])
+			await taskAccess.initiateTaskLoop([])
+
+			expect(saveSpy).toHaveBeenCalledOnce()
+			expect(saveSpy).toHaveBeenCalledWith(true, true)
+		})
+
+		it("does not record a baseline when the task resumes from history", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "resumed-baseline-task",
+					number: 1,
+					ts: Date.now(),
+					task: "resumed baseline task",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const saveSpy = vi.spyOn(task, "checkpointSave").mockResolvedValue(undefined)
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
+
+			vi.spyOn(task, "recursivelyMakeClineRequests").mockResolvedValue(true)
+
+			await taskAccess.initiateTaskLoop([])
+
+			// A history resume must not re-record the baseline: it belongs to the
+			// original task start (exactly once per task).
+			expect(saveSpy).not.toHaveBeenCalled()
+		})
+
+		it("records the baseline checkpoint when the setting is unset (default-on)", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "baseline unset task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const saveSpy = vi.spyOn(task, "checkpointSave").mockResolvedValue(undefined)
+			const state = await mockProvider.getState()
+			// Unset: the property is absent from the state, so default-on applies.
+			const unsetState = { ...state }
+			Reflect.deleteProperty(unsetState, "perWriteCheckpoints")
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(unsetState as typeof state)
+
+			vi.spyOn(task, "recursivelyMakeClineRequests").mockResolvedValue(true)
+
+			await taskAccess.initiateTaskLoop([])
+
+			expect(saveSpy).toHaveBeenCalledOnce()
+			expect(saveSpy).toHaveBeenCalledWith(true, true)
+		})
+
+		it("does not record a baseline checkpoint when perWriteCheckpoints is disabled", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "baseline disabled task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const saveSpy = vi.spyOn(task, "checkpointSave").mockResolvedValue(undefined)
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({ ...state, perWriteCheckpoints: false })
+
+			vi.spyOn(task, "recursivelyMakeClineRequests").mockResolvedValue(true)
+
+			await taskAccess.initiateTaskLoop([])
+
+			expect(saveSpy).not.toHaveBeenCalled()
+		})
+
+		it("does not record a baseline when the task is already aborted", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "aborted baseline task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const saveSpy = vi.spyOn(task, "checkpointSave").mockResolvedValue(undefined)
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
+
+			task.abort = true
+
+			await taskAccess.initiateTaskLoop([])
+
+			// A task cancelled before the loop starts must not pay for (or await)
+			// a baseline checkpoint it will never use.
+			expect(saveSpy).not.toHaveBeenCalled()
+		})
+
+		it("does not record a baseline when cancellation arrives during the state lookup", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "racy baseline task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const saveSpy = vi.spyOn(task, "checkpointSave").mockResolvedValue(undefined)
+			const state = await mockProvider.getState()
+			type StateResult = Awaited<ReturnType<typeof mockProvider.getState>>
+			let resolveState: (value: StateResult | PromiseLike<StateResult>) => void = () => {}
+			const statePromise = new Promise<StateResult>((resolve) => (resolveState = resolve))
+			vi.spyOn(mockProvider, "getState").mockReturnValue(statePromise)
+
+			const loopPromise = taskAccess.initiateTaskLoop([])
+			// Cancellation lands while the state lookup is still pending.
+			task.abort = true
+			resolveState({ ...state, perWriteCheckpoints: true })
+			await loopPromise
+
+			// The post-lookup recheck must skip the save for the canceled task.
+			expect(saveSpy).not.toHaveBeenCalled()
+		})
+
+		it("awaits the baseline checkpoint before entering the request loop", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "baseline await task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			type SaveResult = Awaited<ReturnType<typeof task.checkpointSave>>
+			let resolveSave: (value: SaveResult | PromiseLike<SaveResult>) => void = () => {}
+			const saveSpy = vi
+				.spyOn(task, "checkpointSave")
+				.mockImplementation(() => new Promise<SaveResult>((resolve) => (resolveSave = resolve)))
+			const requestSpy = vi.spyOn(task, "recursivelyMakeClineRequests").mockResolvedValue(true)
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({ ...(await mockProvider.getState()) })
+			const loopPromise = taskAccess.initiateTaskLoop([])
+
+			// The loop must not enter while the baseline checkpoint is still in flight.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			expect(saveSpy).toHaveBeenCalledOnce()
+			expect(requestSpy).not.toHaveBeenCalled()
+
+			resolveSave()
+			await loopPromise
+			expect(requestSpy).toHaveBeenCalled()
+		})
+
+		it("continues task startup when the baseline checkpoint fails", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "baseline failure task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const boom = new Error("baseline boom")
+			vi.spyOn(task, "checkpointSave").mockRejectedValue(boom)
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
+			const requestSpy = vi.spyOn(task, "recursivelyMakeClineRequests").mockResolvedValue(true)
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			// The baseline runs before TaskStarted: a checkpoint error must not
+			// abort task startup (startTask rethrows non-abort errors from
+			// initiateTaskLoop). The loop must still be entered.
+			await taskAccess.initiateTaskLoop([])
+
+			expect(requestSpy).toHaveBeenCalled()
+			expect(consoleErrorSpy).toHaveBeenCalledWith("[Task] task-start checkpoint baseline failed:", boom)
+			consoleErrorSpy.mockRestore()
+		})
+	})
+
 	describe("start()", () => {
 		it("should be a no-op if the task was already started in the constructor", () => {
 			const task = new Task({
@@ -7746,6 +7940,34 @@ describe("Queued message processing after condense", () => {
 
 		expect(submitSpy).toHaveBeenCalledWith("queued text", ["img1.png"])
 		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+	it("does not dequeue queued messages once the task is aborted", () => {
+		// Tools await the checkpoint before handing off queued work; a
+		// cancellation landing during that await must not consume the queued
+		// message: submitUserMessage rejects once abort is set, so dequeuing
+		// would drop the input instead of leaving it for the resume flow.
+		if (!TelemetryService.hasInstance()) {
+			TelemetryService.createInstance([])
+		}
+		const provider = createProvider()
+		const task = new Task({
+			provider,
+			apiConfiguration: apiConfig,
+			task: "initial task",
+			startTask: false,
+		})
+		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+
+		task.messageQueueService.addMessage("queued text")
+		task.abort = true
+		try {
+			task.processQueuedMessages()
+		} finally {
+			task.abort = false
+		}
+
+		expect(submitSpy).not.toHaveBeenCalled()
+		expect(task.messageQueueService.isEmpty()).toBe(false)
 	})
 
 	it("does not cross-drain queues between separate tasks", async () => {

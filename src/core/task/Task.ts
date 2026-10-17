@@ -471,6 +471,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	public lastMessageTs?: number
 	private autoApprovalTimeoutRef?: NodeJS.Timeout
 
+	// B1: task-start baseline, recorded at most once (initiateTaskLoop also runs on resume).
+	private taskStartBaselineDone = false
+
 	// Tool Use
 	consecutiveMistakeCount: number = 0
 	consecutiveMistakeLimit: number
@@ -3843,6 +3846,32 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// arm needed.
 		void getCheckpointService(this)
 
+		// B1 task-start baseline: a suppressed pre-task root commit (default-on).
+		// History resumes skip it: the baseline belongs to the original task start
+		// (exactly once per task), and the resumed task's shadow repo already carries
+		// a baseline for the first post-resume write checkpoint to diff against.
+		// An already-aborted task skips it too: the loop will never run, so the
+		// save would only add latency to a task that is being disposed.
+		if (!this.taskStartBaselineDone && !this._isHistoryTask && !this.abort) {
+			this.taskStartBaselineDone = true
+			try {
+				const baselineEnabled = (await this.providerRef.deref()?.getState())?.perWriteCheckpoints
+				// Cancellation can arrive while the state lookup is pending; recheck
+				// before the save so a canceled task performs no checkpoint work.
+				if (baselineEnabled !== false && !this.abort) {
+					// allowEmpty=true so a clean workspace still produces the baseline
+					// commit; awaited so the first per-write checkpoint cannot interleave.
+					await this.checkpointSave(true, true)
+				}
+			} catch (error) {
+				// The baseline is best-effort and runs before TaskStarted: a rejected
+				// state lookup or a checkpoint error must not abort task startup
+				// (startTask rethrows non-abort errors from initiateTaskLoop). Log
+				// and continue; per-write saves still report their own failures.
+				console.error("[Task] task-start checkpoint baseline failed:", error)
+			}
+		}
+
 		let nextUserContent = userContent
 		let includeFileDetails = true
 
@@ -4276,7 +4305,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										// under the canonical name slip past a name comparison. The first call wins.
 										const idAlreadyUsed = this.assistantMessageContent.some(
 											(entry) =>
-												// Stryker disable next-line ConditionalExpression: only tool_use and mcp_tool_use entries ever carry an id — the text block pushed in the text case has no id field and the start events reaching this guard always carry the string id locked in by processRawChunk — so the type check cannot change the outcome of entry.id === event.id for any entry this pipeline produces; the false replacement is additionally killed by the rejection tests.
 												(entry.type === "tool_use" || entry.type === "mcp_tool_use") &&
 												(entry as { id?: string }).id === event.id,
 										)
@@ -4329,7 +4357,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										// keep the deprecated single-entry-per-ID lookup.
 										let streamingKey: string | undefined
 
-										// Stryker disable next-line ConditionalExpression: event.name is always a string on this path — the only delta events reaching this handler are emitted by processRawChunk with the tracked start name (never undefined), so the legacy nameless branch below is unreachable defensive code and the conditional always takes the named side.
 										if (event.name !== undefined) {
 											streamingKey = NativeToolCallParser.makeStreamingKey(event.id, event.name)
 										} else {
@@ -4346,7 +4373,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										}
 
 										const partialToolUse =
-											// Stryker disable next-line ConditionalExpression: streamingKey can never be undefined here — makeStreamingKey always returns a string and the legacy lookup branch above is unreachable (see the directive on the event.name check) — so the null side is unreachable defensive code.
 											streamingKey === undefined
 												? null
 												: NativeToolCallParser.processStreamingChunk(
@@ -4355,7 +4381,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 														nativeToolCallParserScope,
 													)
 
-										// Stryker disable next-line ConditionalExpression, EqualityOperator: streamingKey is always a defined string on this path (makeStreamingKey never returns undefined; the legacy branch is unreachable per the directives above), and processStreamingChunk returns a partial ToolUse for a known key, so both defensive conditions reduce to the partialToolUse check and cannot change the observed behavior.
 										if (partialToolUse && streamingKey !== undefined) {
 											// Reuse the compound key built above: it is exactly the key the start event
 											// registered under, so the delta lookup needs no second encoding.
@@ -4752,7 +4777,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					if (event.type === "tool_call_end") {
 						// Create compound key for deduplication (same pattern as streaming handler).
 						// End events carry the tool name; fall back to the id for events that don't.
-						// Stryker disable next-line LogicalOperator: event.name is always a string on this path — finalizeRawChunks emits end events with the tracked start name (a string, set before the tracker can start), so the ?? event.id fallback guards a nameless end event this pipeline cannot produce.
 						let eventName = event.name ?? event.id
 						let dedupKey = NativeToolCallParser.makeStreamingKey(event.id, eventName)
 
@@ -4769,13 +4793,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// name (provider quirk), the compound-key lookup above misses and both the
 						// parser entry and the dedup tracking would stay stale. Resolve the tracked
 						// entry by id and target the real compound key for finalization and cleanup.
-						// Stryker disable next-line ConditionalExpression, LogicalOperator, EqualityOperator: the both-miss case is unreachable via the raw-chunk pipeline — end events carry the locked start name so the compound key resolves the registered entry, and a same-ID rejected-start end is always processed after the accepted start's end has already removed that entry; this defensive path protects against a cross-name end event the pipeline cannot produce.
 						if (finalToolUse === null && toolUseIndex === undefined) {
 							const resolved = NativeToolCallParser.getStreamingToolCallById(
 								event.id,
 								nativeToolCallParserScope,
 							)
-							// Stryker disable next-line ConditionalExpression: unreachable defensive region — getStreamingToolCallById can only resolve when the both-miss case above is reachable, which the raw-chunk pipeline cannot produce (see the directive there).
 							if (resolved) {
 								eventName = resolved.name
 								dedupKey = NativeToolCallParser.makeStreamingKey(resolved.id, resolved.name)
@@ -6455,6 +6477,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * @param context - Context string for logging (e.g., the calling tool name)
 	 */
 	public processQueuedMessages(): void {
+		// An aborted task must not dequeue queued messages: submitUserMessage
+		// rejects once abort is set, so consuming the queue here would drop the
+		// message instead of leaving it for the resume/abort flow. Tools await
+		// checkpoint saves before handing off, so a cancellation can land between
+		// the write and this call.
+		if (this.abort) {
+			return
+		}
 		try {
 			if (!this.messageQueueService.isEmpty()) {
 				const queued = this.messageQueueService.dequeueMessage()

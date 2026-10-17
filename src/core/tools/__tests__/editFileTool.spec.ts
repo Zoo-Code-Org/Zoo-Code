@@ -7,6 +7,7 @@ import { fileExistsAtPath } from "../../../utils/fs"
 import { isPathOutsideWorkspace } from "../../../utils/pathUtils"
 import { getReadablePath } from "../../../utils/path"
 import { ToolUse, ToolResponse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
+import { checkpointSave } from "../../checkpoints"
 import { editFileTool } from "../EditFileTool"
 
 vi.mock("fs/promises", () => ({
@@ -57,6 +58,10 @@ vi.mock("../../../utils/path", () => ({
 vi.mock("../../diff/stats", () => ({
 	sanitizeUnifiedDiff: vi.fn((diff) => diff),
 	computeDiffStats: vi.fn(() => ({ additions: 1, deletions: 1 })),
+}))
+
+vi.mock("../../checkpoints", () => ({
+	checkpointSave: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock("vscode", () => ({
@@ -775,6 +780,63 @@ describe("editFileTool", () => {
 
 			expect(mockTask.consecutiveMistakeCount).toBe(0)
 			expect(mockAskApproval).toHaveBeenCalled()
+		})
+	})
+
+	describe("per-write checkpoints (B1)", () => {
+		const mockedCheckpointSave = checkpointSave as MockedFunction<typeof checkpointSave>
+
+		it("records one suppressed checkpoint after a successful edit (default-on)", async () => {
+			await executeEditFileTool({})
+
+			expect(mockTask.consecutiveMistakeCount).toBe(0)
+			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask, false, true)
+		})
+
+		it("awaits the checkpoint before resetting the diff state", async () => {
+			// Fire-and-forget would let diffViewProvider.reset() and the queued-work
+			// handoff race an unfinished checkpoint commit (and lose it at
+			// shutdown): the save must complete before the reset.
+			let releaseCheckpoint: () => void = () => {}
+			mockedCheckpointSave.mockImplementationOnce(
+				() => new Promise<void>((resolve) => (releaseCheckpoint = resolve)),
+			)
+			let settled = false
+			const run = executeEditFileTool({}).then(() => {
+				settled = true
+			})
+			await vi.waitFor(() => expect(mockedCheckpointSave).toHaveBeenCalledOnce())
+			expect(settled).toBe(false)
+			expect(mockTask.diffViewProvider.reset).not.toHaveBeenCalled()
+			releaseCheckpoint()
+			await run
+			expect(mockTask.diffViewProvider.reset).toHaveBeenCalled()
+		})
+
+		it("does not record a checkpoint when perWriteCheckpoints is disabled", async () => {
+			mockTask.providerRef.deref = vi.fn().mockReturnValue({
+				getState: vi.fn().mockResolvedValue({
+					diagnosticsEnabled: true,
+					writeDelayMs: 1000,
+					experiments: {},
+					perWriteCheckpoints: false,
+				}),
+			})
+
+			await executeEditFileTool({})
+
+			expect(mockTask.consecutiveMistakeCount).toBe(0)
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+		})
+
+		it("does not record a checkpoint when the edit fails", async () => {
+			mockTask.diffViewProvider.saveChanges.mockRejectedValue(new Error("save failed"))
+
+			await executeEditFileTool({})
+
+			expect(mockHandleError).toHaveBeenCalledWith("edit_file", expect.any(Error))
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
 		})
 	})
 })

@@ -1,7 +1,7 @@
 import path from "path"
 import fs from "fs/promises"
 
-import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
+import { type ClineSayTool, DEFAULT_PER_WRITE_CHECKPOINTS, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
@@ -13,6 +13,7 @@ import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import { unescapeHtmlEntities } from "../../utils/text-normalization"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { convertNewFileToUnifiedDiff, computeDiffStats, sanitizeUnifiedDiff } from "../diff/stats"
+import { checkpointSave } from "../checkpoints"
 import type { ToolUse } from "../../shared/tools"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
@@ -102,6 +103,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			const state = await provider?.getState()
 			const diagnosticsEnabled = state?.diagnosticsEnabled ?? true
 			const writeDelayMs = state?.writeDelayMs ?? DEFAULT_WRITE_DELAY_MS
+			const perWriteCheckpoints = state?.perWriteCheckpoints ?? DEFAULT_PER_WRITE_CHECKPOINTS
 			const isPreventFocusDisruptionEnabled = experiments.isEnabled(
 				state?.experiments ?? {},
 				EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION,
@@ -176,6 +178,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, !fileExists)
 
 			pushToolResult(message)
+
+			if (perWriteCheckpoints) {
+				// Await so the checkpoint (staging + commit) finishes before the next
+				// queued write starts; otherwise two writes can collapse into one commit.
+				await checkpointSave(task, false, true).catch(() => {})
+			}
 
 			await task.diffViewProvider.reset()
 			this.resetPartialState()

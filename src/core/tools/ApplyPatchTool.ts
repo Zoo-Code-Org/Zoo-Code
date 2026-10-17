@@ -6,6 +6,7 @@ import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 import { getReadablePath } from "../../utils/path"
 import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import { Task } from "../task/Task"
+import { checkpointSave } from "../checkpoints"
 import { formatResponse } from "../prompts/responses"
 import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { fileExistsAtPath } from "../../utils/fs"
@@ -56,6 +57,12 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		const { patch } = params
 		const { handleError, pushToolResult } = callbacks
 
+		// The queued-message handoff is deferred to the finally block below, after
+		// the whole-patch checkpoint attempt: a handler that hands off early lets a
+		// queued turn start while the checkpoint is still staging or committing.
+
+		let handoffPending = false
+
 		try {
 			// Validate required parameters
 			if (!patch) {
@@ -102,7 +109,10 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				return
 			}
 
-			// Process each file change
+			// Process each file change. The handlers report whether their file
+			// operation succeeded, so a rejected approval or a failed local write
+			// does not get checkpointed as if the patch had succeeded.
+			let patchSucceeded = true
 			for (const change of changes) {
 				const relPath = change.path
 				const absolutePath = path.resolve(task.cwd, relPath)
@@ -112,7 +122,11 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				if (!accessAllowed) {
 					await task.say("rooignore_error", relPath)
 					pushToolResult(formatResponse.rooIgnoreError(relPath))
-					return
+					// Partial failure: earlier successful writes are retained; break so the
+					// explicit partial-state checkpoint below persists them before the
+					// queued-message handoff in the finally block.
+					patchSucceeded = false
+					break
 				}
 
 				// Check if file is write-protected
@@ -120,20 +134,86 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 				if (change.type === "add") {
 					// Create new file
-					await this.handleAddFile(change, absolutePath, relPath, task, callbacks, isWriteProtected)
+					const ok = await this.handleAddFile(
+						change,
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+					)
+					handoffPending = handoffPending || ok
+					patchSucceeded = ok && patchSucceeded
 				} else if (change.type === "delete") {
 					// Delete file
-					await this.handleDeleteFile(absolutePath, relPath, task, callbacks, isWriteProtected)
+					const ok = await this.handleDeleteFile(absolutePath, relPath, task, callbacks, isWriteProtected)
+					handoffPending = handoffPending || ok
+					patchSucceeded = ok && patchSucceeded
 				} else if (change.type === "update") {
 					// Update file
-					await this.handleUpdateFile(change, absolutePath, relPath, task, callbacks, isWriteProtected)
+					const ok = await this.handleUpdateFile(
+						change,
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+					)
+					handoffPending = handoffPending || ok
+					patchSucceeded = ok && patchSucceeded
 				}
 			}
 
 			task.consecutiveMistakeCount = 0
+
+			// B1: one checkpoint for the whole patch (not per file), and only when
+			// every file operation succeeded. Live setting with default-on
+			// semantics: skip only when explicitly false.
+			if (patchSucceeded) {
+				const perWriteCheckpoints = (await task.providerRef?.deref()?.getState())?.perWriteCheckpoints
+				if (perWriteCheckpoints !== false) {
+					// Await so the whole-patch checkpoint persists before the tool
+					// completes; an unawaited save lets queued work interleave its own
+					// checkpoint and lets shutdown lose the commit. Called only after
+					// every filesystem operation succeeded.
+					await checkpointSave(task, false, true).catch(() => {})
+				}
+			} else if (handoffPending) {
+				// Partial failure: the earlier successful operations keep their writes
+				// in the workspace. Persist an explicit partial-state checkpoint before
+				// the queued-message handoff (the finally block below) so those retained
+				// writes have rollback metadata instead of being carried forward
+				// unpersisted; the failed operation already reported itself.
+				const perWriteCheckpoints = (await task.providerRef?.deref()?.getState())?.perWriteCheckpoints
+				if (perWriteCheckpoints !== false) {
+					await checkpointSave(task, false, true).catch(() => {})
+				}
+			}
 		} catch (error) {
+			// A later file operation can reject outright (e.g. the approval
+			// stream dies) after earlier handlers succeeded. This catch skips
+			// both checkpoint branches above, but the finally block still
+			// hands off queued messages, so persist an explicit partial-state
+			// checkpoint here (same default-on semantics as the branches
+			// above) instead of letting the queued turn start with the
+			// retained writes carried forward without rollback metadata.
+			if (handoffPending) {
+				const perWriteCheckpoints = (await task.providerRef?.deref()?.getState())?.perWriteCheckpoints
+				if (perWriteCheckpoints !== false) {
+					await checkpointSave(task, false, true).catch(() => {})
+				}
+			}
 			await handleError("apply patch", error as Error)
 			await task.diffViewProvider.reset()
+		} finally {
+			// One handoff per successful patch, after the checkpoint attempt and
+			// independent of the checkpoint setting or outcome: a queued turn can
+			// never start while the patch checkpoint is still staging or
+			// committing, and no path (disabled checkpoints, failed save, early
+			// return, error) strands the queued messages.
+			if (handoffPending) {
+				task.processQueuedMessages()
+			}
 		}
 	}
 
@@ -144,7 +224,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
-	): Promise<void> {
+	): Promise<boolean> {
 		const { askApproval, pushToolResult } = callbacks
 
 		// Check if file already exists
@@ -155,7 +235,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			const errorMessage = `File already exists: ${relPath}. Use Update File instead.`
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
-			return
+			return false
 		}
 
 		const newContent = change.newContent || ""
@@ -209,7 +289,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			}
 			pushToolResult("Changes were rejected by the user.")
 			await task.diffViewProvider.reset()
-			return
+			return false
 		}
 
 		// Save the changes
@@ -226,7 +306,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, true)
 		pushToolResult(message)
 		await task.diffViewProvider.reset()
-		task.processQueuedMessages()
+		return true
 	}
 
 	private async handleDeleteFile(
@@ -235,7 +315,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
-	): Promise<void> {
+	): Promise<boolean> {
 		const { askApproval, pushToolResult } = callbacks
 
 		// Check if file exists
@@ -246,7 +326,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			const errorMessage = `File not found: ${relPath}. Cannot delete a non-existent file.`
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
-			return
+			return false
 		}
 
 		const isOutsideWorkspace = isPathOutsideWorkspace(absolutePath)
@@ -268,7 +348,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 		if (!didApprove) {
 			pushToolResult("Delete operation was rejected by the user.")
-			return
+			return false
 		}
 
 		// Delete the file
@@ -278,12 +358,12 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			const errorMessage = `Failed to delete file '${relPath}': ${error instanceof Error ? error.message : String(error)}`
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
-			return
+			return false
 		}
 
 		task.didEditFile = true
 		pushToolResult(`Successfully deleted ${relPath}`)
-		task.processQueuedMessages()
+		return true
 	}
 
 	private async handleUpdateFile(
@@ -293,7 +373,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
-	): Promise<void> {
+	): Promise<boolean> {
 		const { askApproval, pushToolResult } = callbacks
 
 		// Check if file exists
@@ -304,7 +384,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			const errorMessage = `File not found: ${relPath}. Cannot update a non-existent file.`
 			await task.say("error", errorMessage)
 			pushToolResult(formatResponse.toolError(errorMessage))
-			return
+			return false
 		}
 
 		const originalContent = change.originalContent || ""
@@ -318,9 +398,11 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		// Generate and validate diff
 		const diff = formatResponse.createPrettyPatch(relPath, originalContent, newContent)
 		if (!diff) {
+			// A no-op change is not a failure: the patch processed cleanly and
+			// nothing was written, so the whole-patch success state is kept.
 			pushToolResult(`No changes needed for '${relPath}'`)
 			await task.diffViewProvider.reset()
-			return
+			return true
 		}
 
 		// Check experiment settings
@@ -366,7 +448,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			}
 			pushToolResult("Changes were rejected by the user.")
 			await task.diffViewProvider.reset()
-			return
+			return false
 		}
 
 		// Handle file move if specified
@@ -379,7 +461,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await task.say("rooignore_error", change.movePath)
 				pushToolResult(formatResponse.rooIgnoreError(change.movePath))
 				await task.diffViewProvider.reset()
-				return
+				return false
 			}
 
 			// Check if destination path is write-protected
@@ -391,7 +473,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await task.say("error", errorMessage)
 				pushToolResult(formatResponse.toolError(errorMessage))
 				await task.diffViewProvider.reset()
-				return
+				return false
 			}
 
 			// Check if destination path is outside workspace
@@ -403,7 +485,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				await task.say("error", errorMessage)
 				pushToolResult(formatResponse.toolError(errorMessage))
 				await task.diffViewProvider.reset()
-				return
+				return false
 			}
 
 			// Save new content to the new path
@@ -426,7 +508,20 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			try {
 				await fs.unlink(absolutePath)
 			} catch (error) {
-				console.error(`Failed to delete original file after move: ${error}`)
+				// The source is still present (locked or protected): undo the destination
+				// write so the file does not live in two places, and report the move as
+				// failed. Returning true here would let the whole-patch checkpoint
+				// persist a duplicated file as if the move had succeeded.
+				try {
+					await fs.rm(moveAbsolutePath, { force: true })
+				} catch (restoreError) {
+					console.error(`Failed to restore pre-move state after source deletion failure: ${restoreError}`)
+				}
+				const moveErrorMessage = `Failed to delete original file after move '${relPath}': ${error instanceof Error ? error.message : String(error)}`
+				await task.say("error", moveErrorMessage)
+				pushToolResult(formatResponse.toolError(moveErrorMessage))
+				await task.diffViewProvider.reset()
+				return false
 			}
 
 			await task.fileContextTracker.trackFileContext(change.movePath, "roo_edited" as RecordSource)
@@ -446,7 +541,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, false)
 		pushToolResult(message)
 		await task.diffViewProvider.reset()
-		task.processQueuedMessages()
+		return true
 	}
 
 	override async handlePartial(task: Task, block: ToolUse<"apply_patch">): Promise<void> {
