@@ -202,6 +202,31 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			const handoffAt = vi.mocked(mockTask.processQueuedMessages).mock.invocationCallOrder[0] ?? Infinity
 			expect(checkpointAt).toBeLessThan(handoffAt)
 		})
+		it("persists a partial-state checkpoint when a later handler rejects outright after an earlier write", async () => {
+			const patch = `*** Begin Patch
+*** Delete File: src/obsolete.ts
+*** Delete File: src/locked.ts
+*** End Patch`
+			// The first delete approves and succeeds; the second handler rejects
+			// outright (e.g. the approval stream dies), so the outer catch runs
+			// and the partial-state checkpoint branch above it is skipped.
+			mockAskApproval.mockResolvedValueOnce(true).mockRejectedValueOnce(new Error("approval stream died"))
+
+			await tool.execute({ patch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			// The retained first delete still gets rollback metadata before the
+			// queued-message handoff in the finally block.
+			expect(mockedCheckpointSave).toHaveBeenCalledTimes(1)
+			const checkpointAt = mockedCheckpointSave.mock.invocationCallOrder[0] ?? Infinity
+			const handoffAt = vi.mocked(mockTask.processQueuedMessages).mock.invocationCallOrder[0] ?? Infinity
+			expect(checkpointAt).toBeLessThan(handoffAt)
+			expect(mockHandleError).toHaveBeenCalled()
+		})
 		it("records one suppressed checkpoint for the whole patch (default-on)", async () => {
 			await tool.execute({ patch: deletePatch }, mockTask as Task, {
 				askApproval: mockAskApproval,
