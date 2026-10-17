@@ -3242,15 +3242,20 @@ export class ClineProvider
 				}
 			}
 
+			// Closed views keep their durable viewStates entry after disposal: a pin
+			// naming the deleted profile would rehydrate a missing profile name on
+			// the next load. Re-point those persisted pins to the survivor too.
+			// Order matters: the durable re-point runs before the live re-pin, so a
+			// rejected re-point leaves every live sibling untouched - the
+			// compensation below restores the shared stores only, and an already
+			// re-pointed sibling buffer would keep serving the survivor until its
+			// next mutation.
+			await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
+			persistedRepointLanded = true
 			// Re-pin other live views still buffered on the deleted profile: their
 			// buffer and durable viewStates entry would otherwise keep serving the
 			// deleted profile's name and configuration.
 			await this.rePinViewLocalStateForDeletedProfile(profileToDelete.name, profileToActivate, survivingSettings)
-			// Closed views keep their durable viewStates entry after disposal: a pin
-			// naming the deleted profile would rehydrate a missing profile name on
-			// the next load. Re-point those persisted pins to the survivor too.
-			await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
-			persistedRepointLanded = true
 		} catch (error: unknown) {
 			// A cancelled (timed-out) deletion still compensates. The queue is chained to this run,
 			// so no later mutation can have written these stores in the meantime: holding the queue

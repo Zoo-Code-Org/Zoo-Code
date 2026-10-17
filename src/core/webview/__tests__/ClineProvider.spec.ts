@@ -3685,6 +3685,77 @@ describe("ClineProvider", () => {
 			await viewer.dispose()
 			await writer.dispose()
 		})
+		it("leaves live siblings on the deleted profile when the persisted re-point write fails", async () => {
+			const viewer = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await viewer["setViewStateId"]("shared-view")
+			await viewer.saveViewState("currentApiConfigName", "old-profile")
+			const viewerPostSpy = vi.spyOn(viewer, "postStateToWebview").mockResolvedValue(undefined)
+
+			const writer = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const oldProfile: ProviderSettingsEntry = {
+				name: "old-profile",
+				id: "old-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await writer.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+			await writer.contextProxy.setValue("currentApiConfigName", "old-profile")
+			vi.spyOn(writer, "postStateToWebview").mockResolvedValue(undefined)
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			writer.providerSettingsManager = {
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				getProfile: vi.fn().mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "keeper-key",
+				}),
+				saveConfig: vi.fn().mockResolvedValue("old-id"),
+				activateProfile: vi.fn().mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "keeper-key",
+				}),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+			}
+			// The re-point's durable write fails. With the re-point ordered before the
+			// live re-pin, no sibling buffer has moved when this rejection lands.
+			const updateSpy = vi
+				.spyOn(mockContext.globalState, "update")
+				.mockImplementation(async (key: string, value: unknown) => {
+					if (key === "viewStates" && JSON.stringify(value).includes("keeper-profile")) {
+						throw new Error("durable write failed")
+					}
+					return undefined
+				})
+
+			await expect(writer.deleteProviderProfile(oldProfile)).rejects.toThrow("durable write failed")
+
+			// The deletion rolled back with the sibling never re-pointed: live and
+			// closed pins agree again on the restored profile.
+			expect(viewer["viewLocalState"].currentApiConfigName).toBe("old-profile")
+			expect(viewerPostSpy).not.toHaveBeenCalled()
+			updateSpy.mockRestore()
+			await viewer.dispose()
+			await writer.dispose()
+		})
 
 		it("restores the deleted profile's settings when the profile-list write fails after the store commit", async () => {
 			const provider = new ClineProvider(
