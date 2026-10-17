@@ -19,6 +19,9 @@ import {
 	TelemetryEventName,
 	RooCodeSettings,
 	ExperimentId,
+	checkpointRollbackFilePayloadSchema,
+	checkpointRollbackStepPayloadSchema,
+	checkpointRestoreLatestFilePayloadSchema,
 	checkoutDiffPayloadSchema,
 	checkoutRestorePayloadSchema,
 	getCompletionCheckpoint,
@@ -1645,6 +1648,14 @@ export const webviewMessageHandler = async (
 			// slash-command settings) may legitimately open global config files
 			// outside the workspace, so they keep the previous behavior.
 			const fromMarkdown = message.values?.fromMarkdown === true
+			// Change-card file paths are model-derived and survive task
+			// persistence/import, so the host treats them as untrusted too
+			// (marker posted by ChangeCard.tsx): the same lexical + realpath
+			// containment runs. Card paths are plain filesystem paths rather
+			// than URL link targets, so they get a single best-effort decode -
+			// exactly the decode openFile itself applies after its check -
+			// instead of the markdown URL decode-to-fixed-point.
+			const fromChangeCard = message.values?.fromChangeCard === true
 			const rejectOutsideWorkspace = () => {
 				void vscode.window.showErrorMessage(
 					t("common:errors.cannot_access_path", {
@@ -1660,9 +1671,23 @@ export const webviewMessageHandler = async (
 			// containment as a literal and escape only after that later decode.
 			if (fromMarkdown) {
 				const decoded = decodeUntrustedPathToStable(rawPath)
-				// Stryker disable next-line ConditionalExpression,BlockStatement: hostile non-stabilizing encodings are unreachable from the webview (its posts are plain link targets); the bound is defensive
 				if (decoded === null) {
-					// Stryker disable next-line CallExpression: hostile non-stabilizing encodings are pinned by the direct decodeUntrustedPathToStable bound test; the webview never posts such values
+					rejectOutsideWorkspace()
+					break
+				}
+				filePath = decoded
+			} else if (fromChangeCard) {
+				// Change-card rows post raw workspace paths, but a path may
+				// still carry percent-escapes. Decode to a fixed point at the
+				// containment boundary (same rule as markdown) so openFile's
+				// later single decode cannot shift a validated path outside
+				// the workspace: a double-encoded request such as
+				// `./%252e%252e/%252e%252e/.env` passes containment as a
+				// literal and escapes only after that later decode. A bare
+				// `%` that is not a valid escape stays unchanged (literal
+				// names like "100%.txt"); a non-stabilizing encoding rejects.
+				const decoded = decodeUntrustedPathToStable(rawPath)
+				if (decoded === null) {
 					rejectOutsideWorkspace()
 					break
 				}
@@ -1679,22 +1704,28 @@ export const webviewMessageHandler = async (
 				filePath = path.resolve(cwd, filePath)
 			}
 			// Workspace-boundary validation (defense in depth): the webview already
-			// rejects traversal in markdown anchors, but refuse any markdown path
-			// that still resolves outside the workspace.
-			if (fromMarkdown && isPathOutsideWorkspace(filePath)) {
+			// rejects traversal in markdown anchors and change-card rows, but
+			// refuse any untrusted path that still resolves outside the workspace.
+			if ((fromMarkdown || fromChangeCard) && isPathOutsideWorkspace(filePath)) {
 				rejectOutsideWorkspace()
 				break
 			}
 			// Lexical containment cannot see symlinks: a link inside a workspace
 			// folder may resolve to a target outside the workspace. Re-check the
 			// real filesystem path (failing closed) before opening.
-			if (fromMarkdown && (await isRealPathOutsideWorkspace(filePath))) {
+			if ((fromMarkdown || fromChangeCard) && (await isRealPathOutsideWorkspace(filePath))) {
 				rejectOutsideWorkspace()
 				break
 			}
 			await openFile(
 				filePath,
-				message.values as { create?: boolean; content?: string; line?: number; fromMarkdown?: boolean },
+				message.values as {
+					create?: boolean
+					content?: string
+					line?: number
+					fromMarkdown?: boolean
+					fromChangeCard?: boolean
+				},
 			)
 			break
 		}
@@ -1792,6 +1823,169 @@ export const webviewMessageHandler = async (
 					await provider.getCurrentTask()?.checkpointRestore(result.data)
 				} catch {
 					vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
+				}
+			}
+
+			break
+		}
+		case "checkpointRollbackFile": {
+			// B3b: restore one change-card file to its step checkpoint and report
+			// the outcome back to the requesting card (correlated by cardTs).
+			const result = checkpointRollbackFilePayloadSchema.safeParse(message.payload)
+
+			if (result.success) {
+				const task = provider.getCurrentTask()
+
+				if (task) {
+					// Lazy import: the rollback module pulls the checkpoint service and the
+					// editor integrations (DiffViewProvider) into the import graph. Loading it
+					// only when a rollback is requested keeps specs that mock `vscode` minimally
+					// from executing editor module-scope code at import time.
+					try {
+						const { rollbackFile } = await import("../checkpoints/rollback")
+						const outcome = await rollbackFile(task, result.data.checkpointId, result.data.filePath)
+						await provider.postMessageToWebview({
+							type: "checkpointRollbackResult",
+							checkpointRollbackResult: {
+								cardTs: result.data.cardTs,
+								filePath: outcome.filePath,
+								success: outcome.success,
+								...(outcome.error ? { error: outcome.error } : {}),
+							},
+						})
+					} catch (error) {
+						// Correlated failure: a throw between the request and the result post
+						// (import, journal read, git restore) would otherwise leave the
+						// requesting card pending forever.
+						await provider.postMessageToWebview({
+							type: "checkpointRollbackResult",
+							checkpointRollbackResult: {
+								cardTs: result.data.cardTs,
+								filePath: result.data.filePath,
+								success: false,
+								error: `Rollback failed: ${error instanceof Error ? error.message : String(error)}`,
+							},
+						})
+					}
+				} else {
+					// No active task: the rollback cannot run. Post the correlated
+					// failure so the requesting card can clear its pending state
+					// instead of waiting on a result that will never arrive.
+					await provider.postMessageToWebview({
+						type: "checkpointRollbackResult",
+						checkpointRollbackResult: {
+							cardTs: result.data.cardTs,
+							filePath: result.data.filePath,
+							success: false,
+							error: t("common:errors.message.no_active_task_to_roll_back"),
+						},
+					})
+				}
+			}
+
+			break
+		}
+		case "checkpointRollbackStep": {
+			// B3b: restore every file of a change-card step to the step checkpoint.
+			const result = checkpointRollbackStepPayloadSchema.safeParse(message.payload)
+
+			if (result.success) {
+				const task = provider.getCurrentTask()
+
+				if (task) {
+					// Lazy import (see the checkpointRollbackFile case above).
+					try {
+						const { rollbackStep } = await import("../checkpoints/rollback")
+						const outcome = await rollbackStep(task, result.data.filePaths, result.data.checkpointId)
+						const firstFailure = outcome.files.find((file) => !file.success)
+						await provider.postMessageToWebview({
+							type: "checkpointRollbackResult",
+							checkpointRollbackResult: {
+								cardTs: result.data.cardTs,
+								success: outcome.files.every((file) => file.success),
+								...(firstFailure ? { error: firstFailure.error } : {}),
+								files: outcome.files,
+							},
+						})
+					} catch (error) {
+						// Correlated failure (see the checkpointRollbackFile case).
+						await provider.postMessageToWebview({
+							type: "checkpointRollbackResult",
+							checkpointRollbackResult: {
+								cardTs: result.data.cardTs,
+								success: false,
+								error: `Rollback failed: ${error instanceof Error ? error.message : String(error)}`,
+							},
+						})
+					}
+				} else {
+					// No active task: post the correlated failure so the requesting
+					// card can clear its pending state.
+					await provider.postMessageToWebview({
+						type: "checkpointRollbackResult",
+						checkpointRollbackResult: {
+							cardTs: result.data.cardTs,
+							success: false,
+							error: t("common:errors.message.no_active_task_to_roll_back"),
+						},
+					})
+				}
+			}
+
+			break
+		}
+		case "checkpointRestoreLatestFile": {
+			// B3b: restore one change-card file to the latest recorded version of
+			// that file (the forward direction to a rollback) and report the
+			// outcome back to the requesting card (correlated by cardTs, kind
+			// "restore-latest").
+			const result = checkpointRestoreLatestFilePayloadSchema.safeParse(message.payload)
+
+			if (result.success) {
+				const task = provider.getCurrentTask()
+
+				if (task) {
+					// Lazy import (see the checkpointRollbackFile case above).
+					try {
+						const { restoreLatestFile } = await import("../checkpoints/rollback")
+						const outcome = await restoreLatestFile(task, result.data.filePath)
+						await provider.postMessageToWebview({
+							type: "checkpointRollbackResult",
+							checkpointRollbackResult: {
+								cardTs: result.data.cardTs,
+								kind: "restore-latest",
+								filePath: outcome.filePath,
+								success: outcome.success,
+								...(outcome.noOp ? { noOp: true } : {}),
+								...(outcome.error ? { error: outcome.error } : {}),
+							},
+						})
+					} catch (error) {
+						// Correlated failure (see the checkpointRollbackFile case).
+						await provider.postMessageToWebview({
+							type: "checkpointRollbackResult",
+							checkpointRollbackResult: {
+								cardTs: result.data.cardTs,
+								kind: "restore-latest",
+								filePath: result.data.filePath,
+								success: false,
+								error: `Restore failed: ${error instanceof Error ? error.message : String(error)}`,
+							},
+						})
+					}
+				} else {
+					// No active task: post the correlated failure so the requesting
+					// card can clear its pending state.
+					await provider.postMessageToWebview({
+						type: "checkpointRollbackResult",
+						checkpointRollbackResult: {
+							cardTs: result.data.cardTs,
+							kind: "restore-latest",
+							filePath: result.data.filePath,
+							success: false,
+							error: t("common:errors.message.no_active_task_to_restore"),
+						},
+					})
 				}
 			}
 
