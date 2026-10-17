@@ -5152,7 +5152,12 @@ describe("ClineProvider", () => {
 				setModeConfig: vi.fn(),
 				// The upsert snapshot reads the prior record (none - this call creates the
 				// profile) and the previous per-mode mapping.
-				getProfile: vi.fn().mockRejectedValue(new ProviderSettingsNotFoundError("fresh-profile")),
+				getProfile: vi.fn(async ({ name }: { name: string }) => {
+					if (!savedForReadBack1[name]) {
+						throw new ProviderSettingsNotFoundError(name)
+					}
+					return { name, id: "fresh-id", ...savedForReadBack1[name] }
+				}),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
@@ -5211,14 +5216,23 @@ describe("ClineProvider", () => {
 				id: "fresh-id",
 				apiProvider: providerIdentifiers.openrouter,
 			}
+			const savedForReadBack2: Record<string, Record<string, unknown>> = {}
 			// @ts-ignore - Replace providerSettingsManager with a test double.
 			provider.providerSettingsManager = {
-				saveConfig: vi.fn().mockResolvedValue("fresh-id"),
+				saveConfig: vi.fn(async (name: string, settings: Record<string, unknown>) => {
+					savedForReadBack2[name] = settings
+					return "fresh-id"
+				}),
 				listConfig: vi.fn().mockResolvedValue([profile]),
 				setModeConfig: vi.fn(),
 				// The upsert snapshot reads the prior record (none - this call creates the
 				// profile) and the previous per-mode mapping.
-				getProfile: vi.fn().mockRejectedValue(new ProviderSettingsNotFoundError("fresh-profile")),
+				getProfile: vi.fn(async ({ name }: { name: string }) => {
+					if (!savedForReadBack2[name]) {
+						throw new ProviderSettingsNotFoundError(name)
+					}
+					return { name, id: "fresh-id", ...savedForReadBack2[name] }
+				}),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
@@ -8997,7 +9011,12 @@ describe("ClineProvider", () => {
 				// creation case) and the mode mapping: without these the snapshot
 				// throws a TypeError that upsert swallows, and the activation path
 				// this test names never runs.
-				getProfile: vi.fn().mockRejectedValue(new ProviderSettingsNotFoundError("activated-profile")),
+				getProfile: vi.fn(async ({ name }: { name: string }) => {
+					if (!savedForReadBack3[name]) {
+						throw new ProviderSettingsNotFoundError(name)
+					}
+					return { name, id: "activated-id", ...savedForReadBack3[name] }
+				}),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			}
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
