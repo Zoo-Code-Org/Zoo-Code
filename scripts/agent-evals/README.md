@@ -62,6 +62,27 @@ the accepted task and counts the rest as foreign or malformed. After an
 extension-reported completion the controller drains late usage events for the
 bounded drain window.
 
+## Terminal code semantics
+
+The trace carries two different completion signals. Reviewers must not merge
+them:
+
+- `COMPLETED` requires the extension `taskCompleted` event. The extension emits
+  it only after the completion result is accepted, or a delegated subtask hands
+  back, and the turn is persisted. A stop request, teardown, or a later session
+  loss never changes this code.
+- `execution.completionMessageSeen` records the final `completion_result`
+  message for the accepted task. That message is model output, not acceptance.
+  It never produces `COMPLETED`.
+- `STOPPED` with `adapterStopAfterCompletionMessage` names an observer stop
+  after that message. `STOPPED` with `adapterStop` names an observer stop
+  without it. `TASK_RUN_TIMEOUT` is the bounded run window expiry. A seen
+  message still appears in `completionMessageSeen`.
+- `SESSION_LOST` covers disconnects and interrupts. A manual stop after
+  completion output stays `SESSION_LOST`.
+- The usage drain runs only after a `taskCompleted` event. It stays inside the
+  bounded drain window.
+
 ## Checks
 
 ```sh

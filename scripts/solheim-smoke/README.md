@@ -38,6 +38,14 @@ Teardown escalates through close, terminate, and kill within independent five-se
 completion and actual output-token usage must belong to the accepted task. Activation alone cannot pass.
 The driver never approves dialogs or tool execution; it closes the task during teardown.
 
+The `completionSeen` gate is the final non-empty `completion_result` message for the accepted task. That
+message is model output. It is not the extension `taskCompleted` event, which fires only after a user
+accepts the result. The driver never approves dialogs, so `taskCompleted` does not fire in a smoke run.
+A passing smoke therefore ends with `execution.code: "STOPPED"` and
+`stopReason: "adapterStopAfterCompletionMessage"` in `trace.json`. This is the expected terminal state.
+It does not contradict the `OK` verdict. See
+[`scripts/agent-evals/README.md`](../agent-evals/README.md) for the terminal code semantics.
+
 The action uploads `verdict.json` (fixed failure code, boolean gates, duration and provider/model names),
 `trace.json` (versioned metadata-only structured trace from the shared substrate; see
 [`scripts/agent-evals/README.md`](../agent-evals/README.md) for its accounting limits), and `smoke.mp4`,
@@ -68,6 +76,14 @@ established the underlying integration, not this refactor's live status. Review 
 after the frozen Stage 1B pilot produced zero incremental verified defects. Its research harness and
 receipts are archived outside this smoke-only change; the chronology, results, caveats and preservation
 details are recorded in [tracking issue #1896](https://github.com/Zoo-Code-Org/Zoo-Code/issues/1896).
+
+Validation status, kept as two separate records. One user-reported local live run passed the smoke
+verdict with `completionSeen: true`: total about 6390 ms, activation about 3010 ms, task about 3110 ms,
+2719 input and 29 output tokens, two early buffered and replayed events, two cumulative usage snapshots,
+and a clean teardown with no malformed, foreign, tool failure, or retry events. That trace reported
+`STOPPED` with `adapterStopAfterCompletionMessage`, which matches the signal distinction above. This
+report is not independently verified. The trusted-main workflow run is still pending. Only a
+`.github/workflows/solheim-provider-smoke.yml` run on trusted main counts as verified CI evidence.
 
 Planned follow-ups on top of the shared substrate, in order: five frozen real coding tasks, independent
 credential-free graders, paired exact trusted commit comparisons, repeated runs with uncertainty

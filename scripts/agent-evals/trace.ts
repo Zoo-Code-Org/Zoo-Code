@@ -41,6 +41,7 @@ export type AgentExecutionCode =
 export type AgentStopReason =
 	| "taskCompleted"
 	| "adapterStop"
+	| "adapterStopAfterCompletionMessage"
 	| "runTimeout"
 	| "sessionLost"
 	| "startNotAccepted"
@@ -143,6 +144,9 @@ export interface AgentTrace {
 		activated: boolean
 		taskAccepted: boolean
 		sessionLost: boolean
+		// True when the final completion_result message for the accepted task
+		// was observed. This is model output, not acceptance.
+		completionMessageSeen: boolean
 		timings: {
 			activationMs?: number
 			taskStartMs?: number
@@ -167,6 +171,9 @@ export const TRACE_NOTES = [
 	"apiReqRetriedMarkers counts retry marker messages. It is not an HTTP retry count.",
 	"The trace is metadata only. Prompts, model output, reasoning, tool arguments, error payloads, and storage paths are excluded. Provider settings appear only as the nonsecret settings projection.",
 	"Missing measurements carry a reason. They are never filled with zero.",
+	"execution.code COMPLETED requires the extension taskCompleted event. The extension emits it only after the completion result is accepted, or a delegated subtask hands back, and the turn is persisted.",
+	"The final completion_result message is model output, not acceptance. execution.completionMessageSeen records it and never produces COMPLETED.",
+	"An observer stop after that message is stopReason adapterStopAfterCompletionMessage with code STOPPED. An observer stop without it stays adapterStop.",
 ]
 
 const sortValue = (value: unknown): unknown => {

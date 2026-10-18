@@ -66,6 +66,7 @@ export interface AgentRunResult {
 		activated: boolean
 		taskAccepted: boolean
 		sessionLost: boolean
+		completionMessageSeen: boolean
 	}
 	teardown: AgentTeardown
 	trace: AgentTrace
@@ -102,6 +103,10 @@ export async function runAgentFixture(runtime: AgentRuntime, options: AgentRunOp
 	let lostDuringDrain = false
 	let acceptedTaskId: string | undefined
 	let completedSeen = false
+	// True once the final completion_result say message for the accepted task
+	// arrived. This is model output, not the accepted-completion event. It
+	// never produces COMPLETED; it only refines how a stop is reported.
+	let completionMessageSeen = false
 	// The reason must name what actually stopped evaluation. "notEvaluated"
 	// means the projection was never inspected; it is replaced below.
 	let settings: AgentTrace["settings"] = { available: false, reason: "notEvaluated" }
@@ -157,6 +162,17 @@ export async function runAgentFixture(runtime: AgentRuntime, options: AgentRunOp
 			return
 		}
 		accountant.observe(event)
+		if (event.eventName === RooCodeEventName.Message) {
+			const message = event.payload[0].message
+			if (
+				message.type === "say" &&
+				message.say === "completion_result" &&
+				message.partial !== true &&
+				typeof message.text === "string" &&
+				message.text.trim().length > 0
+			)
+				completionMessageSeen = true
+		}
 		if (event.eventName === RooCodeEventName.TaskCompleted) completedSeen = true
 		options.observers?.onAcceptedEvent?.(event, acceptedTaskId)
 	}
@@ -270,12 +286,20 @@ export async function runAgentFixture(runtime: AgentRuntime, options: AgentRunOp
 							lostDuringDrain = sessionLost
 						}
 						const stopped = !runSessionLost && !completedSeen && options.observers?.shouldStop?.() === true
-						if (runSessionLost) {
-							code = "SESSION_LOST"
-							stopReason = "sessionLost"
-						} else if (completedSeen) {
+						if (completedSeen) {
+							// A confirmed accepted completion outranks a stop
+							// request or a loss observed in the same window.
 							code = "COMPLETED"
 							stopReason = "taskCompleted"
+						} else if (runSessionLost) {
+							code = "SESSION_LOST"
+							stopReason = "sessionLost"
+						} else if (stopped && completionMessageSeen) {
+							// The observer stopped after the model's final
+							// completion message. The accepted-completion event
+							// never fired, so this is not COMPLETED.
+							code = "STOPPED"
+							stopReason = "adapterStopAfterCompletionMessage"
 						} else if (stopped) {
 							code = "STOPPED"
 							stopReason = "adapterStop"
@@ -363,6 +387,7 @@ export async function runAgentFixture(runtime: AgentRuntime, options: AgentRunOp
 			activated,
 			taskAccepted: accepted,
 			sessionLost: runSessionLost,
+			completionMessageSeen,
 			timings,
 		},
 		eventFlow: flow,
@@ -372,7 +397,14 @@ export async function runAgentFixture(runtime: AgentRuntime, options: AgentRunOp
 	}
 	await runtime.writeArtifact("trace.json", trace)
 	return {
-		execution: { code, stopReason, activated, taskAccepted: accepted, sessionLost: runSessionLost },
+		execution: {
+			code,
+			stopReason,
+			activated,
+			taskAccepted: accepted,
+			sessionLost: runSessionLost,
+			completionMessageSeen,
+		},
 		teardown,
 		trace,
 	}

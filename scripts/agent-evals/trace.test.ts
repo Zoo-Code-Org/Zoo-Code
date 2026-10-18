@@ -197,6 +197,12 @@ describe("trace helpers", () => {
 		assert.ok(TRACE_NOTES.some((note) => note.includes("nonsecret settings projection")))
 	})
 
+	it("documents the two completion signals and the observer stop reasons", () => {
+		assert.ok(TRACE_NOTES.some((note) => note.includes("taskCompleted event")))
+		assert.ok(TRACE_NOTES.some((note) => note.includes("completion_result")))
+		assert.ok(TRACE_NOTES.some((note) => note.includes("adapterStopAfterCompletionMessage")))
+	})
+
 	it("digests projections stably regardless of key order", () => {
 		assert.equal(digestProjection({ a: 1, b: { c: 2 } }), digestProjection({ b: { c: 2 }, a: 1 }))
 		assert.notEqual(digestProjection({ a: 1 }), digestProjection({ a: 2 }))

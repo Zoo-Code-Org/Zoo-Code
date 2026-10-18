@@ -52,7 +52,13 @@ type Scenario = "success" | "setup" | "activation" | "start-failure" | "disconne
 
 function harness(
 	scenario: Scenario,
-	options: { stuck?: boolean; closeThrows?: boolean; timeout?: () => void; onPause?: (count: number) => void } = {},
+	options: {
+		stuck?: boolean
+		closeThrows?: boolean
+		timeout?: () => void
+		onPause?: (count: number) => void
+		disconnectOnPause?: number
+	} = {},
 ) {
 	let now = 0
 	let pauseCount = 0
@@ -207,7 +213,9 @@ function harness(
 		async pause(ms) {
 			now += ms
 			pauseCount++
+			// The callback runs first so a test can emit before the loss lands.
 			options.onPause?.(pauseCount)
+			if (options.disconnectOnPause === pauseCount) onDisconnect()
 		},
 	}
 	return {
@@ -252,6 +260,7 @@ describe("agent fixture controller", () => {
 		})
 		assert.equal(result.execution.code, "STOPPED")
 		assert.equal(result.execution.stopReason, "adapterStop")
+		assert.equal(result.execution.completionMessageSeen, false)
 		assert.equal(result.execution.activated, true)
 		assert.equal(result.execution.taskAccepted, true)
 		assert.equal(result.teardown.status, "ok")
@@ -583,5 +592,281 @@ describe("agent fixture controller", () => {
 		assert.equal(result.execution.code, "SESSION_LOST")
 		assert.equal(result.execution.stopReason, "sessionLost")
 		assert.equal(result.execution.sessionLost, true)
+	})
+
+	it("reproduces the synthetic PR 1909 topology: an observer stop after the completion message stays distinct", async () => {
+		// SYNTHETIC FIXTURE. The event topology mirrors one user-reported
+		// local live smoke run: two events before the start ack, one accounted
+		// request, two cumulative usage snapshots, one final completion_result
+		// message, then the observer stops. This is not a recorded provider
+		// artifact. Token counts are the reported aggregates. Timings are not
+		// reproduced.
+		registerTestFixture("pr1909-smoke-topology-synthetic", {
+			identity: {
+				name: "pr1909-smoke-topology-synthetic",
+				version: "0.1.0",
+				description:
+					"SYNTHETIC reproduction of one reported live smoke topology. Not a recorded provider artifact.",
+			},
+		})
+		const f = harness("no-events", {
+			onPause: (count) => {
+				if (count !== 1) return
+				f.emit({
+					eventName: RooCodeEventName.Message,
+					payload: [
+						{
+							taskId: "root",
+							action: "created",
+							message: {
+								ts: 2,
+								type: "say",
+								say: "api_req_started",
+								text: JSON.stringify({ apiProtocol: "openai" }),
+							},
+						},
+					],
+				})
+				f.emit({
+					eventName: RooCodeEventName.Message,
+					payload: [
+						{
+							taskId: "root",
+							action: "updated",
+							message: {
+								ts: 2,
+								type: "say",
+								say: "api_req_started",
+								text: JSON.stringify({ apiProtocol: "openai", tokensIn: 2719, tokensOut: 29 }),
+							},
+						},
+					],
+				})
+				f.emit({
+					eventName: RooCodeEventName.TaskTokenUsageUpdated,
+					payload: [
+						"root",
+						{ totalTokensIn: 2719, totalTokensOut: 12, totalCost: 0, contextTokens: 2719 },
+						{},
+					],
+				})
+				f.emit({
+					eventName: RooCodeEventName.TaskTokenUsageUpdated,
+					payload: [
+						"root",
+						{ totalTokensIn: 2719, totalTokensOut: 29, totalCost: 0, contextTokens: 2748 },
+						{ attempt_completion: { attempts: 1, failures: 0 } },
+					],
+				})
+				f.emit({
+					eventName: RooCodeEventName.Message,
+					payload: [
+						{
+							taskId: "root",
+							action: "created",
+							message: { ts: 3, type: "say", say: "completion_result", text: "synthetic final answer" },
+						},
+					],
+				})
+			},
+		})
+		f.emit({ eventName: RooCodeEventName.TaskStarted, payload: ["root"] })
+		f.emit({
+			eventName: RooCodeEventName.Message,
+			payload: [
+				{
+					taskId: "root",
+					action: "created",
+					message: { ts: 1, type: "say", say: "text", text: "synthetic early event" },
+				},
+			],
+		})
+		let completionOutput = false
+		const result = await runAgentFixture(f.runtime, {
+			fixtureName: "pr1909-smoke-topology-synthetic",
+			credential: CREDENTIAL,
+			observers: {
+				onAcceptedEvent: (event) => {
+					if (
+						event.eventName === RooCodeEventName.Message &&
+						event.payload[0].message.say === "completion_result"
+					)
+						completionOutput = true
+				},
+				shouldStop: () => completionOutput,
+			},
+		})
+		assert.equal(result.execution.code, "STOPPED")
+		assert.equal(result.execution.stopReason, "adapterStopAfterCompletionMessage")
+		assert.equal(result.execution.completionMessageSeen, true)
+		assert.equal(result.execution.sessionLost, false)
+		assert.equal(result.execution.taskAccepted, true)
+		assert.equal(result.teardown.status, "ok")
+		assert.equal(result.teardown.cleanup, "done")
+		const trace = writtenTrace(f)
+		// Seven task events plus the counted TaskStartResponse envelope.
+		assert.equal(trace.eventFlow.observed, 8)
+		assert.equal(trace.eventFlow.bufferedBeforeAck, 2)
+		assert.equal(trace.eventFlow.replayedAfterAck, 2)
+		assert.equal(trace.eventFlow.malformed, 0)
+		assert.equal(trace.eventFlow.foreignTaskEvents, 0)
+		assert.equal(trace.accounting.requestCount, 1)
+		assert.deepEqual(trace.accounting.requests[0]?.tokensIn, { available: true, value: 2719 })
+		assert.deepEqual(trace.accounting.requests[0]?.tokensOut, { available: true, value: 29 })
+		assert.equal(trace.accounting.requests[0]?.messageCount, 2)
+		assert.equal(trace.accounting.usage.snapshotsObserved, 2)
+		assert.equal(trace.accounting.usage.lastSnapshot?.source, "taskTokenUsageUpdated")
+		assert.equal(trace.accounting.usage.lastSnapshot?.tokensOut, 29)
+		assert.deepEqual(trace.accounting.toolSnapshot.snapshot, {
+			attempt_completion: { attempts: 1, failures: 0 },
+		})
+		assert.equal(trace.accounting.completeness.status, "complete")
+		assert.deepEqual(trace.accounting.completeness.reasons, [])
+		// The drain is bound to the accepted-completion event. Without it, no
+		// drain window runs.
+		assert.equal(trace.execution.timings.usageDrainMs, undefined)
+		const serialized = JSON.stringify(trace)
+		assert.ok(serialized.includes("pr1909-smoke-topology-synthetic"))
+		assert.ok(!serialized.includes(CREDENTIAL))
+		assert.ok(!serialized.includes("synthetic early event"))
+		assert.ok(!serialized.includes("synthetic final answer"))
+		assert.ok(!serialized.includes("root"))
+	})
+
+	it("keeps completion output non-completing on a run timeout", async () => {
+		registerTestFixture("controller-output-timeout", {
+			limits: {
+				activationTimeoutMs: 120_000,
+				taskStartTimeoutMs: 35_000,
+				taskRunTimeoutMs: 200,
+				usageDrainMs: 100,
+				teardownStepMs: 100,
+			},
+		})
+		const f = harness("no-events", {
+			onPause: (count) => {
+				if (count !== 1) return
+				f.emit({
+					eventName: RooCodeEventName.Message,
+					payload: [
+						{
+							taskId: "root",
+							action: "created",
+							message: { ts: 1, type: "say", say: "completion_result", text: "synthetic final answer" },
+						},
+					],
+				})
+			},
+		})
+		const result = await runAgentFixture(f.runtime, {
+			fixtureName: "controller-output-timeout",
+			credential: CREDENTIAL,
+		})
+		assert.equal(result.execution.code, "TASK_RUN_TIMEOUT")
+		assert.equal(result.execution.stopReason, "runTimeout")
+		assert.equal(result.execution.completionMessageSeen, true)
+		assert.equal(writtenTrace(f).accounting.usage.snapshotsObserved, 0)
+	})
+
+	it("keeps a manual interrupt a session loss even after completion output", async () => {
+		registerTestFixture("controller-manual-stop")
+		const f = harness("no-events", {
+			onPause: (count) => {
+				if (count === 1)
+					f.emit({
+						eventName: RooCodeEventName.Message,
+						payload: [
+							{
+								taskId: "root",
+								action: "created",
+								message: {
+									ts: 1,
+									type: "say",
+									say: "completion_result",
+									text: "synthetic final answer",
+								},
+							},
+						],
+					})
+				if (count === 2) f.interrupt()
+			},
+		})
+		const result = await runAgentFixture(f.runtime, {
+			fixtureName: "controller-manual-stop",
+			credential: CREDENTIAL,
+		})
+		assert.equal(result.execution.code, "SESSION_LOST")
+		assert.equal(result.execution.stopReason, "sessionLost")
+		assert.equal(result.execution.completionMessageSeen, true)
+		assert.deepEqual(f.signals, ["SIGTERM"])
+		assert.ok(f.cleaned && f.disconnected)
+		const trace = writtenTrace(f)
+		assert.ok(trace.accounting.completeness.reasons.includes("sessionLost"))
+	})
+
+	it("keeps a confirmed completion when the session dies in the same window", async () => {
+		registerTestFixture("controller-completion-outranks-loss")
+		const f = harness("success", {
+			// The completion event lands, then the session dies, before the run
+			// loop can poll again.
+			onPause: (count) => {
+				if (count === 1)
+					f.emit({
+						eventName: RooCodeEventName.TaskCompleted,
+						payload: [
+							"root",
+							{ totalTokensIn: 7, totalTokensOut: 3, totalCost: 0, contextTokens: 9 },
+							{},
+							{ isSubtask: false },
+						],
+					})
+			},
+			disconnectOnPause: 1,
+		})
+		const result = await runAgentFixture(f.runtime, {
+			fixtureName: "controller-completion-outranks-loss",
+			credential: CREDENTIAL,
+		})
+		assert.equal(result.execution.code, "COMPLETED")
+		assert.equal(result.execution.stopReason, "taskCompleted")
+		assert.equal(result.execution.sessionLost, true)
+		const trace = writtenTrace(f)
+		assert.ok(trace.accounting.completeness.reasons.includes("sessionLost"))
+		// A loss in the same window skips the drain and keeps the caveat.
+		assert.equal(trace.execution.timings.usageDrainMs, undefined)
+	})
+
+	it("keeps a confirmed completion when the observer requests a stop", async () => {
+		registerTestFixture("controller-completion-outranks-stop")
+		const f = harness("no-events")
+		f.emit({
+			eventName: RooCodeEventName.Message,
+			payload: [
+				{
+					taskId: "root",
+					action: "created",
+					message: { ts: 1, type: "say", say: "completion_result", text: "synthetic final answer" },
+				},
+			],
+		})
+		f.emit({
+			eventName: RooCodeEventName.TaskCompleted,
+			payload: [
+				"root",
+				{ totalTokensIn: 7, totalTokensOut: 3, totalCost: 0, contextTokens: 9 },
+				{},
+				{ isSubtask: false },
+			],
+		})
+		const result = await runAgentFixture(f.runtime, {
+			fixtureName: "controller-completion-outranks-stop",
+			credential: CREDENTIAL,
+			observers: { shouldStop: () => true },
+		})
+		assert.equal(result.execution.code, "COMPLETED")
+		assert.equal(result.execution.stopReason, "taskCompleted")
+		assert.equal(result.execution.completionMessageSeen, true)
+		assert.equal(result.execution.sessionLost, false)
+		assert.equal(result.teardown.status, "ok")
 	})
 })
