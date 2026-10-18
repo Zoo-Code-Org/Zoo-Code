@@ -467,18 +467,27 @@ describe("record.sh provider stop behavior", () => {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "record-sh-"))
 		const bin = stubRecorderBin(dir)
 		const paths = recorderPaths(dir)
-		const hungPidFile = path.join(dir, "hung-pid")
-		const termSeenFile = path.join(dir, "term-seen")
-		const hungSource = [
-			`const fs = require("node:fs")`,
-			`process.on("SIGTERM", () => fs.writeFileSync(${JSON.stringify(termSeenFile)}, "seen"))`,
-			`fs.writeFileSync(${JSON.stringify(hungPidFile)}, String(process.pid))`,
-			`setInterval(() => {}, 1000)`,
-		].join("\n")
+		// The quote and backslash prove the paths reach the driver as argv,
+		// never interpolated into the driver source.
+		const hungPidFile = path.join(dir, "hung\\pid")
+		const termSeenFile = path.join(dir, 'term"seen')
+		const hungStub = path.join(dir, "hung-driver.mjs")
+		fs.writeFileSync(
+			hungStub,
+			[
+				`import fs from "node:fs"`,
+				`process.on("SIGTERM", () => fs.writeFileSync(process.argv[2], "seen"))`,
+				`fs.writeFileSync(process.argv[3], String(process.pid))`,
+				`setInterval(() => {}, 1000)`,
+			].join("\n"),
+		)
 		const startedAt = Date.now()
 		// The TERM lands well after the child booted, so the ignored TERM is a
 		// handled signal, not a boot-time default kill.
-		const run = await runRecorderSignalled(["node", "-e", hungSource], { delayMs: 900, stopBudget: 2 })
+		const run = await runRecorderSignalled(["node", hungStub, termSeenFile, hungPidFile], {
+			delayMs: 900,
+			stopBudget: 2,
+		})
 		try {
 			assert.equal(run.code, 143)
 			// TERM reached the real driver child, the wrapper waited the
