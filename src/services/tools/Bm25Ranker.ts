@@ -87,8 +87,9 @@ export class Bm25Ranker implements Ranker {
 
 function tokenize(value: string): string[] {
 	return value
+		.normalize("NFC")
 		.toLowerCase()
-		.split(/[^\p{L}\p{N}]+/u)
+		.split(/[^\p{L}\p{M}\p{N}]+/u)
 		.filter(Boolean)
 }
 

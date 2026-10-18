@@ -67,6 +67,14 @@ describe("Bm25Ranker", () => {
 		expect(new Bm25Ranker().rank("٣", [russian, arabic], 10)).toEqual([arabic])
 	})
 
+	it("matches composed and decomposed forms of the same accented character", () => {
+		const decomposed = tool("café", "menu", "Liste du café")
+		const other = tool("calendar", "events", "Show events")
+
+		expect(new Bm25Ranker().rank("café", [other, decomposed], 10)).toEqual([decomposed])
+		expect(new Bm25Ranker().rank("café", [other, tool("café", "menu", "Menu")], 10)).toHaveLength(1)
+	})
+
 	it("handles tools with empty descriptions", () => {
 		const item = tool("GitHub", "listRepos", "")
 
