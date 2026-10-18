@@ -733,6 +733,64 @@ describe("agent fixture controller", () => {
 		assert.ok(!serialized.includes("root"))
 	})
 
+	it("keeps invalid completion_result variants observed but not marked as the completion message", async () => {
+		registerTestFixture("controller-invalid-completion")
+		const f = harness("no-events")
+		// One message per rejection condition of the completion filter: a
+		// partial stream, whitespace-only final text, and the ask-side
+		// completion_result prompt.
+		f.emit({
+			eventName: RooCodeEventName.Message,
+			payload: [
+				{
+					taskId: "root",
+					action: "created",
+					message: { ts: 1, type: "say", say: "completion_result", text: "partial output", partial: true },
+				},
+			],
+		})
+		f.emit({
+			eventName: RooCodeEventName.Message,
+			payload: [
+				{
+					taskId: "root",
+					action: "created",
+					message: { ts: 2, type: "say", say: "completion_result", text: "  \n\t " },
+				},
+			],
+		})
+		f.emit({
+			eventName: RooCodeEventName.Message,
+			payload: [
+				{
+					taskId: "root",
+					action: "created",
+					message: { ts: 3, type: "ask", ask: "completion_result", text: "awaiting feedback" },
+				},
+			],
+		})
+		const accepted: TaskEvent[] = []
+		const result = await runAgentFixture(f.runtime, {
+			fixtureName: "controller-invalid-completion",
+			credential: CREDENTIAL,
+			observers: {
+				onAcceptedEvent: (event) => accepted.push(event),
+				shouldStop: () => true,
+			},
+		})
+		const trace = writtenTrace(f)
+		// Three task events plus the counted TaskStartResponse envelope.
+		assert.equal(accepted.length, 3)
+		assert.equal(trace.eventFlow.observed, 4)
+		assert.equal(trace.eventFlow.replayedAfterAck, 3)
+		assert.equal(result.execution.code, "STOPPED")
+		assert.equal(result.execution.stopReason, "adapterStop")
+		assert.equal(result.execution.completionMessageSeen, false)
+		assert.equal(trace.execution.stopReason, "adapterStop")
+		assert.equal(trace.execution.completionMessageSeen, false)
+		assert.ok(JSON.stringify(trace).includes('"completionMessageSeen":false'))
+	})
+
 	it("keeps completion output non-completing on a run timeout", async () => {
 		registerTestFixture("controller-output-timeout", {
 			limits: {
