@@ -578,6 +578,24 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
 		})
 
+		it("journals the source deletion alongside the destination write for a completed move", async () => {
+			await tool.execute({ patch: movePatch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			// A completed move touches two journal-relevant paths: the
+			// destination write (carrying the content diff) and the source
+			// deletion (a pure delete record). Step rollback restores the
+			// removed source from these entries.
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask as Task, false, true, [
+				expect.objectContaining({ path: "src/moved.ts", operation: "update" }),
+				expect.objectContaining({ path: "src/test.ts", operation: "delete" }),
+			])
+		})
+
 		it("awaits the patch checkpoint before execute settles", async () => {
 			type SaveResult = Awaited<ReturnType<typeof checkpointSave>>
 			let resolveSave: (value: SaveResult | PromiseLike<SaveResult>) => void = () => {}
@@ -640,6 +658,50 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			expect(mockHandleError).toHaveBeenCalledWith("apply patch", expect.anything())
 			// The finally-block handoff still runs for the recorded write.
 			expect(mockTask.processQueuedMessages).toHaveBeenCalled()
+		})
+
+		it("flushes the recorded write from the catch path when the settings read rejects", async () => {
+			// The handler's settings lookup succeeds; the success-path flush's
+			// lookup rejects. The flush flag must not have been set before that
+			// rejection, so the catch path still persists the write already on
+			// disk using the cached (undefined = default-on) setting.
+			const getState = vi.fn().mockResolvedValueOnce({}).mockRejectedValueOnce(new Error("state boom"))
+			mockTask.providerRef = { deref: vi.fn().mockReturnValue({ getState }) } as unknown as Task["providerRef"]
+
+			await tool.execute({ patch: updatePatch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(mockedCheckpointSave).toHaveBeenCalledTimes(1)
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(
+				mockTask as Task,
+				false,
+				true,
+				expect.arrayContaining([expect.objectContaining({ path: "src/test.ts", operation: "update" })]),
+			)
+		})
+
+		it("reports the catch-path flush failure alongside the bookkeeping error", async () => {
+			vi.mocked(mockTask.fileContextTracker.trackFileContext).mockRejectedValueOnce(new Error("tracker boom"))
+			mockedCheckpointSave.mockRejectedValueOnce(new Error("journal boom"))
+
+			await tool.execute({ patch: updatePatch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			// The user must see that the completed write lacks rollback
+			// metadata: the reported error keeps the original message and
+			// appends the persistence failure instead of replacing it.
+			expect(mockHandleError).toHaveBeenCalledTimes(1)
+			const reported = mockHandleError.mock.calls[0][1] as Error
+			expect(reported.message).toContain("tracker boom")
+			expect(reported.message).toContain("checkpoint flush also failed: journal boom")
 		})
 
 		it("records one journal write per file change for a multi-file patch", async () => {
@@ -824,6 +886,8 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			// The copy succeeded but the source still exists, so the move is
 			// reported as a failed tool error - but the destination write was
 			// made on disk and must still be covered by the checkpoint/journal.
+			// The single-entry payload below also guards that the source
+			// deletion is NOT journaled: the source was never removed.
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
 			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask as Task, false, true, [
 				expect.objectContaining({ path: "src/new-location.ts", operation: "update" }),
