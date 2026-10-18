@@ -23,6 +23,8 @@ interface ApplyDiffParams {
 
 // Failures embed file content; cap both detail size and the number of summaries.
 const DETAILED_APPLY_DIFF_FAILURES = 5
+// Strategy errors put file excerpts after this heading; main exposed at most one such excerpt.
+const FILE_CONTENT_SECTION_HEADING = "\n\nSearch Content:\n"
 const MAX_DETAILED_FAILURE_CHARACTERS = 4000
 const MAX_SUMMARY_FAILURE_CHARACTERS = 200
 const MAX_ABBREVIATED_FAILURES = 50
@@ -100,7 +102,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 							? `${failedParts.length} diff blocks failed to apply. Fix the failures below before retrying.\n\n`
 							: ""
 
-					formattedError = `Unable to apply diff to file: ${absolutePath}\n\n<error_details>\n${summary}${this.formatFailedParts(failedParts)}\n</error_details>`
+					formattedError = `Unable to apply diff to file: ${absolutePath}\n\n<error_details>\n${summary}${this.formatFailedParts(failedParts, 1)}\n</error_details>`
 				} else {
 					const errorDetails = diffResult.details ? JSON.stringify(diffResult.details, null, 2) : ""
 
@@ -247,7 +249,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					`The other ${unappliedParts.length} did NOT apply. ` +
 					`Inspect the saved file before retrying, since an earlier block may already contain the intended change. ` +
 					`Then resend ONLY the failed blocks that are still needed; the blocks that already applied will no longer match.\n\n` +
-					`<error_details>\n${this.formatFailedParts(unappliedParts)}\n</error_details>\n\n`
+					`<error_details>\n${this.formatFailedParts(unappliedParts, 0)}\n</error_details>\n\n`
 			}
 
 			// Get the formatted response message
@@ -281,7 +283,11 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 		}
 	}
 
-	private formatFailedParts(failedParts: Extract<DiffResult, { success: false }>[]): string {
+	/** Only the first `fileContentParts` failures may include file excerpts and details. */
+	private formatFailedParts(
+		failedParts: Extract<DiffResult, { success: false }>[],
+		fileContentParts: number,
+	): string {
 		const renderedCount = Math.min(failedParts.length, MAX_ABBREVIATED_FAILURES)
 		const sections = failedParts.slice(0, renderedCount).map((failPart, index) => {
 			const label = failedParts.length > 1 ? `--- Diff block ${index + 1} of ${failedParts.length} ---\n` : ""
@@ -290,6 +296,11 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 			if (index >= DETAILED_APPLY_DIFF_FAILURES) {
 				const summaryLine = error.split("\n")[0]
 				return `${label}${this.truncate(summaryLine, MAX_SUMMARY_FAILURE_CHARACTERS)}`
+			}
+
+			if (index >= fileContentParts) {
+				const diagnostics = error.split(FILE_CONTENT_SECTION_HEADING)[0]
+				return this.truncate(`${label}${diagnostics}`, MAX_DETAILED_FAILURE_CHARACTERS)
 			}
 
 			const errorDetails = failPart.details ? JSON.stringify(failPart.details, null, 2) : ""

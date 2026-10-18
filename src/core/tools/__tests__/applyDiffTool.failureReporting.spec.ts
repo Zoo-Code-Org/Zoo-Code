@@ -306,6 +306,73 @@ describe("ApplyDiffTool failure reporting", () => {
 		})
 	})
 
+	describe("file content exposure", () => {
+		const SECRET = "SECRET_TOKEN=abc123"
+
+		function makeContentFailure(index: number): FailPart {
+			return makeFailure(
+				`No sufficiently similar match found ${index}\n\nDebug Info:\n- Similarity Score: 10%` +
+					`\n\nSearch Content:\nsearch-${index}\n\nBest Match Found:\n${SECRET}\n\nOriginal Content:\n${SECRET}`,
+				{ similarity: 0.1 },
+			)
+		}
+
+		it("keeps file content for only the first failed block on the failure path", async () => {
+			const output = await runApplyDiff(
+				{ success: false, failParts: [1, 2, 3].map((index) => makeContentFailure(index)) },
+				3,
+			)
+
+			expect(output.split("Original Content:").length - 1).toBe(1)
+			expect(output.split(SECRET).length - 1).toBe(2)
+			expect(output.split("Details:").length - 1).toBe(1)
+			expect(output).toContain("No sufficiently similar match found 2\n\nDebug Info:\n- Similarity Score: 10%")
+			expect(output).toContain("No sufficiently similar match found 3\n\nDebug Info:\n- Similarity Score: 10%")
+		})
+
+		it("keeps the full content of a single failed block", async () => {
+			const output = await runApplyDiff({ success: false, failParts: [makeContentFailure(1)] }, 1)
+
+			expect(output).toContain(`Original Content:\n${SECRET}`)
+		})
+
+		it("cuts at the strategy heading even when the search text repeats it", async () => {
+			const repeated = makeFailure(
+				`Diagnostics kept\n\nSearch Content:\nx\n\nSearch Content:\ny\n\nOriginal Content:\n${SECRET}`,
+			)
+			const output = await runApplyDiff({ success: false, failParts: [makeContentFailure(1), repeated] }, 2)
+			const secondSection = output.split("--- Diff block 2 of 2 ---\n")[1]
+
+			expect(secondSection).toContain("Diagnostics kept")
+			expect(secondSection).not.toContain("Search Content:")
+			expect(secondSection).not.toContain(SECRET)
+		})
+
+		it("shows the same content-limited text in the diff_error message", async () => {
+			const result: DiffResult = { success: false, failParts: [1, 2].map((index) => makeContentFailure(index)) }
+			await runApplyDiff(result, 2)
+			const secondOutput = await runApplyDiff(result, 2)
+
+			expect(mockTask.say).toHaveBeenCalledWith("diff_error", secondOutput)
+			expect(secondOutput.split(SECRET).length - 1).toBe(2)
+		})
+
+		it("excludes all file content from the partial-apply result", async () => {
+			const output = await runApplyDiff(
+				{ success: true, content: "x", blockCount: 3, failParts: [makeContentFailure(1)] },
+				3,
+			)
+
+			expect(output).toContain("Applied 2 of 3 diff blocks")
+			expect(output).toContain("No sufficiently similar match found 1\n\nDebug Info:\n- Similarity Score: 10%")
+			expect(output).not.toContain("Search Content:")
+			expect(output).not.toContain("Best Match Found:")
+			expect(output).not.toContain("Original Content:")
+			expect(output).not.toContain("Details:")
+			expect(output).not.toContain(SECRET)
+		})
+	})
+
 	describe("partial apply path", () => {
 		function partialResult(failures: FailPart[]): DiffResult {
 			return { success: true, content: "updated content", failParts: failures }
