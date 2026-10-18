@@ -79,6 +79,7 @@ describe("IOIntelligence", () => {
 		"opencode-go": {},
 		kenari: {},
 		nanogpt: {},
+		friendli: {},
 		"io-intelligence": {
 			"meta-llama/Llama-3.3-70B-Instruct": { contextWindow: 128000, maxTokens: 8192, supportsPromptCache: false },
 		},

@@ -501,6 +501,10 @@ export async function initializeModelCacheRefresh(buildHandler: (provider: Route
 				options: { provider: providerIdentifiers.nanogpt },
 			},
 			{
+				provider: providerIdentifiers.friendli,
+				options: { provider: providerIdentifiers.friendli },
+			},
+			{
 				provider: providerIdentifiers.ioIntelligence,
 				options: { provider: providerIdentifiers.ioIntelligence },
 			},

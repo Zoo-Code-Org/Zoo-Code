@@ -90,9 +90,9 @@ function getStaticCatalogModel(
  *
  * Dynamic providers validate the configured model ID against the fetched
  * router-model list and only resolve the selection once that list is
- * available. LiteLLM is the exception: it fronts arbitrary models and
- * aliases, so a configured `litellmModelId` is the user's explicit
- * selection and is preserved as soon as the fetch settles, even when the
+ * available. Friendli preserves saved selections using its static seed
+ * until then. LiteLLM fronts arbitrary models and aliases, so a configured
+ * `litellmModelId` is preserved as soon as the fetch settles, even when the
  * router payload has no LiteLLM entry (partial listing, failed fetch, or
  * renamed deployment).
  */
@@ -147,11 +147,11 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 		(!needOpenRouterProviders || typeof openRouterModelProviders.data !== "undefined")
 
 	const { id, info } =
-		apiConfiguration && isReady && activeProvider
+		apiConfiguration && activeProvider && (isReady || activeProvider === providerIdentifiers.friendli)
 			? getSelectedModel({
 					provider: activeProvider,
 					apiConfiguration,
-					routerModels: (routerModels.data || {}) as RouterModels,
+					routerModels: (isReady ? routerModels.data || {} : {}) as RouterModels,
 					openRouterModelProviders: (openRouterModelProviders.data || {}) as Record<string, ModelInfo>,
 					lmStudioModels: (lmStudioModels.data || undefined) as ModelRecord | undefined,
 					ollamaModels: (ollamaModels.data || undefined) as ModelRecord | undefined,
@@ -493,9 +493,33 @@ function getSelectedModel({
 		case providerIdentifiers.fireworks:
 			return getStaticCatalogModel(apiConfiguration.apiModelId, fireworksModels, defaultModelId)
 		case providerIdentifiers.friendli: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = friendliModels[id as keyof typeof friendliModels]
-			return { id, info }
+			// When the Friendli router data is absent or empty (loading or fetch
+			// failed), fall back to the static seed. Preserve the saved model
+			// selection if it exists in the static seed rather than substituting
+			// the default, so the user's selection survives the loading window.
+			const hasFriendliRouter = routerModels.friendli && Object.keys(routerModels.friendli).length > 0
+
+			if (!hasFriendliRouter) {
+				const savedId = apiConfiguration.apiModelId
+				const staticInfo = savedId ? friendliModels[savedId as keyof typeof friendliModels] : undefined
+				if (savedId && staticInfo) {
+					return { id: savedId, info: staticInfo }
+				}
+				// Saved id is dynamic-only (not in the static seed) and the
+				// router hasn't loaded yet — keep the requested id instead of
+				// substituting the default, mirroring FriendliHandler.getModel()
+				// on the extension host side during the same load window.
+				if (savedId) {
+					return { id: savedId, info: undefined }
+				}
+				return { id: defaultModelId, info: friendliModels[defaultModelId as keyof typeof friendliModels] }
+			}
+
+			const availableModels = { ...friendliModels, ...routerModels.friendli! }
+			const id = getValidatedModelId(apiConfiguration.apiModelId, availableModels, defaultModelId)
+			const routerInfo = routerModels.friendli?.[id]
+			const staticInfo = friendliModels[id as keyof typeof friendliModels]
+			return { id, info: routerInfo ?? staticInfo }
 		}
 		case providerIdentifiers.poe: {
 			const id = apiConfiguration.apiModelId ?? defaultModelId
