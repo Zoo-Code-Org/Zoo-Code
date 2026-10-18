@@ -737,7 +737,7 @@
 		},
 		"perWrite": {
 			"label": "Punt de control després de cada escriptura de fitxer",
-			"description": "Registra una instantània de punt de control després de cada escriptura de fitxer reeixida de l’agent"
+			"description": "Registra una instantània de punt de control després de cada operació d’escriptura reeixida; un pegat de diversos fitxers genera un únic punt de control."
 		}
 	},
 	"notifications": {

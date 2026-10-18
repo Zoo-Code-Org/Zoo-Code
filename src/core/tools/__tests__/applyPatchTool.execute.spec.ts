@@ -15,6 +15,7 @@ import { ApplyPatchTool } from "../ApplyPatchTool"
 const mockedFsPromises = vi.mocked(
 	fsPromises as unknown as {
 		default: {
+			readFile: MockedFunction<typeof fsPromises.readFile>
 			unlink: MockedFunction<typeof fsPromises.unlink>
 			rm: MockedFunction<typeof fsPromises.rm>
 			writeFile: MockedFunction<typeof fsPromises.writeFile>
@@ -155,6 +156,14 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 +new content
 *** End Patch`
 			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			// The move destination does not exist: the rollback must remove the
+			// destination rather than restore content that was never there.
+			mockedFsPromises.default.readFile.mockImplementation(async (p: unknown) => {
+				if (String(p).includes("new.ts")) {
+					throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+				}
+				return "original file content\n"
+			})
 			mockedFsPromises.default.unlink.mockRejectedValueOnce(
 				Object.assign(new Error("EBUSY: resource busy or locked"), { code: "EBUSY" }),
 			)
@@ -178,6 +187,83 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			)
 			// ...and no whole-patch checkpoint is recorded for the failed move.
 			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+			// Restore the default readFile behavior for later tests.
+			mockedFsPromises.default.readFile.mockResolvedValue("original file content\n")
+		})
+
+		it("restores an existing destination when source deletion fails after the move clobbered it", async () => {
+			const patch = `*** Begin Patch
+*** Update File: src/old.ts
+*** Move to: src/new.ts
+@@
+-original file content
++new content
+*** End Patch`
+			// The destination already exists with its own content; the move writes
+			// over it before the source unlink runs.
+			mockedFsPromises.default.readFile.mockImplementation(async (p: unknown) => {
+				if (String(p).includes("new.ts")) {
+					return "existing destination content"
+				}
+				return "original file content\n"
+			})
+			mockedFsPromises.default.unlink.mockRejectedValueOnce(
+				Object.assign(new Error("EBUSY: resource busy or locked"), { code: "EBUSY" }),
+			)
+
+			await tool.execute({ patch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			// The captured destination content is restored, not deleted: rm must not
+			// run for a destination that existed before the move.
+			expect(mockedFsPromises.default.writeFile).toHaveBeenCalledWith(
+				expect.stringContaining("new.ts"),
+				"existing destination content",
+			)
+			expect(mockedFsPromises.default.rm).not.toHaveBeenCalled()
+			expect(mockPushToolResult).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to delete original file after move"),
+			)
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+			// Restore the default readFile behavior for later tests.
+			mockedFsPromises.default.readFile.mockResolvedValue("original file content\n")
+		})
+
+		it("refuses the move before writing when the destination cannot be inspected", async () => {
+			const patch = `*** Begin Patch
+*** Update File: src/old.ts
+*** Move to: src/new.ts
+@@
+-original file content
++new content
+*** End Patch`
+			// An EACCES on the destination is not "absent": treating every read
+			// failure as missing could delete an inaccessible destination.
+			mockedFsPromises.default.readFile.mockImplementation(async (p: unknown) => {
+				if (String(p).includes("new.ts")) {
+					throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+				}
+				return "original file content\n"
+			})
+
+			await tool.execute({ patch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			// The destination is never written and the source is never unlinked.
+			expect(mockedFsPromises.default.writeFile).not.toHaveBeenCalled()
+			expect(mockedFsPromises.default.unlink).not.toHaveBeenCalled()
+			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("Cannot inspect move destination"))
+			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+			// Restore the default readFile behavior for later tests.
+			mockedFsPromises.default.readFile.mockResolvedValue("original file content\n")
 		})
 
 		it("persists an explicit partial-state checkpoint before handoff when a later operation fails", async () => {
