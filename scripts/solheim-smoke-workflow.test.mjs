@@ -80,7 +80,6 @@ describe("Project A provider smoke workflow", () => {
 			[
 				"${{ runner.temp }}/solheim-provider-smoke/verdict.json",
 				"${{ runner.temp }}/solheim-provider-smoke/trace.json",
-				"${{ runner.temp }}/solheim-provider-smoke/recording-status.txt",
 			],
 		)
 		// The recording artifact carries only the exact validated final path.
@@ -104,8 +103,9 @@ describe("Project A provider smoke workflow", () => {
 	})
 	it("reports a missing or failed recording explicitly before the uploads", () => {
 		const checkStep = workflow.split("- name: Verify recording integrity")[1]?.split("- name:")[0] ?? ""
-		assert.match(checkStep, /recording-status\.txt/)
-		assert.match(checkStep, /test "\$status" = ok/)
+		// The published final is the commit marker; no separate status file exists.
+		assert.match(checkStep, /test -s "\$SOLHEIM_SMOKE_OUT_DIR\/smoke\.mp4"/)
+		assert.ok(!workflow.includes("recording-status"))
 		assert.match(checkStep, /!cancelled\(\)/)
 		const checkIndex = workflow.indexOf("- name: Verify recording integrity")
 		const uploadIndex = workflow.indexOf("- name: Upload provider smoke verdict and trace")
@@ -131,6 +131,18 @@ describe("Project A provider smoke workflow", () => {
 		assert.match(recorder, /rm -f "\$final_recording"/)
 		// ffmpeg must never write the final path directly.
 		assert.ok(!/ffmpeg[^\n]*\$final_recording/.test(recorder))
+	})
+	it("signals the Node driver directly with a documented stop budget", () => {
+		// A package-manager wrapper between the recorder and the driver would
+		// receive the TERM and KILL meant for the driver that performs teardown
+		// and the atomic verdict and trace writes.
+		assert.ok(!recorder.includes("pnpm"))
+		assert.match(recorder, /node --import tsx "\$script_dir\/driver\.mts" &/)
+		assert.match(recorder, /SOLHEIM_SMOKE_STOP_BUDGET_S:-30/)
+		assert.match(recorder, /kill -TERM "\$provider_pid"/)
+		assert.match(recorder, /kill -KILL "\$provider_pid"/)
+		assert.match(recorder, /wait "\$provider_pid"/)
+		assert.ok(!recorder.includes("status_file"))
 	})
 	it("keeps Code QA and package commands focused on smoke contracts", () => {
 		for (const command of [
@@ -195,43 +207,51 @@ function recorderPaths(dir) {
 	const outDir = path.join(dir, "out")
 	return {
 		outDir,
-		statusFile: path.join(outDir, "recording-status.txt"),
 		finalRecording: path.join(outDir, "smoke.mp4"),
 	}
 }
 
-function recorderEnv(bin, outDir, providerMarker) {
+function recorderEnv(bin, outDir, providerMarker, extraEnv) {
 	return {
 		PATH: `${bin}:${process.env.PATH}`,
 		DISPLAY: ":99",
 		SOLHEIM_SMOKE_OUT_DIR: outDir,
 		...(providerMarker ? { PROVIDER_MARKER: providerMarker } : {}),
+		...extraEnv,
 	}
 }
 
+const stopBudgetEnv = (stopBudget) => (stopBudget ? { SOLHEIM_SMOKE_STOP_BUDGET_S: String(stopBudget) } : {})
+
 const recorderScript = new URL("./solheim-smoke/record.sh", import.meta.url).pathname
 
-function runRecorder(args, { ffmpeg, ffmpegWrites = true, ffprobeOk = true, seedFinal, providerMarker } = {}) {
+function runRecorder(
+	args,
+	{ ffmpeg, ffmpegWrites = true, ffprobeOk = true, seedFinal, providerMarker, stopBudget } = {},
+) {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "record-sh-"))
 	const bin = stubRecorderBin(dir, { ffmpeg, ffmpegWrites, ffprobeOk })
 	const paths = recorderPaths(dir)
 	fs.mkdirSync(paths.outDir, { recursive: true })
 	if (seedFinal !== undefined) fs.writeFileSync(paths.finalRecording, seedFinal)
 	const result = spawnSync("bash", [recorderScript, ...args], {
-		env: recorderEnv(bin, paths.outDir, providerMarker),
+		env: recorderEnv(bin, paths.outDir, providerMarker, stopBudgetEnv(stopBudget)),
 		encoding: "utf8",
 		timeout: 20_000,
 	})
 	return { result, ...paths, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) }
 }
 
-function runRecorderSignalled(args, { ffmpeg, ffprobeOk = true, delayMs, providerMarker } = {}) {
+function runRecorderSignalled(args, { ffmpeg, ffprobeOk = true, delayMs, providerMarker, stopBudget } = {}) {
 	return new Promise((resolve) => {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "record-sh-"))
 		const bin = stubRecorderBin(dir, { ffmpeg, ffprobeOk })
 		const paths = recorderPaths(dir)
+		// The output directory is created here, before the recorder runs, so
+		// every process in the test observes the same directory object.
+		fs.mkdirSync(paths.outDir, { recursive: true })
 		const child = spawn("bash", [recorderScript, ...args], {
-			env: recorderEnv(bin, paths.outDir, providerMarker),
+			env: recorderEnv(bin, paths.outDir, providerMarker, stopBudgetEnv(stopBudget)),
 		})
 		let stdout = ""
 		child.stdout.on("data", (chunk) => {
@@ -248,14 +268,21 @@ function runRecorderSignalled(args, { ffmpeg, ffprobeOk = true, delayMs, provide
 }
 
 const tempFilesLeft = (run) => fs.readdirSync(run.outDir).filter((name) => name.includes(".tmp"))
-const recordingStatus = (run) => fs.readFileSync(run.statusFile, "utf8").trim()
+
+const pidAlive = (pid) => {
+	try {
+		process.kill(pid, 0)
+		return true
+	} catch {
+		return false
+	}
+}
 
 describe("record.sh exit and validation behavior", () => {
 	it("passes when the command succeeds and the recording is valid", () => {
 		const run = runRecorder(["true"])
 		try {
 			assert.equal(run.result.status, 0)
-			assert.equal(recordingStatus(run), "ok")
 			assert.equal(fs.readFileSync(run.finalRecording, "utf8"), "data\n")
 			assert.deepEqual(tempFilesLeft(run), [])
 		} finally {
@@ -266,7 +293,6 @@ describe("record.sh exit and validation behavior", () => {
 		const run = runRecorder(["bash", "-c", "exit 7"])
 		try {
 			assert.equal(run.result.status, 7)
-			assert.equal(recordingStatus(run), "ok")
 			assert.equal(fs.readFileSync(run.finalRecording, "utf8"), "data\n")
 		} finally {
 			run.cleanup()
@@ -278,7 +304,6 @@ describe("record.sh exit and validation behavior", () => {
 			assert.equal(run.result.status, 1)
 			assert.match(run.result.stdout, /recording failed/)
 			assert.ok(!fs.existsSync(run.finalRecording))
-			assert.notEqual(recordingStatus(run), "ok")
 		} finally {
 			run.cleanup()
 		}
@@ -289,7 +314,6 @@ describe("record.sh exit and validation behavior", () => {
 			assert.equal(run.result.status, 1)
 			assert.ok(!fs.existsSync(run.finalRecording))
 			assert.deepEqual(tempFilesLeft(run), [])
-			assert.notEqual(recordingStatus(run), "ok")
 		} finally {
 			run.cleanup()
 		}
@@ -331,7 +355,7 @@ describe("record.sh exit and validation behavior", () => {
 			assert.equal(run.result.status, 1)
 			assert.ok(!fs.existsSync(marker))
 			assert.ok(!fs.existsSync(run.finalRecording))
-			assert.match(recordingStatus(run), /stopped on its own/)
+			assert.match(run.result.stdout, /stopped on its own/)
 		} finally {
 			run.cleanup()
 			fs.rmSync(marker, { force: true })
@@ -347,7 +371,7 @@ describe("record.sh exit and validation behavior", () => {
 			assert.equal(run.result.status, 1)
 			assert.ok(!fs.existsSync(run.finalRecording))
 			assert.deepEqual(tempFilesLeft(run), [])
-			assert.match(recordingStatus(run), /stopped on its own/)
+			assert.match(run.result.stdout, /stopped on its own/)
 		} finally {
 			run.cleanup()
 		}
@@ -358,7 +382,6 @@ describe("record.sh exit and validation behavior", () => {
 		})
 		try {
 			assert.equal(run.result.status, 0)
-			assert.equal(recordingStatus(run), "ok")
 			assert.equal(fs.readFileSync(run.finalRecording, "utf8"), "data\n")
 		} finally {
 			run.cleanup()
@@ -383,7 +406,6 @@ describe("record.sh signal teardown behavior", () => {
 		try {
 			assert.equal(run.code, 143)
 			assert.equal(fs.readFileSync(run.finalRecording, "utf8"), "data\n")
-			assert.equal(recordingStatus(run), "ok")
 			assert.equal(fs.readFileSync(marker, "utf8"), "killed")
 			assert.deepEqual(tempFilesLeft(run), [])
 		} finally {
@@ -397,7 +419,98 @@ describe("record.sh signal teardown behavior", () => {
 			assert.equal(run.code, 143)
 			assert.ok(!fs.existsSync(run.finalRecording))
 			assert.deepEqual(tempFilesLeft(run), [])
-			assert.notEqual(recordingStatus(run), "ok")
+		} finally {
+			run.cleanup()
+		}
+	})
+})
+
+describe("record.sh provider stop behavior", () => {
+	it("lets a driver-style stub finish teardown and atomic artifact writes on SIGTERM", async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "record-sh-"))
+		const bin = stubRecorderBin(dir)
+		const paths = recorderPaths(dir)
+		// The artifact lives beside the stub, not inside the recorder output
+		// directory, so the assertion only observes the driver-style write.
+		const artifact = path.join(dir, "verdict.json")
+		const stub = path.join(dir, "driver-stub.mjs")
+		fs.writeFileSync(
+			stub,
+			[
+				`import fs from "node:fs"`,
+				`const artifact = process.argv[2]`,
+				`process.on("SIGTERM", () => {`,
+				`	// Simulate driver teardown before the atomic artifact write.`,
+				`	setTimeout(() => {`,
+				`		fs.writeFileSync(artifact + ".tmp", "complete")`,
+				`		fs.renameSync(artifact + ".tmp", artifact)`,
+				`		process.exit(143)`,
+				`	}, 1500)`,
+				`})`,
+				`setInterval(() => {}, 1000)`,
+			].join("\n"),
+		)
+		const run = await runRecorderSignalled(["node", stub, artifact], { delayMs: 800, stopBudget: 10 })
+		try {
+			assert.equal(run.code, 143)
+			// The wrapper waited for the driver teardown instead of killing the
+			// driver mid-write, so the atomic artifact write completed.
+			assert.equal(fs.readFileSync(artifact, "utf8"), "complete")
+			assert.equal(fs.readFileSync(run.finalRecording, "utf8"), "data\n")
+			assert.deepEqual(tempFilesLeft(run), [])
+		} finally {
+			run.cleanup()
+			fs.rmSync(dir, { recursive: true, force: true })
+		}
+	})
+	it("escalates to KILL and reaps a hung driver within the stop budget", async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "record-sh-"))
+		const bin = stubRecorderBin(dir)
+		const paths = recorderPaths(dir)
+		const hungPidFile = path.join(dir, "hung-pid")
+		const termSeenFile = path.join(dir, "term-seen")
+		const hungSource = [
+			`const fs = require("node:fs")`,
+			`process.on("SIGTERM", () => fs.writeFileSync(${JSON.stringify(termSeenFile)}, "seen"))`,
+			`fs.writeFileSync(${JSON.stringify(hungPidFile)}, String(process.pid))`,
+			`setInterval(() => {}, 1000)`,
+		].join("\n")
+		const startedAt = Date.now()
+		// The TERM lands well after the child booted, so the ignored TERM is a
+		// handled signal, not a boot-time default kill.
+		const run = await runRecorderSignalled(["node", "-e", hungSource], { delayMs: 900, stopBudget: 2 })
+		try {
+			assert.equal(run.code, 143)
+			// TERM reached the real driver child, the wrapper waited the
+			// documented budget, then escalated. Teardown stays bounded.
+			assert.equal(fs.readFileSync(termSeenFile, "utf8"), "seen")
+			assert.ok(Date.now() - startedAt < 10_000)
+			assert.equal(fs.readFileSync(run.finalRecording, "utf8"), "data\n")
+			const hungPid = Number(fs.readFileSync(hungPidFile, "utf8").trim())
+			assert.ok(Number.isInteger(hungPid) && hungPid > 0)
+			let gone = false
+			for (let attempt = 0; attempt < 50 && !gone; attempt++) {
+				gone = !pidAlive(hungPid)
+				if (!gone) await new Promise((resolve) => setTimeout(resolve, 100))
+			}
+			assert.ok(gone, "hung driver survived the KILL escalation")
+		} finally {
+			run.cleanup()
+			fs.rmSync(dir, { recursive: true, force: true })
+		}
+	})
+	it("runs the real Node driver with no arguments and keeps metadata on failure", () => {
+		// The credential-free driver fails fast with a SETUP_FAILED verdict, so
+		// this exercises the exact CI spawn path end to end.
+		const run = runRecorder([])
+		try {
+			assert.equal(run.result.status, 1)
+			const verdict = JSON.parse(fs.readFileSync(path.join(run.outDir, "verdict.json"), "utf8"))
+			assert.equal(verdict.code, "SETUP_FAILED")
+			const trace = JSON.parse(fs.readFileSync(path.join(run.outDir, "trace.json"), "utf8"))
+			assert.equal(trace.execution.code, "SETUP_FAILED")
+			assert.equal(fs.readFileSync(run.finalRecording, "utf8"), "data\n")
+			assert.deepEqual(tempFilesLeft(run), [])
 		} finally {
 			run.cleanup()
 		}

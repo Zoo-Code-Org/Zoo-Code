@@ -48,16 +48,17 @@ jobs:
                   SOLHEIM_SMOKE_OUT_DIR: ${{ runner.temp }}/solheim-provider-smoke
               run: xvfb-run -a -s "-screen 0 1280x720x24 -nolisten tcp" bash scripts/solheim-smoke/record.sh
 
-            # The recorder publishes smoke.mp4 only after a nonempty check and
-            # ffprobe validation, so any other status is a recording failure.
+            # The recorder publishes smoke.mp4 only through an atomic rename
+            # after a nonempty check and ffprobe validation, so the published
+            # final is the commit marker: present and nonempty means complete.
+            # There is no separate persisted status marker.
             - name: Verify recording integrity
               if: ${{ !cancelled() && (steps.provider.outcome == 'success' || steps.provider.outcome == 'failure') }}
               env:
                   SOLHEIM_SMOKE_OUT_DIR: ${{ runner.temp }}/solheim-provider-smoke
               run: |
-                  status="$(cat "$SOLHEIM_SMOKE_OUT_DIR/recording-status.txt" 2>/dev/null || echo missing)"
-                  echo "Recording status: $status"
-                  test "$status" = ok
+                  test -s "$SOLHEIM_SMOKE_OUT_DIR/smoke.mp4"
+                  echo "Recording published and nonempty: $SOLHEIM_SMOKE_OUT_DIR/smoke.mp4"
 
             # Verdict and trace evidence must survive even when the recording
             # is missing, so metadata and video are uploaded separately.
@@ -69,7 +70,6 @@ jobs:
                   path: |
                       ${{ runner.temp }}/solheim-provider-smoke/verdict.json
                       ${{ runner.temp }}/solheim-provider-smoke/trace.json
-                      ${{ runner.temp }}/solheim-provider-smoke/recording-status.txt
                   if-no-files-found: error
                   retention-days: 7
 

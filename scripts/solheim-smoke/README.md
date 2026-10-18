@@ -64,14 +64,22 @@ a stale `smoke.mp4` from an earlier attempt in a reused directory is removed bef
 ffmpeg exits non-zero after its graceful INT or TERM shutdown, so a recorder that was still alive at
 shutdown is judged by content validation alone. A recorder that stopped on its own before shutdown must
 have exited zero (the `-t` time or `-fs` size limits); any other self-chosen status fails the recording
-even when the fragments would still probe. The wrapper records the outcome in `recording-status.txt`
-(`ok`, or the failure reason), reports the reason on stdout, and keeps the provider exit code unchanged.
+even when the fragments would still probe. The wrapper reports failure reasons on stdout and keeps the
+provider exit code unchanged. There is no separate persisted status marker: a published, non-empty
+`smoke.mp4` is the only success marker, and the workflow checks exactly that.
 
-Metadata (`verdict.json`, `trace.json`, `recording-status.txt`) and the video are uploaded as two separate
-artifacts, each with `if-no-files-found: error`. A missing recording therefore fails its own upload step
-and the explicit integrity check step, instead of hiding behind a multi-path upload. Verdict and trace
-evidence stay available when the provider failed and the video is missing. Cancellation may prevent
-finalization and upload.
+The wrapper starts the Node driver directly, not through a package-manager wrapper, so its stop routine
+signals and monitors the driver PID that owns teardown and the atomic verdict and trace writes. It sends
+`TERM`, waits a budget, then escalates to `KILL` for that PID only. The budget defaults to 30 seconds and
+covers the driver teardown worst case: three 5 second host termination windows plus cleanup and writes.
+`SOLHEIM_SMOKE_STOP_BUDGET_S` overrides the budget for tests. A `KILL`ed driver can leave host processes
+behind; no wrapper cleanup can repair that boundary.
+
+Metadata (`verdict.json`, `trace.json`) and the video are uploaded as two separate artifacts, each with
+`if-no-files-found: error`. A missing recording therefore fails its own upload step and the explicit
+integrity check step, instead of hiding behind a multi-path upload. Verdict and trace evidence stay
+available when the provider failed and the video is missing. Cancellation may prevent finalization and
+upload.
 
 Checks, without a provider key or network calls:
 

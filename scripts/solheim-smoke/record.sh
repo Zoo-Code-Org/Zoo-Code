@@ -5,12 +5,11 @@ set -euo pipefail
 : "${SOLHEIM_SMOKE_OUT_DIR:?Set a scratch output directory}"
 mkdir -p "$SOLHEIM_SMOKE_OUT_DIR"
 final_recording="$SOLHEIM_SMOKE_OUT_DIR/smoke.mp4"
-status_file="$SOLHEIM_SMOKE_OUT_DIR/recording-status.txt"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # A stale final from an earlier attempt must never survive into this attempt's
 # upload. Remove only this exact path.
 rm -f "$final_recording"
-echo pending > "$status_file"
 
 # The recorder needs display access, not provider/GitHub credentials. Fragmented
 # MP4 keeps completed fragments readable if the action is forcibly interrupted.
@@ -35,14 +34,22 @@ provider_pid=""
 # ffprobe can still read the fragments.
 report_recording_failure() {
     echo "Solheim smoke recording failed: $1"
-    echo "$1" > "$status_file"
     [[ "$result" -ne 0 ]] || result=1
 }
+
+# The provider child is the Node driver itself, so TERM reaches the one process
+# that owns teardown and the atomic verdict and trace writes. The 30 second
+# budget covers the driver teardown worst case: three 5 second host termination
+# windows plus cleanup and artifact writes. KILL is the last resort for a hung
+# driver; a killed driver can leave host processes behind, and no wrapper
+# cleanup can repair that boundary.
+provider_stop_budget="${SOLHEIM_SMOKE_STOP_BUDGET_S:-30}"
+[[ "$provider_stop_budget" =~ ^[0-9]+$ ]] || provider_stop_budget=30
 
 stop_provider() {
     [[ -n "$provider_pid" ]] || return 0
     kill -TERM "$provider_pid" 2>/dev/null || return 0
-    for ((attempt = 0; attempt < 30; attempt++)); do
+    for ((attempt = 0; attempt < provider_stop_budget * 10; attempt++)); do
         kill -0 "$provider_pid" 2>/dev/null || break
         sleep 0.1
     done
@@ -81,7 +88,8 @@ finish() {
         report_recording_failure "recorder output failed ffprobe validation"
     elif mv -f "$temp_recording" "$final_recording"; then
         # Same-directory rename: atomic, so no partially written final exists.
-        echo ok > "$status_file"
+        # The published, nonempty final is the only success marker.
+        :
     else
         rm -f "$temp_recording"
         report_recording_failure "validated recording could not be published"
@@ -99,7 +107,10 @@ kill -0 "$recorder_pid" 2>/dev/null || exit 1
 if [[ "$#" -gt 0 ]]; then
     "$@" &
 else
-    pnpm solheim:smoke &
+    # Invoke the Node driver directly: a package-manager wrapper would sit
+    # between this wrapper and the driver, and stop_provider must signal and
+    # monitor the driver PID that performs teardown and artifact writes.
+    node --import tsx "$script_dir/driver.mts" &
 fi
 provider_pid=$!
 provider_status=0
