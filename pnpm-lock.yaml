@@ -22,7 +22,6 @@ overrides:
   csstype: 3.2.3
   zod: 4.6.7
   '@lmstudio/sdk>zod': 3.25.76
-  knip>zod: 3.25.76
   katex: 0.18.2
 
 importers:
@@ -14822,7 +14821,7 @@ snapshots:
       typescript: 5.9.3
       unbash: 2.2.0
       yaml: 2.9.0
-      zod: 3.25.76
+      zod: 4.6.7
 
   koa-compose@4.1.0: {}
 

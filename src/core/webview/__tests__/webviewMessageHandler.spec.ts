@@ -2891,8 +2891,7 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		// path is exercised, resolves (with its already-captured, now-stale value) only after
 		// the disable write above has fully landed.
 		const snapshotResolved = vi.mocked(providerForLaunch.getStateToPostToWebview).mock.results[0]?.value as
-			| Promise<unknown>
-			| undefined
+			Promise<unknown> | undefined
 		releaseSnapshot()
 
 		await Promise.all([launch, snapshotResolved])
