@@ -4,7 +4,7 @@ import path from "path"
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { appendChanges, journalPath, loadChanges, type ChangeJournalEntry } from "../changeJournal"
+import { appendChanges, journalPath, journalQueueDepth, loadChanges, type ChangeJournalEntry } from "../changeJournal"
 
 // appendChange (single-entry wrapper) is production code only in B2; these
 // units journal batch writes, so the spec keeps a local helper.
@@ -159,7 +159,7 @@ describe("changeJournal", () => {
 			} finally {
 				readSpy.mockRestore()
 			}
-			// The failed append wrote nothing: the next append still repairs and loads.
+			// The failed append wrote nothing: the next append still loads and appends.
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "after" }))
 			const result = await loadChanges(tmpRoot, taskId)
 			expect(result.map((e) => e.checkpointId)).toEqual(["good", "after"])
@@ -465,7 +465,7 @@ describe("changeJournal", () => {
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
 
 			// Truncate to a single character — definitely invalid JSON. The
-			// append path repairs such a tail on the next write; a read must
+			// append path rejects such a tail on the next write; a read must
 			// not report the lost record as a complete (empty) history.
 			await fs.writeFile(journalPath(tmpRoot, taskId), "{")
 
@@ -492,6 +492,26 @@ describe("changeJournal", () => {
 
 			const result = await loadChanges(tmpRoot, taskId)
 			expect(result[0].diffStats).toBeUndefined()
+		})
+	})
+
+	describe("journal queue lifecycle", () => {
+		it("prunes the per-task queue entry once the update settles", async () => {
+			const before = journalQueueDepth()
+
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "settled" }))
+			// The pruning hook runs one microtask after the caller's promise
+			// settles; drain it before asserting.
+			await new Promise((resolve) => setImmediate(resolve))
+			expect(journalQueueDepth()).toBe(before)
+
+			// In-flight updates hold their entries; settled ones prune again.
+			const first = appendChange(tmpRoot, taskId, entry({ checkpointId: "one" }))
+			const second = appendChange(tmpRoot, "other-task", entry({ checkpointId: "two" }))
+			expect(journalQueueDepth()).toBe(before + 2)
+			await Promise.all([first, second])
+			await new Promise((resolve) => setImmediate(resolve))
+			expect(journalQueueDepth()).toBe(before)
 		})
 	})
 })

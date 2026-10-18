@@ -54,6 +54,11 @@ export function journalPath(globalStorageDir: string, taskId: string): string {
  */
 const journalQueues = new Map<string, Promise<unknown>>()
 
+/** @internal Test seam: number of live per-task journal queue entries. */
+export function journalQueueDepth(): number {
+	return journalQueues.size
+}
+
 export function withTaskLock<T>(key: string, run: () => Promise<T>): Promise<T> {
 	const prev = journalQueues.get(key) ?? Promise.resolve()
 	// The next update runs after the previous one settles, whatever it did.
@@ -61,33 +66,23 @@ export function withTaskLock<T>(key: string, run: () => Promise<T>): Promise<T> 
 	// The queued promise swallows its outcome so a failed update neither
 	// blocks later updates nor surfaces as an unhandled rejection; callers
 	// observe the failure through `next`.
-	journalQueues.set(
-		key,
-		next.then(
-			() => undefined,
-			() => undefined,
-		),
+	const tail = next.then(
+		() => undefined,
+		() => undefined,
 	)
+	journalQueues.set(key, tail)
+	// Prune settled entries: a queue entry must not outlive its work
+	// (deleting a task removes its files but not this map). The identity
+	// check keeps a late completion from deleting a newer queued update
+	// for the same key.
+	void tail.finally(() => {
+		if (journalQueues.get(key) === tail) {
+			journalQueues.delete(key)
+		}
+	})
 	return next
 }
 
-/**
- * Append change-journal entries to the per-task changes.jsonl file as one
- * serialized, atomic update.
- *
- * The whole multi-entry update is a crash-safe replacement: the current
- * journal is read, a torn tail is terminated, the complete next content is
- * written to a temporary file in the same directory and fsynced, then
- * atomically renamed onto the journal, and the parent directory is fsynced
- * (POSIX; Windows cannot open directories). A crash at any point leaves
- * either the old complete journal or the new complete journal - never a
- * half-applied multi-file update - and a durable checkpoint implies a
- * durable journal entry. Creates parent directories if they don't exist
- * yet (e.g. first checkpoint).
- *
- * Failures propagate: callers must not report a fully durable checkpoint
- * when the journal update did not complete.
- */
 /** True when a parsed JSON value is a complete journal record. */
 function isEntryShaped(value: unknown): value is ChangeJournalEntry {
 	return (
@@ -99,6 +94,25 @@ function isEntryShaped(value: unknown): value is ChangeJournalEntry {
 	)
 }
 
+/**
+ * Append change-journal entries to the per-task changes.jsonl file as one
+ * serialized, atomic update.
+ *
+ * The whole multi-entry update is a crash-safe replacement: the current
+ * journal is read and its final record verified - an unterminated but
+ * complete, entry-shaped tail is re-terminated, any other damaged final
+ * record rejects the append - then the complete next content is written
+ * to a temporary file in the same directory and fsynced, atomically
+ * renamed onto the journal, and the parent directory is fsynced (POSIX;
+ * Windows cannot open directories). A crash at any point leaves either
+ * the old complete journal or the new complete journal - never a
+ * half-applied multi-file update - and a durable checkpoint implies a
+ * durable journal entry. Creates parent directories if they don't exist
+ * yet (e.g. first checkpoint).
+ *
+ * Failures propagate: callers must not report a fully durable checkpoint
+ * when the journal update did not complete.
+ */
 export async function appendChanges(
 	globalStorageDir: string,
 	taskId: string,
@@ -237,13 +251,12 @@ export async function appendChanges(
 /**
  * Load all change-journal entries for a task.
  *
- * Torn-tail repair: if the FINAL line is truncated (JSON.parse fails) it is
- * discarded - that is the verified crash tail.  Any other damage throws:
- * a corrupt or non-entry-shaped line before the last one means a write was
- * lost from the history, and a rollback that silently skipped it could
- * restore to the wrong target.  Callers treat the rejection as "journal
- * completeness unknown" and fail closed.  The rest of the file
- * is returned in order.  An absent
+ * Every line must parse to an entry-shaped record: any corrupt or
+ * non-entry-shaped line - including a truncated FINAL line - rejects,
+ * because a torn tail may be the truncated journal record of a committed
+ * write and silently dropping it reports an incomplete rollback history
+ * as valid.  Callers treat the rejection as "journal completeness
+ * unknown" and fail closed.  Entries are returned in order.  An absent
  * or empty journal returns [] — but only an ABSENT file. Any other read
  * failure (permissions, I/O) is rethrown: a journal that cannot be read must
  * not be indistinguishable from one that is legitimately empty.

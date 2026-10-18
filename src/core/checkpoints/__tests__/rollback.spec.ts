@@ -5,6 +5,7 @@ import path from "path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { Task } from "../../task/Task"
+import type { RepoPerTaskCheckpointService } from "../../../services/checkpoints"
 import type { ChangeJournalEntry } from "../changeJournal"
 import { getCheckpointService } from "../index"
 import * as changeJournal from "../changeJournal"
@@ -18,21 +19,29 @@ vi.mock("../index", () => ({
 	checkpointDiff: vi.fn(),
 }))
 
-const mockedGetCheckpointService = getCheckpointService as unknown as ReturnType<typeof vi.fn>
+const mockedGetCheckpointService = vi.mocked(getCheckpointService)
 
-function makeTask(): Task {
+/**
+ * A minimal Task double: the rollback code reads only taskId and
+ * providerRef.deref(). The double assertion is confined to this factory
+ * (AGENTS.md last resort - the real Task carries the full session surface)
+ * so every call site stays typed and cast-free.
+ */
+function makeTask(provider: unknown = { context: { globalStorageUri: { fsPath: globalStorageDir } } }): Task {
 	return {
 		taskId: "task-rollback",
-		providerRef: {
-			deref: vi.fn().mockReturnValue({ context: { globalStorageUri: { fsPath: globalStorageDir } } }),
-		},
+		providerRef: { deref: vi.fn().mockReturnValue(provider) },
 	} as unknown as Task
 }
 
-/** A checkpoint-service double with a recording restoreFile and a baseline. */
-function serviceWith(baseHash: string | undefined) {
+/**
+ * A checkpoint-service double with a recording restoreFile and a baseline.
+ * The rollback code consumes only these two members; the double assertion
+ * is confined to this factory so the vi.mocked handle stays typed.
+ */
+function serviceWith(baseHash: string | undefined): RepoPerTaskCheckpointService {
 	const restoreFile = vi.fn().mockResolvedValue(undefined)
-	return { baseHash, restoreFile }
+	return { baseHash, restoreFile } as unknown as RepoPerTaskCheckpointService
 }
 
 async function seedJournal(entries: ChangeJournalEntry[]): Promise<void> {
@@ -123,10 +132,7 @@ describe("rollbackFile (B3c: undo the step's write to the file)", () => {
 	it("fails when the journal location is unavailable (no global storage)", async () => {
 		// No context on the provider double → the journal cannot even be
 		// located: a clear failure, not a silent miss on the file lookup.
-		const task = {
-			taskId: "task-rollback",
-			providerRef: { deref: vi.fn().mockReturnValue(undefined) },
-		} as unknown as Task
+		const task = makeTask(null)
 
 		const service = serviceWith("base-0")
 		mockedGetCheckpointService.mockResolvedValue(service)
@@ -186,7 +192,7 @@ describe("rollbackFile (B3c: undo the step's write to the file)", () => {
 	it("reports the service error without throwing", async () => {
 		await seedJournal([{ path: "src/a.ts", operation: "create", checkpointId: "sha-1" }])
 		const service = serviceWith("base-0")
-		service.restoreFile.mockRejectedValue(new Error("pathspec did not match"))
+		vi.mocked(service.restoreFile).mockRejectedValue(new Error("pathspec did not match"))
 		mockedGetCheckpointService.mockResolvedValue(service)
 
 		const outcome = await rollbackFile(makeTask(), "sha-1", "src/a.ts")
@@ -198,7 +204,7 @@ describe("rollbackFile (B3c: undo the step's write to the file)", () => {
 	it("stringifies non-Error rejections into the outcome", async () => {
 		await seedJournal([{ path: "src/a.ts", operation: "create", checkpointId: "sha-1" }])
 		const service = serviceWith("base-0")
-		service.restoreFile.mockRejectedValue("raw failure")
+		vi.mocked(service.restoreFile).mockRejectedValue("raw failure")
 		mockedGetCheckpointService.mockResolvedValue(service)
 
 		const outcome = await rollbackFile(makeTask(), "sha-1", "src/a.ts")
@@ -237,7 +243,7 @@ describe("rollbackStep (B3c: undo every file of the step)", () => {
 			{ path: "src/b.ts", operation: "create", checkpointId: "sha-2" },
 		])
 		const service = serviceWith("base-0")
-		service.restoreFile.mockRejectedValueOnce(new Error("pathspec did not match"))
+		vi.mocked(service.restoreFile).mockRejectedValueOnce(new Error("pathspec did not match"))
 		mockedGetCheckpointService.mockResolvedValue(service)
 
 		const outcome = await rollbackStep(makeTask(), ["src/a.ts", "src/b.ts"], "sha-2")
@@ -327,10 +333,7 @@ describe("rollbackStep (B3c: undo every file of the step)", () => {
 		// No context on the provider double → the journal cannot even be
 		// located. That is a failure, not an empty journal: reporting the
 		// step as merely "not part of this checkpoint" would be misleading.
-		const task = {
-			taskId: "task-rollback",
-			providerRef: { deref: vi.fn().mockReturnValue(undefined) },
-		} as unknown as Task
+		const task = makeTask(null)
 
 		const service = serviceWith("base-0")
 		mockedGetCheckpointService.mockResolvedValue(service)
@@ -385,10 +388,7 @@ describe("restoreLatestFile (B3c: forward direction)", () => {
 	it("fails when the journal location is unavailable (no global storage)", async () => {
 		// An unavailable journal is not "the task wrote nothing": a no-op
 		// success would claim a restore that never happened.
-		const task = {
-			taskId: "task-rollback",
-			providerRef: { deref: vi.fn().mockReturnValue(undefined) },
-		} as unknown as Task
+		const task = makeTask(null)
 
 		const service = serviceWith("base-0")
 		mockedGetCheckpointService.mockResolvedValue(service)
@@ -476,7 +476,7 @@ describe("restoreLatestFile (B3c: forward direction)", () => {
 	it("reports the service error without throwing", async () => {
 		await seedJournal([{ path: "src/a.ts", operation: "create", checkpointId: "sha-1" }])
 		const service = serviceWith("base-0")
-		service.restoreFile.mockRejectedValue(new Error("index.lock held"))
+		vi.mocked(service.restoreFile).mockRejectedValue(new Error("index.lock held"))
 		mockedGetCheckpointService.mockResolvedValue(service)
 
 		const outcome = await restoreLatestFile(makeTask(), "src/a.ts")
