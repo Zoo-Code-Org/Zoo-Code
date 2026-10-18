@@ -5,8 +5,21 @@ import path from "path"
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest"
 
 import type { Task } from "../../task/Task"
+import { RepoPerTaskCheckpointService } from "../../../services/checkpoints"
+import { checkGitInstalled } from "../../../utils/git"
 import { journalPath } from "../changeJournal"
 import { checkpointSave } from "../index"
+
+// The recovery test that must re-initialize reaches RepoPerTaskCheckpointService
+// .create; every other test presets a service double or has no storage dir,
+// so the factory is only ever called through these mocks.
+vi.mock("../../../services/checkpoints", () => ({
+	RepoPerTaskCheckpointService: { create: vi.fn() },
+}))
+
+vi.mock("../../../utils/git", () => ({
+	checkGitInstalled: vi.fn(),
+}))
 
 vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: {
@@ -45,6 +58,9 @@ function makeTask(options: {
 	const providerDeref = {
 		context: { globalStorageUri: options.storageDir === null ? undefined : { fsPath: globalStorageDir } },
 		getState: vi.fn().mockResolvedValue(options.state ?? {}),
+		// A re-initialized service sends an init warning through the provider;
+		// the recovery test that re-initializes reaches it.
+		postMessageToWebview: vi.fn(),
 	}
 
 	const task = {
@@ -270,10 +286,56 @@ describe("checkpointSave change-card emission (B3a)", () => {
 
 		await expect(
 			checkpointSave(task, false, true, { path: "src/b.ts", operation: "create", diff: "+y" }),
-		).resolves.toBeDefined()
+		).resolves.toMatchObject({ commit: "sha-recovered-1" })
 		expect(task.enableCheckpoints).toBe(true)
 		const journalRaw = await fs.readFile(journalPath(globalStorageDir, "task-card"), "utf8")
-		expect(journalRaw).toContain("src/b.ts")
+		const entries = journalRaw
+			.split("\n")
+			.filter((line) => line !== "")
+			.map((line) => JSON.parse(line))
+		expect(entries).toEqual([
+			expect.objectContaining({ path: "src/b.ts", operation: "create", checkpointId: "sha-recovered-1" }),
+		])
+	})
+
+	it("does not reuse an uninitialized stored service during recovery", async () => {
+		// A stored service whose shadow-git init never completed must not be
+		// handed to saveCheckpoint by the recovery path: recovery must clear
+		// it and re-initialize instead.
+		vi.mocked(checkGitInstalled).mockResolvedValue(true)
+		const { task } = makeTask({})
+		const svc = task.checkpointService as unknown as { saveCheckpoint: Mock; isInitialized: boolean }
+		svc.saveCheckpoint = vi.fn().mockRejectedValueOnce(new Error("not initialized"))
+		svc.isInitialized = false
+
+		const freshListeners = new Map<string, (...args: unknown[]) => void>()
+		let freshInit = false
+		const fresh = {
+			on: vi.fn((event: string, cb: (...args: unknown[]) => void) => freshListeners.set(event, cb)),
+			initShadowGit: vi.fn(async () => {
+				freshInit = true
+				freshListeners.get("initialize")?.()
+			}),
+			get isInitialized() {
+				return freshInit
+			},
+			saveCheckpoint: vi.fn().mockResolvedValue({ commit: "sha-recovered-2" }),
+			isPathIgnored: vi.fn().mockResolvedValue(false),
+		}
+		vi.mocked(RepoPerTaskCheckpointService.create).mockReturnValue(fresh as unknown as RepoPerTaskCheckpointService)
+
+		await expect(
+			checkpointSave(task, false, true, { path: "src/a.ts", operation: "create", diff: "+x" }),
+		).rejects.toThrow(/Checkpoint save failed after a file write/)
+		expect(task.checkpointsDisabledByFailure).toBe(true)
+
+		await expect(
+			checkpointSave(task, false, true, { path: "src/b.ts", operation: "create", diff: "+y" }),
+		).resolves.toMatchObject({ commit: "sha-recovered-2" })
+		// Recovery replaced the dead handle instead of reusing it: the failed
+		// save ran exactly once and the live handle is the fresh service.
+		expect(svc.saveCheckpoint).toHaveBeenCalledOnce()
+		expect(task.checkpointService).toBe(fresh)
 	})
 
 	it("fails a write-metadata save when recovery after an earlier failure cannot re-initialize", async () => {
