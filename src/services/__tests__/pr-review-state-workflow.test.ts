@@ -27,6 +27,7 @@ interface HarnessOptions {
 	mergeable?: boolean | null
 	mergeableState?: string
 	mergeabilitySequence?: Array<{ mergeable: boolean | null; mergeableState: string }>
+	mergeabilityRetryDelayMs?: number
 	headShaSequence?: string[]
 	fork?: boolean
 	eventName?: string
@@ -490,15 +491,23 @@ async function runWorkflow(options: HarnessOptions = {}) {
 	// The reconcile job runs one matrix shard per PR and receives the target
 	// through the job's PR_NUMBER env mapping, plus the job's concurrency group
 	// through CONCURRENCY_GROUP.
-	const previousEnv = { prNumber: process.env.PR_NUMBER, group: process.env.CONCURRENCY_GROUP }
+	const previousEnv = {
+		prNumber: process.env.PR_NUMBER,
+		group: process.env.CONCURRENCY_GROUP,
+		mergeabilityRetryDelayMs: process.env.MERGEABILITY_RETRY_DELAY_MS,
+	}
 	process.env.PR_NUMBER = String(pr.number)
 	process.env.CONCURRENCY_GROUP = `label-pr-review-state-reconcile-${pr.number}`
+	// The workflow waits 5s between mergeability retries in production; tests
+	// override the delay so the retries run without real waits.
+	process.env.MERGEABILITY_RETRY_DELAY_MS = String(options.mergeabilityRetryDelayMs ?? 0)
 	try {
 		await new AsyncFunction("github", "context", "core", workflowScript)(github, context, core)
 	} finally {
 		for (const [key, value] of [
 			["PR_NUMBER", previousEnv.prNumber],
 			["CONCURRENCY_GROUP", previousEnv.group],
+			["MERGEABILITY_RETRY_DELAY_MS", previousEnv.mergeabilityRetryDelayMs],
 		] as const) {
 			if (value === undefined) {
 				delete process.env[key]
@@ -1011,10 +1020,11 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
 
-	it("keeps has-conflicts while mergeability is unknown and required CI is missing (#2025)", async () => {
+	it("changes no state label while mergeability is unknown and required CI is missing (#2025, #2089)", async () => {
 		// A conflicting PR gets no merge-ref CI run, so its required checks are
-		// missing. Unknown mergeability must not read that as a reason to strip
-		// an existing has-conflicts label; the other state labels still clear.
+		// missing. Unknown mergeability must not read that as a reason to change
+		// any state label: has-conflicts stays, and so does every other state
+		// label until a later run reads a known mergeability value.
 		const result = await runWorkflow({
 			eventName: "push",
 			mergeable: null,
@@ -1023,13 +1033,12 @@ describe("PR review-state workflow", () => {
 			omitRequiredRuns: true,
 		})
 
-		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+		expect(result.removeLabel).not.toHaveBeenCalled()
 		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
-		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-author" }))
 		expect(latestGateStatus(result)?.description).toContain("required CI checks")
 	})
 
-	it("keeps has-conflicts while mergeability is unknown and required CI has failed (#2025)", async () => {
+	it("changes no state label while mergeability is unknown and required CI has failed (#2025, #2089)", async () => {
 		const result = await runWorkflow({
 			mergeable: null,
 			mergeableState: "unknown",
@@ -1037,13 +1046,12 @@ describe("PR review-state workflow", () => {
 			requiredConclusion: "failure",
 		})
 
-		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+		expect(result.removeLabel).not.toHaveBeenCalled()
 		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
-		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-author" }))
 		expect(latestGateStatus(result)?.description).toContain("failing required CI checks")
 	})
 
-	it("does not add has-conflicts while mergeability is unknown and required CI is missing (#2025)", async () => {
+	it("adds no state label while mergeability is unknown and required CI is missing (#2025, #2089)", async () => {
 		const result = await runWorkflow({
 			mergeable: null,
 			mergeableState: "unknown",
@@ -1052,7 +1060,7 @@ describe("PR review-state workflow", () => {
 		})
 
 		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
-		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-author" }))
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-author" }))
 		expect(latestGateStatus(result)?.description).toContain("required CI checks")
 	})
 
@@ -1260,8 +1268,10 @@ describe("PR review-state workflow", () => {
 		const result = await runWorkflow({
 			eventName: "push",
 			labels: ["awaiting-maintainer"],
+			// The first read is known-clean, so no retry runs; the maintainer-handoff
+			// recheck then catches the fresh dirty read before tagging.
 			mergeabilitySequence: [
-				{ mergeable: null, mergeableState: "unknown" },
+				{ mergeable: true, mergeableState: "clean" },
 				{ mergeable: false, mergeableState: "dirty" },
 			],
 			reviews: [
@@ -1278,14 +1288,54 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
 	})
 
+	// Issue #2089: the first read reports unknown, one retry reads dirty, and the
+	// run must not change any state label because of the unknown read itself.
+	it("retries an unknown mergeability read and handles the dirty retry normally (#2089)", async () => {
+		const result = await runWorkflow({
+			eventName: "push",
+			labels: ["awaiting-maintainer"],
+			mergeabilitySequence: [
+				{ mergeable: null, mergeableState: "unknown" },
+				{ mergeable: false, mergeableState: "dirty" },
+			],
+		})
+
+		expect(result.getPullRequest).toHaveBeenCalledTimes(2)
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+	})
+
+	// Issue #2089: unknown on the first read and on every retry means the run
+	// changes no state label at all.
+	it("changes no state label when mergeability stays unknown across all retries (#2089)", async () => {
+		const result = await runWorkflow({
+			eventName: "push",
+			labels: ["has-conflicts", "awaiting-author"],
+			mergeable: null,
+			mergeableState: "unknown",
+		})
+
+		expect(result.getPullRequest).toHaveBeenCalledTimes(4)
+		expect(result.removeLabel).not.toHaveBeenCalled()
+		for (const label of [
+			"awaiting-author",
+			"awaiting-coderabbit",
+			"awaiting-ready",
+			"awaiting-maintainer",
+			"has-conflicts",
+		]) {
+			expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: [label] }))
+		}
+	})
+
 	it("preserves the current state while mergeability is unknown", async () => {
 		const result = await runWorkflow({
 			eventName: "push",
 			labels: ["awaiting-maintainer", "coderabbit-review-active"],
-			mergeabilitySequence: [
-				{ mergeable: null, mergeableState: "unknown" },
-				{ mergeable: null, mergeableState: "unknown" },
-			],
+			// Every read — the shard fetch, each retry, and the maintainer-handoff
+			// recheck — reports unknown.
+			mergeable: null,
+			mergeableState: "unknown",
 			reviews: [
 				{
 					login: "coderabbitai[bot]",
@@ -1307,10 +1357,10 @@ describe("PR review-state workflow", () => {
 		const result = await runWorkflow({
 			eventName: "push",
 			labels: ["awaiting-maintainer", "coderabbit-review-active"],
-			mergeabilitySequence: [
-				{ mergeable: null, mergeableState: "unknown" },
-				{ mergeable: null, mergeableState: "unknown" },
-			],
+			// Every read reports unknown, so the run reaches the maintainer-handoff
+			// recheck and tries to publish the mergeability-pending metadata.
+			mergeable: null,
+			mergeableState: "unknown",
 			removeLabelStatus: 500,
 			reviews: [
 				{
@@ -2973,10 +3023,9 @@ describe("PR review-state workflow", () => {
 			const result = await runWorkflow({
 				eventName: "push",
 				labels: ["awaiting-maintainer", "community-approved"],
-				mergeabilitySequence: [
-					{ mergeable: null, mergeableState: "unknown" },
-					{ mergeable: null, mergeableState: "unknown" },
-				],
+				// Every read reports unknown.
+				mergeable: null,
+				mergeableState: "unknown",
 				reviews: [coderabbitApproval, communityApproval],
 			})
 
@@ -2994,11 +3043,12 @@ describe("PR review-state workflow", () => {
 			const result = await runWorkflow({
 				eventName: "push",
 				labels: ["community-approved"],
-				mergeabilitySequence: [
-					{ mergeable: null, mergeableState: "unknown" },
-					{ mergeable: null, mergeableState: "unknown" },
-				],
-				headShaSequence: [SHA, NEW_SHA],
+				// Every read reports unknown; the head moves to a new SHA on the first
+				// retry and stays there, so the maintainer-handoff recheck still sees
+				// the new head.
+				mergeable: null,
+				mergeableState: "unknown",
+				headShaSequence: [SHA, NEW_SHA, NEW_SHA, NEW_SHA, NEW_SHA],
 				reviews: [coderabbitApproval, communityApproval],
 			})
 
@@ -3110,7 +3160,7 @@ describe("PR review-state workflow", () => {
 					eventName: "push",
 					labels: ["awaiting-maintainer", "community-approved"],
 					mergeabilitySequence: [
-						{ mergeable: null, mergeableState: "unknown" },
+						{ mergeable: true, mergeableState: "clean" },
 						{ mergeable: false, mergeableState: "dirty" },
 					],
 				},
@@ -3167,10 +3217,9 @@ describe("PR review-state workflow", () => {
 			const result = await runWorkflow({
 				eventName: "push",
 				labels: ["awaiting-maintainer", "community-approved"],
-				mergeabilitySequence: [
-					{ mergeable: null, mergeableState: "unknown" },
-					{ mergeable: null, mergeableState: "unknown" },
-				],
+				// Every read reports unknown.
+				mergeable: null,
+				mergeableState: "unknown",
 				reviews: [
 					coderabbitApproval,
 					{ ...communityApproval, id: 1 },

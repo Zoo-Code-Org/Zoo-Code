@@ -364,15 +364,15 @@ jobs:
                         }
                       }
 
-                      // Strips stateLabels from a PR, optionally keeping one desired label
-                      // plus any labels in keepLabels (e.g. has-conflicts while mergeability
-                      // is unknown — kept, never added, per the hoisted check below).
+                      // Strips stateLabels from a PR, optionally keeping one desired label.
+                      // Callers skip this entirely while mergeability is unknown (see the
+                      // hoisted check below), so no keep-list is needed.
                       // Stale-clock labels are owned by the stale step below and are never
                       // touched here: stripping one on a transient CI or mergeability flap
                       // would erase a live warning and restart its close grace (issue #2076).
                       // Only skipped when this run's own token is read-only (see isReadOnlyRun) —
                       // schedule/workflow_dispatch runs reconcile fork PRs normally.
-                      async function reconcileLabels(pr, desiredLabel, keepLabels = []) {
+                      async function reconcileLabels(pr, desiredLabel) {
                         if (isReadOnlyRun && isForkPR(pr)) {
                           core.info(`PR #${pr.number}: fork PR on a read-only run — skipping label mutation`);
                           return;
@@ -393,7 +393,7 @@ jobs:
                           }
                         }
                         for (const label of stateLabels) {
-                          if (label !== desiredLabel && !keepLabels.includes(label) && currentLabels.has(label)) {
+                          if (label !== desiredLabel && currentLabels.has(label)) {
                             try {
                               await github.rest.issues.removeLabel({
                                 owner, repo, issue_number: pr.number, name: label,
@@ -737,8 +737,27 @@ jobs:
                           // GET endpoint and are computed asynchronously by GitHub — this
                           // shard's own pulls.get above provides them, but even that can
                           // return `null`/"unknown" while the merge check is still running.
-                          // Treat "unknown" as not-yet-computed rather than as conflicting.
-                          const prDetail = pr;
+                          // Treat "unknown" as not-yet-computed rather than as conflicting,
+                          // and give GitHub a bounded chance to finish computing it: retry
+                          // the read up to 3 times with a short wait between reads before
+                          // applying the unknown handling below (issue #2089). The wait is
+                          // env-overridable so the test suite can retry without real waits.
+                          const mergeabilityRetryDelayMs = Number(process.env.MERGEABILITY_RETRY_DELAY_MS ?? 5000);
+                          const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+                          let prDetail = pr;
+                          for (
+                            let attempt = 1;
+                            attempt <= 3 &&
+                            (prDetail.mergeable === null || prDetail.mergeable_state === 'unknown');
+                            attempt++
+                          ) {
+                            await sleep(mergeabilityRetryDelayMs);
+                            core.info(`PR #${pr.number}: mergeability unknown — retrying read (${attempt}/3)`);
+                            const { data: retryDetail } = await github.rest.pulls.get({
+                              owner, repo, pull_number: pr.number,
+                            });
+                            prDetail = retryDetail;
+                          }
 
                           if (prDetail.mergeable === false && prDetail.mergeable_state === 'dirty') {
                             core.info(`PR #${pr.number}: has merge conflicts — labeling has-conflicts`);
@@ -751,24 +770,29 @@ jobs:
                           }
 
                           // Unknown mergeability is handled once here, ahead of every
-                          // branch that reconciles labels (issue #2045). GitHub recomputes
-                          // mergeability asynchronously after each push and transiently
-                          // reports `mergeable: null` / `mergeable_state: "unknown"` while
-                          // the background job runs, so unknown says nothing about
-                          // conflicts: an existing has-conflicts label is kept through
-                          // reconciliation — unknown is not evidence the conflicts went
-                          // away — and it is never added, since unknown is not evidence
-                          // of conflicts either. Known-dirty never reaches here (the
-                          // conflict check above handles it first); known-clean keeps the
-                          // strip. The awaiting-maintainer branch below still refetches
-                          // mergeability before the maintainer handoff, because a push
-                          // between this fetch and labeling can change the answer.
-                          // A kept has-conflicts label can sit next to other state labels
-                          // until mergeability is known. This is intended.
-                          const mergeabilityUnknown =
+                          // branch that reconciles labels (issues #2045 and #2089). If the
+                          // reads above still report `mergeable: null` /
+                          // `mergeable_state: "unknown"`, GitHub has not finished computing
+                          // the answer, so it says nothing about conflicts and nothing about
+                          // whose turn it is. This run then changes NO state label for the
+                          // PR: every state-label reconcile below is skipped. Acting on
+                          // unknown previously let the normal reconcile swap labels (for
+                          // example has-conflicts to awaiting-author and back on the next
+                          // run's `dirty` read), which flapped labels on unchanged PRs.
+                          // Known-dirty never reaches here (the conflict check above
+                          // handles it first); known-clean reconciles normally. The
+                          // awaiting-maintainer branch below still refetches mergeability
+                          // before the maintainer handoff, because a push between this
+                          // fetch and labeling can change the answer; a known read there
+                          // re-enables the final reconcile.
+                          let mergeabilityUnknown =
                             prDetail.mergeable === null || prDetail.mergeable_state === 'unknown';
-                          const keepHasConflicts = mergeabilityUnknown &&
-                            pr.labels.some(label => label.name === 'has-conflicts');
+                          if (mergeabilityUnknown) {
+                            core.info(
+                              `PR #${pr.number}: mergeability still unknown after retries — ` +
+                              'leaving state labels unchanged this run'
+                            );
+                          }
 
                           // Check CI status for required checks on the PR's head commit only.
                           // Scoping to required checks avoids advisory checks (e.g. codecov/patch)
@@ -866,20 +890,25 @@ jobs:
 
                           // While CI is running or has failed, remove state labels and move on.
                           // CI failure is its own signal; the label would add noise, not clarity.
-                          // Exception (issue #2025): while GitHub is still computing
-                          // mergeability, a missing required check can simply mean a
-                          // conflicting PR got no merge-ref CI run — not that its
-                          // conflicts went away. keepHasConflicts (computed once above)
-                          // keeps an existing has-conflicts label through this branch
-                          // instead of stripping it with the other state labels.
+                          // Exception (issues #2025 and #2089): while GitHub is still
+                          // computing mergeability, a missing required check can simply
+                          // mean a conflicting PR got no merge-ref CI run — not that its
+                          // conflicts went away. Unknown mergeability changes no state
+                          // label in this run, so this branch keeps every existing state
+                          // label (has-conflicts included) instead of stripping them; a
+                          // later run with a known read reconciles them.
                           if (ciPending || ciFailed) {
                             core.info(
-                              `PR #${pr.number}: CI ${ciPending ? 'pending' : 'failed'} — stripping state labels` +
-                              (keepHasConflicts ? ' (keeping has-conflicts while mergeability is unknown)' : '')
+                              `PR #${pr.number}: CI ${ciPending ? 'pending' : 'failed'} — ` +
+                              (mergeabilityUnknown
+                                ? 'mergeability unknown; leaving state labels unchanged'
+                                : 'stripping state labels')
                             );
                             await updateReviewGate(pr, ciPending ? 'ci-pending' : 'ci-failed', false);
                             await setCodeRabbitReviewActive(pr, false);
-                            await reconcileLabels(pr, keepHasConflicts ? 'has-conflicts' : null);
+                            if (!mergeabilityUnknown) {
+                              await reconcileLabels(pr, null);
+                            }
                             await reconcileCommunityApproval(pr, 'remove');
                             await updateReviewGuide(
                               pr,
@@ -1132,6 +1161,10 @@ jobs:
                               );
                               continue;
                             }
+                            // The refetch above settled mergeability with a fresh known read,
+                            // so the final state-label reconcile below may run even when the
+                            // shard's first reads were unknown (issue #2089).
+                            mergeabilityUnknown = false;
                             communityDecision = headChanged
                               ? 'remove'
                               : communityApprovalFresh
@@ -1166,7 +1199,9 @@ jobs:
                           if (recyclingActiveLabel) {
                             await updateReviewGuide(pr, phase, existingGuide);
                           }
-                          await reconcileLabels(pr, desiredLabel, keepHasConflicts ? ['has-conflicts'] : []);
+                          if (!mergeabilityUnknown) {
+                            await reconcileLabels(pr, desiredLabel);
+                          }
                           await reconcileCommunityApproval(pr, communityDecision);
                           if (readyForMaintainer) {
                             await updateReviewGate(pr, phase, true);
