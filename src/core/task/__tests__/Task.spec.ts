@@ -6833,7 +6833,10 @@ describe("Cline", () => {
 				startTask: false,
 			})
 			const taskAccess = getTaskTestAccess(task)
-			const saveSpy = vi.spyOn(task, "checkpointSave").mockResolvedValue(undefined)
+			// A committed baseline: the done flag is set only on a real
+			// commit, so the double must resolve one for the once-per-instance
+			// assertion to exercise the flag flip.
+			const saveSpy = vi.spyOn(task, "checkpointSave").mockResolvedValue({ commit: "baseline-commit" })
 			const state = await mockProvider.getState()
 			vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
 
@@ -6989,6 +6992,58 @@ describe("Cline", () => {
 
 			resolveSave()
 			await loopPromise
+			expect(requestSpy).toHaveBeenCalled()
+		})
+
+		it("retries the baseline on a later loop entry when a save produced no commit", async () => {
+			// getCheckpointService can resolve to no service (init failure or a
+			// bounded init wait timing out): the save then completes without a
+			// commit, and the baseline must not be marked done - a later loop
+			// entry gets to retry it instead of losing it forever.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "retry baseline task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const saveSpy = vi
+				.spyOn(task, "checkpointSave")
+				.mockResolvedValueOnce(undefined)
+				.mockResolvedValue({ commit: "baseline-commit" })
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
+
+			vi.spyOn(task, "recursivelyMakeClineRequests").mockResolvedValue(true)
+
+			await taskAccess.initiateTaskLoop([])
+			expect(saveSpy).toHaveBeenCalledOnce()
+
+			await taskAccess.initiateTaskLoop([])
+			expect(saveSpy).toHaveBeenCalledTimes(2)
+		})
+
+		it("starts the task default-on when the baseline settings read rejects", async () => {
+			// ClineProvider.getState awaits custom-mode loading and can reject:
+			// a failed settings read must not stop task startup. Default-on
+			// semantics apply (the setting is treated as absent) and the loop
+			// still runs.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "rejected-read baseline task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const saveSpy = vi.spyOn(task, "checkpointSave").mockResolvedValue({ commit: "baseline-commit" })
+			vi.spyOn(mockProvider, "getState").mockRejectedValueOnce(new Error("custom mode load failed"))
+
+			const requestSpy = vi.spyOn(task, "recursivelyMakeClineRequests").mockResolvedValue(true)
+
+			await taskAccess.initiateTaskLoop([])
+
+			expect(saveSpy).toHaveBeenCalledOnce()
+			expect(saveSpy).toHaveBeenCalledWith(true, true)
 			expect(requestSpy).toHaveBeenCalled()
 		})
 	})
