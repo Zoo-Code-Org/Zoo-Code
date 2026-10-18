@@ -71,6 +71,11 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		const { patch } = params
 		const { handleError, pushToolResult } = callbacks
 
+		// Declared outside the try so the catch can persist write metadata
+		// recorded before an unexpected throw.
+		let writeMetadataFlushed = false
+		const successfulChanges: { change: ApplyPatchFileChange; diffStats?: DiffStats }[] = []
+
 		try {
 			// Validate required parameters
 			if (!patch) {
@@ -118,12 +123,13 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			}
 
 			// Process each file change. The handlers report whether their file
-			// operation succeeded (which controls the whole-patch checkpoint) and
-			// whether it actually wrote a file (which controls the change journal
-			// — a no-op update must not be journaled). A rejected approval or a
-			// failed local write never gets checkpointed as a success.
+			// operation succeeded (which controls the whole-patch checkpoint); each
+			// write is recorded through the onWrote callback at the moment it lands
+			// on disk, so a throw from post-write bookkeeping cannot lose the
+			// journal entry for a completed write (a no-op update never calls the
+			// callback). A rejected approval or a failed local write never gets
+			// checkpointed as a success.
 			let patchSucceeded = true
-			const successfulChanges: { change: ApplyPatchFileChange; diffStats?: DiffStats }[] = []
 			for (const change of changes) {
 				const relPath = change.path
 				const absolutePath = path.resolve(task.cwd, relPath)
@@ -153,11 +159,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						task,
 						callbacks,
 						isWriteProtected,
+						(diffStats) => successfulChanges.push({ change, diffStats }),
 					)
 					patchSucceeded = addResult.succeeded && patchSucceeded
-					if (addResult.wrote) {
-						successfulChanges.push({ change, diffStats: addResult.diffStats })
-					}
 				} else if (change.type === "delete") {
 					// Delete file
 					const deleteResult = await this.handleDeleteFile(
@@ -166,11 +170,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						task,
 						callbacks,
 						isWriteProtected,
+						() => successfulChanges.push({ change }),
 					)
 					patchSucceeded = deleteResult.succeeded && patchSucceeded
-					if (deleteResult.wrote) {
-						successfulChanges.push({ change, diffStats: deleteResult.diffStats })
-					}
 				} else if (change.type === "update") {
 					// Update file (a no-op update succeeds without writing)
 					const updateResult = await this.handleUpdateFile(
@@ -180,11 +182,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						task,
 						callbacks,
 						isWriteProtected,
+						(diffStats) => successfulChanges.push({ change, diffStats }),
 					)
 					patchSucceeded = updateResult.succeeded && patchSucceeded
-					if (updateResult.wrote) {
-						successfulChanges.push({ change, diffStats: updateResult.diffStats })
-					}
 				}
 			}
 
@@ -206,6 +206,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// pushToolResult. A fully failed patch (nothing written) leaves no
 			// checkpoint behind.
 			if (patchSucceeded || successfulChanges.length > 0) {
+				writeMetadataFlushed = true
 				const perWriteCheckpoints = (await task.providerRef?.deref()?.getState())?.perWriteCheckpoints
 				if (perWriteCheckpoints !== false) {
 					// B2: one journal entry per file that was actually written by
@@ -242,6 +243,29 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				task.processQueuedMessages()
 			}
 		} catch (error) {
+			// A handler that throws after recording its write (post-write
+			// bookkeeping such as trackFileContext) skips the success-path flush
+			// above. Persist the accumulated write metadata here, awaited, before
+			// the generic error handling: the writes are on disk and the journal
+			// must document them. A flush that already ran (or was skipped by the
+			// setting) is not attempted twice.
+			if (!writeMetadataFlushed && successfulChanges.length > 0) {
+				const perWriteCheckpoints = (await task.providerRef?.deref()?.getState())?.perWriteCheckpoints
+				if (perWriteCheckpoints !== false) {
+					await checkpointSave(
+						task,
+						false,
+						true,
+						successfulChanges.map(({ change, diffStats }) => ({
+							path: change.movePath ?? change.path,
+							operation: change.type === "add" ? "create" : change.type,
+							diffStats: diffStats
+								? { additions: diffStats.added, deletions: diffStats.removed }
+								: undefined,
+						})),
+					).catch(() => {})
+				}
+			}
 			await handleError("apply patch", error as Error)
 			await task.diffViewProvider.reset()
 		}
@@ -254,6 +278,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
+		onWrote?: (diffStats?: DiffStats) => void,
 	): Promise<ApplyPatchFileOpResult> {
 		const { askApproval, pushToolResult } = callbacks
 
@@ -329,6 +354,11 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
 		}
 
+		// Record the completed write before post-write bookkeeping can fail:
+		// a throw from trackFileContext must not lose the journal entry for
+		// a file that is already on disk.
+		onWrote?.(diffStats)
+
 		// Track file edit operation
 		await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
 		task.didEditFile = true
@@ -347,6 +377,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
+		onWrote?: () => void,
 	): Promise<ApplyPatchFileOpResult> {
 		const { askApproval, pushToolResult } = callbacks
 
@@ -393,6 +424,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			return { succeeded: false, wrote: false }
 		}
 
+		// The deletion is complete; record it before the result handoff can fail.
+		onWrote?.()
+
 		task.didEditFile = true
 		pushToolResult(`Successfully deleted ${relPath}`)
 		// B2: processQueuedMessages is deferred to execute()'s post-patch hook
@@ -407,6 +441,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		task: Task,
 		callbacks: ToolCallbacks,
 		isWriteProtected: boolean,
+		onWrote?: (diffStats?: DiffStats) => void,
 	): Promise<ApplyPatchFileOpResult> {
 		const { askApproval, pushToolResult } = callbacks
 
@@ -559,6 +594,10 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				pushToolResult(formatResponse.toolError(errorMessage))
 			}
 
+			// The destination write is on disk whether or not the source unlink
+			// succeeded; record it before bookkeeping can fail.
+			onWrote?.(diffStats)
+
 			await task.fileContextTracker.trackFileContext(change.movePath, "roo_edited" as RecordSource)
 		} else {
 			// Save changes to the same file
@@ -567,6 +606,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			} else {
 				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
 			}
+
+			// Record the completed write before post-write bookkeeping can fail.
+			onWrote?.(diffStats)
 
 			await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
 		}

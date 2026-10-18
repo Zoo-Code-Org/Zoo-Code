@@ -737,7 +737,7 @@
 		},
 		"perWrite": {
 			"label": "Ponto de verificação após cada gravação de arquivo",
-			"description": "Registra um snapshot de ponto de verificação após cada gravação de arquivo bem-sucedida pelo agente"
+			"description": "Registra um snapshot de ponto de verificação após cada operação de gravação bem-sucedida; um patch com vários arquivos produz um único ponto de verificação."
 		}
 	},
 	"notifications": {

@@ -63,6 +63,7 @@ export async function appendChange(globalStorageDir: string, taskId: string, ent
 	const filePath = journalPath(globalStorageDir, taskId)
 	await fs.mkdir(path.dirname(filePath), { recursive: true })
 	let payload = JSON.stringify(entry) + "\n"
+	let journalWasCreated = false
 	try {
 		const stat = await fs.stat(filePath)
 		if (stat.size > 0) {
@@ -84,6 +85,7 @@ export async function appendChange(globalStorageDir: string, taskId: string, ent
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
 			throw error
 		}
+		journalWasCreated = true
 	}
 	const data = Buffer.from(payload)
 	const handle = await fs.open(filePath, "a")
@@ -100,6 +102,29 @@ export async function appendChange(globalStorageDir: string, taskId: string, ent
 	} finally {
 		await handle.close()
 	}
+	if (journalWasCreated) {
+		// The append created the journal file (and possibly its parent
+		// directory via fs.mkdir): fsync the containing directory so the new
+		// file's directory entry survives a crash before the append is reported
+		// as committed. Platforms that cannot open the directory for sync
+		// degrade to a warning, mirroring the rename path's tolerance list.
+		try {
+			const dirHandle = await fs.open(path.dirname(filePath), "r")
+			try {
+				await dirHandle.sync()
+			} finally {
+				await dirHandle.close()
+			}
+		} catch (error) {
+			const syncCode = (error as NodeJS.ErrnoException).code
+			if (!["EINVAL", "EISDIR", "EBADF", "ENOTSUP", "EOPNOTSUPP", "EPERM"].includes(syncCode ?? "")) {
+				throw error
+			}
+			console.warn(
+				`[changeJournal] directory sync unsupported after journal creation (${syncCode}); crash durability reduced`,
+			)
+		}
+	}
 }
 
 /**
@@ -109,7 +134,9 @@ export async function appendChange(globalStorageDir: string, taskId: string, ent
  * silently discarded.  Lines that parse to valid JSON but are not
  * entry-shaped (non-object, missing string path/checkpointId, or an
  * unknown operation) are skipped for the same reason.  The rest of the file is returned in order.  An absent
- * or empty journal returns [].
+ * or empty journal returns [] — but only an ABSENT file. Any other read
+ * failure (permissions, I/O) is rethrown: a journal that cannot be read must
+ * not be indistinguishable from one that is legitimately empty.
  * @internal Wired by a later unit in the split chain; remove when the chain completes.
  */
 export async function loadChanges(globalStorageDir: string, taskId: string): Promise<ChangeJournalEntry[]> {
@@ -118,9 +145,14 @@ export async function loadChanges(globalStorageDir: string, taskId: string): Pro
 	let content: string
 	try {
 		content = await fs.readFile(filePath, "utf8")
-	} catch {
-		// File absent or unreadable → empty journal.
-		return []
+	} catch (error) {
+		// A missing journal is a legitimate empty history; any other read
+		// failure (permissions, I/O) must propagate. Swallowing it would let
+		// a rollback report a no-op success without reading the history.
+		if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+			return []
+		}
+		throw error
 	}
 
 	if (!content.trim()) {

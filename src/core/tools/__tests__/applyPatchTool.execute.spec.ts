@@ -567,6 +567,25 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			])
 		})
 
+		it("journals the recorded write when a handler throws after its write", async () => {
+			// Post-write bookkeeping (trackFileContext) fails after the file is
+			// already on disk: the write recorded at write time must still receive
+			// its checkpoint and journal entry through the catch-path flush.
+			vi.mocked(mockTask.fileContextTracker.trackFileContext).mockRejectedValueOnce(new Error("tracker boom"))
+			await tool.execute({ patch: updatePatch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(mockedCheckpointSave).toHaveBeenCalledTimes(1)
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask as Task, false, true, [
+				{ path: "src/test.ts", operation: "update", diffStats: { additions: 1, deletions: 1 } },
+			])
+			expect(mockHandleError).toHaveBeenCalledWith("apply patch", expect.anything())
+		})
+
 		it("records one journal write per file change for a multi-file patch", async () => {
 			// src/a.ts does not exist (add); src/b.ts does (update).
 			mockedFileExistsAtPath.mockImplementation((filePath: string) =>

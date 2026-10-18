@@ -123,6 +123,67 @@ describe("changeJournal", () => {
 			const result = await loadChanges(tmpRoot, taskId)
 			expect(result.map((e) => e.checkpointId)).toEqual(["first", "second"])
 		})
+		it("fsyncs the containing directory when the append creates the journal file", async () => {
+			const opened: string[] = []
+			const realOpen = fs.open
+			const openSpy = vi.spyOn(fs, "open").mockImplementation(async (pathish, flags) => {
+				opened.push(String(pathish))
+				const openAs = realOpen as (p: string | URL, f?: string) => Promise<fs.FileHandle>
+				return openAs(pathish as string | URL, flags as string | undefined)
+			})
+			try {
+				await appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
+			} finally {
+				openSpy.mockRestore()
+			}
+			// The creation path must sync the journal's parent directory so the new
+			// file's directory entry (and any directory fs.mkdir just created)
+			// survives a crash before the append is reported as committed.
+			expect(opened).toContain(path.dirname(journalPath(tmpRoot, taskId)))
+		})
+
+		it("does not re-open the directory for appends to an existing journal", async () => {
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
+			const dir = path.dirname(journalPath(tmpRoot, taskId))
+			const opened: string[] = []
+			const realOpen = fs.open
+			const openSpy = vi.spyOn(fs, "open").mockImplementation(async (pathish, flags) => {
+				opened.push(String(pathish))
+				const openAs = realOpen as (p: string | URL, f?: string) => Promise<fs.FileHandle>
+				return openAs(pathish as string | URL, flags as string | undefined)
+			})
+			try {
+				await appendChange(tmpRoot, taskId, entry({ checkpointId: "second" }))
+			} finally {
+				openSpy.mockRestore()
+			}
+			// The directory entry is already durable; re-syncing on every append
+			// would add a syscall to the hot path for no durability gain.
+			expect(opened).not.toContain(dir)
+		})
+
+		it("tolerates platforms where the journal directory cannot be synced", async () => {
+			const dir = path.dirname(journalPath(tmpRoot, taskId))
+			const realOpen = fs.open
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			const openSpy = vi.spyOn(fs, "open").mockImplementation(async (pathish, flags) => {
+				if (String(pathish) === dir) {
+					throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+				}
+				const openAs = realOpen as (p: string | URL, f?: string) => Promise<fs.FileHandle>
+				return openAs(pathish as string | URL, flags as string | undefined)
+			})
+			try {
+				await appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
+			} finally {
+				openSpy.mockRestore()
+				warnSpy.mockRestore()
+			}
+			// The entry itself is durable via the file sync; the platform without
+			// directory sync degrades to a warning instead of failing the append.
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual(["first"])
+		})
 	})
 
 	describe("task ID containment", () => {
@@ -228,6 +289,22 @@ describe("changeJournal", () => {
 
 			const result = await loadChanges(tmpRoot, taskId)
 			expect(result[0].diffStats).toBeUndefined()
+		})
+
+		it("propagates a non-ENOENT failure from loadChanges instead of reporting an empty history", async () => {
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "good" }))
+			// A transient read failure is not an empty rollback history: a
+			// restore that saw [] would report a no-op success without ever
+			// reading the real entries (appendChange already propagates
+			// non-ENOENT errors; the loader must agree).
+			const readSpy = vi
+				.spyOn(fs, "readFile")
+				.mockRejectedValueOnce(Object.assign(new Error("simulated I/O error"), { code: "EIO" }))
+			try {
+				await expect(loadChanges(tmpRoot, taskId)).rejects.toMatchObject({ code: "EIO" })
+			} finally {
+				readSpy.mockRestore()
+			}
 		})
 	})
 })
