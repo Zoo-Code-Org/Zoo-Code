@@ -81,26 +81,42 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		// messages when a write succeeded but the post-patch checkpoint failed.
 		const successfulChanges: ApplyPatchFileChange[] = []
 		const bufferedResults: string[] = []
-		// Set once the success-path checkpoint/journal flush has been attempted
-		// so the catch below does not persist the same writes twice.
+		// Set once the success-path flush actually proceeds to checkpointSave, so
+		// the catch below does not persist the same writes twice while a
+		// settings-read rejection before that decision leaves the catch flush
+		// armed with default-on semantics.
 		let writeMetadataFlushed = false
+		// Cached perWriteCheckpoints lookup shared by the success-path flush and
+		// the catch flush: the catch must not call getState() again, because a
+		// rejecting settings read must not skip persisting writes already on disk.
+		let perWriteCheckpoints: boolean | undefined
 		// Journal payload builder shared by the success-path flush and the
 		// catch-path flush for writes recorded before an unexpected throw.
 		const journalEntries = () =>
-			successfulChanges.map((change) => ({
-				path: change.movePath ?? change.path,
-				operation: change.type === "add" ? ("create" as const) : change.type,
-				...(change.diffStats
-					? {
-							diffStats: {
-								additions: change.diffStats.added,
-								deletions: change.diffStats.removed,
-							},
-						}
-					: {}),
-				...(change.diff ? { diff: change.diff } : {}),
-				...(change.autoApproved ? { autoApproved: true } : {}),
-			}))
+			successfulChanges.flatMap((change) => {
+				const written = {
+					path: change.movePath ?? change.path,
+					operation: change.type === "add" ? ("create" as const) : change.type,
+					...(change.diffStats
+						? {
+								diffStats: {
+									additions: change.diffStats.added,
+									deletions: change.diffStats.removed,
+								},
+							}
+						: {}),
+					...(change.diff ? { diff: change.diff } : {}),
+					...(change.autoApproved ? { autoApproved: true } : {}),
+				}
+				// A completed move also DELETES its source: journal that deletion
+				// after the destination write so a step rollback restores the
+				// removed file from its pre-step state. A move whose source unlink
+				// failed left the source on disk and gets no deletion entry.
+				if (change.movePath && change.moveSourceDeleted) {
+					return [written, { path: change.path, operation: "delete" as const }]
+				}
+				return [written]
+			})
 
 		try {
 			// Validate required parameters
@@ -242,14 +258,15 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// pushToolResult. A fully failed patch (nothing written) leaves no
 			// checkpoint behind.
 			if (patchSucceeded || successfulChanges.length > 0) {
-				writeMetadataFlushed = true
-				const perWriteCheckpoints = (await task.providerRef?.deref()?.getState())?.perWriteCheckpoints
+				perWriteCheckpoints = (await task.providerRef?.deref()?.getState())?.perWriteCheckpoints
 				if (perWriteCheckpoints !== false) {
+					writeMetadataFlushed = true
 					// B2: one journal entry per file that was actually written by
 					// the patch (the simplest correct design for multi-file patches),
 					// all referencing the single checkpoint above. A no-op update
 					// contributes no entry because nothing was written. `movePath`,
-					// when present, is the file's final location. B3a: the per-file
+					// when present, is the file's final location, and a completed move
+					// additionally journals its source deletion. B3a: the per-file
 					// approval diff/stats and auto-approval state, retained by the
 					// handlers, feed the per-step change card.
 					// Awaited: a later write must not interleave with this patch's
@@ -275,13 +292,27 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// error handling: the writes are on disk and the journal must document
 			// them. A flush already attempted above is not repeated, so a journal
 			// failure keeps the documented drop-buffered-results behavior.
+			let reportedError: unknown = error
 			if (!writeMetadataFlushed && successfulChanges.length > 0) {
-				const perWriteCheckpoints = (await task.providerRef?.deref()?.getState())?.perWriteCheckpoints
 				if (perWriteCheckpoints !== false) {
-					await checkpointSave(task, false, true, journalEntries()).catch(() => {})
+					let flushError: unknown
+					await checkpointSave(task, false, true, journalEntries()).catch((flushFailure) => {
+						flushError = flushFailure
+					})
+					if (flushError !== undefined) {
+						// The completed write lacks rollback metadata: report the
+						// persistence failure alongside the bookkeeping error without
+						// replacing it as the reported failure.
+						const flushMessage = flushError instanceof Error ? flushError.message : String(flushError)
+						const baseMessage = error instanceof Error ? error.message : String(error)
+						console.error("[ApplyPatchTool] catch-path checkpoint flush failed:", flushError)
+						reportedError = new Error(`${baseMessage} (checkpoint flush also failed: ${flushMessage})`, {
+							cause: error,
+						})
+					}
 				}
 			}
-			await handleError("apply patch", error as Error)
+			await handleError("apply patch", reportedError as Error)
 			await task.diffViewProvider.reset()
 		} finally {
 			// B2: deferred from the per-file handlers - a queued write must not
@@ -646,6 +677,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// checkpointed and journaled as a completed move.
 			try {
 				await fs.unlink(absolutePath)
+				change.moveSourceDeleted = true
 			} catch (error) {
 				moveSucceeded = false
 				console.error(`Failed to delete original file after move: ${error}`)

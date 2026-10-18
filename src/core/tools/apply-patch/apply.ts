@@ -38,6 +38,12 @@ export interface ApplyPatchFileChange {
 	diffStats?: { added: number; removed: number }
 	/** B3a: whether this file's approval was auto-approved. */
 	autoApproved?: boolean
+	/**
+	 * Set by the tool handler when a move's source unlink succeeded: the
+	 * change journal then records the source deletion alongside the
+	 * destination write so a step rollback can restore the removed file.
+	 */
+	moveSourceDeleted?: boolean
 }
 
 /**
