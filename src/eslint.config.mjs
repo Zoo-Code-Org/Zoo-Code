@@ -58,13 +58,14 @@ export default [
 		// Tests inside __tests__/ directories must not traverse 3+ levels above
 		// the test file. That escapes the src/ package root and makes Turbo
 		// invisible to cache changes in those files.
-		// pr-review-state-workflow.test.ts and stale-pr-clock-workflow.test.ts are the
-		// intentional exceptions: they read root-level config and run in a dedicated
-		// non-Turbo CI step.
+		// The workflow test files below are the intentional exceptions: they read
+		// root-level config and run in a dedicated non-Turbo CI step.
 		files: ["**/__tests__/**/*.test.ts", "**/__tests__/**/*.spec.ts"],
 		ignores: [
 			"**/services/__tests__/pr-review-state-workflow.test.ts",
 			"**/services/__tests__/stale-pr-clock-workflow.test.ts",
+			"**/services/__tests__/fork-review-followup-workflow.test.ts",
+			"**/services/__tests__/workflow-self-listen.test.ts",
 		],
 		rules: {
 			"no-restricted-syntax": [
