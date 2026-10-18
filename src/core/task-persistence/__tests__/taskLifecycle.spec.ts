@@ -79,6 +79,14 @@ describe("task lifecycle transitions", () => {
 		expect(() => resumeInterruptedTask(item("child"))).toThrow(LifecycleTransitionError)
 	})
 
+	it("marks an explicit resume so startup recovery can preserve ownership", () => {
+		const child = item("child", { status: "interrupted", parentTaskId: "parent" })
+		const rootTask = item("root-task", { status: "interrupted" })
+
+		expect(resumeInterruptedTask(child, "parent")).toMatchObject({ status: "active", explicitResume: true })
+		expect(resumeInterruptedTask(rootTask)).toMatchObject({ status: "active", explicitResume: true })
+	})
+
 	it("resumes an interrupted child only while its parent still awaits it", () => {
 		const parent = item("parent", {
 			status: "delegated",
@@ -88,7 +96,11 @@ describe("task lifecycle transitions", () => {
 		})
 		const child = item("child", { status: "interrupted", parentTaskId: "parent" })
 
-		expect(resumeInterruptedChild(parent, child)).toMatchObject({ status: "active", parentTaskId: "parent" })
+		expect(resumeInterruptedChild(parent, child)).toMatchObject({
+			status: "active",
+			parentTaskId: "parent",
+			explicitResume: true,
+		})
 	})
 
 	it("rejects the parent-locked resume after the parent re-delegates elsewhere", () => {

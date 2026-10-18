@@ -341,7 +341,17 @@ function invariantViolations(state: ModelState): string[] {
 }
 
 function canonical(state: ModelState): string {
-	return JSON.stringify(taskIds.map((id) => state[id] ?? null))
+	return JSON.stringify(
+		taskIds.map((id) => {
+			const task = state[id]
+			if (!task) return null
+			// explicitResume only steers store-level startup recovery after a
+			// restart, which this reducer model does not represent. No modeled
+			// transition reads it, so it is not part of the canonical state.
+			const { explicitResume: _explicitResume, ...modeled } = task
+			return modeled
+		}),
+	)
 }
 
 function formatCounterexample(message: string, trace: TraceStep[]): string {

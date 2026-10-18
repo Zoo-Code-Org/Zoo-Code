@@ -263,6 +263,54 @@ describe("TaskHistoryStore real cross-host locking", () => {
 		}
 	})
 
+	it("preserves explicit-resume ownership across a restart", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "resume-restart-ownership-"))
+		const storeA = new TaskHistoryStore(storagePath)
+		const parent = {
+			...item("parent"),
+			status: "delegated" as const,
+			awaitingChildId: "child",
+			delegatedToId: "child",
+			childIds: ["child"],
+		}
+		const child = { ...item("child"), status: "interrupted" as const, parentTaskId: "parent", rootTaskId: "parent" }
+
+		try {
+			await storeA.initialize()
+			await storeA.upsert(parent)
+			await storeA.upsert(child)
+
+			// The user accepts the resume prompt; the activated record persists.
+			await storeA.resumeInterruptedTask("child", "parent")
+			expect(storeA.get("child")).toMatchObject({ status: "active", explicitResume: true })
+		} finally {
+			storeA.dispose()
+		}
+
+		// A restart replays startup recovery on the same storage. The resumed
+		// child's session is gone, but the user-approved awaiting link survives so
+		// the next linked resume still succeeds.
+		const storeB = new TaskHistoryStore(storagePath)
+		try {
+			await storeB.initialize()
+			expect(storeB.get("child")).toMatchObject({ status: "interrupted", explicitResume: true })
+			expect(storeB.get("parent")).toMatchObject({
+				status: "delegated",
+				awaitingChildId: "child",
+				delegatedToId: "child",
+			})
+
+			await expect(storeB.resumeInterruptedTask("child", "parent")).resolves.toMatchObject({
+				id: "child",
+				status: "active",
+				explicitResume: true,
+			})
+		} finally {
+			storeB.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
 	it("reads the awaited child's disk record at lock time even when the cache is stale", async () => {
 		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "redelegation-stale-cache-"))
 		const storeA = new TaskHistoryStore(storagePath)

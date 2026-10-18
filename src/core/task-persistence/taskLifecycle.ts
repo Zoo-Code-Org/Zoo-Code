@@ -27,7 +27,9 @@ export function assertValidTransition(from: HistoryItemStatus | undefined, to: H
 /**
  * Reactivates a task only through the explicit user-resume path. This is kept
  * outside VALID_TASK_STATUS_TRANSITIONS so generic stale writes cannot revive
- * an interrupted task.
+ * an interrupted task. The persisted explicitResume marker lets startup
+ * recovery recognize a resumed child after a restart: the session is gone, but
+ * the parent keeps its awaiting link so the next linked resume succeeds.
  */
 export function resumeInterruptedTask(task: HistoryItem, expectedParentTaskId?: string): HistoryItem {
 	if (task.status !== "interrupted") {
@@ -36,7 +38,7 @@ export function resumeInterruptedTask(task: HistoryItem, expectedParentTaskId?: 
 	if (task.parentTaskId !== expectedParentTaskId) {
 		throw new LifecycleTransitionError(`Cannot resume task ${task.id}: parent linkage changed`)
 	}
-	return { ...task, status: "active" }
+	return { ...task, status: "active", explicitResume: true }
 }
 
 /**

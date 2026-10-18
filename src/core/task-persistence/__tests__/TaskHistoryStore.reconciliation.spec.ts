@@ -275,6 +275,50 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		expect(persistedParent.delegatedToId).toBeUndefined()
 	})
 
+	it("preserves explicit-resume ownership across restart", async () => {
+		const child = makeItem({
+			id: "child-4-resumed",
+			status: "active",
+			parentTaskId: "parent-4-resumed",
+			rootTaskId: "parent-4-resumed",
+			explicitResume: true,
+		})
+		const parent = makeItem({
+			id: "parent-4-resumed",
+			status: "delegated",
+			awaitingChildId: "child-4-resumed",
+			delegatedToId: "child-4-resumed",
+			childIds: ["child-4-resumed"],
+		})
+		await seedItems([parent, child])
+
+		await store.initialize()
+
+		// The lost session ends, but the user-approved awaiting link survives so
+		// the next linked resume succeeds.
+		expect(store.get("child-4-resumed")).toMatchObject({
+			id: "child-4-resumed",
+			status: "interrupted",
+			explicitResume: true,
+		})
+		expect(store.get("parent-4-resumed")).toMatchObject({
+			id: "parent-4-resumed",
+			status: "delegated",
+			awaitingChildId: "child-4-resumed",
+			delegatedToId: "child-4-resumed",
+		})
+
+		const tasksDir = path.join(tmpDir, "tasks")
+		const persistedChild = JSON.parse(
+			await fs.readFile(path.join(tasksDir, "child-4-resumed", "history_item.json"), "utf8"),
+		) as HistoryItem
+		const persistedParent = JSON.parse(
+			await fs.readFile(path.join(tasksDir, "parent-4-resumed", "history_item.json"), "utf8"),
+		) as HistoryItem
+		expect(persistedChild).toMatchObject({ status: "interrupted", explicitResume: true })
+		expect(persistedParent).toMatchObject({ status: "delegated", awaitingChildId: "child-4-resumed" })
+	})
+
 	it("repairs a delegated child with an omitted status as implicit active", async () => {
 		const child = makeItem({
 			id: "child-implicit-active",

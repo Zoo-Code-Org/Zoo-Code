@@ -48,6 +48,7 @@ export const historyItemSchema = z.object({
 	awaitingChildId: z.string().optional(), // Child currently awaited (set when delegated)
 	completedByChildId: z.string().optional(), // Child that completed and resumed this parent
 	completionResultSummary: z.string().optional(), // Summary from completed child
+	explicitResume: z.boolean().optional(), // Set when the explicit user-resume path reactivated this task; startup recovery keeps the parent's awaiting link
 	pendingAction: pendingTaskActionSchema.optional(),
 })
 

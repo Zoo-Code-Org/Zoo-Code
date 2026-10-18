@@ -454,11 +454,14 @@ export class TaskHistoryStore {
 	 * - Parent `delegated` with no `awaitingChildId` → parent → `active` (invalid state)
 	 * - Parent `delegated`, child not found → parent → `active` (orphaned delegation)
 	 * - Parent `delegated`, child `completed` → parent → `active` (interrupted handoff)
-	 * - Parent `delegated`, child `active` → child → `interrupted`, parent → `active`
+	 * - Parent `delegated`, child `active` without `explicitResume` → child → `interrupted`, parent → `active`
+	 * - Parent `delegated`, child `active` with `explicitResume` → child → `interrupted`, parent stays `delegated`
 	 *
 	 * A parent awaiting an `interrupted` or `delegated` child is left as-is — the child is
 	 * resumable. An `active` child is treated as orphaned during startup recovery because
-	 * no live task session exists to own it.
+	 * no live task session exists to own it. An `active` child marked `explicitResume` was
+	 * reactivated through the user-resume path, so the restart only ends the lost session:
+	 * the parent keeps its awaiting link and the next linked resume succeeds.
 	 */
 	private async reconcileDelegationState(persistedActiveIds: ReadonlySet<string>): Promise<void> {
 		return this.withLock(() => this.reconcileDelegationStateCore(persistedActiveIds))
@@ -524,10 +527,20 @@ export class TaskHistoryStore {
 						// behind it. Mark it interrupted before releasing the parent's delegation
 						// link so the normal resume/re-delegate flow can take over. This is an
 						// administrative recovery, not a runtime delegation transition.
-						await this.repairActiveDelegation(item, child)
-						console.warn(
-							`[TaskHistoryStore] Reconciled orphaned active child: child ${child.id} → interrupted, task ${item.id} → active`,
-						)
+						// An explicitly resumed child keeps the parent's awaiting link: the user
+						// approved that pairing, so the restart only ends the lost session and
+						// the next linked resume must still succeed.
+						if (child.explicitResume) {
+							await this.upsertCore({ ...child, status: "interrupted" }, { skipTransitionCheck: true })
+							console.warn(
+								`[TaskHistoryStore] Preserved explicit-resume ownership across restart: child ${child.id} → interrupted, task ${item.id} still awaits it`,
+							)
+						} else {
+							await this.repairActiveDelegation(item, child)
+							console.warn(
+								`[TaskHistoryStore] Reconciled orphaned active child: child ${child.id} → interrupted, task ${item.id} → active`,
+							)
+						}
 						repairsInThisPass++
 					} else if (child.status === "completed") {
 						await this.upsertCore(
