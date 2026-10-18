@@ -218,7 +218,7 @@ function isDeprecated(deprecationDate: string | null | undefined): boolean {
  * Pure transform from a Friendli API model entry to a `ModelInfo`. Factored out
  * so tests can exercise it directly without going through axios.
  */
-export const parseFriendliModel = ({ id, model }: { id: string; model: FriendliModel }): ModelInfo => {
+export const parseFriendliModel = ({ model }: { id: string; model: FriendliModel }): ModelInfo => {
 	// Friendli returns both `input`/`output` and legacy `prompt`/`completion`
 	// aliases. Prefer the canonical names and fall back to the aliases.
 	const inputPriceStr = model.pricing?.input ?? model.pricing?.prompt

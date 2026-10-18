@@ -25,6 +25,7 @@ export * from "./xai.js"
 export * from "./vercel-ai-gateway.js"
 export * from "./opencode-go.js"
 export * from "./kenari.js"
+export * from "./io-intelligence.js"
 export * from "./nanogpt.js"
 export * from "./kimi-code.js"
 export * from "./zai.js"
@@ -56,6 +57,7 @@ import { xaiDefaultModelId } from "./xai.js"
 import { vercelAiGatewayDefaultModelId } from "./vercel-ai-gateway.js"
 import { opencodeGoDefaultModelId } from "./opencode-go.js"
 import { kenariDefaultModelId } from "./kenari.js"
+import { ioIntelligenceDefaultModelId } from "./io-intelligence.js"
 import { nanoGptDefaultModelId } from "./nanogpt.js"
 import { kimiCodeDefaultModelId } from "./kimi-code.js"
 import { internationalZAiDefaultModelId, mainlandZAiDefaultModelId } from "./zai.js"
@@ -116,6 +118,7 @@ export function getProviderDefaultModelId(
 		case providerIdentifiers.lmstudio:
 			return NO_DEFAULT_MODEL_ID
 		case providerIdentifiers.vscodeLm:
+		case providerIdentifiers.githubCopilot:
 			return vscodeLlmDefaultModelId
 		case providerIdentifiers.sambanova:
 			return sambaNovaDefaultModelId
@@ -135,6 +138,8 @@ export function getProviderDefaultModelId(
 			return opencodeGoDefaultModelId
 		case providerIdentifiers.kenari:
 			return kenariDefaultModelId
+		case providerIdentifiers.ioIntelligence:
+			return ioIntelligenceDefaultModelId
 		case providerIdentifiers.nanogpt:
 			return nanoGptDefaultModelId
 		case providerIdentifiers.kimiCode:

@@ -68,6 +68,9 @@ export const getOpenRouterReasoning = ({
 				: undefined
 			: undefined
 
+/**
+ * @internal
+ */
 export const getRooReasoning = ({
 	model,
 	reasoningEffort,
@@ -172,7 +175,6 @@ export const getOpenAiReasoning = ({
 export const getGeminiReasoning = ({
 	model,
 	reasoningBudget,
-	reasoningEffort,
 	settings,
 }: GetModelReasoningOptions): GeminiReasoningParams | undefined => {
 	// Budget-based (2.5) models: use thinkingBudget, not thinkingLevel.

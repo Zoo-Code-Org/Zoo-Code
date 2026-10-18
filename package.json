@@ -31,7 +31,9 @@
 		"code-server:install": "node scripts/code-server.js",
 		"changeset:version": "cp CHANGELOG.md src/CHANGELOG.md && changeset version && cp -vf src/CHANGELOG.md .",
 		"knip": "knip",
-		"npm:publish:types": "pnpm --filter @roo-code/types npm:publish"
+		"npm:publish:types": "pnpm --filter @roo-code/types npm:publish",
+		"knip:production": "knip --production",
+		"test:knip-policy": "node --test scripts/knip-policy.test.mjs"
 	},
 	"devDependencies": {
 		"@changesets/cli": "2.31.0",
@@ -77,7 +79,10 @@
 			"@types/react": "18.3.31",
 			"@types/react-dom": "18.3.7",
 			"csstype": "3.2.3",
-			"zod": "3.25.76"
+			"zod": "4.6.7",
+			"@lmstudio/sdk>zod": "3.25.76",
+			"knip>zod": "3.25.76",
+			"katex": "0.18.2"
 		}
 	}
 }

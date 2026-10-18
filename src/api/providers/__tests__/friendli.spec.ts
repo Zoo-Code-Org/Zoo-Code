@@ -9,7 +9,6 @@ import { buildApiHandler } from "../../index"
 import { getModelMaxOutputTokens } from "../../../shared/api"
 import { FriendliHandler } from "../friendli"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
-import { clearAllMocks } from "../../../test-utils/reset"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 // Create mock functions
@@ -159,7 +158,6 @@ describe("FriendliHandler", () => {
 
 	it("createMessage should pass correct parameters to Friendli client", async () => {
 		const modelId = "zai-org/GLM-5.2"
-		const modelInfo = friendliModels[modelId]
 		const handlerWithModel = new FriendliHandler({
 			apiModelId: modelId,
 			friendliApiKey: "test-friendli-api-key",

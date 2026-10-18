@@ -10,12 +10,6 @@ export default [
 		rules: {
 			"prefer-const": ["error", { destructuring: "all" }],
 
-			// TODO: The rules listed below should be re-enabled once their existing violations are fixed.
-			"no-regex-spaces": "off",
-			"no-useless-escape": "off",
-			"no-empty": "off",
-
-			"@typescript-eslint/no-unused-vars": "off",
 			// Enforced; existing violations are suppressed in eslint-suppressions.json and cleaned up incrementally.
 			"@typescript-eslint/no-explicit-any": "error",
 			"@typescript-eslint/no-require-imports": "off",
@@ -64,10 +58,14 @@ export default [
 		// Tests inside __tests__/ directories must not traverse 3+ levels above
 		// the test file. That escapes the src/ package root and makes Turbo
 		// invisible to cache changes in those files.
-		// pr-review-state-workflow.test.ts is the intentional exception: it reads
-		// root-level config and runs in a dedicated non-Turbo CI step.
+		// pr-review-state-workflow.test.ts and stale-pr-clock-workflow.test.ts are the
+		// intentional exceptions: they read root-level config and run in a dedicated
+		// non-Turbo CI step.
 		files: ["**/__tests__/**/*.test.ts", "**/__tests__/**/*.spec.ts"],
-		ignores: ["**/services/__tests__/pr-review-state-workflow.test.ts"],
+		ignores: [
+			"**/services/__tests__/pr-review-state-workflow.test.ts",
+			"**/services/__tests__/stale-pr-clock-workflow.test.ts",
+		],
 		rules: {
 			"no-restricted-syntax": [
 				"error",
